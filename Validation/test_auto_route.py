@@ -244,6 +244,15 @@ class AutoRouteTests(unittest.TestCase):
             })
         self.assertEqual(task_size(messages), "balanced")
 
+    def test_resumed_music_with_finished_files_starts_on_balanced_model(self):
+        prompt = project_prompt({
+            "title": "Michigan song", "folder": "C:/Tasks/music",
+            "brief": "Make a rap song about Michigan with music, one minute long.",
+        }, "\nSaved recovery snapshot:\n"
+           "Existing project files (inspect and verify before regenerating):\n"
+           "- michigan_song_final.wav (12,000,000 bytes)")
+        self.assertEqual(task_size([{"role": "user", "content": prompt}]), "balanced")
+
     def test_music_shortcut_does_not_downgrade_app_or_video_work(self):
         self.assertEqual(
             task_size([{"role": "user", "content": "Create a music app."}]),

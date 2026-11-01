@@ -149,6 +149,11 @@ def task_size(messages):
         and not COMPLEX_PROJECT.search(intent)
         and not MUSIC_VIDEO.search(intent)
     ):
+        # A resumed song with saved artifacts is review/repair work. The fast
+        # model can render a fresh simple jingle, but it repeatedly fumbles
+        # Windows file paths and verification commands in this phase.
+        if project and "Existing project files (inspect and verify before regenerating):" in all_user_text:
+            return "balanced"
         return "quick" if tool_calls <= 3 else "balanced"
     if len(intent) > 800 or COMPLEX_PROJECT.search(intent):
         return "deep"
