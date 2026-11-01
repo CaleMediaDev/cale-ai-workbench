@@ -14,6 +14,9 @@ Each project automatically gets a local SQLite FTS5 memory database in
 Use project_memory_search for ranked snippets, project_memory_get for a full
 record, project_memory_save for requirements/decisions/lessons/skills/components,
 and project_memory_index to refresh code files. Pass the exact project folder.
+Use run_project_checks after the last edit to execute a task's saved
+.local-ai/verify.ps1 in a contained process. It returns the actual exit result
+and evidence; the supervisor repeats the check independently at handoff.
 Use search_computer_files to locate files or folders by name across accessible
 local drives. Its background index stores paths only, never document contents.
 Files remain the source of truth; re-read them before changing code.

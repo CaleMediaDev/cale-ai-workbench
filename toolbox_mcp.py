@@ -9,6 +9,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 import uuid
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
@@ -347,6 +348,35 @@ def registered_project(folder: str) -> Path:
     if not allowed:
         raise ValueError("Choose the exact folder of a task in this Workbench.")
     return requested
+
+
+@server.tool()
+async def run_project_checks(project_folder: str, timeout_seconds: int = 1200) -> dict:
+    """Run a registered task's saved verification script and return its real result.
+
+    The script must be inside the exact task folder. The existing supervisor
+    runner contains the process tree, observes Stop/Pause, and checks that
+    project files were not changed during verification.
+    """
+    folder = registered_project(project_folder)
+    if not 30 <= timeout_seconds <= 1200:
+        raise ValueError("timeout_seconds must be between 30 and 1200.")
+    import long_tasks
+
+    project = next(
+        (item for item in long_tasks.projects() if Path(item["folder"]).resolve() == folder),
+        None,
+    )
+    if project is None:
+        raise ValueError("This task is no longer registered.")
+    started = time.time()
+    passed, evidence = await asyncio.to_thread(long_tasks.verify_project, project, timeout_seconds)
+    log = long_tasks.STATE / f"{project['id']}-verification.log"
+    return {
+        "passed": passed,
+        "evidence": evidence,
+        "verification_log": str(log) if log.is_file() and log.stat().st_mtime >= started - 1 else None,
+    }
 
 
 @server.tool()

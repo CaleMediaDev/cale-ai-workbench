@@ -2,11 +2,40 @@
 
 import asyncio
 import json
+import sqlite3
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import toolbox_mcp
+
+
+def test_project_checks_use_only_registered_task_folder(tmp_path):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    with sqlite3.connect(state / "projects.db") as conn:
+        conn.execute("CREATE TABLE projects (folder TEXT)")
+        conn.execute("INSERT INTO projects VALUES (?)", (str(folder),))
+    project = {"id": "task-1", "folder": str(folder)}
+    import long_tasks
+
+    with (patch.object(toolbox_mcp, "ROOT", tmp_path),
+          patch.object(long_tasks, "STATE", state),
+          patch.object(long_tasks, "projects", return_value=[project]),
+          patch.object(long_tasks, "verify_project", return_value=(True, "Checks passed")) as verify):
+        result = asyncio.run(toolbox_mcp.run_project_checks(str(folder), 60))
+        assert result["passed"] is True
+        assert result["evidence"] == "Checks passed"
+        assert result["verification_log"] is None
+        verify.assert_called_once_with(project, 60)
+        try:
+            asyncio.run(toolbox_mcp.run_project_checks(str(tmp_path), 60))
+        except ValueError as exc:
+            assert "exact folder" in str(exc)
+        else:
+            raise AssertionError("Unregistered folder was accepted")
 
 
 def test_music_tool_is_discoverable_and_callable_from_toolbox_search():

@@ -733,11 +733,14 @@ It must exit nonzero for any failed check (check $LASTEXITCODE after native comm
 Do not make a fake always-passing check or merely inspect source text. Tests must
 exercise the requested behavior, including error cases. For web apps include real
 Playwright interactions. Keep tests reusable, preserve input data and existing tests.
-Run the verification after the last relevant edit. Save .local-ai/TEST-RESULTS.md
-Use powershell.exe -NoProfile -File .local-ai/verify.ps1 from the project folder;
-avoid inline shell -Command/-c code in unattended mode. If execution is blocked,
-run the underlying test runner directly and report the restriction accurately.
-with evidence and remaining limits. The supervisor will independently execute verify.ps1.
+Call run_project_checks with the exact project folder after the last relevant
+edit. It runs .local-ai/verify.ps1 in a contained process and returns the real
+exit result and log. If that tool is unavailable, use powershell.exe -NoProfile
+-File .local-ai/verify.ps1 from the project folder; avoid inline shell
+-Command/-c code in unattended mode. If execution is blocked, run the
+underlying test runner directly and report the restriction accurately.
+Write .local-ai/TEST-RESULTS.md with evidence and remaining limits. The
+supervisor will independently execute verify.ps1 again after handoff.
 Keep source backups/checkpoints before risky edits. Do not delete project files on completion.
 If stuck after three distinct repair attempts, call kanban_block(kind='needs_input')
 with the exact blocker and question. Save progress before blocking.
