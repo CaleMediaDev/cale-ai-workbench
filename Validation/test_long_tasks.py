@@ -478,6 +478,29 @@ class LongTaskTests(unittest.TestCase):
             self.assertIn("needs attention", step)
             self.assertIn("Python tool installation failed", step)
 
+    def test_exhausted_setup_reports_failure_then_auto_resumes_after_repair(self):
+        task_module.update(self.pid, status="paused")
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text(json.dumps({
+            "status": "failed", "current": "Python tool installation failed",
+            "owner": "runtime_features", "attempts": 3,
+        }), encoding="utf-8")
+        pid = task_module.add_project(
+            "", str(self.base / "setup-delayed"), "Build a website", waiting_for_setup=True,
+        )
+        with patch.object(task_module, "create_card") as create:
+            task_module.tick()
+            item = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(item["status"], "needs_input")
+            self.assertIn("automatic retries", item["detail"])
+            self.assertIn("automatic retries", task_module.task_progress(item)[1])
+            create.assert_not_called()
+            progress.write_text('{"status":"complete"}', encoding="utf-8")
+            task_module.tick()
+            item = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(item["status"], "queued")
+            create.assert_called_once()
+
     def test_followup_to_setup_task_stays_waiting(self):
         progress = task_module.STATE / "install-progress.json"
         progress.write_text('{"status":"working"}', encoding="utf-8")

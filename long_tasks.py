@@ -320,6 +320,8 @@ def task_progress(p):
         return 100, "Finished and accepted"
     if state == "ready_for_review":
         return 95, "Ready for you to check"
+    if state == "needs_input" and p["detail"].startswith("AI setup failed after automatic retries:"):
+        return 0, p["detail"][:180]
     folder = Path(p["folder"]) / ".local-ai"
     plan = folder / "PLAN.md"
     progress = folder / "PROGRESS.md"
@@ -1691,6 +1693,18 @@ def goal_budget_exhausted(snapshot):
 
 def advance_project(p):
     """Advance one task; failures are isolated by the supervisor's tick."""
+    setup = read_task_status(STATE / "install-progress.json")
+    if (p["status"] == "needs_input" and
+            p["detail"].startswith("AI setup failed after automatic retries:") and
+            setup.get("status") == "complete"):
+        update(p["id"], status="waiting_for_setup", detail="Setup recovered. Starting your task.")
+        p["status"] = "waiting_for_setup"
+    if p["status"] == "waiting_for_setup" and setup_recovery.repair_exhausted(setup):
+        update(p["id"], status="needs_input", detail=(
+            "AI setup failed after automatic retries: " +
+            str(setup.get("current", "Unknown setup error"))[:300]
+        ))
+        return
     image_id = image_job_id(p)
     if image_id:
         if p["status"] in ("accepted", "stopped", "paused", "needs_input"):

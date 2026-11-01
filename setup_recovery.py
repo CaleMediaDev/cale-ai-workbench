@@ -60,6 +60,17 @@ def _stalled(progress: dict) -> bool:
             and not _installer_running(progress))
 
 
+def repair_exhausted(progress: dict) -> bool:
+    """Tell waiting tasks when automatic repair is finished without success."""
+    if progress.get("owner") == "runtime_features":
+        return (progress.get("status") == "failed" and
+                int(progress.get("attempts", 0)) >= 3)
+    return (progress.get("status") == "error" and
+            str(progress.get("current", "")).startswith("Setup needs attention:") and
+            int(_read(STATE / "base-install-repair.json").get("attempts", 0)) >= len(RETRY_DELAYS) and
+            not _installer_running(progress))
+
+
 def recover() -> bool:
     """Retry a stopped base installer at most three times, preserving task files."""
     progress = _read(STATE / "install-progress.json")

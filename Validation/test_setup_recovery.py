@@ -95,3 +95,19 @@ def test_slow_live_installer_is_not_restarted(tmp_path, monkeypatch):
     monkeypatch.setattr(setup_recovery.subprocess, "Popen", lambda *args, **kwargs: 1 / 0)
     assert not setup_recovery.recover()
     assert json.loads((state / "install-progress.json").read_text())["status"] == "working"
+
+
+def test_repair_exhaustion_requires_final_failure_and_dead_process(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (state / "base-install-repair.json").write_text('{"attempts":3}', encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    failed = {"status": "error", "current": "Setup needs attention: download failed"}
+    assert setup_recovery.repair_exhausted(failed)
+    assert not setup_recovery.repair_exhausted({**failed, "status": "working"})
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: True)
+    assert not setup_recovery.repair_exhausted(failed)
+    assert setup_recovery.repair_exhausted({
+        "owner": "runtime_features", "status": "failed", "attempts": 3,
+    })
