@@ -427,7 +427,14 @@ class Router:
                         r"(?m)^\s*num_ctx\s+(\d+)\s*$",
                         info.get("parameters", ""),
                     )
-                    if not configured or int(configured.group(1)) < 64000:
+                    try:
+                        config_text = (ROOT / "data/config.yaml").read_text(encoding="utf-8")
+                        main = config_text.split("fallback_providers:", 1)[0]
+                        required_match = re.search(r"(?m)^  context_length: (\d+)", main)
+                        required = int(required_match.group(1)) if required_match else 65536
+                    except OSError:
+                        required = 65536
+                    if not configured or int(configured.group(1)) < required:
                         continue
                     label = str(info.get("details", {}).get("parameter_size", ""))
                     match = re.search(r"(\d+(?:\.\d+)?)B", label, re.IGNORECASE)

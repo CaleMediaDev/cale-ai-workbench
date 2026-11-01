@@ -165,6 +165,11 @@ def configure(root, profile):
         )
     with path.open("w", encoding="utf-8") as stream:
         yaml.dump(config, stream)
+    # A 64K bootstrap window satisfies Hermes; the final window follows the
+    # installed model and this PC's RAM rather than staying pinned at 64K.
+    import context_window
+
+    context_window.sync(root, "cale-local")
     # Compatibility patch is MIT-licensed upstream code plus a Windows fix.
     patch = root / "windows-file-tools.patch"
     managed_git = root / "data/tools/git-2.53.0+3-win32-x64/cmd/git.exe"

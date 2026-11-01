@@ -65,6 +65,9 @@ if (-not ($taskModels.models.name -contains $taskModelName)) {
 }
 $taskModelInfo = Invoke-RestMethod 'http://127.0.0.1:11434/api/show' -Method Post -ContentType 'application/json' -Body (@{model=$taskModelName} | ConvertTo-Json) -TimeoutSec 10
 if ($taskModelInfo.remote_host -or $taskModelInfo.remote_model) { throw 'This launcher requires local model weights.' }
+$taskContext = & (Join-Path $taskToolbox 'python/Scripts/python.exe') (Join-Path $PSScriptRoot 'context_window.py') $PSScriptRoot $taskModelName
+if ($LASTEXITCODE -ne 0) { throw 'Could not align the model and task context windows.' }
+Write-Host "Context window: $taskContext tokens" -ForegroundColor Cyan
 Write-Host "LOCAL AI - Hermes | $taskModelName | verification enabled" -ForegroundColor Cyan
 Write-Host 'Local Qwen, or connected free cloud with local fallback. No Codex or paid AI routes.'
 & (Join-Path $taskToolbox 'python/Scripts/python.exe') (Join-Path $PSScriptRoot 'cloud_ai.py') --status

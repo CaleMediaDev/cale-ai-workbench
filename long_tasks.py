@@ -979,6 +979,11 @@ def monitor():
                             + (settings.stderr.strip()[-1000:] or "unknown validation error")
                         )
                     ensure_ollama(json.loads(settings.stdout)["model"])
+                    # Align Hermes with this model's real, memory-aware window
+                    # before a worker sends its first request.
+                    import context_window
+
+                    context_window.sync(ROOT, json.loads(settings.stdout)["model"])
                     from cloud_ai import ensure_router
 
                     ensure_router()
@@ -1159,7 +1164,7 @@ def gui():
     outer = ttk.Frame(window, padding=(26, 20))
     outer.pack(fill="both", expand=True)
     header = ttk.Frame(outer)
-    header.pack(fill="x", pady=(0, 20))
+    header.pack(fill="x", pady=(0, 8))
     logo_path = ROOT / "assets/cale-logo.png"
     if logo_path.is_file():
         with Image.open(logo_path) as logo_source:
@@ -1191,26 +1196,21 @@ def gui():
 
     # The RPM-style ring moves from green through amber to red as load rises.
     gauge_widgets = {}
-    gauge_row = ttk.Frame(header)
-    gauge_row.pack(side="left")
-    drive_free_label = None
-    drive_rate_label = None
-    net_rate_label = None
+    gauge_row = ttk.Frame(outer)
+    gauge_row.pack(fill="x", pady=(0, 10))
+    drive_free_text = tk.StringVar(value="")
+    drive_rate_text = tk.StringVar(value="")
+    net_rate_text = tk.StringVar(value="")
     offline_button = None
     for gauge_name in ("cpu", "ram", "gpu", "drive", "net"):
-        wide = gauge_name in ("drive", "net")
-        center = 45 if wide else 35
-        holder = gauge_row
-        if gauge_name == "net":
-            holder = ttk.Frame(gauge_row)
-            holder.pack(side="left", padx=(0, 8))
+        center = 45
+        holder = ttk.Frame(gauge_row)
+        holder.pack(side="left", fill="x", expand=True)
         gauge_canvas = tk.Canvas(
-            holder, width=90 if wide else 70,
-            height=88 if wide else 70,
+            holder, width=90, height=76,
             bg=bg, highlightthickness=0, borderwidth=0
         )
-        gauge_canvas.pack(side="top" if gauge_name == "net" else "left",
-                          padx=(0, 0 if gauge_name == "net" else 8))
+        gauge_canvas.pack(anchor="center")
         segments = [
             gauge_canvas.create_arc(
                 center - 26, 6, center + 26, 58,
@@ -1220,20 +1220,17 @@ def gui():
             for index in range(24)
         ]
         value = gauge_canvas.create_text(
-            center, 29 if gauge_name == "drive" else 32, text="—", fill=text,
+            center, 32, text="—", fill=text,
             font=("Segoe UI", 12, "bold")
         )
         if gauge_name == "drive":
-            drive_free_label = gauge_canvas.create_text(
-                center, 46, text="", fill=muted, font=("Segoe UI", 7)
-            )
-            drive_rate_label = gauge_canvas.create_text(
-                center, 80, text="", fill="#72e5f0", font=("Segoe UI", 7)
-            )
+            ttk.Label(holder, textvariable=drive_free_text, style="Muted.TLabel",
+                      font=("Segoe UI", 9)).pack(anchor="center")
+            ttk.Label(holder, textvariable=drive_rate_text, style="Muted.TLabel",
+                      font=("Segoe UI", 9)).pack(anchor="center")
         if gauge_name == "net":
-            net_rate_label = gauge_canvas.create_text(
-                center, 80, text="", fill="#72e5f0", font=("Segoe UI", 7)
-            )
+            ttk.Label(holder, textvariable=net_rate_text, style="Muted.TLabel",
+                      font=("Segoe UI", 9)).pack(anchor="center")
         gauge_canvas.create_text(
             center, 66, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 8, "bold")
         )
@@ -1243,7 +1240,7 @@ def gui():
                 holder, text="Go offline", style="Tiny.TButton",
                 command=lambda: toggle_pc_network(),
             )
-            offline_button.pack(fill="x", pady=(1, 0))
+            offline_button.pack(anchor="center", pady=(1, 0))
 
     def toggle_pc_network():
         """Ask Windows to switch all active physical adapters, with UAC."""
@@ -1290,27 +1287,19 @@ def gui():
                         )
                     canvas.itemconfigure(value, text=f"{percent}%" if percent is not None else "—")
                 free_gb = reading.get("drive_free_gb")
-                if drive_free_label is not None:
-                    gauge_widgets["drive"][0].itemconfigure(
-                        drive_free_label,
-                        text=f"{free_gb} GB free" if free_gb is not None else "",
-                    )
-                if drive_rate_label is not None:
-                    read_rate = reading.get("drive_read_mbps")
-                    write_rate = reading.get("drive_write_mbps")
-                    gauge_widgets["drive"][0].itemconfigure(
-                        drive_rate_label,
-                        text=(f"R {read_rate:.1f}  W {write_rate:.1f} MB/s"
-                              if read_rate is not None and write_rate is not None else ""),
-                    )
-                if net_rate_label is not None:
-                    down_rate = reading.get("net_down_mbps")
-                    up_rate = reading.get("net_up_mbps")
-                    gauge_widgets["net"][0].itemconfigure(
-                        net_rate_label,
-                        text=(f"↓{down_rate:.1f} ↑{up_rate:.1f} Mb/s"
-                              if down_rate is not None and up_rate is not None else ""),
-                    )
+                drive_free_text.set(f"{free_gb} GB free" if free_gb is not None else "")
+                read_rate = reading.get("drive_read_mbps")
+                write_rate = reading.get("drive_write_mbps")
+                drive_rate_text.set(
+                    f"Read {read_rate:.1f} · Write {write_rate:.1f} MB/s"
+                    if read_rate is not None and write_rate is not None else ""
+                )
+                down_rate = reading.get("net_down_mbps")
+                up_rate = reading.get("net_up_mbps")
+                net_rate_text.set(
+                    f"Down {down_rate:.1f} · Up {up_rate:.1f} Mb/s"
+                    if down_rate is not None and up_rate is not None else ""
+                )
                 if offline_button is not None and str(offline_button["state"]) != "disabled":
                     offline_button.configure(
                         text="Restore internet" if pc_offline.offline() else "Go offline"
@@ -1803,13 +1792,22 @@ def gui():
         main_page, textvariable=status, style="Muted.TLabel", wraplength=1000
     ).pack(anchor="w", pady=(0, 6))
     chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=12)
-    chat_panel.pack(side="left", fill="both", expand=True)
+    chat_panel.pack(side="left", fill="both", expand=True, pady=(12, 0))
+    ttk.Label(chat_panel, text="Chat with Cale", style="Card.TLabel",
+              font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 5))
+    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame")
+    conversation_frame.pack(fill="x")
     conversation = tk.Text(
-        chat_panel, height=4, wrap="word", state="disabled", background=card,
+        conversation_frame, height=5, wrap="word", state="disabled", background=card,
         foreground=text, insertbackground=text, relief="flat", padx=10, pady=6,
         font=("Segoe UI", 11), highlightthickness=0,
     )
-    conversation.pack(fill="x")
+    conversation_scroll = ttk.Scrollbar(
+        conversation_frame, orient="vertical", command=conversation.yview
+    )
+    conversation.configure(yscrollcommand=conversation_scroll.set)
+    conversation_scroll.pack(side="right", fill="y")
+    conversation.pack(side="left", fill="both", expand=True)
     conversation.tag_configure("user", foreground="#a6c9ff", spacing1=8)
     conversation.tag_configure("assistant", foreground=text, spacing1=8)
     entry_row = ttk.Frame(chat_panel, style="Card.TFrame")
@@ -1873,6 +1871,7 @@ def gui():
     attach_button = ttk.Button(entry_row, text="Add files", command=show_attachment_menu)
 
     def show_chat(role, content):
+        at_bottom = conversation.yview()[1] >= 0.98
         conversation.configure(state="normal")
         prefix = ("You" if role == "user" else "Cale") + ": "
         start = conversation.index("end-1c")
@@ -1890,13 +1889,14 @@ def gui():
             conversation.tag_bind(tag, "<Enter>", lambda _: conversation.configure(cursor="hand2"))
             conversation.tag_bind(tag, "<Leave>", lambda _: conversation.configure(cursor=""))
         conversation.configure(state="disabled")
-        conversation.see("end")
+        if at_bottom:
+            conversation.see("end")
 
     def assistant_reply(content):
         save_chat("assistant", content)
         show_chat("assistant", content)
 
-    for previous in chat_history():
+    for previous in chat_history(500):
         show_chat(previous["role"], previous["content"])
     if not chat_history():
         show_chat("assistant", "Hi! Ask me anything, or tell me what you'd like me to build.")
@@ -2053,7 +2053,7 @@ def gui():
     usage_speed.pack(side="left", padx=(16, 0))
     usage_period = tk.StringVar(value="day")
     usage_canvas = tk.Canvas(
-        usage_panel, height=105, background=card, borderwidth=0,
+        usage_panel, height=165, background=card, borderwidth=0,
         highlightthickness=0,
     )
     usage_canvas.pack(fill="x", pady=(5, 0))
@@ -2074,32 +2074,41 @@ def gui():
         width = max(usage_canvas.winfo_width(), 400)
         points = summary["points"]
         maximum = max((point["tokens"] for point in points), default=0)
-        usage_canvas.create_line(8, 77, width - 8, 77, fill="#344765")
+        left, right, top, bottom = 54, width - 16, 19, 132
+        def compact(number):
+            return (f"{number / 1_000_000:.1f}m" if number >= 1_000_000
+                    else f"{number / 1_000:.1f}k" if number >= 1_000
+                    else str(round(number)))
+
+        for fraction in (0, 0.5, 1):
+            y = bottom - (bottom - top) * fraction
+            usage_canvas.create_line(left, y, right, y, fill="#30415d", dash=(3, 4))
+            usage_canvas.create_text(left - 7, y, anchor="e", text=compact(maximum * fraction),
+                                     fill=muted, font=("Segoe UI", 9))
         if maximum == 0:
             usage_canvas.create_text(
-                width / 2, 48, text="Usage will appear here after your next model response",
-                fill=muted, font=("Segoe UI", 10),
+                (left + right) / 2, 76,
+                text="Your token history will appear after the next AI response",
+                fill=muted, font=("Segoe UI", 11),
             )
             return
-        column = (width - 20) / len(points)
-        centers = []
+        column = (right - left) / len(points)
         for index, point in enumerate(points):
-            center = 10 + column * (index + 0.5)
-            bar_height = 69 * point["tokens"] / maximum
+            center = left + column * (index + 0.5)
+            bar_height = max(2, (bottom - top) * point["tokens"] / maximum)
             color = "#9d87ff" if index == len(points) - 1 else "#38cdbb"
             usage_canvas.create_rectangle(
-                center - column * 0.28, 77 - bar_height,
-                center + column * 0.28, 77,
+                center - column * 0.30, bottom - bar_height,
+                center + column * 0.30, bottom,
                 fill=color, outline="",
             )
-            label = point["date"][5:] if usage_period.get() == "day" else point["date"][2:]
-            usage_canvas.create_text(center, 94, text=label, fill=muted, font=("Segoe UI", 8))
-            centers.append((center, 77 - bar_height))
-        for first, second in zip(centers, centers[1:]):
-            usage_canvas.create_line(*first, *second, fill="#72e5f0", width=2)
+            if index % 2 == 0 or index == len(points) - 1:
+                label = point["date"][5:] if usage_period.get() == "day" else point["date"][2:]
+                usage_canvas.create_text(center, 149, text=label, fill=muted,
+                                         font=("Segoe UI", 9))
         usage_canvas.create_text(
-            width - 10, 8, anchor="ne", text=f"Peak {maximum:,}",
-            fill=muted, font=("Segoe UI", 8),
+            right, 8, anchor="ne", text=f"Peak {maximum:,} tokens",
+            fill=muted, font=("Segoe UI", 9),
         )
 
     def set_usage_period(value):
