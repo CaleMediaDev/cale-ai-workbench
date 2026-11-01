@@ -14,6 +14,26 @@ import model_library as library
 
 
 class AutoModelTests(unittest.TestCase):
+    def test_thinking_model_probe_reaches_the_tool_call(self):
+        response = {
+            "message": {
+                "tool_calls": [
+                    {"function": {"name": "multiply", "arguments": {"a": 7, "b": 13}}}
+                ]
+            }
+        }
+        with patch.object(library, "post", return_value=response) as post:
+            self.assertTrue(library.probe_tool_use("cale-qwen36", "none"))
+        request = post.call_args.args[1]
+        self.assertIs(request["think"], False)
+        self.assertEqual(request["options"]["num_predict"], 512)
+
+    def test_recommendation_can_specify_tool_reasoning(self):
+        candidate = json.loads((ROOT / "models/recommendations.json").read_text())
+        with patch.object(library, "CATALOG", {"main": {"alias": "base"}}):
+            accepted = library.validated_recommendations(candidate)
+        self.assertEqual(accepted["qwen36"]["tool_reasoning_effort"], "none")
+
     def test_only_models_that_fit_ram_and_disk_are_downloaded(self):
         catalog = {
             "main": {"alias": "base"},

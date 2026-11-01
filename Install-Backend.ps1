@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.4.2')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.4.3')
  $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
  function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
    New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
@@ -138,12 +138,16 @@ try {
  try { $null=Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 3 }
  catch {
    Write-SetupStatus 54 'Installing and starting Ollama'
-   $ollama=Join-Path $box 'ollama/ollama.exe'
+   $ollama=Join-Path $env:LOCALAPPDATA 'Programs/Ollama/ollama.exe'
    if (-not (Test-Path -LiteralPath $ollama)) {
-     $archive=Download-Verified $pins.ollama.url $pins.ollama.sha256 'ollama-windows-amd64.zip'
-     Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $box 'ollama') -Force
+     # The native Windows app handles later Ollama updates; the old CLI ZIP does not.
+     $installer=Download-Verified $pins.ollama_setup.url $pins.ollama_setup.sha256 'OllamaSetup.exe'
+     & $installer /VERYSILENT /NORESTART /SUPPRESSMSGBOXES
+     if ($LASTEXITCODE -ne 0) { throw 'Ollama native installation failed.' }
+     if (-not (Test-Path -LiteralPath $ollama)) { throw 'The Ollama installer did not create its application.' }
    }
-   Start-Process -FilePath $ollama -ArgumentList 'serve' -WindowStyle Hidden
+   try { $null=Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 2 }
+   catch { Start-Process -FilePath $ollama -ArgumentList 'serve' -WindowStyle Hidden }
    for ($attempt=0;$attempt -lt 30;$attempt++) { Start-Sleep -Seconds 1; try { $null=Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 2; break } catch { if ($attempt -eq 29) {throw 'Ollama did not start.'} } }
  }
  Write-Output "Downloading model files for $($model.source). This is the largest step."

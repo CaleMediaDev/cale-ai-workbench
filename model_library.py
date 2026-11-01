@@ -134,6 +134,9 @@ def validated_recommendations(document):
             "context": context,
             "auto": True,
             "candidate": True,
+            "tool_reasoning_effort": item.get("tool_reasoning_effort")
+            if item.get("tool_reasoning_effort") in ("none", "low", "medium", "high")
+            else None,
         }
     return accepted
 
@@ -162,38 +165,41 @@ def approve_candidate(item):
     os.replace(temporary, path)
 
 
-def probe_tool_use(alias):
+def probe_tool_use(alias, reasoning_effort=None):
     """Require a real local function call before auto-promoting a new model."""
+    request = {
+        "model": alias,
+        "stream": False,
+        "messages": [
+            {
+                "role": "user",
+                "content": "Call multiply with a=7 and b=13. Do not answer in text.",
+            }
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "multiply",
+                    "description": "Multiply two integers",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "integer"},
+                            "b": {"type": "integer"},
+                        },
+                        "required": ["a", "b"],
+                    },
+                },
+            }
+        ],
+        "options": {"num_predict": 512},
+    }
+    if reasoning_effort == "none":
+        request["think"] = False
     result = post(
         "/api/chat",
-        {
-            "model": alias,
-            "stream": False,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Call multiply with a=7 and b=13. Do not answer in text.",
-                }
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "multiply",
-                        "description": "Multiply two integers",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "a": {"type": "integer"},
-                                "b": {"type": "integer"},
-                            },
-                            "required": ["a", "b"],
-                        },
-                    },
-                }
-            ],
-            "options": {"num_predict": 128},
-        },
+        request,
         timeout=240,
     )
     for call in result.get("message", {}).get("tool_calls", []):
@@ -371,7 +377,7 @@ def install(profile, progress=print):
             "Weights installed, but Ollama did not advertise tool support. This model is not ready for agent tasks."
         )
     if item.get("candidate"):
-        probe_tool_use(item["alias"])
+        probe_tool_use(item["alias"], item.get("tool_reasoning_effort"))
         approve_candidate(item)
     progress(
         "Installed. Tool capability is advertised; reliability still needs task-specific testing."

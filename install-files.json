@@ -1,7 +1,7 @@
 [
   "README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "LICENSE", "HERMES-LICENSE", "THIRD-PARTY-NOTICES.md", "ASSETS.md",
   "assets/cale-logo.png", "assets/cale-logo-original.jpg",
-  "cloud_ai.py", "chatgpt_auth.py", "github_account.py", "self_update.py", "model_library.py", "auto_route.py", "voice_assistant.py", "long_tasks.py", "toolbox_mcp.py", "web_tools.py",
+  "cloud_ai.py", "chatgpt_auth.py", "github_account.py", "self_update.py", "ollama_runtime.py", "project_preview.py", "preview_capture.js", "model_library.py", "auto_route.py", "voice_assistant.py", "long_tasks.py", "toolbox_mcp.py", "web_tools.py",
   "media_worker.py", "natural_voice.py", "small_training.py", "media-models.json", "media-requirements.txt",
   "read-settings.py", "configure_install.py", "config-template.yaml", "downloads.json", "pyproject.toml",
   "requirements-windows.txt", "package.json", "package-lock.json",
@@ -10,5 +10,5 @@
   "Connect Free Cloud AI.cmd", "Install Long Tasks Startup.ps1", "Disable Long Tasks Startup.ps1",
   "models/manifest.json", "models/recommendations.json", "models/large.Modelfile", "models/compact.Modelfile",
   "models/light.Modelfile", "models/permissive.Modelfile", "bin/hermes.cmd",
-  "Validation/test_cloud_ai.py", "Validation/test_chatgpt_auth.py", "Validation/test_github_account.py", "Validation/test_self_update.py", "Validation/test_natural_voice.py", "Validation/test_long_tasks.py", "Validation/test_model_library.py", "Validation/test_auto_route.py", "Validation/test_voice_assistant.py", "Validation/test_media.py"
+  "Validation/test_cloud_ai.py", "Validation/test_chatgpt_auth.py", "Validation/test_github_account.py", "Validation/test_self_update.py", "Validation/test_natural_voice.py", "Validation/test_ollama_runtime.py", "Validation/test_project_preview.py", "Validation/test_long_tasks.py", "Validation/test_model_library.py", "Validation/test_auto_route.py", "Validation/test_voice_assistant.py", "Validation/test_media.py"
 ]

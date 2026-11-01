@@ -10,6 +10,7 @@
       "origin": "https://ollama.com/library/qwen3.6",
       "license": "Apache-2.0",
       "context": 32768,
+      "tool_reasoning_effort": "none",
       "auto": true
     }
   }

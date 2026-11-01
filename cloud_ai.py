@@ -415,6 +415,17 @@ class Router:
             local = dict(payload)
             local.update(model=selected_model, stream=False)
             local.pop("stream_options", None)
+            if local.get("tools"):
+                item = next(
+                    (
+                        entry
+                        for entry in CATALOG.values()
+                        if entry["alias"] == selected_model
+                    ),
+                    None,
+                )
+                if item and item.get("tool_reasoning_effort"):
+                    local["reasoning_effort"] = item["tool_reasoning_effort"]
             try:
                 result = valid_completion(
                     post(

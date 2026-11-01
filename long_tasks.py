@@ -230,7 +230,7 @@ def add_project(title, folder, brief):
         rules.write_text(
             "# Local project\n\nPreserve existing data and tests. Keep .local-ai/PLAN.md and PROGRESS.md current. "
             "Work toward the user's full request in verified milestones. Run real behavior tests after the last edit. "
-            "Use the configured AI route only: local Ollama or user-connected free cloud. Do not configure paid AI or invoke Codex. Do not publish or send external messages without authorization.\n",
+            "Use the configured AI route only: local Ollama or user-connected free cloud. Do not configure paid AI or invoke Codex. A connected GitHub account may store this code in a private repository; never publish it publicly or send external messages without the user's request.\n",
             encoding="utf-8",
         )
     with database() as conn:
@@ -258,11 +258,25 @@ those files concise and current so recovery does not depend on conversation memo
 Do not stop merely because one response or context is full. Continue the goal.
 Never change the request to fit incomplete work. Do not weaken/delete existing tests.
 Use the installed local tools; see {ROOT / "TOOLBOX.txt"} for specialist tools.
+For software or website projects, check whether GitHub CLI is connected. If it is,
+use an existing repository when one is configured; otherwise create a PRIVATE
+repository in the user's account and push verified milestones as a recoverable
+backup. Never upload secrets, .env files, account data, model weights, or private
+user documents. Record the repository URL in PROGRESS.md. If no account is
+connected, continue locally. Only publish a public repository or GitHub Pages
+site when the user asks; Pages is suitable only for allowed static sites.
 Use only the configured model route: local Ollama, user-connected free cloud,
 or the user's explicitly enabled ChatGPT plan, with automatic local fallback.
 Never add AI providers, paid models, Codex, or delegation.
-No publishing, external messages, purchases, or unrelated system/file changes.
+No public publishing, external messages, purchases, or unrelated system/file changes.
 Only use the owner's direct website connections when configured.
+For a website or app, keep the side preview useful while working. Once a local
+web server is running, write .local-ai/preview.json with a loopback URL such as
+{{"url":"http://127.0.0.1:3000"}}; never put a public or credentialed URL there.
+For a desktop app, update .local-ai/preview.png with honest screenshots after
+visible milestones. When using Chrome DevTools, the side window mirrors that
+browser automatically. For other browser tools, save current-page screenshots
+as .local-ai/browser.png so the user can watch progress. Do not capture secrets.
 
 If .local-ai/verify.ps1 exists, preserve it and run it. Otherwise create it to run
 the REAL project's build and behavioral tests.
@@ -868,6 +882,8 @@ def gui():
 
     import chatgpt_auth
     import github_account
+    import ollama_runtime
+    import project_preview
     import self_update
     import voice_assistant
     from cloud_ai import (
@@ -1310,6 +1326,10 @@ def gui():
                     voice_upgrade_marker.write_text(
                         "Natural voice greeted.", encoding="utf-8"
                     )
+                if message.startswith("Hi, I'm Cale. I can research"):
+                    introduction_marker.write_text(
+                        "Introduction spoken.\n", encoding="utf-8"
+                    )
             except Exception as exc:
                 voice_events.put(("error", str(exc)))
             finally:
@@ -1327,6 +1347,8 @@ def gui():
             speech_queue.put((message, rate))
 
     initial_setup = read_task_status(STATE / "install-progress.json")
+    introduction_marker = STATE / "introduction-spoken"
+    introduction_queued = introduction_marker.is_file()
     setup_spoken_step = str(initial_setup.get("current", "")) if initial_setup else ""
     if initial_setup and initial_setup.get("status") != "complete":
         speak_update(
@@ -1346,6 +1368,31 @@ def gui():
             )
         else:
             speak_update("Hi, Cale here. I'm ready when you are.")
+
+    def introduce_if_ready(setup):
+        """Explain the app once, after the installer and natural voice are ready."""
+        nonlocal introduction_queued
+        if introduction_queued or (setup and setup.get("status") != "complete"):
+            return
+        voice_ready = (
+            ROOT / "Media/models/natural_voice/kokoro-v1.0.int8.onnx"
+        ).is_file()
+        voice_failed = (
+            read_task_status(STATE / "natural-voice-progress.json").get("status")
+            == "error"
+        )
+        if not voice_ready and not voice_failed:
+            return
+        introduction_queued = True
+        speak_update(
+            "Hi, I'm Cale. I can research, build websites and apps, work with files, "
+            "and keep going on long projects. Your tasks and progress are right here. "
+            "Click New task and tell me what you want, or turn the mic on and talk to me. "
+            "You can also press Control Alt Space to speak once. I'll tell you what I'm "
+            "doing, and a side window will show website, app, and Chrome work. "
+            "If you want stronger online AI, use Supercharge my AI at the top. "
+            "What should we make first?"
+        )
 
     def record_voice(repeat=False):
         if voice_busy.is_set() or voice_speaking.is_set():
@@ -1584,6 +1631,29 @@ def gui():
 
     auto_models_started = False
     auto_voice_started = False
+    auto_ollama_started = False
+
+    def start_ollama_upgrade(setup):
+        """Give older portable installs Ollama's native update mechanism."""
+        nonlocal auto_ollama_started
+        if auto_ollama_started or (setup and setup.get("status") != "complete"):
+            return
+        auto_ollama_started = True
+        if not ollama_runtime.migration_needed():
+            return
+        path = STATE / "ollama-upgrade.json"
+        save_download_status(path, "working", "Checking Ollama updates", 0)
+        try:
+            subprocess.Popen(
+                [sys.executable, str(ROOT / "ollama_runtime.py")],
+                cwd=ROOT,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=HIDE,
+            )
+        except OSError as exc:
+            save_download_status(path, "error", str(exc), 0)
 
     def start_natural_voice(setup):
         """Finish the voice upgrade on PCs installed before it was bundled."""
@@ -1638,7 +1708,16 @@ def gui():
     task_cards = {}
     setup_card = None
     voice_card = None
+    ollama_card = None
     empty_label = None
+    preview_window = None
+    preview_label = None
+    preview_caption = None
+    preview_task_id = None
+    preview_dismissed_id = None
+    preview_image_signature = None
+    preview_capture_running = set()
+    preview_capture_at = {}
     # Keep a layout anchor for task cards without showing model installation
     # details on the main screen. The separate model worker owns downloads.
     models_section = ttk.Frame(cards)
@@ -1753,7 +1832,7 @@ def gui():
 
     def render_cards():
         """Update existing widgets in place so polling never resets the scroll."""
-        nonlocal setup_card, voice_card, empty_label
+        nonlocal setup_card, voice_card, ollama_card, empty_label
         setup = read_task_status(STATE / "install-progress.json")
         if setup:
             if setup_card is None:
@@ -1788,6 +1867,26 @@ def gui():
         elif voice_card is not None:
             voice_card["panel"].destroy()
             voice_card = None
+
+        ollama_setup = read_task_status(STATE / "ollama-upgrade.json")
+        if ollama_setup.get("status") in ("working", "waiting", "error"):
+            if ollama_card is None:
+                ollama_card = create_progress_card(
+                    "Keep Ollama updated", models_section
+                )
+            update_progress_card(
+                ollama_card,
+                ollama_setup.get("percent", 0),
+                "Current step: " + str(ollama_setup.get("current", "Preparing")),
+                "Installing"
+                if ollama_setup.get("status") == "working"
+                else "Waiting"
+                if ollama_setup.get("status") == "waiting"
+                else "Needs attention",
+            )
+        elif ollama_card is not None:
+            ollama_card["panel"].destroy()
+            ollama_card = None
 
         all_tasks = list(reversed(projects()))
         live_ids = {item["id"] for item in all_tasks}
@@ -1839,6 +1938,148 @@ def gui():
             update_progress_card(card_info, percent, "Current step: " + current, state)
             update_task_controls(card_info, item)
 
+    def update_side_preview(all_projects):
+        """Show the active task's page or Chrome session beside the task board."""
+        nonlocal preview_window, preview_label, preview_caption
+        nonlocal preview_task_id, preview_dismissed_id, preview_image_signature
+        candidates = list(reversed(all_projects))
+        project = next(
+            (
+                item
+                for item in candidates
+                if item["status"] in ("working", "checking", "queued")
+                and (
+                    project_preview.wants_preview(item)
+                    or project_preview.browser_screenshot_path(item["folder"]).is_file()
+                )
+            ),
+            None,
+        )
+        if project is None:
+            project = next(
+                (item for item in candidates if project_preview.wants_preview(item)),
+                None,
+            )
+        if project is None:
+            if preview_window is not None:
+                preview_window.destroy()
+                preview_window = None
+            preview_task_id = None
+            return
+        pid = project["id"]
+        if pid != preview_task_id:
+            preview_image_signature = None
+            if preview_dismissed_id != pid:
+                preview_dismissed_id = None
+            preview_task_id = pid
+        if preview_dismissed_id == pid:
+            return
+        if preview_window is None or not preview_window.winfo_exists():
+            preview_window = tk.Toplevel(window)
+            preview_window.title("Cale · Live preview")
+            preview_window.configure(background=bg)
+            preview_window.geometry("450x760")
+            preview_window.minsize(300, 350)
+            window.update_idletasks()
+            x = min(
+                window.winfo_rootx() + window.winfo_width() + 8,
+                window.winfo_screenwidth() - 458,
+            )
+            y = min(window.winfo_rooty(), window.winfo_screenheight() - 790)
+            preview_window.geometry(f"+{max(0, x)}+{max(0, y)}")
+            ttk.Label(
+                preview_window, text="Live preview", font=("Segoe UI", 16, "bold")
+            ).pack(anchor="w", padx=14, pady=(14, 3))
+            preview_caption = ttk.Label(
+                preview_window,
+                text="Waiting for the first visual update…",
+                style="Muted.TLabel",
+                wraplength=420,
+            )
+            preview_caption.pack(anchor="w", padx=14, pady=(0, 12))
+            preview_label = tk.Label(preview_window, bg="#101725", borderwidth=0)
+            preview_label.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+            def dismiss_preview():
+                nonlocal preview_window, preview_dismissed_id
+                preview_dismissed_id = preview_task_id
+                preview_window.destroy()
+                preview_window = None
+
+            preview_window.protocol("WM_DELETE_WINDOW", dismiss_preview)
+        folder = Path(project["folder"])
+        browser_image = project_preview.browser_screenshot_path(folder)
+        task_image = project_preview.screenshot_path(folder)
+        visual = (
+            browser_image
+            if browser_image.is_file()
+            and (
+                not task_image.is_file()
+                or browser_image.stat().st_mtime > task_image.stat().st_mtime
+            )
+            else task_image
+        )
+        if visual.is_file():
+            signature = (str(visual), visual.stat().st_mtime_ns)
+            if signature != preview_image_signature:
+                try:
+                    with Image.open(visual) as opened:
+                        picture = opened.convert("RGB")
+                    picture.thumbnail((420, 660), Image.Resampling.LANCZOS)
+                    preview_window.picture = ImageTk.PhotoImage(picture)
+                    preview_label.configure(image=preview_window.picture)
+                    preview_image_signature = signature
+                except (OSError, ValueError):
+                    pass
+        preview_caption.configure(
+            text=(
+                "Chrome · "
+                if visual == browser_image and visual.is_file()
+                else "App · "
+            )
+            + project["title"]
+        )
+        page = (
+            project_preview.source(folder)
+            if project_preview.wants_preview(project)
+            else ""
+        )
+        now = time.monotonic()
+        if (
+            page
+            and pid not in preview_capture_running
+            and now - preview_capture_at.get(pid, 0) > 12
+        ):
+            preview_capture_at[pid] = now
+            preview_capture_running.add(pid)
+
+            def capture():
+                output = task_image.with_name("preview-capture.tmp.png")
+                try:
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    node = ROOT / "Toolbox/node-v26.13.0-win-x64/node.exe"
+                    result = subprocess.run(
+                        [
+                            str(node),
+                            str(ROOT / "preview_capture.js"),
+                            page,
+                            str(output),
+                        ],
+                        cwd=ROOT,
+                        capture_output=True,
+                        timeout=45,
+                        creationflags=HIDE,
+                    )
+                    if result.returncode == 0 and output.is_file():
+                        os.replace(output, task_image)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+                finally:
+                    output.unlink(missing_ok=True)
+                    preview_capture_running.discard(pid)
+
+            threading.Thread(target=capture, daemon=True).start()
+
     def maybe_listen():
         if listening.is_set():
             if voice_speaking.is_set() or voice_busy.is_set():
@@ -1869,6 +2110,9 @@ def gui():
     def refresh():
         nonlocal idle_since, idle_slot, setup_spoken_step, voice_upgrade_queued
         setup = read_task_status(STATE / "install-progress.json")
+        introduce_if_ready(setup)
+        voice_setup = read_task_status(STATE / "natural-voice-progress.json")
+        ollama_setup = read_task_status(STATE / "ollama-upgrade.json")
         voice_folder = ROOT / "Media/models/natural_voice"
         if (
             not voice_upgrade_queued
@@ -1912,6 +2156,7 @@ def gui():
             disconnect_button.pack_forget()
         render_cards()
         all_projects = projects()
+        update_side_preview(all_projects)
         now = time.monotonic()
         for item in all_projects:
             current = (item["status"], task_progress(item)[1])
@@ -1945,7 +2190,16 @@ def gui():
         running = any(
             item["status"] in ("queued", "working", "checking") for item in all_projects
         )
-        if blocked or running or (setup and setup.get("status") != "complete"):
+        upgrading = ollama_runtime.model_download_running() or any(
+            state.get("status") in ("working", "waiting")
+            for state in (voice_setup, ollama_setup)
+        )
+        if (
+            blocked
+            or running
+            or upgrading
+            or (setup and setup.get("status") != "complete")
+        ):
             idle_since, idle_slot = now, -1
         else:
             finished = next(
@@ -1997,7 +2251,8 @@ def gui():
             and not updating
             and not self_update.active_tasks()
             and not any(
-                isinstance(child, tk.Toplevel) for child in window.winfo_children()
+                isinstance(child, tk.Toplevel) and child is not preview_window
+                for child in window.winfo_children()
             )
         ):
             setup_state = read_task_status(STATE / "install-progress.json")
@@ -2058,6 +2313,7 @@ def gui():
         setup = read_task_status(STATE / "install-progress.json")
         start_auto_models(setup)
         start_natural_voice(setup)
+        start_ollama_upgrade(setup)
         if (
             not cloud_status()["connected"]
             and not first_connect.exists()

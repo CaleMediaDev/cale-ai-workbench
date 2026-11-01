@@ -166,6 +166,8 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
         raise ValueError("arguments_json must be a JSON object")
     group, name = tool.split(".", 1)
     result = await SESSIONS[group].call_tool(name, arguments=arguments)
+    if group == "devtools" and name != "take_screenshot" and not result.isError:
+        await mirror_chrome_page()
     value = result.model_dump(by_alias=True, exclude_none=True)
     raw = json.dumps(value, ensure_ascii=False)
     if len(raw) > 24000:
@@ -179,6 +181,40 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "truncated": True,
         }
     return value
+
+
+async def mirror_chrome_page():
+    """Capture the selected DevTools page for the desktop side preview.
+
+    A failed capture must never turn a successful browser tool action into a
+    failure. The image stays in the active project's own local progress folder.
+    """
+    state = ROOT / "LongTasks/projects.db"
+    if not state.is_file():
+        return
+    try:
+        conn = sqlite3.connect(state.as_uri() + "?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                "SELECT folder FROM projects WHERE status IN "
+                "('working','checking','queued') ORDER BY updated DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return
+        folder = Path(row[0]).resolve()
+        image = folder / ".local-ai/browser.png"
+        image.parent.mkdir(parents=True, exist_ok=True)
+        temporary = image.with_name("browser-capture.tmp.png")
+        shot = await SESSIONS["devtools"].call_tool(
+            "take_screenshot", arguments={"format": "png", "filePath": str(temporary)}
+        )
+        if not shot.isError and temporary.is_file():
+            os.replace(temporary, image)
+        temporary.unlink(missing_ok=True)
+    except (OSError, sqlite3.Error, RuntimeError):
+        pass
 
 
 async def media_run(action: str, timeout: int = 900, **arguments) -> dict:

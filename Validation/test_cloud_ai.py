@@ -71,6 +71,24 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(post.call_count, 1)
         self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
 
+    def test_candidate_tool_calls_use_verified_reasoning_setting(self):
+        request = dict(
+            REQUEST, tools=[{"type": "function", "function": {"name": "multiply"}}]
+        )
+        catalog = dict(
+            cloud.CATALOG,
+            qwen36={"alias": "cale-qwen36", "tool_reasoning_effort": "none"},
+        )
+        with (
+            patch.object(cloud, "CATALOG", catalog),
+            patch.object(
+                cloud.Router, "local_candidates", return_value=["cale-qwen36"]
+            ),
+            patch.object(cloud, "post", return_value=ANSWER) as post,
+        ):
+            cloud.Router().complete(request)
+        self.assertEqual(post.call_args.args[1]["reasoning_effort"], "none")
+
     def test_installed_tool_models_auto_join_routing(self):
         self.candidates.stop()
         sizes = {
