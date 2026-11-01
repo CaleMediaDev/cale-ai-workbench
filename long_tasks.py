@@ -27,6 +27,7 @@ from pathlib import Path
 import cale_voice
 import chrome_connector
 import project_memory
+import runtime_diagnostics
 import runtime_features
 import self_diagnostics
 import setup_recovery
@@ -3805,6 +3806,24 @@ def gui():
         save_chat("assistant", content)
         show_chat("assistant", content)
 
+    def report_runtime_issue(kind, detail):
+        """Surface repeated real failures without asking a broken voice to speak."""
+        try:
+            if runtime_diagnostics.record(STATE, kind, detail):
+                names = {
+                    "microphone": "microphone", "speech": "spoken replies",
+                    "camera": "camera", "chat": "chat answers",
+                }
+                label = names.get(kind, kind)
+                notice = (
+                    f"I found a repeating problem with {label}: {detail[:180]}. "
+                    "I saved the failure details for diagnosis."
+                )
+                save_chat("assistant", notice)
+                show_chat("assistant", notice, speak=False)
+        except (OSError, sqlite3.Error):
+            pass  # Diagnostics must never disable the chat or device controls.
+
     prior_message = None
     for previous in chat_history(500):
         identity = (previous["role"], previous["content"])
@@ -3884,8 +3903,13 @@ def gui():
                         if paths
                         else chat_assistant.answer_with_tools(question, context)
                     )
+                try:
+                    runtime_diagnostics.resolve(STATE, "chat")
+                except (OSError, sqlite3.Error):
+                    pass
                 conversation_events.put(answer)
             except Exception as exc:
+                conversation_events.put({"diagnostic": "chat", "detail": str(exc)})
                 conversation_events.put("I couldn't answer that yet: " + str(exc))
 
     threading.Thread(target=answer_worker, daemon=True).start()
@@ -4038,7 +4062,9 @@ def gui():
         try:
             while True:
                 result = conversation_events.get_nowait()
-                if isinstance(result, dict) and result.get("image"):
+                if isinstance(result, dict) and result.get("diagnostic"):
+                    report_runtime_issue(result["diagnostic"], result.get("detail", "Unknown error"))
+                elif isinstance(result, dict) and result.get("image"):
                     assistant_reply("Your image is ready: " + result["image"])
                     try:
                         os.startfile(result["image"])
@@ -4917,6 +4943,10 @@ def gui():
                 event, value = voice_events.get_nowait()
                 if event in ("heard", "heard_handsfree"):
                     try:
+                        runtime_diagnostics.resolve(STATE, "microphone")
+                    except (OSError, sqlite3.Error):
+                        pass
+                    try:
                         use_spoken_request(value, handsfree=event == "heard_handsfree")
                     except Exception as exc:
                         voice_label.set("Could not add spoken request: " + str(exc))
@@ -4940,9 +4970,11 @@ def gui():
                         mic_turn_requested.clear()
                         mic_button.configure(text="🎤  Mic Off")
                         voice_label.set("Microphone unavailable: " + problem[:140])
+                        report_runtime_issue("microphone", problem)
                 elif event == "mic_error":
                     voice_label.set("Microphone unavailable: " + value[:140])
                     mic_button.configure(text="🎤  Mic Off")
+                    report_runtime_issue("microphone", value)
                 elif event == "mic_quiet":
                     voice_label.set("Mic on, but " + value[:140])
                 elif event == "mic_unrecognized":
@@ -4952,6 +4984,7 @@ def gui():
                         wake_sequence.renew_after_ack()
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
+                    report_runtime_issue("speech", value)
                 elif event == "camera_frame":
                     show_camera_preview(value)
                 elif event in ("camera_visitor", "camera_enrolled"):
@@ -4960,7 +4993,13 @@ def gui():
                     assistant_reply(value)
                 elif event in ("camera_ready", "camera_stopped", "camera_error", "camera_setup", "camera_notice"):
                     status.set(value[:220])
+                    if event == "camera_ready":
+                        try:
+                            runtime_diagnostics.resolve(STATE, "camera")
+                        except (OSError, sqlite3.Error):
+                            pass
                     if event == "camera_error":
+                        report_runtime_issue("camera", value)
                         camera_button.configure(text="📷  Camera Off")
                         clear_camera_preview()
                         greeting_until[0] = 0
@@ -4971,6 +5010,11 @@ def gui():
                     voice_label.set(value)
                 elif event in ("speaking", "spoken"):
                     voice_label.set(value)
+                    if event == "spoken":
+                        try:
+                            runtime_diagnostics.resolve(STATE, "speech")
+                        except (OSError, sqlite3.Error):
+                            pass
                 else:
                     voice_label.set(value)
         except queue.Empty:
