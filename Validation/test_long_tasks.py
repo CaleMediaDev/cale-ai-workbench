@@ -177,6 +177,18 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("Use SQLite", self.item()["brief"])
         self.assertTrue(any(c.args[0] == "unblock" for c in board.call_args_list))
 
+    def test_scheduled_card_waits_for_automatic_dispatch(self):
+        task_module.update(self.pid, card="scheduled-card", status="working")
+        with patch.object(
+            task_module,
+            "board",
+            return_value={"task": {"status": "scheduled"}},
+        ):
+            task_module.tick()
+            task_module.tick()
+        self.assertEqual(self.item()["status"], "working")
+        self.assertIn("scheduled", self.item()["detail"])
+
     def test_accept_rejects_stale_files(self):
         task_module.update(self.pid, status="ready_for_review", fingerprint="old")
         task_module.request(self.pid, "accept")

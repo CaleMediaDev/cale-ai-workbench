@@ -719,7 +719,7 @@ def tick():
                 )
                 continue
             handle_handoff(p, task)
-        elif task["status"] in ("blocked", "triage", "archived", "scheduled"):
+        elif task["status"] in ("blocked", "triage", "archived"):
             comments = snapshot.get("comments", [])
             update(
                 p["id"],
