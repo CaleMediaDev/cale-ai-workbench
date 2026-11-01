@@ -374,6 +374,37 @@ def speak(text, output_path, play=False, rate=0):
     return {"path": str(target), "engine": engine}
 
 
+def _capture_microphone(sd, device: int, rate: int, seconds: int):
+    """End a spoken clip after a short pause instead of always waiting eight seconds.
+
+    The whole clip, including leading and trailing silence, still goes to the
+    offline recognizer. Quiet or continuously noisy inputs use the full limit.
+    """
+    import numpy as np
+
+    block_frames = max(1, round(rate * 0.2))
+    maximum = seconds * rate
+    pieces = []
+    captured = 0
+    speaking = False
+    last_voice_frame = 0
+    with sd.InputStream(samplerate=rate, channels=1, dtype="float32", device=device) as stream:
+        while captured < maximum:
+            block, _overflowed = stream.read(min(block_frames, maximum - captured))
+            if len(block) == 0:
+                raise RuntimeError("Microphone returned no audio samples.")
+            pieces.append(block)
+            captured += len(block)
+            # A low fixed threshold avoids treating faint background hiss as a
+            # voice. The final Whisper pass decides whether words were spoken.
+            if float(np.max(np.abs(block))) >= 0.012:
+                speaking = True
+                last_voice_frame = captured
+            if speaking and captured >= rate and captured - last_voice_frame >= round(rate * 1.2):
+                break
+    return np.concatenate(pieces, axis=0)
+
+
 def record_audio(seconds=10):
     """Capture a bounded clip from the default or first usable microphone."""
     import tempfile
@@ -412,10 +443,20 @@ def record_audio(seconds=10):
             "No working microphone was found. Connect a microphone and try again."
         )
     (ROOT / "Temp").mkdir(exist_ok=True)
-    audio = sd.rec(
-        seconds * rate, samplerate=rate, channels=1, dtype="float32", device=chosen
-    )
-    sd.wait()
+    if hasattr(sd, "InputStream"):
+        try:
+            audio = _capture_microphone(sd, chosen, rate, seconds)
+        except (ValueError, sd.PortAudioError):
+            # Keep older audio drivers working if their stream interface fails.
+            audio = sd.rec(
+                seconds * rate, samplerate=rate, channels=1, dtype="float32", device=chosen
+            )
+            sd.wait()
+    else:
+        audio = sd.rec(
+            seconds * rate, samplerate=rate, channels=1, dtype="float32", device=chosen
+        )
+        sd.wait()
     peak = float(abs(audio).max())
     microphone = str(devices[chosen]["name"])
     if peak < 0.003:

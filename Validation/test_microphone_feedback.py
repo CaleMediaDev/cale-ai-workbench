@@ -59,3 +59,45 @@ def test_listen_result_preserves_mic_diagnostics():
         result = voice_assistant.listen_result(8)
     assert result == {"text": "Hey, Kale", "quiet": False,
                       "input_device": "Fifine Microphone", "input_peak": 0.05}
+
+
+def test_spoken_clip_ends_after_pause_instead_of_full_eight_seconds():
+    class Stream:
+        def __init__(self, **_kwargs):
+            self.reads = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read(self, frames):
+            self.reads += 1
+            # Four spoken blocks, then silence. The microphone captures the
+            # pause after speech but need not wait through all eight seconds.
+            level = 0.04 if self.reads <= 4 else 0.0
+            return np.full((frames, 1), level, dtype=np.float32), False
+
+    stream = Stream()
+    sd = SimpleNamespace(InputStream=lambda **_kwargs: stream)
+    clip = media_worker._capture_microphone(sd, device=1, rate=100, seconds=8)
+    assert 100 < len(clip) < 800
+    assert stream.reads < 40
+    assert np.max(clip) == np.float32(0.04)
+
+
+def test_quiet_clip_waits_for_full_listening_window():
+    class Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read(self, frames):
+            return np.zeros((frames, 1), dtype=np.float32), False
+
+    sd = SimpleNamespace(InputStream=lambda **_kwargs: Stream())
+    clip = media_worker._capture_microphone(sd, device=1, rate=100, seconds=8)
+    assert len(clip) == 800
