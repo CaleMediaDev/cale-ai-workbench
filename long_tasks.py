@@ -2072,24 +2072,49 @@ def ensure_gateway_current():
     """Reload Hermes after a context change, without interrupting live runs."""
     import psutil
 
+    pending = STATE / "gateway-update-pending.json"
     try:
         status = hermes("gateway", "status", timeout=20)
     except RuntimeError:
         hermes("gateway", "start", timeout=120)
+        pending.unlink(missing_ok=True)
         return
     match = re.search(r"\bPID:\s*(\d+)\b", status)
     if not match:
         hermes("gateway", "start", timeout=120)
+        pending.unlink(missing_ok=True)
         return
     try:
         started = psutil.Process(int(match.group(1))).create_time()
     except psutil.Error:
         hermes("gateway", "start", timeout=120)
+        pending.unlink(missing_ok=True)
         return
     if started < (ROOT / "data/config.yaml").stat().st_mtime:
         # Hermes refuses this command while sessions are live. The monitor
         # retries later; it never uses --yes to cut off an active task.
-        hermes("gateway", "restart", "--detach", timeout=120)
+        try:
+            hermes("gateway", "restart", "--detach", timeout=120)
+        except RuntimeError as exc:
+            if not re.search(
+                r"Refusing to restart the gateway: \d+ live session\(s\) would be interrupted",
+                str(exc),
+            ):
+                raise
+            # A running task is an expected reason to defer the update, not a
+            # new service failure. Keep one diagnostic for Cale to inspect.
+            pending.write_text(
+                json.dumps(
+                    {
+                        "reason": "live_session",
+                        "message": str(exc).strip(),
+                        "retry": "after the live session ends",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return
+    pending.unlink(missing_ok=True)
 
 
 def dispatch_ready_fallback():

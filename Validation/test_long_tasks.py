@@ -139,6 +139,47 @@ class LongTaskTests(unittest.TestCase):
                 task_module.ensure_gateway_current()
             self.assertEqual(cli.call_args.args, ("gateway", "restart", "--detach"))
 
+    def test_live_gateway_session_defers_update_without_service_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "data").mkdir()
+            (root / "data/config.yaml").write_text("model: {}")
+            state = root / "state"
+            state.mkdir()
+            refusal = RuntimeError(
+                "Refusing to restart the gateway: 1 live session(s) would be interrupted."
+            )
+            with (patch.object(task_module, "ROOT", root),
+                  patch.object(task_module, "STATE", state),
+                  patch.object(task_module, "hermes", side_effect=[
+                      "Gateway running (PID: 123)", refusal,
+                      "Gateway running (PID: 123)", "Restarted",
+                  ]),
+                  patch("psutil.Process") as process):
+                process.return_value.create_time.return_value = 1
+                task_module.ensure_gateway_current()
+                self.assertEqual(
+                    json.loads((state / "gateway-update-pending.json").read_text())["reason"],
+                    "live_session",
+                )
+                task_module.ensure_gateway_current()
+            self.assertFalse((state / "gateway-update-pending.json").exists())
+
+    def test_other_gateway_restart_errors_still_surface(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "data").mkdir()
+            (root / "data/config.yaml").write_text("model: {}")
+            with (patch.object(task_module, "ROOT", root),
+                  patch.object(task_module, "STATE", root),
+                  patch.object(task_module, "hermes", side_effect=[
+                      "Gateway running (PID: 123)", RuntimeError("bad configuration"),
+                  ]),
+                  patch("psutil.Process") as process):
+                process.return_value.create_time.return_value = 1
+                with self.assertRaisesRegex(RuntimeError, "bad configuration"):
+                    task_module.ensure_gateway_current()
+
     def test_supervisor_can_dispatch_ready_work_when_gateway_misses_it(self):
         with (patch.object(task_module, "projects", return_value=[{"status": "working"}]),
               patch.object(task_module, "board", return_value={"spawned": []}) as board):
