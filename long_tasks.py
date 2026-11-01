@@ -2051,8 +2051,10 @@ def monitor():
             if time.monotonic() - last_setup_recovery >= 30:
                 last_setup_recovery = time.monotonic()
                 runtime_features.start_background()
-                if not any(p["status"] in ("working", "checking") for p in projects()):
-                    setup_recovery.recover()
+                # The recovery helper checks the actual installer process and
+                # retry backoff. A stale "working" task must not suppress it:
+                # setup can freeze that task before its status is updated.
+                setup_recovery.recover()
             setup = read_task_status(STATE / "install-progress.json")
             if setup.get("status") == "working":
                 (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
