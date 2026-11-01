@@ -32,11 +32,11 @@ The Hermes agent itself is an external pinned dependency, installed under the ap
 
 ## Tasks and state
 
-The UI inserts user requests into `LongTasks/projects.db`. The monitor handles them through a separate `requests` table, so a button click does not block the window. It creates an idempotent Hermes board card for each task generation. The worker writes `.local-ai/PLAN.md`, `PROGRESS.md`, and `verify.ps1` inside the project folder. The supervisor runs `verify.ps1` in a Windows Job object, then starts a distinct review pass. Successful review reaches `ready_for_review`; the user accepts it. Stop and Delete retire the board work but preserve project files.
+The UI inserts user requests into `LongTasks/projects.db`. The monitor handles them through a separate `requests` table, so a button click does not block the window. It creates an idempotent Hermes board card for each task generation. The worker writes `.local-ai/PLAN.md`, `PROGRESS.md`, and `verify.ps1` inside the project folder. A fresh worker receives a bounded snapshot of the saved plan and latest progress in its board brief, then reads the current files. The supervisor runs `verify.ps1` in a Windows Job object, then starts a distinct review pass. Successful review reaches `ready_for_review`; the user accepts it. Stop and Delete retire the board work but preserve project files.
 
 The UI polls every five seconds. Existing task widgets are updated in place; a widget is created or destroyed only when a task is added or removed. Mouse-wheel scrolling is scoped to the task list, and the canvas keeps its pixel position across ordinary refreshes. Progress percentages are estimates from the saved milestone checklist, not a time estimate.
 
-`LongTasks/install-progress.json` and `LongTasks/optional-model-*.json` are small atomic status files read by the UI. The optional downloader runs independently, uses a Windows file lock to prevent duplicate automatic runs, and leaves weights in Ollama's model store. It checks physical RAM and at least 12 GB of extra disk headroom before each automatic pull. Models that cannot fit stay visible, with a manual Start/Retry button and their requirements.
+`LongTasks/install-progress.json` and `LongTasks/optional-model-*.json` are small atomic status files read by the UI. The optional downloader runs independently, uses a Windows file lock to prevent duplicate automatic runs, and leaves weights in Ollama's model store. It checks Ollama for a usable local model before trusting a saved completion status, and checks physical RAM plus at least 12 GB of extra space on the model store's drive before each pull. Models that cannot fit stay visible, with a manual Start/Retry button and their requirements.
 
 ## Accounts and model routing
 

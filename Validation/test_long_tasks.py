@@ -55,6 +55,20 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(item["title"], "Make a simple recipe app")
         self.assertTrue((Path(item["folder"]) / ".local-ai").is_dir())
 
+    def test_new_worker_receives_saved_plan_and_latest_progress(self):
+        notes = Path(self.item()["folder"]) / ".local-ai"
+        (notes / "PLAN.md").write_text("Milestone: build search", encoding="utf-8")
+        (notes / "PROGRESS.md").write_text(
+            "x" * 6500 + "\nNext concrete step: test search", encoding="utf-8"
+        )
+        with patch.object(task_module, "board", return_value={"id": "card-1"}) as board:
+            task_module.create_card(self.item())
+        args = board.call_args.args
+        body = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+        self.assertIn("Milestone: build search", body)
+        self.assertIn("Next concrete step: test search", body)
+        self.assertNotIn("x" * 6500, body)
+
     def test_real_failing_check_cannot_pass(self):
         self.verify_script('Write-Output "actual check failed"\nexit 7\n')
         ok, text = task_module.verify_project(self.item())

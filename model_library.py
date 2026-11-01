@@ -96,6 +96,26 @@ def total_ram_gb():
     return memory.total_phys / 2**30
 
 
+def model_store_path():
+    """Find the drive Ollama uses for weights, including a custom model store."""
+    configured = os.environ.get("OLLAMA_MODELS")
+    store = (
+        Path(configured).expanduser() if configured else Path.home() / ".ollama/models"
+    )
+    # disk_usage accepts an existing ancestor even before Ollama creates models/.
+    return next((path for path in (store, *store.parents) if path.exists()), store)
+
+
+def model_ready(profile):
+    """Check actual local Ollama state instead of trusting an old UI status file."""
+    info = post("/api/show", {"model": CATALOG[profile]["alias"]}, timeout=10)
+    return (
+        not info.get("remote_host")
+        and not info.get("remote_model")
+        and "tools" in info.get("capabilities", [])
+    )
+
+
 def install(profile, progress=print):
     """Pull one model through Ollama and verify it advertises tool support."""
     item = CATALOG[profile]
@@ -215,17 +235,18 @@ def auto_install(status_dir):
                 path = status_dir / f"optional-model-{profile}.json"
                 if ram + 1 < model["ram_gb"]:
                     continue
-                if path.exists():
-                    try:
-                        if (
-                            json.loads(path.read_text(encoding="utf-8")).get("status")
-                            == "complete"
-                        ):
-                            continue
-                    except (OSError, ValueError):
-                        pass
+                try:
+                    if model_ready(profile):
+                        save_download_status(
+                            path, "complete", "Installed and ready to use", 100
+                        )
+                        continue
+                except Exception:
+                    # Ollama may not be running yet, or this alias may be absent.
+                    # The pull below will give a concrete error if it cannot connect.
+                    pass
                 # A model needs space for weights plus Ollama's temporary files.
-                free_gb = shutil.disk_usage(ROOT).free / 2**30
+                free_gb = shutil.disk_usage(model_store_path()).free / 2**30
                 if free_gb < model["download_gb"] + 12:
                     save_download_status(
                         path,

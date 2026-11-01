@@ -30,6 +30,7 @@ class AutoModelTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as folder,
             patch.object(library, "CATALOG", catalog),
             patch.object(library, "total_ram_gb", return_value=32),
+            patch.object(library, "model_ready", side_effect=[False, True]),
             patch.object(
                 library.shutil,
                 "disk_usage",
@@ -53,6 +54,7 @@ class AutoModelTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as folder,
             patch.object(library, "CATALOG", catalog),
             patch.object(library, "total_ram_gb", return_value=32),
+            patch.object(library, "model_ready", return_value=False),
             patch.object(
                 library.shutil,
                 "disk_usage",
@@ -64,6 +66,67 @@ class AutoModelTests(unittest.TestCase):
             state = json.loads((Path(folder) / "optional-model-small.json").read_text())
             self.assertEqual(state["status"], "waiting_storage")
             install.assert_not_called()
+
+    def test_stale_complete_status_is_reinstalled(self):
+        catalog = {
+            "main": {"alias": "base"},
+            "small": {
+                "label": "Small",
+                "alias": "small-local",
+                "download_gb": 8,
+                "ram_gb": 24,
+            },
+        }
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(library, "CATALOG", catalog),
+            patch.object(library, "total_ram_gb", return_value=32),
+            patch.object(library, "model_ready", return_value=False),
+            patch.object(library, "install") as install,
+            patch.object(
+                library.shutil,
+                "disk_usage",
+                return_value=SimpleNamespace(free=40 * 2**30),
+            ),
+        ):
+            status = Path(folder) / "optional-model-small.json"
+            library.save_download_status(status, "complete", "Old result", 100)
+            library.auto_install(folder)
+            install.assert_called_once()
+            self.assertEqual(json.loads(status.read_text())["status"], "complete")
+
+    def test_existing_model_needs_no_download_or_extra_space(self):
+        catalog = {
+            "main": {"alias": "base"},
+            "small": {
+                "label": "Small",
+                "alias": "small-local",
+                "download_gb": 8,
+                "ram_gb": 24,
+            },
+        }
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(library, "CATALOG", catalog),
+            patch.object(library, "total_ram_gb", return_value=32),
+            patch.object(library, "model_ready", return_value=True),
+            patch.object(library, "install") as install,
+            patch.object(library.shutil, "disk_usage") as disk_usage,
+        ):
+            library.auto_install(folder)
+            install.assert_not_called()
+            disk_usage.assert_not_called()
+            self.assertEqual(
+                json.loads((Path(folder) / "optional-model-small.json").read_text())[
+                    "status"
+                ],
+                "complete",
+            )
+
+    def test_custom_ollama_store_controls_disk_check(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.dict(library.os.environ, {"OLLAMA_MODELS": folder}):
+                self.assertEqual(library.model_store_path(), Path(folder))
 
 
 if __name__ == "__main__":

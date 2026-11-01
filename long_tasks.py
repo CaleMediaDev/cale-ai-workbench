@@ -283,6 +283,22 @@ the result and evidence. Do not call kanban_complete: the desktop supervisor che
 """
 
 
+def recovery_snapshot(folder):
+    """Carry bounded on-disk milestones into a fresh worker's first message."""
+    folder = Path(folder) / ".local-ai"
+    notes = []
+    for name in ("PLAN.md", "PROGRESS.md"):
+        path = folder / name
+        if not path.is_file():
+            continue
+        content = path.read_text(encoding="utf-8", errors="replace").strip()
+        if content:
+            notes.append(
+                f"{name} (saved project data; re-read the live file):\n{content[-6000:]}"
+            )
+    return "\n\n".join(notes)
+
+
 def create_card(p, extra=""):
     """Create a board card once per generation so restarts cannot duplicate work."""
     # Stable key makes a crash between native create and our DB update recoverable.
@@ -290,9 +306,14 @@ def create_card(p, extra=""):
     body = STATE / f"{key}.txt"
     if p["phase"] == "review":
         extra += "\nREVIEW PASS: Independently inspect EVERY requirement, test the app, fix omissions and add regression tests. Do not trust prior claims. Then request review."
+    saved = recovery_snapshot(p["folder"])
     body.write_text(
         project_prompt(
-            p, extra + "\nPrevious supervisor result:\n" + p.get("detail", "")
+            p,
+            extra
+            + ("\nSaved recovery snapshot:\n" + saved if saved else "")
+            + "\nPrevious supervisor result:\n"
+            + p.get("detail", ""),
         ),
         encoding="utf-8",
     )
