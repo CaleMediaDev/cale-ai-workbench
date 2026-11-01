@@ -178,6 +178,11 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
         return business_contact_answer(name, result.get("sources", []))
     if needs_web(question):
         return answer_from_web(question)
+    from quick_calculator import calculate
+
+    calculation = calculate(question)
+    if calculation is not None:
+        return calculation
     return local_answer(question, history)
 
 
