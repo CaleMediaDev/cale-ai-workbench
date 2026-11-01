@@ -25,6 +25,10 @@ DEFAULT_FILES = (
 )
 SECRET_NAME = re.compile(r"(?:^\.env(?:\.|$)|secret|credential|token|password|\.pem$|\.pfx$|\.p12$|\.key$)", re.I)
 WORD = re.compile(r"[^\W_]+", re.UNICODE)
+SEARCH_STOPWORDS = frozenset({
+    "a", "an", "and", "are", "for", "from", "in", "is", "my", "of",
+    "on", "or", "please", "show", "the", "this", "to", "what", "where", "with",
+})
 
 
 def database_path(folder: str | Path) -> Path:
@@ -227,20 +231,35 @@ def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> li
         raise ValueError("Unknown memory kind.")
     root = Path(folder).resolve(strict=True)
     index(root)
-    words = WORD.findall(query)[:12]
+    words = list(dict.fromkeys(
+        word.casefold() for word in WORD.findall(query)
+        if word.casefold() not in SEARCH_STOPWORDS
+    ))[:12]
     limit = max(1, min(int(limit), 20))
     def query_rows():
         with connection(root) as conn:
             if words:
-                expression = " OR ".join('"' + word + '"' for word in words)
-                return conn.execute("""SELECT m.id,m.kind,m.title,m.tags,m.source_path,
+                def matches(expression):
+                    return conn.execute("""SELECT m.id,m.kind,m.title,m.body,m.tags,m.source_path,
                     m.source_hash,m.updated,
                     snippet(memory_fts, 2, '[', ']', ' … ', 24) AS excerpt
                     FROM memory_fts JOIN memories AS m ON m.id=memory_fts.id
                     WHERE memory_fts MATCH ? AND (?='' OR m.kind=?)
                     ORDER BY bm25(memory_fts, 0.0, 4.0, 1.0, 2.0), m.updated DESC LIMIT ?""",
                     (expression, kind, kind, limit * 5)).fetchall()
-            return conn.execute("""SELECT id,kind,title,tags,source_path,
+                exact = matches(" AND ".join('"' + word + '"' for word in words))
+                if exact:
+                    return exact
+                loose = matches(" OR ".join('"' + word + '"' for word in words))
+                # Quoted/asterisk input may be a literal example of FTS syntax;
+                # keep useful plain-text matches while never executing it raw.
+                minimum = 1 if len(words) == 1 or re.search(r'["*]', query) else 2
+                return [row for row in loose if len(set(words) & {
+                    word.casefold() for word in WORD.findall(
+                        row["title"] + " " + row["body"] + " " + row["tags"]
+                    )
+                }) >= minimum]
+            return conn.execute("""SELECT id,kind,title,body,tags,source_path,
                 source_hash,updated,substr(body,1,500) AS excerpt FROM memories
                 WHERE (?='' OR kind=?) ORDER BY updated DESC LIMIT ?""",
                 (kind, kind, limit * 5)).fetchall()

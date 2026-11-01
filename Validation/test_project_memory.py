@@ -81,6 +81,14 @@ class ProjectMemoryTests(unittest.TestCase):
             memory.get(self.folder, identifier)
         self.assertFalse(memory.search(self.folder, "fresh_invoice", kind="file"))
 
+    def test_old_identifier_does_not_match_new_identifier_by_shared_word(self):
+        source = self.folder / "app.py"
+        source.write_text("def old_widget(): return 1", encoding="utf-8")
+        memory.index(self.folder, include_code=True)
+        source.write_text("def new_widget(): return 2", encoding="utf-8")
+        self.assertFalse(memory.search(self.folder, "old_widget", kind="file"))
+        self.assertTrue(memory.search(self.folder, "new_widget", kind="file"))
+
     def test_memory_is_isolated_and_source_cannot_escape_project(self):
         other = Path(self.temp.name) / "other"
         other.mkdir()
