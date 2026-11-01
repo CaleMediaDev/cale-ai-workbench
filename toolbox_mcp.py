@@ -17,6 +17,9 @@ from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 from mcp.server import MCPServer
 
+import project_memory
+import site_crawler
+
 ROOT = Path(__file__).resolve().parent
 BOX = ROOT / "Toolbox"
 NODE = BOX / "node-v26.13.0-win-x64/node.exe"
@@ -181,6 +184,65 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "truncated": True,
         }
     return value
+
+
+def registered_project(folder: str) -> Path:
+    """Memory tools operate only on an exact folder in the user's task list."""
+    requested = Path(folder).resolve(strict=True)
+    state = ROOT / "LongTasks/projects.db"
+    if not state.is_file():
+        raise ValueError("No project is registered yet.")
+    conn = sqlite3.connect(state.as_uri() + "?mode=ro", uri=True)
+    try:
+        allowed = any(
+            requested == Path(row[0]).resolve()
+            for row in conn.execute("SELECT folder FROM projects")
+        )
+    finally:
+        conn.close()
+    if not allowed:
+        raise ValueError("Choose the exact folder of a task in this Workbench.")
+    return requested
+
+
+@server.tool()
+def project_memory_search(project_folder: str, query: str, kind: str = "", limit: int = 8) -> dict:
+    """Search this project's local SQLite memory and file index; returns ranked snippets."""
+    folder = registered_project(project_folder)
+    matches = project_memory.search(folder, query, kind=kind, limit=limit)
+    return {"project_folder": str(folder), "matches": matches}
+
+
+@server.tool()
+def project_memory_get(project_folder: str, memory_id: str) -> dict:
+    """Read one full saved memory or indexed file after finding its ID."""
+    return project_memory.get(registered_project(project_folder), memory_id)
+
+
+@server.tool()
+def project_memory_save(
+    project_folder: str, kind: str, title: str, body: str,
+    tags: str = "", source_path: str = "", memory_id: str = "",
+) -> dict:
+    """Save a durable requirement, decision, lesson, skill recipe, component, app, or note locally."""
+    return project_memory.save(
+        registered_project(project_folder), kind, title, body,
+        tags=tags, source_path=source_path, memory_id=memory_id,
+    )
+
+
+@server.tool()
+def project_memory_index(project_folder: str, include_code: bool = True) -> dict:
+    """Refresh the local full-text index from project docs and optionally source files."""
+    return project_memory.index(registered_project(project_folder), include_code=include_code)
+
+
+@server.tool()
+async def crawl_website(project_folder: str, start_url: str, max_pages: int = 5) -> dict:
+    """Crawl public pages on one website locally; save Markdown into the task and searchable memory."""
+    return await site_crawler.crawl_site(
+        registered_project(project_folder), start_url, max_pages=max_pages
+    )
 
 
 async def mirror_chrome_page():

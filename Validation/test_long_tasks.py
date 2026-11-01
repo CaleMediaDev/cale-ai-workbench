@@ -41,6 +41,7 @@ class LongTaskTests(unittest.TestCase):
 
     def test_persistence_and_overlap_guard(self):
         self.assertEqual(task_module.projects()[0]["id"], self.pid)
+        self.assertTrue((self.base / "project/.local-ai/memory.sqlite3").is_file())
         with self.assertRaises(ValueError):
             task_module.add_project("bad", str(self.base / "project/child"), "overlap")
         with task_module.database() as db:
@@ -98,6 +99,20 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("Milestone: build search", body)
         self.assertIn("Next concrete step: test search", body)
         self.assertNotIn("x" * 6500, body)
+
+    def test_new_worker_receives_relevant_durable_memory(self):
+        import project_memory
+
+        project_memory.save(
+            self.item()["folder"], "decision", "Fixture database choice",
+            "Use SQLite for the working fixture database.",
+        )
+        with patch.object(task_module, "board", return_value={"id": "card-1"}) as board:
+            task_module.create_card(self.item())
+        args = board.call_args.args
+        body = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+        self.assertIn("Fixture database choice", body)
+        self.assertIn("project_memory_search", body)
 
     def test_real_failing_check_cannot_pass(self):
         self.verify_script('Write-Output "actual check failed"\nexit 7\n')

@@ -9,8 +9,13 @@ from __future__ import annotations
 import ctypes
 import math
 import os
+import shutil
 import subprocess
+import time
 from ctypes import wintypes
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
 
 
 def rpm_color(position: float) -> str:
@@ -116,15 +121,48 @@ def _gpu_percent():
     return parse_gpu_utilization(result.stdout) if result.returncode == 0 else None
 
 
+def _drive_space():
+    """Measure the volume holding the app, downloads, and local models."""
+    total, _used, free = shutil.disk_usage(ROOT)
+    if total <= 0:
+        return None, None
+    return round(100 * (1 - free / total)), round(free / (1024 ** 3))
+
+
+def disk_transfer_speed(previous, current, elapsed):
+    """Convert PC-wide disk byte counters into read/write MB per second."""
+    if previous is None or current is None or elapsed <= 0:
+        return None, None
+    return (
+        max(0, (current[0] - previous[0]) / elapsed / 1_000_000),
+        max(0, (current[1] - previous[1]) / elapsed / 1_000_000),
+    )
+
+
+def network_bandwidth(previous, current, elapsed, link_mbps):
+    """Return receive/send Mbps and link utilization from byte counters."""
+    if previous is None or current is None or elapsed <= 0:
+        return None, None, None
+    down = max(0, (current[0] - previous[0]) * 8 / elapsed / 1_000_000)
+    up = max(0, (current[1] - previous[1]) * 8 / elapsed / 1_000_000)
+    load = round(min(100, 100 * (down + up) / link_mbps)) if link_mbps else None
+    return down, up, load
+
+
 class HardwareSampler:
     """Keep the previous CPU snapshot; GPU and RAM are sampled on demand."""
 
     def __init__(self):
         self.previous_cpu = None
+        self.previous_disk = None
+        self.previous_disk_time = None
+        self.previous_net = None
+        self.previous_net_time = None
 
     def sample(self):
         if os.name != "nt":
-            return {"cpu": None, "ram": None, "gpu": None}
+            return {"cpu": None, "ram": None, "gpu": None,
+                    "drive": None, "drive_free_gb": None, "net": None}
         try:
             current = _cpu_times()
             cpu = cpu_percent(self.previous_cpu, current)
@@ -139,4 +177,35 @@ class HardwareSampler:
             gpu = _gpu_percent()
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             gpu = None
-        return {"cpu": cpu, "ram": ram, "gpu": gpu}
+        try:
+            drive, drive_free = _drive_space()
+        except OSError:
+            drive, drive_free = None, None
+        now = time.monotonic()
+        try:
+            import psutil
+
+            counters = psutil.disk_io_counters()
+            current_disk = (counters.read_bytes, counters.write_bytes) if counters else None
+        except (ImportError, AttributeError, OSError):
+            current_disk = None
+        elapsed = now - self.previous_disk_time if self.previous_disk_time is not None else 0
+        drive_read, drive_write = disk_transfer_speed(self.previous_disk, current_disk, elapsed)
+        self.previous_disk, self.previous_disk_time = current_disk, now
+        try:
+            net_counters = psutil.net_io_counters()
+            current_net = (net_counters.bytes_recv, net_counters.bytes_sent) if net_counters else None
+            link_speeds = [item.speed for item in psutil.net_if_stats().values()
+                           if item.isup and item.speed > 0]
+            link_mbps = max(link_speeds, default=None)
+        except (NameError, AttributeError, OSError):
+            current_net, link_mbps = None, None
+        net_elapsed = now - self.previous_net_time if self.previous_net_time is not None else 0
+        net_down, net_up, net_load = network_bandwidth(
+            self.previous_net, current_net, net_elapsed, link_mbps
+        )
+        self.previous_net, self.previous_net_time = current_net, now
+        return {"cpu": cpu, "ram": ram, "gpu": gpu,
+                "drive": drive, "drive_free_gb": drive_free,
+                "drive_read_mbps": drive_read, "drive_write_mbps": drive_write,
+                "net": net_load, "net_down_mbps": net_down, "net_up_mbps": net_up}

@@ -2,7 +2,7 @@ LOCAL AI LONG TASKS
 
 Open "Cale AI Workbench" on your desktop. Setup progress and optional model
 downloads appear in My tasks. Type in the chat what you want built,
-and let the app make a folder automatically. Click Start my task.
+and let the app make a folder and local memory database automatically.
 
 It will keep working through a saved plan, test its work, and use a separate
 local-model review pass. You can close the window while it runs. The normal
@@ -28,6 +28,8 @@ WHAT SURVIVES RESTARTS
 Hermes stores tasks, claims, failures, comments and runs in its SQLite board.
 The companion separately stores projects, requests and verification state.
 The agent maintains .local-ai/PLAN.md and PROGRESS.md inside each project.
+It also keeps a SQLite full-text memory index in .local-ai/memory.sqlite3.
+This is created automatically; there is no separate database installation.
 After a crash, a replacement worker reads those files and prior task context.
 Context compression and fresh review sessions prevent one conversation growing forever.
 

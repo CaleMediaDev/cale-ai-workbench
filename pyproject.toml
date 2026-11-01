@@ -1,6 +1,7 @@
 [tool.ruff]
 target-version = "py313"
 line-length = 88
+extend-exclude = ["vendor/hermes-connector"]  # Preserve the upstream release source unchanged.
 
 [tool.ruff.lint]
 # Focus on correctness and readable imports. Long UI strings and task prompts

@@ -8,9 +8,12 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Ollama | https://github.com/ollama/ollama |
 | GitHub CLI | https://github.com/cli/cli |
 | Kokoro-ONNX (MIT) and Kokoro 82M voice weights (Apache-2.0) | https://github.com/thewh1teagle/kokoro-onnx and https://huggingface.co/hexgrad/Kokoro-82M |
+| Qwen3-TTS 0.6B Base voice clone (Apache-2.0; downloaded locally) | https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base |
 | REA / rea-agents | https://github.com/morluto/rea |
 | Chrome DevTools MCP | https://github.com/ChromeDevTools/chrome-devtools-mcp |
 | Playwright MCP | https://github.com/microsoft/playwright-mcp |
+| Crawl4AI (Apache-2.0), local browser crawler | https://github.com/unclecode/crawl4ai |
+| Hermes Connector 0.2.6 (MIT; license bundled under `vendor/hermes-connector/LICENSE`) | https://github.com/CorsenAI/hermes-connector/tree/v0.2.6 |
 | MarkItDown | https://github.com/microsoft/markitdown |
 | Ghidra | https://github.com/NationalSecurityAgency/ghidra |
 | Eclipse Temurin JDK | https://adoptium.net/temurin/releases/ |
@@ -30,6 +33,7 @@ The Windows compatibility patch contains modifications to MIT-licensed Hermes co
 - Qwen3-Coder-Next: https://huggingface.co/Qwen/Qwen3-Coder-Next — Apache-2.0. Ollama distribution: https://ollama.com/library/qwen3-coder-next.
 - Qwen 3.5: https://ollama.com/library/qwen3.5 — consult the selected model's upstream license.
 - Huihui Qwen Coder Next abliterated: https://huggingface.co/huihui-ai/Huihui-Qwen3-Coder-Next-abliterated — Apache-2.0. Publisher's Ollama distribution: https://ollama.com/huihui_ai/qwen3-coder-next-abliterated.
+- Huihui Qwen 3.5 9B abliterated: https://huggingface.co/huihui-ai/Huihui-Qwen3.5-9B-abliterated — Apache-2.0. Publisher's Ollama distribution: https://ollama.com/huihui_ai/qwen3.5-abliterated:9b.
 - Huihui Llama 3.3 70B abliterated: https://huggingface.co/huihui-ai/Llama-3.3-70B-Instruct-abliterated — **Llama 3.3 Community License**, not our MIT license. Built with Llama. Publisher's distribution: https://ollama.com/huihui_ai/llama3.3-abliterated.
 - ArliAI GPT-OSS 20B Derestricted: https://huggingface.co/ArliAI/gpt-oss-20b-Derestricted — Apache-2.0. Community GGUF conversion: https://huggingface.co/MaziyarPanahi/gpt-oss-20b-Derestricted-GGUF.
 - OpenAI GPT-OSS 20B via Ollama: https://ollama.com/library/gpt-oss — Apache-2.0; downloaded separately from this source release.

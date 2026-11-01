@@ -6,6 +6,16 @@ the optional connected account can use free cloud inference with local fallback.
 Already available: terminal commands, read/write/patch files, file search,
 Git, Python, Node, memory, reusable skills, public web search and page reading,
 Playwright browser automation, and persistent Hermes task boards.
+Each project automatically gets a local SQLite FTS5 memory database in
+.local-ai/memory.sqlite3. No database software, account, or setup is needed.
+Use project_memory_search for ranked snippets, project_memory_get for a full
+record, project_memory_save for requirements/decisions/lessons/skills/components,
+and project_memory_index to refresh code files. Pass the exact project folder.
+Files remain the source of truth; re-read them before changing code.
+Use crawl_website for bounded, same-host public website research. It runs
+Crawl4AI locally in a headless browser, respects robots.txt, saves Markdown
+under Research/Web in the project, and indexes it in the local SQLite memory.
+It does not require an account. The browser can render JavaScript-heavy pages.
 Public search uses Brave with DuckDuckGo Lite fallback if the first service is
 rate limited. Search links are leads; read the destination page for evidence.
 
@@ -28,6 +38,10 @@ Chrome DevTools 1.12.0: browser console errors, network requests, screenshots,
 DOM interaction, performance traces, memory debugging and device emulation.
 It uses an isolated browser, not your signed-in personal browser. Telemetry and
 CrUX URL lookup are disabled. Playwright remains available for repeatable tests.
+Hermes Connector 0.2.6: the local companion is installed automatically. Use
+"Connect my Chrome tabs" under Supercharge to approve its Chrome extension,
+paste the local pairing code, and attach selected signed-in tabs to a task.
+Then the agent can use bridge_status and bridge_* tools on those tabs only.
 
 document_to_text: local PDF, Word, Excel, PowerPoint, HTML, CSV and text extraction
 using Microsoft MarkItDown. No external AI, image descriptions or cloud OCR.

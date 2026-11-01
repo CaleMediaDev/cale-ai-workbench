@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.14')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.16')
  $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
  function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
    New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
@@ -75,6 +75,9 @@ try {
  Write-Output 'Installing document, database, testing and model-connection tools...'
  & $python -m pip install --disable-pip-version-check -r (Join-Path $PSScriptRoot 'requirements-windows.txt')
  if ($LASTEXITCODE -ne 0) { throw 'Python tool installation failed.' }
+ # Crawl4AI uses Python Playwright, separate from the JavaScript MCP browser.
+ & $python -m playwright install chromium --only-shell
+ if ($LASTEXITCODE -ne 0) { throw 'Local crawler browser download failed.' }
  if (-not (Test-Path -LiteralPath (Join-Path $box 'node-v26.13.0-win-x64/node.exe'))) {
    $archive=Download-Verified $pins.node.url $pins.node.sha256 'node-v26.13.0-win-x64.zip'
    Expand-Archive -LiteralPath $archive -DestinationPath $box -Force
@@ -109,6 +112,13 @@ try {
    New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $target -Force
  }
+ # Prepare signed-in Chrome control locally. Chrome itself asks the user to
+ # approve its extension and explicitly choose which tabs Cale may access.
+ $env:PATH=(Join-Path $env:HERMES_HOME 'bin')+';'+$env:PATH
+ & $runtime (Join-Path $Destination 'vendor/hermes-connector/install_companion.py') --source (Join-Path $Destination 'vendor/hermes-connector/plugin') --hermes-home $env:HERMES_HOME --no-show-code
+ if ($LASTEXITCODE -ne 0) { throw 'Local Chrome companion installation failed.' }
+ New-Item -ItemType Directory -Path (Join-Path $Destination 'Updates') -Force | Out-Null
+ [IO.File]::WriteAllText((Join-Path $Destination 'Updates/features-0.5.16.done'),'Crawl4AI 0.9.5; Hermes Connector 0.2.6')
  if (-not $NoLaunch) {
    Start-Process (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'long_tasks.py')+'"') -WindowStyle Normal
  }

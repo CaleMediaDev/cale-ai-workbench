@@ -90,6 +90,47 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(result, ANSWER)
         self.assertEqual(post.call_args.args[1]["model"], alias)
 
+    def test_derestricted_retry_scales_with_task_size(self):
+        small = cloud.CATALOG["permissive_small"]["alias"]
+        large = cloud.CATALOG["permissive"]["alias"]
+
+        def response(url, payload, **kwargs):
+            if url.endswith("/api/show"):
+                return {"capabilities": ["completion", "tools"]}
+            return REFUSAL if payload["model"] == cloud.LOCAL_MODEL else ANSWER
+
+        with (
+            patch.object(cloud, "candidate_approved", return_value=True),
+            patch.object(cloud, "post", side_effect=response) as post,
+        ):
+            cloud.Router().complete(REQUEST)
+            self.assertEqual(post.call_args.args[1]["model"], small)
+            self.assertEqual(post.call_args.args[1]["reasoning_effort"], "none")
+            post.reset_mock()
+            cloud.Router().complete(dict(
+                REQUEST, messages=[{"role": "user", "content": "Build a working website"}]
+            ))
+            self.assertEqual(post.call_args.args[1]["model"], large)
+
+    def test_small_derestricted_stays_reserved_for_refusals(self):
+        self.candidates.stop()
+        small = cloud.CATALOG["permissive_small"]["alias"]
+
+        def show(url, payload, **kwargs):
+            if payload["model"] not in (small, cloud.FAST_MODEL):
+                raise OSError("not installed")
+            return {"capabilities": ["completion", "tools"],
+                    "details": {"parameter_size": "9B"}}
+
+        with (
+            patch.object(cloud, "candidate_approved", return_value=True),
+            patch.object(cloud, "refresh_catalog"),
+            patch.object(cloud, "post", side_effect=show),
+        ):
+            candidates = cloud.Router().local_candidates("quick")
+        self.assertIn(cloud.FAST_MODEL, candidates)
+        self.assertNotIn(small, candidates)
+
     def test_tool_refusal_skips_derestricted_model_without_tools(self):
         request = dict(REQUEST, tools=[{"type": "function", "function": {"name": "x"}}])
         seen = []

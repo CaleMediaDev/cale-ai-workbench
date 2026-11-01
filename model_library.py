@@ -35,6 +35,19 @@ CATALOG = {
         "license": "Apache-2.0",
         "context": 32768,
     },
+    "permissive_small": {
+        "label": "Huihui Qwen 3.5 9B abliterated (local)",
+        "alias": "cale-qwen35-abliterated-9b",
+        "source": "huihui_ai/qwen3.5-abliterated:9b",
+        "download_gb": 7,
+        "ram_gb": 16,
+        "origin": "https://huggingface.co/huihui-ai/Huihui-Qwen3.5-9B-abliterated",
+        "license": "Apache-2.0",
+        "context": 32768,
+        "candidate": True,
+        "fallback_only": True,
+        "tool_reasoning_effort": "none",
+    },
     "permissive": {
         "label": "Qwen Coder Next permissive (local)",
         "alias": configured_permissive_alias(ROOT),
@@ -102,7 +115,7 @@ def validated_recommendations(document):
     accepted = {}
     for profile, item in entries.items():
         if not re.fullmatch(r"[a-z][a-z0-9_]{2,24}", profile) or (
-            profile in CATALOG and not CATALOG[profile].get("candidate")
+            profile in CATALOG
         ):
             continue
         if not isinstance(item, dict):

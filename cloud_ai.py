@@ -28,6 +28,7 @@ from urllib.request import Request, urlopen
 
 import win32crypt
 
+import pc_offline
 from auto_route import model_order, task_size
 from model_identity import configured_main_alias, configured_permissive_alias
 from model_library import CATALOG, candidate_approved, refresh_catalog
@@ -164,11 +165,19 @@ def post(url, payload, key="", timeout=180):
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = "Bearer " + key
+    started = time.monotonic()
     with urlopen(
         Request(url, data=json.dumps(payload).encode(), headers=headers),
         timeout=timeout,
     ) as response:
-        return json.load(response)
+        result = json.load(response)
+    if url.endswith("/chat/completions"):
+        import usage_history
+
+        usage_history.record_completion(
+            result, "openrouter" if key else "ollama", time.monotonic() - started
+        )
+    return result
 
 
 def callback_code(path, expected_path, expected_state):
@@ -316,7 +325,9 @@ REFUSAL_TEXT = re.compile(
     r"am not able)|I'm\s+unable|I’m\s+unable|I\s+can't comply|I\s+cannot comply)\b",
     re.IGNORECASE,
 )
-DERESTRICTED_PROFILES = ("permissive", "llama", "glm", "gptoss")
+DERESTRICTED_PROFILES = (
+    "permissive_small", "permissive", "llama", "glm", "gptoss"
+)
 
 
 def is_refusal(result):
@@ -343,9 +354,14 @@ def retry_derestricted(payload, result, original_model=""):
     """
     if not is_refusal(result):
         return result
-    for profile in DERESTRICTED_PROFILES:
+    profiles = (
+        ("permissive", "llama", "glm", "permissive_small", "gptoss")
+        if task_size(payload.get("messages", [])) == "deep"
+        else DERESTRICTED_PROFILES
+    )
+    for profile in profiles:
         item = CATALOG.get(profile)
-        if not item:
+        if not item or not candidate_approved(item):
             continue
         model = item["alias"]
         if model == original_model:
@@ -358,7 +374,7 @@ def retry_derestricted(payload, result, original_model=""):
                 continue
             local = dict(payload, model=model, stream=False)
             local.pop("stream_options", None)
-            if local.get("tools") and item.get("tool_reasoning_effort"):
+            if item.get("tool_reasoning_effort"):
                 local["reasoning_effort"] = item["tool_reasoning_effort"]
             attempt = valid_completion(
                 post("http://127.0.0.1:11434/v1/chat/completions", local, timeout=1800)
@@ -395,7 +411,7 @@ class Router:
                 item = next(
                     (item for item in CATALOG.values() if item["alias"] == name), None
                 )
-                if item and not candidate_approved(item):
+                if item and (item.get("fallback_only") or not candidate_approved(item)):
                     continue
                 try:
                     info = post(
@@ -446,20 +462,26 @@ class Router:
             )
         profile = local_profile()
         size = task_size(payload.get("messages", [])) if profile == "main" else "manual"
-        key = credentials().get("cloud_key") if profile == "main" else ""
+        offline_mode = pc_offline.offline()
+        key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         reason = "Cloud is not connected."
         # Explicit plan usage can supercharge demanding work. Quick requests
         # stay local so they do not spend the person's shared allowance.
         if (
             profile == "main"
             and size == "deep"
+            and not offline_mode
             and time.time() >= self.chatgpt_cooldown
         ):
             try:
                 import chatgpt_auth
 
                 if chatgpt_auth.status()["enabled"]:
+                    started = time.monotonic()
                     result = valid_completion(chatgpt_auth.complete(payload))
+                    import usage_history
+
+                    usage_history.record_completion(result, "chatgpt", time.monotonic() - started)
                     record(
                         "ChatGPT plan",
                         "User-enabled ChatGPT plan response received.",

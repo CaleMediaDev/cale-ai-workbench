@@ -23,3 +23,19 @@ def test_rpm_scale_lights_green_to_red_and_handles_missing_sensor():
     assert system_gauges.active_segments(1) == 1
     assert system_gauges.active_segments(50) == 12
     assert system_gauges.active_segments(100) == 24
+
+
+def test_drive_gauge_tracks_volume_with_models(monkeypatch):
+    monkeypatch.setattr(system_gauges.shutil, "disk_usage", lambda path: (100, 75, 25))
+    assert system_gauges._drive_space()[0] == 75
+
+
+def test_disk_transfer_speed_uses_counter_delta_and_elapsed_time():
+    assert system_gauges.disk_transfer_speed((0, 0), (8_000_000, 2_000_000), 2) == (4, 1)
+    assert system_gauges.disk_transfer_speed(None, (10, 20), 2) == (None, None)
+
+
+def test_network_bandwidth_includes_link_load():
+    assert system_gauges.network_bandwidth(
+        (0, 0), (12_500_000, 2_500_000), 1, 200
+    ) == (100, 20, 60)

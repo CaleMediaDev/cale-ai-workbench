@@ -214,6 +214,15 @@ def say(message, rate=0):
     temp = ROOT / "Temp"
     temp.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=temp) as folder:
+        import cale_voice
+
+        if cale_voice.ready():
+            try:
+                return cale_voice.speak(str(message)[:280], Path(folder) / "update.wav")
+            except (OSError, RuntimeError, ValueError):
+                # Keep spoken updates available if the clone worker exits or
+                # a particular phrase cannot be synthesized.
+                pass
         return media_call(
             "speak",
             text=str(message)[:280],

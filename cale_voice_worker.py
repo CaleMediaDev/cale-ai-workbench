@@ -1,0 +1,66 @@
+"""Keep the local Qwen voice model loaded between Cale's spoken updates."""
+
+import contextlib
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+REFERENCE = ROOT / "assets/cale-voice-reference.wav"
+REFERENCE_TEXT = "Hey, I'm Cale with Cale Media. How you doing?"
+
+
+def load_model():
+    """Use the local GPU when present; downloads are staged during setup."""
+    with contextlib.redirect_stdout(sys.stderr):
+        import torch
+        from huggingface_hub import snapshot_download
+        from qwen_tts import Qwen3TTSModel
+
+        cuda = torch.cuda.is_available()
+        # Resolve the pinned cache snapshot first. Passing a local directory
+        # prevents Transformers from probing Hugging Face during offline use.
+        local_model = snapshot_download(MODEL_ID, local_files_only=True)
+        return Qwen3TTSModel.from_pretrained(
+            local_model,
+            device_map="cuda:0" if cuda else "cpu",
+            dtype=torch.bfloat16 if cuda else torch.float32,
+            attn_implementation="sdpa",
+        )
+
+
+def generate(model, text: str, output_path: str) -> dict:
+    """Render one bounded update using Cale's own reference recording."""
+    import soundfile as sf
+
+    target = Path(output_path).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.redirect_stdout(sys.stderr):
+        audio, sample_rate = model.generate_voice_clone(
+            text=str(text)[:280],
+            language="English",
+            ref_audio=str(REFERENCE),
+            ref_text=REFERENCE_TEXT,
+        )
+    sf.write(target, audio[0], sample_rate)
+    return {"path": str(target), "engine": "Cale's local voice"}
+
+
+def main():
+    model = load_model()
+    if "--warm-model" in sys.argv:
+        print(json.dumps({"ready": True}), flush=True)
+        return
+    print(json.dumps({"ready": True}), flush=True)
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+            response = generate(model, request["text"], request["output_path"])
+        except Exception as exc:
+            response = {"error": str(exc)[:300]}
+        print(json.dumps(response, ensure_ascii=True), flush=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -416,6 +416,7 @@ def response_to_completion(response):
         message["tool_calls"] = calls
     if not calls and not message["content"]:
         raise RuntimeError("ChatGPT returned an empty response.")
+    usage = response.get("usage") or {}
     return {
         "id": response.get("id", ""),
         "object": "chat.completion",
@@ -428,6 +429,11 @@ def response_to_completion(response):
                 "finish_reason": "tool_calls" if calls else "stop",
             }
         ],
+        "usage": {
+            "prompt_tokens": usage.get("input_tokens", 0),
+            "completion_tokens": usage.get("output_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        } if usage else {},
     }
 
 

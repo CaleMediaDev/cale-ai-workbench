@@ -8,6 +8,7 @@ cffi==2.1.1
 charset-normalizer==3.5.2
 click==8.5.0
 cobble==0.1.4
+crawl4ai==0.9.5
 colorama==0.4.6
 cryptography==50.0.2
 defusedxml==0.7.1
@@ -32,6 +33,7 @@ numpy==2.5.4
 onnxruntime==1.31.1
 openpyxl==3.1.5
 opentelemetry-api==1.45.2
+psutil==7.2.2
 packaging==26.3
 pandas==3.1.0
 pdfminer.six==20260107

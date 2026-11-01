@@ -61,6 +61,7 @@ class ChatGPTAuthTests(unittest.TestCase):
             {
                 "id": "resp_1",
                 "model": "gpt-test",
+                "usage": {"input_tokens": 42, "output_tokens": 8, "total_tokens": 50},
                 "output": [
                     {
                         "type": "function_call",
@@ -74,6 +75,8 @@ class ChatGPTAuthTests(unittest.TestCase):
         message = result["choices"][0]["message"]
         self.assertEqual(message["tool_calls"][0]["id"], "call_1")
         self.assertEqual(result["choices"][0]["finish_reason"], "tool_calls")
+        self.assertEqual(result["usage"]["total_tokens"], 50)
+        self.assertEqual(result["usage"]["prompt_tokens"], 42)
 
     def test_plan_usage_requires_explicit_enable(self):
         with patch.object(

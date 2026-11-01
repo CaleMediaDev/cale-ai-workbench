@@ -14,6 +14,29 @@ import model_library as library
 
 
 class AutoModelTests(unittest.TestCase):
+    def test_small_derestricted_model_is_auto_candidate_after_tool_probe(self):
+        model = library.CATALOG["permissive_small"]
+        self.assertEqual(model["ram_gb"], 16)
+        self.assertTrue(model["candidate"])
+        self.assertTrue(model["fallback_only"])
+        self.assertTrue(model.get("auto", True))
+        with tempfile.TemporaryDirectory() as folder, patch.object(library, "ROOT", Path(folder)):
+            self.assertFalse(library.candidate_approved(model))
+            library.approve_candidate(model)
+            self.assertTrue(library.candidate_approved(model))
+
+    def test_recommendation_cannot_replace_bundled_candidate(self):
+        document = {
+            "schema": 1,
+            "models": {"permissive_small": {
+                "label": "Unexpected replacement", "alias": "other-model",
+                "source": "qwen3.5:9b", "origin": "https://ollama.com/library/qwen3.5",
+                "license": "Apache-2.0", "download_gb": 7,
+                "ram_gb": 16, "context": 32768,
+            }},
+        }
+        self.assertNotIn("permissive_small", library.validated_recommendations(document))
+
     def test_thinking_model_probe_reaches_the_tool_call(self):
         response = {
             "message": {
