@@ -2163,6 +2163,7 @@ def monitor():
     last_dispatch = 0
     last_media_recovery = 0
     last_setup_recovery = 0
+    last_self_check = 0
     service_error = ""
     catalog_thread = None
     catalog_refresh_seconds = 24 * 60 * 60
@@ -2212,6 +2213,11 @@ def monitor():
             )
             if not active:
                 service_error = ""
+                if time.monotonic() - last_self_check >= 3600:
+                    last_self_check = time.monotonic()
+                    import self_diagnostics
+
+                    self_diagnostics.schedule(ROOT, STATE)
             prepare = None
             if active and time.monotonic() - last_start > 120:
                 last_start = time.monotonic()

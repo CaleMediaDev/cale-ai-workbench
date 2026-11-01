@@ -345,12 +345,21 @@ class CloudTests(unittest.TestCase):
         self.candidates.start()
         self.loaded = patch.object(cloud, "loaded_local_models", return_value=[])
         self.loaded.start()
+        # An installed Workbench may have a real ChatGPT connection and an
+        # offline switch. Never let tests route to that account or inherit its
+        # machine state: the fake upstreams must be the only possible routes.
+        self.plan = patch("chatgpt_auth.status", return_value={"enabled": False})
+        self.plan.start()
+        self.offline = patch.object(cloud.pc_offline, "offline", return_value=False)
+        self.offline.start()
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(self.state.stop)
         self.addCleanup(self.root.stop)
         self.addCleanup(self.routing_db.stop)
         self.addCleanup(self.candidates.stop)
         self.addCleanup(self.loaded.stop)
+        self.addCleanup(self.plan.stop)
+        self.addCleanup(self.offline.stop)
 
     def test_loaded_balanced_model_avoids_unnecessary_model_swap(self):
         self.candidates.stop()
