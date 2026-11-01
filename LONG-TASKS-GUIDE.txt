@@ -68,7 +68,7 @@ No external AI fallback is configured. Local runs do not consume Codex model usa
 STARTUP CONTROL
 Run "Disable Long Tasks Startup.ps1" to disable future automatic starts.
 Run "Install Long Tasks Startup.ps1" to re-enable it.
-Use Pause in the window to stop an already-running project.
+Double-click a project in the window, then choose Pause to stop it.
 
 DIAGNOSTICS
 LongTasks/projects.db                         Project and request state

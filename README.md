@@ -10,7 +10,7 @@ Created by [Cale Media](https://calemedia.com/). Built on Hermes Agent, Ollama, 
 
 1. Download `Cale-AI-Workbench-Setup.exe` and open it.
 2. Leave the model set to **Automatic**, then click **Install**.
-3. Open **Cale AI Workbench** from your desktop. Click **New task** and describe what you want done in everyday language. The app creates a task folder for you.
+3. Open **Cale AI Workbench** from your desktop. Click **New task** and describe what you want done in everyday language. The app creates a task folder for you. To manage a task later, double-click it in the list.
 
 The installer downloads the runtime, tools, browser, image/voice models, and model files. No Python, Git, Node, terminal commands, or API keys need to be installed manually. The ZIP alternative contains `Install.cmd` with the same setup screen.
 

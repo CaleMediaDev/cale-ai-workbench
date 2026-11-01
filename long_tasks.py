@@ -616,19 +616,6 @@ def gui():
     ttk.Label(project_panel, text="My tasks", font=("Segoe UI", 15, "bold")).pack(anchor="w")
     ttk.Label(project_panel, text="Start something new or check what your assistant has finished.",
               style="Muted.TLabel").pack(anchor="w", pady=(4, 14))
-    connection_card = ttk.Frame(project_panel, style="Card.TFrame", padding=(16, 12))
-    connection_card.pack(fill="x", pady=(0, 14))
-    connection_copy = ttk.Frame(connection_card, style="Card.TFrame")
-    connection_copy.pack(side="left", fill="x", expand=True)
-    ttk.Label(connection_copy, text="OPTIONAL · CONNECT YOUR OWN ACCOUNT", style="Card.TLabel",
-              font=("Segoe UI", 10, "bold")).pack(anchor="w")
-    quick_text = tk.StringVar(value="One click opens a browser sign-in. You never need to copy a key.")
-    ttk.Label(connection_copy, textvariable=quick_text, style="CardMuted.TLabel",
-              wraplength=620).pack(anchor="w", pady=(3, 0))
-    quick_connect = ttk.Button(connection_card, text="Connect account →", command=connect,
-                               style="Accent.TButton")
-    quick_connect.pack(side="right", padx=(16, 0))
-    connect_controls.append(quick_connect)
     tree = ttk.Treeview(project_panel, columns=("name", "status", "phase"), show="headings", height=4)
     for key, label, width in (("name", "Task", 500), ("status", "Progress", 230), ("phase", "Step", 120)):
         tree.heading(key, text=label); tree.column(key, width=width)
@@ -695,16 +682,46 @@ def gui():
         request(p["id"], kind, note)
         status.set("Request saved. It will be applied after the current supervisor check finishes.")
 
+    def task_options(event):
+        row = tree.identify_row(event.y)
+        if not row: return
+        tree.selection_set(row)
+        p = selected()
+        if not p: return
+        dialog = tk.Toplevel(window)
+        dialog.title(p["title"])
+        dialog.geometry("480x220")
+        dialog.configure(background=bg)
+        dialog.transient(window)
+        pane = ttk.Frame(dialog, padding=20); pane.pack(fill="both", expand=True)
+        ttk.Label(pane, text=p["title"], font=("Segoe UI", 16, "bold"),
+                  wraplength=420).pack(anchor="w")
+        ttk.Label(pane, text="Choose what to do with this task.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(8, 18))
+        choices = {
+            "queued": (("Pause", "pause"), ("Add instructions", "note")),
+            "working": (("Pause", "pause"), ("Add instructions", "note")),
+            "paused": (("Continue", "resume"), ("Add instructions", "note")),
+            "needs_input": (("Add instructions", "note"), ("Continue", "resume")),
+            "ready_for_review": (("Looks good", "accept"), ("Request changes", "note")),
+        }
+        row_buttons = ttk.Frame(pane); row_buttons.pack(anchor="w")
+        for label, kind in choices.get(p["status"], ()):
+            def choose(task_action=kind):
+                dialog.destroy(); action(task_action)
+            ttk.Button(row_buttons, text=label, command=choose).pack(side="left", padx=(0, 8))
+        if p["status"] == "accepted":
+            ttk.Label(pane, text="This task is finished.", style="Muted.TLabel").pack(anchor="w")
+    tree.bind("<Double-1>", task_options)
+
     buttons = ttk.Frame(project_panel); buttons.pack(fill="x", before=tree, pady=(0, 12))
     ttk.Button(buttons, text="+ New task", command=new, style="Accent.TButton").pack(side="left", padx=(0, 8))
-    for text, kind in (("Pause", "pause"), ("Continue", "resume"), ("Tell it more", "note"), ("Looks good", "accept")):
-        ttk.Button(buttons, text=text, command=lambda k=kind: action(k)).pack(side="left", padx=3)
     ttk.Button(buttons, text="Open files", command=lambda: os.startfile(selected()["folder"]) if selected() else None).pack(side="left", padx=3)
     ttk.Button(tools_panel, text="Toolbox guide", command=lambda: os.startfile(str(ROOT / "TOOLBOX.txt"))).pack(anchor="w", pady=(22, 0))
     ttk.Button(tools_panel, text="Technical logs", command=lambda: os.startfile(str(STATE))).pack(anchor="w", pady=(8, 0))
     ttk.Label(project_panel, textvariable=status, style="Muted.TLabel", wraplength=960).pack(
         before=tree, anchor="w", pady=(0, 6))
-    empty_hint = ttk.Label(project_panel, text="No tasks yet. Start with the blue New task button.",
+    empty_hint = ttk.Label(project_panel, text="No tasks yet. Start with New task. Double-click a task later for more options.",
                            style="Muted.TLabel")
     empty_hint.pack(before=tree, anchor="w", pady=(0, 6))
 
@@ -731,15 +748,12 @@ def gui():
             cloud = cloud_status()
             if cloud['connected']:
                 cloud_text.set("Connected • Free cloud + local fallback • Last route: " + cloud.get('backend', 'pending') + " — " + cloud.get('reason', ''))
-                quick_text.set("Connected. Free online help is available when quota permits; your computer can take over.")
-                quick_connect.configure(text="Reconnect →")
             elif not cloud_text.get().startswith(('Sign-in', 'The browser')):
                 cloud_text.set("Local only • " + cloud.get('reason', 'Connect your account to enable free cloud.'))
-                quick_text.set("One click opens a browser sign-in. You never need to copy a key.")
-                quick_connect.configure(text="Connect account →")
         existing = set(tree.get_children())
         current_projects = projects()
-        empty_hint.configure(text="" if current_projects else "No tasks yet. Start with the blue New task button.")
+        empty_hint.configure(text="Double-click a task for more options." if current_projects else
+                             "No tasks yet. Start with New task. Double-click a task later for more options.")
         for p in current_projects:
             friendly_status = {"queued": "Waiting to start", "working": "Working",
                                "ready_for_review": "Ready for you", "needs_input": "Needs your help",
@@ -754,7 +768,7 @@ def gui():
         if last and last[0] == 'error': status.set("Last request error: " + last[1][-300:])
         elif (STATE / 'service-status.txt').exists():
             status.set((STATE / 'service-status.txt').read_text(encoding='utf-8') +
-                       '  Closing this window leaves work running. Use Pause to stop a project.')
+                       '  Closing this window leaves work running. Double-click a task to manage it.')
     def poll():
         refresh(); window.after(5000, poll)
     poll()

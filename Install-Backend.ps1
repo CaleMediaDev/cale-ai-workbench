@@ -17,7 +17,7 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.1.1')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.1.2')
  if (-not $DownloadCache) { $DownloadCache=Join-Path $Destination 'Downloads' }
  New-Item -ItemType Directory -Path $DownloadCache -Force | Out-Null
  $pins=Get-Content (Join-Path $PSScriptRoot 'downloads.json') -Raw | ConvertFrom-Json
