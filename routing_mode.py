@@ -32,12 +32,17 @@ def save(state: Path, mode: str) -> None:
 
 def paid_first(mode: str, size: str, local_speed: float, paid_speed: float,
                fastest_free_speed: float, normal_paid: bool) -> bool:
-    """Only Floor it changes paid priority by measured response speed."""
+    """Floor it favors the route expected to finish first, including latency."""
     if mode == "paid_saver":
         return False
     if mode == "medium":
         return normal_paid
-    return paid_speed > local_speed and paid_speed >= fastest_free_speed
+    output = {"quick": 100, "balanced": 1000, "deep": 3000}.get(size, 1000)
+    paid_time = 2.0 + output / max(paid_speed, 1)
+    local_time = output / max(local_speed, 1)
+    free_time = (2.0 + output / fastest_free_speed
+                 if fastest_free_speed > 0 else float("inf"))
+    return paid_time < min(local_time, free_time)
 
 
 def free_first(mode: str, normal_free: bool, faster_than_local: bool) -> bool:

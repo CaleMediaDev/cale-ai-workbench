@@ -743,12 +743,29 @@ class Router:
             provider: usage_history.recent_provider_speed(provider, spec["speed"])
             for provider, spec in connected
         }
+        required_context = estimated_context(payload)
+        expected_output = min(8192, int(payload.get("max_tokens") or
+                                        payload.get("max_completion_tokens") or 4096))
+        prompt_estimate = max(1, len(json.dumps({
+            "messages": payload.get("messages", []),
+            "tools": payload.get("tools", []),
+        }, ensure_ascii=True).encode("utf-8")) // 3)
         paid_speed = (
             usage_history.recent_provider_speed("chatgpt", 140)
             if mode == "floor_it" else 140
         )
-        openrouter_speed = usage_history.recent_provider_speed("openrouter", 120) if key else 0
-        fastest_free_speed = max([openrouter_speed, *measured_speeds.values()], default=0)
+        openrouter_speed = (
+            usage_history.recent_provider_speed("openrouter", 120)
+            if key and time.time() >= self.cooldown else 0
+        )
+        eligible_free_speeds = [
+            measured_speeds[provider] for provider, spec in connected
+            if (prompt_estimate + min(expected_output, spec.get("max_tokens", 8192)) + 1024
+                <= spec["context"]
+                and time.time() >= self.provider_cooldowns.get(provider, 0)
+                and time.time() - routing_memory.pressure(provider)["last_limit"] >= 3600)
+        ]
+        fastest_free_speed = max([openrouter_speed, *eligible_free_speeds], default=0)
         paid_attempted = False
 
         def try_paid():
@@ -788,18 +805,11 @@ class Router:
             paid_result = try_paid()
             if paid_result is not None:
                 return paid_result
-        required_context = estimated_context(payload)
         openrouter_attempted = False
         # Free-plan connections are optional. A fast connected provider gets
         # the first shot when it can hold the whole request. Errors, quotas,
         # and offline mode leave the local route intact.
         if profile == "main" and not offline_mode:
-            expected_output = min(8192, int(payload.get("max_tokens") or
-                                            payload.get("max_completion_tokens") or 4096))
-            prompt_estimate = max(1, len(json.dumps({
-                "messages": payload.get("messages", []),
-                "tools": payload.get("tools", []),
-            }, ensure_ascii=True).encode("utf-8")) // 3)
             for provider, spec in sorted(connected,
                                          key=lambda pair: measured_speeds[pair[0]], reverse=True):
                 provider_key = keys.get(provider)
@@ -868,7 +878,7 @@ class Router:
                 routing_memory.record("openrouter", size, routing_memory.failure_kind(exc))
                 self.cooldown = time.time() + 120
         if (mode == "floor_it" and profile == "main" and not offline_mode
-                and paid_speed > local_speed):
+                and cloud_providers.likely_faster(size, paid_speed, local_speed)):
             paid_result = try_paid()
             if paid_result is not None:
                 return paid_result

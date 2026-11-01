@@ -702,6 +702,20 @@ class CloudTests(unittest.TestCase):
         paid.assert_called_once()
         free.assert_not_called()
 
+    def test_floor_it_keeps_quick_answer_local_when_network_delay_wins(self):
+        cloud.routing_mode.save(cloud.STATE, "floor_it")
+        with (
+            patch.object(cloud, "task_size", return_value="quick"),
+            patch("usage_history.recent_local_speed", return_value=70),
+            patch("usage_history.recent_provider_speed", return_value=140),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete") as paid,
+            patch.object(cloud, "post", return_value=ANSWER) as local,
+        ):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        local.assert_called_once()
+        paid.assert_not_called()
+
     def test_paid_quota_error_is_learned_and_falls_back_to_free(self):
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
         with (

@@ -24,5 +24,9 @@ def test_paid_saver_and_floor_it_choose_different_priorities():
     assert routing_mode.paid_first("medium", "deep", 10, 20, 100, True)
     assert not routing_mode.paid_first("floor_it", "deep", 10, 200, 300, True)
     assert routing_mode.paid_first("floor_it", "quick", 10, 300, 200, False)
+    # Round-trip delay makes local faster for a short answer despite lower
+    # raw token throughput.
+    assert not routing_mode.paid_first("floor_it", "quick", 70, 140, 0, False)
+    assert routing_mode.paid_first("floor_it", "deep", 15, 140, 0, False)
     assert routing_mode.free_first("paid_saver", False, True)
     assert not routing_mode.free_first("floor_it", True, False)
