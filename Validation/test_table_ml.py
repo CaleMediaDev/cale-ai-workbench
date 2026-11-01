@@ -29,7 +29,9 @@ class TableMLTests(unittest.TestCase):
             prediction = root / "new.csv"
             prediction.write_text("temperature,weather\n30,sun\n85,cloud\n", encoding="utf-8")
             output = root / "prediction.csv"
-            predict_table_model(str(model), str(prediction), str(output))
+            response = predict_table_model(str(model), str(prediction), str(output))
+            self.assertTrue(response["better_than_baseline"])
+            self.assertIsNone(response["quality_warning"])
             with output.open(newline="", encoding="utf-8") as stream:
                 self.assertEqual([row["prediction"] for row in csv.DictReader(stream)],
                                  ["cold", "hot"])
@@ -88,6 +90,8 @@ class TableMLTests(unittest.TestCase):
                 "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
                 "feature_names": ["size"], "coefficients": [[float("inf")]],
                 "intercepts": [0], "classes": [], "target_column": "value",
+                "metric": "holdout_mean_absolute_error", "holdout_score": 1,
+                "baseline_score": 2,
             }), encoding="utf-8")
             prediction = root / "new.csv"
             prediction.write_text("size\n2\n", encoding="utf-8")
@@ -95,6 +99,25 @@ class TableMLTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "nonfinite"):
                 predict_table_model(str(model), str(prediction), str(output))
             self.assertFalse(output.exists())
+
+    def test_reused_weak_model_carries_quality_warning(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            model.write_text(json.dumps({
+                "format": "cale-table-model-v1", "problem_type": "regression",
+                "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
+                "feature_names": ["size"], "coefficients": [[1]],
+                "intercepts": [0], "classes": [], "target_column": "value",
+                "metric": "holdout_mean_absolute_error", "holdout_score": 10,
+                "baseline_score": 2,
+            }), encoding="utf-8")
+            prediction = root / "new.csv"
+            prediction.write_text("size\n2\n", encoding="utf-8")
+            result = predict_table_model(str(model), str(prediction),
+                                         str(root / "prediction.csv"))
+            self.assertFalse(result["better_than_baseline"])
+            self.assertIn("did not beat", result["quality_warning"])
 
     def test_classification_baseline_uses_holdout_rows(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -109,6 +132,20 @@ class TableMLTests(unittest.TestCase):
                     writer.writerow([index + 100, "B"])
             result = train_table_model(str(training), "label", str(root / "model.json"))
             self.assertEqual(result["baseline"], .6364)
+
+    def test_auto_detects_repeated_numeric_codes_as_labels(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["feature", "code"])
+                for code in range(1, 13):
+                    for repeat in range(10):
+                        writer.writerow([code * 100 + repeat, code])
+            result = train_table_model(str(training), "code", str(root / "model.json"))
+            self.assertEqual(result["problem_type"], "classification")
+            self.assertEqual(result["label_counts"]["12"], 10)
 
 
 if __name__ == "__main__":

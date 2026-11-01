@@ -674,7 +674,8 @@ documentation and terms before using an API. Never send private project files
 to an API merely because a catalog lists it.
 For labeled spreadsheet data, local.train_table_model can fit a local CSV
 predictor and report holdout performance against a baseline. Use
-local.predict_table_model on new rows only after checking that score.
+local.predict_table_model on new rows only after checking that score. On later
+reuse, disclose its quality_warning if the saved model missed that baseline.
 If the user attaches a signed-in Chrome tab through Hermes Connector, first
 call bridge_status, then use bridge_* tools for that exact attached session.
 Never claim access to personal Chrome when no tab is attached.
@@ -3243,6 +3244,23 @@ def gui():
                     voice_label.set("I heard audio, but not Hey Cale at the start. Please try again.")
             return
         action, note = parsed
+        if action == "note" and visitor_awaiting_intro_until[0] > time.monotonic():
+            import visitor_memory
+
+            introduced = visitor_memory.remember_intro(note)
+            if introduced:
+                visitor_awaiting_intro_until[0] = 0
+                from face_identity import request_enrollment
+
+                if (greeting_until[0] > time.time() and greeting_process[0]
+                        and greeting_process[0].poll() is None):
+                    request_enrollment(introduced)
+                voice_label.set("Heard: " + phrase[:100])
+                assistant_reply(
+                    f"Nice to meet you, {introduced}. I'll remember the name you told me on this PC. "
+                    "If you're in view, I'll try to learn your face locally for future greetings."
+                )
+                return
         if action == "hearing":
             voice_label.set("Heard: " + phrase[:100])
             speak_update("Yep, I can hear you. What would you like me to do?")
@@ -3291,6 +3309,73 @@ def gui():
 
     mic_button = ttk.Button(title_row, text="🎤  Mic Off", command=toggle_listening)
     mic_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    greeting_config = ROOT / "Media/camera-greeting.json"
+    camera_consent = ROOT / "Media/camera-consent.json"
+    greeting_process = [None]
+    greeting_until = [float(read_task_status(greeting_config).get("until", 0))]
+    visitor_awaiting_intro_until = [0.0]
+
+    def start_camera_greeting():
+        """Run local face detection in the media runtime, off the UI thread."""
+        if greeting_until[0] <= time.time():
+            return
+        if greeting_process[0] is not None and greeting_process[0].poll() is None:
+            return
+        media_python = ROOT / "Media/python/Scripts/python.exe"
+        if not media_python.is_file():
+            voice_events.put(("camera_error", "Camera tools are still installing."))
+            return
+
+        def monitor():
+            try:
+                process = subprocess.Popen(
+                    [str(media_python), "-u", str(ROOT / "camera_presence.py")],
+                    cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, encoding="utf-8", errors="replace",
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                greeting_process[0] = process
+                for line in process.stdout:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    voice_events.put(("camera_" + str(event.get("event", "error")),
+                                      str(event.get("message", ""))))
+                process.wait()
+                if process.returncode and greeting_until[0] > time.time():
+                    voice_events.put(("camera_error", "Camera greeting stopped. Check the camera connection and try again."))
+            except OSError as exc:
+                voice_events.put(("camera_error", "Could not start webcam: " + str(exc)))
+            finally:
+                greeting_process[0] = None
+
+        threading.Thread(target=monitor, daemon=True).start()
+
+    def toggle_camera_greeting():
+        """The visible one-hour switch also gates all other camera tools."""
+        enabled = greeting_until[0] <= time.time()
+        until = time.time() + 3600 if enabled else 0
+        greeting_until[0] = until
+        greeting_config.parent.mkdir(exist_ok=True)
+        greeting_config.write_text(json.dumps({"until": until}), encoding="utf-8")
+        camera_consent.write_text(json.dumps({"until": until}), encoding="utf-8")
+        camera_button.configure(text="📷  Greeting On" if enabled else "📷  Greeting Off")
+        if enabled:
+            start_camera_greeting()
+        else:
+            process = greeting_process[0]
+            if process is not None and process.poll() is None:
+                process.terminate()
+            status.set("Camera greeting turned off.")
+
+    camera_button = ttk.Button(
+        title_row, text="📷  Greeting On" if greeting_until[0] > time.time()
+        else "📷  Greeting Off", command=toggle_camera_greeting,
+    )
+    camera_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    if greeting_until[0] > time.time():
+        start_camera_greeting()
     window.bind("<Control-Alt-space>", lambda _: record_voice())
     ttk.Label(main_page, textvariable=voice_label, style="Muted.TLabel").pack(
         anchor="w", pady=(0, 5)
@@ -3869,6 +3954,13 @@ def gui():
                 json.dumps({"until": time.time() + 3600 if kind == "camera_on" else 0}),
                 encoding="utf-8",
             )
+            if kind == "camera_off":
+                greeting_until[0] = 0
+                greeting_config.write_text(json.dumps({"until": 0}), encoding="utf-8")
+                camera_button.configure(text="📷  Greeting Off")
+                process = greeting_process[0]
+                if process is not None and process.poll() is None:
+                    process.terminate()
             status.set(
                 "Camera allowed for one hour."
                 if kind == "camera_on"
@@ -4481,6 +4573,9 @@ def gui():
                 record_voice(repeat=not manual)
 
     def voice_poll():
+        if greeting_until[0] and greeting_until[0] <= time.time():
+            greeting_until[0] = 0
+            camera_button.configure(text="📷  Greeting Off")
         try:
             while True:
                 event, value = voice_events.get_nowait()
@@ -4521,6 +4616,17 @@ def gui():
                         wake_sequence.renew_after_ack()
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
+                elif event in ("camera_visitor", "camera_enrolled"):
+                    if event == "camera_visitor" and "Who are you?" in value:
+                        visitor_awaiting_intro_until[0] = time.monotonic() + 45
+                    assistant_reply(value)
+                elif event in ("camera_ready", "camera_stopped", "camera_error", "camera_setup", "camera_notice"):
+                    status.set(value[:220])
+                    if event == "camera_error":
+                        camera_button.configure(text="📷  Greeting Off")
+                        greeting_until[0] = 0
+                        greeting_config.write_text(json.dumps({"until": 0}), encoding="utf-8")
+                        camera_consent.write_text(json.dumps({"until": 0}), encoding="utf-8")
                 elif event in ("replay_done", "replay_error"):
                     show_chat("assistant", value, speak=False)
                     voice_label.set(value)
@@ -4779,6 +4885,18 @@ def gui():
     toggle_listening(interrupt_speech=False)
     voice_poll()
     poll()
+
+    def close_window():
+        """Never leave a camera greeting worker running after the UI closes."""
+        if greeting_until[0] > time.time():
+            greeting_config.write_text(json.dumps({"until": 0}), encoding="utf-8")
+            camera_consent.write_text(json.dumps({"until": 0}), encoding="utf-8")
+        process = greeting_process[0]
+        if process is not None and process.poll() is None:
+            process.terminate()
+        window.destroy()
+
+    window.protocol("WM_DELETE_WINDOW", close_window)
     window.mainloop()
 
 

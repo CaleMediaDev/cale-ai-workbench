@@ -241,6 +241,18 @@ def camera_permission():
         return False
 
 
+def open_camera(device):
+    """Open a USB camera index or a previously registered local stream."""
+    import cv2
+
+    from camera_network import camera_source
+
+    source = camera_source(device)
+    if isinstance(source, int):
+        return cv2.VideoCapture(source, cv2.CAP_DSHOW)
+    return cv2.VideoCapture(source)
+
+
 def capture_camera(output_path, device=0):
     """Save one camera frame only while the user's permission is active."""
     if not camera_permission():
@@ -250,7 +262,7 @@ def capture_camera(output_path, device=0):
     import cv2
 
     target = output_file(output_path, ".png")
-    capture = cv2.VideoCapture(int(device), cv2.CAP_DSHOW)
+    capture = open_camera(device)
     try:
         if not capture.isOpened():
             raise ValueError(
@@ -293,7 +305,7 @@ def watch_camera(
     seconds = min(max(int(seconds), 1), 30)
     max_frames = min(max(int(max_frames), 1), 4)
     (ROOT / "Temp").mkdir(exist_ok=True)
-    capture = cv2.VideoCapture(int(device), cv2.CAP_DSHOW)
+    capture = open_camera(device)
     if not capture.isOpened():
         capture.release()
         raise ValueError("Camera unavailable. Check Windows camera permissions.")
@@ -630,6 +642,13 @@ if __name__ == "__main__":
         else:
             request = json.load(sys.stdin)
             action = request.pop("action")
+            from camera_network import (
+                add_camera,
+                discover_onvif,
+                list_cameras,
+                remove_camera,
+                set_greeting_camera,
+            )
             from music_analysis import analyze_music
             from scanned_pdf import read_scanned_pdf
             from small_training import (
@@ -638,6 +657,7 @@ if __name__ == "__main__":
                 train_adapter,
                 train_classifier,
             )
+            from visitor_memory import forget_visitor, list_visitors
 
             allowed = {
                 "generate_image": generate_image,
@@ -649,6 +669,13 @@ if __name__ == "__main__":
                 "record_audio": record_audio,
                 "microphone_status": microphone_status,
                 "watch_camera": watch_camera,
+                "discover_cameras": discover_onvif,
+                "add_network_camera": add_camera,
+                "list_network_cameras": list_cameras,
+                "remove_network_camera": remove_camera,
+                "set_greeting_camera": set_greeting_camera,
+                "list_visitors": list_visitors,
+                "forget_visitor": forget_visitor,
                 "train_classifier": train_classifier,
                 "predict_classifier": predict_classifier,
                 "train_adapter": train_adapter,

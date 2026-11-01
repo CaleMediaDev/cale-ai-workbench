@@ -106,9 +106,15 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
         except ValueError:
             pass
     if problem_type == "auto":
-        problem_type = ("regression" if len(numeric_targets) == len(targets)
-                        and len(set(targets)) > min(10, len(targets) // 4)
-                        else "classification")
+        # Repeated numeric codes (for example 1..12) are labels, even when
+        # there are more than ten of them. Distinct or rarely repeated numbers
+        # are better treated as continuous values by default.
+        counts = Counter(targets)
+        repeated_codes = 2 <= len(counts) <= 20 and min(counts.values()) >= 5
+        problem_type = (
+            "classification" if len(numeric_targets) != len(targets) or repeated_codes
+            else "regression"
+        )
     if problem_type == "regression" and len(numeric_targets) != len(targets):
         raise ValueError("Regression target column must contain finite numbers only.")
     classes = sorted(set(targets)) if problem_type == "classification" else []
@@ -165,7 +171,12 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
     return {"model_path": str(output), "problem_type": problem_type,
             metric: round(score, 4), "baseline": round(baseline, 4),
             "better_than_baseline": better, "trained_rows": len(rows),
-            "note": "Use the holdout score before relying on predictions; small or biased data can mislead."}
+            "label_counts": dict(Counter(targets)) if classes else None,
+            "note": (
+                "This model did not beat the holdout baseline; do not rely on its predictions."
+                if not better else
+                "Use the holdout score before relying on predictions; small or biased data can mislead."
+            )}
 
 
 def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dict:
@@ -207,8 +218,19 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
                 predictions = [classes[index] for index in np.argmax(scores, axis=1)]
             for row, prediction in zip(batch, predictions):
                 writer.writerow({**row, output_column: prediction})
+    better = (
+        model["holdout_score"] > model["baseline_score"]
+        if model["problem_type"] == "classification"
+        else model["holdout_score"] < model["baseline_score"]
+    )
     return {"path": str(output), "rows": len(rows),
-            "target_column": model["target_column"], "output_column": output_column}
+            "target_column": model["target_column"], "output_column": output_column,
+            "holdout_metric": model["metric"],
+            "holdout_score": round(model["holdout_score"], 4),
+            "baseline_score": round(model["baseline_score"], 4),
+            "better_than_baseline": better,
+            "quality_warning": None if better else
+            "This model did not beat its holdout baseline; review predictions before use."}
 
 
 def _checked_model(model: dict) -> tuple[list[str], list[list[float]], list[float], list[str]]:
@@ -251,6 +273,13 @@ def _checked_model(model: dict) -> tuple[list[str], list[list[float]], list[floa
         isinstance(label, str) for label in classes
     ) or len(set(classes)) != len(classes):
         raise ValueError("Saved model has invalid class labels.")
+    expected_metric = ("holdout_accuracy" if kind == "classification"
+                       else "holdout_mean_absolute_error")
+    if model.get("metric") != expected_metric or not all(
+        isinstance(model.get(key), (int, float)) and math.isfinite(model[key])
+        for key in ("holdout_score", "baseline_score")
+    ):
+        raise ValueError("Saved model has an invalid holdout score.")
     if not all(
         isinstance(row, list) and len(row) == len(names)
         and all(isinstance(value, (int, float)) and math.isfinite(value) for value in row)

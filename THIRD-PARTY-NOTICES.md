@@ -38,6 +38,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Wan 2.2 (Apache-2.0; checksum-verified model files downloaded separately) | https://huggingface.co/Comfy-Org/Wan-2.2 |
 | public-apis-live (MIT; its daily catalog is queried on demand for public API research leads, not bundled) | https://github.com/Manavarya09/public-apis-live |
 | scikit-learn 1.9.1 (BSD-3-Clause; local CSV classification and regression training, installed as a Python dependency) | https://github.com/scikit-learn/scikit-learn |
+| OpenCV Zoo YuNet face detector (MIT) and SFace recognizer (Apache-2.0); checksum-verified weights download to the user's PC when camera greeting is enabled | https://github.com/opencv/opencv_zoo |
 
 The Windows compatibility patch contains modifications to MIT-licensed Hermes code. The upstream MIT notice is reproduced in `HERMES-LICENSE`.
 

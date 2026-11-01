@@ -875,7 +875,7 @@ async def watch_video(
 
 
 @server.tool()
-async def camera_snapshot(output_path: str, device: int = 0) -> dict:
+async def camera_snapshot(output_path: str, device: str = "0") -> dict:
     """Capture one camera frame only while the desktop user's one-hour Camera switch is enabled."""
     return await media_run("capture_camera", 20, output_path=output_path, device=device)
 
@@ -883,7 +883,7 @@ async def camera_snapshot(output_path: str, device: int = 0) -> dict:
 @server.tool()
 async def watch_camera(
     seconds: int = 10,
-    device: int = 0,
+    device: str = "0",
     max_frames: int = 3,
     question: str = "Describe visible activity in this camera frame.",
 ) -> dict:
@@ -896,6 +896,48 @@ async def watch_camera(
         max_frames=max_frames,
         question=question,
     )
+
+
+@server.tool()
+async def find_local_cameras() -> dict:
+    """Discover ONVIF cameras on the local network without trying passwords."""
+    return await media_run("discover_cameras", 15)
+
+
+@server.tool()
+async def add_local_camera(name: str, stream_url: str) -> dict:
+    """Save a user-provided private-network RTSP/HTTP stream for camera tools. Credentials stay local."""
+    return await media_run("add_network_camera", 15, name=name, stream_url=stream_url)
+
+
+@server.tool()
+async def list_local_cameras() -> dict:
+    """List registered network camera names without exposing stream credentials."""
+    return await media_run("list_network_cameras", 15)
+
+
+@server.tool()
+async def remove_local_camera(name: str) -> dict:
+    """Remove one saved network camera stream."""
+    return await media_run("remove_network_camera", 15, name=name)
+
+
+@server.tool()
+async def use_camera_for_greetings(name: str) -> dict:
+    """Choose a registered network camera or USB index for local visitor greetings."""
+    return await media_run("set_greeting_camera", 15, name=name)
+
+
+@server.tool()
+async def known_visitors() -> dict:
+    """List only names people voluntarily told Cale; no camera images leave the PC."""
+    return await media_run("list_visitors", 15)
+
+
+@server.tool()
+async def forget_visitor(name: str) -> dict:
+    """Delete a visitor's local name and learned face examples."""
+    return await media_run("forget_visitor", 15, name=name)
 
 
 @server.tool()
