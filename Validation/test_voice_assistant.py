@@ -1,6 +1,8 @@
 """Voice control uses the local media worker and bounds recorded clips."""
 
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,6 +10,7 @@ from types import ModuleType
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import cale_voice
 import voice_assistant
 
 
@@ -91,6 +94,39 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(result["engine"], "Windows offline speech")
         self.assertEqual(fallback.call_args.args, ("speak",))
         self.assertTrue(fallback.call_args.kwargs["play"])
+
+    def test_voice_generation_stops_promptly_for_a_microphone_turn(self):
+        release = threading.Event()
+        cancel = threading.Event()
+
+        class SlowVoice:
+            def readline(self):
+                release.wait(2)
+                return '{"path":"unused.wav"}'
+
+        timer = threading.Timer(0.1, cancel.set)
+        timer.start()
+        started = time.monotonic()
+        try:
+            with self.assertRaises(cale_voice.SpeechInterrupted):
+                cale_voice._line_with_timeout(SlowVoice(), 5, cancel)
+        finally:
+            release.set()
+            timer.join()
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_interrupted_voice_does_not_fall_back_and_speak_over_the_mic(self):
+        with TemporaryDirectory() as folder, patch.object(
+            voice_assistant, "ROOT", Path(folder)
+        ), patch("cale_voice.ready", return_value=True), patch(
+            "cale_voice.speak", side_effect=cale_voice.SpeechInterrupted
+        ) as clone, patch.object(voice_assistant, "media_call") as fallback:
+            cancel = threading.Event()
+            cancel.set()
+            with self.assertRaises(cale_voice.SpeechInterrupted):
+                voice_assistant.say("Read my reply", cancel=cancel)
+        self.assertIs(clone.call_args.kwargs["cancel"], cancel)
+        fallback.assert_not_called()
 
     def test_long_chat_reply_is_spoken_without_truncation(self):
         message = " ".join(f"word{index}" for index in range(150))
@@ -209,7 +245,7 @@ class VoiceTests(unittest.TestCase):
             reference = root / "reference.wav"
             reference.write_bytes(b"voice")
 
-            def synthesize(_message, output):
+            def synthesize(_message, output, cancel=None):
                 Path(output).write_bytes(b"wave" * 300)
                 return {"path": str(output), "engine": "Cale's local voice"}
 

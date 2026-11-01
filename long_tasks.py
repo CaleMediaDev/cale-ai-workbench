@@ -23,6 +23,7 @@ import traceback
 import uuid
 from pathlib import Path
 
+import cale_voice
 import chrome_connector
 import project_memory
 import runtime_features
@@ -2508,6 +2509,7 @@ def gui():
                 result = {}
                 chunks = voice_assistant.speech_chunks(spoken)
                 interrupted = False
+                index = 1
                 for index, chunk in enumerate(chunks, 1):
                     if mic_turn_requested.is_set():
                         remainder = " ".join(chunks[index - 1:])
@@ -2518,7 +2520,7 @@ def gui():
                     while voice_busy.is_set():
                         time.sleep(0.2)
                     voice_events.put(("speaking", f"Speaking aloud · part {index} of {len(chunks)}"))
-                    result = voice_assistant.say(chunk, rate=rate)
+                    result = voice_assistant.say(chunk, rate=rate, cancel=mic_turn_requested)
                     if mic_turn_requested.is_set() and index < len(chunks):
                         remainder = " ".join(chunks[index:])
                         speech_queue.put((rank, next(speech_order), remainder, rate,
@@ -2561,6 +2563,12 @@ def gui():
                     introduction_marker.write_text(
                         "Introduction spoken.\n", encoding="utf-8"
                     )
+            except cale_voice.SpeechInterrupted:
+                # Microphone use takes priority, but the person's requested
+                # spoken reply must resume after capture finishes.
+                remainder = " ".join(chunks[index - 1:])
+                speech_queue.put((rank, next(speech_order), remainder, rate,
+                                  False, (), replay_id))
             except Exception as exc:
                 if message == voice_assistant.WAKE_ACK:
                     voice_events.put(("wake_ack_done", ""))

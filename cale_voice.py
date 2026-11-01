@@ -8,6 +8,8 @@ import os
 import queue
 import subprocess
 import threading
+import time
+import wave
 from pathlib import Path
 
 from model_library import save_download_status
@@ -23,6 +25,10 @@ _lock = threading.Lock()
 _idle_timer = None
 _generation = 0
 IDLE_SECONDS = 60
+
+
+class SpeechInterrupted(Exception):
+    """A microphone turn interrupted speech; the caller should queue it again."""
 
 
 def ready() -> bool:
@@ -79,10 +85,20 @@ def install():
             save_download_status(STATUS, "error", str(exc)[:400], 0)
 
 
-def _line_with_timeout(stream, seconds: int) -> str:
+def _line_with_timeout(stream, seconds: int, cancel: threading.Event | None = None) -> str:
     output: queue.Queue[str] = queue.Queue(maxsize=1)
     threading.Thread(target=lambda: output.put(stream.readline()), daemon=True).start()
-    return output.get(timeout=seconds)
+    deadline = time.monotonic() + seconds
+    while True:
+        if cancel is not None and cancel.is_set():
+            raise SpeechInterrupted
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise queue.Empty
+        try:
+            return output.get(timeout=min(remaining, 0.1))
+        except queue.Empty:
+            continue
 
 
 def _stop_worker():
@@ -126,7 +142,8 @@ def _release_after_idle(generation: int) -> None:
 atexit.register(_stop_worker)
 
 
-def speak(text: str, output_path: str | Path, play: bool = True) -> dict:
+def speak(text: str, output_path: str | Path, play: bool = True,
+          cancel: threading.Event | None = None) -> dict:
     """Send a short line to one persistent local GPU worker, then play it."""
     global _worker, _idle_timer, _generation
     if not ready():
@@ -144,14 +161,17 @@ def speak(text: str, output_path: str | Path, play: bool = True) -> dict:
                     stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
                     bufsize=1, cwd=ROOT, env=env, creationflags=HIDE,
                 )
-                ready_line = json.loads(_line_with_timeout(_worker.stdout, 45))
+                ready_line = json.loads(_line_with_timeout(_worker.stdout, 45, cancel))
                 if not ready_line.get("ready"):
                     raise RuntimeError("The voice worker did not start.")
             _worker.stdin.write(json.dumps({"text": str(text)[:280], "output_path": str(output_path)}) + "\n")
             _worker.stdin.flush()
-            answer = json.loads(_line_with_timeout(_worker.stdout, 120))
+            answer = json.loads(_line_with_timeout(_worker.stdout, 120, cancel))
             if "error" in answer:
                 raise RuntimeError(answer["error"])
+        except SpeechInterrupted:
+            _stop_worker()
+            raise
         except (OSError, ValueError, queue.Empty, RuntimeError) as exc:
             _stop_worker()
             raise RuntimeError("Cale's voice worker could not finish this update.") from exc
@@ -161,7 +181,19 @@ def speak(text: str, output_path: str | Path, play: bool = True) -> dict:
     if play:
         import winsound
 
-        winsound.PlaySound(answer["path"], winsound.SND_FILENAME)
+        if cancel is None:
+            winsound.PlaySound(answer["path"], winsound.SND_FILENAME)
+        else:
+            if cancel.is_set():
+                raise SpeechInterrupted
+            with wave.open(answer["path"], "rb") as audio:
+                duration = audio.getnframes() / audio.getframerate()
+            winsound.PlaySound(answer["path"], winsound.SND_FILENAME | winsound.SND_ASYNC)
+            deadline = time.monotonic() + duration
+            while time.monotonic() < deadline:
+                if cancel.wait(timeout=min(0.1, max(0, deadline - time.monotonic()))):
+                    winsound.PlaySound(None, 0)
+                    raise SpeechInterrupted
     return answer
 
 

@@ -358,7 +358,7 @@ def listen_result(seconds=8):
     }
 
 
-def say(message, rate=0):
+def say(message, rate=0, cancel=None):
     """Speak one short status message through Windows' offline voice."""
     bundled_name = {
         WAKE_ACK: "cale-wake-ack.wav",
@@ -394,7 +394,7 @@ def say(message, rate=0):
 
                         winsound.PlaySound(str(cached), winsound.SND_FILENAME)
                         return {"path": str(cached), "engine": "Cale's local voice (cached)"}
-                result = cale_voice.speak(str(message)[:280], Path(folder) / "update.wav")
+                result = cale_voice.speak(str(message)[:280], Path(folder) / "update.wav", cancel=cancel)
                 if cached is not None:
                     try:
                         cached.parent.mkdir(parents=True, exist_ok=True)
