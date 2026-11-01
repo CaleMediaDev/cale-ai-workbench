@@ -1,4 +1,4 @@
-"""The countdown survives restarts and excludes pauses and app downtime."""
+"""The countdown survives restarts and excludes pauses and supervisor downtime."""
 
 import task_eta
 

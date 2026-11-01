@@ -1622,6 +1622,20 @@ def supervisor_step(prepare_services=None, prior_error=""):
             with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
                 log.write(time.ctime() + "\nService startup: " + traceback.format_exc() + "\n")
     tick()
+    # The supervisor keeps working after the window closes. Record milestone
+    # observations here so the ETA does not mistake hidden-window work for a
+    # pause; the UI can still read the same persisted estimate on demand.
+    for project in projects():
+        if music_job_id(project) or image_job_id(project):
+            continue
+        try:
+            percent, _ = task_progress(project)
+            task_eta.countdown(
+                STATE / "projects.db", project["id"], percent, project["status"]
+            )
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
+                log.write(time.ctime() + f"\nTask ETA {project['id']}: {exc}\n")
     (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
     status = "Supervisor online. " + time.ctime()
     if service_error:

@@ -738,6 +738,16 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("model service offline", error)
         self.assertIn("Model service retrying", (task_module.STATE / "service-status.txt").read_text())
 
+    def test_supervisor_records_task_progress_without_ui(self):
+        task_module.update(self.pid, card="fixture", status="working")
+        with patch.object(task_module, "tick"), patch.object(
+            task_module, "task_progress", return_value=(35, "Building")
+        ), patch.object(task_module.task_eta, "countdown") as countdown:
+            task_module.supervisor_step()
+        countdown.assert_called_once_with(
+            task_module.STATE / "projects.db", self.pid, 35, "working"
+        )
+
     def test_accept_rejects_stale_files(self):
         task_module.update(self.pid, status="ready_for_review", fingerprint="old")
         task_module.request(self.pid, "accept")

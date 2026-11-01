@@ -2,13 +2,14 @@
 
 The task board reports milestone percentages, not a fixed amount of work. An
 estimate therefore appears only after two measured advances and is labelled
-as an estimate to review. Pauses and time while the app is closed are excluded.
+as an estimate to review. Pauses and time while the supervisor is stopped are excluded.
 """
 
 from __future__ import annotations
 
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 
 
@@ -38,7 +39,9 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
     if status == "accepted":
         return "Complete"
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    # sqlite3's context manager commits but does not close the connection.
+    # On Windows, an open handle can prevent task-folder cleanup or updates.
+    with closing(sqlite3.connect(db_path, timeout=30)) as conn, conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS task_eta_state (
             task_id TEXT PRIMARY KEY, active_seconds REAL NOT NULL DEFAULT 0,
             last_seen REAL NOT NULL, was_active INTEGER NOT NULL,

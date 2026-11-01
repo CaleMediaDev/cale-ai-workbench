@@ -82,6 +82,8 @@ The project queue and native Hermes task board use SQLite. Each project also get
 
 Your PC must be on and awake. The optional sign-in task restarts the supervisor when you sign back in. This is resumable work across days, not a promise that any request will complete unattended. One demanding local worker runs at a time.
 
+The background supervisor records task milestones even when the window is closed, so the estimated time to review reflects ongoing work. Pauses and time while the supervisor is stopped do not count.
+
 The supervisor handles task controls even when a local model or gateway is temporarily unavailable. A failure on one task is recorded for retry without preventing other saved tasks from advancing.
 The model router sizes each worker step using the original project and recent user follow-ups, so adding a substantial requirement can move the work to a stronger installed model even when the original request was simple.
 If independent verification fails after a review handoff, Cale creates a fresh worker card with the saved plan and failure output. User requests for changes after review also start a fresh generation. This avoids relying on Hermes reopening a goal card that its judge may reject.
