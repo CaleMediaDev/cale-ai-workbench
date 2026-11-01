@@ -1,7 +1,7 @@
 LOCAL AI LONG TASKS
 
 Open "Cale AI Workbench" on your desktop. Setup progress and optional model
-downloads appear in My tasks. Click New task, describe what you want built,
+downloads appear in My tasks. Type in the chat what you want built,
 and let the app make a folder automatically. Click Start my task.
 
 It will keep working through a saved plan, test its work, and use a separate

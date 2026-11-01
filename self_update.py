@@ -167,6 +167,41 @@ def active_tasks():
     )
 
 
+def add_design_tools_to_config(root, backup):
+    """Expose new local tools to existing installs without resetting preferences."""
+    config = root / "data/config.yaml"
+    if not config.is_file():
+        return None
+    original = config.read_text(encoding="utf-8")
+    if "mcp-design" in original and "  design:\n" in original:
+        return None
+    updated = original
+    if "mcp-design" not in updated:
+        anchor = "  - mcp-toolbox\n"
+        if anchor not in updated:
+            raise RuntimeError("Could not locate the tool list in the existing config.")
+        updated = updated.replace(anchor, anchor + "  - mcp-design\n", 1)
+    if "  design:\n" not in updated:
+        anchor = "skills:\n"
+        if anchor not in updated:
+            raise RuntimeError("Could not locate the MCP section in the existing config.")
+        block = (
+            "  design:\n"
+            f"    command: '{(root / 'Toolbox/python/Scripts/python.exe').as_posix()}'\n"
+            "    args:\n"
+            f"    - '{(root / 'design_tools.py').as_posix()}'\n"
+            "    timeout: 120\n"
+            "    sampling:\n"
+            "      enabled: false\n"
+        )
+        updated = updated.replace(anchor, block + anchor, 1)
+    previous = backup / "data/config.yaml"
+    previous.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(config, previous)
+    config.write_text(updated, encoding="utf-8")
+    return config, previous
+
+
 def apply(archive_path, version):
     """Keep the old source recoverable and swap only files in the manifest."""
     if active_tasks():
@@ -192,6 +227,9 @@ def apply(archive_path, version):
                 staged.write_bytes(archive.read(name))
                 os.replace(staged, target)
                 replaced.append((target, previous))
+            migration = add_design_tools_to_config(ROOT, backup)
+            if migration:
+                replaced.append(migration)
             marker = ROOT / ".cale-ai-install"
             marker.write_text(
                 "Cale AI Workbench " + ".".join(map(str, version)), encoding="utf-8"

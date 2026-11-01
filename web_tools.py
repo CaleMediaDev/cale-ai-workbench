@@ -261,5 +261,79 @@ def search_web(query: str) -> dict:
     }
 
 
+@server.tool()
+def find_business_contact(name: str, locality: str = "") -> dict:
+    """Find live business phone links and show the pages that contain them.
+
+    Search ranking does not prove ownership. The caller should describe each
+    number as listed by its source page, especially for directory results.
+    """
+    if (
+        not 2 <= len(name.strip()) <= 160
+        or len(locality) > 100
+        or any(ord(char) < 32 for char in name + locality)
+    ):
+        raise ValueError("Provide a business name and optional locality.")
+    query = " ".join(
+        part for part in (name.strip(), locality.strip(), "phone number") if part
+    )
+    found = search_web(query)
+    words = [
+        word for word in re.findall(r"[a-z0-9]+", name.casefold()) if len(word) > 1
+    ]
+    minimum = 1 if len(words) < 3 else 2
+    candidates = []
+    seen_hosts = set()
+    for result in found.get("results", [])[:8]:
+        url = result.get("url", "")
+        host = (urlsplit(url).hostname or "").lower()
+        if not host or host in seen_hosts:
+            continue
+        visible = (result.get("title", "") + " " + host).casefold()
+        if sum(word in visible for word in words) < minimum:
+            continue
+        seen_hosts.add(host)
+        try:
+            page = read_webpage(url)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            continue
+        phones = list(
+            dict.fromkeys(
+                link
+                for link in page["contact_links"]
+                if link.lower().startswith("tel:")
+            )
+        )
+        if not phones:
+            continue
+        text = page["text"]
+        marker = re.search(r"\+?\d[\d\s().-]{7,}\d", text)
+        start = max(0, marker.start() - 150) if marker else 0
+        candidates.append(
+            {
+                "source_url": page["source_url"],
+                "page_title": page["title"],
+                "retrieved_at": page["retrieved_at"],
+                "phone_links": phones[:8],
+                "page_excerpt": text[start : start + 400],
+            }
+        )
+        if len(candidates) >= 3:
+            break
+    return {
+        "business": name.strip(),
+        "locality": locality.strip(),
+        "sources": candidates,
+        "note": (
+            "These numbers were read from live pages, but search ranking alone does "
+            "not prove a site belongs to the business. Cite the source and say when "
+            "ownership or currency could not be confirmed."
+        ),
+        "error": "No matching live page with a phone link was found."
+        if not candidates
+        else None,
+    }
+
+
 if __name__ == "__main__":
     server.run(transport="stdio")

@@ -98,6 +98,9 @@ def database():
     conn.execute("""CREATE TABLE IF NOT EXISTS requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT, action TEXT, note TEXT,
       status TEXT DEFAULT 'pending', result TEXT DEFAULT '')""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL,
+      content TEXT NOT NULL, created REAL NOT NULL)""")
     conn.commit()
     try:
         yield conn
@@ -120,6 +123,25 @@ def projects():
         return [
             dict(row) for row in conn.execute("SELECT * FROM projects ORDER BY created")
         ]
+
+
+def chat_history(limit=50):
+    """Read the most recent messages in conversation order."""
+    with database() as conn:
+        rows = conn.execute(
+            "SELECT role, content FROM chat_messages ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(row) for row in reversed(rows)]
+
+
+def save_chat(role, content):
+    if role not in ("user", "assistant"):
+        raise ValueError("Invalid chat role")
+    with database() as conn:
+        conn.execute(
+            "INSERT INTO chat_messages(role,content,created) VALUES(?,?,?)",
+            (role, content, time.time()),
+        )
 
 
 def task_progress(p):
@@ -881,10 +903,11 @@ def gui():
     import threading
     import tkinter as tk
     import webbrowser
-    from tkinter import filedialog, messagebox, simpledialog, ttk
+    from tkinter import messagebox, simpledialog, ttk
 
     from PIL import Image, ImageTk
 
+    import chat_assistant
     import chatgpt_auth
     import github_account
     import ollama_runtime
@@ -901,6 +924,11 @@ def gui():
     )
     from model_library import save_download_status
 
+    try:
+        self_update.add_design_tools_to_config(ROOT, ROOT / "Recovery/design-tools")
+        config_migration_error = ""
+    except (OSError, RuntimeError) as exc:
+        config_migration_error = "Design tools setup needs attention: " + str(exc)
     start_monitor()
     if os.name == "nt":
         # Give the taskbar a stable Cale identity instead of Python's generic one.
@@ -1204,15 +1232,15 @@ def gui():
     title_row.pack(fill="x", pady=(0, 8))
     title_copy = ttk.Frame(title_row)
     title_copy.pack(side="left")
-    ttk.Label(title_copy, text="My tasks", font=("Segoe UI", 29, "bold")).pack(
+    ttk.Label(title_copy, text="Talk to Cale", font=("Segoe UI", 29, "bold")).pack(
         anchor="w"
     )
     ttk.Label(
         title_copy,
-        text="See what your assistant is doing and what needs your attention.",
+        text="Ask a question or describe something you'd like me to make.",
         style="Muted.TLabel",
     ).pack(anchor="w", pady=(3, 0))
-    status = tk.StringVar(value="")
+    status = tk.StringVar(value=config_migration_error)
     update_events = queue.Queue()
     pending_update = None
     updating = False
@@ -1225,90 +1253,7 @@ def gui():
 
     threading.Thread(target=check_updates, daemon=True).start()
 
-    def new(initial_text=""):
-        setup = read_task_status(STATE / "install-progress.json")
-        if setup and setup.get("status") != "complete":
-            messagebox.showinfo(
-                "Setting up your AI",
-                "Wait for setup to finish before starting a task.",
-                parent=window,
-            )
-            return
-        dialog = tk.Toplevel(window)
-        dialog.title("New task")
-        dialog.geometry("720x520")
-        dialog.configure(background=bg)
-        dialog.transient(window)
-        pane = ttk.Frame(dialog, padding=20)
-        pane.pack(fill="both", expand=True)
-        folder = tk.StringVar()
-        ttk.Label(
-            pane, text="What would you like done?", font=("Segoe UI", 17, "bold")
-        ).pack(anchor="w")
-        ttk.Label(
-            pane,
-            text="For example: Make a simple website for my bakery, with hours, photos, and a contact form.",
-            style="Muted.TLabel",
-            wraplength=650,
-        ).pack(anchor="w", pady=(7, 14))
-        brief = tk.Text(
-            pane,
-            wrap="word",
-            height=14,
-            background=field,
-            foreground=text,
-            insertbackground=text,
-            selectbackground="#334a85",
-            relief="flat",
-            padx=12,
-            pady=10,
-        )
-        brief.pack(fill="both", expand=True)
-        if initial_text:
-            brief.insert("1.0", initial_text)
-        folder_label = tk.StringVar(
-            value="A new folder will be made automatically for this task."
-        )
-        choice = ttk.Frame(pane)
-        choice.pack(fill="x", pady=(14, 0))
-        ttk.Label(
-            choice, textvariable=folder_label, style="Muted.TLabel", wraplength=460
-        ).pack(side="left", fill="x", expand=True)
-
-        def browse():
-            selected = filedialog.askdirectory(parent=dialog)
-            if selected:
-                folder.set(selected)
-                folder_label.set("Working in: " + selected)
-
-        ttk.Button(choice, text="Use a folder I already have", command=browse).pack(
-            side="right"
-        )
-        ttk.Label(
-            pane,
-            text="Your computer needs to stay on while it works. You can close this window and check back later.",
-            style="Muted.TLabel",
-            wraplength=650,
-        ).pack(anchor="w", pady=(12, 8))
-
-        def save():
-            try:
-                add_project("", folder.get(), brief.get("1.0", "end"))
-                dialog.destroy()
-                status.set("Task saved. Your assistant will start shortly.")
-                render_cards()
-            except Exception as exc:
-                messagebox.showerror("Could not start task", str(exc), parent=dialog)
-
-        ttk.Button(
-            pane, text="Start my task", command=save, style="Accent.TButton"
-        ).pack(anchor="e")
-        brief.focus_set()
-
-    new_button = ttk.Button(
-        title_row, text="+  New task", command=new, style="Accent.TButton"
-    )
-    new_button.pack(side="right", pady=(8, 0))
+    conversation_events = queue.Queue()
     voice_events = queue.Queue()
     voice_busy = threading.Event()
     voice_speaking = threading.Event()
@@ -1402,7 +1347,7 @@ def gui():
         speak_update(
             "Hi, I'm Cale. I can research, build websites and apps, work with files, "
             "and keep going on long projects. Your tasks and progress are right here. "
-            "Click New task and tell me what you want. My mic is off until you turn it on. "
+            "Type what you want in the chat. I'll answer or start a task for you. My mic is off until you turn it on. "
             "With the mic on, I only respond when you say Hey Cale before an instruction. "
             "You can also press Control Alt Space to speak once without a wake phrase. I'll tell you what I'm "
             "doing, and a side window will show website, app, and Chrome work. "
@@ -1462,7 +1407,7 @@ def gui():
             listening.clear()
             mic_button.configure(text="🎤  Mic Off")
             voice_label.set("Heard: " + phrase[:100])
-            new(note)
+            submit_chat_text(note)
             return
         if active:
             selected = max(active, key=lambda item: item["updated"] or 0)
@@ -1488,7 +1433,7 @@ def gui():
             listening.clear()
             mic_button.configure(text="🎤  Mic Off")
             voice_label.set("Heard: " + phrase[:100])
-            new(note)
+            submit_chat_text(note)
 
     mic_button = ttk.Button(title_row, text="🎤  Mic Off", command=toggle_listening)
     mic_button.pack(side="right", padx=(0, 8), pady=(8, 0))
@@ -1499,21 +1444,99 @@ def gui():
     ttk.Label(
         main_page, textvariable=status, style="Muted.TLabel", wraplength=1000
     ).pack(anchor="w", pady=(0, 6))
-    github_banner = ttk.Frame(main_page, style="Card.TFrame", padding=12)
-    ttk.Label(
-        github_banner,
-        text="Save your projects online with GitHub",
-        style="Card.TLabel",
-        font=("Segoe UI", 13, "bold"),
-    ).pack(side="left", padx=(0, 12))
-    ttk.Button(
-        github_banner,
-        text="Connect GitHub",
-        command=connect_github,
-        style="Accent.TButton",
-    ).pack(side="right")
-    github_banner.pack(fill="x", pady=(0, 10))
+    chat_panel = ttk.Frame(main_page, style="Card.TFrame", padding=12)
+    chat_panel.pack(fill="x", pady=(0, 12))
+    conversation = tk.Text(
+        chat_panel, height=8, wrap="word", state="disabled", background=card,
+        foreground=text, insertbackground=text, relief="flat", padx=10, pady=6,
+        font=("Segoe UI", 11), highlightthickness=0,
+    )
+    conversation.pack(fill="x")
+    conversation.tag_configure("user", foreground="#a6c9ff", spacing1=8)
+    conversation.tag_configure("assistant", foreground=text, spacing1=8)
+    entry_row = ttk.Frame(chat_panel, style="Card.TFrame")
+    entry_row.pack(fill="x", pady=(8, 0))
+    chat_input = tk.Entry(
+        entry_row, background=field, foreground=text, insertbackground=text,
+        relief="flat", font=("Segoe UI", 12), highlightthickness=0,
+    )
+    chat_input.pack(side="left", fill="x", expand=True, ipady=10, padx=(0, 8))
 
+    def show_chat(role, content):
+        conversation.configure(state="normal")
+        conversation.insert("end", ("You" if role == "user" else "Cale") + ": " + content + "\n", role)
+        conversation.configure(state="disabled")
+        conversation.see("end")
+
+    def assistant_reply(content):
+        save_chat("assistant", content)
+        show_chat("assistant", content)
+
+    for previous in chat_history():
+        show_chat(previous["role"], previous["content"])
+    if not chat_history():
+        show_chat("assistant", "Hi! Ask me anything, or tell me what you'd like me to build.")
+
+    def submit_chat_text(value=None):
+        value = (chat_input.get() if value is None else value).strip()
+        if not value:
+            return
+        if value == chat_input.get().strip():
+            chat_input.delete(0, "end")
+        context = chat_history(12)
+        save_chat("user", value)
+        show_chat("user", value)
+        active = [p for p in projects() if p["status"] in (
+            "queued", "working", "checking", "paused", "needs_input")]
+        action = chat_assistant.route(value, active)
+        try:
+            if action == "task":
+                setup = read_task_status(STATE / "install-progress.json")
+                if setup and setup.get("status") != "complete":
+                    assistant_reply("I'm still installing the local AI. Your message is saved here; please send it again when setup finishes.")
+                    return
+                pid = add_project("", "", value)
+                item = next(p for p in projects() if p["id"] == pid)
+                assistant_reply("I started a task: " + item["title"] + ". I'll show its progress below.")
+                render_cards()
+            elif action == "note":
+                selected = max(active, key=lambda p: p["updated"] or 0)
+                request(selected["id"], "note", value)
+                assistant_reply("Added that to " + selected["title"] + ".")
+            elif action == "status":
+                if active:
+                    selected = max(active, key=lambda p: p["updated"] or 0)
+                    assistant_reply(selected["title"] + ": " + task_progress(selected)[1])
+                else:
+                    assistant_reply("Nothing is running right now. Tell me what you'd like me to do.")
+            else:
+                assistant_reply("Let me check that locally…")
+
+                def worker():
+                    try:
+                        conversation_events.put(chat_assistant.answer_with_tools(value, context))
+                    except Exception as exc:
+                        conversation_events.put(str(exc))
+
+                threading.Thread(target=worker, daemon=True).start()
+        except Exception as exc:
+            assistant_reply("I couldn't do that yet: " + str(exc))
+
+    send_button = ttk.Button(entry_row, text="Send", command=submit_chat_text, style="Accent.TButton")
+    send_button.pack(side="right")
+    chat_input.bind("<Return>", lambda _: submit_chat_text())
+    chat_input.focus_set()
+
+    def poll_chat():
+        try:
+            while True:
+                assistant_reply(conversation_events.get_nowait())
+        except queue.Empty:
+            pass
+        window.after(350, poll_chat)
+
+    window.after(350, poll_chat)
+    ttk.Label(main_page, text="My tasks", font=("Segoe UI", 17, "bold")).pack(anchor="w", pady=(0, 5))
     list_wrap = ttk.Frame(main_page)
     list_wrap.pack(fill="both", expand=True)
     canvas = tk.Canvas(list_wrap, background=bg, borderwidth=0, highlightthickness=0)
@@ -1913,7 +1936,7 @@ def gui():
             if empty_label is None:
                 empty_label = ttk.Label(
                     cards,
-                    text="No tasks yet. Click New task to get started.",
+                    text="No tasks yet. Tell Cale what you'd like done in the chat.",
                     style="Muted.TLabel",
                     font=("Segoe UI", 13),
                 )
@@ -2144,11 +2167,6 @@ def gui():
             if current_step and current_step != setup_spoken_step:
                 setup_spoken_step = current_step
                 speak_update("Setup update. " + current_step + ".")
-        new_button.configure(
-            state="disabled"
-            if setup and setup.get("status") != "complete"
-            else "normal"
-        )
         try:
             while True:
                 cloud_text.set(cloud_events.get_nowait())
@@ -2311,7 +2329,6 @@ def gui():
                     + ". Your AI can use your repositories when you ask it to."
                 )
                 github_button.configure(text="GitHub connected")
-                github_banner.pack_forget()
         if (
             not getattr(window, "github_checking", False)
             and time.monotonic() - getattr(window, "github_checked_at", 0) > 20

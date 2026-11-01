@@ -64,6 +64,22 @@ class SelfUpdateTests(unittest.TestCase):
             self.assertEqual((backup / "long_tasks.py").read_text(), "old")
             self.assertIn("0.5.0", (root / ".cale-ai-install").read_text())
 
+    def test_design_tools_migrate_without_replacing_existing_settings(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = root / "data/config.yaml"
+            config.parent.mkdir()
+            original = "platform_toolsets:\n  cli:\n  - mcp-toolbox\nmcp_servers:\n  toolbox: {}\nskills:\n  disabled: []\n"
+            config.write_text(original, encoding="utf-8")
+            backup = root / "backup"
+            self_update.add_design_tools_to_config(root, backup)
+            updated = config.read_text(encoding="utf-8")
+            self.assertIn("  - mcp-design\n", updated)
+            self.assertIn("  design:\n", updated)
+            self.assertIn("  toolbox: {}\n", updated)
+            self.assertEqual((backup / "data/config.yaml").read_text(), original)
+            self.assertIsNone(self_update.add_design_tools_to_config(root, backup))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,14 @@ document_to_text: local PDF, Word, Excel, PowerPoint, HTML, CSV and text extract
 using Microsoft MarkItDown. No external AI, image descriptions or cloud OCR.
 sqlite_read: read-only SQL on existing local databases.
 
+LOCAL DESIGN TOOLS
+scan_frontend_design: audit a local HTML/CSS/JavaScript/React file or folder for
+generic design patterns, with source locations. This bundles the MIT-licensed
+avoid-ai-design scanner. Findings are suggestions; render the result and judge it.
+check_color_contrast: calculate WCAG AA/AAA text contrast for two hex colors.
+Use Chrome DevTools or Playwright to inspect real pages and screenshots, and
+make_image for locally generated design assets. These tools need no account.
+
 LOCAL MEDIA AND TRAINING TOOLS
 make_image: generate a PNG locally with LCM Dreamshaper v7.
 see_image: describe a photo, screenshot or chart with local Qwen vision.
@@ -76,6 +84,7 @@ https://github.com/ast-grep/ast-grep
 https://github.com/microsoft/markitdown
 https://github.com/NationalSecurityAgency/ghidra
 https://adoptium.net/temurin/releases/
+https://github.com/funboy322/avoid-ai-design
 
 Packages are pinned locally. Updating them requires rechecking their compatibility.
 This is a local tool suite, not a sandbox: tools run with your Windows account's

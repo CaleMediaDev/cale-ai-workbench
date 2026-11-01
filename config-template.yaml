@@ -32,7 +32,10 @@ agent:
     recorded. Never mask failing exits. Test files and test scripts must be in the
     project, not a shared temporary directory.\nPublic research tools are mcp__localweb__search_web
     and mcp__localweb__read_webpage. Search, then read the supporting passage on the
-    official source. Search snippets, memory, and a saved record do not establish
+    official source. For business phone lookups, use mcp__localweb__find_business_contact
+    and cite the live source. Design tools are mcp__design__scan_frontend_design
+    and mcp__design__check_color_contrast. Scan source, then render and review it.
+    Search snippets, memory, and a saved record do not establish
     current verification. If a source fails, try another relevant public source and
     clearly state remaining uncertainty.\nThis Windows terminal uses Git Bash. Use
     python, not python3, and quote paths containing spaces. Prefer targeted patch
@@ -75,6 +78,7 @@ platform_toolsets:
   - mcp-localweb
   - mcp-pages
   - mcp-toolbox
+  - mcp-design
 disabled_toolsets:
 - delegation
 - todo
@@ -207,6 +211,13 @@ mcp_servers:
     args:
     - '{{ROOT}}/toolbox_mcp.py'
     timeout: 1200
+    sampling:
+      enabled: false
+  design:
+    command: '{{ROOT}}/Toolbox/python/Scripts/python.exe'
+    args:
+    - '{{ROOT}}/design_tools.py'
+    timeout: 120
     sampling:
       enabled: false
 skills:
