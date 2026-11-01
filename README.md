@@ -86,6 +86,8 @@ The background supervisor records task milestones even when the window is closed
 
 The desktop rechecks GitHub releases while long tasks are running. If a newer release appears before a task finishes, Cale stages the newest version and applies it when the task is idle.
 
+Automatic model sizing ignores Hermes's own board-finish reminders. A simple task therefore stays on the appropriate fast or middle model after a reminder, while a real new user request can still scale it up.
+
 When someone asks Cale to revise a finished image or song, the task keeps its original plan and adds fresh revision milestones. Its progress starts over for the new request. An empty revision message leaves the existing render running.
 
 The supervisor handles task controls even when a local model or gateway is temporarily unavailable. A failure on one task is recorded for retry without preventing other saved tasks from advancing.

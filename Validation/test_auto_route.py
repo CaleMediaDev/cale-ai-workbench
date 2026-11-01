@@ -185,6 +185,31 @@ class AutoRouteTests(unittest.TestCase):
             {"role": "user", "content": "Build a production-ready multi-page file manager app."},
         ]), "deep")
 
+    def test_kanban_protocol_nudge_does_not_escalate_small_music_work(self):
+        prompt = project_prompt({
+            "title": "Michigan song", "folder": "C:/Tasks/music",
+            "brief": "Make a rap song about Michigan with music, one minute long.",
+        }, "\nRecent user follow-ups (read the full file):\n"
+           "Request 19: add vocals\nPrevious supervisor result:\nWorking")
+        messages = [{"role": "user", "content": prompt}]
+        for _ in range(4):
+            messages.append({
+                "role": "assistant",
+                "tool_calls": [{"function": {"name": "mcp__toolbox__toolbox_call"}}],
+            })
+        self.assertEqual(task_size(messages), "balanced")
+        messages.append({"role": "user", "content": (
+            "[System: You are a Hermes kanban worker. A plain-text reply is NOT a "
+            "terminal state for the board. Finish the remaining deliverable. "
+            "Call kanban_request_review or kanban_block. Repeated protocol violations "
+            "will block this task and require manual intervention.]"
+        )})
+        self.assertEqual(task_size(messages), "balanced")
+        messages.insert(-1, {"role": "user", "content": (
+            "Build a production-ready multi-page music website too."
+        )})
+        self.assertEqual(task_size(messages), "deep")
+
     def test_short_tool_work_stays_on_middle_model_without_project_marker(self):
         messages = [{"role": "user", "content": "Analyze the attached data."}]
         for _ in range(4):

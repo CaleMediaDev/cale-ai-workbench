@@ -99,6 +99,11 @@ def message_text(content):
     return ""
 
 
+def synthetic_worker_note(text):
+    """Hermes board reminders are protocol messages, not new user scope."""
+    return text.lstrip().startswith("[System: You are a Hermes kanban worker.")
+
+
 def task_size(messages):
     """Return quick, balanced, or deep from user intent and actual tool history."""
     users = [
@@ -120,8 +125,12 @@ def task_size(messages):
         # after END OF ORIGINAL REQUEST, outside PROJECT_REQUEST's capture.
         followups = RECENT_FOLLOWUPS.search(request)
         intent = original + ("\n" + followups.group(1).strip() if followups else "")
-        if len(users) > 1:
-            intent += "\n" + users[-1].strip()
+        latest_real_user = next(
+            (item.strip() for item in reversed(users[1:]) if not synthetic_worker_note(item)),
+            "",
+        )
+        if latest_real_user:
+            intent += "\n" + latest_real_user
     else:
         intent = request
     tool_calls = sum(
