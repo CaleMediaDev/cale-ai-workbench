@@ -63,3 +63,32 @@ def test_removed_file_is_reported_before_a_task_is_created(tmp_path):
     missing = tmp_path / "gone.txt"
     with pytest.raises(FileNotFoundError, match="no longer available"):
         chat_assistant.route_with_files("What's in this?", [], [str(missing)])
+
+
+def test_long_file_question_retrieves_middle_and_keeps_end_visible():
+    text = "Opening notes.\n" + ("Ordinary material.\n" * 1200)
+    text += "The warranty code is W-4817.\n"
+    text += "Ordinary material.\n" * 1200
+    text += "Final instruction: call the office.\n"
+    excerpt = file_chat.select_excerpt(text, "What is the warranty code?")
+    assert "W-4817" in excerpt
+    assert "Final instruction" in excerpt
+    assert "omitted" in excerpt
+    assert len(excerpt) <= 12000
+
+
+def test_long_file_end_question_keeps_tail_context():
+    text = "Opening notes.\n" + ("Ordinary material.\n" * 1600)
+    text += "The final decision is to postpone.\n"
+    excerpt = file_chat.select_excerpt(text, "What is the final decision?")
+    assert "postpone" in excerpt
+
+
+def test_long_file_answer_discloses_omitted_sections(tmp_path):
+    path = tmp_path / "long.txt"
+    path.write_text("Opening.\n" + "Filler.\n" * 2000 + "Answer: 42.\n", encoding="utf-8")
+    result = {"choices": [{"message": {"content": "The answer is 42 [1]."}}]}
+    with patch("cloud_ai.post", return_value=result):
+        answer = file_chat.answer_from_files("What is the answer?", [str(path)])
+    assert "Selected passages only" in answer
+    assert "long.txt" in answer

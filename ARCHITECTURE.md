@@ -32,7 +32,7 @@ Ollama model store                  cloud_ai.py → ChatGPT (opt-in)
 | `chatgpt_auth.py` | Public-client ChatGPT sign-in, identity validation, DPAPI token storage, refresh, and Responses API adaptation. |
 | `configure_install.py` | Creates the main and vision Ollama models and configures Hermes. |
 | `toolbox_mcp.py`, `web_tools.py`, `media_worker.py`, `small_training.py` | Tools available to the agent for files, browsers, media, and small-model training. |
-| `chat_assistant.py`, `file_chat.py` | Route short chat requests and answer bounded questions about selected local files using installed models. |
+| `chat_assistant.py`, `file_chat.py` | Route short chat requests and answer bounded questions about selected local files using installed models. Long files use lexical passage selection across the document before inference. |
 | `system_gauges.py` | Samples Windows CPU and RAM load and NVIDIA GPU load for the live header rings. Missing sensors stay visibly unavailable. |
 | `install-files.json`, `pack-release.py`, `build-release.ps1` | Explicit list of shipped files and Windows release packaging. |
 

@@ -1125,29 +1125,31 @@ def gui():
         style="Muted.TLabel",
     ).pack(anchor="w")
 
-    # These compact rings show live hardware load without adding another page.
-    gauge_colors = {"cpu": "#48d7f2", "ram": "#ab8bff", "gpu": "#ff9b6a"}
+    import system_gauges
+
+    # The RPM-style ring moves from green through amber to red as load rises.
     gauge_widgets = {}
     gauge_row = ttk.Frame(header)
     gauge_row.pack(side="left")
-    for gauge_name, gauge_color in gauge_colors.items():
+    for gauge_name in ("cpu", "ram", "gpu"):
         gauge_canvas = tk.Canvas(
             gauge_row, width=70, height=70, bg=bg, highlightthickness=0, borderwidth=0
         )
         gauge_canvas.pack(side="left", padx=(0, 8))
-        gauge_canvas.create_oval(9, 6, 61, 58, outline="#2e3a55", width=6)
-        arc = gauge_canvas.create_arc(
-            9, 6, 61, 58, start=90, extent=0, style="arc", outline=gauge_color, width=6
-        )
+        segments = [
+            gauge_canvas.create_arc(
+                9, 6, 61, 58, start=90 - index * 15, extent=-12.5,
+                style="arc", outline=system_gauges.dim_rpm_color(index / 23), width=6,
+            )
+            for index in range(24)
+        ]
         value = gauge_canvas.create_text(
             35, 32, text="—", fill=text, font=("Segoe UI", 12, "bold")
         )
         gauge_canvas.create_text(
             35, 66, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 8, "bold")
         )
-        gauge_widgets[gauge_name] = (gauge_canvas, arc, value)
-
-    import system_gauges
+        gauge_widgets[gauge_name] = (gauge_canvas, segments, value)
 
     gauge_events = queue.Queue(maxsize=1)
 
@@ -1165,9 +1167,17 @@ def gui():
         try:
             while True:
                 reading = gauge_events.get_nowait()
-                for name, (canvas, arc, value) in gauge_widgets.items():
+                for name, (canvas, segments, value) in gauge_widgets.items():
                     percent = reading[name]
-                    canvas.itemconfigure(arc, extent=-(percent or 0) * 3.6)
+                    active = system_gauges.active_segments(percent)
+                    for index, segment in enumerate(segments):
+                        canvas.itemconfigure(
+                            segment, outline=(
+                                system_gauges.rpm_color(index / (len(segments) - 1))
+                                if index < active
+                                else system_gauges.dim_rpm_color(index / (len(segments) - 1))
+                            ),
+                        )
                     canvas.itemconfigure(value, text=f"{percent}%" if percent is not None else "—")
         except queue.Empty:
             pass

@@ -7,9 +7,41 @@ An unavailable sensor is represented by None, never a misleading zero.
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import subprocess
 from ctypes import wintypes
+
+
+def rpm_color(position: float) -> str:
+    """Map a position on a load gauge from green through amber to red."""
+    position = max(0.0, min(1.0, position))
+    stops = ((50, 211, 144), (255, 198, 75), (255, 79, 97))
+    left, right, fraction = (
+        (stops[0], stops[1], position * 2)
+        if position <= 0.5
+        else (stops[1], stops[2], (position - 0.5) * 2)
+    )
+    channels = (round(a + (b - a) * fraction) for a, b in zip(left, right))
+    return "#" + "".join(f"{channel:02x}" for channel in channels)
+
+
+def dim_rpm_color(position: float) -> str:
+    """Leave the green-to-red range faintly visible behind inactive segments."""
+    bright = rpm_color(position)
+    background = "#0b1020"
+    channels = (
+        round(int(background[index:index + 2], 16) * 0.73 + int(bright[index:index + 2], 16) * 0.27)
+        for index in (1, 3, 5)
+    )
+    return "#" + "".join(f"{channel:02x}" for channel in channels)
+
+
+def active_segments(percent: int | None, count: int = 24) -> int:
+    """Keep small nonzero readings visible on the segmented scale."""
+    if percent is None:
+        return 0
+    return math.ceil(max(0, min(100, percent)) * count / 100)
 
 
 class _FileTime(ctypes.Structure):

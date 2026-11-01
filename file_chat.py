@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -19,6 +20,51 @@ PLAIN_TEXT = {
     ".json", ".xml", ".yaml", ".yml", ".py", ".js", ".ts", ".css",
 }
 DOCUMENTS = {".pdf", ".docx", ".xlsx", ".pptx"}
+STOP_WORDS = {
+    "about", "after", "also", "and", "are", "can", "does", "file", "find",
+    "for", "from", "have", "how", "into", "its", "me", "of", "say", "show",
+    "tell", "that", "the", "their", "there", "these", "this", "what", "when",
+    "where", "which", "with", "you",
+}
+
+
+def select_excerpt(text: str, question: str, limit: int = 12000) -> str:
+    """Pick passages across a long file that are likely to answer the question.
+
+    This is lexical retrieval, not a claim that the omitted text was reviewed.
+    It keeps model context bounded and labels the selected spans as partial.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    chunk_size = 2200
+    words = {
+        word for word in re.findall(r"[\w-]{3,}", question.casefold())
+        if word not in STOP_WORDS
+    }
+    chunks = [text[pos:pos + chunk_size] for pos in range(0, len(text), chunk_size)]
+    lower_chunks = [chunk.casefold() for chunk in chunks]
+    scores = [sum(chunk.count(word) for word in words) for chunk in lower_chunks]
+    summary = bool(re.search(r"\b(summarize|summary|overview|main points)\b", question, re.I))
+    priority = [0, len(chunks) - 1]
+    if re.search(r"\b(end|ending|final|conclusion|last)\b", question, re.I):
+        priority.append(len(chunks) - 2)
+    if re.search(r"\b(start|beginning|first|intro)\b", question, re.I):
+        priority.append(1)
+    if summary or not any(scores):
+        priority.extend([len(chunks) // 3, 2 * len(chunks) // 3])
+    else:
+        ranked = sorted(range(len(chunks)), key=lambda i: (-scores[i], i))
+        priority.extend(ranked[:3])
+    selected = set(list(dict.fromkeys(priority))[:5])
+    result = []
+    # Keep the excerpt below its cap even when explicit start/end hints add spans.
+    for index in sorted(selected):
+        span = f"[Characters {index * chunk_size + 1}-{min((index + 1) * chunk_size, len(text))}]\n{chunks[index]}"
+        if sum(map(len, result)) + len(span) + 100 > limit:
+            break
+        result.append(span)
+    return "[Selected excerpts from a longer file; other sections are omitted.]\n" + "\n\n".join(result)
 
 
 def image_description(path: Path, question: str) -> str:
@@ -56,8 +102,7 @@ def file_excerpt(path: Path, question: str) -> str:
         from markitdown import MarkItDown
 
         text = MarkItDown(enable_plugins=False).convert(str(path)).text_content
-    text = text.strip()
-    return text[:12000] + ("\n[Excerpt ends; file continues.]" if len(text) > 12000 else "")
+    return select_excerpt(text, question)
 
 
 def answer_from_files(question: str, paths: list[str]) -> str:
@@ -67,6 +112,7 @@ def answer_from_files(question: str, paths: list[str]) -> str:
     if not paths or len(paths) > 3:
         raise ValueError("Select up to three files for a quick chat answer.")
     evidence = []
+    partial_files = []
     for number, raw in enumerate(paths, 1):
         path = Path(raw).resolve(strict=True)
         if not path.is_file() or path.stat().st_size > 15 * 1024 * 1024:
@@ -76,6 +122,8 @@ def answer_from_files(question: str, paths: list[str]) -> str:
         text = file_excerpt(path, question)
         if not text:
             raise ValueError(f"I couldn't read any content from {path.name}.")
+        if text.startswith("[Selected excerpts from a longer file;"):
+            partial_files.append(path.name)
         evidence.append(f"[{number}] {path.name}\n{text}")
     messages = [
         {
@@ -107,6 +155,8 @@ def answer_from_files(question: str, paths: list[str]) -> str:
             answer = result["choices"][0]["message"].get("content", "").strip()
             if answer:
                 names = ", ".join(f"[{i}] {Path(path).name}" for i, path in enumerate(paths, 1))
+                if partial_files:
+                    answer += "\nSelected passages only; other sections were omitted from " + ", ".join(partial_files) + "."
                 return answer + "\nFiles read: " + names
         except (KeyError, IndexError, OSError, ValueError):
             continue
