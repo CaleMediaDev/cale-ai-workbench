@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 TASK_VERBS = (
@@ -13,6 +14,12 @@ TASK_VERBS = (
     "analyse", "generate", "implement", "set up", "install",
     "add", "change", "work on",
 )
+QUICK_FILE_TYPES = {
+    ".txt", ".md", ".markdown", ".csv", ".tsv", ".html", ".htm",
+    ".pdf", ".docx", ".xlsx", ".pptx", ".json", ".xml", ".yaml",
+    ".yml", ".py", ".js", ".ts", ".css", ".png", ".jpg",
+    ".jpeg", ".webp", ".bmp", ".gif",
+}
 
 
 def route(text: str, active_tasks: list[dict]) -> str:
@@ -35,6 +42,26 @@ def route(text: str, active_tasks: list[dict]) -> str:
     if any(re.match(r"^" + re.escape(verb) + r"\b", command) for verb in TASK_VERBS):
         return "task"
     return "answer"
+
+
+def route_with_files(text: str, active_tasks: list[dict], paths: list[str]) -> str:
+    """Answer small file questions in chat; leave lasting work on the board."""
+    action = route(text, active_tasks)
+    if not paths or action != "answer":
+        return action
+    if len(paths) > 3:
+        return "task"
+    for raw in paths:
+        path = Path(raw)
+        if not path.exists():
+            raise FileNotFoundError(f"Selected file or folder is no longer available: {path.name}")
+        if (
+            not path.is_file()
+            or path.suffix.casefold() not in QUICK_FILE_TYPES
+            or path.stat().st_size > 15 * 1024 * 1024
+        ):
+            return "task"
+    return "file_answer"
 
 
 def status_reply(question: str, tasks: list[dict], progress) -> str:

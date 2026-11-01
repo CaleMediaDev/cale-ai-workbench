@@ -1020,6 +1020,7 @@ def gui():
 
     import chat_assistant
     import chatgpt_auth
+    import file_chat
     import github_account
     import ollama_runtime
     import project_preview
@@ -1116,13 +1117,64 @@ def gui():
             height=1,
         ).pack(side="left", padx=(0, 16))
     brand = ttk.Frame(header)
-    brand.pack(side="left")
+    brand.pack(side="left", padx=(0, 22))
     ttk.Label(brand, text="CALE  /  AI", font=("Segoe UI", 21, "bold")).pack(anchor="w")
     ttk.Label(
         brand,
-        text="A helpful assistant that keeps working and remembers your progress.",
+        text="Works while you do other things.",
         style="Muted.TLabel",
     ).pack(anchor="w")
+
+    # These compact rings show live hardware load without adding another page.
+    gauge_colors = {"cpu": "#48d7f2", "ram": "#ab8bff", "gpu": "#ff9b6a"}
+    gauge_widgets = {}
+    gauge_row = ttk.Frame(header)
+    gauge_row.pack(side="left")
+    for gauge_name, gauge_color in gauge_colors.items():
+        gauge_canvas = tk.Canvas(
+            gauge_row, width=70, height=70, bg=bg, highlightthickness=0, borderwidth=0
+        )
+        gauge_canvas.pack(side="left", padx=(0, 8))
+        gauge_canvas.create_oval(9, 6, 61, 58, outline="#2e3a55", width=6)
+        arc = gauge_canvas.create_arc(
+            9, 6, 61, 58, start=90, extent=0, style="arc", outline=gauge_color, width=6
+        )
+        value = gauge_canvas.create_text(
+            35, 32, text="—", fill=text, font=("Segoe UI", 12, "bold")
+        )
+        gauge_canvas.create_text(
+            35, 66, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 8, "bold")
+        )
+        gauge_widgets[gauge_name] = (gauge_canvas, arc, value)
+
+    import system_gauges
+
+    gauge_events = queue.Queue(maxsize=1)
+
+    def sample_gauges():
+        sampler = system_gauges.HardwareSampler()
+        while True:
+            reading = sampler.sample()
+            try:
+                gauge_events.put_nowait(reading)
+            except queue.Full:
+                pass
+            time.sleep(4)
+
+    def paint_gauges():
+        try:
+            while True:
+                reading = gauge_events.get_nowait()
+                for name, (canvas, arc, value) in gauge_widgets.items():
+                    percent = reading[name]
+                    canvas.itemconfigure(arc, extent=-(percent or 0) * 3.6)
+                    canvas.itemconfigure(value, text=f"{percent}%" if percent is not None else "—")
+        except queue.Empty:
+            pass
+        window.after(1000, paint_gauges)
+
+    threading.Thread(target=sample_gauges, daemon=True).start()
+    window.after(1000, paint_gauges)
 
     main_page = ttk.Frame(outer)
     super_page = ttk.Frame(outer)
@@ -1679,9 +1731,14 @@ def gui():
     def answer_worker():
         """Keep local model calls in order and avoid competing for the same GPU."""
         while True:
-            question, context = answer_requests.get()
+            question, context, paths = answer_requests.get()
             try:
-                conversation_events.put(chat_assistant.answer_with_tools(question, context))
+                answer = (
+                    file_chat.answer_from_files(question, paths)
+                    if paths
+                    else chat_assistant.answer_with_tools(question, context)
+                )
+                conversation_events.put(answer)
             except Exception as exc:
                 conversation_events.put("I couldn't answer that yet: " + str(exc))
 
@@ -1739,9 +1796,8 @@ def gui():
                 assistant_reply("I couldn't match that number to an active task. Please choose one of the numbers above.")
                 return
             pending_followup = None
-        routed = chat_assistant.route(raw_value, active)
-        action = "task" if selected_paths and routed != "note" else routed
         try:
+            action = chat_assistant.route_with_files(raw_value, active, selected_paths)
             if action == "task":
                 setup = read_task_status(STATE / "install-progress.json")
                 waiting = bool(setup and setup.get("status") != "complete")
@@ -1771,7 +1827,7 @@ def gui():
                 )
             else:
                 show_chat("assistant", "Let me check that locally…")
-                answer_requests.put((value, context))
+                answer_requests.put((raw_value, context, selected_paths))
         except Exception as exc:
             restore_selection()
             assistant_reply("I couldn't do that yet: " + str(exc))

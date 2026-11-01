@@ -1,0 +1,65 @@
+"""Selected files answer small questions locally without creating tasks."""
+
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+import chat_assistant
+import file_chat
+
+
+def test_small_file_question_routes_to_chat_and_build_work_to_task(tmp_path):
+    report = tmp_path / "report.txt"
+    report.write_text("Revenue increased in June.", encoding="utf-8")
+    paths = [str(report)]
+    assert chat_assistant.route_with_files("What's in this file?", [], paths) == "file_answer"
+    assert chat_assistant.route_with_files("Summarize this file", [], paths) == "file_answer"
+    assert chat_assistant.route_with_files("Build an app from this file", [], paths) == "task"
+    assert chat_assistant.route_with_files("What's the status?", [], paths) == "status"
+    assert chat_assistant.route_with_files("What's in this folder?", [], [str(tmp_path)]) == "task"
+
+
+def test_file_answer_uses_read_only_local_excerpt(tmp_path):
+    report = tmp_path / "report.txt"
+    report.write_text("Revenue increased in June.", encoding="utf-8")
+    result = {"choices": [{"message": {"content": "Revenue rose in June [1]."}}]}
+    with patch("cloud_ai.post", return_value=result) as post:
+        answer = file_chat.answer_from_files("What changed?", [str(report)])
+    assert "Revenue rose in June" in answer
+    assert "[1] report.txt" in answer
+    assert post.call_args.args[0].startswith("http://127.0.0.1:11434/")
+    payload = post.call_args.args[1]
+    assert "Revenue increased in June" in payload["messages"][1]["content"]
+    assert "untrusted data" in payload["messages"][0]["content"]
+    assert payload["reasoning_effort"] == "none"
+
+
+def test_image_question_uses_local_vision_description(tmp_path):
+    image = tmp_path / "garden.png"
+    image.write_bytes(b"fake image for mocked vision")
+    with (
+        patch.object(file_chat, "image_description", return_value="A garden with flowers.") as see,
+        patch("cloud_ai.post", return_value={"choices": [{"message": {"content": "Flowers in a garden [1]."}}]}),
+    ):
+        answer = file_chat.answer_from_files("What is shown?", [str(image)])
+    see.assert_called_once_with(Path(image), "What is shown?")
+    assert "Flowers in a garden" in answer
+
+
+def test_large_or_many_files_use_persistent_task(tmp_path):
+    paths = []
+    for index in range(4):
+        path = tmp_path / f"part-{index}.txt"
+        path.write_text("text", encoding="utf-8")
+        paths.append(str(path))
+    assert chat_assistant.route_with_files("What do these say?", [], paths) == "task"
+    unsupported = tmp_path / "archive.zip"
+    unsupported.write_bytes(b"zip")
+    assert chat_assistant.route_with_files("What's in this?", [], [str(unsupported)]) == "task"
+
+
+def test_removed_file_is_reported_before_a_task_is_created(tmp_path):
+    missing = tmp_path / "gone.txt"
+    with pytest.raises(FileNotFoundError, match="no longer available"):
+        chat_assistant.route_with_files("What's in this?", [], [str(missing)])

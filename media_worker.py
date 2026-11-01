@@ -519,7 +519,9 @@ if __name__ == "__main__":
                 "ask_adapter": ask_adapter,
             }
             result = allowed[action](**request)
-        print(json.dumps(result, ensure_ascii=False), flush=True)
+        # Keep the subprocess protocol ASCII-safe on Windows code pages. JSON
+        # escapes preserve Unicode for callers without risking a charmap error.
+        print(json.dumps(result), flush=True)
     except Exception as exc:
         print(json.dumps({"error": str(exc)}), flush=True)
         sys.exit(1)
