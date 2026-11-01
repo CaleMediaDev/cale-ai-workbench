@@ -2247,11 +2247,27 @@ def gui():
     pending_followup = None
     answer_requests = queue.Queue()
     index_requests = queue.Queue()
+    try:
+        remembered = user_file_memory.remembered_roots(STATE)
+        for start in range(0, len(remembered), user_file_memory.MAX_ROOTS):
+            index_requests.put(remembered[start:start + user_file_memory.MAX_ROOTS])
+    except Exception:
+        # Chat remains usable if the optional file-memory database is damaged.
+        pass
 
     def index_worker():
-        """Keep document extraction off the UI thread."""
+        """Index selected folders off the UI thread and discover later additions."""
         while True:
-            paths = index_requests.get()
+            try:
+                paths = index_requests.get(timeout=600)
+            except queue.Empty:
+                try:
+                    remembered = user_file_memory.remembered_roots(STATE)
+                    for start in range(0, len(remembered), user_file_memory.MAX_ROOTS):
+                        index_requests.put(remembered[start:start + user_file_memory.MAX_ROOTS])
+                except Exception:
+                    pass
+                continue
             try:
                 user_file_memory.ingest(STATE, paths)
             except Exception:
@@ -2291,6 +2307,10 @@ def gui():
             return
         selected_paths = list(attachments)
         if selected_paths:
+            try:
+                user_file_memory.remember_roots(STATE, selected_paths)
+            except Exception:
+                conversation_events.put("I couldn't save those files to long-term memory yet.")
             index_requests.put(selected_paths)
         value = chat_assistant.attach_request(raw_value, selected_paths)
         if raw_value == chat_input.get().strip():

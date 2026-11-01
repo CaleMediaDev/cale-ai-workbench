@@ -21,7 +21,7 @@ IMAGES = file_chat.IMAGES
 AUDIO = frozenset({".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"})
 VIDEO = frozenset({".mp4", ".mov", ".mkv", ".avi", ".webm"})
 SUPPORTED = file_chat.PLAIN_TEXT | file_chat.DOCUMENTS | IMAGES | AUDIO | VIDEO
-MAX_FILES = 200
+BATCH_FILES = 50
 MAX_ROOTS = 20
 MAX_BYTES = 15 * 1024 * 1024
 MAX_MEDIA_BYTES = 100 * 1024 * 1024
@@ -34,7 +34,6 @@ def _file_limit(path: Path) -> int:
 
 def _files(paths: list[str]):
     """Walk only user-selected roots, without following directory links."""
-    count = 0
     for raw in paths[:MAX_ROOTS]:
         try:
             selected = Path(raw)
@@ -57,15 +56,12 @@ def _files(paths: list[str]):
 
             candidates = walk()
         for path in candidates:
-            if count >= MAX_FILES:
-                return
             if path.is_symlink() or project_memory.SECRET_NAME.search(path.name):
                 continue
             if path.suffix.casefold() not in SUPPORTED:
                 continue
             if not path.is_file() or path.stat().st_size > _file_limit(path):
                 continue
-            count += 1
             yield path.resolve()
 
 
@@ -168,6 +164,9 @@ def _connection(state: str | Path):
     conn.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
         path UNINDEXED, filename, content, tokenize='unicode61'
     )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS selected_roots (
+        path TEXT PRIMARY KEY, selected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )""")
     try:
         yield conn
         conn.commit()
@@ -175,11 +174,39 @@ def _connection(state: str | Path):
         conn.close()
 
 
+def remember_roots(state: str | Path, paths: list[str]) -> int:
+    """Save only user-selected roots so unfinished indexing can resume later."""
+    selected = []
+    for raw in paths[:MAX_ROOTS]:
+        path = Path(raw)
+        try:
+            if (not path.is_symlink() and (path.is_file() or path.is_dir())
+                    and not project_memory.SECRET_NAME.search(path.name)):
+                selected.append(str(path.resolve(strict=True)))
+        except OSError:
+            continue
+    with _connection(state) as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO selected_roots(path) VALUES(?)",
+            ((path,) for path in selected),
+        )
+    return len(selected)
+
+
+def remembered_roots(state: str | Path) -> list[str]:
+    """Return explicit selections for a background scan after an app restart."""
+    with _connection(state) as conn:
+        return [row[0] for row in conn.execute(
+            "SELECT path FROM selected_roots ORDER BY selected_at,path"
+        )]
+
+
 def ingest(state: str | Path, paths: list[str]) -> dict:
     """Incrementally index supported files and documents from selected roots."""
-    indexed = unchanged = skipped = 0
+    indexed = unchanged = skipped = processed = 0
     with _connection(state) as conn:
         for path in _files(paths):
+            processed += 1
             source = str(path)
             try:
                 stat = path.stat()
@@ -216,6 +243,11 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
                     size=-1, modified_ns=-1, version='', content=''""", (source,))
                 conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
                 skipped += 1
+            finally:
+                if processed % BATCH_FILES == 0:
+                    # Let search and task workers use memory while a large
+                    # folder continues indexing in the background.
+                    conn.commit()
         conn.commit()
     return {"indexed": indexed, "unchanged": unchanged, "skipped": skipped}
 

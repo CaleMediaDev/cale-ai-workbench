@@ -122,6 +122,39 @@ class UserFileMemoryTests(unittest.TestCase):
         last.write_text("desert", encoding="utf-8")
         self.assertEqual(user_file_memory.search(self.state, "desert")[0]["path"], str(last))
 
+    def test_selected_folder_indexes_past_old_two_hundred_file_cutoff(self):
+        folder = self.root / "selected"
+        folder.mkdir()
+        for number in range(225):
+            (folder / f"note-{number:03}.txt").write_text(
+                f"Batch {number} content", encoding="utf-8"
+            )
+        result = user_file_memory.ingest(self.state, [str(folder)])
+        self.assertEqual(result["indexed"], 225)
+        self.assertEqual(
+            user_file_memory.search(self.state, "Batch 224")[0]["path"],
+            str(folder / "note-224.txt"),
+        )
+
+    def test_explicit_roots_are_saved_for_background_resume(self):
+        folder = self.root / "selected"
+        folder.mkdir()
+        (folder / "notes.md").write_text("Recoverable notes", encoding="utf-8")
+        self.assertEqual(user_file_memory.remember_roots(self.state, [str(folder)]), 1)
+        self.assertEqual(user_file_memory.remembered_roots(self.state), [str(folder)])
+        self.assertEqual(user_file_memory.ingest(
+            self.state, user_file_memory.remembered_roots(self.state)
+        )["indexed"], 1)
+        self.assertEqual(user_file_memory.search(self.state, "Recoverable")[0]["path"],
+                         str(folder / "notes.md"))
+        later = folder / "added-later.md"
+        later.write_text("New information after selection", encoding="utf-8")
+        self.assertEqual(user_file_memory.ingest(
+            self.state, user_file_memory.remembered_roots(self.state)
+        )["indexed"], 1)
+        self.assertEqual(user_file_memory.search(self.state, "information")[0]["path"],
+                         str(later))
+
     def test_failed_extraction_keeps_selected_file_for_retry(self):
         path = self.root / "notes.txt"
         path.write_text("recoverable", encoding="utf-8")
