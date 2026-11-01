@@ -11,6 +11,7 @@ import ctypes
 import json
 import os
 import re
+import shutil
 import sqlite3
 import time
 import uuid
@@ -20,6 +21,12 @@ from pathlib import Path
 DB_NAME = "computer-files.sqlite3"
 STATUS_NAME = "computer-files-status.json"
 BATCH = 1000
+MIN_FREE_BYTES = 5 * 1024**3
+
+
+def enough_space(state: str | Path) -> bool:
+    """Leave room for Windows and the person's own files during a large scan."""
+    return shutil.disk_usage(state).free >= MIN_FREE_BYTES
 
 
 def folder_priority(folder: Path, home: Path | None = None) -> int:
@@ -102,6 +109,14 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> d
     _status(state, status="working", files=0, folders=0, roots=[str(r) for r in roots])
     try:
         with database(state) as conn:
+            if not enough_space(state):
+                result = {
+                    "status": "waiting_for_space", "files": 0, "folders": 0,
+                    "roots": [str(r) for r in roots],
+                    "message": "Free at least 5 GB on the drive holding Cale's index to continue.",
+                }
+                _status(state, **result)
+                return result
             for root in roots:
                 pending = [root]
                 while pending:
@@ -138,6 +153,15 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> d
                                             folders=folders, unreadable=unreadable,
                                             roots=[str(r) for r in roots],
                                         )
+                                    if processed % (BATCH * 10) == 0 and not enough_space(state):
+                                        result = {
+                                            "status": "waiting_for_space", "files": files,
+                                            "folders": folders, "unreadable": unreadable,
+                                            "roots": [str(r) for r in roots],
+                                            "message": "Free at least 5 GB on the drive holding Cale's index to continue.",
+                                        }
+                                        _status(state, **result)
+                                        return result
                                 except OSError:
                                     unreadable += 1
                     except OSError:

@@ -2980,7 +2980,7 @@ def gui():
         import file_catalog
 
         index_status = file_catalog.status(STATE)
-        if index_status.get("status") in ("working", "error"):
+        if index_status.get("status") in ("working", "error", "waiting_for_space"):
             if file_index_card is None:
                 file_index_card = create_progress_card("Find files on this PC", models_section)
                 file_index_card["bar"].configure(mode="indeterminate")
@@ -2991,13 +2991,15 @@ def gui():
                 f"{index_status.get('files', 0):,} files, "
                 f"{index_status.get('folders', 0):,} folders found"
                 if index_status.get("status") == "working"
-                else str(index_status.get("error", "Index needs attention")),
+                else str(index_status.get("message") or index_status.get("error", "Index needs attention")),
             )
             set_text(
                 file_index_card["state"],
-                "Scanning" if index_status.get("status") == "working" else "Needs attention",
+                "Scanning" if index_status.get("status") == "working"
+                else "Needs space" if index_status.get("status") == "waiting_for_space"
+                else "Needs attention",
             )
-            if index_status.get("status") == "error":
+            if index_status.get("status") != "working":
                 file_index_card["bar"].stop()
         elif file_index_card is not None:
             file_index_card["bar"].stop()

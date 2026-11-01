@@ -3,11 +3,48 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import file_catalog
 
 
 class FileCatalogTests(unittest.TestCase):
+    def test_low_space_keeps_previous_results(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            kept = root / "kept.txt"
+            kept.write_text("contents never indexed", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            with patch.object(file_catalog.shutil, "disk_usage", return_value=SimpleNamespace(free=0)):
+                result = file_catalog.scan_computer(state, [root])
+            self.assertEqual(result["status"], "waiting_for_space")
+            self.assertEqual(file_catalog.search(state, "kept")[0]["path"], str(kept))
+
+    def test_low_space_mid_scan_stops_before_pruning(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            prior = root / "prior.txt"
+            prior.write_text("old", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            prior.unlink()
+            for number in range(12):
+                (root / f"new-{number}.txt").write_text("new", encoding="utf-8")
+            with patch.object(file_catalog, "BATCH", 1), patch.object(
+                file_catalog.shutil, "disk_usage",
+                side_effect=[SimpleNamespace(free=file_catalog.MIN_FREE_BYTES), SimpleNamespace(free=0)],
+            ):
+                result = file_catalog.scan_computer(state, [root])
+            self.assertEqual(result["status"], "waiting_for_space")
+            with file_catalog.database(state) as conn:
+                self.assertIsNotNone(
+                    conn.execute("SELECT id FROM entries WHERE path=?", (str(prior),)).fetchone()
+                )
+
     def test_personal_folders_scan_first(self):
         home = Path("C:/Users/person")
         self.assertGreater(
