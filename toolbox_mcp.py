@@ -78,6 +78,13 @@ LOCAL_CATALOG = {
             "source_path": {"type": "string"},
         }, "required": ["source_path"]},
     },
+    "local.master_music": {
+        "description": "Master a local song against a reference song using Matchering. Makes a new 24-bit WAV, preserving both inputs. Installs the separate local mastering runtime on first use; no account or cloud AI.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_path": {"type": "string"}, "reference_path": {"type": "string"},
+            "output_path": {"type": "string"},
+        }, "required": ["source_path", "reference_path", "output_path"]},
+    },
 }
 
 
@@ -262,6 +269,7 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "local.separate_music": separate_music,
             "local.audio_to_midi": audio_to_midi,
             "local.analyze_music": analyze_music,
+            "local.master_music": master_music,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -576,6 +584,17 @@ async def audio_to_midi(source_path: str, output_dir: str) -> dict:
 async def analyze_music(source_path: str) -> dict:
     """Measure an existing song before remixing, covering, or composing with it."""
     return await media_run("analyze_music", 900, source_path=source_path)
+
+
+@server.tool()
+async def master_music(source_path: str, reference_path: str, output_path: str) -> dict:
+    """Master a local song to match a reference song; save a new WAV without changing either input."""
+    import music_mastering
+
+    return await asyncio.wait_for(
+        asyncio.to_thread(music_mastering.master_music, source_path, reference_path, output_path),
+        timeout=3900,
+    )
 
 
 @server.tool()
