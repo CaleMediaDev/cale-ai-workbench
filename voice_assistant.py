@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-WAKE = re.compile(r"^\s*(?:hey|okay|ok)?\s*(?:cale|kale)\b[\s,.:;!-]*", re.IGNORECASE)
+WAKE = re.compile(r"^\s*hey\s+(?:cale|kale)\b[\s,.:;!-]*", re.IGNORECASE)
 IDLE_TIMES = (120, 600, 1800, 3600)
 STUCK_TIMES = (120, 480, 1200, 3600)
 

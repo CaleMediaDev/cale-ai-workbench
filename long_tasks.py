@@ -1347,7 +1347,7 @@ def gui():
             speech_queue.put((message, rate))
 
     initial_setup = read_task_status(STATE / "install-progress.json")
-    introduction_marker = STATE / "introduction-spoken"
+    introduction_marker = STATE / "introduction-spoken-v2"
     introduction_queued = introduction_marker.is_file()
     setup_spoken_step = str(initial_setup.get("current", "")) if initial_setup else ""
     if initial_setup and initial_setup.get("status") != "complete":
@@ -1387,8 +1387,9 @@ def gui():
         speak_update(
             "Hi, I'm Cale. I can research, build websites and apps, work with files, "
             "and keep going on long projects. Your tasks and progress are right here. "
-            "Click New task and tell me what you want, or turn the mic on and talk to me. "
-            "You can also press Control Alt Space to speak once. I'll tell you what I'm "
+            "Click New task and tell me what you want. My mic is off until you turn it on. "
+            "With the mic on, I only respond when you say Hey Cale before an instruction. "
+            "You can also press Control Alt Space to speak once without a wake phrase. I'll tell you what I'm "
             "doing, and a side window will show website, app, and Chrome work. "
             "If you want stronger online AI, use Supercharge my AI at the top. "
             "What should we make first?"

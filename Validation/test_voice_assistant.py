@@ -29,6 +29,14 @@ class VoiceTests(unittest.TestCase):
         self.assertIsNone(
             voice_assistant.spoken_command("pause the task", require_wake=True)
         )
+        self.assertIsNone(
+            voice_assistant.spoken_command("Cale, pause the task", require_wake=True)
+        )
+        self.assertIsNone(
+            voice_assistant.spoken_command(
+                "Okay Cale, pause the task", require_wake=True
+            )
+        )
         self.assertEqual(
             voice_assistant.spoken_command(
                 "Hey Kale, pause the task", require_wake=True
