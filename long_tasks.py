@@ -1383,15 +1383,34 @@ def gui():
     window.after(1000, paint_gauges)
 
     main_page = ttk.Frame(outer)
-    super_page = ttk.Frame(outer)
+    super_shell = ttk.Frame(outer)
+    super_canvas = tk.Canvas(
+        super_shell, background=bg, borderwidth=0, highlightthickness=0,
+    )
+    super_scroll = ttk.Scrollbar(
+        super_shell, orient="vertical", command=super_canvas.yview,
+    )
+    super_canvas.configure(yscrollcommand=super_scroll.set)
+    super_scroll.pack(side="right", fill="y")
+    super_canvas.pack(side="left", fill="both", expand=True)
+    super_page = ttk.Frame(super_canvas)
+    super_window = super_canvas.create_window(
+        (0, 0), window=super_page, anchor="nw",
+    )
+    super_page.bind(
+        "<Configure>", lambda _: super_canvas.configure(scrollregion=super_canvas.bbox("all")),
+    )
+    super_canvas.bind(
+        "<Configure>", lambda event: super_canvas.itemconfigure(super_window, width=event.width),
+    )
 
     def show_super():
         main_page.pack_forget()
         rocket.pack_forget()
-        super_page.pack(fill="both", expand=True)
+        super_shell.pack(fill="both", expand=True)
 
     def show_main():
-        super_page.pack_forget()
+        super_shell.pack_forget()
         rocket.pack(side="right")
         main_page.pack(fill="both", expand=True)
 
@@ -1409,10 +1428,62 @@ def gui():
     )
     ttk.Label(
         super_page,
-        text="Connect free online AI when you want more help.",
+        text="Give your local AI more room to think, or connect optional online help.",
         font=("Segoe UI", 14),
         style="Muted.TLabel",
     ).pack(anchor="w", pady=(5, 12))
+
+    # NVIDIA provides the product photograph as a newsroom media asset. Keep
+    # the supplied Amazon link intact so the owner's referral tag survives.
+    spark_link = "https://link.amazon/B0j9RBQZ9"
+    spark_card = ttk.Frame(super_page, style="Card.TFrame", padding=(14, 13))
+    spark_card.pack(fill="x", pady=(0, 13))
+    spark_photo = ROOT / "assets/dgx-spark-nvidia.jpg"
+    if spark_photo.is_file():
+        with Image.open(spark_photo) as source:
+            crop = source.crop((1260, 650, 1720, 930))
+            crop.thumbnail((300, 190), Image.Resampling.LANCZOS)
+            window.spark_image = ImageTk.PhotoImage(crop)
+        tk.Label(
+            spark_card, image=window.spark_image, bg=card, borderwidth=0,
+        ).pack(side="left", padx=(0, 18), anchor="n")
+    spark_copy = ttk.Frame(spark_card, style="Card.TFrame")
+    spark_copy.pack(side="left", fill="x", expand=True)
+    ttk.Label(
+        spark_copy, text="LOCAL AI HARDWARE PICK", style="CardMuted.TLabel",
+        font=("Segoe UI", 9, "bold"),
+    ).pack(anchor="w")
+    ttk.Label(
+        spark_copy, text="Buy a local supercomputer", style="Card.TLabel",
+        font=("Segoe UI", 20, "bold"),
+    ).pack(anchor="w", pady=(1, 6))
+    ttk.Label(
+        spark_copy,
+        text=(
+            "Own the compute. NVIDIA DGX Spark packs 128 GB of unified memory "
+            "into a desktop AI computer, giving massive local models room to run. "
+            "NVIDIA rates supported FP4 models up to 200B parameters. Build, "
+            "create and experiment without metered cloud tokens for work you run locally."
+        ),
+        style="Card.TLabel", wraplength=430, justify="left",
+    ).pack(anchor="w", pady=(0, 8))
+    ttk.Button(
+        spark_copy, text="Explore DGX Spark on Amazon ↗",
+        command=lambda: webbrowser.open(spark_link), style="Accent.TButton",
+    ).pack(anchor="w")
+    ttk.Label(
+        spark_copy,
+        text=(
+            "DGX Spark uses Linux/Arm; this Workbench installer currently runs on Windows x64. "
+            "As an Amazon Associate, Cale Media earns from qualifying purchases."
+        ),
+        style="CardMuted.TLabel", wraplength=430, justify="left",
+        font=("Segoe UI", 9),
+    ).pack(anchor="w", pady=(8, 0))
+    ttk.Label(
+        super_page, text="Product photo courtesy of NVIDIA.",
+        style="Muted.TLabel", font=("Segoe UI", 8),
+    ).pack(anchor="w", pady=(0, 8))
     ttk.Label(
         super_page, text="Your projects on GitHub", font=("Segoe UI", 18, "bold")
     ).pack(anchor="w", pady=(2, 4))
@@ -2326,6 +2397,19 @@ def gui():
     window.bind_all("<MouseWheel>", on_mousewheel, add="+")
     window.bind_all("<Button-4>", on_wheel_button, add="+")
     window.bind_all("<Button-5>", on_wheel_button, add="+")
+
+    def scroll_super(event):
+        if not super_shell.winfo_ismapped():
+            return None
+        widget = window.winfo_containing(window.winfo_pointerx(), window.winfo_pointery())
+        while widget is not None:
+            if widget is super_canvas or widget is super_page:
+                super_canvas.yview_scroll(-3 if event.delta > 0 else 3, "units")
+                return "break"
+            widget = widget.master
+        return None
+
+    window.bind_all("<MouseWheel>", scroll_super, add="+")
 
     def task_action(pid, kind):
         item = next((p for p in projects() if p["id"] == pid), None)
