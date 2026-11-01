@@ -4591,7 +4591,7 @@ def gui():
             pass
         # A worker may run for days. Refresh a staged release while it works
         # so the eventual idle install uses the newest available version.
-        update_interval = 300 if pending_update else 1800
+        update_interval = 300
         if not updating and time.monotonic() - window.update_checked_at >= update_interval:
             window.update_checked_at = time.monotonic()
             threading.Thread(target=check_updates, daemon=True).start()
@@ -4680,6 +4680,47 @@ def gui():
     window.mainloop()
 
 
+def focus_existing_window():
+    """Bring the already-open workbench forward on Windows."""
+    if os.name != "nt":
+        return False
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    user32.FindWindowW.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p)
+    user32.FindWindowW.restype = ctypes.c_void_p
+    window = user32.FindWindowW(None, "Cale AI Local Workbench")
+    if not window:
+        return False
+    user32.ShowWindow(window, 9)  # SW_RESTORE
+    return bool(user32.SetForegroundWindow(window))
+
+
+def gui_single_instance():
+    """Keep one visible desktop shell; release the lock when its window closes."""
+    if os.name != "nt":
+        return gui()
+    import msvcrt
+
+    STATE.mkdir(exist_ok=True)
+    with (STATE / "gui.lock").open("a+b") as lock:
+        lock.seek(0, 2)
+        if lock.tell() == 0:
+            lock.write(b"1")
+            lock.flush()
+        lock.seek(0)
+        try:
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            focus_existing_window()
+            return
+        try:
+            gui()
+        finally:
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--monitor", action="store_true")
@@ -4695,4 +4736,4 @@ if __name__ == "__main__":
         except (OSError, ValueError) as exc:
             (ROOT / "Updates").mkdir(exist_ok=True)
             (ROOT / "Updates/skills-error.txt").write_text(str(exc), encoding="utf-8")
-    monitor() if args.monitor else gui()
+    monitor() if args.monitor else gui_single_instance()
