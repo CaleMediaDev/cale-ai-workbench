@@ -163,6 +163,7 @@ class LongTaskTests(unittest.TestCase):
         self.verify_script(
             'if ((2 + 2) -ne 4) { exit 1 }; Write-Output "assertion passed"; exit 0'
         )
+        task_module.update(self.pid, card="build-card")
         with (
             patch.object(task_module, "board") as board,
             patch.object(task_module, "create_card") as create,
@@ -171,7 +172,7 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(self.item()["phase"], "review")
         self.assertNotEqual(self.item()["status"], "ready_for_review")
         self.assertEqual(create.call_count, 1)
-        board.assert_not_called()
+        self.assertEqual(board.call_args.args, ("archive", "build-card"))
 
     def test_review_requires_fresh_passing_checks(self):
         self.verify_script('Write-Output "assertions passed"; exit 0')
@@ -198,20 +199,26 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(create.call_count, 2)
         board.assert_not_called()
 
-    def test_verified_task_archives_a_ready_board_card_once(self):
+    def test_verified_task_archives_ready_card_from_older_generation_once(self):
         folder = self.base / "project"
         task_module.update(
-            self.pid, card="ready-card", phase="review",
+            self.pid, card="current-review-card", phase="review",
             status="ready_for_review", fingerprint=task_module.fingerprint(folder),
         )
+        listing = [
+            {"id": "ready-card", "status": "ready", "workspace_path": str(folder)},
+            {"id": "current-review-card", "status": "review", "workspace_path": str(folder)},
+            {"id": "other-card", "status": "ready", "workspace_path": str(self.base / "other")},
+        ]
         with (
-            patch.object(task_module, "REVIEW_CARD_CHECKED", set()),
-            patch.object(task_module, "board", return_value={"task": {"status": "ready"}}) as board,
+            patch.object(task_module, "REVIEW_PROJECTS_CHECKED", set()),
+            patch.object(task_module, "board", side_effect=[listing, "Archived"]) as board,
         ):
             task_module.tick()
             task_module.tick()
         self.assertEqual(self.item()["status"], "ready_for_review")
-        self.assertEqual([call.args[0] for call in board.call_args_list], ["show", "archive"])
+        self.assertEqual([call.args[0] for call in board.call_args_list], ["list", "archive"])
+        self.assertEqual(board.call_args.args[1], "ready-card")
 
     def test_verified_task_blocks_running_worker_before_archiving(self):
         folder = self.base / "project"
@@ -222,19 +229,20 @@ class LongTaskTests(unittest.TestCase):
         states = iter(("running", "triage"))
 
         def board_call(command, *args, **kwargs):
-            if command == "show":
-                return {"task": {"status": next(states)}}
+            if command == "list":
+                return [{"id": "running-card", "status": next(states),
+                         "workspace_path": str(folder)}]
             return "ok"
 
         with (
-            patch.object(task_module, "REVIEW_CARD_CHECKED", set()),
+            patch.object(task_module, "REVIEW_PROJECTS_CHECKED", set()),
             patch.object(task_module, "board", side_effect=board_call) as board,
         ):
             task_module.tick()
             task_module.tick()
         self.assertEqual(
             [call.args[0] for call in board.call_args_list],
-            ["show", "block", "show", "archive"],
+            ["list", "block", "list", "archive"],
         )
 
     def test_review_feedback_starts_a_new_saved_generation(self):

@@ -653,9 +653,11 @@ def handle_handoff(p, task):
         return
     if p["phase"] == "build":
         # Fresh worker/context reviews the finished work against the original request.
-        # Keep the implementation card's review state/history. Its worker has
-        # handed off; local review dispatch is disabled. Do not ask an LLM judge
-        # to certify an implementation while the separate review is still owed.
+        # Archive the implementation card after its worker has handed off. The
+        # board retains its history, but cannot dispatch that old generation
+        # again while the separate review worker checks the same project.
+        if p["card"]:
+            board("archive", p["card"])
         update(
             p["id"],
             card="",
@@ -679,27 +681,36 @@ def handle_handoff(p, task):
         )
 
 
-REVIEW_CARD_CHECKED = set()
+REVIEW_PROJECTS_CHECKED = set()
 
 
-def retire_review_card(p):
-    """Keep an already verified task from being dispatched a second time.
+def retire_review_cards(p):
+    """Keep all generations of a verified task from being dispatched again.
 
-    A normal review handoff leaves its card in review. A recovered or manually
-    verified project may still have a ready board card; archive that card once.
-    Running workers are blocked first and archived on the next supervisor tick.
+    A project may have older implementation and review cards. The current card
+    alone cannot reveal a stale worker in the same folder. Inspect the board
+    once per reviewed project; running workers are blocked first and archived
+    after they retire on a later supervisor tick.
     """
-    card = p["card"]
-    if not card or card in REVIEW_CARD_CHECKED:
+    if p["id"] in REVIEW_PROJECTS_CHECKED:
         return
-    snapshot = board("show", card, "--json", parse=True)
-    state = snapshot["task"]["status"]
-    if state == "running":
-        board("block", card, "Task is independently verified and ready for user review", "--kind", "needs_input")
-        return
-    if state in ("ready", "scheduled", "blocked", "triage"):
-        board("archive", card)
-    REVIEW_CARD_CHECKED.add(card)
+    folder = os.path.normcase(str(Path(p["folder"]).resolve()))
+    retiring = False
+    for task in board("list", "--json", parse=True):
+        workspace = task.get("workspace_path")
+        if not workspace or os.path.normcase(str(Path(workspace).resolve())) != folder:
+            continue
+        state, card = task["status"], task["id"]
+        if state == "running":
+            board(
+                "block", card, "Project is independently verified and ready for review",
+                "--kind", "needs_input",
+            )
+            retiring = True
+        elif state in ("ready", "scheduled", "blocked", "triage"):
+            board("archive", card)
+    if not retiring:
+        REVIEW_PROJECTS_CHECKED.add(p["id"])
 
 
 def process_requests():
@@ -868,7 +879,7 @@ def advance_project(p):
                 fingerprint=fingerprint(folder) if passed else "",
             )
             return
-        retire_review_card(p)
+        retire_review_cards(p)
         if fingerprint(Path(p["folder"])) != p["fingerprint"]:
             update(
                 p["id"],
