@@ -3947,8 +3947,9 @@ def gui():
         "<Configure>",
         lambda event: canvas.itemconfigure(cards_window, width=event.width),
     )
-    usage_panel = ttk.Frame(main_page, style="Card.TFrame", padding=(14, 8))
-    usage_panel.pack(side="bottom", fill="x", pady=(9, 0))
+    # Keep tasks first in the shared scroll area. A growing per-model graph
+    # must never consume the viewport and hide the task cards on launch.
+    usage_panel = ttk.Frame(cards, style="Card.TFrame", padding=(14, 8))
     list_wrap.pack(fill="both", expand=True)
     usage_header = ttk.Frame(usage_panel, style="Card.TFrame")
     usage_header.pack(fill="x")
@@ -4363,6 +4364,7 @@ def gui():
     # details on the main screen. The separate model worker owns downloads.
     models_section = ttk.Frame(cards)
     models_section.pack(fill="x")
+    usage_panel.pack(fill="x", pady=(9, 0))
 
     def set_text(variable, value):
         if variable.get() != value:
