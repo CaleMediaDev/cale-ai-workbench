@@ -434,7 +434,7 @@ def token_legend_layout(models, width):
     heights = []
     for start in range(0, len(models), columns):
         row = labels[start:start + columns]
-        heights.append(max(23, max(label.count("\n") + 1 for label in row) * 15 + 8))
+        heights.append(max(39, max(label.count("\n") + 1 for label in row) * 15 + 22))
     offsets = []
     y = 144
     for height in heights:
@@ -2300,11 +2300,10 @@ def gui():
         window.iconbitmap(default=str(icon_path))
     # Use the available desktop height so the task list is visible at launch.
     # Users can still restore and resize the window whenever they like.
+    window.geometry("1280x900")
     if os.name == "nt":
         window.state("zoomed")
-    else:
-        window.geometry("1120x900")
-    window.minsize(850, 600)
+    window.minsize(1050, 740)
     bg, card, field = "#0b1020", "#151d31", "#202d46"
     text, muted, accent = "#edf3ff", "#aab8d3", "#6e82ff"
     window.configure(background=bg)
@@ -2344,8 +2343,21 @@ def gui():
         thickness=12,
     )
 
-    outer = ttk.Frame(window, padding=(26, 20))
-    outer.pack(fill="both", expand=True)
+    # Keep dense task text within a readable width on large monitors while
+    # still using the full available height for the task list.
+    outer = ttk.Frame(window, padding=(20, 16))
+
+    def fit_content(event):
+        if event.widget is not window:
+            return
+        content_width = min(1680, max(810, event.width - 40))
+        outer.place(
+            x=max(0, (event.width - content_width) // 2), y=0,
+            width=content_width, height=event.height,
+        )
+
+    window.bind("<Configure>", fit_content, add="+")
+    outer.place(x=0, y=0, width=1120, height=window.winfo_height())
     header = ttk.Frame(outer)
     header.pack(fill="x", pady=(0, 8))
     logo_path = ROOT / "assets/cale-logo.png"
@@ -2380,44 +2392,44 @@ def gui():
     # The RPM-style ring moves from green through amber to red as load rises.
     gauge_widgets = {}
     gauge_row = ttk.Frame(outer)
-    gauge_row.pack(fill="x", pady=(0, 6))
+    gauge_row.pack(fill="x", pady=(2, 14))
     drive_free_text = tk.StringVar(value="")
     drive_rate_text = tk.StringVar(value="")
     net_rate_text = tk.StringVar(value="")
     offline_button = None
     for column, gauge_name in enumerate(("cpu", "ram", "gpu", "drive", "net")):
-        center = 60
+        center = 70
         gauge_row.columnconfigure(column, weight=1, uniform="gauges")
-        holder = ttk.Frame(gauge_row)
-        holder.grid(row=0, column=column, sticky="nsew", padx=3)
+        holder = ttk.Frame(gauge_row, style="Card.TFrame", padding=(6, 6))
+        holder.grid(row=0, column=column, sticky="nsew", padx=5)
         gauge_canvas = tk.Canvas(
-            holder, width=120, height=76,
-            bg=bg, highlightthickness=0, borderwidth=0
+            holder, width=140, height=90,
+            bg=card, highlightthickness=0, borderwidth=0
         )
         gauge_canvas.pack(anchor="center")
         segments = [
             gauge_canvas.create_arc(
-                center - 26, 6, center + 26, 58,
+                center - 34, 4, center + 34, 72,
                 start=90 - index * 15, extent=-12.5,
-                style="arc", outline=system_gauges.dim_rpm_color(index / 23), width=6,
+                style="arc", outline=system_gauges.dim_rpm_color(index / 23), width=8,
             )
             for index in range(24)
         ]
         value = gauge_canvas.create_text(
-            center, 32, text="—", fill=text,
-            font=("Segoe UI", 12, "bold")
+            center, 38, text="—", fill=text,
+            font=("Segoe UI", 16, "bold")
         )
         gauge_canvas.create_text(
-            center, 66, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 8, "bold")
+            center, 82, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 10, "bold")
         )
         detail = drive_free_text if gauge_name == "drive" else net_rate_text if gauge_name == "net" else ""
         ttk.Label(holder, textvariable=detail if detail else None,
-                  text="" if detail else " ", style="Muted.TLabel",
-                  font=("Segoe UI", 9), anchor="center").pack(fill="x")
+                  text="" if detail else " ", style="CardMuted.TLabel",
+                  font=("Segoe UI", 10), anchor="center").pack(fill="x")
         detail = drive_rate_text if gauge_name == "drive" else ""
         ttk.Label(holder, textvariable=detail if detail else None,
-                  text="" if detail else " ", style="Muted.TLabel",
-                  font=("Segoe UI", 9), anchor="center").pack(fill="x")
+                  text="" if detail else " ", style="CardMuted.TLabel",
+                  font=("Segoe UI", 10), anchor="center").pack(fill="x")
         gauge_widgets[gauge_name] = (gauge_canvas, segments, value)
         if gauge_name == "net":
             offline_button = ttk.Button(
@@ -3321,6 +3333,52 @@ def gui():
 
     mic_button = ttk.Button(title_row, text="🎤  Mic Off", command=toggle_listening)
     mic_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    presence = tk.Canvas(
+        header, width=148, height=46, background=bg,
+        highlightthickness=0, borderwidth=0,
+    )
+    presence.pack(side="left", padx=(8, 0))
+    presence_phase = [0]
+    presence_mode = ["ready"]
+
+    def animate_presence():
+        """Give the desktop a quiet, truthful heartbeat for its current state."""
+        import math
+
+        presence_phase[0] += 1
+        if presence_phase[0] % 6 == 1:
+            try:
+                active = any(
+                    item["status"] in ("working", "checking", "queued", "waiting_for_setup")
+                    for item in projects()
+                )
+            except (OSError, sqlite3.Error):
+                active = False
+            presence_mode[0] = "working" if active else "ready"
+        mode = (
+            "speaking" if voice_speaking.is_set() else
+            "listening" if listening.is_set() else presence_mode[0]
+        )
+        colors = {
+            "speaking": "#75d8ff", "listening": "#58e4b5",
+            "working": "#ffbd68", "ready": "#8797ff",
+        }
+        color = colors[mode]
+        pulse = (math.sin(presence_phase[0] * 0.28) + 1) / 2
+        presence.delete("all")
+        presence.create_oval(
+            8 - 5 * pulse, 11 - 5 * pulse, 32 + 5 * pulse, 35 + 5 * pulse,
+            outline=color, width=1,
+        )
+        presence.create_oval(13, 16, 27, 30, fill=color, outline="")
+        presence.create_text(
+            42, 23, anchor="w", text=mode.capitalize(), fill=text,
+            font=("Segoe UI", 10, "bold"),
+        )
+        if window.winfo_exists():
+            window.after(180, animate_presence)
+
+    window.after(180, animate_presence)
     greeting_config = ROOT / "Media/camera-greeting.json"
     camera_consent = ROOT / "Media/camera-consent.json"
     greeting_process = [None]
@@ -3393,12 +3451,13 @@ def gui():
     if greeting_until[0] > time.time():
         start_camera_greeting()
     window.bind("<Control-Alt-space>", lambda _: record_voice())
-    ttk.Label(main_page, textvariable=voice_label, style="Muted.TLabel").pack(
-        anchor="w", pady=(0, 5)
+    ttk.Label(title_copy, textvariable=voice_label, style="Muted.TLabel",
+              wraplength=310).pack(
+        anchor="w", pady=(8, 2)
     )
     ttk.Label(
-        main_page, textvariable=status, style="Muted.TLabel", wraplength=1000
-    ).pack(anchor="w", pady=(0, 6))
+        title_copy, textvariable=status, style="Muted.TLabel", wraplength=310
+    ).pack(anchor="w", pady=(0, 3))
     chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=12)
     chat_panel.pack(side="left", fill="both", expand=True)
     ttk.Label(chat_panel, text="Chat with Cale", style="Card.TLabel",
@@ -3526,8 +3585,13 @@ def gui():
         save_chat("assistant", content)
         show_chat("assistant", content)
 
+    prior_message = None
     for previous in chat_history(500):
+        identity = (previous["role"], previous["content"])
+        if identity == prior_message and previous["role"] == "assistant":
+            continue  # Repeated launch greetings add no value to the transcript.
         show_chat(previous["role"], previous["content"], speak=False)
+        prior_message = identity
     conversation.see("end")
     # A restart can interrupt a spoken replay. Resume the latest request once
     # the chat and speech queue are ready, without inventing a new task.
@@ -3789,7 +3853,7 @@ def gui():
     usage_header = ttk.Frame(usage_panel, style="Card.TFrame")
     usage_header.pack(fill="x")
     ttk.Label(
-        usage_header, text="✦  Total tokens used", style="Card.TLabel",
+        usage_header, text="✦  Model activity", style="Card.TLabel",
         font=("Segoe UI", 12, "bold"),
     ).pack(side="left")
     usage_total = ttk.Label(usage_header, text="", style="CardMuted.TLabel")
@@ -3879,6 +3943,7 @@ def gui():
             right, 8, anchor="ne", text=f"Peak {maximum:,} tokens",
             fill=muted, font=("Segoe UI", 9),
         )
+        largest_model = max((item["tokens"] for item in models), default=1)
         for index, item in enumerate(legend):
             x, y = item["x"], item["y"]
             usage_canvas.create_rectangle(
@@ -3892,6 +3957,17 @@ def gui():
             usage_canvas.create_text(
                 x + column_width - 18, y + 3, anchor="ne", text=f"{item['tokens']:,}",
                 fill=muted, font=("Segoe UI", 9, "bold"),
+            )
+            bar_right = x + column_width - 18
+            bar_top = y + 18 + 15 * item["label"].count("\n")
+            usage_canvas.create_rectangle(
+                x + 16, bar_top, bar_right, bar_top + 4,
+                fill="#2a3853", outline="",
+            )
+            usage_canvas.create_rectangle(
+                x + 16, bar_top,
+                x + 16 + (bar_right - x - 16) * item["tokens"] / largest_model,
+                bar_top + 4, fill=colors[index % len(colors)], outline="",
             )
         if not models:
             usage_canvas.create_text(
