@@ -13,6 +13,25 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_paused_task_waits_for_its_real_worker_before_update(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            executable = root / "data/tools/python.exe"
+            executable.parent.mkdir(parents=True)
+            worker = MagicMock(info={
+                "exe": str(executable),
+                "cmdline": [str(executable), "-m", "agent.managed_worker"],
+            })
+            with patch.object(self_update, "ROOT", root), patch(
+                "long_tasks.projects", return_value=[{"status": "paused"}]
+            ), patch("psutil.process_iter", return_value=[worker]):
+                self.assertTrue(self_update.active_tasks())
+            worker.info["exe"] = str(root.parent / "other-install/python.exe")
+            with patch.object(self_update, "ROOT", root), patch(
+                "long_tasks.projects", return_value=[{"status": "paused"}]
+            ), patch("psutil.process_iter", return_value=[worker]):
+                self.assertFalse(self_update.active_tasks())
+
     def test_update_installs_new_media_pin_before_swapping_source(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

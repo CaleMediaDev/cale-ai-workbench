@@ -159,12 +159,34 @@ def stage():
 
 
 def active_tasks():
-    """Source files may change only when no project worker is active."""
+    """Source files may change only when no project worker is active.
+
+    A pause or stop updates the project row before Hermes has necessarily
+    retired its worker. Check the actual process too, or an update could swap
+    the source underneath that still-running worker.
+    """
     from long_tasks import projects
 
-    return any(
+    if any(
         task["status"] in ("queued", "working", "checking") for task in projects()
-    )
+    ):
+        return True
+    import psutil
+
+    install = ROOT.resolve()
+    for process in psutil.process_iter(["exe", "cmdline"]):
+        try:
+            command = process.info["cmdline"] or []
+            executable = process.info["exe"]
+            if (
+                executable
+                and "agent.managed_worker" in command
+                and Path(executable).resolve().is_relative_to(install)
+            ):
+                return True
+        except (OSError, psutil.Error):
+            continue
+    return False
 
 
 def add_design_tools_to_config(root, backup):

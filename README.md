@@ -88,6 +88,8 @@ The desktop rechecks GitHub releases while long tasks are running. If a newer re
 
 Automatic model sizing ignores Hermes's own board-finish reminders. A simple task therefore stays on the appropriate fast or middle model after a reminder, while a real new user request can still scale it up.
 
+Updates wait for the actual Hermes worker process to exit, including the short retirement period after Pause or Stop changes a task card's status.
+
 When someone asks Cale to revise a finished image or song, the task keeps its original plan and adds fresh revision milestones. Its progress starts over for the new request. An empty revision message leaves the existing render running.
 
 The supervisor handles task controls even when a local model or gateway is temporarily unavailable. A failure on one task is recorded for retry without preventing other saved tasks from advancing.
