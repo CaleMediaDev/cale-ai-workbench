@@ -93,6 +93,32 @@ def image_description(path: Path, question: str) -> str:
     return str(answer.get("description", "")).strip()
 
 
+def document_text(path: Path, max_scanned_pages: int = 6) -> str:
+    """Extract document text, falling back to offline vision for scan-only PDFs."""
+    from markitdown import MarkItDown
+
+    text = MarkItDown(enable_plugins=False).convert(str(path)).text_content or ""
+    if path.suffix.casefold() != ".pdf" or text.strip():
+        return text
+    python = ROOT / "Media/python/Scripts/python.exe"
+    if not python.is_file():
+        raise RuntimeError("The local scanned-PDF reader is still installing.")
+    result = subprocess.run(
+        [str(python), str(ROOT / "media_worker.py")],
+        input=json.dumps({"action": "read_scanned_pdf", "path": str(path),
+                          "max_pages": max_scanned_pages}),
+        text=True, capture_output=True, encoding="utf-8", errors="replace",
+        cwd=ROOT, timeout=1800, creationflags=HIDE,
+    )
+    try:
+        answer = json.loads(result.stdout.splitlines()[-1])
+    except (IndexError, ValueError) as exc:
+        raise RuntimeError("The local scanned-PDF reader did not respond.") from exc
+    if result.returncode or "error" in answer:
+        raise RuntimeError(str(answer.get("error", "Could not read the scanned PDF.")))
+    return str(answer.get("text", ""))
+
+
 def file_excerpt(path: Path, question: str) -> str:
     """Extract bounded local text; never send the file to an online provider."""
     if path.suffix.casefold() in IMAGES:
@@ -100,9 +126,7 @@ def file_excerpt(path: Path, question: str) -> str:
     if path.suffix.casefold() in PLAIN_TEXT:
         text = path.read_text(encoding="utf-8-sig", errors="replace")
     else:
-        from markitdown import MarkItDown
-
-        text = MarkItDown(enable_plugins=False).convert(str(path)).text_content
+        text = document_text(path)
     return select_excerpt(text, question)
 
 
@@ -123,7 +147,7 @@ def answer_from_files(question: str, paths: list[str]) -> str:
         text = file_excerpt(path, question)
         if not text:
             raise ValueError(f"I couldn't read any content from {path.name}.")
-        if text.startswith("[Selected excerpts from a longer file;"):
+        if text.startswith("[Selected excerpts from a longer file;") or "pages were not read" in text:
             partial_files.append(path.name)
         evidence.append(f"[{number}] {path.name}\n{text}")
     messages = [

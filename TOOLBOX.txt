@@ -51,7 +51,8 @@ paste the local pairing code, and attach selected signed-in tabs to a task.
 Then the agent can use bridge_status and bridge_* tools on those tabs only.
 
 document_to_text: local PDF, Word, Excel, PowerPoint, HTML, CSV and text extraction
-using Microsoft MarkItDown. No external AI, image descriptions or cloud OCR.
+using Microsoft MarkItDown. Image-only PDFs fall back to bounded local vision
+transcription, which can misread text and labels any unsampled pages. No cloud OCR.
 sqlite_read: read-only SQL on existing local databases.
 
 LOCAL DESIGN TOOLS

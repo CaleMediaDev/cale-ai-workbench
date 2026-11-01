@@ -680,21 +680,21 @@ async def ask_small_adapter(model_folder: str, prompt: str) -> dict:
 
 @server.tool()
 def document_to_text(path: str, max_chars: int = 20000) -> dict:
-    """Read a local PDF, DOCX, XLSX, PPTX, CSV, HTML or text document as Markdown. No cloud/OCR calls."""
-    from markitdown import MarkItDown
+    """Read a local document; image-only PDFs use bounded offline vision transcription."""
+    import file_chat
 
     source = Path(path).resolve(strict=True)
     if not source.is_file():
         raise ValueError("Path must be a local file")
-    result = MarkItDown(enable_plugins=False).convert(str(source))
+    text = file_chat.document_text(source, max_scanned_pages=20)
     output = BOX / "Results" / (uuid.uuid4().hex + ".md")
     output.parent.mkdir(exist_ok=True)
-    output.write_text(result.text_content, encoding="utf-8")
+    output.write_text(text, encoding="utf-8")
     return {
         "source": str(source),
-        "text": result.text_content[: max(1, min(max_chars, 40000))],
+        "text": text[: max(1, min(max_chars, 40000))],
         "full_text_file": str(output),
-        "characters": len(result.text_content),
+        "characters": len(text),
     }
 
 

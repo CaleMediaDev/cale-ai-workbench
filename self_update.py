@@ -222,6 +222,11 @@ def apply(archive_path, version):
     """Keep the old source recoverable and swap only files in the manifest."""
     if active_tasks():
         raise RuntimeError("Wait for current tasks to finish before updating.")
+    # Install newly pinned media packages before swapping source. Otherwise an
+    # automatic source update can expose a tool whose runtime is still missing.
+    with ZipFile(archive_path) as archive:
+        validated_manifest(archive)
+        sync_new_media_requirements(archive)
     backup = (
         ROOT
         / "Updates/backups"
@@ -258,6 +263,34 @@ def apply(archive_path, version):
                     target.unlink(missing_ok=True)
             raise
     return backup
+
+
+def sync_new_media_requirements(archive):
+    """Install only added or changed media pins for an existing installation."""
+    if "media-requirements.txt" not in archive.namelist():
+        return
+    python = ROOT / "Media/python/Scripts/python.exe"
+    if not python.is_file():
+        return  # A fresh installation prepares its media runtime separately.
+
+    def pins(text):
+        return [line.strip() for line in text.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")]
+
+    current = ROOT / "media-requirements.txt"
+    old = set(pins(current.read_text(encoding="utf-8"))) if current.is_file() else set()
+    additions = [pin for pin in pins(archive.read("media-requirements.txt").decode("utf-8"))
+                 if pin not in old]
+    if not additions:
+        return
+    result = subprocess.run(
+        [str(python), "-m", "pip", "install", "--disable-pip-version-check", *additions],
+        capture_output=True, text=True, timeout=1800,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode:
+        raise RuntimeError("Could not install a new local media dependency: "
+                           + result.stderr[-600:])
 
 
 def wait_for_exit(pid):

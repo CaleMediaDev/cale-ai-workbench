@@ -546,6 +546,7 @@ if __name__ == "__main__":
             request = json.load(sys.stdin)
             action = request.pop("action")
             from music_analysis import analyze_music
+            from scanned_pdf import read_scanned_pdf
             from small_training import (
                 ask_adapter,
                 predict_classifier,
@@ -567,6 +568,7 @@ if __name__ == "__main__":
                 "train_adapter": train_adapter,
                 "ask_adapter": ask_adapter,
                 "analyze_music": analyze_music,
+                "read_scanned_pdf": read_scanned_pdf,
             }
             result = allowed[action](**request)
         # Keep the subprocess protocol ASCII-safe on Windows code pages. JSON

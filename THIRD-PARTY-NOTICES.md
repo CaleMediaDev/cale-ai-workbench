@@ -15,6 +15,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Crawl4AI (Apache-2.0), local browser crawler | https://github.com/unclecode/crawl4ai |
 | Hermes Connector 0.2.6 (MIT; license bundled under `vendor/hermes-connector/LICENSE`) | https://github.com/CorsenAI/hermes-connector/tree/v0.2.6 |
 | MarkItDown | https://github.com/microsoft/markitdown |
+| pypdfium2 5.14.0 (BSD-3-Clause/Apache-2.0; local scanned-PDF rendering) | https://github.com/pypdfium2-team/pypdfium2 |
 | Ghidra | https://github.com/NationalSecurityAgency/ghidra |
 | Eclipse Temurin JDK | https://adoptium.net/temurin/releases/ |
 | Node.js | https://nodejs.org/ |

@@ -13,6 +13,22 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_update_installs_new_media_pin_before_swapping_source(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            runtime = root / "Media/python/Scripts/python.exe"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(b"")
+            (root / "media-requirements.txt").write_text("old-package==1\n")
+            archive_path = root / "release.zip"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("media-requirements.txt", "old-package==1\npypdfium2==5.14.0\n")
+            with patch.object(self_update, "ROOT", root), patch.object(
+                self_update.subprocess, "run", return_value=MagicMock(returncode=0)
+            ) as install, ZipFile(archive_path) as archive:
+                self_update.sync_new_media_requirements(archive)
+            self.assertEqual(install.call_args.args[0][-1], "pypdfium2==5.14.0")
+
     def test_update_restarts_only_its_own_router_process(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
