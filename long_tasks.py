@@ -601,6 +601,31 @@ def _start_music_project(p: dict, spec: dict) -> None:
            detail="Starting local music render")
 
 
+def recover_blocked_music_project(p: dict) -> bool:
+    """Move a misrouted new song to the built-in renderer without user input."""
+    if (p["status"] != "needs_input" or not p["card"]
+            or p["card"].startswith(("music-job:", "image-job:"))
+            or p["detail"].startswith("Local music could not start:")):
+        return False
+    import chat_assistant
+
+    spec = chat_assistant.music_request(p["brief"])
+    if spec is None:
+        return False
+    snapshot = board("show", p["card"], "--json", parse=True)
+    if snapshot["task"]["status"] != "blocked":
+        return False
+    runs = snapshot.get("runs", [])
+    reason = str(runs[-1].get("summary", "")).lower() if runs else ""
+    if not ("music" in reason and "tool" in reason):
+        return False
+    if any(run.get("started_at") and not run.get("ended_at") for run in runs):
+        return False
+    board("archive", p["card"])
+    _start_music_project(p, spec)
+    return True
+
+
 def add_image_project(request_text: str, prompt: str, folder: str = "") -> str:
     """Keep a quick local image request in My Tasks across app restarts."""
 
@@ -1883,6 +1908,8 @@ def advance_project(p):
             return
         update(p["id"], status="queued", detail="Setup finished. Getting ready.")
         p["status"] = "queued"
+    if p["status"] == "needs_input" and recover_blocked_music_project(p):
+        return
     if p["status"] in ("accepted", "paused", "stopped", "needs_input"):
         return
     if p["status"] == "ready_for_review":
@@ -3185,7 +3212,9 @@ def gui():
 
         def worker():
             try:
-                heard = voice_assistant.listen_result(8)
+                # Allow a complete spoken instruction; the recorder returns
+                # after silence, so short requests do not wait twenty seconds.
+                heard = voice_assistant.listen_result(20)
                 phrase = heard["text"]
                 if phrase:
                     voice_events.put(("heard_handsfree" if repeat else "heard", phrase))

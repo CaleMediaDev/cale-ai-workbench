@@ -107,7 +107,9 @@ def test_noise_spikes_do_not_end_a_clip_early():
 
     sd = SimpleNamespace(InputStream=lambda **_kwargs: Stream())
     clip = media_worker._capture_microphone(sd, device=1, rate=100, seconds=8)
-    assert len(clip) == 800
+    # A spike must not count as speech; quiet listening can restart at four
+    # seconds instead of waiting through the full long-command window.
+    assert len(clip) == 400
 
 
 def test_audible_microphone_transcribes_and_reports_input_level(tmp_path):
@@ -159,7 +161,7 @@ def test_spoken_clip_ends_after_pause_instead_of_full_eight_seconds():
     assert np.max(clip) == np.float32(0.04)
 
 
-def test_quiet_clip_waits_for_full_listening_window():
+def test_quiet_clip_returns_early_to_restart_handsfree_listening():
     class Stream:
         def __enter__(self):
             return self
@@ -172,4 +174,20 @@ def test_quiet_clip_waits_for_full_listening_window():
 
     sd = SimpleNamespace(InputStream=lambda **_kwargs: Stream())
     clip = media_worker._capture_microphone(sd, device=1, rate=100, seconds=8)
-    assert len(clip) == 800
+    assert len(clip) == 400
+
+
+def test_long_spoken_request_is_not_cut_off_after_eight_seconds():
+    class Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read(self, frames):
+            return np.full((frames, 1), 0.04, dtype=np.float32), False
+
+    sd = SimpleNamespace(InputStream=lambda **_kwargs: Stream())
+    clip = media_worker._capture_microphone(sd, device=1, rate=100, seconds=20)
+    assert len(clip) == 2000

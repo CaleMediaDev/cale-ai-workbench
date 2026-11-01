@@ -84,6 +84,9 @@ def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():
     assert chat_assistant.music_request("make a 2-minute beat")["duration_seconds"] == 120
     assert chat_assistant.music_request("make a 2-minute beat")["instrumental"] is True
     assert chat_assistant.music_request("make a rap beat with vocals")["instrumental"] is False
+    rap = "make a 3 min rap with heavy bass about cale media"
+    assert chat_assistant.route(rap, []) == "music"
+    assert chat_assistant.music_request(rap)["duration_seconds"] == 180
     assert chat_assistant.music_request("make a 1 minute 30 second song")["duration_seconds"] == 90
     assert chat_assistant.music_request("make a 1 minute and 30 second song")["duration_seconds"] == 90
     assert chat_assistant.music_request("make a 1:30 song")["duration_seconds"] == 90

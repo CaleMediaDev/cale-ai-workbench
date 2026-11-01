@@ -398,7 +398,8 @@ def _capture_microphone(sd, device: int, rate: int, seconds: int):
     """End a spoken clip after a short pause instead of always waiting eight seconds.
 
     The whole clip, including leading and trailing silence, still goes to the
-    offline recognizer. Quiet or continuously noisy inputs use the full limit.
+    offline recognizer. A silent room returns early so hands-free mode can
+    listen again without spending the full long-command window.
     """
     import numpy as np
 
@@ -422,7 +423,9 @@ def _capture_microphone(sd, device: int, rate: int, seconds: int):
                     and float(np.sqrt(np.mean(np.square(block)))) >= MIC_VOICE_RMS_LEVEL):
                 speaking = True
                 last_voice_frame = captured
-            if speaking and captured >= rate and captured - last_voice_frame >= round(rate * 0.9):
+            if speaking and captured >= rate and captured - last_voice_frame >= round(rate * 1.5):
+                break
+            if not speaking and captured >= min(seconds, 4) * rate:
                 break
     return np.concatenate(pieces, axis=0)
 

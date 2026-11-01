@@ -23,6 +23,23 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_blocked_rap_without_music_tool_recovers_to_direct_renderer(self):
+        task = {
+            "id": "rap-task", "status": "needs_input", "card": "t-rap",
+            "brief": "make a 3 min rap with heavy bass about Cale Media",
+            "detail": "The agent had no music tool.",
+        }
+        snapshot = {
+            "task": {"status": "blocked"},
+            "runs": [{"summary": "No music-generation tool was available.",
+                      "started_at": 1, "ended_at": 2}],
+        }
+        with (patch.object(task_module, "board", side_effect=[snapshot, None]) as board,
+              patch.object(task_module, "_start_music_project") as start):
+            self.assertTrue(task_module.recover_blocked_music_project(task))
+        self.assertEqual(board.call_args_list[-1].args, ("archive", "t-rap"))
+        self.assertEqual(start.call_args.args[1]["duration_seconds"], 180)
+
     def test_desktop_lock_prevents_duplicate_window_and_focuses_existing(self):
         import msvcrt
 

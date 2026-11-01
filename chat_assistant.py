@@ -65,7 +65,7 @@ def music_request(text: str) -> dict | None:
             r"\b(?:with|using)(?:\s+(?:these|the following|my))?$",
             "", prompt, flags=re.IGNORECASE,
         ).strip()
-    if not re.search(r"\b(?:song|music|instrumental|jingle|beat|soundtrack)\b", prompt, re.IGNORECASE):
+    if not re.search(r"\b(?:song|music|instrumental|jingle|beat|soundtrack|rap)\b", prompt, re.IGNORECASE):
         return None
     if re.search(
         r"\b(?:cover|remix|edit|change|extend|from this|using this file|"
