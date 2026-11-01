@@ -731,7 +731,9 @@ class Router:
         # model repeatedly prefills a large context. Use the connected free
         # route when measured local throughput is poor, then fall back locally.
         slow_long_context = (
-            size == "balanced" and prompt_estimate >= 16_000 and local_speed < 20
+            size == "balanced"
+            and (prompt_estimate >= 24_000 or
+                 (prompt_estimate >= 16_000 and local_speed < 20))
         ) if profile == "main" and not offline_mode else False
         # Prefer an eligible direct free-plan account before spending the
         # smaller shared OpenRouter free allowance on demanding work.

@@ -373,6 +373,17 @@ class CloudTests(unittest.TestCase):
         reserve.assert_not_called()
         self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
 
+    def test_very_large_balanced_prompt_tries_free_route_without_speed_history(self):
+        self.connected()
+        request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 90_000}])
+        with (patch.object(cloud, "task_size", return_value="balanced"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("usage_history.recent_local_speed", return_value=35),
+              patch.object(cloud.Router, "reserve_free_request", return_value=True),
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        self.assertTrue(post.call_args.args[0].startswith(cloud.API))
+
     def test_slow_balanced_task_falls_back_to_local_after_free_error(self):
         self.connected()
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
