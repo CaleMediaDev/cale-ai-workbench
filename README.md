@@ -70,6 +70,7 @@ See [OpenRouter's free model information](https://openrouter.ai/collections/free
 ## Models included in the project
 
 The repository contains model definitions, sources, configuration, and automatic download code. The installer places the actual weights in Ollama's local model store. It does not put tens of gigabytes into Git history or require users to find model files themselves.
+Source updates read the installed model name from the user's existing configuration, so earlier installs using a different local alias keep working without manual edits.
 
 | Model | Approximate download | Suggested RAM | Role |
 |---|---:|---:|---|

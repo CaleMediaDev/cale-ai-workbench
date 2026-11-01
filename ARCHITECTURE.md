@@ -24,6 +24,7 @@ Ollama model store                  cloud_ai.py → ChatGPT (opt-in)
 | `project_preview.py`, `preview_capture.js` | Select local task previews and capture web pages into a side window; Chrome DevTools actions also mirror their selected page through `toolbox_mcp.py`. |
 | `model_library.py` | Defines optional Ollama models, checks RAM and disk space, downloads sequentially, and writes private progress JSON. |
 | `auto_route.py`, `cloud_ai.py` | Sizes each request without an extra AI call, chooses an installed tool-capable local model, and handles explicit ChatGPT plan use plus free OpenRouter fallback. |
+| `model_identity.py` | Reads the installed Hermes model name so source updates preserve older working Ollama aliases. |
 | `voice_assistant.py`, `natural_voice.py` | Run offline speech recording and playback; upgrade existing installations to pinned Kokoro voice weights in the background. |
 | `github_account.py` | Starts GitHub CLI browser sign-in and reports the connected account name without reading tokens. |
 | `self_update.py` | Checks public releases, verifies the published ZIP digest and manifest, backs up old source, and updates while tasks are idle. |

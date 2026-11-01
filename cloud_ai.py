@@ -29,13 +29,14 @@ from urllib.request import Request, urlopen
 import win32crypt
 
 from auto_route import model_order, task_size
+from model_identity import configured_main_alias, configured_permissive_alias
 from model_library import CATALOG, candidate_approved, refresh_catalog
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "Cloud"
 PORT = 11435
-LOCAL_MODEL = "cale-local"
-PERMISSIVE_MODEL = "cale-permissive"
+LOCAL_MODEL = configured_main_alias(ROOT)
+PERMISSIVE_MODEL = configured_permissive_alias(ROOT)
 FAST_MODEL = "cale-fast"
 BALANCED_MODEL = "cale-qwen35"
 API = "https://openrouter.ai/api/v1"

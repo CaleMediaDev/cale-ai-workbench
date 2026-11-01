@@ -13,13 +13,18 @@ import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from model_identity import configured_main_alias, configured_permissive_alias
+
 ROOT = Path(__file__).resolve().parent
 RECOMMENDATIONS_URL = (
     "https://raw.githubusercontent.com/CaleMediaDev/"
     "cale-ai-workbench/main/models/recommendations.json"
 )
 CATALOG = {
-    "main": {"label": "Main coding + optional free cloud", "alias": "cale-local"},
+    "main": {
+        "label": "Main coding + optional free cloud",
+        "alias": configured_main_alias(ROOT),
+    },
     "qwen35": {
         "label": "Qwen 3.5 35B (balanced local)",
         "alias": "cale-qwen35",
@@ -32,7 +37,7 @@ CATALOG = {
     },
     "permissive": {
         "label": "Qwen Coder Next permissive (local)",
-        "alias": "cale-permissive",
+        "alias": configured_permissive_alias(ROOT),
         "source": "huihui_ai/qwen3-coder-next-abliterated:q4_K",
         "download_gb": 52,
         "ram_gb": 96,
