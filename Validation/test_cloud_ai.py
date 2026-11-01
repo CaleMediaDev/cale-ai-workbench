@@ -77,12 +77,12 @@ class CloudTests(unittest.TestCase):
         self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
 
     def test_any_refusal_tries_installed_derestricted_model(self):
-        alias = cloud.CATALOG["gptoss"]["alias"]
+        alias = cloud.CATALOG["permissive"]["alias"]
 
         def response(url, payload, **kwargs):
             if url.endswith("/api/show"):
                 self.assertEqual(payload["model"], alias)
-                return {"capabilities": ["completion"]}
+                return {"capabilities": ["completion", "tools"]}
             return REFUSAL if payload["model"] == cloud.LOCAL_MODEL else ANSWER
 
         with patch.object(cloud, "post", side_effect=response) as post:
@@ -101,7 +101,10 @@ class CloudTests(unittest.TestCase):
             seen.append(payload["model"])
             return REFUSAL if payload["model"] == cloud.LOCAL_MODEL else ANSWER
 
-        with patch.object(cloud, "post", side_effect=response):
+        with (
+            patch.object(cloud, "DERESTRICTED_PROFILES", ("gptoss", "permissive")),
+            patch.object(cloud, "post", side_effect=response),
+        ):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
         self.assertEqual(seen, [cloud.LOCAL_MODEL, cloud.PERMISSIVE_MODEL])
 
@@ -124,7 +127,7 @@ class CloudTests(unittest.TestCase):
         ):
             result = cloud.Router().complete(REQUEST)
         self.assertEqual(result, ANSWER)
-        self.assertEqual(post.call_args.args[1]["model"], cloud.CATALOG["gptoss"]["alias"])
+        self.assertEqual(post.call_args.args[1]["model"], cloud.PERMISSIVE_MODEL)
 
     def test_candidate_tool_calls_use_verified_reasoning_setting(self):
         request = dict(

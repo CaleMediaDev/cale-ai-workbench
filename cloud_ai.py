@@ -316,7 +316,7 @@ REFUSAL_TEXT = re.compile(
     r"am not able)|I'm\s+unable|I’m\s+unable|I\s+can't comply|I\s+cannot comply)\b",
     re.IGNORECASE,
 )
-DER_RESTRICTED_PROFILES = ("gptoss", "permissive", "llama", "glm")
+DERESTRICTED_PROFILES = ("permissive", "llama", "glm", "gptoss")
 
 
 def is_refusal(result):
@@ -343,7 +343,7 @@ def retry_derestricted(payload, result, original_model=""):
     """
     if not is_refusal(result):
         return result
-    for profile in DER_RESTRICTED_PROFILES:
+    for profile in DERESTRICTED_PROFILES:
         item = CATALOG.get(profile)
         if not item:
             continue
