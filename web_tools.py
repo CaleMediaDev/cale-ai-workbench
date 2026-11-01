@@ -274,6 +274,16 @@ def search_web(query: str) -> dict:
     }
 
 
+def name_matching_domain(name: str, url: str) -> bool:
+    """Identify a plausible business domain without claiming verified ownership."""
+    host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    labels = host.split(".")
+    if len(labels) < 2:
+        return False
+    brand = "".join(re.findall(r"[a-z0-9]+", name.casefold()))
+    return len(brand) >= 5 and brand in labels[-2]
+
+
 @server.tool()
 def find_business_contact(name: str, locality: str = "") -> dict:
     """Find live business phone links and show the pages that contain them.
@@ -296,16 +306,22 @@ def find_business_contact(name: str, locality: str = "") -> dict:
     ]
     minimum = 1 if len(words) < 3 else 2
     candidates = []
-    seen_hosts = set()
-    for result in found.get("results", [])[:8]:
+    seen_urls = set()
+    host_counts = {}
+    ranked = sorted(
+        found.get("results", [])[:12],
+        key=lambda result: not name_matching_domain(name, result.get("url", "")),
+    )
+    for result in ranked:
         url = result.get("url", "")
         host = (urlsplit(url).hostname or "").lower()
-        if not host or host in seen_hosts:
+        if not host or url in seen_urls or host_counts.get(host, 0) >= 2:
             continue
         visible = (result.get("title", "") + " " + host).casefold()
         if sum(word in visible for word in words) < minimum:
             continue
-        seen_hosts.add(host)
+        seen_urls.add(url)
+        host_counts[host] = host_counts.get(host, 0) + 1
         try:
             page = read_webpage(url)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
@@ -329,6 +345,7 @@ def find_business_contact(name: str, locality: str = "") -> dict:
                 "retrieved_at": page["retrieved_at"],
                 "phone_links": phones[:8],
                 "page_excerpt": text[start : start + 400],
+                "name_matching_domain": name_matching_domain(name, page["source_url"]),
             }
         )
         if len(candidates) >= 3:

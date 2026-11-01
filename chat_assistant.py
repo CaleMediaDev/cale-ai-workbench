@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 TASK_VERBS = (
     "build", "make", "create", "develop", "design", "write", "research",
@@ -92,6 +92,55 @@ def business_contact_query(text: str) -> str | None:
     return None
 
 
+def display_phone(link: str) -> tuple[str, str] | None:
+    """Normalize a live tel link for comparison and readable US display."""
+    raw = unquote(link[4:]).split(";", 1)[0].strip()
+    digits = re.sub(r"\D", "", raw)
+    if not 7 <= len(digits) <= 15:
+        return None
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        display = f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    else:
+        display = raw
+    return digits, display
+
+
+def business_contact_answer(name: str, sources: list[dict]) -> str:
+    """Prefer matching business domains and disclose conflicting live numbers."""
+    records = []
+    for source in sources[:3]:
+        for link in source.get("phone_links", [])[:3]:
+            parsed = display_phone(link)
+            if parsed:
+                records.append((parsed[0], parsed[1], source))
+    if not records:
+        return "I couldn't find a live page listing a phone number for " + name + "."
+    distinct = list(dict.fromkeys(number for number, _, _ in records))
+    if len(distinct) > 1:
+        lines = []
+        for number in distinct[:3]:
+            _, display, source = next(row for row in records if row[0] == number)
+            lines.append(f"{display} — {source['source_url']}")
+        return (
+            f"I found different phone numbers for {name} on live pages: "
+            + "; ".join(lines)
+            + ". I can't confirm which is current."
+        )
+    _, display, source = records[0]
+    lead = f"{source['page_title']} lists {display}. Source: {source['source_url']}."
+    agreement = next(
+        (other for number, _, other in records[1:] if number == distinct[0] and other["source_url"] != source["source_url"]),
+        None,
+    )
+    if agreement:
+        lead += f" Another live page agrees: {agreement['source_url']}."
+    elif not source.get("name_matching_domain"):
+        lead += " I couldn't confirm it on the business's website."
+    return lead
+
+
 def answer_with_tools(question: str, history: list[dict]) -> str:
     """Use a live source for contact lookups, then local inference for other chat."""
     name = business_contact_query(question)
@@ -99,15 +148,7 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
         from web_tools import find_business_contact
 
         result = find_business_contact(name)
-        sources = result.get("sources", [])
-        if not sources:
-            return "I couldn't find a live page listing a phone number for " + name + "."
-        source = sources[0]
-        phone = source["phone_links"][0][4:]
-        return (
-            f"{source['page_title']} lists {phone}. Source: {source['source_url']} "
-            "(checked live; I haven't independently confirmed who operates the site)."
-        )
+        return business_contact_answer(name, result.get("sources", []))
     if needs_web(question):
         return answer_from_web(question)
     return local_answer(question, history)

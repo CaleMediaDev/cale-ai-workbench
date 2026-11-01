@@ -71,6 +71,31 @@ class BusinessContactTests(unittest.TestCase):
         self.assertEqual(result["sources"], [])
         self.assertIn("No matching", result["error"])
 
+    def test_contact_page_on_same_business_site_beats_earlier_directory(self):
+        search = {"results": [
+            {"url": "https://directory.example/pure-michigan", "title": "Pure Michigan Lawn Care listing"},
+            {"url": "https://puremichiganlawncare.com/", "title": "Pure Michigan Lawn Care"},
+            {"url": "https://puremichiganlawncare.com/contact", "title": "Contact Pure Michigan Lawn Care"},
+        ]}
+
+        def read(url):
+            return {
+                "source_url": url,
+                "title": "Pure Michigan Lawn Care",
+                "retrieved_at": "2026-10-31T00:00:00Z",
+                "contact_links": [] if url.endswith(".com/") else ["tel:+15172581313"],
+                "text": "Call (517) 258-1313" if not url.endswith(".com/") else "Welcome",
+            }
+
+        with (
+            patch.object(web_tools, "search_web", return_value=search),
+            patch.object(web_tools, "read_webpage", side_effect=read) as reader,
+        ):
+            result = web_tools.find_business_contact("Pure Michigan Lawn Care")
+        self.assertEqual(result["sources"][0]["source_url"], "https://puremichiganlawncare.com/contact")
+        self.assertTrue(result["sources"][0]["name_matching_domain"])
+        self.assertEqual(reader.call_count, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

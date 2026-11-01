@@ -71,6 +71,30 @@ def test_business_number_question_uses_live_lookup_path():
     assert chat_assistant.business_contact_query("What's Ross number?") == "Ross"
 
 
+def test_business_number_prefers_name_matching_site_and_discloses_conflicts():
+    official = {
+        "source_url": "https://puremichiganlawncare.com/contact",
+        "page_title": "Pure Michigan Lawn Care",
+        "phone_links": ["tel:+15172581313"],
+        "name_matching_domain": True,
+    }
+    directory = {
+        "source_url": "https://directory.example/listing",
+        "page_title": "Directory listing",
+        "phone_links": ["tel:(517) 258-1313"],
+        "name_matching_domain": False,
+    }
+    answer = chat_assistant.business_contact_answer("Pure Michigan Lawn Care", [official, directory])
+    assert "(517) 258-1313" in answer
+    assert official["source_url"] in answer
+    assert directory["source_url"] in answer
+    directory["phone_links"] = ["tel:+15175550100"]
+    conflict = chat_assistant.business_contact_answer("Pure Michigan Lawn Care", [official, directory])
+    assert "different phone numbers" in conflict
+    assert "(517) 555-0100" in conflict
+    assert "can't confirm which is current" in conflict
+
+
 def test_current_facts_use_web_but_stable_questions_stay_local():
     assert chat_assistant.needs_web("What's the weather in Howell today?")
     assert chat_assistant.needs_web("Search online for the latest release")
