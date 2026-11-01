@@ -28,7 +28,8 @@ PROVIDERS = {
     # This model's card lists one Magicube per API-Inference request; reserve
     # room for the user's other ModelScope activity.
     "modelscope": {"name": "ModelScope", "url": "https://api-inference.modelscope.cn/v1/chat/completions", "model": "Qwen/Qwen3.5-35B-A3B", "context": 131072, "rpm": 5, "daily": 150, "speed": 120, "signup": "https://modelscope.cn/my/myaccesstoken"},
-    "cohere": {"name": "Cohere", "url": "https://api.cohere.com/v2/chat", "model": "command-r-08-2024", "context": 128000, "rpm": 5, "daily": 30, "speed": 80, "signup": "https://dashboard.cohere.com/api-keys"},
+    # Cohere documents Command A+ as free until its trial/production limits.
+    "cohere": {"name": "Cohere", "url": "https://api.cohere.com/v2/chat", "model": "command-a-plus-05-2026", "context": 128000, "rpm": 5, "daily": 30, "speed": 80, "signup": "https://dashboard.cohere.com/api-keys"},
     "huggingface": {"name": "Hugging Face", "url": "https://router.huggingface.co/v1/chat/completions", "model": "openai/gpt-oss-120b:fastest", "context": 8192, "rpm": 2, "daily": 2, "monthly": 2, "speed": 150, "max_tokens": 1024, "signup": "https://huggingface.co/settings/tokens"},
     "cloudflare": {"name": "Cloudflare Workers AI", "url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions", "model": "@cf/openai/gpt-oss-20b", "context": 128000, "rpm": 5, "daily": 12, "speed": 160, "max_tokens": 2048, "daily_neurons": 8500, "input_neurons_per_m": 18182, "output_neurons_per_m": 27273, "signup": "https://dash.cloudflare.com/?to=/:account/ai/workers-ai"},
 }
@@ -82,7 +83,7 @@ def _cohere_completion(data: dict) -> dict:
             "name": function.get("name"), "arguments": function.get("arguments", "{}")}})
     usage = data.get("usage") or {}
     billed = usage.get("billed_units") or usage.get("tokens") or {}
-    return {"id": data.get("id", ""), "model": data.get("model", "command-r-08-2024"),
+    return {"id": data.get("id", ""), "model": data.get("model", "command-a-plus-05-2026"),
             "choices": [{"index": 0, "message": {"role": "assistant", "content": content or None,
                                                "tool_calls": calls or None}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": billed.get("input_tokens", 0),

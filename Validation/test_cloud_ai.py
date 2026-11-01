@@ -200,7 +200,7 @@ class CloudTests(unittest.TestCase):
                 pass
 
             def read(self, *_):
-                return json.dumps({"id": "co-test", "model": "command-r-08-2024",
+                return json.dumps({"id": "co-test", "model": "command-a-plus-05-2026",
                     "message": {"content": [{"type": "text", "text": "hello"}]},
                     "usage": {"billed_units": {"input_tokens": 3,
                                                "output_tokens": 1}}}).encode()
@@ -209,6 +209,8 @@ class CloudTests(unittest.TestCase):
             result, elapsed = cloud_providers.complete("cohere", "private-test-key", REQUEST)
         self.assertEqual(result["choices"][0]["message"]["content"], "hello")
         self.assertEqual(result["usage"]["prompt_tokens"], 3)
+        self.assertEqual(json.loads(fetch.call_args.args[0].data)["model"],
+                         "command-a-plus-05-2026")
         self.assertEqual(fetch.call_args.args[0].full_url,
                          "https://api.cohere.com/v2/chat")
         self.assertEqual(fetch.call_args.args[0].get_header("Authorization"),
