@@ -780,81 +780,113 @@ def tick():
     """Advance each runnable task by one supervisor step."""
     process_requests()
     for p in projects():
-        if p["status"] == "waiting_for_setup":
-            setup = read_task_status(STATE / "install-progress.json")
-            if setup and setup.get("status") != "complete":
-                continue
-            update(p["id"], status="queued", detail="Setup finished. Getting ready.")
-            p["status"] = "queued"
-        if p["status"] in ("accepted", "paused", "stopped", "needs_input"):
-            continue
-        if p["status"] == "ready_for_review":
-            if not str(p["fingerprint"]).startswith("content-v2:"):
-                folder = Path(p["folder"])
-                if legacy_fingerprint(folder) != p["fingerprint"]:
-                    update(
-                        p["id"], status="needs_input",
-                        detail="Files changed since the previous review. Resume to check them again.",
-                    )
-                    continue
-                update(p["id"], status="checking", detail="Rechecking completed work after the verification upgrade.")
-                passed, evidence = verify_project(p)
-                with database() as conn:
-                    pending = conn.execute(
-                        "SELECT 1 FROM requests WHERE project=? AND status='pending' LIMIT 1",
-                        (p["id"],),
-                    ).fetchone()
-                if pending:
-                    process_requests()
-                    current = next((x for x in projects() if x["id"] == p["id"]), None)
-                    if not current or current["status"] != "checking":
-                        continue
+        try:
+            advance_project(p)
+        except Exception as exc:
+            detail = f"Supervisor will retry this task: {type(exc).__name__}: {exc}"
+            if p["detail"] != detail:
+                update(p["id"], detail=detail)
+                with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
+                    log.write(time.ctime() + f"\nTask {p['id']}: " + traceback.format_exc() + "\n")
+
+
+def advance_project(p):
+    """Advance one task; failures are isolated by the supervisor's tick."""
+    if p["status"] == "waiting_for_setup":
+        setup = read_task_status(STATE / "install-progress.json")
+        if setup and setup.get("status") != "complete":
+            return
+        update(p["id"], status="queued", detail="Setup finished. Getting ready.")
+        p["status"] = "queued"
+    if p["status"] in ("accepted", "paused", "stopped", "needs_input"):
+        return
+    if p["status"] == "ready_for_review":
+        if not str(p["fingerprint"]).startswith("content-v2:"):
+            folder = Path(p["folder"])
+            if legacy_fingerprint(folder) != p["fingerprint"]:
                 update(
-                    p["id"],
-                    status="ready_for_review" if passed else "needs_input",
-                    detail=evidence,
-                    fingerprint=fingerprint(folder) if passed else "",
+                    p["id"], status="needs_input",
+                    detail="Files changed since the previous review. Resume to check them again.",
                 )
-                continue
-            if fingerprint(Path(p["folder"])) != p["fingerprint"]:
-                update(
-                    p["id"],
-                    status="needs_input",
-                    detail="Files changed after verification. Resume to check them again.",
-                )
-            continue
-        if not p["card"]:
-            create_card(p)
-            continue
-        snapshot = board("show", p["card"], "--json", parse=True)
-        task = snapshot["task"]
-        if task["status"] in ("review", "done"):
-            ended = max(
-                (r.get("ended_at") or 0 for r in snapshot.get("runs", [])), default=0
+                return
+            update(p["id"], status="checking", detail="Rechecking completed work after the verification upgrade.")
+            passed, evidence = verify_project(p)
+            with database() as conn:
+                pending = conn.execute(
+                    "SELECT 1 FROM requests WHERE project=? AND status='pending' LIMIT 1",
+                    (p["id"],),
+                ).fetchone()
+            if pending:
+                process_requests()
+                current = next((x for x in projects() if x["id"] == p["id"]), None)
+                if not current or current["status"] != "checking":
+                    return
+            update(
+                p["id"],
+                status="ready_for_review" if passed else "needs_input",
+                detail=evidence,
+                fingerprint=fingerprint(folder) if passed else "",
             )
-            if ended and time.time() - ended < 150:
-                update(
-                    p["id"],
-                    status="working",
-                    detail="Worker handed off. Letting it finish and release files before independent checks.",
-                )
-                continue
-            handle_handoff(p, task)
-        elif task["status"] in ("blocked", "triage", "archived"):
-            comments = snapshot.get("comments", [])
+            return
+        if fingerprint(Path(p["folder"])) != p["fingerprint"]:
             update(
                 p["id"],
                 status="needs_input",
-                detail=json.dumps(
-                    {"task": task, "recent_comments": comments[-3:]}, indent=2
-                )[-12000:],
+                detail="Files changed after verification. Resume to check them again.",
             )
-        else:
+        return
+    if not p["card"]:
+        create_card(p)
+        return
+    snapshot = board("show", p["card"], "--json", parse=True)
+    task = snapshot["task"]
+    if task["status"] in ("review", "done"):
+        ended = max(
+            (r.get("ended_at") or 0 for r in snapshot.get("runs", [])), default=0
+        )
+        if ended and time.time() - ended < 150:
             update(
                 p["id"],
                 status="working",
-                detail=f"Hermes: {task['status']}. Card {p['card']}. Progress is saved in the project folder.",
+                detail="Worker handed off. Letting it finish and release files before independent checks.",
             )
+            return
+        handle_handoff(p, task)
+    elif task["status"] in ("blocked", "triage", "archived"):
+        comments = snapshot.get("comments", [])
+        update(
+            p["id"],
+            status="needs_input",
+            detail=json.dumps(
+                {"task": task, "recent_comments": comments[-3:]}, indent=2
+            )[-12000:],
+        )
+    else:
+        update(
+            p["id"],
+            status="working",
+            detail=f"Hermes: {task['status']}. Card {p['card']}. Progress is saved in the project folder.",
+        )
+
+
+def supervisor_step(prepare_services=None, prior_error=""):
+    """Process tasks even when optional model/gateway startup needs a retry."""
+    service_error = prior_error
+    if prepare_services is not None:
+        try:
+            prepare_services()
+            service_error = ""
+        except Exception as exc:
+            service_error = f"Model service retrying: {type(exc).__name__}: {exc}"
+            with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
+                log.write(time.ctime() + "\nService startup: " + traceback.format_exc() + "\n")
+    tick()
+    (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
+    status = "Supervisor online. " + time.ctime()
+    if service_error:
+        status += ". " + service_error
+    (STATE / "service-status.txt").write_text(status, encoding="utf-8")
+    return service_error
 
 
 def monitor():
@@ -880,6 +912,7 @@ def monitor():
     )
     # Native gateway startup is idempotent and owns its own process lock.
     last_start = 0
+    service_error = ""
     while True:
         if (ROOT / ".cale-ai-install").exists() and (
             ROOT / ".cale-ai-install"
@@ -887,45 +920,40 @@ def monitor():
             return  # A newly installed version starts its own supervisor.
         try:
             active = any(
-                p["status"]
-                not in (
-                    "accepted",
-                    "paused",
-                    "stopped",
-                    "needs_input",
-                    "ready_for_review",
-                )
+                p["status"] in ("queued", "working", "checking")
                 for p in projects()
             )
+            if not active:
+                service_error = ""
+            prepare = None
             if active and time.monotonic() - last_start > 120:
-                facts_file = max(
-                    (ROOT / "data/installs").glob("*/facts.json"),
-                    key=lambda f: f.stat().st_mtime,
-                )
-                facts = json.loads(facts_file.read_text())
-                py = str(
-                    Path(facts["packages"]["venv"]["environment"])
-                    / "Scripts/python.exe"
-                )
-                settings = subprocess.run(
-                    [py, str(ROOT / "read-settings.py")],
-                    env=environment(),
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    creationflags=HIDE,
-                )
-                ensure_ollama(json.loads(settings.stdout)["model"])
-                from cloud_ai import ensure_router
-
-                ensure_router()
-                hermes("gateway", "start", timeout=120)
                 last_start = time.monotonic()
-            tick()
-            (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
-            (STATE / "service-status.txt").write_text(
-                "Supervisor online. " + time.ctime(), encoding="utf-8"
-            )
+
+                def prepare():
+                    facts_file = max(
+                        (ROOT / "data/installs").glob("*/facts.json"),
+                        key=lambda f: f.stat().st_mtime,
+                    )
+                    facts = json.loads(facts_file.read_text())
+                    py = str(
+                        Path(facts["packages"]["venv"]["environment"])
+                        / "Scripts/python.exe"
+                    )
+                    settings = subprocess.run(
+                        [py, str(ROOT / "read-settings.py")],
+                        env=environment(),
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        creationflags=HIDE,
+                    )
+                    ensure_ollama(json.loads(settings.stdout)["model"])
+                    from cloud_ai import ensure_router
+
+                    ensure_router()
+                    hermes("gateway", "start", timeout=120)
+
+            service_error = supervisor_step(prepare, service_error)
         except Exception:
             (STATE / "service-status.txt").write_text(
                 "Supervisor is retrying after an error. See monitor-errors.log. "

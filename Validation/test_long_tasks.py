@@ -219,6 +219,33 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(self.item()["status"], "working")
         self.assertIn("scheduled", self.item()["detail"])
 
+    def test_one_task_failure_does_not_starve_later_tasks(self):
+        second = task_module.add_project(
+            "second", str(self.base / "second"), "Build another fixture"
+        )
+
+        def create(project):
+            if project["id"] == self.pid:
+                raise RuntimeError("temporary board outage")
+            task_module.update(project["id"], card="second-card", status="working")
+
+        with patch.object(task_module, "create_card", side_effect=create) as cards:
+            task_module.tick()
+        self.assertEqual(cards.call_count, 2)
+        self.assertIn("Supervisor will retry", self.item()["detail"])
+        self.assertEqual(next(p for p in task_module.projects() if p["id"] == second)["card"], "second-card")
+
+    def test_service_startup_failure_still_processes_pause_request(self):
+        task_module.request(self.pid, "pause")
+
+        def unavailable():
+            raise RuntimeError("model service offline")
+
+        error = task_module.supervisor_step(unavailable)
+        self.assertEqual(self.item()["status"], "paused")
+        self.assertIn("model service offline", error)
+        self.assertIn("Model service retrying", (task_module.STATE / "service-status.txt").read_text())
+
     def test_accept_rejects_stale_files(self):
         task_module.update(self.pid, status="ready_for_review", fingerprint="old")
         task_module.request(self.pid, "accept")

@@ -60,6 +60,8 @@ The project queue and native Hermes task board use SQLite. The worker maintains 
 
 Your PC must be on and awake. The optional sign-in task restarts the supervisor when you sign back in. This is resumable work across days, not a promise that any request will complete unattended. One demanding local worker runs at a time.
 
+The supervisor handles task controls even when a local model or gateway is temporarily unavailable. A failure on one task is recorded for retry without preventing other saved tasks from advancing.
+
 ## Free cloud connection
 
 When setup finishes, the app opens an OpenRouter browser connection automatically. Sign in and approve the connection once; the app saves the resulting key privately for that Windows account. You never need to copy an API key. The rocket button at the top opens **Supercharge my AI**, where you can reconnect OpenRouter or connect ChatGPT. Connecting allows task prompts and tool results to be sent to the selected online provider; an in-flight request may finish after disconnecting.
