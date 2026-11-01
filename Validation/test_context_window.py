@@ -38,7 +38,7 @@ class ContextWindowTests(unittest.TestCase):
                 {"model_info": {"qwen.context_length": 32768}}, 128 * 2**30, 7 * 2**30
             )
 
-    def test_sync_grows_alias_and_hermes_together(self):
+    def test_sync_grows_only_main_alias_and_hermes_together(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             (root / "data").mkdir()
@@ -64,6 +64,7 @@ class ContextWindowTests(unittest.TestCase):
             self.assertIn("context_length: 262144", config.read_text())
             self.assertTrue(any(path == "/api/create" and body["parameters"]["num_ctx"] == 262144
                                 for path, body in calls))
+            self.assertFalse(any(body.get("model") == "cale-fast" for _, body in calls))
 
 
 if __name__ == "__main__":

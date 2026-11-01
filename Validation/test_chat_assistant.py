@@ -22,6 +22,14 @@ def test_explicit_work_creates_task():
     assert chat_assistant.route("I want to know how to build an app", []) == "answer"
 
 
+def test_simple_image_uses_local_media_without_a_long_agent_task():
+    request = "can you make a image of a dog"
+    assert chat_assistant.image_prompt(request) == "a dog"
+    assert chat_assistant.route(request, []) == "image"
+    assert chat_assistant.route_with_files(request, [], [r"C:\photo.png"]) == "task"
+    assert chat_assistant.image_prompt("edit this image of a dog") is None
+
+
 def test_followup_attaches_to_active_task():
     task = [{"id": "one"}]
     assert chat_assistant.route("Also add a contact page", task) == "note"

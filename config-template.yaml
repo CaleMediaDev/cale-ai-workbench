@@ -142,13 +142,13 @@ auxiliary:
     reasoning_effort: none
   triage_specifier:
     provider: custom
-    model: cale-local
+    model: cale-vision
     base_url: http://127.0.0.1:11434/v1
     timeout: 900
     reasoning_effort: none
   kanban_decomposer:
     provider: custom
-    model: cale-local
+    model: cale-vision
     base_url: http://127.0.0.1:11434/v1
     timeout: 900
     reasoning_effort: none

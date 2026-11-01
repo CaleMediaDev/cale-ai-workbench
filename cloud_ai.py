@@ -388,6 +388,20 @@ def retry_derestricted(payload, result, original_model=""):
     return result
 
 
+def estimated_context(payload):
+    """Reserve room for the input, tool schemas and the next model response.
+
+    Character count is an estimate rather than a tokenizer guarantee. The
+    generous reserve prevents small routes from receiving near-limit prompts;
+    the main model remains available when a request grows beyond them.
+    """
+    input_bytes = len(json.dumps({
+        "messages": payload.get("messages", []),
+        "tools": payload.get("tools", []),
+    }, ensure_ascii=True).encode("utf-8"))
+    return max(8192, input_bytes // 3 + 8192)
+
+
 class Router:
     """Choose a provider for one request while preserving local fallback."""
 
@@ -397,13 +411,15 @@ class Router:
         self.last_attempt = 0
         self.lock = threading.Lock()
         self.model_cache = {}
+        self.model_contexts = {}
         self.model_cache_until = 0
 
-    def local_candidates(self, size):
-        """Rank installed tool-capable models and refresh after new downloads."""
+    def local_candidates(self, size, required_context=65536):
+        """Rank installed models that can hold this request, not the global maximum."""
         if time.monotonic() >= self.model_cache_until:
             refresh_catalog(online=False)
             available = {}
+            contexts = {}
             aliases = dict.fromkeys(
                 [FAST_MODEL, *(item["alias"] for item in CATALOG.values())]
             )
@@ -427,24 +443,22 @@ class Router:
                         r"(?m)^\s*num_ctx\s+(\d+)\s*$",
                         info.get("parameters", ""),
                     )
-                    try:
-                        config_text = (ROOT / "data/config.yaml").read_text(encoding="utf-8")
-                        main = config_text.split("fallback_providers:", 1)[0]
-                        required_match = re.search(r"(?m)^  context_length: (\d+)", main)
-                        required = int(required_match.group(1)) if required_match else 65536
-                    except OSError:
-                        required = 65536
-                    if not configured or int(configured.group(1)) < required:
+                    if not configured or int(configured.group(1)) < 64000:
                         continue
                     label = str(info.get("details", {}).get("parameter_size", ""))
                     match = re.search(r"(\d+(?:\.\d+)?)B", label, re.IGNORECASE)
                     available[name] = float(match.group(1)) if match else 1.0
+                    contexts[name] = int(configured.group(1))
                 except Exception:
                     continue
             self.model_cache = available
+            self.model_contexts = contexts
             self.model_cache_until = time.monotonic() + 60
         return model_order(
-            size, self.model_cache, LOCAL_MODEL, FAST_MODEL, BALANCED_MODEL
+            size,
+            {name: size_gb for name, size_gb in self.model_cache.items()
+             if self.model_contexts.get(name, 0) >= required_context},
+            LOCAL_MODEL, FAST_MODEL, BALANCED_MODEL
         )
 
     def reserve_free_request(self):
@@ -505,7 +519,7 @@ class Router:
                 self.chatgpt_cooldown = time.time() + 120
                 reason = "ChatGPT plan unavailable; trying free cloud or local AI."
         selected = (
-            self.local_candidates(size)
+            self.local_candidates(size, estimated_context(payload))
             if profile == "main"
             else [CATALOG[profile]["alias"]]
         )

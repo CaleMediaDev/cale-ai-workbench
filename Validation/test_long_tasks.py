@@ -20,6 +20,26 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_stale_gateway_restarts_without_interrupting_live_sessions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "data").mkdir()
+            (root / "data/config.yaml").write_text("model: {}")
+            with (patch.object(task_module, "ROOT", root),
+                  patch.object(task_module, "hermes", side_effect=[
+                      "Gateway running (PID: 123)", "Restarted"
+                  ]) as cli,
+                  patch("psutil.Process") as process):
+                process.return_value.create_time.return_value = 1
+                task_module.ensure_gateway_current()
+            self.assertEqual(cli.call_args.args, ("gateway", "restart", "--detach"))
+
+    def test_supervisor_can_dispatch_ready_work_when_gateway_misses_it(self):
+        with (patch.object(task_module, "projects", return_value=[{"status": "working"}]),
+              patch.object(task_module, "board", return_value={"spawned": []}) as board):
+            task_module.dispatch_ready_fallback()
+        self.assertEqual(board.call_args.args, ("dispatch", "--max", "1", "--json"))
+
     def test_legacy_main_alias_is_repaired_to_64k_without_repulling_weights(self):
         requests = []
 

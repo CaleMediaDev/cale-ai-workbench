@@ -82,7 +82,11 @@ def desired_context(info, ram_bytes, weight_bytes):
 
 
 def sync(root, model):
-    """Grow the main alias and Hermes setting together, then align quick routes."""
+    """Grow the main alias and Hermes setting together.
+
+    Optional aliases keep their smaller windows. The router uses them only
+    when the actual request fits, so a short task remains fast on modest GPUs.
+    """
     root = Path(root)
     info = post("/api/show", {"model": model})
     if info.get("remote_host") or info.get("remote_model"):
@@ -96,25 +100,6 @@ def sync(root, model):
         })
         if result.get("error"):
             raise RuntimeError(result["error"])
-    # Align every installed route that can afford the main agent's window.
-    # Smaller models remain installed but the router will exclude them.
-    from model_library import CATALOG
-
-    for candidate in dict.fromkeys(item["alias"] for item in CATALOG.values()):
-        if candidate == model:
-            continue
-        try:
-            candidate_info = post("/api/show", {"model": candidate})
-            if ("tools" in candidate_info.get("capabilities", [])
-                    and native_context(candidate_info) >= target
-                    and desired_context(candidate_info, ram, model_bytes(candidate)) >= target
-                    and configured_context(candidate_info) != target):
-                post("/api/create", {
-                    "model": candidate, "from": candidate, "stream": False,
-                    "parameters": {"num_ctx": target},
-                })
-        except (OSError, ValueError):
-            continue
     path = root / "data/config.yaml"
     original = path.read_text(encoding="utf-8")
     section = original.split("fallback_providers:", 1)[0]

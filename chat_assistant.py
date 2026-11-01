@@ -22,11 +22,24 @@ QUICK_FILE_TYPES = {
 }
 
 
+def image_prompt(text: str) -> str | None:
+    """Recognize a straightforward new image, leaving edits to a full task."""
+    match = re.match(
+        r"^(?:(?:please|can you|could you|i want you to)\s+)?"
+        r"(?:make|create|generate|draw)\s+(?:me\s+)?(?:an?\s+)?"
+        r"(?:image|picture|photo|illustration)\s+(?:of|showing|with)\s+(.+?)\s*\??$",
+        text.strip(), re.IGNORECASE,
+    )
+    return match.group(1).strip(" .?!") if match else None
+
+
 def route(text: str, active_tasks: list[dict]) -> str:
     """Keep ordinary questions in chat and send explicit work to the task queue."""
     value = text.strip().lower()
     if not value:
         return "empty"
+    if not active_tasks and image_prompt(text):
+        return "image"
     if re.search(r"\b(?:what(?:'s| is) the status|status (?:of|for)|how(?:'s| is) (?:it|the task) going|what are you working on)\b", value):
         return "status"
     if active_tasks and re.match(r"^(?:also|actually|change it|add to (?:it|that)|tell (?:it|the ai) to|instead)\b", value):
@@ -47,6 +60,8 @@ def route(text: str, active_tasks: list[dict]) -> str:
 def route_with_files(text: str, active_tasks: list[dict], paths: list[str]) -> str:
     """Answer small file questions in chat; leave lasting work on the board."""
     action = route(text, active_tasks)
+    if paths and action == "image":
+        return "task"
     if not paths or action != "answer":
         return action
     if len(paths) > 3:

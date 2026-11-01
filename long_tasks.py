@@ -906,6 +906,37 @@ def supervisor_step(prepare_services=None, prior_error=""):
     return service_error
 
 
+def ensure_gateway_current():
+    """Reload Hermes after a context change, without interrupting live runs."""
+    import psutil
+
+    try:
+        status = hermes("gateway", "status", timeout=20)
+    except RuntimeError:
+        hermes("gateway", "start", timeout=120)
+        return
+    match = re.search(r"\bPID:\s*(\d+)\b", status)
+    if not match:
+        hermes("gateway", "start", timeout=120)
+        return
+    try:
+        started = psutil.Process(int(match.group(1))).create_time()
+    except psutil.Error:
+        hermes("gateway", "start", timeout=120)
+        return
+    if started < (ROOT / "data/config.yaml").stat().st_mtime:
+        # Hermes refuses this command while sessions are live. The monitor
+        # retries later; it never uses --yes to cut off an active task.
+        hermes("gateway", "restart", "--detach", timeout=120)
+
+
+def dispatch_ready_fallback():
+    """Kick an idle board when the embedded dispatcher misses a ready task."""
+    if any(p["status"] in ("queued", "working", "checking") for p in projects()):
+        return board("dispatch", "--max", "1", "--json", parse=True, timeout=60)
+    return None
+
+
 def monitor():
     """Own the single background supervisor loop across app windows."""
     import msvcrt
@@ -934,6 +965,7 @@ def monitor():
     )
     # Native gateway startup is idempotent and owns its own process lock.
     last_start = 0
+    last_dispatch = 0
     service_error = ""
     while True:
         if (ROOT / ".cale-ai-install").exists() and (
@@ -987,9 +1019,12 @@ def monitor():
                     from cloud_ai import ensure_router
 
                     ensure_router()
-                    hermes("gateway", "start", timeout=120)
+                    ensure_gateway_current()
 
             service_error = supervisor_step(prepare, service_error)
+            if active and time.monotonic() - last_dispatch > 60:
+                last_dispatch = time.monotonic()
+                dispatch_ready_fallback()
         except Exception:
             (STATE / "service-status.txt").write_text(
                 "Supervisor is retrying after an error. See monitor-errors.log. "
@@ -1197,17 +1232,18 @@ def gui():
     # The RPM-style ring moves from green through amber to red as load rises.
     gauge_widgets = {}
     gauge_row = ttk.Frame(outer)
-    gauge_row.pack(fill="x", pady=(0, 10))
+    gauge_row.pack(fill="x", pady=(0, 6))
     drive_free_text = tk.StringVar(value="")
     drive_rate_text = tk.StringVar(value="")
     net_rate_text = tk.StringVar(value="")
     offline_button = None
-    for gauge_name in ("cpu", "ram", "gpu", "drive", "net"):
-        center = 45
+    for column, gauge_name in enumerate(("cpu", "ram", "gpu", "drive", "net")):
+        center = 60
+        gauge_row.columnconfigure(column, weight=1, uniform="gauges")
         holder = ttk.Frame(gauge_row)
-        holder.pack(side="left", fill="x", expand=True)
+        holder.grid(row=0, column=column, sticky="nsew", padx=3)
         gauge_canvas = tk.Canvas(
-            holder, width=90, height=76,
+            holder, width=120, height=76,
             bg=bg, highlightthickness=0, borderwidth=0
         )
         gauge_canvas.pack(anchor="center")
@@ -1223,24 +1259,24 @@ def gui():
             center, 32, text="—", fill=text,
             font=("Segoe UI", 12, "bold")
         )
-        if gauge_name == "drive":
-            ttk.Label(holder, textvariable=drive_free_text, style="Muted.TLabel",
-                      font=("Segoe UI", 9)).pack(anchor="center")
-            ttk.Label(holder, textvariable=drive_rate_text, style="Muted.TLabel",
-                      font=("Segoe UI", 9)).pack(anchor="center")
-        if gauge_name == "net":
-            ttk.Label(holder, textvariable=net_rate_text, style="Muted.TLabel",
-                      font=("Segoe UI", 9)).pack(anchor="center")
         gauge_canvas.create_text(
             center, 66, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 8, "bold")
         )
+        detail = drive_free_text if gauge_name == "drive" else net_rate_text if gauge_name == "net" else ""
+        ttk.Label(holder, textvariable=detail if detail else None,
+                  text="" if detail else " ", style="Muted.TLabel",
+                  font=("Segoe UI", 9), anchor="center").pack(fill="x")
+        detail = drive_rate_text if gauge_name == "drive" else ""
+        ttk.Label(holder, textvariable=detail if detail else None,
+                  text="" if detail else " ", style="Muted.TLabel",
+                  font=("Segoe UI", 9), anchor="center").pack(fill="x")
         gauge_widgets[gauge_name] = (gauge_canvas, segments, value)
         if gauge_name == "net":
             offline_button = ttk.Button(
                 holder, text="Go offline", style="Tiny.TButton",
                 command=lambda: toggle_pc_network(),
             )
-            offline_button.pack(anchor="center", pady=(1, 0))
+            offline_button.pack(anchor="center", pady=(2, 0))
 
     def toggle_pc_network():
         """Ask Windows to switch all active physical adapters, with UAC."""
@@ -1291,13 +1327,13 @@ def gui():
                 read_rate = reading.get("drive_read_mbps")
                 write_rate = reading.get("drive_write_mbps")
                 drive_rate_text.set(
-                    f"Read {read_rate:.1f} · Write {write_rate:.1f} MB/s"
+                    f"R {read_rate:.1f} · W {write_rate:.1f} MB/s"
                     if read_rate is not None and write_rate is not None else ""
                 )
                 down_rate = reading.get("net_down_mbps")
                 up_rate = reading.get("net_up_mbps")
                 net_rate_text.set(
-                    f"Down {down_rate:.1f} · Up {up_rate:.1f} Mb/s"
+                    f"↓ {down_rate:.1f} · ↑ {up_rate:.1f} Mb/s"
                     if down_rate is not None and up_rate is not None else ""
                 )
                 if offline_button is not None and str(offline_button["state"]) != "disabled":
@@ -1554,7 +1590,7 @@ def gui():
 
     voice_speaking = threading.Event()
     talk_chat_row = ttk.Frame(main_page)
-    talk_chat_row.pack(fill="x", pady=(0, 8))
+    talk_chat_row.pack(fill="x", pady=(0, 5))
     title_row = ttk.Frame(talk_chat_row)
     title_row.pack(side="left", anchor="n", padx=(0, 14))
     title_copy = ttk.Frame(title_row)
@@ -1792,13 +1828,14 @@ def gui():
         main_page, textvariable=status, style="Muted.TLabel", wraplength=1000
     ).pack(anchor="w", pady=(0, 6))
     chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=12)
-    chat_panel.pack(side="left", fill="both", expand=True, pady=(12, 0))
+    chat_panel.pack(side="left", fill="both", expand=True)
     ttk.Label(chat_panel, text="Chat with Cale", style="Card.TLabel",
               font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 5))
-    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame")
-    conversation_frame.pack(fill="x")
+    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=142)
+    conversation_frame.pack(fill="both", expand=True)
+    conversation_frame.pack_propagate(False)
     conversation = tk.Text(
-        conversation_frame, height=5, wrap="word", state="disabled", background=card,
+        conversation_frame, height=1, wrap="word", state="disabled", background=card,
         foreground=text, insertbackground=text, relief="flat", padx=10, pady=6,
         font=("Segoe UI", 11), highlightthickness=0,
     )
@@ -1898,6 +1935,7 @@ def gui():
 
     for previous in chat_history(500):
         show_chat(previous["role"], previous["content"])
+    conversation.see("end")
     if not chat_history():
         show_chat("assistant", "Hi! Ask me anything, or tell me what you'd like me to build.")
     pending_followup = None
@@ -1906,14 +1944,20 @@ def gui():
     def answer_worker():
         """Keep local model calls in order and avoid competing for the same GPU."""
         while True:
-            question, context, paths = answer_requests.get()
+            question, context, paths, kind = answer_requests.get()
             try:
-                answer = (
-                    file_chat.answer_from_files(question, paths)
-                    if paths
-                    else chat_assistant.answer_with_tools(question, context)
-                )
-                conversation_events.put(answer)
+                if kind == "image":
+                    import quick_image
+
+                    destination = quick_image.generate(ROOT, question)
+                    conversation_events.put({"image": str(destination)})
+                else:
+                    answer = (
+                        file_chat.answer_from_files(question, paths)
+                        if paths
+                        else chat_assistant.answer_with_tools(question, context)
+                    )
+                    conversation_events.put(answer)
             except Exception as exc:
                 conversation_events.put("I couldn't answer that yet: " + str(exc))
 
@@ -1973,7 +2017,10 @@ def gui():
             pending_followup = None
         try:
             action = chat_assistant.route_with_files(raw_value, active, selected_paths)
-            if action == "task":
+            if action == "image":
+                assistant_reply("I'm making that image locally. I'll open it when it's ready.")
+                answer_requests.put((chat_assistant.image_prompt(raw_value), context, [], "image"))
+            elif action == "task":
                 setup = read_task_status(STATE / "install-progress.json")
                 waiting = bool(setup and setup.get("status") != "complete")
                 pid = add_project("", "", value, waiting_for_setup=waiting)
@@ -2002,7 +2049,7 @@ def gui():
                 )
             else:
                 show_chat("assistant", "Let me check that locally…")
-                answer_requests.put((raw_value, context, selected_paths))
+                answer_requests.put((raw_value, context, selected_paths, "answer"))
         except Exception as exc:
             restore_selection()
             assistant_reply("I couldn't do that yet: " + str(exc))
@@ -2016,7 +2063,15 @@ def gui():
     def poll_chat():
         try:
             while True:
-                assistant_reply(conversation_events.get_nowait())
+                result = conversation_events.get_nowait()
+                if isinstance(result, dict) and result.get("image"):
+                    assistant_reply("Your image is ready: " + result["image"])
+                    try:
+                        os.startfile(result["image"])
+                    except OSError:
+                        assistant_reply("I saved it, but Windows could not open the image viewer.")
+                else:
+                    assistant_reply(result)
         except queue.Empty:
             pass
         window.after(350, poll_chat)
@@ -2053,7 +2108,7 @@ def gui():
     usage_speed.pack(side="left", padx=(16, 0))
     usage_period = tk.StringVar(value="day")
     usage_canvas = tk.Canvas(
-        usage_panel, height=165, background=card, borderwidth=0,
+        usage_panel, height=135, background=card, borderwidth=0,
         highlightthickness=0,
     )
     usage_canvas.pack(fill="x", pady=(5, 0))
@@ -2074,7 +2129,7 @@ def gui():
         width = max(usage_canvas.winfo_width(), 400)
         points = summary["points"]
         maximum = max((point["tokens"] for point in points), default=0)
-        left, right, top, bottom = 54, width - 16, 19, 132
+        left, right, top, bottom = 52, width - 24, 24, 106
         def compact(number):
             return (f"{number / 1_000_000:.1f}m" if number >= 1_000_000
                     else f"{number / 1_000:.1f}k" if number >= 1_000
@@ -2082,30 +2137,35 @@ def gui():
 
         for fraction in (0, 0.5, 1):
             y = bottom - (bottom - top) * fraction
-            usage_canvas.create_line(left, y, right, y, fill="#30415d", dash=(3, 4))
+            usage_canvas.create_line(left, y, right, y, fill="#31415d", dash=(2, 5))
             usage_canvas.create_text(left - 7, y, anchor="e", text=compact(maximum * fraction),
                                      fill=muted, font=("Segoe UI", 9))
         if maximum == 0:
             usage_canvas.create_text(
-                (left + right) / 2, 76,
+                (left + right) / 2, 68,
                 text="Your token history will appear after the next AI response",
                 fill=muted, font=("Segoe UI", 11),
             )
             return
-        column = (right - left) / len(points)
+        if not points:
+            return
+        column = (right - left) / max(len(points) - 1, 1)
+        coordinates = []
         for index, point in enumerate(points):
-            center = left + column * (index + 0.5)
-            bar_height = max(2, (bottom - top) * point["tokens"] / maximum)
-            color = "#9d87ff" if index == len(points) - 1 else "#38cdbb"
-            usage_canvas.create_rectangle(
-                center - column * 0.30, bottom - bar_height,
-                center + column * 0.30, bottom,
-                fill=color, outline="",
-            )
-            if index % 2 == 0 or index == len(points) - 1:
+            center = left + column * index
+            y = bottom - (bottom - top) * point["tokens"] / maximum
+            coordinates.extend((center, y))
+            if index % max(1, (len(points) - 1) // 4) == 0 or index == len(points) - 1:
                 label = point["date"][5:] if usage_period.get() == "day" else point["date"][2:]
-                usage_canvas.create_text(center, 149, text=label, fill=muted,
+                usage_canvas.create_text(center, 122, text=label, fill=muted,
                                          font=("Segoe UI", 9))
+        area = [left, bottom, *coordinates, right, bottom]
+        usage_canvas.create_polygon(*area, fill="#1b3b50", outline="")
+        usage_canvas.create_line(*coordinates, fill="#1b8b8c", width=7, smooth=True)
+        usage_canvas.create_line(*coordinates, fill="#51e5d0", width=3, smooth=True)
+        usage_canvas.create_oval(coordinates[-2] - 5, coordinates[-1] - 5,
+                                 coordinates[-2] + 5, coordinates[-1] + 5,
+                                 fill="#ad9cff", outline=card, width=2)
         usage_canvas.create_text(
             right, 8, anchor="ne", text=f"Peak {maximum:,} tokens",
             fill=muted, font=("Segoe UI", 9),

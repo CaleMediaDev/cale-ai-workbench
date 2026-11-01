@@ -115,6 +115,25 @@ class SelfUpdateTests(unittest.TestCase):
             self.assertIn("default: qwen3-coder-local", updated)
             self.assertEqual((backup / "data/config.yaml").read_text(), original)
 
+    def test_short_planning_uses_local_small_model_without_changing_custom_choice(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = root / "data/config.yaml"
+            config.parent.mkdir()
+            config.write_text(
+                "auxiliary:\n  triage_specifier:\n    provider: custom\n"
+                "    model: qwen3-coder-local\n    timeout: 900\n"
+                "  kanban_decomposer:\n    provider: custom\n"
+                "    model: my-custom-model\n    timeout: 900\n"
+                "platform_toolsets:\n  cli:\n  - mcp-toolbox\n  - mcp-design\n"
+                "mcp_servers:\n  design: {}\nskills:\n  disabled: []\n",
+                encoding="utf-8",
+            )
+            self_update.add_design_tools_to_config(root, root / "backup")
+            text = config.read_text(encoding="utf-8")
+            self.assertIn("triage_specifier:\n    provider: custom\n    model: cale-vision", text)
+            self.assertIn("kanban_decomposer:\n    provider: custom\n    model: my-custom-model", text)
+
 
 if __name__ == "__main__":
     unittest.main()

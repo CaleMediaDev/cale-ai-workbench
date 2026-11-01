@@ -154,6 +154,9 @@ def configure(root, profile):
     config["model"]["context_length"] = max(selection["context"], 65536)
     config["auxiliary"]["vision"]["enabled"] = True
     config["auxiliary"]["vision"]["model"] = "cale-vision"
+    # Small planning calls do not need to load the large coding model.
+    config["auxiliary"]["triage_specifier"]["model"] = "cale-vision"
+    config["auxiliary"]["kanban_decomposer"]["model"] = "cale-vision"
     (root / "Media").mkdir(exist_ok=True)
     (root / "Media/settings.json").write_text(
         json.dumps({"vision_model": "cale-vision"}), encoding="utf-8"

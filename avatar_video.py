@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps
 
-SIZE = (440, 180)
+SIZE = (320, 132)
 
 
 def load_frames(path: str | Path) -> tuple[list[Image.Image], list[int]]:

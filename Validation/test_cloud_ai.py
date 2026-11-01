@@ -40,6 +40,12 @@ REQUEST = {
 
 
 class CloudTests(unittest.TestCase):
+    def test_request_size_keeps_short_work_on_small_model(self):
+        short = {"messages": [{"role": "user", "content": "Hello"}], "tools": []}
+        long = {"messages": [{"role": "user", "content": "x" * 300_000}], "tools": []}
+        self.assertLess(cloud.estimated_context(short), 65536)
+        self.assertGreater(cloud.estimated_context(long), 65536)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.state = patch.object(cloud, "STATE", Path(self.temp.name))
@@ -219,6 +225,10 @@ class CloudTests(unittest.TestCase):
             self.assertIn(
                 cloud.CATALOG["gptoss_official"]["alias"],
                 router.local_candidates("deep"),
+            )
+            self.assertEqual(
+                router.local_candidates("quick", required_context=131072),
+                [cloud.LOCAL_MODEL],
             )
 
     def test_old_32k_alias_is_not_auto_routed_to_long_task(self):

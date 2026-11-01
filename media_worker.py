@@ -37,16 +37,10 @@ def ollama(path, data=None, timeout=600):
 
 def unload_local_models():
     # Leave unrelated models owned by other applications alone.
-    owned = {
-        "cale-local",
-        "cale-permissive",
-        "cale-local",
-        "cale-permissive",
-        "qwen3.5-local-fast",
-        "cale-vision",
-    }
+    legacy = {"qwen3-coder-local", "qwen3-coder-permissive", "qwen3.5-local-fast"}
     for model in ollama("/api/ps", timeout=10).get("models", []):
-        if model["name"].split(":")[0] in owned:
+        name = model["name"].split(":")[0]
+        if name.startswith("cale-") or name in legacy:
             ollama(
                 "/api/generate", {"model": model["name"], "keep_alive": 0}, timeout=120
             )

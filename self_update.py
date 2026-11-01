@@ -180,6 +180,16 @@ def add_design_tools_to_config(root, backup):
     context = re.search(r"(?m)^  context_length: ([0-9]+)[ \t]*$", model_block)
     if context and int(context.group(1)) < 64000:
         updated = updated.replace(context.group(0), "  context_length: 65536", 1)
+    # Keep short board-planning calls on the installed 9B vision/text model.
+    # Touch only the app's prior default aliases; preserve custom user choices.
+    for section in ("triage_specifier", "kanban_decomposer"):
+        updated = re.sub(
+            rf"(?m)(^  {section}:\r?\n(?:    [^\r\n]*\r?\n)*?    model: )"
+            r"(qwen3-coder-local|cale-local)(?=\r?$)",
+            r"\g<1>cale-vision",
+            updated,
+            count=1,
+        )
     if "mcp-design" not in updated:
         anchor = "  - mcp-toolbox\n"
         if anchor not in updated:
