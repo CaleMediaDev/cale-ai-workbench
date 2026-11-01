@@ -7,6 +7,7 @@ models, runtime folders and account credentials are never part of an update.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -24,6 +25,34 @@ RELEASES = (
     "https://api.github.com/repos/CaleMediaDev/cale-ai-workbench/releases?per_page=10"
 )
 MAX_ZIP = 100 * 1024 * 1024
+
+
+@contextmanager
+def update_lock(timeout=600):
+    """Allow one updater at a time, even when two desktop windows are open."""
+    import msvcrt
+
+    path = ROOT / "Updates/update.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as lock:
+        if os.fstat(lock.fileno()).st_size == 0:
+            lock.write(b"1")
+            lock.flush()
+        deadline = time.monotonic() + timeout
+        while True:
+            lock.seek(0)
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Another Cale AI update is still running.")
+                time.sleep(2)
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def current_version():
@@ -362,6 +391,42 @@ def restart_router_after_update():
     ensure_router()
 
 
+def reopen_desktop():
+    """Return the user to a usable window after success or rollback."""
+    executable = Path(sys.executable)
+    pythonw = executable.with_name("pythonw.exe")
+    subprocess.Popen(
+        [
+            str(pythonw if pythonw.is_file() else executable),
+            str(ROOT / "long_tasks.py"),
+        ],
+        cwd=ROOT,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=subprocess.DETACHED_PROCESS if os.name == "nt" else 0,
+    )
+
+
+def run_update(archive: Path, version: tuple[int, int, int], parent_pid: int) -> None:
+    """Serialize app swaps and restore the desktop after a failed attempt."""
+    wait_for_exit(parent_pid)
+    with update_lock():
+        if current_version() >= version:
+            return  # Another window already installed this release and reopened.
+        try:
+            apply(archive, version)
+            restart_router_after_update()
+        except Exception as exc:
+            log = ROOT / "Updates/last-error.txt"
+            log.parent.mkdir(exist_ok=True)
+            log.write_text(str(exc), encoding="utf-8")
+            reopen_desktop()
+            raise
+        (ROOT / "Updates/last-error.txt").unlink(missing_ok=True)
+        reopen_desktop()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", type=Path)
@@ -383,28 +448,7 @@ def main():
     match = re.fullmatch(r"\d+\.\d+\.\d+", args.version or "")
     if not match:
         raise ValueError("Invalid update version.")
-    wait_for_exit(args.parent_pid)
-    try:
-        apply(args.apply, tuple(map(int, args.version.split("."))))
-        restart_router_after_update()
-    except Exception as exc:
-        log = ROOT / "Updates/last-error.txt"
-        log.parent.mkdir(exist_ok=True)
-        log.write_text(str(exc), encoding="utf-8")
-        raise
-    executable = Path(sys.executable)
-    pythonw = executable.with_name("pythonw.exe")
-    subprocess.Popen(
-        [
-            str(pythonw if pythonw.is_file() else executable),
-            str(ROOT / "long_tasks.py"),
-        ],
-        cwd=ROOT,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.DETACHED_PROCESS if os.name == "nt" else 0,
-    )
+    run_update(args.apply, tuple(map(int, args.version.split("."))), args.parent_pid)
 
 
 if __name__ == "__main__":

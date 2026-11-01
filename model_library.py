@@ -549,8 +549,8 @@ def auto_install(status_dir, refresh=True):
     status_dir = Path(status_dir)
     status_dir.mkdir(parents=True, exist_ok=True)
     with (status_dir / "auto-models.lock").open("a+b") as lock:
-        lock.seek(0)
-        if not lock.read(1):
+        lock.seek(0, 2)
+        if lock.tell() == 0:
             lock.seek(0)
             lock.write(b"0")
             lock.flush()

@@ -1,6 +1,7 @@
 """Release updates protect user data and require a published digest."""
 
 import json
+from contextlib import nullcontext
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,42 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_two_updaters_cannot_hold_the_update_lock_together(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(
+            self_update, "ROOT", Path(folder)
+        ):
+            with self_update.update_lock():
+                with self.assertRaises(TimeoutError):
+                    with self_update.update_lock(timeout=0):
+                        pass
+
+    def test_failed_update_reopens_old_desktop(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / ".cale-ai-install").write_text("Cale AI Workbench 0.4.0")
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "wait_for_exit"),
+                  patch.object(self_update, "update_lock", return_value=nullcontext()),
+                  patch.object(self_update, "apply", side_effect=OSError("disk full")),
+                  patch.object(self_update, "reopen_desktop") as reopen):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    self_update.run_update(root / "release.zip", (0, 5, 0), 123)
+            reopen.assert_called_once()
+            self.assertIn("disk full", (root / "Updates/last-error.txt").read_text())
+
+    def test_second_updater_skips_release_already_applied(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / ".cale-ai-install").write_text("Cale AI Workbench 0.5.0")
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "wait_for_exit"),
+                  patch.object(self_update, "update_lock", return_value=nullcontext()),
+                  patch.object(self_update, "apply") as apply,
+                  patch.object(self_update, "reopen_desktop") as reopen):
+                self_update.run_update(root / "release.zip", (0, 5, 0), 123)
+            apply.assert_not_called()
+            reopen.assert_not_called()
+
     def test_paused_task_waits_for_its_real_worker_before_update(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

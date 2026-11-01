@@ -1824,8 +1824,8 @@ def monitor():
 
     STATE.mkdir(exist_ok=True)
     lock = (STATE / "monitor.lock").open("a+b")
-    lock.seek(0)
-    if not lock.read(1):
+    lock.seek(0, 2)
+    if lock.tell() == 0:
         lock.write(b"1")
         lock.flush()
     lock.seek(0)

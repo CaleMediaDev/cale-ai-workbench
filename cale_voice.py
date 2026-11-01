@@ -51,8 +51,8 @@ def install():
         return
     STATUS.parent.mkdir(exist_ok=True)
     with (STATUS.parent / "cale-voice.lock").open("a+b") as lock:
-        lock.seek(0)
-        if not lock.read(1):
+        lock.seek(0, 2)
+        if lock.tell() == 0:
             lock.write(b"1")
             lock.flush()
         lock.seek(0)
