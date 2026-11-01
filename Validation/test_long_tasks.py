@@ -1,7 +1,7 @@
 """Behavior checks for the companion (no model or native board writes)."""
 
-import importlib.util
 import contextlib
+import importlib.util
 import io
 import json
 import os
@@ -421,6 +421,42 @@ class LongTaskTests(unittest.TestCase):
             self.assertEqual(create.call_args.args[0]["id"], pid)
             self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "queued")
 
+    def test_optional_tool_update_does_not_hold_core_tasks(self):
+        self.assertTrue(task_module.setup_blocks_tasks({"status": "working"}))
+        self.assertFalse(task_module.setup_blocks_tasks({
+            "status": "working", "owner": "runtime_features"
+        }))
+        task_module.update(self.pid, status="paused")
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text(json.dumps({
+            "status": "working", "owner": "runtime_features",
+            "current": "Adding the local website crawler",
+        }), encoding="utf-8")
+        pid = task_module.add_project(
+            "", str(self.base / "optional-tools"), "Build a website", waiting_for_setup=True
+        )
+        with patch.object(task_module, "create_card") as create:
+            task_module.tick()
+        create.assert_called_once()
+        self.assertEqual(create.call_args.args[0]["id"], pid)
+        self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "queued")
+
+    def test_optional_tool_failure_releases_previously_waiting_task(self):
+        task_module.update(self.pid, status="paused")
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text(json.dumps({
+            "status": "failed", "owner": "runtime_features", "attempts": 3,
+            "current": "Optional browser tool update failed",
+        }), encoding="utf-8")
+        pid = task_module.add_project(
+            "", str(self.base / "optional-failure"), "Write a document",
+            waiting_for_setup=True,
+        )
+        with patch.object(task_module, "create_card") as create:
+            task_module.tick()
+        create.assert_called_once()
+        self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "queued")
+
     def test_music_saved_during_setup_keeps_direct_music_route(self):
         task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"
@@ -482,14 +518,14 @@ class LongTaskTests(unittest.TestCase):
         task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"
         progress.write_text(json.dumps({
-            "status": "failed", "current": "Python tool installation failed",
-            "owner": "runtime_features", "attempts": 3,
+            "status": "error", "current": "Setup needs attention: AI model installation failed",
         }), encoding="utf-8")
         pid = task_module.add_project(
             "", str(self.base / "setup-delayed"), "Build a website", waiting_for_setup=True,
         )
         with patch.object(task_module, "create_card") as create:
-            task_module.tick()
+            with patch.object(task_module.setup_recovery, "repair_exhausted", return_value=True):
+                task_module.tick()
             item = next(p for p in task_module.projects() if p["id"] == pid)
             self.assertEqual(item["status"], "needs_input")
             self.assertIn("automatic retries", item["detail"])

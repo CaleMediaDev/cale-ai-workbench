@@ -410,6 +410,12 @@ def read_task_status(path):
         return {}
 
 
+def setup_blocks_tasks(setup):
+    """Only the base AI install must hold work; added tools update in parallel."""
+    return bool(setup and setup.get("status") != "complete"
+                and setup.get("owner") != "runtime_features")
+
+
 def token_legend_layout(models, width):
     """Fit every full model name and total beneath the graph without scrolling."""
     width = max(int(width), 400)
@@ -563,7 +569,6 @@ def add_project(title, folder, brief, waiting_for_setup=False, pending_media=Non
 
 def add_music_project(request_text: str, spec: dict, folder: str = "") -> str:
     """Start simple music directly, with a normal task folder and task card."""
-    import music_backend
 
     pid = add_project("", folder, request_text, waiting_for_setup=True)
     p = next(item for item in projects() if item["id"] == pid)
@@ -598,7 +603,6 @@ def _start_music_project(p: dict, spec: dict) -> None:
 
 def add_image_project(request_text: str, prompt: str, folder: str = "") -> str:
     """Keep a quick local image request in My Tasks across app restarts."""
-    import quick_image
 
     pid = add_project("", folder, request_text, waiting_for_setup=True)
     p = next(item for item in projects() if item["id"] == pid)
@@ -1664,7 +1668,7 @@ def process_requests():
                 elif task and task["status"] in ("done", "archived", "triage"):
                     update(p["id"], card="", generation=p["generation"] + 1)
                 setup = read_task_status(STATE / "install-progress.json")
-                waiting = p["status"] == "waiting_for_setup" and setup.get("status") != "complete"
+                waiting = p["status"] == "waiting_for_setup" and setup_blocks_tasks(setup)
                 update(
                     p["id"],
                     status="waiting_for_setup" if waiting else "working",
@@ -1745,10 +1749,12 @@ def advance_project(p):
     setup = read_task_status(STATE / "install-progress.json")
     if (p["status"] == "needs_input" and
             p["detail"].startswith("AI setup failed after automatic retries:") and
-            setup.get("status") == "complete"):
+            (setup.get("status") == "complete" or
+             setup.get("owner") == "runtime_features")):
         update(p["id"], status="waiting_for_setup", detail="Setup recovered. Starting your task.")
         p["status"] = "waiting_for_setup"
-    if p["status"] == "waiting_for_setup" and setup_recovery.repair_exhausted(setup):
+    if (p["status"] == "waiting_for_setup" and setup_blocks_tasks(setup)
+            and setup_recovery.repair_exhausted(setup)):
         update(p["id"], status="needs_input", detail=(
             "AI setup failed after automatic retries: " +
             str(setup.get("current", "Unknown setup error"))[:300]
@@ -1862,7 +1868,7 @@ def advance_project(p):
         return
     if p["status"] == "waiting_for_setup":
         setup = read_task_status(STATE / "install-progress.json")
-        if setup and setup.get("status") != "complete":
+        if setup_blocks_tasks(setup):
             return
         pending = Path(p["folder"]) / ".local-ai" / "pending-media.json"
         if pending.is_file():
@@ -2088,7 +2094,7 @@ def monitor():
                 # setup can freeze that task before its status is updated.
                 setup_recovery.recover()
             setup = read_task_status(STATE / "install-progress.json")
-            if setup.get("status") == "working":
+            if setup.get("status") == "working" and setup_blocks_tasks(setup):
                 (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
                 time.sleep(5)
                 continue
@@ -3679,7 +3685,7 @@ def gui():
             action = chat_assistant.route_with_files(raw_value, active, selected_paths)
             if action == "image":
                 setup = read_task_status(STATE / "install-progress.json")
-                if setup and setup.get("status") != "complete":
+                if setup_blocks_tasks(setup):
                     add_project("", "", value, waiting_for_setup=True,
                                 pending_media={"kind": "image", "prompt": chat_assistant.image_prompt(raw_value)})
                     assistant_reply("I saved your image task. I'll start it after setup finishes.")
@@ -3689,7 +3695,7 @@ def gui():
                 render_cards()
             elif action == "music":
                 setup = read_task_status(STATE / "install-progress.json")
-                if setup and setup.get("status") != "complete":
+                if setup_blocks_tasks(setup):
                     pid = add_project("", "", value, waiting_for_setup=True,
                                       pending_media={"kind": "music", "spec": chat_assistant.music_request(raw_value)})
                     assistant_reply("I saved your music task. I'll start it after setup finishes.")
@@ -3699,7 +3705,7 @@ def gui():
                 render_cards()
             elif action == "task":
                 setup = read_task_status(STATE / "install-progress.json")
-                waiting = bool(setup and setup.get("status") != "complete")
+                waiting = setup_blocks_tasks(setup)
                 pid = add_project("", "", value, waiting_for_setup=waiting)
                 item = next(p for p in projects() if p["id"] == pid)
                 if waiting:
