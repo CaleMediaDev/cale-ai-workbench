@@ -832,7 +832,7 @@ def handle_handoff(p, task):
         )
 
 
-REVIEW_PROJECTS_CHECKED = set()
+REVIEW_PROJECTS_CHECKED = {}  # project id -> (generation, current card)
 
 
 def retire_review_cards(p):
@@ -843,7 +843,8 @@ def retire_review_cards(p):
     once per reviewed project; running workers are blocked first and archived
     after they retire on a later supervisor tick.
     """
-    if p["id"] in REVIEW_PROJECTS_CHECKED:
+    review = (p["generation"], p["card"])
+    if REVIEW_PROJECTS_CHECKED.get(p["id"]) == review:
         return
     folder = os.path.normcase(str(Path(p["folder"]).resolve()))
     retiring = False
@@ -861,7 +862,7 @@ def retire_review_cards(p):
         elif state in ("ready", "scheduled", "blocked", "triage"):
             board("archive", card)
     if not retiring:
-        REVIEW_PROJECTS_CHECKED.add(p["id"])
+        REVIEW_PROJECTS_CHECKED[p["id"]] = review
 
 
 def process_requests():
@@ -899,6 +900,7 @@ def process_requests():
                 ):
                     board("archive", p["card"])
                 if action == "delete":
+                    REVIEW_PROJECTS_CHECKED.pop(p["id"], None)
                     with database() as conn:
                         conn.execute("DELETE FROM projects WHERE id=?", (p["id"],))
                         conn.execute(

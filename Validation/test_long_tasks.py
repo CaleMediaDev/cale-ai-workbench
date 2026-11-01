@@ -259,7 +259,7 @@ class LongTaskTests(unittest.TestCase):
             {"id": "other-card", "status": "ready", "workspace_path": str(self.base / "other")},
         ]
         with (
-            patch.object(task_module, "REVIEW_PROJECTS_CHECKED", set()),
+            patch.object(task_module, "REVIEW_PROJECTS_CHECKED", {}),
             patch.object(task_module, "board", side_effect=[listing, "Archived"]) as board,
         ):
             task_module.tick()
@@ -283,7 +283,7 @@ class LongTaskTests(unittest.TestCase):
             return "ok"
 
         with (
-            patch.object(task_module, "REVIEW_PROJECTS_CHECKED", set()),
+            patch.object(task_module, "REVIEW_PROJECTS_CHECKED", {}),
             patch.object(task_module, "board", side_effect=board_call) as board,
         ):
             task_module.tick()
@@ -291,6 +291,32 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(
             [call.args[0] for call in board.call_args_list],
             ["list", "block", "list", "archive"],
+        )
+
+    def test_new_review_generation_rechecks_old_cards(self):
+        folder = self.base / "project"
+        old = {
+            **self.item(), "card": "review-0", "generation": 0,
+        }
+        newer = {**old, "card": "review-1", "generation": 1}
+        listings = [
+            [{"id": "review-0", "status": "review", "workspace_path": str(folder)}],
+            [{"id": "review-0", "status": "ready", "workspace_path": str(folder)}],
+        ]
+
+        def board_call(command, *args, **kwargs):
+            return listings.pop(0) if command == "list" else "Archived"
+
+        with (
+            patch.object(task_module, "REVIEW_PROJECTS_CHECKED", {}),
+            patch.object(task_module, "board", side_effect=board_call) as board,
+        ):
+            task_module.retire_review_cards(old)
+            task_module.retire_review_cards(old)
+            task_module.retire_review_cards(newer)
+        self.assertEqual(
+            [call.args[0] for call in board.call_args_list],
+            ["list", "list", "archive"],
         )
 
     def test_review_feedback_starts_a_new_saved_generation(self):
