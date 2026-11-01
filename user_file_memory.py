@@ -32,6 +32,11 @@ def _file_limit(path: Path) -> int:
     return MAX_MEDIA_BYTES if path.suffix.casefold() in AUDIO | VIDEO else MAX_BYTES
 
 
+def _safe_file_path(path: Path) -> bool:
+    """Keep content under secret-named folders out of local searchable memory."""
+    return not any(project_memory.SECRET_NAME.search(part) for part in path.parts)
+
+
 def _files(paths: list[str]):
     """Walk only user-selected roots, without following directory links."""
     for raw in paths[:MAX_ROOTS]:
@@ -50,13 +55,14 @@ def _files(paths: list[str]):
             def walk():
                 for base, dirs, names in os.walk(root, followlinks=False):
                     dirs[:] = sorted(d for d in dirs if d not in project_memory.SKIP_DIRS
+                                     and not project_memory.SECRET_NAME.search(d)
                                      and not (Path(base) / d).is_symlink())
                     for name in sorted(names):
                         yield Path(base) / name
 
             candidates = walk()
         for path in candidates:
-            if path.is_symlink() or project_memory.SECRET_NAME.search(path.name):
+            if path.is_symlink() or not _safe_file_path(path):
                 continue
             if path.suffix.casefold() not in SUPPORTED:
                 continue
@@ -258,7 +264,7 @@ def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
     def available(raw: str) -> bool:
         path = Path(raw)
         try:
-            return (not path.is_symlink() and path.is_file()
+            return (not path.is_symlink() and _safe_file_path(path) and path.is_file()
                     and path.suffix.casefold() in SUPPORTED
                     and path.stat().st_size <= _file_limit(path))
         except OSError:
@@ -295,7 +301,7 @@ def get(state: str | Path, path: str) -> dict:
     source = Path(path)
     try:
         available = (
-            not source.is_symlink() and source.is_file()
+            not source.is_symlink() and _safe_file_path(source) and source.is_file()
             and source.suffix.casefold() in SUPPORTED
             and source.stat().st_size <= _file_limit(source)
         )

@@ -117,7 +117,11 @@ def _eligible(root: Path, path: Path) -> bool:
         return False
     try:
         resolved = path.resolve(strict=True)
-        return resolved.is_file() and resolved.is_relative_to(root) and resolved.stat().st_size <= 256_000
+        if not resolved.is_relative_to(root):
+            return False
+        relative = resolved.relative_to(root)
+        return (resolved.is_file() and not any(SECRET_NAME.search(part) for part in relative.parts[:-1])
+                and resolved.stat().st_size <= 256_000)
     except OSError:
         return False
 
@@ -152,7 +156,8 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
     if include_code:
         count = 0
         for base, dirs, names in os.walk(root, followlinks=False):
-            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not (Path(base) / d).is_symlink())
+            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS
+                             and not SECRET_NAME.search(d) and not (Path(base) / d).is_symlink())
             for name in sorted(names):
                 path = Path(base) / name
                 if path not in paths:

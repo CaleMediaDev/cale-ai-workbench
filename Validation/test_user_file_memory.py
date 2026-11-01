@@ -200,6 +200,27 @@ class UserFileMemoryTests(unittest.TestCase):
         self.assertEqual(user_file_memory.search(self.state, "private"), [])
         self.assertEqual(user_file_memory.search(self.state, "hidden"), [])
 
+    def test_nested_secret_folder_is_not_indexed_or_recalled(self):
+        folder = self.root / "selected"
+        private = folder / "credentials"
+        private.mkdir(parents=True)
+        source = private / "ordinary-notes.txt"
+        source.write_text("hidden-account-detail", encoding="utf-8")
+        (folder / "public-notes.txt").write_text("public-project-detail", encoding="utf-8")
+        self.assertEqual(user_file_memory.ingest(self.state, [str(folder)])["indexed"], 1)
+        self.assertEqual(user_file_memory.search(self.state, "hidden"), [])
+        self.assertEqual(len(user_file_memory.search(self.state, "public")), 1)
+        # Old indexes made before this guard must also disappear from search.
+        with user_file_memory._connection(self.state) as conn:
+            conn.execute("INSERT INTO files(path,size,modified_ns,version,content) VALUES(?,?,?,?,?)",
+                         (str(source), source.stat().st_size, source.stat().st_mtime_ns,
+                          "old", "hidden-account-detail"))
+            conn.execute("INSERT INTO file_fts(path,filename,content) VALUES(?,?,?)",
+                         (str(source), source.name, "hidden-account-detail"))
+        self.assertEqual(user_file_memory.search(self.state, "hidden"), [])
+        with self.assertRaises(ValueError):
+            user_file_memory.get(self.state, str(source))
+
     def test_empty_or_unreadable_revision_does_not_leave_old_memory(self):
         path = self.root / "report.txt"
         path.write_text("The budget is 42.", encoding="utf-8")

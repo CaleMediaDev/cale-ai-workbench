@@ -61,6 +61,16 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertFalse(memory.search(self.folder, "private"))
         self.assertFalse(memory.search(self.folder, "hidden_package_marker"))
 
+    def test_project_scan_and_explicit_index_reject_nested_secret_folder(self):
+        private = self.folder / "secrets"
+        private.mkdir()
+        source = private / "ordinary-notes.md"
+        source.write_text("hidden-project-key", encoding="utf-8")
+        memory.index(self.folder, include_code=True)
+        self.assertFalse(memory.search(self.folder, "hidden-project-key"))
+        with self.assertRaises(ValueError):
+            memory.index_file(self.folder, source)
+
     def test_recalled_code_file_refreshes_after_edit_and_deletion(self):
         source = self.folder / "app.py"
         source.write_text("def old_recipe(): return 1", encoding="utf-8")
