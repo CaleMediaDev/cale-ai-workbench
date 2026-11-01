@@ -106,8 +106,13 @@ def task_size(messages):
         for msg in messages
         if isinstance(msg, dict) and msg.get("role") == "user"
     ]
-    request = "\n".join(users)[-16000:]
-    project = PROJECT_REQUEST.search(request)
+    # A long-lived worker can accumulate enough saved guidance that its
+    # original brief drops out of the tail. Inspect both ends without making
+    # the model tier depend on the length of the worker wrapper itself.
+    all_user_text = "\n".join(users)
+    request = all_user_text[-16000:]
+    beginning = all_user_text[:16000]
+    project = PROJECT_REQUEST.search(beginning) or PROJECT_REQUEST.search(request)
     if project:
         original = project.group(1).strip()
         # The latest saved user follow-ups can turn a small original task into
@@ -124,7 +129,7 @@ def task_size(messages):
         for msg in messages
         if isinstance(msg, dict) and msg.get("role") == "assistant"
     )
-    if PROJECT_MARKER.search(request) and not project:
+    if (PROJECT_MARKER.search(beginning) or PROJECT_MARKER.search(request)) and not project:
         return "deep"
     # An agent can spend several tool calls discovering the music engine. That
     # is routine media work, not evidence that it needs a 70B+ planning model.
