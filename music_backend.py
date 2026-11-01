@@ -239,7 +239,7 @@ def _generate_music(
     request = {
         "prompt": prompt.strip(), "lyrics": "[Instrumental]" if instrumental else lyrics,
         "audio_format": target.suffix.lower()[1:], "audio_duration": duration_seconds,
-        "thinking": False, "inference_steps": 8,
+        "thinking": False, "inference_steps": 8, "batch_size": 1,
     }
     if source:
         request.update({"task_type": "cover", "src_audio_path": str(source)})
@@ -294,6 +294,10 @@ def _generate_music(
             os.replace(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
+        # A successful render proves the local weights are usable. Future
+        # launches need not repeat the background model prefetch.
+        if (ENGINE / "checkpoints" / "acestep-v15-turbo").is_dir():
+            (ENGINE / ".cale-model-ready").write_text(REVISION, encoding="ascii")
         return {
             "path": str(target), "model": "ACE-Step 1.5",
             "duration_seconds": duration_seconds,

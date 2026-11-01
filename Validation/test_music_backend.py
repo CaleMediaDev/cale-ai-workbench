@@ -48,6 +48,7 @@ def test_generates_instrumental_from_loopback_only(tmp_path):
     assert result["model"] == "ACE-Step 1.5"
     assert request.call_args_list[0].args[1]["audio_format"] == "mp3"
     assert request.call_args_list[0].args[1]["lyrics"] == "[Instrumental]"
+    assert request.call_args_list[0].args[1]["batch_size"] == 1
     assert download.call_args.args[0].startswith(music_backend.BASE + "/v1/audio")
 
 
