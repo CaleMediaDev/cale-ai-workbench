@@ -22,6 +22,7 @@ def test_daily_monthly_and_lifetime_totals(tmp_path, monkeypatch):
     assert daily["points"][-1]["tokens"] == 200
     assert monthly["points"][-1]["tokens"] == 200
     assert daily["current_speed"] == 5
+    assert daily["top_speed"] == 5
     with sqlite3.connect(usage_history.DATABASE) as conn:
         assert conn.execute("SELECT COUNT(*) FROM usage_events").fetchone()[0] == 2
 
@@ -42,3 +43,15 @@ def test_ollama_generation_duration_takes_priority(tmp_path, monkeypatch):
         "ollama", elapsed_seconds=5,
     )
     assert usage_history.history()["current_speed"] == 10
+
+
+def test_top_speed_survives_slower_later_response(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for tokens, seconds in ((50, 1), (20, 2)):
+        assert usage_history.record_completion(
+            {"model": "local", "usage": {"completion_tokens": tokens}},
+            "ollama", elapsed_seconds=seconds,
+        )
+    summary = usage_history.history()
+    assert summary["current_speed"] == 10
+    assert summary["top_speed"] == 50

@@ -2106,6 +2106,8 @@ def gui():
     usage_total.pack(side="left", padx=(16, 0))
     usage_speed = ttk.Label(usage_header, text="", style="CardMuted.TLabel")
     usage_speed.pack(side="left", padx=(16, 0))
+    usage_peak = ttk.Label(usage_header, text="", style="CardMuted.TLabel")
+    usage_peak.pack(side="left", padx=(16, 0))
     usage_period = tk.StringVar(value="day")
     usage_canvas = tk.Canvas(
         usage_panel, height=135, background=card, borderwidth=0,
@@ -2125,6 +2127,10 @@ def gui():
         speed = summary.get("current_speed")
         usage_speed.configure(
             text=f"Latest {speed:.1f} tokens/s" if speed is not None else "Speed appears after the next response"
+        )
+        peak = summary.get("top_speed")
+        usage_peak.configure(
+            text=f"Top {peak:.1f} tokens/s" if peak is not None else ""
         )
         width = max(usage_canvas.winfo_width(), 400)
         points = summary["points"]

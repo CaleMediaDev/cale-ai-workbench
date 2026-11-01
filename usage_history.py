@@ -93,12 +93,16 @@ def history(period: str = "day") -> dict:
             "SELECT tokens_per_second,source,model FROM usage_events "
             "WHERE tokens_per_second IS NOT NULL ORDER BY timestamp DESC,id DESC LIMIT 1"
         ).fetchone()
+        top_speed = conn.execute(
+            "SELECT MAX(tokens_per_second) FROM usage_events"
+        ).fetchone()[0]
         rows = conn.execute(
             f"SELECT {expression}, SUM(total_tokens) FROM usage_events GROUP BY 1"
         ).fetchall()
     counts = dict(rows)
     return {"period": period, "total": total,
             "current_speed": latest[0] if latest else None,
+            "top_speed": top_speed,
             "speed_source": latest[1] if latest else None,
             "speed_model": latest[2] if latest else None,
             "points": [{"date": key, "tokens": counts.get(key, 0)} for key in keys]}
