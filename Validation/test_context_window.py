@@ -32,6 +32,20 @@ class ContextWindowTests(unittest.TestCase):
             131072,
         )
 
+    def test_non_power_of_two_native_window_is_used_when_memory_fits(self):
+        info = {"model_info": {"qwen.context_length": 98304}}
+        self.assertEqual(
+            context_window.desired_context(info, 64 * 2**30, 7 * 2**30),
+            98304,
+        )
+
+    def test_non_power_of_two_native_window_still_obeys_memory_budget(self):
+        info = {"model_info": {"qwen.context_length": 98304}}
+        self.assertEqual(
+            context_window.desired_context(info, 24 * 2**30, 7 * 2**30),
+            65536,
+        )
+
     def test_model_below_hermes_minimum_is_rejected(self):
         with self.assertRaises(ValueError):
             context_window.desired_context(

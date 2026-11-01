@@ -64,7 +64,7 @@ def model_bytes(model):
 
 
 def desired_context(info, ram_bytes, weight_bytes):
-    """Use the largest power-of-two window estimated to fit alongside weights.
+    """Use the native window when it fits, otherwise a conservative power of two.
 
     The 128 KiB/token allowance is intentionally conservative because Ollama's
     actual KV cache varies by architecture, parallelism and GPU placement.
@@ -75,6 +75,8 @@ def desired_context(info, ram_bytes, weight_bytes):
     reserve = max(8 * 2**30, ram_bytes // 8)
     available = max(0, ram_bytes - weight_bytes - reserve)
     affordable = max(MIN_AGENT_CONTEXT, available // (128 * 1024))
+    if affordable >= native:
+        return native
     window = MIN_AGENT_CONTEXT
     while window * 2 <= min(native, affordable):
         window *= 2
