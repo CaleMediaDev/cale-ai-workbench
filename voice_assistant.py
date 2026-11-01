@@ -178,6 +178,42 @@ def spoken_command(transcript, require_wake=False):
     return ("note", phrase)
 
 
+class WakeSequence:
+    """Keep a wake phrase alive when it lands at the end of an audio clip.
+
+    Microphone recording happens in short clips. Without this small state,
+    saying "Hey Cale" in one clip and the request in the next silently drops
+    the request. Only the immediately following clip gets this exception.
+    """
+
+    def __init__(self, timeout=12):
+        self.timeout = timeout
+        self.pending_until = 0.0
+
+    def consume(self, transcript, now=None):
+        now = time.monotonic() if now is None else now
+        phrase = str(transcript).strip()
+        wake = WAKE.match(phrase)
+        if wake:
+            self.pending_until = 0.0
+            command = spoken_command(phrase, require_wake=True)
+            if command is None:
+                self.pending_until = now + self.timeout
+            return command
+        if self.pending_until > now and phrase:
+            self.pending_until = 0.0
+            return spoken_command(phrase)
+        self.pending_until = 0.0
+        return None
+
+    def reset(self):
+        self.pending_until = 0.0
+
+    @property
+    def awaiting_command(self):
+        return self.pending_until > time.monotonic()
+
+
 def background_prompt(
     kind, elapsed, previous_slot=-1, title="", mic_off=True, variation=0
 ):

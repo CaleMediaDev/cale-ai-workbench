@@ -133,6 +133,22 @@ class VoiceTests(unittest.TestCase):
             ("hearing", ""),
         )
 
+    def test_wake_phrase_can_span_two_microphone_clips(self):
+        listener = voice_assistant.WakeSequence(timeout=12)
+        self.assertIsNone(listener.consume("open my files", now=100))
+        self.assertIsNone(listener.consume("Hey, Cale!", now=101))
+        self.assertEqual(listener.consume("can you hear me?", now=108), ("hearing", ""))
+        self.assertIsNone(listener.consume("pause the task", now=109))
+
+    def test_split_wake_expires_and_mic_off_resets_it(self):
+        listener = voice_assistant.WakeSequence(timeout=12)
+        self.assertIsNone(listener.consume("Hey Cale", now=100))
+        self.assertIsNone(listener.consume("stop the task", now=113))
+        self.assertIsNone(listener.consume("Hey Cale", now=120))
+        listener.reset()
+        self.assertIsNone(listener.consume("stop the task", now=121))
+        self.assertEqual(listener.consume("Hey Cale, stop the task", now=122), ("stop", ""))
+
     def test_saved_rap_is_cleaned_for_speech(self):
         self.assertEqual(
             voice_assistant.spoken_text("**The Rap**\n\n*Great Lakes*\n---\nLine one"),

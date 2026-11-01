@@ -2466,9 +2466,12 @@ def gui():
 
         threading.Thread(target=worker, daemon=True).start()
 
+    wake_sequence = voice_assistant.WakeSequence()
+
     def toggle_listening():
         if listening.is_set():
             listening.clear()
+            wake_sequence.reset()
             mic_button.configure(text="🎤  Mic Off")
             voice_label.set("Microphone off. Press Ctrl+Alt+Space to talk once.")
         else:
@@ -2483,10 +2486,17 @@ def gui():
 
     def use_spoken_request(phrase, handsfree=False):
         """Send spoken instructions to the current task, or start a new one."""
-        parsed = voice_assistant.spoken_command(phrase, require_wake=handsfree)
+        parsed = (
+            wake_sequence.consume(phrase)
+            if handsfree else voice_assistant.spoken_command(phrase)
+        )
         if parsed is None:
             if handsfree and phrase.strip():
-                voice_label.set("I heard audio, but not Hey Cale at the start. Please try again.")
+                voice_label.set(
+                    "Heard Hey Cale. What should I do?"
+                    if wake_sequence.awaiting_command
+                    else "I heard audio, but not Hey Cale at the start. Please try again."
+                )
             return
         action, note = parsed
         if action == "hearing":
