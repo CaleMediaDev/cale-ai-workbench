@@ -2009,15 +2009,22 @@ def gui():
         while True:
             _, _, message, rate, vary, required, replay_id = speech_queue.get()
             try:
+                # Routine status chatter must not keep a newly enabled mic
+                # waiting behind a backlog of old announcements.
+                if listening.is_set() and vary:
+                    continue
                 spoken = (
                     voice_assistant.rephrase_status(message, recent_spoken_status, required)
                     if vary else message
                 )
                 result = {}
-                for chunk in voice_assistant.speech_chunks(spoken):
+                chunks = voice_assistant.speech_chunks(spoken)
+                for index, chunk in enumerate(chunks, 1):
                     while voice_busy.is_set():
                         time.sleep(0.2)
+                    voice_events.put(("speaking", f"Speaking aloud · part {index} of {len(chunks)}"))
                     result = voice_assistant.say(chunk, rate=rate)
+                voice_events.put(("spoken", "Finished speaking aloud."))
                 if vary:
                     recent_spoken_status.append(spoken)
                     del recent_spoken_status[:-6]
@@ -2147,7 +2154,11 @@ def gui():
         else:
             listening.set()
             mic_button.configure(text="🎤  Mic On")
-            voice_label.set("Microphone on. Say Hey Cale before an instruction.")
+            voice_label.set(
+                "Microphone on. Finishing speech before listening…"
+                if voice_speaking.is_set()
+                else "Microphone on. Say Hey Cale before an instruction."
+            )
             maybe_listen()
 
     def use_spoken_request(phrase, handsfree=False):
@@ -2361,7 +2372,7 @@ def gui():
             show_chat("assistant", "I found it. I'll read it aloud now.", speak=False)
             speak_update(
                 voice_assistant.spoken_text(requested_replay),
-                replay_id=last_chat_row["id"],
+                priority=-2, replay_id=last_chat_row["id"],
             )
     if not chat_history():
         show_chat("assistant", "Hi! Ask me anything, or tell me what you'd like me to build.")
@@ -2457,13 +2468,14 @@ def gui():
         replay = chat_assistant.spoken_replay_target(raw_value, chat_history(100))
         if replay is not None:
             if replay:
-                show_chat("assistant", "I found it. I'll read it aloud now.")
+                show_chat("assistant", "I found it. I'll read it aloud now.", speak=False)
                 with database() as conn:
                     replay_id = conn.execute(
                         "SELECT MAX(id) FROM chat_messages"
                     ).fetchone()[0]
                 speak_update(
-                    voice_assistant.spoken_text(replay), replay_id=replay_id
+                    voice_assistant.spoken_text(replay), priority=-2,
+                    replay_id=replay_id,
                 )
             else:
                 assistant_reply("I can't find an earlier reply to read aloud yet.")
@@ -3370,6 +3382,8 @@ def gui():
                     mic_button.configure(text="🎤  Mic Off")
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
+                elif event in ("speaking", "spoken"):
+                    voice_label.set(value)
                 else:
                     voice_label.set(value)
         except queue.Empty:
