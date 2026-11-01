@@ -85,6 +85,24 @@ LOCAL_CATALOG = {
             "output_path": {"type": "string"},
         }, "required": ["source_path", "reference_path", "output_path"]},
     },
+    "local.edit_music": {
+        "description": "Trim a local song or recording, fade it in or out, and adjust volume. Saves a new WAV, MP3 or FLAC file; no account or cloud service.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_path": {"type": "string"}, "output_path": {"type": "string"},
+            "start_seconds": {"type": "number"}, "duration_seconds": {"type": "number"},
+            "fade_in_seconds": {"type": "number"}, "fade_out_seconds": {"type": "number"},
+            "gain_db": {"type": "number"},
+        }, "required": ["source_path", "output_path"]},
+    },
+    "local.mix_music": {
+        "description": "Mix two local audio tracks, such as narration over background music. Supports track volumes and a delayed foreground start; writes a new file offline.",
+        "inputSchema": {"type": "object", "properties": {
+            "background_path": {"type": "string"}, "foreground_path": {"type": "string"},
+            "output_path": {"type": "string"}, "background_gain_db": {"type": "number"},
+            "foreground_gain_db": {"type": "number"},
+            "foreground_start_seconds": {"type": "number"},
+        }, "required": ["background_path", "foreground_path", "output_path"]},
+    },
 }
 
 
@@ -270,6 +288,8 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "local.audio_to_midi": audio_to_midi,
             "local.analyze_music": analyze_music,
             "local.master_music": master_music,
+            "local.edit_music": edit_music,
+            "local.mix_music": mix_music,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -594,6 +614,32 @@ async def master_music(source_path: str, reference_path: str, output_path: str) 
     return await asyncio.wait_for(
         asyncio.to_thread(music_mastering.master_music, source_path, reference_path, output_path),
         timeout=3900,
+    )
+
+
+@server.tool()
+async def edit_music(source_path: str, output_path: str, start_seconds: float = 0,
+                     duration_seconds: float | None = None, fade_in_seconds: float = 0,
+                     fade_out_seconds: float = 0, gain_db: float = 0) -> dict:
+    """Trim, fade or change the volume of a local audio file."""
+    import music_edit
+
+    return await asyncio.to_thread(
+        music_edit.edit_music, source_path, output_path, start_seconds,
+        duration_seconds, fade_in_seconds, fade_out_seconds, gain_db,
+    )
+
+
+@server.tool()
+async def mix_music(background_path: str, foreground_path: str, output_path: str,
+                    background_gain_db: float = -10, foreground_gain_db: float = 0,
+                    foreground_start_seconds: float = 0) -> dict:
+    """Layer narration or another track over background music locally."""
+    import music_edit
+
+    return await asyncio.to_thread(
+        music_edit.mix_music, background_path, foreground_path, output_path,
+        background_gain_db, foreground_gain_db, foreground_start_seconds,
     )
 
 

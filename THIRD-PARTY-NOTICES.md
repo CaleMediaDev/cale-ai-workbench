@@ -32,6 +32,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Audio Separator 0.48.0 (MIT; optional local vocal/instrumental separation installed on first use; model weights download separately) | https://github.com/nomadkaraoke/python-audio-separator |
 | Spotify Basic Pitch 0.4.0 (Apache-2.0; optional local audio-to-MIDI transcription installed on first use) | https://github.com/spotify/basic-pitch |
 | Matchering 2.0.6 (GPL-3.0; optional separate local reference-mastering runtime installed on first use, not bundled in the release) | https://github.com/sergree/matchering |
+| imageio-ffmpeg 0.6.0 (BSD-2-Clause; bundles FFmpeg binary used for local trim, fade and mix; FFmpeg carries its own component licenses) | https://github.com/imageio/imageio-ffmpeg |
 
 The Windows compatibility patch contains modifications to MIT-licensed Hermes code. The upstream MIT notice is reproduced in `HERMES-LICENSE`.
 
