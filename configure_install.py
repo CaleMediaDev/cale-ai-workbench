@@ -75,7 +75,7 @@ def configure(root, profile):
         "from": selection["source"],
         "stream": False,
         "parameters": {
-            "num_ctx": selection["context"],
+            "num_ctx": max(selection["context"], 65536),
             "num_predict": 8192,
             "temperature": 1,
             "top_p": 0.95,
@@ -129,7 +129,7 @@ def configure(root, profile):
         "model": "cale-fast",
         "from": vision_source,
         "stream": False,
-        "parameters": {"num_ctx": 32768, "num_predict": 4096, "temperature": 0.7},
+        "parameters": {"num_ctx": 65536, "num_predict": 4096, "temperature": 0.7},
     }
     with urlopen(
         Request(
@@ -149,9 +149,9 @@ def configure(root, profile):
         .read_text(encoding="utf-8")
         .replace("{{ROOT}}", root.as_posix())
     )
-    # The router may switch to an optional 32K local model during a task. Keep
-    # Hermes's compaction estimate within every selectable model's window.
-    config["model"]["context_length"] = min(selection["context"], 32768)
+    # Hermes refuses agent runs below 64K. Every automatically routed model is
+    # configured for at least that window, including the small local choices.
+    config["model"]["context_length"] = max(selection["context"], 65536)
     config["auxiliary"]["vision"]["enabled"] = True
     config["auxiliary"]["vision"]["model"] = "cale-vision"
     (root / "Media").mkdir(exist_ok=True)

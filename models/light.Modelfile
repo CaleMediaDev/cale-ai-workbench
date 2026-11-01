@@ -1,5 +1,5 @@
 FROM qwen3.5:4b
-PARAMETER num_ctx 16384
+PARAMETER num_ctx 65536
 PARAMETER num_predict 8192
 PARAMETER temperature 1
 PARAMETER top_p 0.95

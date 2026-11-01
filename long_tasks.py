@@ -969,11 +969,15 @@ def monitor():
                     settings = subprocess.run(
                         [py, str(ROOT / "read-settings.py")],
                         env=environment(),
-                        check=True,
                         capture_output=True,
                         text=True,
                         creationflags=HIDE,
                     )
+                    if settings.returncode:
+                        raise RuntimeError(
+                            "Local model settings need repair: "
+                            + (settings.stderr.strip()[-1000:] or "unknown validation error")
+                        )
                     ensure_ollama(json.loads(settings.stdout)["model"])
                     from cloud_ai import ensure_router
 
@@ -993,7 +997,7 @@ def monitor():
 
 
 def ensure_ollama(model):
-    """Start local Ollama if needed and reject remote model aliases."""
+    """Start Ollama and repair an older main alias with too little context."""
     from urllib.request import Request, urlopen
 
     try:
@@ -1030,6 +1034,22 @@ def ensure_ollama(model):
         raise RuntimeError(
             "Long tasks require local weights, not a remote Ollama model."
         )
+    context = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", info.get("parameters", ""))
+    if context is None or int(context.group(1)) < 64000:
+        # Ollama copies the existing alias before replacing it. This changes
+        # only its context parameter; the weights and other options are kept.
+        request = Request(
+            "http://127.0.0.1:11434/api/create",
+            data=json.dumps({
+                "model": model, "from": model, "stream": False,
+                "parameters": {"num_ctx": 65536},
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(request, timeout=120) as response:
+            result = json.load(response)
+        if result.get("error"):
+            raise RuntimeError("Could not prepare a 64K local model: " + result["error"])
 
 
 def start_monitor():

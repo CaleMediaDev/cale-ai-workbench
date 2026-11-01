@@ -1,6 +1,8 @@
 """Behavior checks for the companion (no model or native board writes)."""
 
 import importlib.util
+import io
+import json
 import os
 import subprocess
 import sys
@@ -18,6 +20,20 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_legacy_main_alias_is_repaired_to_64k_without_repulling_weights(self):
+        requests = []
+
+        def response(request, timeout=0):
+            url = request.full_url if hasattr(request, "full_url") else request
+            requests.append(url)
+            if url.endswith("/api/show"):
+                return io.BytesIO(json.dumps({"parameters": "num_ctx 32768\n"}).encode())
+            return io.BytesIO(b'{"status":"success"}')
+
+        with patch("urllib.request.urlopen", side_effect=response):
+            task_module.ensure_ollama("qwen3-coder-local")
+        self.assertEqual(requests[-1], "http://127.0.0.1:11434/api/create")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name)

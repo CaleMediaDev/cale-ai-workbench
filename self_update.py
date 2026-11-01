@@ -168,14 +168,18 @@ def active_tasks():
 
 
 def add_design_tools_to_config(root, backup):
-    """Expose new local tools to existing installs without resetting preferences."""
+    """Migrate only known local settings while preserving user preferences."""
     config = root / "data/config.yaml"
     if not config.is_file():
         return None
     original = config.read_text(encoding="utf-8")
-    if "mcp-design" in original and "  design:\n" in original:
-        return None
     updated = original
+    # Hermes now rejects agent windows below 64K. Older installations pinned
+    # the main model to 32K even when its local weights support a larger window.
+    model_block = updated.split("fallback_providers:", 1)[0]
+    context = re.search(r"(?m)^  context_length: ([0-9]+)[ \t]*$", model_block)
+    if context and int(context.group(1)) < 64000:
+        updated = updated.replace(context.group(0), "  context_length: 65536", 1)
     if "mcp-design" not in updated:
         anchor = "  - mcp-toolbox\n"
         if anchor not in updated:
@@ -195,6 +199,8 @@ def add_design_tools_to_config(root, backup):
             "      enabled: false\n"
         )
         updated = updated.replace(anchor, block + anchor, 1)
+    if updated == original:
+        return None
     previous = backup / "data/config.yaml"
     previous.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(config, previous)

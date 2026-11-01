@@ -120,6 +120,7 @@ class CloudTests(unittest.TestCase):
             if payload["model"] not in (small, cloud.FAST_MODEL):
                 raise OSError("not installed")
             return {"capabilities": ["completion", "tools"],
+                    "parameters": "num_ctx 65536\n",
                     "details": {"parameter_size": "9B"}}
 
         with (
@@ -203,10 +204,12 @@ class CloudTests(unittest.TestCase):
                 raise OSError("not installed")
             return {
                 "capabilities": ["completion", "tools"],
+                "parameters": "num_ctx 65536\n",
                 "details": {"parameter_size": sizes[name]},
             }
 
-        with patch.object(cloud, "post", side_effect=show):
+        with (patch.object(cloud, "post", side_effect=show),
+              patch.object(cloud, "candidate_approved", return_value=True)):
             router = cloud.Router()
             self.assertEqual(router.local_candidates("quick")[0], cloud.FAST_MODEL)
             self.assertEqual(
@@ -217,6 +220,19 @@ class CloudTests(unittest.TestCase):
                 cloud.CATALOG["gptoss_official"]["alias"],
                 router.local_candidates("deep"),
             )
+
+    def test_old_32k_alias_is_not_auto_routed_to_long_task(self):
+        self.candidates.stop()
+
+        def show(url, payload, **kwargs):
+            if payload["model"] != cloud.FAST_MODEL:
+                raise OSError("not installed")
+            return {"capabilities": ["completion", "tools"],
+                    "parameters": "num_ctx 32768\n",
+                    "details": {"parameter_size": "9B"}}
+
+        with patch.object(cloud, "post", side_effect=show):
+            self.assertEqual(cloud.Router().local_candidates("quick"), [cloud.LOCAL_MODEL])
 
     def test_paid_model_rejected_before_network(self):
         self.connected()

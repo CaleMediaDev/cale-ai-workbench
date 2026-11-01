@@ -25,6 +25,18 @@ CATALOG = {
         "label": "Main coding + optional free cloud",
         "alias": configured_main_alias(ROOT),
     },
+    "fast": {
+        "label": "Fast local tool model",
+        "alias": "cale-fast",
+        "source": "qwen3.5:9b",
+        "download_gb": 7,
+        "ram_gb": 24,
+        "origin": "https://ollama.com/library/qwen3.5",
+        "license": "Apache-2.0",
+        "context": 65536,
+        "candidate": True,
+        "tool_reasoning_effort": "none",
+    },
     "qwen35": {
         "label": "Qwen 3.5 35B (balanced local)",
         "alias": "cale-qwen35",
@@ -33,7 +45,7 @@ CATALOG = {
         "ram_gb": 48,
         "origin": "https://ollama.com/library/qwen3.5",
         "license": "Apache-2.0",
-        "context": 32768,
+        "context": 65536,
     },
     "permissive_small": {
         "label": "Huihui Qwen 3.5 9B abliterated (local)",
@@ -43,7 +55,7 @@ CATALOG = {
         "ram_gb": 16,
         "origin": "https://huggingface.co/huihui-ai/Huihui-Qwen3.5-9B-abliterated",
         "license": "Apache-2.0",
-        "context": 32768,
+        "context": 65536,
         "candidate": True,
         "fallback_only": True,
         "tool_reasoning_effort": "none",
@@ -66,7 +78,7 @@ CATALOG = {
         "ram_gb": 32,
         "origin": "https://ollama.com/library/gpt-oss",
         "license": "Apache-2.0",
-        "context": 32768,
+        "context": 65536,
     },
     "gptoss": {
         "label": "ArliAI GPT-OSS 20B (manual experimental)",
@@ -77,7 +89,7 @@ CATALOG = {
         "origin": "https://huggingface.co/ArliAI/gpt-oss-20b-Derestricted",
         "conversion": "https://huggingface.co/MaziyarPanahi/gpt-oss-20b-Derestricted-GGUF",
         "license": "Apache-2.0",
-        "context": 32768,
+        "context": 65536,
         "auto": False,
     },
     "llama": {
@@ -88,7 +100,7 @@ CATALOG = {
         "ram_gb": 80,
         "origin": "https://huggingface.co/huihui-ai/Llama-3.3-70B-Instruct-abliterated",
         "license": "Llama 3.3 Community License",
-        "context": 32768,
+        "context": 65536,
     },
     "glm": {
         "label": "ArliAI GLM 4.5 Air (manual experimental)",
@@ -99,7 +111,7 @@ CATALOG = {
         "origin": "https://huggingface.co/ArliAI/GLM-4.5-Air-Derestricted",
         "conversion": "https://huggingface.co/mradermacher/GLM-4.5-Air-Derestricted-GGUF",
         "license": "MIT",
-        "context": 32768,
+        "context": 65536,
         "auto": False,
     },
 }
@@ -139,7 +151,7 @@ def validated_recommendations(document):
             context = int(item["context"])
         except (KeyError, TypeError, ValueError):
             continue
-        if not (1 <= size <= 80 and 16 <= ram <= 256 and 8192 <= context <= 65536):
+        if not (1 <= size <= 80 and 16 <= ram <= 256 and 64000 <= context <= 65536):
             continue
         accepted[profile] = {
             "label": str(item.get("label", profile))[:80],
@@ -317,12 +329,15 @@ def model_store_path():
 
 
 def model_ready(profile):
-    """Check actual local Ollama state instead of trusting an old UI status file."""
+    """Require tool support and the context window needed by Hermes workers."""
     info = post("/api/show", {"model": CATALOG[profile]["alias"]}, timeout=10)
+    configured = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", info.get("parameters", ""))
     return (
         not info.get("remote_host")
         and not info.get("remote_model")
         and "tools" in info.get("capabilities", [])
+        and configured is not None
+        and int(configured.group(1)) >= max(64000, CATALOG[profile]["context"])
         and candidate_approved(CATALOG[profile])
     )
 
@@ -330,7 +345,8 @@ def model_ready(profile):
 def catalog_signature():
     """Change when the optional download set or its model sources change."""
     options = {
-        profile: {"source": item.get("source", ""), "auto": item.get("auto", True)}
+        profile: {"source": item.get("source", ""), "auto": item.get("auto", True),
+                  "context": item.get("context", 0)}
         for profile, item in CATALOG.items()
         if profile != "main"
     }

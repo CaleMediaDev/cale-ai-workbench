@@ -80,6 +80,24 @@ class SelfUpdateTests(unittest.TestCase):
             self.assertEqual((backup / "data/config.yaml").read_text(), original)
             self.assertIsNone(self_update.add_design_tools_to_config(root, backup))
 
+    def test_existing_32k_model_config_is_upgraded_without_other_changes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = root / "data/config.yaml"
+            config.parent.mkdir()
+            original = (
+                "model:\n  default: qwen3-coder-local\n  context_length: 32768\n"
+                "fallback_providers: []\nplatform_toolsets:\n  cli:\n  - mcp-toolbox\n"
+                "  - mcp-design\nmcp_servers:\n  design: {}\nskills:\n  disabled: []\n"
+            )
+            config.write_text(original, encoding="utf-8")
+            backup = root / "backup"
+            self_update.add_design_tools_to_config(root, backup)
+            updated = config.read_text(encoding="utf-8")
+            self.assertIn("context_length: 65536", updated)
+            self.assertIn("default: qwen3-coder-local", updated)
+            self.assertEqual((backup / "data/config.yaml").read_text(), original)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -423,6 +423,12 @@ class Router:
                         continue
                     if "tools" not in info.get("capabilities", []):
                         continue
+                    configured = re.search(
+                        r"(?m)^\s*num_ctx\s+(\d+)\s*$",
+                        info.get("parameters", ""),
+                    )
+                    if not configured or int(configured.group(1)) < 64000:
+                        continue
                     label = str(info.get("details", {}).get("parameter_size", ""))
                     match = re.search(r"(\d+(?:\.\d+)?)B", label, re.IGNORECASE)
                     available[name] = float(match.group(1)) if match else 1.0

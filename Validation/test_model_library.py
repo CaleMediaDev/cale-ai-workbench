@@ -14,6 +14,14 @@ import model_library as library
 
 
 class AutoModelTests(unittest.TestCase):
+    def test_agent_model_needs_64k_context(self):
+        details = {"capabilities": ["tools"], "parameters": "num_ctx 32768\n"}
+        with patch.object(library, "post", return_value=details):
+            self.assertFalse(library.model_ready("qwen35"))
+        details["parameters"] = "num_ctx 65536\n"
+        with patch.object(library, "post", return_value=details):
+            self.assertTrue(library.model_ready("qwen35"))
+
     def test_small_derestricted_model_is_auto_candidate_after_tool_probe(self):
         model = library.CATALOG["permissive_small"]
         self.assertEqual(model["ram_gb"], 16)
