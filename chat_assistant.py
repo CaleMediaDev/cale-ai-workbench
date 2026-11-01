@@ -131,6 +131,24 @@ def attach_request(text: str, paths: list[str]) -> str:
     )
 
 
+PERSONAL_CONTACT = re.compile(
+    r"\b(?:my|our)\s+(?:(?:personal|home|work|office|business)\s+)?"
+    r"(?:phone\s+number|number|e-?mail(?:\s+address)?|address|hours)\b",
+    re.IGNORECASE,
+)
+GENERIC_CONTACT_NAMES = frozenset({
+    "my", "our", "your", "his", "her", "their", "me", "us", "the",
+    "my business", "our business", "my company", "our company",
+    "my shop", "our shop", "the business", "the company",
+})
+
+
+def public_business_name(name: str) -> str | None:
+    """Require a named business before searching public contact pages."""
+    cleaned = re.sub(r"'s$", "", name.strip(), flags=re.IGNORECASE)
+    return cleaned if len(cleaned) >= 2 and cleaned.casefold() not in GENERIC_CONTACT_NAMES else None
+
+
 def business_contact_query(text: str) -> str | None:
     """Recognize a common live lookup without sending the whole chat to a model."""
     value = text.strip().rstrip("? .")
@@ -141,8 +159,7 @@ def business_contact_query(text: str) -> str | None:
     for pattern in patterns:
         match = re.match(pattern, value, re.IGNORECASE)
         if match:
-            name = re.sub(r"'s$", "", match.group(1).strip(), flags=re.IGNORECASE)
-            return name if len(name) >= 2 else None
+            return public_business_name(match.group(1))
     return None
 
 
@@ -156,8 +173,7 @@ def business_email_query(text: str) -> str | None:
     for pattern in patterns:
         match = re.match(pattern, value, re.IGNORECASE)
         if match:
-            name = re.sub(r"'s$", "", match.group(1).strip(), flags=re.IGNORECASE)
-            return name if len(name) >= 2 else None
+            return public_business_name(match.group(1))
     return None
 
 
@@ -172,8 +188,7 @@ def business_address_query(text: str) -> str | None:
     for pattern in patterns:
         match = re.match(pattern, value, re.IGNORECASE)
         if match:
-            name = re.sub(r"'s$", "", match.group(1).strip(), flags=re.IGNORECASE)
-            return name if len(name) >= 2 else None
+            return public_business_name(match.group(1))
     return None
 
 
@@ -256,6 +271,8 @@ def business_contact_answer(name: str, sources: list[dict]) -> str:
 
 def answer_with_tools(question: str, history: list[dict]) -> str:
     """Use a live source for contact lookups, then local inference for other chat."""
+    if PERSONAL_CONTACT.search(question):
+        return local_answer(question, history)
     name = business_contact_query(question)
     if name:
         from web_tools import find_business_contact
@@ -291,7 +308,7 @@ WEB_SIGNALS = re.compile(
 
 def needs_web(question: str) -> bool:
     """Route changing facts and explicit web searches to live public sources."""
-    if re.search(r"\b(?:my|our)\s+(?:email|e-mail|address)\b", question, re.I):
+    if PERSONAL_CONTACT.search(question):
         return False
     return bool(WEB_SIGNALS.search(question) or re.search(r"https?://", question))
 

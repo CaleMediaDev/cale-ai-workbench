@@ -94,6 +94,29 @@ def test_business_number_question_uses_live_lookup_path():
     assert chat_assistant.business_contact_query("What's Ross number?") == "Ross"
 
 
+def test_personal_contact_questions_stay_local():
+    questions = (
+        "What's my phone number?", "What is our office address?",
+        "What's my email address?", "What are my business hours?",
+    )
+    with (
+        patch.object(chat_assistant, "local_answer", return_value="Saved local detail") as local,
+        patch("web_tools.find_business_contact") as phone,
+        patch("web_tools.find_business_email") as email,
+        patch.object(chat_assistant, "answer_from_web") as web,
+    ):
+        for question in questions:
+            assert chat_assistant.answer_with_tools(question, []) == "Saved local detail"
+            assert not chat_assistant.needs_web(question)
+    assert local.call_count == len(questions)
+    phone.assert_not_called()
+    email.assert_not_called()
+    web.assert_not_called()
+    assert chat_assistant.business_contact_query("What's my number?") is None
+    assert chat_assistant.business_email_query("What's my email?") is None
+    assert chat_assistant.business_address_query("Where is my business located?") is None
+
+
 def test_business_email_uses_live_lookup_and_rejects_placeholder():
     assert chat_assistant.business_email_query("What's Pure Michigan Lawn Care's email?") == "Pure Michigan Lawn Care"
     assert chat_assistant.business_email_query("What is the email address for Pure Michigan Lawn Care?") == "Pure Michigan Lawn Care"
