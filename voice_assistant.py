@@ -462,6 +462,11 @@ def listen_result(seconds=8):
     }
 
 
+def microphone_status():
+    """Identify the microphone before continuous listening starts; record nothing."""
+    return media_call("microphone_status")
+
+
 def say(message, rate=0, cancel=None):
     """Speak one short status message through Windows' offline voice."""
     bundled_name = {

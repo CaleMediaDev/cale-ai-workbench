@@ -2910,6 +2910,9 @@ def gui():
     voice_busy = threading.Event()
     mic_turn_requested = threading.Event()
     listening = threading.Event()
+    mic_preflight_pending = threading.Event()
+    mic_check_generation = [0]
+    selected_mic_device = [""]
     manual_voice_requested = threading.Event()
     speech_queue = queue.PriorityQueue()
     speech_order = itertools.count()
@@ -3121,7 +3124,9 @@ def gui():
             # made while Cale was still speaking. Keep later mic diagnostics
             # visible instead of replacing them every eight-second clip.
             mic_button.configure(text="🎤  Mic On")
-            voice_events.put(("state", "Listening for Hey Cale…"))
+            device = selected_mic_device[0]
+            voice_events.put(("state", "Listening for Hey Cale"
+                              + (" on " + device[:85] if device else "") + "…"))
         elif not repeat:
             voice_events.put(("state", "Listening… speak now."))
 
@@ -3161,22 +3166,32 @@ def gui():
     wake_sequence = voice_assistant.WakeSequence()
 
     def toggle_listening():
+        mic_check_generation[0] += 1
+        generation = mic_check_generation[0]
         if listening.is_set():
             listening.clear()
+            mic_preflight_pending.clear()
             mic_turn_requested.clear()
             wake_sequence.reset()
             mic_button.configure(text="🎤  Mic Off")
             voice_label.set("Microphone off. Press Ctrl+Alt+Space to talk once.")
         else:
             listening.set()
+            mic_preflight_pending.set()
             mic_turn_requested.set()
             mic_button.configure(text="🎤  Mic starting…")
-            voice_label.set(
-                "Microphone on. Finishing speech before listening…"
-                if voice_speaking.is_set()
-                else "Microphone on. Say Hey Cale before an instruction."
-            )
-            maybe_listen()
+            voice_label.set("Checking the selected microphone…")
+
+            def check_microphone():
+                try:
+                    result = voice_assistant.microphone_status()
+                    voice_events.put(("mic_ready", (
+                        generation, str(result.get("input_device", "microphone"))
+                    )))
+                except Exception as exc:
+                    voice_events.put(("mic_preflight_error", (generation, str(exc))))
+
+            threading.Thread(target=check_microphone, daemon=True).start()
 
     def use_spoken_request(phrase, handsfree=False):
         """Send spoken instructions to the current task, or start a new one."""
@@ -4420,6 +4435,8 @@ def gui():
 
     def maybe_listen():
         if manual_voice_requested.is_set() or listening.is_set():
+            if mic_preflight_pending.is_set():
+                return
             if voice_speaking.is_set() or voice_busy.is_set():
                 window.after(500, maybe_listen)
             else:
@@ -4441,6 +4458,21 @@ def gui():
                     window.after(200, maybe_listen)
                 elif event == "capture_done":
                     mic_turn_requested.clear()
+                elif event == "mic_ready":
+                    generation, device = value
+                    if generation == mic_check_generation[0] and listening.is_set():
+                        mic_preflight_pending.clear()
+                        selected_mic_device[0] = device
+                        voice_label.set("Using " + device[:85] + ". Say Hey Cale before an instruction.")
+                        maybe_listen()
+                elif event == "mic_preflight_error":
+                    generation, problem = value
+                    if generation == mic_check_generation[0] and listening.is_set():
+                        listening.clear()
+                        mic_preflight_pending.clear()
+                        mic_turn_requested.clear()
+                        mic_button.configure(text="🎤  Mic Off")
+                        voice_label.set("Microphone unavailable: " + problem[:140])
                 elif event == "mic_error":
                     voice_label.set("Microphone unavailable: " + value[:140])
                     mic_button.configure(text="🎤  Mic Off")

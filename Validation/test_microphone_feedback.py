@@ -25,6 +25,17 @@ def _audio_modules(level):
     return sounddevice, soundfile
 
 
+def test_microphone_preflight_identifies_input_without_recording():
+    sd, sf = _audio_modules(0)
+    with patch.dict(sys.modules, {"sounddevice": sd, "soundfile": sf}):
+        result = media_worker.microphone_status()
+    assert result == {"input_device": "Fifine Microphone", "device_index": 0,
+                      "sample_rate": 44100}
+    sd.check_input_settings.assert_called_once_with(device=0, samplerate=44100, channels=1)
+    sd.rec.assert_not_called()
+    sf.write.assert_not_called()
+
+
 def test_near_silent_microphone_skips_transcription_and_names_device(tmp_path):
     sd, sf = _audio_modules(0.0001)
     with patch.dict(sys.modules, {"sounddevice": sd, "soundfile": sf}), patch.object(

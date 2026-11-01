@@ -75,6 +75,14 @@ class VoiceTests(unittest.TestCase):
             self.assertEqual(voice_assistant.listen(8), "Hello")
         call.assert_called_once_with("record_audio", seconds=8)
 
+    def test_microphone_preflight_uses_local_worker_without_recording(self):
+        with patch.object(voice_assistant, "media_call", return_value={
+            "input_device": "Fifine Microphone", "device_index": 1,
+        }) as call:
+            self.assertEqual(voice_assistant.microphone_status()["input_device"],
+                             "Fifine Microphone")
+        call.assert_called_once_with("microphone_status")
+
     def test_speech_uses_local_worker(self):
         with patch("cale_voice.ready", return_value=False), patch.object(
             voice_assistant, "media_call", return_value={"path": "speech.wav"}

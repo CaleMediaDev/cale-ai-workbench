@@ -413,14 +413,8 @@ def _capture_microphone(sd, device: int, rate: int, seconds: int):
     return np.concatenate(pieces, axis=0)
 
 
-def record_audio(seconds=10):
-    """Capture a bounded clip from the default or first usable microphone."""
-    import tempfile
-
-    import sounddevice as sd
-    import soundfile as sf
-
-    seconds = min(max(int(seconds), 1), 30)
+def _select_microphone(sd):
+    """Choose the same usable input for preflight and subsequent recording."""
     devices = sd.query_devices()
     preferred = sd.default.device[0]
     candidates = [preferred] if isinstance(preferred, int) and preferred >= 0 else []
@@ -450,6 +444,26 @@ def record_audio(seconds=10):
         raise RuntimeError(
             "No working microphone was found. Connect a microphone and try again."
         )
+    return chosen, rate, str(devices[chosen]["name"])
+
+
+def microphone_status():
+    """Check the selected input without recording or storing any sound."""
+    import sounddevice as sd
+
+    chosen, rate, name = _select_microphone(sd)
+    return {"input_device": name, "device_index": chosen, "sample_rate": rate}
+
+
+def record_audio(seconds=10):
+    """Capture a bounded clip from the default or first usable microphone."""
+    import tempfile
+
+    import sounddevice as sd
+    import soundfile as sf
+
+    seconds = min(max(int(seconds), 1), 30)
+    chosen, rate, microphone = _select_microphone(sd)
     (ROOT / "Temp").mkdir(exist_ok=True)
     if hasattr(sd, "InputStream"):
         try:
@@ -467,7 +481,6 @@ def record_audio(seconds=10):
         sd.wait()
     peak = float(abs(audio).max())
     rms = float((audio.astype("float64") ** 2).mean() ** 0.5)
-    microphone = str(devices[chosen]["name"])
     if peak < MIC_SILENCE_LEVEL:
         # Muted or disconnected inputs otherwise look exactly like a missed
         # wake phrase. Skip Whisper and tell the UI what the device captured.
@@ -634,6 +647,7 @@ if __name__ == "__main__":
                 "capture_camera": capture_camera,
                 "speak": speak,
                 "record_audio": record_audio,
+                "microphone_status": microphone_status,
                 "watch_camera": watch_camera,
                 "train_classifier": train_classifier,
                 "predict_classifier": predict_classifier,
