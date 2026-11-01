@@ -525,6 +525,40 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(self.item()["status"], "ready_for_review")
         self.assertTrue(self.item()["fingerprint"].startswith("content-v2:"))
 
+    def test_resume_waits_for_active_paused_worker_to_retire(self):
+        task_module.update(self.pid, card="active-card", status="working")
+        running = {"task": {"status": "running"}, "runs": [
+            {"status": "running", "started_at": 100, "ended_at": None},
+        ]}
+        with patch.object(task_module, "board", return_value=running):
+            task_module.request(self.pid, "pause")
+            task_module.process_requests()
+        self.assertEqual(self.item()["status"], "paused")
+
+        blocked_but_alive = {"task": {"status": "blocked"}, "runs": [
+            {"status": "running", "started_at": 100, "ended_at": None},
+        ]}
+        with patch.object(task_module, "board", return_value=blocked_but_alive) as board:
+            task_module.request(self.pid, "resume")
+            task_module.process_requests()
+        self.assertEqual(self.item()["status"], "paused")
+        self.assertFalse(any(call.args[0] == "unblock" for call in board.call_args_list))
+        with task_module.database() as conn:
+            result = conn.execute(
+                "SELECT status,result FROM requests ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        self.assertEqual(result["status"], "error")
+        self.assertIn("still retiring", result["result"])
+
+        retired = {"task": {"status": "blocked"}, "runs": [
+            {"status": "blocked", "started_at": 100, "ended_at": 101},
+        ]}
+        with patch.object(task_module, "board", return_value=retired) as board:
+            task_module.request(self.pid, "resume")
+            task_module.process_requests()
+        self.assertEqual(self.item()["status"], "working")
+        self.assertTrue(any(call.args[0] == "unblock" for call in board.call_args_list))
+
     def test_stop_during_review_migration_is_not_overwritten(self):
         self.verify_script('Write-Output "real check passed"; exit 0')
         old = task_module.legacy_fingerprint(self.base / "project")

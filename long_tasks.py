@@ -915,6 +915,13 @@ def process_requests():
                         detail=f"{state.title()}. A retiring worker may take up to two minutes to exit. Project files are preserved.",
                     )
             elif action in ("resume", "note"):
+                if p["status"] == "paused" and any(
+                    run.get("started_at") and not run.get("ended_at")
+                    for run in snapshot.get("runs", [])
+                ):
+                    raise ValueError(
+                        "The paused worker is still retiring. Continue after its run ends to avoid overlapping edits."
+                    )
                 ended = max(
                     (r.get("ended_at") or 0 for r in snapshot.get("runs", [])),
                     default=0,
