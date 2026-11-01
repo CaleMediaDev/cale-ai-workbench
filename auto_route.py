@@ -16,8 +16,24 @@ PROJECT_MARKER = re.compile(
     r"USER PROJECT:|persistent local project|\.local-ai/(?:PLAN|PROGRESS)\.md",
     re.IGNORECASE,
 )
+PROJECT_REQUEST = re.compile(
+    r"REQUEST AND ACCEPTANCE CRITERIA:\s*\n(.*?)\n\s*This is a persistent local project\.",
+    re.IGNORECASE | re.DOTALL,
+)
 QUESTION_START = re.compile(
     r"^(what|why|how|when|where|who|which|is|are|does|do|tell me|explain)\b",
+    re.IGNORECASE,
+)
+LIVE_FACT = re.compile(
+    r"\b(?:phone\s+number|contact\s+(?:info|information|details)|"
+    r"business\s+hours|opening\s+hours|street\s+address|"
+    r"current|latest|today|right\s+now|weather|stock\s+price|"
+    r"sports?\s+score)\b",
+    re.IGNORECASE,
+)
+CONTACT_NUMBER = re.compile(r"\b(?:phone|number|contact|address)\b", re.IGNORECASE)
+LOOKUP_WORD = re.compile(
+    r"\b(?:find|lookup|look\s+up|search|what(?:'?s| is)?|where(?:'?s| is)?)\b",
     re.IGNORECASE,
 )
 
@@ -43,21 +59,33 @@ def task_size(messages):
         if isinstance(msg, dict) and msg.get("role") == "user"
     ]
     request = "\n".join(users)[-16000:]
+    project = PROJECT_REQUEST.search(request)
+    intent = project.group(1).strip() if project else request
     tool_calls = sum(
         len(msg.get("tool_calls") or [])
         for msg in messages
         if isinstance(msg, dict) and msg.get("role") == "assistant"
     )
-    if PROJECT_MARKER.search(request):
+    if PROJECT_MARKER.search(request) and not project:
         return "deep"
-    latest = users[-1].strip() if users else ""
-    if len(request) <= 280 and tool_calls == 0 and QUESTION_START.match(latest):
+    if len(intent) > 800 or tool_calls >= 4:
+        return "deep"
+    live_lookup = LIVE_FACT.search(intent) or (
+        CONTACT_NUMBER.search(intent) and LOOKUP_WORD.search(intent)
+    )
+    latest = intent.strip()
+    if (
+        len(intent) <= 280
+        and tool_calls == 0
+        and QUESTION_START.match(latest)
+        and not live_lookup
+    ):
         return "quick"
-    if BUILD_ACTION.search(request):
+    if BUILD_ACTION.search(intent):
         return "deep"
-    if len(request) > 800 or tool_calls >= 4:
-        return "deep"
-    if len(request) <= 280 and tool_calls == 0:
+    if live_lookup:
+        return "balanced"
+    if len(intent) <= 280 and tool_calls == 0:
         return "quick"
     return "balanced"
 

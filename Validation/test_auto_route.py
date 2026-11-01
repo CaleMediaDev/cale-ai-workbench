@@ -6,10 +6,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from auto_route import model_order, task_size
+from long_tasks import project_prompt
 
 
 class AutoRouteTests(unittest.TestCase):
-    def test_short_question_uses_fast_tier(self):
+    def test_current_business_contact_uses_tool_capable_middle_tier(self):
         self.assertEqual(
             task_size(
                 [
@@ -19,12 +20,37 @@ class AutoRouteTests(unittest.TestCase):
                     }
                 ]
             ),
-            "quick",
+            "balanced",
         )
+        self.assertEqual(
+            task_size([{"role": "user", "content": "whats the shop's phone number"}]),
+            "balanced",
+        )
+
+    def test_stable_short_question_uses_fast_tier(self):
         self.assertEqual(
             task_size([{"role": "user", "content": "How do I create a folder?"}]),
             "quick",
         )
+
+    def test_project_wrapper_does_not_force_every_task_to_large_model(self):
+        def wrapped(brief):
+            return [
+                {
+                    "role": "user",
+                    "content": project_prompt(
+                        {"title": "Task", "folder": "C:/Tasks/test", "brief": brief}
+                    ),
+                }
+            ]
+
+        self.assertEqual(task_size(wrapped("How do I create a folder?")), "quick")
+        self.assertEqual(
+            task_size(wrapped("What's Pure Michigan Lawn Care's number?")),
+            "balanced",
+        )
+        self.assertEqual(task_size(wrapped("Build and test a recipe app.")), "deep")
+        self.assertEqual(task_size(wrapped("Build a weather app.")), "deep")
 
     def test_build_and_saved_project_use_deep_tier(self):
         self.assertEqual(

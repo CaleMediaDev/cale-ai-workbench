@@ -258,6 +258,11 @@ those files concise and current so recovery does not depend on conversation memo
 Do not stop merely because one response or context is full. Continue the goal.
 Never change the request to fit incomplete work. Do not weaken/delete existing tests.
 Use the installed local tools; see {ROOT / "TOOLBOX.txt"} for specialist tools.
+For changeable facts such as business phone numbers, addresses, hours, prices,
+weather, and current events, search the public web and read the supporting
+source before answering. A search snippet or saved record alone is not live
+verification. If the official source fails, try another relevant source and
+state what remains unverified instead of claiming a verified answer.
 For software or website projects, check whether GitHub CLI is connected. If it is,
 use an existing repository when one is configured; otherwise create a PRIVATE
 repository in the user's account and push verified milestones as a recoverable

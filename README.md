@@ -39,7 +39,7 @@ This is an **early preview**, with an unsigned Windows installer. It has been de
 - Inspect JavaScript, analyze Windows binaries, and use Ghidra where supported.
 - Connect your own free OpenRouter account with one browser sign-in, then fall back to local inference when limits or errors occur. No API key copying is needed.
 - Optionally connect ChatGPT and explicitly enable your shared ChatGPT/Codex plan allowance for tasks. Connecting alone does not use that allowance.
-- Automatically download additional tool-ready local models that fit the PC's RAM and available storage, one at a time after setup. The AI picks a smaller installed model for quick questions and a stronger one for demanding projects.
+- Automatically download additional tool-ready local models that fit the PC's RAM and available storage, one at a time after setup. The AI picks a smaller installed model for simple questions, a middle tier for current facts that require tools, and a stronger model for demanding projects. The New task wrapper does not by itself force every request to the largest model.
 - Speak task updates aloud. Switch **Mic On** to listen for “Hey Cale” and a spoken instruction; click again for **Mic Off**. **Ctrl+Alt+Space** while the app is focused records one instruction. The microphone is off by default; speech recognition and playback run locally.
 - Generate images locally, describe photos and screenshots, transcribe audio, and create offline spoken WAV files.
 - Inspect sampled video frames and optionally transcribe a video's audio. Agents can capture a camera frame or watch up to four snapshots over 30 seconds only after you enable Camera in the app; that switch expires after one hour.
