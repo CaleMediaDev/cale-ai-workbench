@@ -25,20 +25,45 @@ def _audio_modules(level):
     return sounddevice, soundfile
 
 
-def test_quiet_microphone_skips_transcription_and_names_device(tmp_path):
-    # This low input level was observed on the default FIFINE microphone in a
-    # live quiet-room capture; it must not look like usable speech.
-    sd, sf = _audio_modules(0.0104)
+def test_near_silent_microphone_skips_transcription_and_names_device(tmp_path):
+    sd, sf = _audio_modules(0.0001)
     with patch.dict(sys.modules, {"sounddevice": sd, "soundfile": sf}), patch.object(
         media_worker, "ROOT", tmp_path
     ), patch.object(media_worker, "transcribe_audio") as transcribe:
         result = media_worker.record_audio(seconds=1)
     assert result["quiet"] is True
     assert result["input_device"] == "Fifine Microphone"
-    assert result["input_peak"] == 0.0104
+    assert result["input_peak"] == 0.0001
     assert result["text"] == ""
     transcribe.assert_not_called()
     sf.write.assert_not_called()
+
+
+def test_faint_speech_is_recognized_before_diagnosing_low_input(tmp_path):
+    sd, sf = _audio_modules(0.006)
+    with patch.dict(sys.modules, {"sounddevice": sd, "soundfile": sf}), patch.object(
+        media_worker, "ROOT", tmp_path
+    ), patch.object(media_worker, "transcribe_audio", return_value={
+        "text": "Hey Kale, can you hear me?", "segments": [], "language": "en"
+    }) as transcribe:
+        result = media_worker.record_audio(seconds=1)
+    transcribe.assert_called_once()
+    assert result["quiet"] is False
+    assert result["text"] == "Hey Kale, can you hear me?"
+
+
+def test_faint_hiss_without_words_reports_low_input(tmp_path):
+    # This low level matches a quiet-room capture from the default microphone.
+    sd, sf = _audio_modules(0.0104)
+    with patch.dict(sys.modules, {"sounddevice": sd, "soundfile": sf}), patch.object(
+        media_worker, "ROOT", tmp_path
+    ), patch.object(media_worker, "transcribe_audio", return_value={
+        "text": "", "segments": [], "language": ""
+    }) as transcribe:
+        result = media_worker.record_audio(seconds=1)
+    transcribe.assert_called_once()
+    assert result["quiet"] is True
+    assert result["input_peak"] == 0.0104
 
 
 def test_audible_microphone_transcribes_and_reports_input_level(tmp_path):

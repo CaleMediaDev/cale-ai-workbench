@@ -12,8 +12,10 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 MEDIA = ROOT / "Media"
-# Use the same level for clip detection and the "too quiet" diagnosis. A
-# smaller cutoff here sent background hiss to Whisper as if it were speech.
+# A faint human voice can still be recognized below the clip-end detector's
+# level. Only skip recognition for near-silence; diagnose other faint clips
+# after Whisper has had a chance to find words.
+MIC_SILENCE_LEVEL = 0.003
 MIC_VOICE_LEVEL = 0.012
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
@@ -462,7 +464,7 @@ def record_audio(seconds=10):
         sd.wait()
     peak = float(abs(audio).max())
     microphone = str(devices[chosen]["name"])
-    if peak < MIC_VOICE_LEVEL:
+    if peak < MIC_SILENCE_LEVEL:
         # Muted or disconnected inputs otherwise look exactly like a missed
         # wake phrase. Skip Whisper and tell the UI what the device captured.
         return {"text": "", "segments": [], "language": "",
@@ -471,8 +473,13 @@ def record_audio(seconds=10):
     with tempfile.TemporaryDirectory(dir=ROOT / "Temp") as temp:
         path = Path(temp) / "dictation.wav"
         sf.write(path, audio, rate)
-        return {**transcribe_audio(path), "input_device": microphone,
-                "input_peak": round(peak, 4), "quiet": False}
+        transcript = transcribe_audio(path)
+        # Background hiss can cross the near-silence cutoff. If no words were
+        # found and the whole clip stayed below the speech level, give the
+        # user the actionable low-input diagnosis. Recognized soft speech wins.
+        quiet = not str(transcript.get("text", "")).strip() and peak < MIC_VOICE_LEVEL
+        return {**transcript, "input_device": microphone,
+                "input_peak": round(peak, 4), "quiet": quiet}
 
 
 def download_natural_voice(item=None):
