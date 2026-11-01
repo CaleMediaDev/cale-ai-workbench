@@ -149,11 +149,17 @@ class UserFileMemoryTests(unittest.TestCase):
                          str(folder / "notes.md"))
         later = folder / "added-later.md"
         later.write_text("New information after selection", encoding="utf-8")
-        self.assertEqual(user_file_memory.ingest(
-            self.state, user_file_memory.remembered_roots(self.state)
-        )["indexed"], 1)
+        # No UI background worker is running in this test. Search itself must
+        # find a later addition to the folder the person selected.
         self.assertEqual(user_file_memory.search(self.state, "information")[0]["path"],
                          str(later))
+
+    def test_search_does_not_discover_new_file_outside_selected_folder(self):
+        selected = self.root / "selected"
+        selected.mkdir()
+        user_file_memory.remember_roots(self.state, [str(selected)])
+        (self.root / "other-notes.md").write_text("unselected detail", encoding="utf-8")
+        self.assertEqual(user_file_memory.search(self.state, "unselected"), [])
 
     def test_failed_extraction_keeps_selected_file_for_retry(self):
         path = self.root / "notes.txt"

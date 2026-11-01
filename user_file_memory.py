@@ -260,6 +260,7 @@ def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
     """Search selected files locally, refreshing changes before returning snippets."""
     with _connection(state) as conn:
         paths = [row[0] for row in conn.execute("SELECT path FROM files")]
+        roots = [row[0] for row in conn.execute("SELECT path FROM selected_roots")]
     # A disappeared file must not remain available as apparent current evidence.
     def available(raw: str) -> bool:
         path = Path(raw)
@@ -271,10 +272,20 @@ def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
             return False
 
     existing = [path for path in paths if available(path)]
-    # ingest limits user-selected roots to twenty. Refresh in that same size
-    # so every previously indexed file is revisited, even past the first page.
-    for start in range(0, len(existing), MAX_ROOTS):
-        ingest(state, existing[start:start + MAX_ROOTS])
+    # Search must discover files added to a selected folder even when its UI
+    # background worker is not running. Each remembered root is explicitly
+    # user-selected; ingest still skips links, secrets and unsupported files.
+    for start in range(0, len(roots), MAX_ROOTS):
+        ingest(state, roots[start:start + MAX_ROOTS])
+    covered_files = {Path(root) for root in roots if Path(root).is_file()}
+    covered_dirs = [Path(root) for root in roots if Path(root).is_dir()
+                    and not Path(root).is_symlink()]
+    # Older records may have been indexed directly without a saved root. Keep
+    # refreshing them as well, in bounded batches, rather than losing them.
+    outside_roots = [path for path in existing if Path(path) not in covered_files
+                     and not any(Path(path).is_relative_to(root) for root in covered_dirs)]
+    for start in range(0, len(outside_roots), MAX_ROOTS):
+        ingest(state, outside_roots[start:start + MAX_ROOTS])
     with _connection(state) as conn:
         for path in set(paths) - set(existing):
             conn.execute("DELETE FROM files WHERE path=?", (path,))
