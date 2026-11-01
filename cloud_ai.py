@@ -495,7 +495,7 @@ class Router:
         self.provider_cooldowns = {}
         self.provider_last_attempts = {}
 
-    def reserve_provider_request(self, provider, estimated_cost=0):
+    def reserve_provider_request(self, provider, estimated_cost=0, estimated_tokens=0):
         """Keep a conservative daily and per-minute budget per connected account."""
         spec = cloud_providers.PROVIDERS[provider]
         with self.lock:
@@ -520,6 +520,11 @@ class Router:
                 if estimated_cost <= 0 or spent + estimated_cost > spec["daily_neurons"]:
                     return False
                 usage["neurons"][provider] = spent + estimated_cost
+            if spec.get("daily_tokens"):
+                spent = usage.setdefault("tokens", {}).get(provider, 0)
+                if estimated_tokens <= 0 or spent + estimated_tokens > spec["daily_tokens"]:
+                    return False
+                usage["tokens"][provider] = spent + estimated_tokens
             if spec.get("monthly"):
                 month = today[:7]
                 monthly = usage.setdefault("monthly", {})
@@ -701,10 +706,11 @@ class Router:
                 provider_key = keys.get(provider)
                 provider_context = prompt_estimate + min(expected_output, spec.get("max_tokens", 8192)) + 1024
                 estimated_cost = cloud_providers.estimated_neurons(provider, payload)
+                estimated_tokens = cloud_providers.estimated_tokens(provider, payload)
                 if (not provider_key or not confirmed.get(provider)
                         or provider_context > spec["context"]
                         or not cloud_providers.likely_faster(size, measured_speeds[provider], local_speed)
-                        or not self.reserve_provider_request(provider, estimated_cost)):
+                        or not self.reserve_provider_request(provider, estimated_cost, estimated_tokens)):
                     continue
                 try:
                     result, elapsed = cloud_providers.complete(

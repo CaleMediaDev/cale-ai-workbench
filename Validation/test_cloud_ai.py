@@ -68,6 +68,21 @@ class CloudTests(unittest.TestCase):
         cloud.disconnect_provider("cloudflare")
         self.assertNotIn("cloudflare", cloud.credentials()["provider_accounts"])
 
+    def test_aion_reserves_free_tier_token_budget(self):
+        request = dict(REQUEST, max_tokens=9999, tool_choice="required")
+        body = cloud_providers.request_body("aion", request)
+        self.assertEqual(body["model"], "aion-labs/aion-3.5-mini")
+        self.assertEqual(body["max_tokens"], 2048)
+        self.assertEqual(body["reasoning_effort"], "low")
+        self.assertNotIn("tool_choice", body)
+        cost = cloud_providers.estimated_tokens("aion", request)
+        self.assertGreater(cost, 2048)
+        router = cloud.Router()
+        self.assertFalse(router.reserve_provider_request("aion", estimated_tokens=10001))
+        self.assertTrue(router.reserve_provider_request("aion", estimated_tokens=cost))
+        self.assertEqual(json.loads((cloud.STATE / "provider-quota.json").read_text())
+                         ["tokens"]["aion"], cost)
+
     def test_cloudflare_endpoint_uses_validated_account_id(self):
         with self.assertRaisesRegex(ValueError, "account ID"):
             cloud_providers.complete("cloudflare", "secret", REQUEST,
@@ -166,6 +181,8 @@ class CloudTests(unittest.TestCase):
                          "glm-4.7-flash"),
             "modelscope": ("https://api-inference.modelscope.cn/v1/chat/completions",
                            "Qwen/Qwen3.5-35B-A3B"),
+            "aion": ("https://api.aionlabs.ai/v1/chat/completions",
+                     "aion-labs/aion-3.5-mini"),
         }
         for provider, (url, model) in expected.items():
             with self.subTest(provider=provider):

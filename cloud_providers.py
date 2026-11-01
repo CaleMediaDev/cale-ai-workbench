@@ -28,6 +28,9 @@ PROVIDERS = {
     # This model's card lists one Magicube per API-Inference request; reserve
     # room for the user's other ModelScope activity.
     "modelscope": {"name": "ModelScope", "url": "https://api-inference.modelscope.cn/v1/chat/completions", "model": "Qwen/Qwen3.5-35B-A3B", "context": 131072, "rpm": 5, "daily": 150, "speed": 120, "signup": "https://modelscope.cn/my/myaccesstoken"},
+    # Aion's free account has a 20K-token daily limit. Reserve at most half
+    # of that here, because other use and provider-side accounting are unknown.
+    "aion": {"name": "Aion Labs", "url": "https://api.aionlabs.ai/v1/chat/completions", "model": "aion-labs/aion-3.5-mini", "context": 262144, "rpm": 5, "daily": 8, "daily_tokens": 10000, "speed": 80, "max_tokens": 2048, "signup": "https://www.aionlabs.ai/"},
     # Cohere documents Command A+ as free until its trial/production limits.
     "cohere": {"name": "Cohere", "url": "https://api.cohere.com/v2/chat", "model": "command-a-plus-05-2026", "context": 128000, "rpm": 5, "daily": 30, "speed": 80, "signup": "https://dashboard.cohere.com/api-keys"},
     "huggingface": {"name": "Hugging Face", "url": "https://router.huggingface.co/v1/chat/completions", "model": "openai/gpt-oss-120b:fastest", "context": 8192, "rpm": 2, "daily": 2, "monthly": 2, "speed": 150, "max_tokens": 1024, "signup": "https://huggingface.co/settings/tokens"},
@@ -57,6 +60,17 @@ def estimated_neurons(provider: str, payload: dict) -> int:
     return max(1, int(raw * 1.25) + 1)
 
 
+def estimated_tokens(provider: str, payload: dict) -> int:
+    """Reserve a conservative upper bound for token-limited free accounts."""
+    if not PROVIDERS[provider].get("daily_tokens"):
+        return 0
+    body = request_body(provider, payload)
+    prompt_bytes = len(json.dumps({"messages": body.get("messages", []),
+                                   "tools": body.get("tools", [])},
+                                  ensure_ascii=True).encode("utf-8"))
+    return max(1, int(prompt_bytes * 1.25) + body["max_tokens"] + 1)
+
+
 def request_body(provider: str, payload: dict) -> dict:
     """Copy only safe OpenAI chat fields; translate Cohere's v2 wire shape."""
     spec = PROVIDERS[provider]
@@ -69,6 +83,12 @@ def request_body(provider: str, payload: dict) -> dict:
         body.pop("parallel_tool_calls", None)
         body.pop("response_format", None)
         body["max_tokens"] = min(body["max_tokens"], 4096)
+    if provider == "aion":
+        # The documented chat endpoint accepts tools but not these optional
+        # OpenAI parameters. Lower reasoning leaves room for visible output.
+        for field in ("tool_choice", "top_p", "seed", "response_format", "parallel_tool_calls"):
+            body.pop(field, None)
+        body["reasoning_effort"] = "low"
     return body
 
 
