@@ -27,6 +27,7 @@ import cale_voice
 import chrome_connector
 import project_memory
 import runtime_features
+import setup_recovery
 import skill_catalog
 import task_eta
 import usage_history
@@ -369,7 +370,7 @@ def task_progress(p):
         )
     if state == "waiting_for_setup":
         setup = read_task_status(STATE / "install-progress.json")
-        if setup.get("status") == "failed":
+        if setup.get("status") in ("failed", "error"):
             step = "AI setup needs attention: " + str(setup.get("current", "Unknown error"))
     return percent, step[:180]
 
@@ -1864,6 +1865,8 @@ def monitor():
             if time.monotonic() - last_setup_recovery >= 30:
                 last_setup_recovery = time.monotonic()
                 runtime_features.start_background()
+                if not any(p["status"] in ("working", "checking") for p in projects()):
+                    setup_recovery.recover()
             setup = read_task_status(STATE / "install-progress.json")
             if setup.get("status") == "working":
                 (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
@@ -3963,7 +3966,7 @@ def gui():
                 setup.get("percent", 0),
                 "Current step: " + str(setup.get("current", "Preparing")),
                 "Ready" if setup.get("status") == "complete" else (
-                    "Needs attention" if setup.get("status") == "failed" else "Setting up"
+                    "Needs attention" if setup.get("status") in ("failed", "error") else "Setting up"
                 ),
             )
         elif setup_card is not None:

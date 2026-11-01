@@ -445,14 +445,15 @@ class LongTaskTests(unittest.TestCase):
 
     def test_waiting_task_shows_setup_failure(self):
         progress = task_module.STATE / "install-progress.json"
-        progress.write_text(
-            '{"status":"failed","current":"Python tool installation failed"}',
-            encoding="utf-8",
-        )
         task_module.update(self.pid, status="waiting_for_setup")
-        _, step = task_module.task_progress(self.item())
-        self.assertIn("needs attention", step)
-        self.assertIn("Python tool installation failed", step)
+        for status in ("failed", "error"):
+            progress.write_text(
+                json.dumps({"status": status, "current": "Python tool installation failed"}),
+                encoding="utf-8",
+            )
+            _, step = task_module.task_progress(self.item())
+            self.assertIn("needs attention", step)
+            self.assertIn("Python tool installation failed", step)
 
     def test_followup_to_setup_task_stays_waiting(self):
         progress = task_module.STATE / "install-progress.json"

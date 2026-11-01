@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.153')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.154')
  $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
  function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
    New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
@@ -108,9 +108,12 @@ try {
  # Copy only published source. Never touch project folders, saved tasks or account credentials.
  $manifest=Get-Content (Join-Path $PSScriptRoot 'install-files.json') -Raw | ConvertFrom-Json
  foreach ($file in $manifest) {
+   $source=Join-Path $PSScriptRoot $file
    $target=Join-Path $Destination $file
    New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
-   Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $target -Force
+   if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($target)) {
+     Copy-Item -LiteralPath $source -Destination $target -Force
+   }
  }
  & $python (Join-Path $Destination 'skill_catalog.py')
  if ($LASTEXITCODE -ne 0) { throw 'Local skill setup failed.' }
