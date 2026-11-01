@@ -200,6 +200,7 @@ def valid_completion(result):
 class Router:
     def __init__(self):
         self.cooldown = 0
+        self.chatgpt_cooldown = 0
         self.last_attempt = 0
         self.lock = threading.Lock()
 
@@ -222,6 +223,16 @@ class Router:
         profile = local_profile()
         key = credentials().get('cloud_key') if profile == 'main' else ''
         reason = 'Cloud is not connected.'
+        if profile == 'main' and time.time() >= self.chatgpt_cooldown:
+            try:
+                import chatgpt_auth
+                if chatgpt_auth.status()['enabled']:
+                    result = valid_completion(chatgpt_auth.complete(payload))
+                    record('ChatGPT plan', 'User-enabled ChatGPT plan response received.', result.get('model',''))
+                    return result
+            except Exception:
+                self.chatgpt_cooldown = time.time() + 120
+                reason = 'ChatGPT plan unavailable; trying free cloud or local AI.'
         if key and self.reserve_free_request():
             try:
                 result = valid_completion(post(API + '/chat/completions', cloud_payload(payload), key, timeout=120))

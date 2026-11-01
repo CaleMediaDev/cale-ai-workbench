@@ -1,8 +1,8 @@
 LOCAL AI LONG TASKS
 
-Open "Cale AI Workbench" on your desktop. Click New project, give it a name,
-choose a project folder (or leave blank), and describe what you want built.
-Include the features and what a working result should do. Click Start building.
+Open "Cale AI Workbench" on your desktop. Setup progress and optional model
+downloads appear in My tasks. Click New task, describe what you want built,
+and let the app make a folder automatically. Click Start my task.
 
 It will keep working through a saved plan, test its work, and use a separate
 local-model review pass. You can close the window while it runs. The normal
@@ -10,11 +10,12 @@ local-model review pass. You can close the window while it runs. The normal
 
 CONTROLS
 Pause: stops further progress; a retiring worker can take up to two minutes.
-Resume: continues from the project's files, saved plan and task history.
+Stop: ends the task permanently but preserves its project files.
+Delete: removes the task from the app but preserves its project files.
+Continue: resumes from the project's files, saved plan and task history.
 Add instructions: answers a blocker or adds requirements and resumes the project.
-Open project: opens the actual files in Explorer.
-Accept result: records your acceptance after fresh checks and review.
-Logs: opens supervisor, verification and request history.
+Open files: opens the actual files in Explorer.
+Looks good: records your acceptance after fresh checks and review.
 
 STATUS
 Working: building, reviewing, queued for the single worker, or settling a handoff.
@@ -63,12 +64,13 @@ Existing project instructions are preserved. Use a dedicated folder per project;
 the companion rejects overlapping project folders in its queue.
 Queued projects use your Windows account permissions. No WordPress credentials,
 personal browser cookies or Codex connections were copied to this local assistant.
-No external AI fallback is configured. Local runs do not consume Codex model usage.
+OpenRouter free models can be connected, with local fallback. ChatGPT plan use
+requires a separate choice and uses the shared ChatGPT/Codex allowance.
 
 STARTUP CONTROL
 Run "Disable Long Tasks Startup.ps1" to disable future automatic starts.
 Run "Install Long Tasks Startup.ps1" to re-enable it.
-Double-click a project in the window, then choose Pause to stop it.
+Use Pause or Stop on a task card to halt it.
 
 DIAGNOSTICS
 LongTasks/projects.db                         Project and request state

@@ -1,6 +1,9 @@
 """Download optional local weights with Ollama's verified, resumable model store."""
 import json
+import os
 from pathlib import Path
+import re
+import time
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
@@ -63,7 +66,33 @@ def install(profile, progress=print):
     return item['alias']
 
 
+def save_download_status(path, state, current, percent=0):
+    path=Path(path)
+    path.parent.mkdir(exist_ok=True)
+    temporary=path.with_suffix(f'.{os.getpid()}.tmp')
+    temporary.write_text(json.dumps({'status':state,'current':current,'percent':percent,
+                                     'updated':time.time()}),encoding='utf-8')
+    os.replace(temporary,path)
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(); parser.add_argument('profile', choices=list(CATALOG)[1:])
-    install(parser.parse_args().profile, lambda text: print(text, flush=True))
+    parser.add_argument('--status-file')
+    args=parser.parse_args()
+    if args.status_file:
+        save_download_status(args.status_file,'working','Starting download',0)
+        def report(message):
+            match=re.search(r'(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*GB',message)
+            percent=min(95,round(95*float(match.group(1))/float(match.group(2)))) if match and float(match.group(2)) else 0
+            save_download_status(args.status_file,'working',message,percent)
+        try:
+            install(args.profile,report)
+            from cloud_ai import select_profile
+            select_profile(args.profile)
+            save_download_status(args.status_file,'complete','Installed and ready for the next task',100)
+        except Exception as exc:
+            save_download_status(args.status_file,'error',str(exc),0)
+            raise
+    else:
+        install(args.profile, lambda message: print(message,flush=True))

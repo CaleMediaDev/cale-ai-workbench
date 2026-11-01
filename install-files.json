@@ -1,6 +1,6 @@
 [
   "README.md", "LICENSE", "HERMES-LICENSE", "THIRD-PARTY-NOTICES.md",
-  "cloud_ai.py", "model_library.py", "long_tasks.py", "toolbox_mcp.py", "web_tools.py",
+  "cloud_ai.py", "chatgpt_auth.py", "model_library.py", "long_tasks.py", "toolbox_mcp.py", "web_tools.py",
   "media_worker.py", "small_training.py", "media-models.json", "media-requirements.txt",
   "read-settings.py", "configure_install.py", "config-template.yaml", "downloads.json",
   "requirements-windows.txt", "package.json", "package-lock.json",
@@ -9,5 +9,5 @@
   "Connect Free Cloud AI.cmd", "Install Long Tasks Startup.ps1", "Disable Long Tasks Startup.ps1",
   "models/manifest.json", "models/large.Modelfile", "models/compact.Modelfile",
   "models/light.Modelfile", "models/permissive.Modelfile", "bin/hermes.cmd",
-  "Validation/test_cloud_ai.py", "Validation/test_long_tasks.py", "Validation/test_media.py"
+  "Validation/test_cloud_ai.py", "Validation/test_chatgpt_auth.py", "Validation/test_long_tasks.py", "Validation/test_media.py"
 ]

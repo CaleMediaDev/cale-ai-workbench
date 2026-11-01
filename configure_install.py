@@ -10,6 +10,15 @@ from urllib.request import Request, urlopen
 from ruamel.yaml import YAML
 
 
+def setup_progress(root, percent, current):
+    path = root / 'LongTasks/install-progress.json'
+    path.parent.mkdir(exist_ok=True)
+    temporary = path.with_suffix(f'.{os.getpid()}.tmp')
+    temporary.write_text(json.dumps({'percent':percent, 'current':current,
+                                     'status':'working', 'updated':time.time()}), encoding='utf-8')
+    os.replace(temporary, path)
+
+
 def configure(root, profile):
     root = Path(root).resolve()
     for folder in ('Temp','Projects','LongTasks','Browser-output','Recovery','Cloud'):
@@ -23,6 +32,9 @@ def configure(root, profile):
             if data.get('error'): raise RuntimeError(data['error'])
             if time.monotonic()-last > 5 or data.get('status') == 'success':
                 print(data.get('status'), f"{data.get('completed',0)/1e9:.1f}/{data.get('total',0)/1e9:.1f} GB", flush=True)
+                if data.get('total'):
+                    setup_progress(root, 60 + round(14 * data.get('completed',0) / data['total']),
+                                   'Downloading your main AI model')
                 last=time.monotonic()
     body={'model':'cale-local','from':selection['source'],'stream':False,
         'parameters':{'num_ctx':selection['context'],'num_predict':8192,'temperature':1,'top_p':.95,'top_k':40,'repeat_penalty':1}}
@@ -30,6 +42,7 @@ def configure(root, profile):
         data=json.load(response)
         if data.get('error'): raise RuntimeError(data['error'])
     vision_source='qwen3.5:9b'
+    setup_progress(root, 75, 'Downloading the vision model')
     with urlopen(Request('http://127.0.0.1:11434/api/pull', data=json.dumps({'model':vision_source,'stream':False}).encode(),
         headers={'Content-Type':'application/json'}), timeout=3600) as response:
         data=json.load(response)
@@ -40,6 +53,7 @@ def configure(root, profile):
         headers={'Content-Type':'application/json'}),timeout=180) as response:
         data=json.load(response)
         if data.get('error'): raise RuntimeError(data['error'])
+    setup_progress(root, 78, 'Configuring the local AI')
     yaml=YAML()
     config=yaml.load((root/'config-template.yaml').read_text(encoding='utf-8').replace('{{ROOT}}',root.as_posix()))
     config['model']['context_length']=selection['context']

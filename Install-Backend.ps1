@@ -17,7 +17,17 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.1.2')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.2.0')
+ $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
+ function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
+   New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
+   $payload=@{percent=$percent;current=$current;status=$status;updated=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()} | ConvertTo-Json -Compress
+   $temporary=$setupState+'.'+$PID+'.tmp'
+   [IO.File]::WriteAllText($temporary,$payload)
+   Move-Item -LiteralPath $temporary -Destination $setupState -Force
+   Write-Output "SETUP: $current ($percent%)"
+ }
+ Write-SetupStatus 2 'Checking this PC and choosing a model'
  if (-not $DownloadCache) { $DownloadCache=Join-Path $Destination 'Downloads' }
  New-Item -ItemType Directory -Path $DownloadCache -Force | Out-Null
  $pins=Get-Content (Join-Path $PSScriptRoot 'downloads.json') -Raw | ConvertFrom-Json
@@ -45,6 +55,7 @@ try {
  New-Item -ItemType Directory -Path (Join-Path $Destination 'Temp') -Force | Out-Null
  $env:TEMP=Join-Path $Destination 'Temp'; $env:TMP=$env:TEMP
  if (-not (Test-Path -LiteralPath (Join-Path $env:HERMES_HOME 'bin/hermes.exe'))) {
+   Write-SetupStatus 10 'Installing the agent and Python runtime'
    $bootstrap=Download-Verified "https://raw.githubusercontent.com/NousResearch/hermes-agent/$($pins.hermes_commit)/scripts/install.ps1" $pins.hermes_installer_sha256 'hermes-install.ps1'
    Write-Output 'Installing the agent and its managed Python runtime...'
    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrap -HermesHome $env:HERMES_HOME -InstallDir (Join-Path $Destination 'app') -Commit $pins.hermes_commit -NonInteractive -SkipComputerUse -SkipBrowser
@@ -55,6 +66,7 @@ try {
  $facts=Get-Content -LiteralPath $factsFile.FullName -Raw | ConvertFrom-Json
  $runtime=Join-Path $facts.packages.venv.environment 'Scripts/python.exe'
  $box=Join-Path $Destination 'Toolbox'
+ Write-SetupStatus 25 'Installing tools and browser support'
  New-Item -ItemType Directory -Path $box -Force | Out-Null
  if (-not (Test-Path -LiteralPath (Join-Path $box 'python/Scripts/python.exe'))) { & $runtime -m venv (Join-Path $box 'python'); if ($LASTEXITCODE -ne 0) { throw 'Could not create the tool runtime.' } }
  $python=Join-Path $box 'python/Scripts/python.exe'
@@ -89,6 +101,10 @@ try {
    New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $target -Force
  }
+ if (-not $NoLaunch) {
+   Start-Process (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'long_tasks.py')+'"') -WindowStyle Normal
+ }
+ Write-SetupStatus 42 'Installing local image and voice tools'
  $env:GHIDRA_INSTALL_DIR=Join-Path $box 'ghidra_12.1.4_PUBLIC'; $env:JAVA_HOME=Join-Path $box 'jdk-21.0.13+9'
  $env:NODE_PATH=Join-Path $box 'node_modules'
  $env:PATH=(Join-Path $box 'node_modules/.bin')+';'+$env:PATH
@@ -113,6 +129,7 @@ try {
  if ($LASTEXITCODE -ne 0) { throw 'Media tool installation failed.' }
  try { $null=Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 3 }
  catch {
+   Write-SetupStatus 54 'Installing and starting Ollama'
    $ollama=Join-Path $box 'ollama/ollama.exe'
    if (-not (Test-Path -LiteralPath $ollama)) {
      $archive=Download-Verified $pins.ollama.url $pins.ollama.sha256 'ollama-windows-amd64.zip'
@@ -122,9 +139,11 @@ try {
    for ($attempt=0;$attempt -lt 30;$attempt++) { Start-Sleep -Seconds 1; try { $null=Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 2; break } catch { if ($attempt -eq 29) {throw 'Ollama did not start.'} } }
  }
  Write-Output "Downloading model files for $($model.source). This is the largest step."
+ Write-SetupStatus 60 'Downloading your main AI model'
  & $python (Join-Path $Destination 'configure_install.py') --root $Destination --profile $Profile
  if ($LASTEXITCODE -ne 0) { throw 'Model/configuration setup failed.' }
  Write-Output 'Downloading local image, speech and small training models...'
+ Write-SetupStatus 80 'Downloading image, speech, and training models'
  & $mediaPython (Join-Path $Destination 'media_worker.py') --download-models
  if ($LASTEXITCODE -ne 0) { throw 'Media model download failed. Re-run to resume.' }
  if ($ExtraModels) {
@@ -134,13 +153,19 @@ try {
    }
  }
  Write-Output 'Checking the installed companion...'
+ Write-SetupStatus 91 'Checking that everything works'
  & $python (Join-Path $Destination 'Validation/test_cloud_ai.py')
  if ($LASTEXITCODE -ne 0) { throw 'Cloud-routing behavior checks failed.' }
+ & $python (Join-Path $Destination 'Validation/test_chatgpt_auth.py')
+ if ($LASTEXITCODE -ne 0) { throw 'ChatGPT connection behavior checks failed.' }
  & $python (Join-Path $Destination 'Validation/test_long_tasks.py')
  if ($LASTEXITCODE -ne 0) { throw 'Long-task behavior checks failed.' }
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
- if (-not $NoLaunch) { Start-Process (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'long_tasks.py')+'"') -WindowStyle Normal }
+ Write-SetupStatus 100 'Your AI is ready' 'complete'
  Write-Output "Installation complete: $Destination"
+} catch {
+ if ($setupState) { Write-SetupStatus 0 ("Setup needs attention: " + $_.Exception.Message) 'error' }
+ throw
 } finally { $taskLock.ReleaseMutex(); $taskLock.Dispose() }

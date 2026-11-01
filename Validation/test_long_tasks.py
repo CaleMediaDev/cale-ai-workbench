@@ -70,6 +70,29 @@ class LongTaskTests(unittest.TestCase):
             l.tick(); l.tick()
         self.assertEqual(self.item()['status'],'paused')
         board.assert_not_called()
+    def test_stop_keeps_files_and_prevents_restart(self):
+        l.request(self.pid,'stop')
+        with patch.object(l,'board') as board:
+            l.tick(); l.tick()
+        self.assertEqual(self.item()['status'],'stopped')
+        self.assertTrue((self.base/'project/AGENTS.md').exists())
+        board.assert_not_called()
+    def test_delete_removes_task_but_preserves_project_files(self):
+        l.request(self.pid,'delete')
+        with patch.object(l,'board') as board:
+            l.tick(); l.tick()
+        self.assertEqual(l.projects(),[])
+        self.assertTrue((self.base/'project/AGENTS.md').exists())
+        board.assert_not_called()
+    def test_progress_uses_saved_checklist_and_current_step(self):
+        folder=self.base/'project/.local-ai'
+        (folder/'PLAN.md').write_text('- [x] Plan\n- [ ] Build\n- [ ] Test\n',encoding='utf-8')
+        (folder/'PROGRESS.md').write_text('Next step: Build the homepage\n',encoding='utf-8')
+        percent,step=l.task_progress(self.item())
+        self.assertEqual(percent,33)
+        self.assertEqual(step,'Build the homepage')
+        l.update(self.pid,status='accepted')
+        self.assertEqual(l.task_progress(self.item())[0],100)
     def test_blocker_requires_explicit_resume(self):
         l.update(self.pid,card='test',status='working')
         with patch.object(l,'board',return_value={'task':{'status':'blocked'},'comments':[{'body':'need input'}]}):

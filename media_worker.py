@@ -196,7 +196,14 @@ def record_audio(seconds=10):
 def download_models():
     from huggingface_hub import snapshot_download
     models=json.loads((ROOT/'media-models.json').read_text())
-    for name, item in models.items():
+    for index, (name, item) in enumerate(models.items()):
+        path=ROOT/'LongTasks/install-progress.json'
+        path.parent.mkdir(exist_ok=True)
+        temporary=path.with_suffix(f'.{os.getpid()}.tmp')
+        temporary.write_text(json.dumps({'percent':80+round(10*index/max(1,len(models))),
+            'current':'Downloading '+name+' model files', 'status':'working',
+            'updated':time.time()}),encoding='utf-8')
+        os.replace(temporary,path)
         print('Downloading '+name+' model files...',file=sys.stderr,flush=True)
         snapshot_download(item['repo'],revision=item['revision'],local_dir=str(MEDIA/'models'/name),
             allow_patterns=item['patterns'],max_workers=4)
