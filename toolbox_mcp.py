@@ -109,6 +109,13 @@ LOCAL_CATALOG = {
             "foreground_start_seconds": {"type": "number"},
         }, "required": ["background_path", "foreground_path", "output_path"]},
     },
+    "local.make_music_video": {
+        "description": "Turn a local song into a shareable animated spectrum music video, entirely offline. Saves a new H.264/AAC MP4 in wide, vertical or square layout. No account or extra model download.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_path": {"type": "string"}, "output_path": {"type": "string"},
+            "layout": {"type": "string", "enum": ["wide", "vertical", "square"]},
+        }, "required": ["source_path", "output_path"]},
+    },
 }
 
 
@@ -297,6 +304,7 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "local.master_music": master_music,
             "local.edit_music": edit_music,
             "local.mix_music": mix_music,
+            "local.make_music_video": make_music_video,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -660,6 +668,14 @@ async def mix_music(background_path: str, foreground_path: str, output_path: str
         music_edit.mix_music, background_path, foreground_path, output_path,
         background_gain_db, foreground_gain_db, foreground_start_seconds,
     )
+
+
+@server.tool()
+async def make_music_video(source_path: str, output_path: str, layout: str = "wide") -> dict:
+    """Render an animated audio spectrum with the original song as an MP4."""
+    import music_video
+
+    return await asyncio.to_thread(music_video.make_music_video, source_path, output_path, layout)
 
 
 @server.tool()
