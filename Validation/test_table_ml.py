@@ -55,6 +55,61 @@ class TableMLTests(unittest.TestCase):
                 estimated = float(next(csv.DictReader(stream))["prediction"])
             self.assertAlmostEqual(estimated, 950, delta=25)
 
+    def test_multiclass_and_existing_prediction_column(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["signal", "label"])
+                for repeat in range(30):
+                    for label, signal in (("low", 1), ("middle", 10), ("high", 20)):
+                        writer.writerow([signal + repeat / 100, label])
+            model = root / "model.json"
+            result = train_table_model(str(training), "label", str(model), "classification")
+            self.assertGreater(result["holdout_accuracy"], .8)
+            prediction = root / "new.csv"
+            prediction.write_text("signal,prediction\n1,old\n10,old\n20,old\n", encoding="utf-8")
+            output = root / "predicted.csv"
+            response = predict_table_model(str(model), str(prediction), str(output))
+            self.assertEqual(response["output_column"], "prediction_2")
+            with output.open(newline="", encoding="utf-8") as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual([row["prediction"] for row in rows], ["old"] * 3)
+            self.assertEqual([row["prediction_2"] for row in rows],
+                             ["low", "middle", "high"])
+
+    def test_malformed_model_is_rejected_before_writing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            model.write_text(json.dumps({
+                "format": "cale-table-model-v1", "problem_type": "regression",
+                "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
+                "feature_names": ["size"], "coefficients": [[float("inf")]],
+                "intercepts": [0], "classes": [], "target_column": "value",
+            }), encoding="utf-8")
+            prediction = root / "new.csv"
+            prediction.write_text("size\n2\n", encoding="utf-8")
+            output = root / "predicted.csv"
+            with self.assertRaisesRegex(ValueError, "nonfinite"):
+                predict_table_model(str(model), str(prediction), str(output))
+            self.assertFalse(output.exists())
+
+    def test_classification_baseline_uses_holdout_rows(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["feature", "label"])
+                for index in range(31):
+                    writer.writerow([index, "A"])
+                for index in range(20):
+                    writer.writerow([index + 100, "B"])
+            result = train_table_model(str(training), "label", str(root / "model.json"))
+            self.assertEqual(result["baseline"], .6364)
+
 
 if __name__ == "__main__":
     unittest.main()

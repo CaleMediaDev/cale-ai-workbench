@@ -141,7 +141,8 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
         model = LogisticRegression(max_iter=1000, class_weight="balanced")
         model.fit(x_train, y_train)
         score = float(accuracy_score(y_test, model.predict(x_test)))
-        baseline = max(Counter(y_train).values()) / len(y_train)
+        majority_label = Counter(y_train).most_common(1)[0][0]
+        baseline = float(accuracy_score(y_test, [majority_label] * len(y_test)))
         metric = "holdout_accuracy"
     else:
         model = Ridge(alpha=1.0)
@@ -158,7 +159,8 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
                "intercepts": model.intercept_.tolist() if classes else [float(model.intercept_)],
                "metric": metric, "holdout_score": score, "baseline_score": baseline,
                "trained_rows": len(rows), "holdout_rows": len(y_test)}
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    with output.open("x", encoding="utf-8") as stream:
+        json.dump(payload, stream, ensure_ascii=False, indent=2)
     better = score > baseline if classes else score < baseline
     return {"model_path": str(output), "problem_type": problem_type,
             metric: round(score, 4), "baseline": round(baseline, 4),
@@ -172,35 +174,89 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
     if path.suffix.lower() != ".json" or path.stat().st_size > 10_000_000:
         raise ValueError("Choose a Cale table-model JSON file under 10 MB.")
     model = json.loads(path.read_text(encoding="utf-8"))
-    if model.get("format") != "cale-table-model-v1":
-        raise ValueError("This is not a Cale table model.")
+    names, coefficients, intercepts, classes = _checked_model(model)
     columns, rows = _csv(csv_path)
     if not rows or any(column not in columns for column in model["schema"]):
         raise ValueError("Prediction CSV needs rows and the model's feature columns.")
     output = _new_file(output_path, ".csv")
-    names = model["feature_names"]
-    if len(names) > 10_000 or len(model["coefficients"]) > 20:
-        raise ValueError("Saved model exceeds local prediction limits.")
-    values = _features(rows, model["schema"])
-    predictions = []
-    for row in values:
-        vector = {key: float(value) for key, value in row.items() if isinstance(value, float)}
-        vector.update({f"{key}={value}": 1.0 for key, value in row.items() if isinstance(value, str)})
-        logits = []
-        for weights, bias in zip(model["coefficients"], model["intercepts"]):
-            if len(weights) != len(names):
-                raise ValueError("Saved model coefficients do not match its features.")
-            logits.append(float(bias) + sum(float(weight) * vector.get(name, 0)
-                                            for name, weight in zip(names, weights)))
-        if model["problem_type"] == "regression":
-            predictions.append(f"{logits[0]:.6g}")
-        elif len(model["classes"]) == 2:
-            predictions.append(model["classes"][int(logits[0] >= 0)])
-        else:
-            predictions.append(model["classes"][max(range(len(logits)), key=logits.__getitem__)])
-    with output.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=[*columns, "prediction"])
+    import numpy as np
+    from sklearn.feature_extraction import DictVectorizer
+
+    vectorizer = DictVectorizer(sparse=True)
+    vectorizer.vocabulary_ = {name: index for index, name in enumerate(names)}
+    vectorizer.feature_names_ = names
+    weights = np.asarray(coefficients, dtype=np.float64)
+    biases = np.asarray(intercepts, dtype=np.float64)
+    output_column = "prediction"
+    suffix = 2
+    while output_column in columns:
+        output_column = f"prediction_{suffix}"
+        suffix += 1
+    with output.open("x", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=[*columns, output_column])
         writer.writeheader()
-        for row, prediction in zip(rows, predictions):
-            writer.writerow({**row, "prediction": prediction})
-    return {"path": str(output), "rows": len(predictions), "target_column": model["target_column"]}
+        for start in range(0, len(rows), 4096):
+            batch = rows[start:start + 4096]
+            matrix = vectorizer.transform(_features(batch, model["schema"]))
+            scores = matrix @ weights.T + biases
+            if model["problem_type"] == "regression":
+                predictions = [f"{number:.6g}" for number in scores[:, 0]]
+            elif len(classes) == 2:
+                predictions = [classes[int(number >= 0)] for number in scores[:, 0]]
+            else:
+                predictions = [classes[index] for index in np.argmax(scores, axis=1)]
+            for row, prediction in zip(batch, predictions):
+                writer.writerow({**row, output_column: prediction})
+    return {"path": str(output), "rows": len(rows),
+            "target_column": model["target_column"], "output_column": output_column}
+
+
+def _checked_model(model: dict) -> tuple[list[str], list[list[float]], list[float], list[str]]:
+    """Reject malformed JSON before allocating a matrix or writing an output."""
+    if not isinstance(model, dict) or model.get("format") != "cale-table-model-v1":
+        raise ValueError("This is not a Cale table model.")
+    schema = model.get("schema")
+    names = model.get("feature_names")
+    coefficients = model.get("coefficients")
+    intercepts = model.get("intercepts")
+    classes = model.get("classes")
+    kind = model.get("problem_type")
+    if not isinstance(schema, dict) or not 1 <= len(schema) <= 100 or not all(
+        isinstance(column, str) and isinstance(spec, dict)
+        and spec.get("kind") in ("number", "category")
+        and (spec.get("kind") != "number" or (
+            isinstance(spec.get("median"), (int, float))
+            and isinstance(spec.get("scale"), (int, float))
+            and math.isfinite(spec["median"]) and math.isfinite(spec["scale"])
+            and spec["scale"] > 0))
+        for column, spec in schema.items()
+    ):
+        raise ValueError("Saved model has an invalid feature schema.")
+    if not isinstance(names, list) or not 1 <= len(names) <= 10_000 or not all(
+        isinstance(name, str) for name in names
+    ) or len(set(names)) != len(names):
+        raise ValueError("Saved model has invalid feature names.")
+    class_count = len(classes) if isinstance(classes, list) else 0
+    rows_expected = 1 if kind == "regression" or class_count == 2 else class_count
+    if (kind not in ("classification", "regression")
+            or not isinstance(classes, list)
+            or (kind == "classification" and not 2 <= class_count <= 20)
+            or (kind == "regression" and classes)
+            or not isinstance(coefficients, list)
+            or len(coefficients) != rows_expected
+            or not isinstance(intercepts, list)
+            or len(intercepts) != rows_expected):
+        raise ValueError("Saved model has invalid output classes or coefficients.")
+    if not isinstance(model.get("target_column"), str) or not all(
+        isinstance(label, str) for label in classes
+    ) or len(set(classes)) != len(classes):
+        raise ValueError("Saved model has invalid class labels.")
+    if not all(
+        isinstance(row, list) and len(row) == len(names)
+        and all(isinstance(value, (int, float)) and math.isfinite(value) for value in row)
+        for row in coefficients
+    ) or not all(
+        isinstance(value, (int, float)) and math.isfinite(value) for value in intercepts
+    ):
+        raise ValueError("Saved model contains invalid or nonfinite weights.")
+    return names, coefficients, intercepts, classes
