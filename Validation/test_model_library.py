@@ -23,6 +23,32 @@ class AutoModelTests(unittest.TestCase):
         with patch.object(library, "post", return_value=details):
             self.assertTrue(library.model_ready("qwen35"))
 
+    def test_ready_model_uses_the_native_window_when_memory_allows(self):
+        details = {
+            "capabilities": ["tools"],
+            "parameters": "num_ctx 65536\n",
+            "model_info": {"qwen.context_length": 98304},
+        }
+        with (
+            patch.object(library, "post", return_value=details),
+            patch("context_window.model_bytes", return_value=7 * 2**30),
+            patch("context_window.physical_ram_bytes", return_value=64 * 2**30),
+        ):
+            self.assertFalse(library.model_ready("qwen35"))
+            details["parameters"] = "num_ctx 98304\n"
+            self.assertTrue(library.model_ready("qwen35"))
+
+    def test_recommendation_can_require_more_than_64k_context(self):
+        document = {"schema": 1, "models": {"wide": {
+            "label": "Wide model", "alias": "cale-wide-model", "source": "qwen3.6:35b",
+            "origin": "https://ollama.com/library/qwen3.6", "license": "Apache-2.0",
+            "download_gb": 23, "ram_gb": 48, "context": 131072, "auto": True,
+        }}}
+        with patch.object(library, "CATALOG", {"main": {"alias": "base"}}):
+            self.assertEqual(
+                library.validated_recommendations(document)["wide"]["context"], 131072
+            )
+
     def test_small_derestricted_model_is_auto_candidate_after_tool_probe(self):
         model = library.CATALOG["permissive_small"]
         self.assertEqual(model["ram_gb"], 16)
@@ -195,6 +221,29 @@ class AutoModelTests(unittest.TestCase):
         ])
         approve.assert_called_once_with(model)
 
+    def test_install_creates_optional_alias_with_memory_aware_native_context(self):
+        model = {
+            "label": "Wide", "alias": "cale-wide", "source": "qwen3.6:35b",
+            "download_gb": 23, "ram_gb": 48, "context": 65536,
+        }
+        calls = []
+
+        def fake_post(path, payload, **_kwargs):
+            calls.append((path, payload))
+            return {"capabilities": ["tools"], "model_info": {"qwen.context_length": 98304}}
+
+        with (
+            patch.object(library, "CATALOG", {"wide": model}),
+            patch.object(library, "total_ram_gb", return_value=64),
+            patch.object(library, "urlopen", return_value=io.BytesIO(b'{"status":"success"}\n')),
+            patch.object(library, "post", side_effect=fake_post),
+            patch("context_window.model_bytes", return_value=23 * 2**30),
+            patch("context_window.physical_ram_bytes", return_value=64 * 2**30),
+        ):
+            self.assertEqual(library.install("wide", lambda _message: None), "cale-wide")
+        create = next(payload for path, payload in calls if path == "/api/create")
+        self.assertEqual(create["parameters"]["num_ctx"], 98304)
+
     def test_thinking_model_probe_reaches_the_tool_call(self):
         response = {
             "message": {
@@ -269,6 +318,54 @@ class AutoModelTests(unittest.TestCase):
             state = json.loads((Path(folder) / "optional-model-small.json").read_text())
             self.assertEqual(state["status"], "waiting_storage")
             install.assert_not_called()
+
+    def test_cached_weights_can_receive_wider_alias_without_full_download_space(self):
+        catalog = {
+            "main": {"alias": "base"},
+            "wide": {"label": "Wide", "alias": "cale-wide", "source": "qwen3.6:35b",
+                     "download_gb": 23, "ram_gb": 48},
+        }
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(library, "CATALOG", catalog),
+            patch.object(library, "total_ram_gb", return_value=64),
+            patch.object(library, "model_ready", return_value=False),
+            patch.object(library, "source_cached", return_value=True),
+            patch.object(library.shutil, "disk_usage", return_value=SimpleNamespace(free=3 * 2**30)),
+            patch.object(library, "install") as install,
+        ):
+            library.auto_install(folder, refresh=False)
+            install.assert_called_once()
+
+    def test_existing_alias_is_not_rebuilt_during_an_active_task(self):
+        catalog = {
+            "main": {"alias": "base"},
+            "wide": {"label": "Wide", "alias": "cale-wide", "source": "qwen3.6:35b",
+                     "download_gb": 23, "ram_gb": 48},
+        }
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(library, "CATALOG", catalog),
+            patch.object(library, "total_ram_gb", return_value=64),
+            patch.object(library, "model_ready", return_value=False),
+            patch.object(library, "alias_update_waits_for_tasks", return_value=True),
+            patch.object(library, "install") as install,
+        ):
+            library.auto_install(folder, refresh=False)
+            install.assert_not_called()
+            status = json.loads((Path(folder) / "optional-model-wide.json").read_text())
+            self.assertEqual(status["status"], "waiting_tasks")
+
+    def test_existing_alias_detects_active_project_before_rebuild(self):
+        item = {"alias": "cale-wide"}
+        with patch.object(library, "post", return_value={}), patch(
+            "long_tasks.projects", return_value=[{"status": "working"}]
+        ):
+            self.assertTrue(library.alias_update_waits_for_tasks(item))
+        with patch.object(library, "post", return_value={}), patch(
+            "long_tasks.projects", return_value=[{"status": "ready_for_review"}]
+        ):
+            self.assertFalse(library.alias_update_waits_for_tasks(item))
 
     def test_stale_complete_status_is_reinstalled(self):
         catalog = {

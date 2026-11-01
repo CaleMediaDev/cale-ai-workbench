@@ -173,7 +173,7 @@ def validated_recommendations(document):
             if previous is not None and profile not in BUILTIN_PROFILES:
                 raise ValueError("An existing model recommendation has invalid sizing.") from None
             continue
-        if not (1 <= size <= 80 and 16 <= ram <= 256 and 64000 <= context <= 65536):
+        if not (1 <= size <= 80 and 16 <= ram <= 256 and 64000 <= context <= 1048576):
             if previous is not None and profile not in BUILTIN_PROFILES:
                 raise ValueError("An existing model recommendation has invalid sizing.")
             continue
@@ -353,18 +353,72 @@ def model_store_path():
     return next((path for path in (store, *store.parents) if path.exists()), store)
 
 
+def source_cached(item):
+    """Distinguish a context-only alias update from a fresh weight download."""
+    source = item.get("source")
+    if not source:
+        return False
+    try:
+        import context_window
+
+        return context_window.model_bytes(source) > 0
+    except (OSError, ValueError):
+        return False
+
+
+def alias_update_waits_for_tasks(item):
+    """Do not rebuild an installed alias while a project may be using it."""
+    try:
+        post("/api/show", {"model": item["alias"]}, timeout=10)
+    except (OSError, ValueError, KeyError):
+        return False  # An absent alias cannot be in use by an existing worker.
+    try:
+        from long_tasks import projects
+
+        return any(
+            task["status"] in ("queued", "working", "checking")
+            for task in projects()
+        )
+    except Exception:
+        return True  # Preserve a working alias if task state is unavailable.
+
+
 def model_ready(profile):
     """Require tool support and the context window needed by Hermes workers."""
-    info = post("/api/show", {"model": CATALOG[profile]["alias"]}, timeout=10)
+    item = CATALOG[profile]
+    info = post("/api/show", {"model": item["alias"]}, timeout=10)
     configured = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", info.get("parameters", ""))
     return (
         not info.get("remote_host")
         and not info.get("remote_model")
         and "tools" in info.get("capabilities", [])
         and configured is not None
-        and int(configured.group(1)) >= max(64000, CATALOG[profile]["context"])
-        and candidate_approved(CATALOG[profile])
+        and int(configured.group(1)) >= preferred_context(item, info, item["alias"])
+        and candidate_approved(item)
     )
+
+
+def preferred_context(item, info, model):
+    """Choose the largest native window this PC can hold alongside the weights.
+
+    A missing size or architecture report keeps the catalog's tested minimum.
+    It must never make an existing 64K alias unusable merely because Ollama
+    omitted optional metadata.
+    """
+    minimum = max(64000, item["context"])
+    import context_window
+
+    if not info.get("model_info"):
+        return minimum
+    weights = context_window.model_bytes(model)
+    if not weights:
+        return minimum
+    target = context_window.desired_context(
+        info, context_window.physical_ram_bytes(), weights
+    )
+    if target < minimum:
+        raise ValueError("This PC cannot fit the model's required context window.")
+    return target
 
 
 def catalog_signature():
@@ -424,6 +478,7 @@ def install(profile, progress=print):
         )
     if item.get("candidate"):
         probe_tool_use(item["source"], item.get("tool_reasoning_effort"))
+    context = preferred_context(item, source_info, item["source"])
     result = post(
         "/api/create",
         {
@@ -431,7 +486,7 @@ def install(profile, progress=print):
             "from": item["source"],
             "stream": False,
             "parameters": {
-                "num_ctx": item["context"],
+                "num_ctx": context,
                 "num_predict": 8192,
                 "temperature": 0.7,
             },
@@ -522,13 +577,20 @@ def auto_install(status_dir, refresh=True):
                     # Ollama may not be running yet, or this alias may be absent.
                     # The pull below will give a concrete error if it cannot connect.
                     pass
-                # A model needs space for weights plus Ollama's temporary files.
+                if alias_update_waits_for_tasks(model):
+                    save_download_status(
+                        path, "waiting_tasks", "Waiting for active tasks before updating this model", 0
+                    )
+                    continue
+                # Creating a wider alias for weights already in Ollama needs
+                # very little disk; a new pull needs room for the whole model.
                 free_gb = shutil.disk_usage(model_store_path()).free / 2**30
-                if free_gb < model["download_gb"] + 12:
+                required_gb = 2 if source_cached(model) else model["download_gb"] + 12
+                if free_gb < required_gb:
                     save_download_status(
                         path,
                         "waiting_storage",
-                        f"Needs about {model['download_gb'] + 12} GB free to download safely.",
+                        f"Needs about {required_gb} GB free to download safely.",
                         0,
                     )
                     continue

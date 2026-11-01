@@ -372,6 +372,19 @@ def read_task_status(path):
         return {}
 
 
+def deferred_model_retry_ready(state, tasks):
+    """Restart a finished model check once its deferred alias is safe to edit."""
+    state = Path(state)
+    if read_task_status(state / "auto-model-worker.json").get("status") != "complete":
+        return False
+    if any(task["status"] in ("queued", "working", "checking") for task in tasks):
+        return False
+    return any(
+        read_task_status(note).get("status") == "waiting_tasks"
+        for note in state.glob("optional-model-*.json")
+    )
+
+
 def request(pid, action, note=""):
     """Queue a UI action for the monitor instead of blocking the window."""
     with database() as conn:
@@ -3426,9 +3439,14 @@ def gui():
         nonlocal auto_models_started
         if setup and setup.get("status") != "complete":
             return
-        if auto_models_started:
-            return
         path = STATE / "auto-model-worker.json"
+        if auto_models_started:
+            # A model already serving a task is left untouched. Retry that
+            # deferred alias as soon as the task ends, without needing a new
+            # app launch to discover the wider context window.
+            if not deferred_model_retry_ready(STATE, projects()):
+                return
+            auto_models_started = False
         save_download_status(path, "working", "Checking this PC for optional models", 0)
         try:
             subprocess.Popen(

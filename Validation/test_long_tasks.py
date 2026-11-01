@@ -329,6 +329,18 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("large file truncated", snapshot)
         self.assertLess(len(snapshot), 13_000)
 
+    def test_deferred_model_update_retries_after_active_task_finishes(self):
+        state = self.base / "model-status"
+        state.mkdir()
+        (state / "auto-model-worker.json").write_text('{"status":"complete"}')
+        (state / "optional-model-wide.json").write_text('{"status":"waiting_tasks"}')
+        self.assertFalse(task_module.deferred_model_retry_ready(
+            state, [{"status": "working"}]
+        ))
+        self.assertTrue(task_module.deferred_model_retry_ready(
+            state, [{"status": "ready_for_review"}]
+        ))
+
     def test_fresh_placeholder_notes_do_not_bloat_first_worker_prompt(self):
         self.assertEqual(task_module.recovery_snapshot(self.item()["folder"]), "")
 
