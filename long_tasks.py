@@ -1812,6 +1812,7 @@ def monitor():
     last_start = 0
     last_dispatch = 0
     last_media_recovery = 0
+    last_setup_recovery = 0
     service_error = ""
     catalog_thread = None
     catalog_refresh_seconds = 24 * 60 * 60
@@ -1824,6 +1825,9 @@ def monitor():
         ).read_bytes() != installed_marker:
             return  # A newly installed version starts its own supervisor.
         try:
+            if time.monotonic() - last_setup_recovery >= 30:
+                last_setup_recovery = time.monotonic()
+                runtime_features.start_background()
             setup = read_task_status(STATE / "install-progress.json")
             if setup.get("status") == "working":
                 (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")

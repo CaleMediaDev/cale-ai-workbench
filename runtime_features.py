@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent
 MARKER = ROOT / "Updates/features-0.5.16.done"
 PROGRESS = ROOT / "LongTasks/install-progress.json"
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+RETRY_DELAYS = (10, 30, 60)
 
 
 def ready() -> bool:
@@ -23,9 +24,15 @@ def ready() -> bool:
             and chrome_connector.installed_version() == chrome_connector.EXPECTED_VERSION)
 
 
-def progress(percent: int, current: str, status: str = "working") -> None:
+def progress(percent: int, current: str, status: str = "working", attempts: int | None = None) -> None:
     PROGRESS.parent.mkdir(parents=True, exist_ok=True)
-    value = {"percent": percent, "current": current, "status": status, "updated": time.time()}
+    if attempts is None:
+        try:
+            attempts = int(json.loads(PROGRESS.read_text(encoding="utf-8")).get("attempts", 0))
+        except (OSError, ValueError, TypeError):
+            attempts = 0
+    value = {"percent": percent, "current": current, "status": status,
+             "updated": time.time(), "attempts": attempts, "owner": "runtime_features"}
     temporary = PROGRESS.with_name(PROGRESS.name + "." + str(os.getpid()) + ".tmp")
     temporary.write_text(json.dumps(value), encoding="utf-8")
     os.replace(temporary, PROGRESS)
@@ -39,6 +46,16 @@ def _run(args: list[str], env: dict | None = None, timeout: int = 600) -> None:
     if result.returncode:
         detail = (result.stderr or result.stdout or "unknown error").strip()[-500:]
         raise RuntimeError(detail)
+
+
+def _ensure_pip(python: str) -> None:
+    """Repair uv-created Python environments that omit pip by default."""
+    try:
+        _run([python, "-m", "pip", "--version"], timeout=30)
+    except RuntimeError:
+        progress(8, "Repairing the local Python package installer")
+        _run([python, "-m", "ensurepip", "--default-pip"], timeout=120)
+        _run([python, "-m", "pip", "--version"], timeout=30)
 
 
 def install() -> None:
@@ -62,6 +79,7 @@ def install() -> None:
         try:
             if ready():
                 return
+            _ensure_pip(sys.executable)
             progress(12, "Adding the local website crawler")
             _run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "crawl4ai==0.9.5"])
             progress(50, "Downloading the crawler's local browser")
@@ -70,6 +88,7 @@ def install() -> None:
             facts_file = max((ROOT / "data/installs").glob("*/facts.json"), key=lambda f: f.stat().st_mtime)
             facts = json.loads(facts_file.read_text(encoding="utf-8"))
             runtime = Path(facts["packages"]["venv"]["environment"]) / "Scripts/python.exe"
+            _ensure_pip(str(runtime))
             env = os.environ.copy()
             env["HERMES_HOME"] = str(ROOT / "data")
             env["PATH"] = str(ROOT / "data/bin") + os.pathsep + env.get("PATH", "")
@@ -79,7 +98,7 @@ def install() -> None:
                 "--hermes-home", str(ROOT / "data"), "--no-show-code",
             ], env=env, timeout=120)
             MARKER.write_text("Crawl4AI 0.9.5; Hermes Connector 0.2.6", encoding="utf-8")
-            progress(100, "Your local tools are ready", "complete")
+            progress(100, "Your local tools are ready", "complete", attempts=0)
         except Exception as exc:
             progress(0, "Tool update needs attention: " + str(exc)[:200], "failed")
             raise
@@ -90,25 +109,36 @@ def install() -> None:
 
 def start_background() -> bool:
     """Keep the desktop responsive while dependencies install or repair."""
-    if ready():
-        # A previous installer can leave a failed progress file after another
-        # process has already installed and verified every required tool.
-        # Tasks must not wait indefinitely on that stale status.
-        try:
-            previous = json.loads(PROGRESS.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            previous = {}
-        if previous.get("status") == "failed":
-            progress(100, "Your local tools are ready", "complete")
-        return False
     current = {}
     try:
         current = json.loads(PROGRESS.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         pass
-    if current.get("status") == "working" and time.time() - current.get("updated", 0) < 900:
+    owned = current.get("owner") == "runtime_features" or str(current.get("current", "")).startswith(
+        ("Tool update needs attention:", "Preparing new local tools")
+    )
+    if ready():
+        # A previous installer can leave a failed progress file after another
+        # process has already installed and verified every required tool.
+        # Tasks must not wait indefinitely on that stale status.
+        if owned and current.get("status") == "failed":
+            progress(100, "Your local tools are ready", "complete", attempts=0)
         return False
-    progress(3, "Preparing new local tools")
+    # The base installer also writes this file while downloading models.
+    # Never mistake its long-running work for a stalled feature update.
+    if current and not owned and current.get("status") != "complete":
+        return False
+    age = time.time() - current.get("updated", 0)
+    attempts = max(0, int(current.get("attempts", 0)))
+    if current.get("status") == "working" and age < 900:
+        return False
+    if attempts >= len(RETRY_DELAYS):
+        if current.get("status") != "failed":
+            progress(0, "Automatic setup repair could not finish. Check the tool installation.", "failed")
+        return False
+    if current.get("status") == "failed" and age < RETRY_DELAYS[attempts]:
+        return False
+    progress(3, "Preparing local tools" if attempts == 0 else "Repairing local tools", attempts=attempts + 1)
     subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), "--install"],
         cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
