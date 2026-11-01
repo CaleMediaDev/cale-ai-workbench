@@ -64,6 +64,13 @@ make_image for locally generated design assets. These tools need no account.
 
 LOCAL MEDIA AND TRAINING TOOLS
 make_image: generate a PNG locally with LCM Dreamshaper v7.
+make_music: generate a local WAV, MP3 or FLAC song, beat, jingle or instrumental
+with ACE-Step 1.5. For long renders use start_music_job, then music_job_status.
+cover_music: make a style cover from an existing local audio file. These music
+tools also appear in toolbox_search as local.make_music, local.start_music_job,
+local.music_job_status and local.cover_music; read toolbox_schema and call them
+through toolbox_call when discovering tools by purpose. Do not use make_image
+for audio requests.
 see_image: describe a photo, screenshot or chart with local Qwen vision.
 hear_audio: transcribe a local audio/video file with Faster-Whisper base.
 watch_video: inspect up to eight sampled frames and optionally transcribe audio.
