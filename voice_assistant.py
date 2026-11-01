@@ -4,6 +4,7 @@ Audio is handled by the installed media runtime. No microphone recording or
 spoken task text is sent to an online provider by this module.
 """
 
+import atexit
 import hashlib
 import json
 import os
@@ -20,6 +21,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+_mic_worker = None
+_mic_lock = threading.Lock()
 # Whisper can spell the spoken name as Cal or Kaeln. Accept those observed
 # phonetic spellings while still requiring "Hey" and a whole-word name match.
 WAKE = re.compile(r"^\s*hey[\s,]+(?:cale|kale|cal|kaeln|kayle|kail)\b[\s,.:;!-]*", re.IGNORECASE)
@@ -367,8 +370,53 @@ def _stop_media_process(process):
             pass
 
 
+def _stop_mic_worker():
+    global _mic_worker
+    worker, _mic_worker = _mic_worker, None
+    if worker is not None:
+        _stop_media_process(worker)
+
+
+atexit.register(_stop_mic_worker)
+
+
+def _persistent_mic_call(action, arguments):
+    """Reuse one local microphone worker, falling back if it cannot start."""
+    global _mic_worker
+    python = ROOT / "Media/python/Scripts/python.exe"
+    if not python.is_file():
+        return None
+    with _mic_lock:
+        try:
+            if _mic_worker is None or _mic_worker.poll() is not None:
+                _stop_mic_worker()
+                _mic_worker = subprocess.Popen(
+                    [str(python), str(ROOT / "media_worker.py"),
+                     "--voice-server", str(os.getpid())],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+                    cwd=ROOT, creationflags=HIDE, bufsize=1,
+                )
+            _mic_worker.stdin.write(json.dumps({"action": action, **arguments}) + "\n")
+            _mic_worker.stdin.flush()
+            import cale_voice
+
+            line = cale_voice._line_with_timeout(_mic_worker.stdout, 90)
+            answer = json.loads(line)
+        except (OSError, ValueError, queue.Empty, AttributeError, TypeError):
+            _stop_mic_worker()
+            return None
+    if "error" in answer:
+        raise RuntimeError(str(answer["error"]))
+    return answer
+
+
 def media_call(action, cancel=None, **arguments):
     """Run one bounded media action and return its final JSON response."""
+    if action in ("record_audio", "microphone_status") and cancel is None:
+        result = _persistent_mic_call(action, arguments)
+        if result is not None:
+            return result
     python = ROOT / "Media/python/Scripts/python.exe"
     voice_files = ROOT / "Media/models/natural_voice"
     natural_ready = (voice_files / "kokoro-v1.0.int8.onnx").is_file() and (

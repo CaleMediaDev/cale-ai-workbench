@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -20,6 +21,8 @@ MIC_VOICE_LEVEL = 0.012
 MIC_VOICE_RMS_LEVEL = 0.005
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+_whisper_model = None
+_whisper_lock = threading.Lock()
 
 
 def output_file(path, suffix):
@@ -112,12 +115,14 @@ def transcribe_audio(path, fast=False):
     source = Path(path).resolve()
     if not source.is_file():
         raise ValueError("Audio or video file not found.")
-    model = WhisperModel(
-        str(MEDIA / "models/whisper"),
-        device="cpu",
-        compute_type="int8",
-        local_files_only=True,
-    )
+    global _whisper_model
+    with _whisper_lock:
+        if _whisper_model is None:
+            _whisper_model = WhisperModel(
+                str(MEDIA / "models/whisper"), device="cpu",
+                compute_type="int8", local_files_only=True,
+            )
+        model = _whisper_model
     # Live microphone turns favor a fast first answer; longer file analysis
     # retains its wider beam for accuracy.
     segments, info = model.transcribe(str(source), beam_size=1 if fast else 3, vad_filter=True)
@@ -636,8 +641,47 @@ def download_image_upgrade():
     return {"installed": True, "model": "Segmind SSD-1B"}
 
 
+def serve_microphone(parent_pid: int) -> None:
+    """Handle mic clips in one local process so Whisper stays warm.
+
+    The parent check releases model memory if the desktop is terminated
+    without a graceful shutdown. An idle server exits after 90 seconds.
+    """
+    import psutil
+
+    parent = psutil.Process(parent_pid)
+    parent_started = parent.create_time()
+    last_request = [time.monotonic()]
+
+    def retire_orphan() -> None:
+        while True:
+            time.sleep(5)
+            if time.monotonic() - last_request[0] > 90:
+                os._exit(0)
+            try:
+                if psutil.Process(parent_pid).create_time() != parent_started:
+                    os._exit(0)
+            except psutil.Error:
+                os._exit(0)
+
+    threading.Thread(target=retire_orphan, daemon=True).start()
+    allowed = {"record_audio": record_audio, "microphone_status": microphone_status}
+    for line in sys.stdin:
+        last_request[0] = time.monotonic()
+        try:
+            request = json.loads(line)
+            action = request.pop("action")
+            result = allowed[action](**request)
+        except Exception as exc:
+            result = {"error": str(exc)}
+        print(json.dumps(result), flush=True)
+
+
 if __name__ == "__main__":
     try:
+        if "--voice-server" in sys.argv:
+            serve_microphone(int(sys.argv[sys.argv.index("--voice-server") + 1]))
+            sys.exit(0)
         if "--download-models" in sys.argv:
             result = download_models()
         elif "--download-image-upgrade" in sys.argv:

@@ -191,3 +191,19 @@ def test_long_spoken_request_is_not_cut_off_after_eight_seconds():
     sd = SimpleNamespace(InputStream=lambda **_kwargs: Stream())
     clip = media_worker._capture_microphone(sd, device=1, rate=100, seconds=20)
     assert len(clip) == 2000
+
+
+def test_whisper_model_is_loaded_once_for_repeated_clips(tmp_path):
+    audio = tmp_path / "clip.wav"
+    audio.write_bytes(b"test")
+    model = Mock()
+    model.transcribe.return_value = ([], SimpleNamespace(language="en"))
+    fake = ModuleType("faster_whisper")
+    fake.WhisperModel = Mock(return_value=model)
+    with patch.dict(sys.modules, {"faster_whisper": fake}), patch.object(
+        media_worker, "_whisper_model", None
+    ):
+        media_worker.transcribe_audio(audio, fast=True)
+        media_worker.transcribe_audio(audio, fast=True)
+    fake.WhisperModel.assert_called_once()
+    assert model.transcribe.call_count == 2

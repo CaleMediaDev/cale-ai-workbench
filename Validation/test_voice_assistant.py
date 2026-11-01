@@ -1,5 +1,8 @@
 """Voice control uses the local media worker and bounds recorded clips."""
 
+import json
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -16,6 +19,45 @@ import voice_assistant
 
 
 class VoiceTests(unittest.TestCase):
+    def test_microphone_server_handles_multiple_requests_in_one_process(self):
+        server = Path(__file__).resolve().parents[1] / "media_worker.py"
+        result = subprocess.run(
+            [sys.executable, str(server), "--voice-server", str(os.getpid())],
+            input='{"action":"unknown"}\n{"action":"unknown"}\n',
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        responses = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(len(responses), 2)
+        self.assertTrue(all("error" in response for response in responses))
+
+    def test_microphone_calls_reuse_persistent_worker(self):
+        from unittest.mock import Mock
+
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Media/python/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            worker = Mock()
+            worker.poll.return_value = None
+            with patch.object(voice_assistant, "ROOT", root), patch.object(
+                voice_assistant.subprocess, "Popen", return_value=worker
+            ) as launch, patch("cale_voice._line_with_timeout", side_effect=[
+                '{"input_device":"Mic"}', '{"text":"hello"}',
+            ]):
+                self.assertEqual(
+                    voice_assistant._persistent_mic_call("microphone_status", {})["input_device"],
+                    "Mic",
+                )
+                self.assertEqual(
+                    voice_assistant._persistent_mic_call("record_audio", {"seconds": 8})["text"],
+                    "hello",
+                )
+                launch.assert_called_once()
+            with patch.object(voice_assistant, "_stop_media_process"):
+                voice_assistant._stop_mic_worker()
+
     def test_status_rephrasing_uses_fast_local_model_and_keeps_facts(self):
         fake = ModuleType("cloud_ai")
         fake.FAST_MODEL = "cale-fast"
