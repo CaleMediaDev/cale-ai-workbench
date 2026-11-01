@@ -2482,6 +2482,7 @@ def gui():
         except Exception as exc:
             update_events.put(("error", str(exc)))
 
+    window.update_checked_at = time.monotonic()
     threading.Thread(target=check_updates, daemon=True).start()
 
     def check_image_upgrade():
@@ -4214,13 +4215,21 @@ def gui():
                     status.set(
                         "Update check will retry next time: " + candidate[1][:140]
                     )
-                elif candidate:
+                elif candidate and (
+                    pending_update is None or candidate[1] > pending_update[1]
+                ):
                     pending_update = candidate
                     status.set(
                         "A verified update is ready. It will install when tasks are idle."
                     )
         except queue.Empty:
             pass
+        # A worker may run for days. Refresh a staged release while it works
+        # so the eventual idle install uses the newest available version.
+        update_interval = 300 if pending_update else 1800
+        if not updating and time.monotonic() - window.update_checked_at >= update_interval:
+            window.update_checked_at = time.monotonic()
+            threading.Thread(target=check_updates, daemon=True).start()
         if (
             pending_update
             and not updating
