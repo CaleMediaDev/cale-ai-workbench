@@ -57,6 +57,20 @@ def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():
     assert chat_assistant.music_request("make a 2-minute beat")["duration_seconds"] == 120
 
 
+def test_music_edits_reach_agent_tools_instead_of_plain_chat():
+    for request in (
+        "Turn this melody into MIDI",
+        "Can you convert my recording to MIDI?",
+        "Separate vocals from this song",
+        "Please isolate the instrumental track",
+        "Transcribe this audio into MIDI notes",
+    ):
+        assert chat_assistant.route(request, []) == "task"
+    assert chat_assistant.route("What is MIDI?", []) == "answer"
+    assert chat_assistant.route("How do I separate vocals?", []) == "answer"
+    assert chat_assistant.route("Convert 12 inches to feet", []) == "answer"
+
+
 def test_followup_attaches_to_active_task():
     task = [{"id": "one"}]
     assert chat_assistant.route("Also add a contact page", task) == "note"

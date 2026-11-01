@@ -67,6 +67,14 @@ def music_request(text: str) -> dict | None:
     return {"prompt": value.strip(" .?!"), "duration_seconds": duration, "instrumental": instrumental}
 
 
+def music_edit_request(command: str) -> bool:
+    """Recognize audio transformation work without hijacking music questions."""
+    return bool(
+        re.match(r"^(?:turn|convert|transcribe|separate|split|isolate|remix|master|extract)\b", command)
+        and re.search(r"\b(?:audio|song|music|melody|recording|midi|vocals?|stems?|tracks?|instrumental)\b", command)
+    )
+
+
 def route(text: str, active_tasks: list[dict]) -> str:
     """Keep ordinary questions in chat and send explicit work to the task queue."""
     value = text.strip().lower()
@@ -82,6 +90,8 @@ def route(text: str, active_tasks: list[dict]) -> str:
         r"^(?:(?:please|can you|could you|i want you to|i need you to|i want to|i need to|help me(?: to)?)\s+)+",
         "", value,
     )
+    if music_edit_request(command):
+        return "task"
     if active_tasks and (
         command.startswith(("add ", "change "))
         or re.match(r"^(?:make|fix|update|improve|revise|redo|adjust)\s+(?:it|that|this)\b", command)
