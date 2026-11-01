@@ -682,6 +682,32 @@ class LongTaskTests(unittest.TestCase):
         task_module.process_requests()
         self.assertNotEqual(self.item()["status"], "accepted")
 
+    def test_ready_review_avoids_rehashing_unchanged_project_every_tick(self):
+        folder = self.base / "project"
+        source = folder / "source.txt"
+        source.write_text("first", encoding="utf-8")
+        task = self.item()
+        task["fingerprint"] = task_module.fingerprint(folder)
+        task_module.REVIEW_FILE_STATE.pop(task["id"], None)
+        with patch.object(task_module, "fingerprint", wraps=task_module.fingerprint) as digest, patch.object(
+            task_module.time, "monotonic", side_effect=[100, 101, 702]
+        ):
+            self.assertFalse(task_module.review_files_changed(task))
+            self.assertFalse(task_module.review_files_changed(task))
+            self.assertFalse(task_module.review_files_changed(task))
+        self.assertEqual(digest.call_count, 2)
+        source.write_text("changed", encoding="utf-8")
+        self.assertTrue(task_module.review_files_changed(task))
+
+    def test_ready_review_detects_new_file_without_waiting_for_full_interval(self):
+        folder = self.base / "project"
+        task = self.item()
+        task["fingerprint"] = task_module.fingerprint(folder)
+        task_module.REVIEW_FILE_STATE.pop(task["id"], None)
+        self.assertFalse(task_module.review_files_changed(task))
+        (folder / "new.txt").write_text("new", encoding="utf-8")
+        self.assertTrue(task_module.review_files_changed(task))
+
     def test_check_that_edits_project_cannot_pass_as_final(self):
         source = self.base / "project/source.txt"
         source.write_text("before", encoding="utf-8")

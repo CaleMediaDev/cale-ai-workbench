@@ -762,6 +762,52 @@ def fingerprint(folder):
     return "content-v2:" + digest.hexdigest()
 
 
+REVIEW_FILE_STATE = {}  # project id -> (accepted fingerprint, file metadata, full-check time)
+
+
+def review_file_metadata(folder):
+    """Cheap change detector for the task board; acceptance still hashes content."""
+    entries = []
+    count = 0
+    for base, dirs, files in os.walk(folder, followlinks=False):
+        dirs[:] = sorted(
+            d for d in dirs if d not in SKIP and not (Path(base) / d).is_symlink()
+        )
+        for name in sorted(files):
+            path = Path(base) / name
+            if path.is_symlink():
+                continue
+            stat = path.stat()
+            entries.append((str(path.relative_to(folder)), stat.st_size, stat.st_mtime_ns))
+            count += 1
+            if count > 100000:
+                raise RuntimeError("Project too large for the completion freshness check.")
+    verify = Path(folder) / ".local-ai/verify.ps1"
+    if verify.is_file():
+        stat = verify.stat()
+        entries.append((".local-ai/verify.ps1", stat.st_size, stat.st_mtime_ns))
+    return tuple(entries)
+
+
+def review_files_changed(p):
+    """Avoid re-reading large projects on every supervisor tick.
+
+    The board gets a full content check on first observation, when file names
+    or metadata change, and every ten minutes. Accept always calls fingerprint
+    directly, so a same-size edit with a restored timestamp cannot be approved.
+    """
+    folder = Path(p["folder"])
+    metadata = review_file_metadata(folder)
+    now = time.monotonic()
+    previous = REVIEW_FILE_STATE.get(p["id"])
+    if (previous and previous[0] == p["fingerprint"] and previous[1] == metadata
+            and now - previous[2] < 600):
+        return False
+    changed = fingerprint(folder) != p["fingerprint"]
+    REVIEW_FILE_STATE[p["id"]] = (p["fingerprint"], metadata, now)
+    return changed
+
+
 def legacy_fingerprint(folder):
     """Read the old metadata checksum only to migrate pending reviews safely."""
     old_skip = SKIP - {".ruff_cache", "playwright-report", "test-results"}
@@ -1166,6 +1212,7 @@ def process_requests():
                     board("archive", p["card"])
                 if action == "delete":
                     REVIEW_PROJECTS_CHECKED.pop(p["id"], None)
+                    REVIEW_FILE_STATE.pop(p["id"], None)
                     with database() as conn:
                         conn.execute("DELETE FROM projects WHERE id=?", (p["id"],))
                         conn.execute(
@@ -1293,7 +1340,7 @@ def advance_project(p):
         if p["status"] in ("accepted", "stopped", "paused", "needs_input"):
             return
         if p["status"] == "ready_for_review":
-            if fingerprint(Path(p["folder"])) != p["fingerprint"]:
+            if review_files_changed(p):
                 update(p["id"], status="needs_input",
                        detail="Image files changed after review. Check them before accepting.")
             return
@@ -1330,7 +1377,7 @@ def advance_project(p):
         if p["status"] in ("accepted", "stopped", "paused", "needs_input"):
             return
         if p["status"] == "ready_for_review":
-            if fingerprint(Path(p["folder"])) != p["fingerprint"]:
+            if review_files_changed(p):
                 update(p["id"], status="needs_input",
                        detail="Music files changed after review. Check them before accepting.")
             return
@@ -1399,7 +1446,7 @@ def advance_project(p):
             )
             return
         retire_review_cards(p)
-        if fingerprint(Path(p["folder"])) != p["fingerprint"]:
+        if review_files_changed(p):
             update(
                 p["id"],
                 status="needs_input",
