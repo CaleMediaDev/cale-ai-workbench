@@ -2,7 +2,7 @@ model:
   provider: custom
   default: cale-local
   base_url: http://127.0.0.1:11435/v1
-  context_length: 65536
+  context_length: 32768
   streaming: true
   key_env: LOCAL_AI_ROUTER_KEY
 fallback_providers: []
@@ -63,6 +63,8 @@ agent:
   coding_instructions: Check the requested behavior, not just syntax. Re-run 
     checks after the last relevant edit and report actual outcomes.
 checkpoints:
+  enabled: true
+compression:
   enabled: true
 platform_toolsets:
   cli:

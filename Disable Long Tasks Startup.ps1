@@ -12,3 +12,4 @@ if (Test-Path -LiteralPath $taskShortcut) {
     }
 }
 'Automatic startup disabled. Pause projects in Cale AI Workbench to stop current work.'
+# Remove the optional sign-in scheduled task without deleting project files.

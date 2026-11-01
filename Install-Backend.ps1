@@ -1,3 +1,5 @@
+# Install into one app folder. Each download is pinned and checksum-verified;
+# progress JSON lets the desktop window show setup as a task while this runs.
 [CmdletBinding()]
 param(
  [string]$Destination=(Join-Path $env:LOCALAPPDATA 'CaleMedia\AIWorkbench'),
@@ -17,7 +19,7 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.2.0')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.3.0')
  $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
  function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
    New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
@@ -160,10 +162,14 @@ try {
  if ($LASTEXITCODE -ne 0) { throw 'ChatGPT connection behavior checks failed.' }
  & $python (Join-Path $Destination 'Validation/test_long_tasks.py')
  if ($LASTEXITCODE -ne 0) { throw 'Long-task behavior checks failed.' }
+ & $python (Join-Path $Destination 'Validation/test_model_library.py')
+ if ($LASTEXITCODE -ne 0) { throw 'Automatic model selection checks failed.' }
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
  Write-SetupStatus 100 'Your AI is ready' 'complete'
+ # Optional local models continue in a separate process after the installer closes.
+ Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden
  Write-Output "Installation complete: $Destination"
 } catch {
  if ($setupState) { Write-SetupStatus 0 ("Setup needs attention: " + $_.Exception.Message) 'error' }

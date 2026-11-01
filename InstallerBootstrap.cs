@@ -1,3 +1,5 @@
+// Small Windows executable that unpacks the versioned source payload and
+// starts the PowerShell setup window. Install-Backend.ps1 does the installation.
 using System;
 using System.Diagnostics;
 using System.IO;

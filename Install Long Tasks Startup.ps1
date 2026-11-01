@@ -36,3 +36,4 @@ $taskShortcut.WorkingDirectory = $taskRoot
 $taskShortcut.Description = 'Persistent local AI projects, progress, pause/resume and verification'
 $taskShortcut.Save()
 'Desktop shortcut created: Cale AI Workbench'
+# Register the task supervisor at Windows sign-in so saved work can resume.

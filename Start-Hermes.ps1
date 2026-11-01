@@ -1,3 +1,4 @@
+# Launch one interactive Hermes task using the tools installed with this app.
 param(
     [string]$Folder = (Join-Path $PSScriptRoot 'Projects'),
     [string]$Task,

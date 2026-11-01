@@ -1,3 +1,5 @@
+# Small, automatic first-run installer UI. Install-Backend.ps1 owns the actual
+# downloads; this window only starts it and shows a readable progress log.
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -12,10 +14,17 @@ $ink=[Drawing.ColorTranslator]::FromHtml('#EDF3FF')
 $muted=[Drawing.ColorTranslator]::FromHtml('#9AAAC6')
 $accent=[Drawing.ColorTranslator]::FromHtml('#6E82FF')
 $form.BackColor=$bg; $form.ForeColor=$ink
-$mark=New-Object Windows.Forms.Label
-$mark.Text='◆'; $mark.TextAlign='MiddleCenter'; $mark.Font=New-Object Drawing.Font('Segoe UI',22,[Drawing.FontStyle]::Bold)
-$mark.BackColor=$accent; $mark.ForeColor=[Drawing.Color]::White
-$mark.SetBounds(24,24,56,52); $form.Controls.Add($mark)
+$logoPath=Join-Path $PSScriptRoot 'assets\cale-logo.png'
+if (Test-Path -LiteralPath $logoPath) {
+    $mark=New-Object Windows.Forms.PictureBox
+    $mark.Image=[Drawing.Image]::FromFile($logoPath)
+    $mark.SizeMode='Zoom'; $mark.BackColor=$bg
+} else {
+    $mark=New-Object Windows.Forms.Label
+    $mark.Text='◆'; $mark.TextAlign='MiddleCenter'; $mark.Font=New-Object Drawing.Font('Segoe UI',22,[Drawing.FontStyle]::Bold)
+    $mark.BackColor=$accent; $mark.ForeColor=[Drawing.Color]::White
+}
+$mark.SetBounds(24,20,60,60); $form.Controls.Add($mark)
 $title = New-Object Windows.Forms.Label
 $title.Text = 'CALE  /  AI WORKBENCH'
 $title.Font = New-Object Drawing.Font('Segoe UI',19,[Drawing.FontStyle]::Bold)
@@ -31,7 +40,7 @@ $path.ReadOnly=$true
 $path.BackColor=$card; $path.ForeColor=$ink; $path.BorderStyle='FixedSingle'
 $path.SetBounds(26,157,758,30); $form.Controls.Add($path)
 $notice = New-Object Windows.Forms.Label
-$notice.Text = 'Setup starts automatically. The workbench opens during setup so you can follow downloads in My tasks. Large optional models have Start buttons there.'
+$notice.Text = 'Setup starts automatically. The workbench shows progress in My tasks. After setup, compatible large models download one at a time when RAM and storage allow.'
 $notice.ForeColor=$muted
 $notice.SetBounds(26,205,758,60); $form.Controls.Add($notice)
 $install = New-Object Windows.Forms.Button
