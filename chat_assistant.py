@@ -274,6 +274,19 @@ def business_contact_answer(name: str, sources: list[dict]) -> str:
 
 def answer_with_tools(question: str, history: list[dict]) -> str:
     """Use a live source for contact lookups, then local inference for other chat."""
+    file_query = computer_file_query(question)
+    if file_query:
+        import file_catalog
+
+        state = Path(__file__).resolve().parent / "LongTasks"
+        matches = file_catalog.search(state, file_query, 10)
+        if matches:
+            return "I found these on this PC:\n" + "\n".join(
+                f"{row['name']} — {row['path']}" for row in matches
+            )
+        index = file_catalog.status(state)
+        suffix = " The first scan is still running." if index.get("status") == "working" else ""
+        return f"I couldn't find a file named {file_query!r} in the local index.{suffix}"
     if re.search(r"\b(?:file|document|attachment|uploaded|attached|gave you|sent you|"
                  r"photo|picture|image|audio|recording|video)\b", question, re.I):
         import user_file_memory
@@ -312,6 +325,20 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
     if calculation is not None:
         return calculation
     return local_answer(question, history)
+
+
+def computer_file_query(question: str) -> str:
+    """Recognize direct requests to locate a file, without hijacking document Q&A."""
+    text = question.strip().rstrip("?.!")
+    match = re.match(
+        r"(?i)^(?:find|locate|where is|where's|search (?:my |this )?computer for|"
+        r"look for)\s+(?:my |the |a |an )?(?:file |folder |document |photo |video )?(.+)$",
+        text,
+    )
+    if not match:
+        return ""
+    query = re.sub(r"(?i)\s+(?:file|folder|document|on my (?:computer|pc)|on this pc)$", "", match.group(1))
+    return query.strip()
 
 
 WEB_SIGNALS = re.compile(

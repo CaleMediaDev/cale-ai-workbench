@@ -17,6 +17,7 @@ from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 from mcp.server import MCPServer
 
+import file_catalog
 import project_memory
 import site_crawler
 import skill_hub
@@ -250,6 +251,16 @@ def project_memory_search(project_folder: str, query: str, kind: str = "", limit
 def user_file_memory_search(query: str, limit: int = 8) -> dict:
     """Search local files and documents the person attached in chat; return source paths."""
     return {"matches": user_file_memory.search(ROOT / "LongTasks", query, limit)}
+
+
+@server.tool()
+def search_computer_files(query: str, limit: int = 10) -> dict:
+    """Find file/folder names across local drives; catalog never reads file contents."""
+    state = ROOT / "LongTasks"
+    return {
+        "matches": file_catalog.search(state, query, limit),
+        "index": file_catalog.status(state),
+    }
 
 
 @server.tool()
