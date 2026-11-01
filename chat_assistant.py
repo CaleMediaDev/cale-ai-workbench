@@ -271,10 +271,14 @@ def business_contact_answer(name: str, sources: list[dict]) -> str:
 
 def answer_with_tools(question: str, history: list[dict]) -> str:
     """Use a live source for contact lookups, then local inference for other chat."""
-    if re.search(r"\b(?:file|document|attachment|uploaded|attached|gave you|sent you)\b", question, re.I):
+    if re.search(r"\b(?:file|document|attachment|uploaded|attached|gave you|sent you|"
+                 r"photo|picture|image|audio|recording|video)\b", question, re.I):
         import user_file_memory
 
-        matches = user_file_memory.search(Path(__file__).resolve().parent / "LongTasks", question, 4)
+        state = Path(__file__).resolve().parent / "LongTasks"
+        matches = user_file_memory.search(state, question, 4)
+        if not matches:
+            matches = user_file_memory.search(state, "", 4)
         if matches:
             evidence = "\n\n".join(
                 f"[{number}] {row['path']}\n{row['excerpt']}"

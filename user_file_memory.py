@@ -6,18 +6,28 @@ search refreshes indexed files so edits and deletions do not return stale text.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
+import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
 import file_chat
 import project_memory
 
-SUPPORTED = file_chat.PLAIN_TEXT | file_chat.DOCUMENTS
+IMAGES = file_chat.IMAGES
+AUDIO = frozenset({".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"})
+VIDEO = frozenset({".mp4", ".mov", ".mkv", ".avi", ".webm"})
+SUPPORTED = file_chat.PLAIN_TEXT | file_chat.DOCUMENTS | IMAGES | AUDIO | VIDEO
 MAX_FILES = 200
 MAX_BYTES = 15 * 1024 * 1024
+MAX_MEDIA_BYTES = 100 * 1024 * 1024
 MAX_TEXT = 256_000
+
+
+def _file_limit(path: Path) -> int:
+    return MAX_MEDIA_BYTES if path.suffix.casefold() in AUDIO | VIDEO else MAX_BYTES
 
 
 def _files(paths: list[str]):
@@ -28,16 +38,19 @@ def _files(paths: list[str]):
             root = Path(raw).resolve(strict=True)
         except OSError:
             continue
-        if root.is_file():
-            candidates = [root]
-        elif root.is_dir():
-            candidates = []
-            for base, dirs, names in os.walk(root, followlinks=False):
-                dirs[:] = sorted(d for d in dirs if d not in project_memory.SKIP_DIRS
-                                 and not (Path(base) / d).is_symlink())
-                candidates.extend(Path(base) / name for name in sorted(names))
-        else:
+        if not root.is_file() and not root.is_dir():
             continue
+        if root.is_file():
+            candidates = iter((root,))
+        else:
+            def walk():
+                for base, dirs, names in os.walk(root, followlinks=False):
+                    dirs[:] = sorted(d for d in dirs if d not in project_memory.SKIP_DIRS
+                                     and not (Path(base) / d).is_symlink())
+                    for name in sorted(names):
+                        yield Path(base) / name
+
+            candidates = walk()
         for path in candidates:
             if count >= MAX_FILES:
                 return
@@ -45,13 +58,63 @@ def _files(paths: list[str]):
                 continue
             if path.suffix.casefold() not in SUPPORTED:
                 continue
-            if not path.is_file() or path.stat().st_size > MAX_BYTES:
+            if not path.is_file() or path.stat().st_size > _file_limit(path):
                 continue
             count += 1
             yield path.resolve()
 
 
+def _media_call(action: str, path: Path, **options) -> dict:
+    """Use bundled offline media models; never send selected content online."""
+    python = file_chat.ROOT / "Media/python/Scripts/python.exe"
+    if not python.is_file():
+        raise RuntimeError("The local media reader is still installing.")
+    result = subprocess.run(
+        [str(python), str(file_chat.ROOT / "media_worker.py")],
+        input=json.dumps({"action": action, "path": str(path), **options}),
+        text=True, capture_output=True, encoding="utf-8", errors="replace",
+        cwd=file_chat.ROOT, timeout=900, creationflags=file_chat.HIDE,
+    )
+    try:
+        payload = json.loads(result.stdout.splitlines()[-1])
+    except (IndexError, ValueError) as exc:
+        raise RuntimeError("The local media reader did not respond.") from exc
+    if result.returncode or "error" in payload:
+        raise RuntimeError(str(payload.get("error", "Could not read the media.")))
+    return payload
+
+
 def _text(path: Path) -> str:
+    suffix = path.suffix.casefold()
+    if suffix in IMAGES:
+        description = file_chat.image_description(
+            path, "Describe this image accurately and transcribe readable text."
+        ).strip()
+        return ("[AI-generated local image description; verify against the original image.]\n" + description) if description else ""
+    if suffix in AUDIO:
+        result = _media_call("transcribe_audio", path)
+        transcript = result["text"].strip()
+        return ("[Offline audio transcript; verify against the original recording.]\n" + transcript) if transcript else ""
+    if suffix in VIDEO:
+        result = _media_call(
+            "analyze_video", path, max_frames=4, include_audio=False,
+            question="Describe the visible events and transcribe readable text.",
+        )
+        observations = "\n".join(
+            f"{frame['timestamp_seconds']}s: {frame['description']}"
+            for frame in result["sampled_frames"]
+        )
+        try:
+            audio = _media_call("transcribe_audio", path).get("text", "")
+        except (OSError, ValueError, RuntimeError, KeyError, subprocess.TimeoutExpired):
+            # Silent videos and unsupported audio tracks still retain visual memory.
+            audio = ""
+        if not observations and not audio:
+            return ""
+        return (
+            "[AI-generated description of up to four sampled video frames; events between frames may be missed.]\n"
+            + observations + "\n[Offline audio transcript]\n" + audio
+        )
     if path.suffix.casefold() in file_chat.PLAIN_TEXT:
         data = path.read_bytes()
         if b"\x00" in data:
@@ -97,6 +160,9 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
                     continue
                 content = _text(path).strip()
                 if not content:
+                    if previous:
+                        conn.execute("DELETE FROM files WHERE path=?", (source,))
+                        conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
                     skipped += 1
                     continue
                 conn.execute("""INSERT INTO files(path,size,modified_ns,content) VALUES(?,?,?,?)
@@ -107,7 +173,9 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
                 conn.execute("INSERT INTO file_fts(path,filename,content) VALUES(?,?,?)",
                              (source, path.name, content))
                 indexed += 1
-            except (OSError, ValueError, RuntimeError):
+            except (OSError, ValueError, RuntimeError, KeyError, ImportError, subprocess.TimeoutExpired):
+                conn.execute("DELETE FROM files WHERE path=?", (source,))
+                conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
                 skipped += 1
         conn.commit()
     return {"indexed": indexed, "unchanged": unchanged, "skipped": skipped}
@@ -121,7 +189,7 @@ def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
     existing = [
         path for path in paths
         if Path(path).is_file() and Path(path).suffix.casefold() in SUPPORTED
-        and Path(path).stat().st_size <= MAX_BYTES
+        and Path(path).stat().st_size <= _file_limit(Path(path))
     ]
     for start in range(0, len(existing), MAX_FILES):
         ingest(state, existing[start:start + MAX_FILES])
