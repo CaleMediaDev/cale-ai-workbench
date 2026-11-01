@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -570,6 +571,41 @@ class LongTaskTests(unittest.TestCase):
 
     def test_missing_check_cannot_pass(self):
         self.assertFalse(task_module.verify_project(self.item())[0])
+
+    def test_finished_song_gets_independent_audio_check_without_worker_script(self):
+        task_module.update(self.pid, brief="Make a 0.1 minute rap song with vocals")
+        project = self.base / "project"
+        with wave.open(str(project / "song_final.wav"), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(8000)
+            audio.writeframes(b"\0\0" * (6 * 8000))
+        (project / "lyrics.txt").write_text("Michigan and Cale Media make the beat. " * 8)
+        with (patch("music_backend.audio_file_ok", return_value=True),
+              patch("music_backend.vocal_evidence", return_value={
+                  "passed": True, "recognized_words": 45,
+              })):
+            passed, evidence = task_module.verify_project(self.item())
+        self.assertTrue(passed)
+        self.assertIn("6.0s", evidence)
+        self.assertIn("45 recognized", evidence)
+
+    def test_song_without_saved_audio_fails_instead_of_claiming_completion(self):
+        task_module.update(self.pid, brief="Make a 3 minute rap song")
+        passed, evidence = task_module.verify_project(self.item())
+        self.assertFalse(passed)
+        self.assertIn("No finished WAV", evidence)
+
+    def test_finished_scratch_audio_is_recovered_into_project(self):
+        root = self.base / "app"
+        scratch = root / "data/cache/scratch"
+        scratch.mkdir(parents=True)
+        source = scratch / "song_final.wav"
+        source.write_bytes(b"RIFF" + b"audio" * 100)
+        snapshot = {"runs": [{"metadata": json.dumps({"artifacts": [str(source)]})}]}
+        with patch.object(task_module, "ROOT", root):
+            task_module.recover_media_artifacts(self.item(), snapshot)
+        self.assertEqual((self.base / "project/song_final.wav").read_bytes(), source.read_bytes())
 
     def test_success_starts_separate_review(self):
         self.verify_script(

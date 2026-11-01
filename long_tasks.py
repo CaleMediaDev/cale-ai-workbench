@@ -21,6 +21,7 @@ import textwrap
 import time
 import traceback
 import uuid
+import wave
 from pathlib import Path
 
 import cale_voice
@@ -976,11 +977,95 @@ def legacy_fingerprint(folder):
     return digest.hexdigest()
 
 
+def verify_audio_handoff(p):
+    """Independently check a standalone song when its worker omitted verify.ps1.
+
+    This narrow fallback keeps an otherwise finished media task moving. Software
+    projects still need their own behavioral test script.
+    """
+    brief = str(p.get("brief", ""))
+    if not re.search(r"\b(song|music|rap|audio track)\b", brief, re.I):
+        return None
+    if re.search(r"\b(app|website|software|program|plugin)\b", brief, re.I):
+        return None
+    folder = Path(p["folder"])
+    audio = sorted(
+        (path for path in folder.glob("*.wav") if path.is_file()),
+        key=lambda path: ("final" not in path.stem.lower(), -path.stat().st_mtime),
+    )
+    if not audio:
+        return False, "No finished WAV was saved in the project folder."
+    selected = audio[0]
+    try:
+        with wave.open(str(selected), "rb") as recording:
+            duration = recording.getnframes() / recording.getframerate()
+            channels = recording.getnchannels()
+        minutes = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:min(?:ute)?s?)\b", brief, re.I)
+        if minutes and abs(duration - float(minutes.group(1)) * 60) > 10:
+            return False, f"Song duration {duration:.1f}s misses the requested {minutes.group(1)} minutes."
+        if duration < 5 or channels < 1:
+            return False, "The song is too short or has no audio channels."
+        import music_backend
+
+        if not music_backend.audio_file_ok(selected):
+            return False, "The finished song could not be decoded or has no audible signal."
+        if re.search(r"\b(rap|vocal|sing|lyrics|voice)\b", brief, re.I):
+            lyrics = folder / "lyrics.txt"
+            if not lyrics.is_file() or len(lyrics.read_text(encoding="utf-8").split()) < 20:
+                return False, "The requested vocal song has no usable lyrics.txt."
+            evidence = music_backend.vocal_evidence(selected, round(duration))
+            if not evidence["passed"]:
+                return False, "The song plays, but the vocal check found too few words across the track."
+            vocal_note = f"; {evidence['recognized_words']} recognized vocal words"
+        else:
+            vocal_note = ""
+    except (OSError, ValueError, RuntimeError, EOFError, KeyError) as exc:
+        return False, f"Could not independently verify the song: {exc}"
+    return True, f"Built-in audio verification passed: {selected.name}, {duration:.1f}s, {channels} channel(s){vocal_note}."
+
+
+def recover_media_artifacts(p, snapshot):
+    """Copy a worker's finished scratch render into its durable project folder."""
+    folder = Path(p["folder"])
+    scratch = (ROOT / "data/cache/scratch").resolve()
+    for run in reversed(snapshot.get("runs", [])):
+        metadata = run.get("metadata") or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except ValueError:
+                continue
+        if not isinstance(metadata, dict):
+            continue
+        for item in metadata.get("artifacts", []):
+            source = Path(str(item))
+            if source.suffix.lower() not in (".wav", ".mp3", ".flac", ".ogg", ".m4a"):
+                continue
+            try:
+                resolved = source.resolve(strict=True)
+                if not resolved.is_relative_to(scratch) or not resolved.is_file():
+                    continue
+                target = folder / resolved.name
+                if target.is_file() and target.stat().st_size >= resolved.stat().st_size:
+                    continue
+                temporary = folder / ("." + resolved.name + "." + uuid.uuid4().hex + ".part")
+                try:
+                    shutil.copy2(resolved, temporary)
+                    os.replace(temporary, target)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            except (OSError, ValueError):
+                continue
+
+
 def verify_project(p, timeout=1200):
     """Run project checks in a kill-on-close Windows Job for safe cancellation."""
     folder = Path(p["folder"])
     script = folder / ".local-ai/verify.ps1"
     if not script.is_file() or not script.read_text(encoding="utf-8-sig").strip():
+        media_result = verify_audio_handoff(p)
+        if media_result is not None:
+            return media_result
         return (
             False,
             "Missing .local-ai/verify.ps1. Create and run real acceptance tests.",
@@ -1087,8 +1172,10 @@ def verify_project(p, timeout=1200):
     return code == 0, evidence
 
 
-def handle_handoff(p, task):
+def handle_handoff(p, task, snapshot=None):
     """Verify a worker handoff, then start review or ask the user for help."""
+    if snapshot:
+        recover_media_artifacts(p, snapshot)
     update(
         p["id"],
         status="checking",
@@ -1713,7 +1800,7 @@ def advance_project(p):
                 detail="Worker handed off. Letting it finish and release files before independent checks.",
             )
             return
-        handle_handoff(p, task)
+        handle_handoff(p, task, snapshot)
     elif task["status"] == "blocked" and goal_budget_exhausted(snapshot):
         # Hermes' goal loop deliberately blocks after its turn budget. That is
         # a worker boundary, not a request for human judgment. Start another
