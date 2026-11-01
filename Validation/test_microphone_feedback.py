@@ -66,6 +66,39 @@ def test_faint_hiss_without_words_reports_low_input(tmp_path):
     assert result["input_peak"] == 0.0104
 
 
+def test_idle_mic_noise_spikes_do_not_masquerade_as_speech(tmp_path):
+    sd, sf = _audio_modules(0.001)
+    samples = np.full((100, 1), 0.001, dtype=np.float32)
+    samples[::10] = 0.014
+    sd.rec.return_value = samples
+    with patch.dict(sys.modules, {"sounddevice": sd, "soundfile": sf}), patch.object(
+        media_worker, "ROOT", tmp_path
+    ), patch.object(media_worker, "transcribe_audio", return_value={
+        "text": "", "segments": [], "language": ""
+    }):
+        result = media_worker.record_audio(seconds=1)
+    assert result["input_peak"] == 0.014
+    assert result["quiet"] is True
+
+
+def test_noise_spikes_do_not_end_a_clip_early():
+    class Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read(self, frames):
+            block = np.full((frames, 1), 0.001, dtype=np.float32)
+            block[0] = 0.014
+            return block, False
+
+    sd = SimpleNamespace(InputStream=lambda **_kwargs: Stream())
+    clip = media_worker._capture_microphone(sd, device=1, rate=100, seconds=8)
+    assert len(clip) == 800
+
+
 def test_audible_microphone_transcribes_and_reports_input_level(tmp_path):
     sd, sf = _audio_modules(0.05)
     transcript = {"text": "Hey, Kale, can you hear me?", "segments": [], "language": "en"}

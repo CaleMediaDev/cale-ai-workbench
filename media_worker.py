@@ -17,6 +17,7 @@ MEDIA = ROOT / "Media"
 # after Whisper has had a chance to find words.
 MIC_SILENCE_LEVEL = 0.003
 MIC_VOICE_LEVEL = 0.012
+MIC_VOICE_RMS_LEVEL = 0.005
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
@@ -400,9 +401,11 @@ def _capture_microphone(sd, device: int, rate: int, seconds: int):
                 raise RuntimeError("Microphone returned no audio samples.")
             pieces.append(block)
             captured += len(block)
-            # A low fixed threshold avoids treating faint background hiss as a
-            # voice. The final Whisper pass decides whether words were spoken.
-            if float(np.max(np.abs(block))) >= MIC_VOICE_LEVEL:
+            # A single sample can spike above the peak threshold in an idle
+            # microphone. Require sustained energy as well before treating a
+            # block as speech and starting the pause-after-speech timer.
+            if (float(np.max(np.abs(block))) >= MIC_VOICE_LEVEL
+                    and float(np.sqrt(np.mean(np.square(block)))) >= MIC_VOICE_RMS_LEVEL):
                 speaking = True
                 last_voice_frame = captured
             if speaking and captured >= rate and captured - last_voice_frame >= round(rate * 1.2):
@@ -463,6 +466,7 @@ def record_audio(seconds=10):
         )
         sd.wait()
     peak = float(abs(audio).max())
+    rms = float((audio.astype("float64") ** 2).mean() ** 0.5)
     microphone = str(devices[chosen]["name"])
     if peak < MIC_SILENCE_LEVEL:
         # Muted or disconnected inputs otherwise look exactly like a missed
@@ -477,7 +481,9 @@ def record_audio(seconds=10):
         # Background hiss can cross the near-silence cutoff. If no words were
         # found and the whole clip stayed below the speech level, give the
         # user the actionable low-input diagnosis. Recognized soft speech wins.
-        quiet = not str(transcript.get("text", "")).strip() and peak < MIC_VOICE_LEVEL
+        quiet = not str(transcript.get("text", "")).strip() and (
+            peak < MIC_VOICE_LEVEL or rms < MIC_VOICE_RMS_LEVEL
+        )
         return {**transcript, "input_device": microphone,
                 "input_peak": round(peak, 4), "quiet": quiet}
 

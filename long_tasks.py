@@ -2716,10 +2716,16 @@ def gui():
                     voice_events.put(("mic_quiet", f"{device} captured almost no sound. Check its mute and Windows input level."))
                 elif not repeat:
                     voice_events.put(
-                        ("state", "The mic heard sound, but I couldn't make out words. Try again.")
+                        ("mic_unrecognized", "The mic heard sound on "
+                         + (heard["input_device"] or "the selected microphone")
+                         + ", but I couldn't make out words. Try speaking closer and try again.")
                     )
                 else:
-                    voice_events.put(("state", "Mic on. Waiting for Hey Cale."))
+                    voice_events.put(
+                        ("mic_unrecognized", "The mic heard sound on "
+                         + (heard["input_device"] or "the selected microphone")
+                         + ", but couldn't make out words. Say Hey Cale clearly, then your request.")
+                    )
             except Exception as exc:
                 listening.clear()
                 manual_voice_requested.clear()
@@ -3999,6 +4005,8 @@ def gui():
                     mic_button.configure(text="🎤  Mic Off")
                 elif event == "mic_quiet":
                     voice_label.set("Mic on, but " + value[:140])
+                elif event == "mic_unrecognized":
+                    voice_label.set(value[:180])
                 elif event == "wake_ack_done":
                     if listening.is_set():
                         wake_sequence.renew_after_ack()
