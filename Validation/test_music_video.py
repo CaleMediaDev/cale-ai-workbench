@@ -9,7 +9,7 @@ import wave
 
 import imageio_ffmpeg
 import pytest
-from PIL import Image
+from PIL import Image, ImageChops
 
 import music_video
 import toolbox_mcp
@@ -79,3 +79,44 @@ def test_music_video_uses_supplied_cover_art_without_changing_it(tmp_path):
     with pytest.raises(ValueError, match="background image"):
         music_video.make_music_video(str(song), str(tmp_path / "bad.mp4"),
                                      background_image=str(song))
+
+
+def test_music_video_burns_timed_srt_captions_without_changing_inputs(tmp_path):
+    song = tmp_path / "song.wav"
+    captions = tmp_path / "lyrics.srt"
+    plain = tmp_path / "plain.mp4"
+    captioned = tmp_path / "captioned.mp4"
+    with wave.open(str(song), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b"".join(
+            struct.pack("<h", round(5000 * math.sin(2 * math.pi * 440 * n / 16000)))
+            for n in range(16000)
+        ))
+    captions.write_text("1\n00:00:00,000 --> 00:00:01,000\nHELLO CALE\n\n", encoding="utf-8")
+    original_song, original_captions = song.read_bytes(), captions.read_bytes()
+    schema = toolbox_mcp.toolbox_schema("local.make_music_video")
+    assert "captions_path" in schema["inputSchema"]["properties"]
+    music_video.make_music_video(str(song), str(plain))
+    result = asyncio.run(toolbox_mcp.toolbox_call("local.make_music_video", json.dumps({
+        "source_path": str(song), "output_path": str(captioned),
+        "captions_path": str(captions),
+    })))
+    assert result["captions_path"] == str(captions)
+    frames = []
+    for video, name in ((plain, "plain.png"), (captioned, "captioned.png")):
+        frame = tmp_path / name
+        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-ss", "0.5", "-i", str(video),
+                        "-frames:v", "1", str(frame)], check=True, capture_output=True)
+        with Image.open(frame) as image:
+            frames.append(image.convert("RGB"))
+    difference = ImageChops.difference(*frames)
+    assert difference.getbbox() is not None
+    assert sum(1 for pixel in difference.crop((0, 500, 1280, 720)).get_flattened_data()
+               if max(pixel) > 60) > 100
+    assert song.read_bytes() == original_song
+    assert captions.read_bytes() == original_captions
+    with pytest.raises(ValueError, match="SRT"):
+        music_video.make_music_video(str(song), str(tmp_path / "bad.mp4"),
+                                     captions_path=str(song))

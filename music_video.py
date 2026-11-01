@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -12,8 +14,8 @@ HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def make_music_video(source_path: str, output_path: str, layout: str = "wide",
-                     background_image: str = "") -> dict:
-    """Pair a local song and optional cover art with an animated spectrum."""
+                     background_image: str = "", captions_path: str = "") -> dict:
+    """Pair local audio, optional cover art and timed captions with a spectrum."""
     source = Path(source_path).expanduser().resolve(strict=True)
     output = Path(output_path).expanduser().resolve()
     if not source.is_file() or source.suffix.lower() not in {".wav", ".mp3", ".flac", ".m4a", ".ogg"}:
@@ -27,14 +29,20 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
         image = Path(background_image).expanduser().resolve(strict=True)
         if not image.is_file() or image.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
             raise ValueError("Choose an existing PNG, JPG or WebP background image.")
+    captions = None
+    if captions_path:
+        captions = Path(captions_path).expanduser().resolve(strict=True)
+        if not captions.is_file() or captions.suffix.lower() != ".srt" or captions.stat().st_size > 2_000_000:
+            raise ValueError("Choose an existing SRT captions file under 2 MB.")
     width, height = SIZES[layout]
     output.parent.mkdir(parents=True, exist_ok=True)
     # FFmpeg's spectrum filter draws frames from audio, so the video stops with
     # the actual song and never needs an estimated duration or a cloud service.
     inputs = ["-i", str(source)]
     spectrum = f"[0:a]showspectrum=s={width}x{height}:mode=combined:slide=scroll:color=rainbow:fps=30"
+    video_label = "base" if captions else "v"
     if image is None:
-        filters = spectrum + "[v]"
+        filters = spectrum + f"[{video_label}]"
     else:
         inputs.extend(["-loop", "1", "-framerate", "30", "-i", str(image)])
         # The cover fills the frame; black spectrum pixels become transparent
@@ -43,19 +51,27 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
             f"[1:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},format=rgba[cover];"
             + spectrum + ",format=rgba,colorkey=0x000000:0.05:0.1[spec];"
-            "[cover][spec]overlay=shortest=1:format=auto,format=yuv420p[v]"
+            f"[cover][spec]overlay=shortest=1:format=auto,format=yuv420p[{video_label}]"
         )
-    command = [
-        imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
-        *inputs, "-filter_complex", filters,
-        "-map", "[v]", "-map", "0:a:0", "-c:v", "libx264", "-preset", "veryfast",
-        "-pix_fmt", "yuv420p", "-crf", "23", "-c:a", "aac", "-b:a", "192k",
-        "-movflags", "+faststart", "-shortest", str(output),
-    ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=3600, creationflags=HIDE)
+    with tempfile.TemporaryDirectory(prefix="cale-music-video-") as temp:
+        if captions:
+            # A relative filename avoids Windows drive-letter escaping inside
+            # FFmpeg's filter language. The copied SRT is deleted afterward.
+            shutil.copyfile(captions, Path(temp) / "captions.srt")
+            filters += ";[base]subtitles=captions.srt[v]"
+        command = [
+            imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
+            *inputs, "-filter_complex", filters,
+            "-map", "[v]", "-map", "0:a:0", "-c:v", "libx264", "-preset", "veryfast",
+            "-pix_fmt", "yuv420p", "-crf", "23", "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart", "-shortest", str(output),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True,
+                                timeout=3600, creationflags=HIDE, cwd=temp)
     if result.returncode or not output.is_file() or not output.stat().st_size:
         if result.returncode and output.is_file() and "already exists" not in result.stderr.lower():
             output.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local music video failed.")
     return {"source": str(source), "path": str(output), "layout": layout,
-            "background_image": str(image) if image else "", "kind": "music_visualizer"}
+            "background_image": str(image) if image else "",
+            "captions_path": str(captions) if captions else "", "kind": "music_visualizer"}

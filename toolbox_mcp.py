@@ -110,11 +110,12 @@ LOCAL_CATALOG = {
         }, "required": ["background_path", "foreground_path", "output_path"]},
     },
     "local.make_music_video": {
-        "description": "Turn a local song into a shareable animated spectrum music video, optionally over a supplied PNG/JPG/WebP cover image. Entirely offline. Saves a new H.264/AAC MP4 in wide, vertical or square layout. No account or extra model download.",
+        "description": "Turn a local song into a shareable animated spectrum music video, optionally over a PNG/JPG/WebP cover image with on-screen SRT lyric captions. Entirely offline. Saves a new H.264/AAC MP4 in wide, vertical or square layout. No account or extra model download.",
         "inputSchema": {"type": "object", "properties": {
             "source_path": {"type": "string"}, "output_path": {"type": "string"},
             "layout": {"type": "string", "enum": ["wide", "vertical", "square"]},
             "background_image": {"type": "string"},
+            "captions_path": {"type": "string"},
         }, "required": ["source_path", "output_path"]},
     },
 }
@@ -673,12 +674,13 @@ async def mix_music(background_path: str, foreground_path: str, output_path: str
 
 @server.tool()
 async def make_music_video(source_path: str, output_path: str, layout: str = "wide",
-                           background_image: str = "") -> dict:
-    """Render a local song with spectrum and optional cover image as an MP4."""
+                           background_image: str = "", captions_path: str = "") -> dict:
+    """Render a local song with spectrum, cover and timed lyrics as an MP4."""
     import music_video
 
     return await asyncio.to_thread(
-        music_video.make_music_video, source_path, output_path, layout, background_image
+        music_video.make_music_video, source_path, output_path, layout,
+        background_image, captions_path
     )
 
 

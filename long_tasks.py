@@ -616,7 +616,8 @@ local.separate_music and local.audio_to_midi for audio edits. For a finished
 clip use local.edit_music to trim/fade, or local.mix_music to layer narration
 over a soundtrack. Use local.transcribe_song_lyrics for editable sung words and
 timed SRT captions. Use local.make_music_video to render a finished song as an
-offline visualizer MP4. Find exact arguments with
+offline visualizer MP4; pass reviewed lyrics.srt as captions_path for on-screen
+lyrics. Find exact arguments with
 toolbox_search, read its schema, and save output in a fresh project folder.
 Before substantial design, coding, performance, security, or release work,
 check the installed Hermes skills for a relevant workflow. Load only skills
