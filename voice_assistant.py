@@ -6,6 +6,7 @@ spoken task text is sent to an online provider by this module.
 
 import json
 import os
+import queue
 import re
 import subprocess
 import tempfile
@@ -28,6 +29,12 @@ def speech_chunks(message, limit=280):
         str(message), width=limit, break_long_words=True,
         break_on_hyphens=False, replace_whitespace=True, drop_whitespace=True,
     )
+
+
+def urgent_speech_waiting(pending: queue.PriorityQueue, current_rank: int) -> bool:
+    """Check the next speech item without racing another queue producer."""
+    with pending.mutex:
+        return bool(pending.queue and pending.queue[0][0] < current_rank)
 
 
 def spoken_text(message):

@@ -2327,7 +2327,7 @@ def gui():
     def speech_worker():
         """Speak queued updates one at a time, after microphone clips finish."""
         while True:
-            _, _, message, rate, vary, required, replay_id = speech_queue.get()
+            rank, _, message, rate, vary, required, replay_id = speech_queue.get()
             try:
                 # Routine status chatter must not keep a newly enabled mic
                 # waiting behind a backlog of old announcements.
@@ -2339,11 +2339,22 @@ def gui():
                 )
                 result = {}
                 chunks = voice_assistant.speech_chunks(spoken)
+                interrupted = False
                 for index, chunk in enumerate(chunks, 1):
                     while voice_busy.is_set():
                         time.sleep(0.2)
                     voice_events.put(("speaking", f"Speaking aloud · part {index} of {len(chunks)}"))
                     result = voice_assistant.say(chunk, rate=rate)
+                    if index < len(chunks) and voice_assistant.urgent_speech_waiting(speech_queue, rank):
+                        # A requested replay should not sit behind minutes of
+                        # earlier chat. Resume the unspoken remainder afterward.
+                        remainder = " ".join(chunks[index:])
+                        speech_queue.put((rank, next(speech_order), remainder, rate,
+                                          False, (), replay_id))
+                        interrupted = True
+                        break
+                if interrupted:
+                    continue
                 voice_events.put(("spoken", "Finished speaking aloud."))
                 if vary:
                     recent_spoken_status.append(spoken)

@@ -88,6 +88,17 @@ class VoiceTests(unittest.TestCase):
         self.assertTrue(all(0 < len(chunk) <= 280 for chunk in chunks))
         self.assertEqual(" ".join(chunks), message)
 
+    def test_spoken_replay_can_preempt_a_long_ordinary_reply(self):
+        import queue
+
+        pending = queue.PriorityQueue()
+        pending.put((0, 2, "ordinary reply"))
+        self.assertFalse(voice_assistant.urgent_speech_waiting(pending, 0))
+        pending.put((-2, 3, "requested replay"))
+        self.assertTrue(voice_assistant.urgent_speech_waiting(pending, 0))
+        self.assertFalse(voice_assistant.urgent_speech_waiting(pending, -2))
+        self.assertEqual(pending.get()[2], "requested replay")
+
     def test_handsfree_requires_name_and_recognizes_task_controls(self):
         self.assertIsNone(
             voice_assistant.spoken_command("pause the task", require_wake=True)
