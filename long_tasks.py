@@ -2647,7 +2647,13 @@ def gui():
                 voice_label.set("I'll listen as soon as the current audio finishes.")
             return
         voice_busy.set()
-        if not repeat:
+        if repeat and mic_button.cget("text") != "🎤  Mic On":
+            # The button must describe actual recording, not merely a request
+            # made while Cale was still speaking. Keep later mic diagnostics
+            # visible instead of replacing them every eight-second clip.
+            mic_button.configure(text="🎤  Mic On")
+            voice_events.put(("state", "Listening for Hey Cale…"))
+        elif not repeat:
             voice_events.put(("state", "Listening… speak now."))
 
         def worker():
@@ -2689,7 +2695,7 @@ def gui():
         else:
             listening.set()
             mic_turn_requested.set()
-            mic_button.configure(text="🎤  Mic On")
+            mic_button.configure(text="🎤  Mic starting…")
             voice_label.set(
                 "Microphone on. Finishing speech before listening…"
                 if voice_speaking.is_set()
@@ -2912,7 +2918,8 @@ def gui():
         except OSError:
             served_replay = ""
         if requested_replay and served_replay != str(last_chat_row["id"]):
-            show_chat("assistant", "I found it. I'll read it aloud now.", speak=False)
+            show_chat("assistant", voice_assistant.REPLAY_ACK, speak=False)
+            speak_update(voice_assistant.REPLAY_ACK, priority=-3)
             speak_update(
                 voice_assistant.spoken_text(requested_replay),
                 priority=-2, replay_id=last_chat_row["id"],
@@ -3005,7 +3012,8 @@ def gui():
         replay = chat_assistant.spoken_replay_target(raw_value, chat_history(100))
         if replay is not None:
             if replay:
-                show_chat("assistant", "I found it. I'll read it aloud now.", speak=False)
+                show_chat("assistant", voice_assistant.REPLAY_ACK, speak=False)
+                speak_update(voice_assistant.REPLAY_ACK, priority=-3)
                 with database() as conn:
                     replay_id = conn.execute(
                         "SELECT MAX(id) FROM chat_messages"

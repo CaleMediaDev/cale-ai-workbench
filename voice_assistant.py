@@ -24,6 +24,7 @@ WAKE = re.compile(r"^\s*hey[\s,]+(?:cale|kale|cal|kaeln|kayle|kail)\b[\s,.:;!-]*
 IDLE_TIMES = (120, 600, 1800, 3600)
 STUCK_TIMES = (120, 480, 1200, 3600)
 WAKE_ACK = "I'm listening. What should I do?"
+REPLAY_ACK = "Got it. I will read that out loud now."
 WAKE_REFERENCE_SHA256 = "ec586df55a3e1431b4f08e0dae05e1078b2bf4a8a42f904a12bb448551d2e3cc"
 
 
@@ -359,11 +360,15 @@ def listen_result(seconds=8):
 
 def say(message, rate=0):
     """Speak one short status message through Windows' offline voice."""
-    if str(message).strip() == WAKE_ACK:
-        # Ship this two-second line in the owner's real voice, so the first
-        # wake response does not wait for GPU voice synthesis or downloads.
+    bundled_name = {
+        WAKE_ACK: "cale-wake-ack.wav",
+        REPLAY_ACK: "cale-reading-ack.wav",
+    }.get(str(message).strip())
+    if bundled_name:
+        # Short replies in the owner's real voice play before the GPU clone
+        # can finish its first, comparatively slow synthesis call.
         reference = ROOT / "assets" / "cale-voice-reference.wav"
-        bundled = ROOT / "assets" / "cale-wake-ack.wav"
+        bundled = ROOT / "assets" / bundled_name
         if (reference.is_file() and bundled.is_file() and bundled.stat().st_size > 1000
                 and hashlib.sha256(reference.read_bytes()).hexdigest() == WAKE_REFERENCE_SHA256):
             import winsound

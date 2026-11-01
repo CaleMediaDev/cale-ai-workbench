@@ -253,6 +253,29 @@ class VoiceTests(unittest.TestCase):
             ready.assert_not_called()
             playback.assert_called_once()
 
+    def test_bundled_read_aloud_reply_starts_before_voice_model(self):
+        import hashlib
+
+        import cale_voice
+
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            assets = root / "assets"
+            assets.mkdir()
+            (assets / "cale-voice-reference.wav").write_bytes(b"original voice")
+            (assets / "cale-reading-ack.wav").write_bytes(b"wave" * 300)
+            digest = hashlib.sha256(b"original voice").hexdigest()
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant, "WAKE_REFERENCE_SHA256", digest),
+                patch.object(cale_voice, "ready") as ready,
+                patch("winsound.PlaySound") as playback,
+            ):
+                result = voice_assistant.say(voice_assistant.REPLAY_ACK)
+            self.assertEqual(result["engine"], "Cale's local voice (bundled)")
+            ready.assert_not_called()
+            playback.assert_called_once()
+
     def test_saved_rap_is_cleaned_for_speech(self):
         self.assertEqual(
             voice_assistant.spoken_text("**The Rap**\n\n*Great Lakes*\n---\nLine one"),
