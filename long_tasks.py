@@ -1175,7 +1175,9 @@ def monitor():
     last_start = 0
     last_dispatch = 0
     service_error = ""
-    catalog_started = False
+    catalog_thread = None
+    last_catalog_finish = None
+    catalog_refresh_seconds = 24 * 60 * 60
     while True:
         if (ROOT / ".cale-ai-install").exists() and (
             ROOT / ".cale-ai-install"
@@ -1187,14 +1189,20 @@ def monitor():
                 (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
                 time.sleep(5)
                 continue
-            if not catalog_started:
-                threading.Thread(
+            if catalog_thread is not None and not catalog_thread.is_alive():
+                catalog_thread = None
+                last_catalog_finish = time.monotonic()
+            if catalog_thread is None and (
+                last_catalog_finish is None
+                or time.monotonic() - last_catalog_finish >= catalog_refresh_seconds
+            ):
+                catalog_thread = threading.Thread(
                     target=file_catalog.scan_computer,
                     args=(STATE,),
                     daemon=True,
                     name="computer-file-index",
-                ).start()
-                catalog_started = True
+                )
+                catalog_thread.start()
             active = any(
                 p["status"] in ("queued", "working", "checking")
                 for p in projects()
