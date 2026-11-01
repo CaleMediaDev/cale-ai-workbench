@@ -515,7 +515,8 @@ Never claim access to personal Chrome when no tab is attached.
 Do not stop merely because one response or context is full. Continue the goal.
 Never change the request to fit incomplete work. Do not weaken/delete existing tests.
 Use the installed local tools; see {ROOT / "TOOLBOX.txt"} for specialist tools.
-For audio edits, discover local.separate_music or local.audio_to_midi with
+For existing songs, discover local.analyze_music for tempo/key/chords, or
+local.separate_music and local.audio_to_midi for audio edits, with
 toolbox_search, read its schema, and save output in a fresh project folder.
 Before substantial design, coding, performance, security, or release work,
 check the installed Hermes skills for a relevant workflow. Load only skills

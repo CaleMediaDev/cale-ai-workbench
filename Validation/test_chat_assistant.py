@@ -69,6 +69,7 @@ def test_music_edits_reach_agent_tools_instead_of_plain_chat():
     assert chat_assistant.route("What is MIDI?", []) == "answer"
     assert chat_assistant.route("How do I separate vocals?", []) == "answer"
     assert chat_assistant.route("Convert 12 inches to feet", []) == "answer"
+    assert chat_assistant.route_with_files("What's the tempo and key?", [], ["song.wav"]) == "task"
 
 
 def test_followup_attaches_to_active_task():

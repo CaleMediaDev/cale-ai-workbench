@@ -113,6 +113,9 @@ def route_with_files(text: str, active_tasks: list[dict], paths: list[str]) -> s
         return "task"
     if paths and action == "music":
         return "task"
+    if paths and any(Path(path).suffix.casefold() in {".wav", ".mp3", ".flac", ".m4a", ".ogg"} for path in paths):
+        # Audio questions need local listening/analysis tools, not the text-file reader.
+        return "task"
     if not paths or action != "answer":
         return action
     if len(paths) > 3:

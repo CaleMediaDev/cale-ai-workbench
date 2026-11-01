@@ -72,6 +72,12 @@ LOCAL_CATALOG = {
             "source_path": {"type": "string"}, "output_dir": {"type": "string"},
         }, "required": ["source_path", "output_dir"]},
     },
+    "local.analyze_music": {
+        "description": "Analyze an existing local song for estimated tempo, key, chord changes, and peak level. No download or account; reads up to the first three minutes. Estimates are approximate.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_path": {"type": "string"},
+        }, "required": ["source_path"]},
+    },
 }
 
 
@@ -255,6 +261,7 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "local.music_job_status": music_job_status,
             "local.separate_music": separate_music,
             "local.audio_to_midi": audio_to_midi,
+            "local.analyze_music": analyze_music,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -563,6 +570,12 @@ async def audio_to_midi(source_path: str, output_dir: str) -> dict:
         asyncio.to_thread(music_midi.transcribe_to_midi, source_path, output_dir),
         timeout=3900,
     )
+
+
+@server.tool()
+async def analyze_music(source_path: str) -> dict:
+    """Measure an existing song before remixing, covering, or composing with it."""
+    return await media_run("analyze_music", 900, source_path=source_path)
 
 
 @server.tool()

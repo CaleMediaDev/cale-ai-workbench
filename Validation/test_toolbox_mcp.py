@@ -58,6 +58,21 @@ def test_audio_to_midi_tool_is_discoverable_and_callable():
     assert result["midi_path"] == "notes/melody.mid"
 
 
+def test_analyze_music_tool_is_discoverable_and_callable():
+    found = toolbox_mcp.toolbox_search("song tempo key chords")
+    assert any(tool["name"] == "local.analyze_music" for tool in found["tools"])
+    assert toolbox_mcp.toolbox_schema("local.analyze_music")["inputSchema"]["required"] == ["source_path"]
+
+    async def fake_analysis(**arguments):
+        return {"source": arguments["source_path"], "tempo_bpm": 120}
+
+    with patch.object(toolbox_mcp, "analyze_music", fake_analysis):
+        result = asyncio.run(toolbox_mcp.toolbox_call(
+            "local.analyze_music", json.dumps({"source_path": "song.wav"})
+        ))
+    assert result["tempo_bpm"] == 120
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):

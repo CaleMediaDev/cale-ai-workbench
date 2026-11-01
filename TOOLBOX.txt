@@ -79,6 +79,11 @@ notes plus a note-event CSV with Spotify Basic Pitch. It works best on one
 instrument at a time and installs its isolated local model on first use. Find
 local.audio_to_midi in toolbox_search; pass a source audio file and empty
 output folder. Do not send the recording to a cloud transcription service.
+analyze_music: inspect an existing song's approximate BPM, key, chord changes,
+and peak level before making a cover or remix. Find local.analyze_music in
+toolbox_search and pass source_path. It uses installed local media libraries,
+analyzes at most the first three minutes, and may get harmony or half/double
+tempo wrong. No account, download, or cloud service is needed.
 see_image: describe a photo, screenshot or chart with local Qwen vision.
 hear_audio: transcribe a local audio/video file with Faster-Whisper base.
 watch_video: inspect up to eight sampled frames and optionally transcribe audio.
