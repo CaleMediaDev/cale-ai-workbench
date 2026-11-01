@@ -454,12 +454,20 @@ class Router:
             self.model_cache = available
             self.model_contexts = contexts
             self.model_cache_until = time.monotonic() + 60
-        return model_order(
+        ordered = model_order(
             size,
             {name: size_gb for name, size_gb in self.model_cache.items()
              if self.model_contexts.get(name, 0) >= required_context},
             LOCAL_MODEL, FAST_MODEL, BALANCED_MODEL
         )
+        # Keep the main alias as a fallback when Ollama metadata is missing,
+        # but do not send a prompt to a model known to be too small for it.
+        return [
+            name for name in ordered
+            if name != LOCAL_MODEL
+            or name not in self.model_contexts
+            or self.model_contexts[name] >= required_context
+        ]
 
     def reserve_free_request(self):
         with self.lock:
@@ -518,8 +526,9 @@ class Router:
             except Exception:
                 self.chatgpt_cooldown = time.time() + 120
                 reason = "ChatGPT plan unavailable; trying free cloud or local AI."
+        required_context = estimated_context(payload)
         selected = (
-            self.local_candidates(size, estimated_context(payload))
+            self.local_candidates(size, required_context)
             if profile == "main"
             else [CATALOG[profile]["alias"]]
         )
@@ -587,6 +596,12 @@ class Router:
         record("unavailable", reason, selected[-1] if selected else "")
         if last_error:
             raise last_error
+        if not selected and profile == "main":
+            raise RuntimeError(
+                f"This request needs about {required_context:,} tokens of context, "
+                "but the installed local models have smaller windows. "
+                "Use a capable connected model or shorten the input."
+            )
         raise RuntimeError("No configured local or free cloud model responded.")
 
 

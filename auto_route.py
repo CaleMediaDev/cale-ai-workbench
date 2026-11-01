@@ -17,7 +17,7 @@ PROJECT_MARKER = re.compile(
     re.IGNORECASE,
 )
 PROJECT_REQUEST = re.compile(
-    r"REQUEST AND ACCEPTANCE CRITERIA:\s*\n(.*?)\n\s*This is a persistent local project\.",
+    r"REQUEST AND ACCEPTANCE CRITERIA:\s*\n(.*?)\n(?:END OF ORIGINAL REQUEST|\s*This is a persistent local project\.)",
     re.IGNORECASE | re.DOTALL,
 )
 QUESTION_START = re.compile(

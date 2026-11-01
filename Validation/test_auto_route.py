@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from auto_route import model_order, task_size
+from auto_route import PROJECT_REQUEST, model_order, task_size
 from long_tasks import project_prompt
 
 
@@ -51,6 +51,15 @@ class AutoRouteTests(unittest.TestCase):
         )
         self.assertEqual(task_size(wrapped("Build and test a recipe app.")), "deep")
         self.assertEqual(task_size(wrapped("Build a weather app.")), "deep")
+
+    def test_project_sizing_uses_original_request_not_worker_guidance(self):
+        prompt = project_prompt({
+            "title": "Task", "folder": "C:/Tasks/test",
+            "brief": "How do I create a folder?",
+        })
+        self.assertEqual(PROJECT_REQUEST.search(prompt).group(1).strip(),
+                         "How do I create a folder?")
+        self.assertEqual(task_size([{"role": "user", "content": prompt}]), "quick")
 
     def test_build_and_saved_project_use_deep_tier(self):
         self.assertEqual(

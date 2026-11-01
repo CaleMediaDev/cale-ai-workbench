@@ -228,8 +228,44 @@ class CloudTests(unittest.TestCase):
             )
             self.assertEqual(
                 router.local_candidates("quick", required_context=131072),
-                [cloud.LOCAL_MODEL],
+                [],
             )
+
+    def test_oversized_request_uses_connected_free_fallback(self):
+        self.candidates.stop()
+        self.connected()
+        def show(url, payload, *args, **kwargs):
+            if url.endswith("/api/show"):
+                return {"capabilities": ["completion", "tools"],
+                        "parameters": "num_ctx 65536\n",
+                        "details": {"parameter_size": "9B"}}
+            if url.startswith(cloud.API):
+                return ANSWER
+            raise AssertionError("A known undersized local model was called")
+        request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 300_000}])
+        with (patch.object(cloud, "post", side_effect=show) as post,
+              patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("chatgpt_auth.status", return_value={"enabled": False}),
+              patch.object(cloud.Router, "reserve_free_request", return_value=True),
+              patch.object(cloud, "candidate_approved", return_value=True)):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        self.assertTrue(any(call.args[0].startswith(cloud.API) for call in post.call_args_list))
+
+    def test_oversized_request_without_cloud_explains_context_limit(self):
+        self.candidates.stop()
+        def show(url, payload, **kwargs):
+            if url.endswith("/api/show"):
+                return {"capabilities": ["completion", "tools"],
+                        "parameters": "num_ctx 65536\n",
+                        "details": {"parameter_size": "9B"}}
+            raise AssertionError("A known undersized local model was called")
+        request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 300_000}])
+        with (patch.object(cloud, "post", side_effect=show),
+              patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "candidate_approved", return_value=True)):
+            with self.assertRaisesRegex(RuntimeError, "installed local models have smaller windows"):
+                cloud.Router().complete(request)
 
     def test_old_32k_alias_is_not_auto_routed_to_long_task(self):
         self.candidates.stop()

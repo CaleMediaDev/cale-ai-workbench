@@ -281,6 +281,7 @@ def project_prompt(p, extra=""):
 PROJECT FOLDER: {p["folder"]}
 REQUEST AND ACCEPTANCE CRITERIA:
 {p["brief"]}
+END OF ORIGINAL REQUEST
 
 Later user instructions are saved in .local-ai/USER-REQUESTS.md. Read that
 file in full before planning or resuming work. Its numbered entries are
