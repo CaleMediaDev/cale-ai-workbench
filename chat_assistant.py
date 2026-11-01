@@ -155,6 +155,7 @@ def spoken_replay_target(text: str, history: list[dict]) -> str | None:
     ):
         return None
     wants_rap = bool(re.search(r"\brap\b", request, re.I))
+    fallback = ""
     for item in reversed(history):
         if item.get("role") != "assistant":
             continue
@@ -164,9 +165,13 @@ def spoken_replay_target(text: str, history: list[dict]) -> str | None:
             "I couldn't finish reading that aloud. Check Voice status and try again.",
         }:
             continue
+        # A generated verse may have no heading saying "rap". Remember the
+        # latest actual reply so an explicit replay request still speaks it.
+        if content and not fallback and content != "Let me check that locally…":
+            fallback = content
         if content and (not wants_rap or re.search(r"\brap\b", content, re.I)):
             return content
-    return ""
+    return fallback if wants_rap else ""
 
 
 def status_reply(question: str, tasks: list[dict], progress) -> str:

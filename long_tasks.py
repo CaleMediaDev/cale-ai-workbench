@@ -2382,6 +2382,7 @@ def gui():
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
     voice_busy = threading.Event()
+    mic_turn_requested = threading.Event()
     listening = threading.Event()
     manual_voice_requested = threading.Event()
     speech_queue = queue.PriorityQueue()
@@ -2422,6 +2423,12 @@ def gui():
         while True:
             rank, _, message, rate, vary, required, replay_id = speech_queue.get()
             try:
+                # A requested mic turn takes priority over speech that has not
+                # started yet. Queued chat remains available to read afterward.
+                while mic_turn_requested.is_set():
+                    voice_speaking.clear()
+                    time.sleep(0.05)
+                voice_speaking.set()
                 # Routine status chatter must not keep a newly enabled mic
                 # waiting behind a backlog of old announcements.
                 if listening.is_set() and vary:
@@ -2434,10 +2441,22 @@ def gui():
                 chunks = voice_assistant.speech_chunks(spoken)
                 interrupted = False
                 for index, chunk in enumerate(chunks, 1):
+                    if mic_turn_requested.is_set():
+                        remainder = " ".join(chunks[index - 1:])
+                        speech_queue.put((rank, next(speech_order), remainder, rate,
+                                          False, (), replay_id))
+                        interrupted = True
+                        break
                     while voice_busy.is_set():
                         time.sleep(0.2)
                     voice_events.put(("speaking", f"Speaking aloud · part {index} of {len(chunks)}"))
                     result = voice_assistant.say(chunk, rate=rate)
+                    if mic_turn_requested.is_set() and index < len(chunks):
+                        remainder = " ".join(chunks[index:])
+                        speech_queue.put((rank, next(speech_order), remainder, rate,
+                                          False, (), replay_id))
+                        interrupted = True
+                        break
                     if index < len(chunks) and voice_assistant.urgent_speech_waiting(speech_queue, rank):
                         # A requested replay should not sit behind minutes of
                         # earlier chat. Resume the unspoken remainder afterward.
@@ -2486,7 +2505,7 @@ def gui():
                     voice_events.put(("speech_error", str(exc)))
             finally:
                 with speech_lock:
-                    if speech_queue.empty():
+                    if speech_queue.empty() or mic_turn_requested.is_set():
                         voice_speaking.clear()
                 if manual_voice_requested.is_set():
                     voice_events.put(("again", ""))
@@ -2557,6 +2576,7 @@ def gui():
         if voice_busy.is_set() or voice_speaking.is_set():
             if not repeat:
                 manual_voice_requested.set()
+                mic_turn_requested.set()
                 voice_label.set("I'll listen as soon as the current audio finishes.")
             return
         voice_busy.set()
@@ -2584,6 +2604,7 @@ def gui():
                 voice_events.put(("mic_error", str(exc)))
             finally:
                 voice_busy.clear()
+                voice_events.put(("capture_done", ""))
                 if manual_voice_requested.is_set() or listening.is_set():
                     voice_events.put(("again", ""))
 
@@ -2594,11 +2615,13 @@ def gui():
     def toggle_listening():
         if listening.is_set():
             listening.clear()
+            mic_turn_requested.clear()
             wake_sequence.reset()
             mic_button.configure(text="🎤  Mic Off")
             voice_label.set("Microphone off. Press Ctrl+Alt+Space to talk once.")
         else:
             listening.set()
+            mic_turn_requested.set()
             mic_button.configure(text="🎤  Mic On")
             voice_label.set(
                 "Microphone on. Finishing speech before listening…"
@@ -3847,7 +3870,9 @@ def gui():
                     except Exception as exc:
                         voice_label.set("Could not add spoken request: " + str(exc))
                 elif event == "again":
-                    maybe_listen()
+                    window.after(200, maybe_listen)
+                elif event == "capture_done":
+                    mic_turn_requested.clear()
                 elif event == "mic_error":
                     voice_label.set("Microphone unavailable: " + value[:140])
                     mic_button.configure(text="🎤  Mic Off")

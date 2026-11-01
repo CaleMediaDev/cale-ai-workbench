@@ -25,6 +25,16 @@ def test_voice_replay_finds_saved_rap_without_another_model_call():
     assert chat_assistant.spoken_replay_target("say that again", history).startswith("Here")
 
 
+def test_voice_replay_reads_unlabelled_generated_verse():
+    history = [
+        {"role": "assistant", "content": "The lake is bright tonight,\nThe city lights are in flight."},
+        {"role": "user", "content": "say the rap it made with its voice"},
+    ]
+    assert chat_assistant.spoken_replay_target(
+        "say the rap it made with its voice", history
+    ) == history[0]["content"]
+
+
 def test_explicit_work_creates_task():
     assert chat_assistant.route("Build me a bakery website", []) == "task"
     assert chat_assistant.route("Can you fix my app?", []) == "task"
