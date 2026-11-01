@@ -52,6 +52,21 @@ def test_generates_instrumental_from_loopback_only(tmp_path):
     assert download.call_args.args[0].startswith(music_backend.BASE + "/v1/audio")
 
 
+def test_sends_user_lyrics_to_local_music_engine_unchanged(tmp_path):
+    lyrics = "[Verse]\nWe made it home\n[Chorus]\nSing it again"
+    responses = iter([
+        {"code": 200, "data": {"task_id": "task-lyrics"}},
+        {"code": 200, "data": [{"status": 1, "result": '[{"file":"/v1/audio?path=lyrics"}]'}]},
+    ])
+    with patch.object(music_backend, "start_server"), patch.object(
+        music_backend, "_request", side_effect=lambda *_args, **_kwargs: next(responses)
+    ) as request, patch.object(
+        music_backend, "urlopen", return_value=io.BytesIO(b"audio")
+    ), patch.object(music_backend.time, "sleep"):
+        music_backend.generate_music("soul song", str(tmp_path / "song.mp3"), lyrics=lyrics)
+    assert request.call_args_list[0].args[1]["lyrics"] == lyrics
+
+
 def test_rejects_remote_audio_url(tmp_path):
     responses = iter([
         {"code": 200, "data": {"task_id": "task-1"}},

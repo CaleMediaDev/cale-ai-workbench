@@ -535,6 +535,7 @@ def add_music_project(request_text: str, spec: dict, folder: str = "") -> str:
     try:
         job = music_backend.start_music_job(
             spec["prompt"], str(folder / "song.mp3"),
+            lyrics=spec.get("lyrics", ""),
             duration_seconds=spec["duration_seconds"],
             instrumental=spec["instrumental"],
         )

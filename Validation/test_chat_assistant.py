@@ -71,6 +71,7 @@ def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():
     request = "can you make a 10-second instrumental beach guitar jingle"
     assert chat_assistant.music_request(request) == {
         "prompt": "make a 10-second instrumental beach guitar jingle",
+        "lyrics": "",
         "duration_seconds": 10,
         "instrumental": True,
     }
@@ -86,6 +87,24 @@ def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():
     assert chat_assistant.music_request("make a 1:30 song")["duration_seconds"] == 90
     with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
         chat_assistant.music_request("make an 11 minute song")
+
+
+def test_direct_song_preserves_explicit_lyrics_and_routes_ambiguous_text_to_agent():
+    request = "Make a 90-second soul song with these lyrics:\n[Verse]\nWe made it home\n[Chorus]\nSing it again"
+    spec = chat_assistant.music_request(request)
+    assert spec == {
+        "prompt": "Make a 90-second soul song",
+        "lyrics": "[Verse]\nWe made it home\n[Chorus]\nSing it again",
+        "duration_seconds": 90,
+        "instrumental": False,
+    }
+    assert chat_assistant.route(request, []) == "music"
+    lyric_words = "Make a soul song with lyrics:\nCover the night\nMeet me at 1:30"
+    assert chat_assistant.music_request(lyric_words)["lyrics"] == "Cover the night\nMeet me at 1:30"
+    assert chat_assistant.music_request(lyric_words)["duration_seconds"] == 30
+    assert chat_assistant.route("Make a soul song with lyrics:\nWhat's the status of our love", []) == "music"
+    assert chat_assistant.route("Make a song\nUse this melody\nThen change the chorus", []) == "task"
+    assert chat_assistant.route("Make an instrumental song with lyrics: sing along", []) == "task"
 
 
 def test_music_edits_reach_agent_tools_instead_of_plain_chat():

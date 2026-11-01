@@ -50,23 +50,38 @@ def music_request(text: str) -> dict | None:
     )
     if not re.match(r"^(?:make|create|generate)\s+", value, re.IGNORECASE):
         return None
-    if not re.search(r"\b(?:song|music|instrumental|jingle|beat|soundtrack)\b", value, re.IGNORECASE):
+    lyrics_marker = re.search(r"\blyrics\s*:", value, re.IGNORECASE)
+    if "\n" in value and lyrics_marker is None:
+        # An unlabelled multi-line request may contain instructions or song
+        # words. Let the agent interpret it instead of flattening everything
+        # into one style prompt and losing the intended lyrics.
+        return None
+    lyrics = value[lyrics_marker.end():].strip() if lyrics_marker else ""
+    if lyrics_marker and not lyrics:
+        return None
+    prompt = value[:lyrics_marker.start()].strip() if lyrics_marker else value
+    if lyrics_marker:
+        prompt = re.sub(
+            r"\b(?:with|using)(?:\s+(?:these|the following|my))?$",
+            "", prompt, flags=re.IGNORECASE,
+        ).strip()
+    if not re.search(r"\b(?:song|music|instrumental|jingle|beat|soundtrack)\b", prompt, re.IGNORECASE):
         return None
     if re.search(
         r"\b(?:cover|remix|edit|change|extend|from this|using this file|"
         r"music video|this song|song longer|music app|music website|"
         r"music software|music tool|music player|music studio|song generator)\b",
-        value, re.IGNORECASE,
+        prompt, re.IGNORECASE,
     ):
         return None
-    clock = re.search(r"\b(\d{1,2}):([0-5]\d)\b", value)
+    clock = re.search(r"\b(\d{1,2}):([0-5]\d)\b", prompt)
     combined = re.search(
         r"\b(\d+)\s*(?:minutes?|mins?|min)\s*(?:and\s*)?"
-        r"(\d+)\s*(?:seconds?|secs?|sec|s)\b", value, re.IGNORECASE,
+        r"(\d+)\s*(?:seconds?|secs?|sec|s)\b", prompt, re.IGNORECASE,
     )
     single = re.search(
         r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|minutes?|mins?|min|s)\b",
-        value, re.IGNORECASE,
+        prompt, re.IGNORECASE,
     )
     if clock:
         duration = int(clock.group(1)) * 60 + int(clock.group(2))
@@ -78,8 +93,11 @@ def music_request(text: str) -> dict | None:
         duration = 30
     if not 10 <= duration <= 600:
         raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
-    instrumental = bool(re.search(r"\b(?:instrumental|no vocals|without vocals|no singing)\b", value, re.IGNORECASE))
-    return {"prompt": value.strip(" .?!"), "duration_seconds": duration, "instrumental": instrumental}
+    instrumental = bool(re.search(r"\b(?:instrumental|no vocals|without vocals|no singing)\b", prompt, re.IGNORECASE))
+    if instrumental and lyrics:
+        return None  # The agent can resolve contradictory instructions.
+    return {"prompt": prompt.strip(" .?!"), "lyrics": lyrics,
+            "duration_seconds": duration, "instrumental": instrumental}
 
 
 def music_edit_request(command: str) -> bool:
@@ -103,9 +121,10 @@ def route(text: str, active_tasks: list[dict]) -> str:
     value = text.strip().lower()
     if not value:
         return "empty"
+    first_line = value.splitlines()[0]
     if image_prompt(text):
         return "image"
-    if re.search(r"\b(?:what(?:'s| is) the status|status (?:of|for)|how(?:'s| is) (?:it|the task) going|what are you working on)\b", value):
+    if re.search(r"\b(?:what(?:'s| is) the status|status (?:of|for)|how(?:'s| is) (?:it|the task) going|what are you working on)\b", first_line):
         return "status"
     if active_tasks and re.match(r"^(?:also|actually|change it|add to (?:it|that)|tell (?:it|the ai) to|instead)\b", value):
         return "note"

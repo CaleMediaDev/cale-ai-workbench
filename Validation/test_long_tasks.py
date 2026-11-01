@@ -125,12 +125,13 @@ class LongTaskTests(unittest.TestCase):
 
     def test_direct_music_job_finishes_on_task_board_without_hermes(self):
         job_id = "a" * 32
-        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}) as start:
             pid = task_module.add_music_project(
                 "make a 10-second instrumental jingle",
                 {"prompt": "beach guitar", "duration_seconds": 10, "instrumental": True},
                 str(self.base / "music-one"),
             )
+            self.assertEqual(start.call_args.kwargs["lyrics"], "")
         task = next(p for p in task_module.projects() if p["id"] == pid)
         self.assertEqual(task_module.music_job_id(task), job_id)
         output = Path(task["folder"]) / "song.mp3"
@@ -144,6 +145,18 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(complete["status"], "ready_for_review")
         self.assertEqual(task_module.task_progress(complete)[0], 95)
         self.assertTrue((Path(task["folder"]) / ".local-ai" / "PROGRESS.md").is_file())
+
+    def test_direct_music_passes_exact_user_lyrics_to_local_job(self):
+        import chat_assistant
+
+        words = "[Verse]\nWe made it home\n[Chorus]\nSing it again"
+        request = "Make a 90-second soul song with these lyrics:\n" + words
+        with patch("music_backend.start_music_job", return_value={"job_id": "e" * 32}) as start:
+            task_module.add_music_project(
+                request, chat_assistant.music_request(request), str(self.base / "music-lyrics"),
+            )
+        self.assertEqual(start.call_args.kwargs["lyrics"], words)
+        self.assertEqual(start.call_args.args[0], "Make a 90-second soul song")
 
     def test_direct_music_stop_uses_exact_job_and_preserves_project_files(self):
         job_id = "b" * 32
