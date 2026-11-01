@@ -19,6 +19,7 @@ from mcp.server import MCPServer
 
 import project_memory
 import site_crawler
+import user_file_memory
 
 ROOT = Path(__file__).resolve().parent
 BOX = ROOT / "Toolbox"
@@ -211,6 +212,18 @@ def project_memory_search(project_folder: str, query: str, kind: str = "", limit
     folder = registered_project(project_folder)
     matches = project_memory.search(folder, query, kind=kind, limit=limit)
     return {"project_folder": str(folder), "matches": matches}
+
+
+@server.tool()
+def user_file_memory_search(query: str, limit: int = 8) -> dict:
+    """Search local files and documents the person attached in chat; return source paths."""
+    return {"matches": user_file_memory.search(ROOT / "LongTasks", query, limit)}
+
+
+@server.tool()
+def user_file_memory_get(path: str) -> dict:
+    """Read one previously indexed file by its exact source path."""
+    return user_file_memory.get(ROOT / "LongTasks", path)
 
 
 @server.tool()
