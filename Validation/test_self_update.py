@@ -2,9 +2,11 @@
 
 import json
 import io
-from contextlib import nullcontext
+import sqlite3
+from contextlib import closing, nullcontext
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -21,6 +23,75 @@ class SelfUpdateTests(unittest.TestCase):
         request = open_url.call_args.args[0]
         self.assertIn("&checked_at=", request.full_url)
         self.assertEqual(request.get_header("Cache-control"), "no-cache")
+
+    def test_orphaned_terminal_run_no_longer_blocks_update(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            project = root / "Projects/song"
+            project.mkdir(parents=True)
+            state_db = root / "data/state.db"
+            board_db = root / "data/kanban/boards/long-tasks/kanban.db"
+            board_db.parent.mkdir(parents=True)
+            started = time.time() - 1000
+            with closing(sqlite3.connect(state_db)) as db:
+                db.execute("CREATE TABLE sessions (id TEXT, cwd TEXT, started_at REAL)")
+                db.execute("CREATE TABLE session_admissions (target_session_id TEXT, seq INTEGER, payload_json TEXT)")
+                db.execute("INSERT INTO sessions VALUES ('session-1', ?, ?)", (str(project), started))
+                db.execute("INSERT INTO session_admissions VALUES ('session-1', 1, ?)", (
+                    json.dumps({"kanban_card_v1": {"board": "long-tasks", "run_id": 20,
+                                                   "task_id": "card-1"}}),
+                ))
+                db.commit()
+            with closing(sqlite3.connect(board_db)) as db:
+                db.execute("CREATE TABLE task_runs (id INTEGER, task_id TEXT, ended_at REAL)")
+                db.execute("INSERT INTO task_runs VALUES (20, 'card-1', ?)", (time.time() - 400,))
+                db.commit()
+            executable = root / "data/tools/python.exe"
+            worker = MagicMock(info={"exe": str(executable),
+                                     "cmdline": [str(executable), "-m", "agent.managed_worker"]})
+            worker.pid = 123
+            worker.create_time.return_value = started
+            worker.cwd.return_value = str(project)
+            worker.cmdline.return_value = worker.info["cmdline"]
+            with (patch.object(self_update, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[{"status": "paused"}]),
+                  patch("psutil.process_iter", return_value=[worker])):
+                self.assertFalse(self_update.active_tasks())
+            worker.terminate.assert_called_once()
+            self.assertIn("run 20", (root / "Updates/orphan-recovery.log").read_text())
+
+    def test_live_board_run_is_never_retired_for_update(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            project = root / "Projects/song"
+            project.mkdir(parents=True)
+            state_db = root / "data/state.db"
+            board_db = root / "data/kanban/boards/long-tasks/kanban.db"
+            board_db.parent.mkdir(parents=True)
+            started = time.time() - 1000
+            with closing(sqlite3.connect(state_db)) as db:
+                db.execute("CREATE TABLE sessions (id TEXT, cwd TEXT, started_at REAL)")
+                db.execute("CREATE TABLE session_admissions (target_session_id TEXT, seq INTEGER, payload_json TEXT)")
+                db.execute("INSERT INTO sessions VALUES ('session-1', ?, ?)", (str(project), started))
+                db.execute("INSERT INTO session_admissions VALUES ('session-1', 1, ?)", (
+                    json.dumps({"kanban_card_v1": {"board": "long-tasks", "run_id": 20,
+                                                   "task_id": "card-1"}}),
+                ))
+                db.commit()
+            with closing(sqlite3.connect(board_db)) as db:
+                db.execute("CREATE TABLE task_runs (id INTEGER, task_id TEXT, ended_at REAL)")
+                db.execute("INSERT INTO task_runs VALUES (20, 'card-1', NULL)")
+                db.commit()
+            executable = root / "data/tools/python.exe"
+            worker = MagicMock(info={"exe": str(executable),
+                                     "cmdline": [str(executable), "-m", "agent.managed_worker"]})
+            worker.create_time.return_value = started
+            worker.cwd.return_value = str(project)
+            with (patch.object(self_update, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[{"status": "paused"}]),
+                  patch("psutil.process_iter", return_value=[worker])):
+                self.assertTrue(self_update.active_tasks())
+            worker.terminate.assert_not_called()
 
     def test_two_updaters_cannot_hold_the_update_lock_together(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(

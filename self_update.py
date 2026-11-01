@@ -7,12 +7,13 @@ models, runtime folders and account credentials are never part of an update.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import hashlib
 import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -192,6 +193,69 @@ def stage():
     return destination, version
 
 
+def retire_terminal_board_worker(process):
+    """Retire only a managed worker tied to a board run that already ended.
+
+    Hermes can leave the inner agent process alive after its board client has
+    handed off. That orphan keeps every automatic update waiting forever. The
+    session admission binds the process's session to one exact board run; no
+    matching terminal run means the process is left alone.
+    """
+    state_db = ROOT / "data/state.db"
+    board_db = ROOT / "data/kanban/boards/long-tasks/kanban.db"
+    if not state_db.is_file() or not board_db.is_file():
+        return False
+    try:
+        started = process.create_time()
+        cwd = Path(process.cwd()).resolve()
+        with closing(sqlite3.connect(state_db, timeout=0.2)) as state:
+            sessions = state.execute(
+                "SELECT id, cwd FROM sessions WHERE started_at BETWEEN ? AND ?",
+                (started - 5, started + 5),
+            ).fetchall()
+            matching = [row[0] for row in sessions if row[1] and Path(row[1]).resolve() == cwd]
+            if len(matching) != 1:
+                return False
+            admissions = state.execute(
+                "SELECT payload_json FROM session_admissions "
+                "WHERE target_session_id=? ORDER BY seq DESC LIMIT 1",
+                (matching[0],),
+            ).fetchone()
+        if not admissions:
+            return False
+        payload = json.loads(admissions[0])
+        if not isinstance(payload, dict):
+            return False
+        card = payload.get("kanban_card_v1") or {}
+        if not isinstance(card, dict):
+            return False
+        if card.get("board") != "long-tasks":
+            return False
+        run_id, task_id = int(card["run_id"]), str(card["task_id"])
+        with closing(sqlite3.connect(board_db, timeout=0.2)) as board:
+            run = board.execute(
+                "SELECT ended_at FROM task_runs WHERE id=? AND task_id=?",
+                (run_id, task_id),
+            ).fetchone()
+        if not run or not run[0] or time.time() - run[0] < 180:
+            return False
+        if process.cmdline()[1:] != ["-m", "agent.managed_worker"] or process.create_time() != started:
+            return False
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except Exception:
+            # A surviving process remains a blocker; never swap source under it.
+            return False
+        log = ROOT / "Updates/orphan-recovery.log"
+        log.parent.mkdir(exist_ok=True)
+        with log.open("a", encoding="utf-8") as output:
+            output.write(f"{time.ctime()} retired managed worker {process.pid} for run {run_id}\n")
+        return True
+    except (OSError, ValueError, KeyError, sqlite3.Error):
+        return False
+
+
 def active_tasks():
     """Source files may change only when no project worker is active.
 
@@ -217,6 +281,8 @@ def active_tasks():
                 and "agent.managed_worker" in command
                 and Path(executable).resolve().is_relative_to(install)
             ):
+                if retire_terminal_board_worker(process):
+                    continue
                 return True
         except (OSError, psutil.Error):
             continue
