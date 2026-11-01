@@ -20,6 +20,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Node.js | https://nodejs.org/ |
 | ast-grep | https://github.com/ast-grep/ast-grep |
 | avoid-ai-design scanner (MIT; license bundled under `vendor/avoid-ai-design/LICENSE`) | https://github.com/funboy322/avoid-ai-design |
+| Addy Osmani's Agent Skills (MIT; seven selected skills pinned at commit `8bfcc1f9916f2eea55494d8c1fa7f4bde867dd9e`; license bundled under `vendor/agent-skills/LICENSE`) | https://github.com/addyosmani/agent-skills |
 | Diffusers and LCM Dreamshaper v7 | https://huggingface.co/SimianLuo/LCM_Dreamshaper_v7 |
 | Segmind SSD-1B (Apache-2.0 image model; downloaded on supported PCs) | https://huggingface.co/segmind/SSD-1B |
 | Faster-Whisper and PyAV | https://github.com/SYSTRAN/faster-whisper |
