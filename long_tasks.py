@@ -1942,6 +1942,18 @@ def gui():
 
     threading.Thread(target=check_image_upgrade, daemon=True).start()
 
+    def prepare_music_in_background():
+        """Fetch optional local music weights without adding a task card."""
+        try:
+            import music_backend
+
+            music_backend.prefetch()
+        except Exception:
+            # Music is optional; a failed prefetch must not block the task UI.
+            pass
+
+    threading.Thread(target=prepare_music_in_background, daemon=True).start()
+
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
     voice_busy = threading.Event()

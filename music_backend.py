@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -21,6 +22,85 @@ ENGINE = ROOT / "Media" / "music" / "ACE-Step-1.5"
 REVISION = "ca1e85fe9430179831e6bc6be790c332190a3866"
 BASE = "http://127.0.0.1:8001"
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+@contextmanager
+def _setup_lock():
+    """Keep first-run setup from racing a music request in another process."""
+    import msvcrt
+
+    lock_path = ENGINE.parent / "setup.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        if handle.seek(0, os.SEEK_END) == 0:
+            handle.write(b"0")
+            handle.flush()
+        for _ in range(7200):
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                time.sleep(1)
+        else:
+            raise TimeoutError("Local music setup is still busy after two hours.")
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def _write_setup_status(status: str, current: str, percent: int) -> None:
+    path = ROOT / "LongTasks" / "music-install-progress.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps({"status": status, "current": current, "progress": percent}),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _capable_for_background() -> bool:
+    """Start optional model downloads only on PCs that can run them well."""
+    python = ROOT / "Media" / "python" / "Scripts" / "python.exe"
+    if not python.is_file() or shutil.disk_usage(ROOT).free < 18 * 1024**3:
+        return False
+    probe = subprocess.run(
+        [str(python), "-c", "import torch; print(int(torch.cuda.is_available() and "
+         "torch.cuda.get_device_properties(0).total_memory >= 4_000_000_000))"],
+        capture_output=True, text=True, timeout=45, creationflags=HIDE,
+    )
+    return probe.returncode == 0 and probe.stdout.strip() == "1"
+
+
+def prefetch() -> None:
+    """Install the model quietly after launch on a suitable PC."""
+    marker = ENGINE / ".cale-model-ready"
+    try:
+        if marker.is_file() or healthy() or not _capable_for_background():
+            return
+        with _setup_lock():
+            if marker.is_file() or healthy():
+                return
+            _write_setup_status("working", "Installing local music tools", 5)
+            install()
+            executable = ENGINE / ".venv" / "Scripts" / "acestep-download.exe"
+            if not executable.is_file():
+                raise RuntimeError("ACE-Step installed without its model downloader.")
+            _write_setup_status("working", "Downloading the local music model", 35)
+            log_path = ENGINE.parent / "download.log"
+            with log_path.open("ab") as log:
+                subprocess.run(
+                    [str(executable)], cwd=ENGINE, stdout=log,
+                    stderr=subprocess.STDOUT, check=True, timeout=7200,
+                    creationflags=HIDE,
+                )
+            marker.write_text(REVISION, encoding="ascii")
+            _write_setup_status("complete", "Local music is ready", 100)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        _write_setup_status("error", str(exc)[:300], 0)
 
 
 def _tool(name: str) -> str:
@@ -86,7 +166,10 @@ def start_server() -> None:
     """Start the local API on demand, using its own model/runtime directory."""
     if healthy():
         return
-    install()
+    with _setup_lock():
+        if healthy():
+            return
+        install()
     env = os.environ.copy()
     env.update({
         "ACESTEP_API_HOST": "127.0.0.1",
