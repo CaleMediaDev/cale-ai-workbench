@@ -8,6 +8,15 @@ from zipfile import ZIP_DEFLATED, ZipFile
 root = Path(sys.argv[1]).resolve()
 destination = Path(sys.argv[2]).resolve()
 manifest = json.loads((root / "install-files.json").read_text(encoding="utf-8"))
+# The installed app runs this suite as its background self-check. A forgotten
+# test would make that check look green while exercising less than development.
+missing_tests = sorted(
+    path.relative_to(root).as_posix()
+    for path in (root / "Validation").glob("test_*.py")
+    if path.relative_to(root).as_posix() not in manifest
+)
+if missing_tests:
+    raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
     "Install.cmd",
     "Setup.ps1",
