@@ -162,10 +162,10 @@ def task_progress(p):
         done = sum(mark.lower() == "x" for mark in marks)
         percent = min(80, 10 + round(70 * done / len(marks)))
     else:
-        percent = {"queued": 0, "checking": 85}.get(
+        percent = {"queued": 0, "waiting_for_setup": 0, "checking": 85}.get(
             state, 70 if p["phase"] == "review" else 10
         )
-    if p["phase"] == "review" and state not in ("queued", "stopped"):
+    if p["phase"] == "review" and state not in ("queued", "waiting_for_setup", "stopped"):
         percent = max(percent, 80)
     if state == "checking":
         percent = 85
@@ -187,6 +187,7 @@ def task_progress(p):
     if not step:
         step = {
             "queued": "Getting ready",
+            "waiting_for_setup": "Waiting for AI setup to finish",
             "checking": "Checking the work",
             "paused": "Paused until you continue",
             "stopped": "Stopped",
@@ -217,7 +218,7 @@ def request(pid, action, note=""):
         )
 
 
-def add_project(title, folder, brief):
+def add_project(title, folder, brief, waiting_for_setup=False):
     """Create a task without overlapping another task's project folder."""
     title, brief = title.strip(), brief.strip()
     if not brief:
@@ -243,7 +244,7 @@ def add_project(title, folder, brief):
             or other.is_relative_to(folder)
         ):
             raise ValueError(
-                "That folder overlaps another queued project. Use its Add instructions button."
+                "That folder overlaps another task. Give the existing task more instructions in the chat."
             )
     folder.mkdir(parents=True, exist_ok=True)
     (folder / ".local-ai").mkdir(exist_ok=True)
@@ -257,8 +258,12 @@ def add_project(title, folder, brief):
         )
     with database() as conn:
         conn.execute(
-            "INSERT INTO projects(id,title,folder,brief,created,updated) VALUES(?,?,?,?,?,?)",
-            (pid, title, str(folder), brief, time.time(), time.time()),
+            "INSERT INTO projects(id,title,folder,brief,status,created,updated) VALUES(?,?,?,?,?,?,?)",
+            (
+                pid, title, str(folder), brief,
+                "waiting_for_setup" if waiting_for_setup else "queued",
+                time.time(), time.time(),
+            ),
         )
     return pid
 
@@ -679,8 +684,14 @@ def process_requests():
                     )
                 elif task and task["status"] in ("done", "archived", "triage"):
                     update(p["id"], card="", generation=p["generation"] + 1)
+                setup = read_task_status(STATE / "install-progress.json")
+                waiting = p["status"] == "waiting_for_setup" and setup.get("status") != "complete"
                 update(
-                    p["id"], status="working", failures=0, fingerprint="", phase="build"
+                    p["id"],
+                    status="waiting_for_setup" if waiting else "working",
+                    failures=0,
+                    fingerprint="",
+                    phase="build",
                 )
             elif action == "accept":
                 if (
@@ -719,6 +730,12 @@ def tick():
     """Advance each runnable task by one supervisor step."""
     process_requests()
     for p in projects():
+        if p["status"] == "waiting_for_setup":
+            setup = read_task_status(STATE / "install-progress.json")
+            if setup and setup.get("status") != "complete":
+                continue
+            update(p["id"], status="queued", detail="Setup finished. Getting ready.")
+            p["status"] = "queued"
         if p["status"] in ("accepted", "paused", "stopped", "needs_input"):
             continue
         if p["status"] == "ready_for_review":
@@ -1401,7 +1418,7 @@ def gui():
             item
             for item in projects()
             if item["status"]
-            in ("queued", "working", "checking", "paused", "needs_input")
+            in ("queued", "waiting_for_setup", "working", "checking", "paused", "needs_input")
         ]
         if action == "new":
             listening.clear()
@@ -1476,8 +1493,22 @@ def gui():
         show_chat(previous["role"], previous["content"])
     if not chat_history():
         show_chat("assistant", "Hi! Ask me anything, or tell me what you'd like me to build.")
+    pending_followup = None
+    answer_requests = queue.Queue()
+
+    def answer_worker():
+        """Keep local model calls in order and avoid competing for the same GPU."""
+        while True:
+            question, context = answer_requests.get()
+            try:
+                conversation_events.put(chat_assistant.answer_with_tools(question, context))
+            except Exception as exc:
+                conversation_events.put("I couldn't answer that yet: " + str(exc))
+
+    threading.Thread(target=answer_worker, daemon=True).start()
 
     def submit_chat_text(value=None):
+        nonlocal pending_followup
         value = (chat_input.get() if value is None else value).strip()
         if not value:
             return
@@ -1487,22 +1518,46 @@ def gui():
         save_chat("user", value)
         show_chat("user", value)
         active = [p for p in projects() if p["status"] in (
-            "queued", "working", "checking", "paused", "needs_input")]
+            "queued", "waiting_for_setup", "working", "checking", "paused", "needs_input")]
+        if pending_followup:
+            note, ids = pending_followup
+            candidates = [p for p in active if p["id"] in ids]
+            target = chat_assistant.choose_task(value, candidates, allow_single=False)
+            if target:
+                pending_followup = None
+                try:
+                    request(target["id"], "note", note)
+                    assistant_reply("Added that to " + target["title"] + ".")
+                except Exception as exc:
+                    assistant_reply("I couldn't add that instruction: " + str(exc))
+                return
+            if value.isdigit():
+                assistant_reply("I couldn't match that number to an active task. Please choose one of the numbers above.")
+                return
+            pending_followup = None
         action = chat_assistant.route(value, active)
         try:
             if action == "task":
                 setup = read_task_status(STATE / "install-progress.json")
-                if setup and setup.get("status") != "complete":
-                    assistant_reply("I'm still installing the local AI. Your message is saved here; please send it again when setup finishes.")
-                    return
-                pid = add_project("", "", value)
+                waiting = bool(setup and setup.get("status") != "complete")
+                pid = add_project("", "", value, waiting_for_setup=waiting)
                 item = next(p for p in projects() if p["id"] == pid)
-                assistant_reply("I started a task: " + item["title"] + ". I'll show its progress below.")
+                if waiting:
+                    assistant_reply("I saved your task: " + item["title"] + ". It will start automatically when setup finishes.")
+                else:
+                    assistant_reply("I started a task: " + item["title"] + ". I'll show its progress below.")
                 render_cards()
             elif action == "note":
-                selected = max(active, key=lambda p: p["updated"] or 0)
-                request(selected["id"], "note", value)
-                assistant_reply("Added that to " + selected["title"] + ".")
+                selected = chat_assistant.choose_task(value, active)
+                if selected:
+                    request(selected["id"], "note", value)
+                    assistant_reply("Added that to " + selected["title"] + ".")
+                else:
+                    pending_followup = (value, [p["id"] for p in active])
+                    options = "  ".join(
+                        f"{index}. {task['title']}" for index, task in enumerate(active, 1)
+                    )
+                    assistant_reply("Which task should I change? Reply with its number. " + options)
             elif action == "status":
                 if active:
                     selected = max(active, key=lambda p: p["updated"] or 0)
@@ -1510,15 +1565,8 @@ def gui():
                 else:
                     assistant_reply("Nothing is running right now. Tell me what you'd like me to do.")
             else:
-                assistant_reply("Let me check that locally…")
-
-                def worker():
-                    try:
-                        conversation_events.put(chat_assistant.answer_with_tools(value, context))
-                    except Exception as exc:
-                        conversation_events.put(str(exc))
-
-                threading.Thread(target=worker, daemon=True).start()
+                show_chat("assistant", "Let me check that locally…")
+                answer_requests.put((value, context))
         except Exception as exc:
             assistant_reply("I couldn't do that yet: " + str(exc))
 
@@ -1818,7 +1866,7 @@ def gui():
             card_info["bar"].configure(value=percent)
 
     def choices_for(state):
-        if state in ("queued", "working", "checking"):
+        if state in ("queued", "waiting_for_setup", "working", "checking"):
             return (("Stop", "stop"), ("Pause", "pause"), ("Delete", "delete"))
         if state == "paused":
             return (("Continue", "resume"), ("Stop", "stop"), ("Delete", "delete"))

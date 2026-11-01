@@ -8,7 +8,7 @@ TASK_VERBS = (
     "build", "make", "create", "develop", "design", "write", "research",
     "investigate", "fix", "repair", "update", "improve", "train", "analyze",
     "analyse", "generate", "implement", "set up", "install",
-    "add", "change",
+    "add", "change", "work on",
 )
 
 
@@ -21,14 +21,31 @@ def route(text: str, active_tasks: list[dict]) -> str:
         return "status"
     if active_tasks and re.match(r"^(?:also|actually|change it|add to (?:it|that)|tell (?:it|the ai) to|instead)\b", value):
         return "note"
-    command = re.sub(r"^(?:please\s+|can you\s+|could you\s+|i want you to\s+|i need you to\s+)", "", value)
+    command = re.sub(
+        r"^(?:(?:please|can you|could you|i want you to|i need you to|help me)\s+)+",
+        "", value,
+    )
     if active_tasks and command.startswith(("add ", "change ")):
         return "note"
     if re.match(r"^i (?:want|need) (?:a|an|some) (?:website|app|program|logo|design|image|report|plan|tool)\b", value):
         return "task"
-    if command.startswith(TASK_VERBS):
+    if any(re.match(r"^" + re.escape(verb) + r"\b", command) for verb in TASK_VERBS):
         return "task"
     return "answer"
+
+
+def choose_task(text: str, tasks: list[dict], *, allow_single=True) -> dict | None:
+    """Find an unambiguous follow-up target, or require the person to choose."""
+    if not tasks:
+        return None
+    if len(tasks) == 1 and allow_single:
+        return tasks[0]
+    value = text.strip().casefold()
+    if value.isdigit():
+        index = int(value) - 1
+        return tasks[index] if 0 <= index < len(tasks) else None
+    matches = [task for task in tasks if task["title"].casefold() in value]
+    return matches[0] if len(matches) == 1 else None
 
 
 def business_contact_query(text: str) -> str | None:
@@ -41,7 +58,7 @@ def business_contact_query(text: str) -> str | None:
     for pattern in patterns:
         match = re.match(pattern, value, re.IGNORECASE)
         if match:
-            name = match.group(1).strip().rstrip("'s")
+            name = re.sub(r"'s$", "", match.group(1).strip(), flags=re.IGNORECASE)
             return name if len(name) >= 2 else None
     return None
 

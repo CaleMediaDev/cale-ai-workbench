@@ -55,6 +55,35 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(item["title"], "Make a simple recipe app")
         self.assertTrue((Path(item["folder"]) / ".local-ai").is_dir())
 
+    def test_task_saved_during_setup_starts_after_setup_finishes(self):
+        task_module.update(self.pid, status="paused")
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text('{"status":"working"}', encoding="utf-8")
+        pid = task_module.add_project(
+            "", str(self.base / "second"), "Build a website", waiting_for_setup=True
+        )
+        with patch.object(task_module, "create_card") as create:
+            task_module.tick()
+            create.assert_not_called()
+            self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "waiting_for_setup")
+            progress.write_text('{"status":"complete"}', encoding="utf-8")
+            task_module.tick()
+            self.assertEqual(create.call_count, 1)
+            self.assertEqual(create.call_args.args[0]["id"], pid)
+            self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "queued")
+
+    def test_followup_to_setup_task_stays_waiting(self):
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text('{"status":"working"}', encoding="utf-8")
+        pid = task_module.add_project(
+            "", str(self.base / "second"), "Build a website", waiting_for_setup=True
+        )
+        task_module.request(pid, "note", "Add large buttons")
+        task_module.process_requests()
+        updated = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(updated["status"], "waiting_for_setup")
+        self.assertIn("Add large buttons", updated["brief"])
+
     def test_new_worker_receives_saved_plan_and_latest_progress(self):
         notes = Path(self.item()["folder"]) / ".local-ai"
         (notes / "PLAN.md").write_text("Milestone: build search", encoding="utf-8")
