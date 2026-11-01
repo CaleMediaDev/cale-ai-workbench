@@ -565,6 +565,7 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("Fixture database choice", body)
         self.assertIn("project_memory_search", body)
         self.assertIn("a lyrics file is not proof", body)
+        self.assertIn("never attach an empty placeholder", body)
 
     def test_real_failing_check_cannot_pass(self):
         self.verify_script('Write-Output "actual check failed"\nexit 7\n')
