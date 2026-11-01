@@ -867,7 +867,7 @@ def gui():
     from cloud_ai import (
         status as cloud_status,
     )
-    from model_library import CATALOG, save_download_status
+    from model_library import CATALOG, catalog_signature, save_download_status
 
     start_monitor()
     window = tk.Tk()
@@ -1398,7 +1398,10 @@ def gui():
             return
         path = STATE / "auto-model-worker.json"
         worker = read_task_status(path)
-        if worker.get("status") in ("complete", "error"):
+        if (
+            worker.get("status") in ("complete", "error")
+            and worker.get("catalog") == catalog_signature()
+        ):
             return
         if (
             worker.get("status") == "working"
@@ -1435,7 +1438,7 @@ def gui():
     ).pack(anchor="w", pady=(0, 3))
     ttk.Label(
         models_section,
-        text="Compatible models download automatically after setup. You can retry or choose a model here.",
+        text="Tool-ready models download automatically. You can start experimental variants here.",
         style="Muted.TLabel",
     ).pack(anchor="w", pady=(0, 10))
 

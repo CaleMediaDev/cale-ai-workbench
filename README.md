@@ -65,11 +65,12 @@ The repository contains model definitions, sources, configuration, and automatic
 | Qwen 3.5 9B | 7 GB | 24 GB | Smaller default |
 | Qwen 3.5 4B | 4 GB | 16 GB | Light default |
 | Huihui Qwen Coder Next abliterated | 52 GB | 96 GB | Optional local coding variant |
-| ArliAI GPT-OSS 20B Derestricted | 13 GB | 32 GB | Experimental optional model |
+| GPT-OSS 20B (official Ollama package) | 14 GB | 32 GB | Tool-ready optional local model |
+| ArliAI GPT-OSS 20B Derestricted | 13 GB | 32 GB | Manual experimental variant; its tested GGUF did not advertise tool support in Ollama |
 | Huihui Llama 3.3 70B abliterated | 43 GB | 80 GB | Experimental optional model |
 | ArliAI GLM 4.5 Air Derestricted | 67 GB | 112 GB | Experimental optional model |
 
-RAM guidance is conservative, not a benchmark. Speed depends heavily on GPU memory, CPU and context size. Setup downloads the recommended base model, vision model, image, speech, and training weights automatically. After setup, the app automatically downloads additional models that fit physical RAM and leave at least 12 GB of storage headroom. Model rows under **My tasks** show download progress, requirements, Retry, and Use buttons. It checks for advertised tool support before offering a model for tasks. “Abliterated” or “derestricted” describes the publisher's modifications; it does not establish better reasoning, reliability, or suitability for a particular task. See [model sources and licenses](THIRD-PARTY-NOTICES.md).
+RAM guidance is conservative, not a benchmark. Speed depends heavily on GPU memory, CPU and context size. Setup downloads the recommended base model, vision model, image, speech, and training weights automatically. After setup, the app automatically downloads tool-ready models that fit physical RAM and leave at least 12 GB of storage headroom. Model rows under **My tasks** show download progress, requirements, Retry, and Use buttons. The ArliAI GPT-OSS GGUF remains a manual experiment because it did not advertise tool support in our Ollama test; the official [GPT-OSS package](https://ollama.com/library/gpt-oss) does. The app checks each installed model's advertised tool support before offering it for tasks. “Abliterated” or “derestricted” describes the publisher's modifications; it does not establish better reasoning, reliability, or suitability for a particular task. See [model sources and licenses](THIRD-PARTY-NOTICES.md).
 
 ## Development
 

@@ -36,7 +36,7 @@ The UI inserts user requests into `LongTasks/projects.db`. The monitor handles t
 
 The UI polls every five seconds. Existing task widgets are updated in place; a widget is created or destroyed only when a task is added or removed. Mouse-wheel scrolling is scoped to the task list, and the canvas keeps its pixel position across ordinary refreshes. Progress percentages are estimates from the saved milestone checklist, not a time estimate.
 
-`LongTasks/install-progress.json` and `LongTasks/optional-model-*.json` are small atomic status files read by the UI. The optional downloader runs independently, uses a Windows file lock to prevent duplicate automatic runs, and leaves weights in Ollama's model store. It checks Ollama for a usable local model before trusting a saved completion status, and checks physical RAM plus at least 12 GB of extra space on the model store's drive before each pull. Models that cannot fit stay visible, with a manual Start/Retry button and their requirements.
+`LongTasks/install-progress.json` and `LongTasks/optional-model-*.json` are small atomic status files read by the UI. The optional downloader runs independently, uses a Windows file lock to prevent duplicate automatic runs, and leaves weights in Ollama's model store. It checks Ollama for a usable local model before trusting a saved completion status, and checks physical RAM plus at least 12 GB of extra space on the model store's drive before each pull. A catalog signature makes the app rescan when a release adds or changes model sources. Models that cannot fit stay visible, with a manual Start/Retry button and their requirements.
 
 ## Accounts and model routing
 

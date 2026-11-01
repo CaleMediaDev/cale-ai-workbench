@@ -42,6 +42,8 @@ class AutoModelTests(unittest.TestCase):
             library.auto_install(folder)
             state = json.loads((Path(folder) / "optional-model-small.json").read_text())
             self.assertEqual(state["status"], "complete")
+            worker = json.loads((Path(folder) / "auto-model-worker.json").read_text())
+            self.assertEqual(worker["catalog"], library.catalog_signature())
             self.assertEqual(calls, ["small"])
             self.assertFalse((Path(folder) / "optional-model-large.json").exists())
 
@@ -127,6 +129,29 @@ class AutoModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with patch.dict(library.os.environ, {"OLLAMA_MODELS": folder}):
                 self.assertEqual(library.model_store_path(), Path(folder))
+
+    def test_manual_experimental_model_is_not_auto_downloaded(self):
+        catalog = {
+            "main": {"alias": "base"},
+            "experimental": {
+                "label": "Experimental",
+                "alias": "experimental-local",
+                "download_gb": 8,
+                "ram_gb": 24,
+                "auto": False,
+            },
+        }
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(library, "CATALOG", catalog),
+            patch.object(library, "total_ram_gb", return_value=128),
+            patch.object(library, "install") as install,
+        ):
+            library.auto_install(folder)
+            install.assert_not_called()
+            self.assertFalse(
+                (Path(folder) / "optional-model-experimental.json").exists()
+            )
 
 
 if __name__ == "__main__":

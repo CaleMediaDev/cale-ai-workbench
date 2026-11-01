@@ -4,6 +4,7 @@ The app starts this module in a separate process for manual or automatic
 downloads. Each profile writes a small atomic JSON status file for the UI.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -25,8 +26,18 @@ CATALOG = {
         "license": "Apache-2.0",
         "context": 65536,
     },
+    "gptoss_official": {
+        "label": "GPT-OSS 20B (tool-ready local)",
+        "alias": "cale-gptoss",
+        "source": "gpt-oss:20b",
+        "download_gb": 14,
+        "ram_gb": 32,
+        "origin": "https://ollama.com/library/gpt-oss",
+        "license": "Apache-2.0",
+        "context": 32768,
+    },
     "gptoss": {
-        "label": "ArliAI GPT-OSS 20B (experimental)",
+        "label": "ArliAI GPT-OSS 20B (manual experimental)",
         "alias": "cale-gptoss-derestricted",
         "source": "hf.co/MaziyarPanahi/gpt-oss-20b-Derestricted-GGUF:Q4_K_M",
         "download_gb": 13,
@@ -35,6 +46,7 @@ CATALOG = {
         "conversion": "https://huggingface.co/MaziyarPanahi/gpt-oss-20b-Derestricted-GGUF",
         "license": "Apache-2.0",
         "context": 32768,
+        "auto": False,
     },
     "llama": {
         "label": "Huihui Llama 3.3 70B (experimental)",
@@ -116,6 +128,16 @@ def model_ready(profile):
     )
 
 
+def catalog_signature():
+    """Change when the optional download set or its model sources change."""
+    options = {
+        profile: {"source": item.get("source", ""), "auto": item.get("auto", True)}
+        for profile, item in CATALOG.items()
+        if profile != "main"
+    }
+    return hashlib.sha256(json.dumps(options, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def install(profile, progress=print):
     """Pull one model through Ollama and verify it advertises tool support."""
     item = CATALOG[profile]
@@ -179,7 +201,7 @@ def install(profile, progress=print):
     return item["alias"]
 
 
-def save_download_status(path, state, current, percent=0):
+def save_download_status(path, state, current, percent=0, metadata=None):
     """Write one UI status snapshot atomically so readers never see partial JSON."""
     path = Path(path)
     path.parent.mkdir(exist_ok=True)
@@ -191,6 +213,7 @@ def save_download_status(path, state, current, percent=0):
                 "current": current,
                 "percent": percent,
                 "updated": time.time(),
+                **(metadata or {}),
             }
         ),
         encoding="utf-8",
@@ -227,7 +250,7 @@ def auto_install(status_dir):
                 (
                     (profile, model)
                     for profile, model in CATALOG.items()
-                    if profile != "main"
+                    if profile != "main" and model.get("auto", True)
                 ),
                 key=lambda pair: pair[1]["download_gb"],
             )
@@ -292,10 +315,16 @@ def auto_install(status_dir):
                     save_download_status(path, "error", str(exc), 0)
                     # One unavailable model must not block smaller or different models.
             save_download_status(
-                worker_status, "complete", "Automatic model checks finished", 100
+                worker_status,
+                "complete",
+                "Automatic model checks finished",
+                100,
+                {"catalog": catalog_signature()},
             )
         except Exception as exc:
-            save_download_status(worker_status, "error", str(exc), 0)
+            save_download_status(
+                worker_status, "error", str(exc), 0, {"catalog": catalog_signature()}
+            )
             raise
         finally:
             lock.seek(0)
