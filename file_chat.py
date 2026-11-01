@@ -108,7 +108,7 @@ def file_excerpt(path: Path, question: str) -> str:
 
 def answer_from_files(question: str, paths: list[str]) -> str:
     """Use local extraction and local Ollama to answer a bounded file question."""
-    from cloud_ai import FAST_MODEL, LOCAL_MODEL, post
+    from cloud_ai import FAST_MODEL, LOCAL_MODEL, post, retry_derestricted
 
     if not paths or len(paths) > 3:
         raise ValueError("Select up to three files for a quick chat answer.")
@@ -153,7 +153,11 @@ def answer_from_files(question: str, paths: list[str]) -> str:
                 },
                 timeout=180,
             )
-            answer = result["choices"][0]["message"].get("content", "").strip()
+            result = retry_derestricted(
+                {"messages": messages, "max_tokens": 500, "temperature": 0.2},
+                result, model,
+            )
+            answer = (result["choices"][0]["message"].get("content") or "").strip()
             if answer:
                 names = ", ".join(f"[{i}] {Path(path).name}" for i, path in enumerate(paths, 1))
                 if partial_files:

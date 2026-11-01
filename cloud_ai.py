@@ -300,12 +300,75 @@ def valid_completion(result):
     if not isinstance(result, dict) or result.get("error") or not result.get("choices"):
         raise ValueError("Invalid inference response")
     message = result["choices"][0].get("message", {})
-    if not message.get("content") and not message.get("tool_calls"):
+    if (not message.get("content") and not message.get("tool_calls")
+            and not message.get("refusal")
+            and result["choices"][0].get("finish_reason") != "content_filter"):
         raise ValueError("Empty inference response")
     for call in message.get("tool_calls", []):
         if not call.get("id") or not call.get("function", {}).get("name"):
             raise ValueError("Invalid tool response")
         json.loads(call["function"]["arguments"])
+    return result
+
+
+REFUSAL_TEXT = re.compile(
+    r"\b(?:I\s+(?:can(?:not|'t|’t)|won't|will not|must decline|have to decline|am unable|"
+    r"am not able)|I'm\s+unable|I’m\s+unable|I\s+can't comply|I\s+cannot comply)\b",
+    re.IGNORECASE,
+)
+DER_RESTRICTED_PROFILES = ("gptoss", "permissive", "llama", "glm")
+
+
+def is_refusal(result):
+    """Recognize a model's rejection, independent of the request's subject."""
+    try:
+        choice = result["choices"][0]
+        message = choice["message"]
+        if message.get("tool_calls"):
+            return False
+        return bool(
+            message.get("refusal")
+            or choice.get("finish_reason") == "content_filter"
+            or REFUSAL_TEXT.search(str(message.get("content") or "").replace("’", "'"))
+        )
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
+def retry_derestricted(payload, result, original_model=""):
+    """Retry any rejected completion with installed local derestricted models.
+
+    Models without tool capability are only used for text requests. The
+    original rejection remains available if every local retry fails.
+    """
+    if not is_refusal(result):
+        return result
+    for profile in DER_RESTRICTED_PROFILES:
+        item = CATALOG.get(profile)
+        if not item:
+            continue
+        model = item["alias"]
+        if model == original_model:
+            continue
+        try:
+            info = post("http://127.0.0.1:11434/api/show", {"model": model}, timeout=10)
+            if info.get("remote_host") or info.get("remote_model"):
+                continue
+            if payload.get("tools") and "tools" not in info.get("capabilities", []):
+                continue
+            local = dict(payload, model=model, stream=False)
+            local.pop("stream_options", None)
+            if local.get("tools") and item.get("tool_reasoning_effort"):
+                local["reasoning_effort"] = item["tool_reasoning_effort"]
+            attempt = valid_completion(
+                post("http://127.0.0.1:11434/v1/chat/completions", local, timeout=1800)
+            )
+            if not is_refusal(attempt):
+                record("local", "A model refused; an installed derestricted model answered.", model)
+                return attempt
+        except Exception:
+            continue
+    record("local", "A model refused; no installed derestricted model answered.", original_model)
     return result
 
 
@@ -402,7 +465,7 @@ class Router:
                         "User-enabled ChatGPT plan response received.",
                         result.get("model", ""),
                     )
-                    return result
+                    return retry_derestricted(payload, result, result.get("model", ""))
             except Exception:
                 self.chatgpt_cooldown = time.time() + 120
                 reason = "ChatGPT plan unavailable; trying free cloud or local AI."
@@ -440,7 +503,7 @@ class Router:
                     f"Auto scale: {size}; local model responded.",
                     selected_model,
                 )
-                return result
+                return retry_derestricted(payload, result, selected_model)
             except Exception as exc:
                 last_error = exc
         # Free cloud is a fallback after installed local models fail. It never
@@ -460,7 +523,7 @@ class Router:
                     "Free cloud response received.",
                     result.get("model", "openrouter/free"),
                 )
-                return result
+                return retry_derestricted(payload, result, result.get("model", ""))
             except HTTPError as exc:
                 # No response body, keys or project text is written into logs.
                 self.cooldown = time.time() + (

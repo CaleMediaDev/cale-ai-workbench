@@ -291,6 +291,94 @@ def name_matching_domain(name: str, url: str) -> bool:
     return len(brand) >= 5 and brand in labels[-2]
 
 
+def business_name_matches(name: str, title: str, url: str) -> bool:
+    """Require every meaningful name word before attributing contact details."""
+    if name_matching_domain(name, url):
+        return True
+    words = [
+        word for word in re.findall(r"[a-z0-9]+", name.casefold())
+        if len(word) > 1 and word not in {"the", "and", "llc", "inc"}
+    ]
+    visible = (title + " " + (urlsplit(url).hostname or "")).casefold()
+    return bool(words) and all(word in visible for word in words)
+
+
+EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
+RESERVED_EMAIL_DOMAINS = {"example.com", "example.org", "example.net", "test.com"}
+
+
+def public_emails(page: dict) -> list[str]:
+    """Collect visible or mailto-linked addresses, excluding examples and placeholders."""
+    addresses = []
+    for link in page.get("contact_links", []):
+        if link.lower().startswith("mailto:"):
+            addresses.extend(unquote(link[7:]).split("?", 1)[0].replace(";", ",").split(","))
+    addresses.extend(EMAIL_PATTERN.findall(page.get("text", "")))
+    valid = []
+    for raw in addresses:
+        address = raw.strip()
+        if (
+            EMAIL_PATTERN.fullmatch(address)
+            and address.rsplit("@", 1)[1].lower() not in RESERVED_EMAIL_DOMAINS
+        ):
+            valid.append(address.lower())
+    return list(dict.fromkeys(valid))
+
+
+@server.tool()
+def find_business_email(name: str, locality: str = "") -> dict:
+    """Find a business's public email on live pages, returning exact source URLs.
+
+    A search result or an email-protection placeholder is not an email address.
+    Matching the business name to a domain is useful evidence, not ownership proof.
+    """
+    if (
+        not 2 <= len(name.strip()) <= 160
+        or len(locality) > 100
+        or any(ord(char) < 32 for char in name + locality)
+    ):
+        raise ValueError("Provide a business name and optional locality.")
+    query = " ".join(part for part in (name.strip(), locality.strip(), "email") if part)
+    found = search_web(query)
+    ranked = sorted(
+        found.get("results", [])[:12],
+        key=lambda result: not name_matching_domain(name, result.get("url", "")),
+    )
+    sources, checked, seen = [], [], set()
+    for result in ranked:
+        url = result.get("url", "")
+        host = (urlsplit(url).hostname or "").lower()
+        if not host or url in seen:
+            continue
+        if not business_name_matches(name, result.get("title", ""), url):
+            continue
+        seen.add(url)
+        try:
+            page = read_webpage(url, question=f"{name} public email address")
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            continue
+        record = {
+            "source_url": page["source_url"],
+            "page_title": page["title"],
+            "retrieved_at": page["retrieved_at"],
+            "name_matching_domain": name_matching_domain(name, page["source_url"]),
+        }
+        checked.append(record)
+        addresses = public_emails(page)
+        if addresses:
+            sources.append({**record, "email_addresses": addresses[:8]})
+        if len(sources) >= 3 or len(checked) >= 8:
+            break
+    return {
+        "business": name.strip(),
+        "locality": locality.strip(),
+        "sources": sources,
+        "checked_pages": checked,
+        "error": "No public email address was found on the live pages checked."
+        if not sources else None,
+    }
+
+
 @server.tool()
 def find_business_contact(name: str, locality: str = "") -> dict:
     """Find live business phone links and show the pages that contain them.
@@ -308,10 +396,6 @@ def find_business_contact(name: str, locality: str = "") -> dict:
         part for part in (name.strip(), locality.strip(), "phone number") if part
     )
     found = search_web(query)
-    words = [
-        word for word in re.findall(r"[a-z0-9]+", name.casefold()) if len(word) > 1
-    ]
-    minimum = 1 if len(words) < 3 else 2
     candidates = []
     seen_urls = set()
     host_counts = {}
@@ -324,8 +408,7 @@ def find_business_contact(name: str, locality: str = "") -> dict:
         host = (urlsplit(url).hostname or "").lower()
         if not host or url in seen_urls or host_counts.get(host, 0) >= 2:
             continue
-        visible = (result.get("title", "") + " " + host).casefold()
-        if sum(word in visible for word in words) < minimum:
+        if not business_name_matches(name, result.get("title", ""), url):
             continue
         seen_urls.add(url)
         host_counts[host] = host_counts.get(host, 0) + 1

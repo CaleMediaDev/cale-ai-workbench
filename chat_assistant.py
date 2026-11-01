@@ -119,6 +119,65 @@ def business_contact_query(text: str) -> str | None:
     return None
 
 
+def business_email_query(text: str) -> str | None:
+    """Recognize a public business email request without an extra model call."""
+    value = text.strip().rstrip("? .")
+    patterns = (
+        r"^(?:what(?:'s| is|s)\s+)?(.+?)(?:'s)?\s+e-?mail(?:\s+address)?$",
+        r"^(?:(?:what(?:'s| is)\s+)?(?:the\s+)?|find\s+|look up\s+|give me\s+)(?:e-?mail)(?:\s+address)?\s+(?:for|of)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, value, re.IGNORECASE)
+        if match:
+            name = re.sub(r"'s$", "", match.group(1).strip(), flags=re.IGNORECASE)
+            return name if len(name) >= 2 else None
+    return None
+
+
+def business_address_query(text: str) -> str | None:
+    """Identify a business-location question so its own site can be checked first."""
+    value = text.strip().rstrip("? .")
+    patterns = (
+        r"^(?:what(?:'s| is|s)\s+)?(.+?)(?:'s)?\s+(?:(?:street|physical|business)\s+)?address$",
+        r"^(?:what(?:'s| is)\s+)?(?:the\s+)?(?:(?:street|physical|business)\s+)?address\s+(?:for|of)\s+(.+)$",
+        r"^where is (.+?) located$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, value, re.IGNORECASE)
+        if match:
+            name = re.sub(r"'s$", "", match.group(1).strip(), flags=re.IGNORECASE)
+            return name if len(name) >= 2 else None
+    return None
+
+
+def business_email_answer(name: str, result: dict) -> str:
+    """State only addresses seen on live pages, with conflict disclosure."""
+    records = [
+        (address, source)
+        for source in result.get("sources", [])[:3]
+        for address in source.get("email_addresses", [])[:8]
+    ]
+    if not records:
+        checked = result.get("checked_pages", [])
+        lead = next((page for page in checked if page.get("name_matching_domain")), None)
+        if lead is None and checked:
+            lead = checked[0]
+        suffix = f" I checked {lead['source_url']}." if lead else ""
+        return f"I couldn't verify a public email address for {name} on live pages.{suffix}"
+    distinct = list(dict.fromkeys(address for address, _ in records))
+    if len(distinct) > 1:
+        details = "; ".join(
+            f"{address} — {next(source for email, source in records if email == address)['source_url']}"
+            for address in distinct[:3]
+        )
+        return f"Live pages list different email addresses for {name}: {details}. I can't confirm which is current."
+    address, source = records[0]
+    answer = f"{source['page_title'] or name} lists {address}. Source: {source['source_url']}."
+    if not source.get("name_matching_domain"):
+        answer += " I couldn't confirm it on the business's website."
+    return answer
+
+
 def display_phone(link: str) -> tuple[str, str] | None:
     """Normalize a live tel link for comparison and readable US display."""
     raw = unquote(link[4:]).split(";", 1)[0].strip()
@@ -176,6 +235,14 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
 
         result = find_business_contact(name)
         return business_contact_answer(name, result.get("sources", []))
+    email_name = business_email_query(question)
+    if email_name:
+        from web_tools import find_business_email
+
+        return business_email_answer(email_name, find_business_email(email_name))
+    address_name = business_address_query(question)
+    if address_name:
+        return answer_from_web(question, preferred_business=address_name)
     if needs_web(question):
         return answer_from_web(question)
     from quick_calculator import calculate
@@ -189,32 +256,42 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
 WEB_SIGNALS = re.compile(
     r"\b(?:search|look up|online|on the web|current|latest|today|tonight|"
     r"right now|recent|this week|this month|weather|forecast|news|price|"
-    r"stock|score|schedule|hours|open now|president|ceo|version|release)\b",
+    r"stock|score|schedule|hours|open now|president|ceo|version|release|"
+    r"email|e-mail|address)\b",
     re.IGNORECASE,
 )
 
 
 def needs_web(question: str) -> bool:
     """Route changing facts and explicit web searches to live public sources."""
+    if re.search(r"\b(?:my|our)\s+(?:email|e-mail|address)\b", question, re.I):
+        return False
     return bool(WEB_SIGNALS.search(question) or re.search(r"https?://", question))
 
 
-def web_sources(question: str) -> tuple[list[dict], list[dict]]:
+def web_sources(question: str, preferred_business: str = "") -> tuple[list[dict], list[dict]]:
     """Read relevant public results live; snippets alone are only leads."""
-    from web_tools import read_webpage, search_web
+    from web_tools import name_matching_domain, read_webpage, search_web
 
     supplied_urls = [url.rstrip(".,;)") for url in re.findall(r"https?://[^\s<>]+", question)[:3]]
     leads = (
         [{"title": "Provided page", "url": url} for url in supplied_urls]
         if supplied_urls else search_web(question).get("results", [])[:8]
     )
+    if preferred_business and not supplied_urls:
+        leads = sorted(
+            leads,
+            key=lambda lead: not name_matching_domain(preferred_business, lead.get("url", "")),
+        )
     pages = []
     seen_hosts = set()
     for lead in leads:
         url = lead.get("url", "")
         parsed = urlsplit(url)
         host = (parsed.hostname or "").lower()
-        if not host or (not supplied_urls and (host in seen_hosts or parsed.path in ("", "/"))):
+        home = parsed.path in ("", "/")
+        relevant_home = preferred_business and name_matching_domain(preferred_business, url)
+        if not host or (not supplied_urls and (host in seen_hosts or (home and not relevant_home))):
             continue
         seen_hosts.add(host)
         try:
@@ -235,11 +312,17 @@ def web_sources(question: str) -> tuple[list[dict], list[dict]]:
     return pages, leads
 
 
-def answer_from_web(question: str) -> str:
+def answer_from_web(question: str, preferred_business: str = "") -> str:
     """Synthesize a sourced answer locally and expose exactly what was read."""
-    from cloud_ai import BALANCED_MODEL, FAST_MODEL, LOCAL_MODEL, post
+    from cloud_ai import (
+        BALANCED_MODEL,
+        FAST_MODEL,
+        LOCAL_MODEL,
+        post,
+        retry_derestricted,
+    )
 
-    pages, leads = web_sources(question)
+    pages, leads = web_sources(question, preferred_business=preferred_business)
     if not pages:
         if leads:
             links = "\n".join(
@@ -247,6 +330,18 @@ def answer_from_web(question: str) -> str:
             )
             return "I found these search leads, but couldn't read a page to verify the answer:\n" + links
         return "I couldn't find a readable live source for that question."
+    if preferred_business:
+        from web_tools import name_matching_domain
+
+        for page in pages:
+            if (
+                name_matching_domain(preferred_business, page["url"])
+                and re.search(r"\bno public (?:office|street|physical) address\b", page["excerpt"], re.I)
+            ):
+                return (
+                    f"{preferred_business}'s site says it has no public office address. "
+                    f"Source: {page['url']}."
+                )
     evidence = "\n\n".join(
         f"[{number}] {page['title']}\nURL: {page['url']}\n"
         f"Retrieved: {page['retrieved_at']}\nExcerpt:\n{page['excerpt']}"
@@ -275,7 +370,11 @@ def answer_from_web(question: str) -> str:
                  "reasoning_effort": "none"},
                 timeout=180,
             )
-            answer = result["choices"][0]["message"].get("content", "").strip()
+            result = retry_derestricted(
+                {"messages": messages, "max_tokens": 550, "temperature": 0.1},
+                result, model,
+            )
+            answer = (result["choices"][0]["message"].get("content") or "").strip()
             citations = {int(value) for value in re.findall(r"\[(\d+)\]", answer)}
             if answer and citations and min(citations) >= 1 and max(citations) <= len(pages):
                 references = "\n".join(
@@ -293,7 +392,7 @@ def answer_from_web(question: str) -> str:
 
 def local_answer(question: str, history: list[dict]) -> str:
     """Answer quick chat locally; this path never spends connected cloud credits."""
-    from cloud_ai import FAST_MODEL, LOCAL_MODEL, post
+    from cloud_ai import FAST_MODEL, LOCAL_MODEL, post, retry_derestricted
 
     messages = [{
         "role": "system",
@@ -320,7 +419,11 @@ def local_answer(question: str, history: list[dict]) -> str:
                  "reasoning_effort": "none"},
                 timeout=120,
             )
-            answer = result["choices"][0]["message"].get("content", "").strip()
+            result = retry_derestricted(
+                {"messages": messages, "max_tokens": 450, "temperature": 0.3},
+                result, model,
+            )
+            answer = (result["choices"][0]["message"].get("content") or "").strip()
             if answer:
                 return answer
         except (KeyError, IndexError, OSError, ValueError):

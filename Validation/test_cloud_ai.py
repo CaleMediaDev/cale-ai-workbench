@@ -28,6 +28,11 @@ ANSWER = {
         }
     ],
 }
+REFUSAL = {
+    **ANSWER,
+    "choices": [{"message": {"role": "assistant", "content": "I can't help with that."},
+                 "finish_reason": "stop"}],
+}
 REQUEST = {
     "model": cloud.LOCAL_MODEL,
     "messages": [{"role": "user", "content": "test"}],
@@ -70,6 +75,56 @@ class CloudTests(unittest.TestCase):
             cloud.Router().complete(REQUEST)
         self.assertEqual(post.call_count, 1)
         self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
+
+    def test_any_refusal_tries_installed_derestricted_model(self):
+        alias = cloud.CATALOG["gptoss"]["alias"]
+
+        def response(url, payload, **kwargs):
+            if url.endswith("/api/show"):
+                self.assertEqual(payload["model"], alias)
+                return {"capabilities": ["completion"]}
+            return REFUSAL if payload["model"] == cloud.LOCAL_MODEL else ANSWER
+
+        with patch.object(cloud, "post", side_effect=response) as post:
+            result = cloud.Router().complete(REQUEST)
+        self.assertEqual(result, ANSWER)
+        self.assertEqual(post.call_args.args[1]["model"], alias)
+
+    def test_tool_refusal_skips_derestricted_model_without_tools(self):
+        request = dict(REQUEST, tools=[{"type": "function", "function": {"name": "x"}}])
+        seen = []
+
+        def response(url, payload, **kwargs):
+            if url.endswith("/api/show"):
+                return {"capabilities": (["completion"] if payload["model"] == cloud.CATALOG["gptoss"]["alias"]
+                                         else ["completion", "tools"])}
+            seen.append(payload["model"])
+            return REFUSAL if payload["model"] == cloud.LOCAL_MODEL else ANSWER
+
+        with patch.object(cloud, "post", side_effect=response):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        self.assertEqual(seen, [cloud.LOCAL_MODEL, cloud.PERMISSIVE_MODEL])
+
+    def test_refusal_detection_accepts_policy_field_without_reinterpreting_tools(self):
+        self.assertTrue(cloud.is_refusal(REFUSAL))
+        self.assertTrue(cloud.is_refusal({"choices": [{"message": {"refusal": "blocked"}}]}))
+        self.assertFalse(cloud.is_refusal(ANSWER))
+        self.assertFalse(cloud.is_refusal({"choices": [{"message": {
+            "content": "I can't help with that.", "tool_calls": [{"id": "x"}]}}]}))
+        cloud.valid_completion({"choices": [{"message": {"refusal": "blocked"}}]})
+
+    def test_connected_chatgpt_refusal_retries_locally(self):
+        with (
+            patch.object(cloud, "task_size", return_value="deep"),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete", return_value=REFUSAL),
+            patch.object(cloud, "post", side_effect=[
+                {"capabilities": ["completion"]}, ANSWER,
+            ]) as post,
+        ):
+            result = cloud.Router().complete(REQUEST)
+        self.assertEqual(result, ANSWER)
+        self.assertEqual(post.call_args.args[1]["model"], cloud.CATALOG["gptoss"]["alias"])
 
     def test_candidate_tool_calls_use_verified_reasoning_setting(self):
         request = dict(

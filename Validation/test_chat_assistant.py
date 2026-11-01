@@ -71,6 +71,37 @@ def test_business_number_question_uses_live_lookup_path():
     assert chat_assistant.business_contact_query("What's Ross number?") == "Ross"
 
 
+def test_business_email_uses_live_lookup_and_rejects_placeholder():
+    assert chat_assistant.business_email_query("What's Pure Michigan Lawn Care's email?") == "Pure Michigan Lawn Care"
+    assert chat_assistant.business_email_query("What is the email address for Pure Michigan Lawn Care?") == "Pure Michigan Lawn Care"
+    checked = [{"source_url": "https://puremichiganlawncare.com/contact", "name_matching_domain": True}]
+    with (
+        patch("web_tools.find_business_email", return_value={"sources": [], "checked_pages": checked}) as lookup,
+        patch.object(chat_assistant, "local_answer") as model,
+    ):
+        answer = chat_assistant.answer_with_tools("What's Pure Michigan Lawn Care email?", [])
+    lookup.assert_called_once_with("Pure Michigan Lawn Care")
+    model.assert_not_called()
+    assert "couldn't verify a public email" in answer
+    assert checked[0]["source_url"] in answer
+
+
+def test_business_email_cites_source_and_discloses_conflicts():
+    source = {
+        "source_url": "https://puremichiganlawncare.com/contact",
+        "page_title": "Pure Michigan Lawn Care",
+        "name_matching_domain": True,
+        "email_addresses": ["office@puremichiganlawncare.com"],
+    }
+    answer = chat_assistant.business_email_answer("Pure Michigan Lawn Care", {"sources": [source]})
+    assert "office@puremichiganlawncare.com" in answer
+    assert source["source_url"] in answer
+    other = {**source, "source_url": "https://directory.example/listing", "email_addresses": ["help@directorymail.org"]}
+    conflict = chat_assistant.business_email_answer("Pure Michigan Lawn Care", {"sources": [source, other]})
+    assert "different email addresses" in conflict
+    assert "can't confirm which is current" in conflict
+
+
 def test_business_number_prefers_name_matching_site_and_discloses_conflicts():
     official = {
         "source_url": "https://puremichiganlawncare.com/contact",
@@ -100,6 +131,9 @@ def test_current_facts_use_web_but_stable_questions_stay_local():
     assert chat_assistant.needs_web("Search online for the latest release")
     assert not chat_assistant.needs_web("How do I multiply fractions?")
     assert chat_assistant.needs_web("Summarize https://example.org/")
+    assert chat_assistant.needs_web("What's Pure Michigan Lawn Care address?")
+    assert chat_assistant.needs_web("What's Acme's email?")
+    assert not chat_assistant.needs_web("What is my email address?")
 
 
 def test_supplied_public_url_is_read_without_search():
@@ -162,6 +196,36 @@ def test_quick_chat_disables_reasoning_trace_to_leave_room_for_answer():
         answer = chat_assistant.local_answer("Say hello", [])
     assert answer == "Hello!"
     assert post.call_args.args[1]["reasoning_effort"] == "none"
+
+
+def test_quick_chat_retries_model_refusal_with_derestricted():
+    rejected = {"choices": [{"message": {"content": "I cannot help with that."}}]}
+    accepted = {"choices": [{"message": {"content": "Here is the answer."}}]}
+    with (
+        patch("cloud_ai.post", return_value=rejected),
+        patch("cloud_ai.retry_derestricted", return_value=accepted) as retry,
+    ):
+        answer = chat_assistant.local_answer("Explain the task", [])
+    assert answer == "Here is the answer."
+    assert retry.call_count == 1
+
+
+def test_business_address_prefers_official_no_office_statement():
+    pages = [
+        {"url": "https://puremichiganlawncare.com/", "excerpt":
+         "Pure Michigan Lawn Care is a service-area business; no public office address."},
+        {"url": "https://directory.example/business", "excerpt": "123 Main St"},
+    ]
+    with (
+        patch.object(chat_assistant, "web_sources", return_value=(pages, [])),
+        patch("cloud_ai.post") as model,
+    ):
+        answer = chat_assistant.answer_from_web(
+            "What is Pure Michigan Lawn Care address?", preferred_business="Pure Michigan Lawn Care"
+        )
+    assert "no public office address" in answer
+    assert "puremichiganlawncare.com" in answer
+    model.assert_not_called()
 
 
 def test_search_leads_are_not_presented_as_verified_answer():

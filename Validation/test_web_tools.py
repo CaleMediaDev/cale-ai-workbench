@@ -7,6 +7,46 @@ import web_tools
 
 
 class BusinessContactTests(unittest.TestCase):
+    def test_business_name_does_not_match_a_similar_company(self):
+        self.assertFalse(web_tools.business_name_matches(
+            "Pure Michigan Lawn Care", "Pure Precision Lawn Care",
+            "https://pureprecisionlawncare.com/contact-us.html",
+        ))
+        self.assertTrue(web_tools.business_name_matches(
+            "Pure Michigan Lawn Care", "Pure Michigan Lawn Care listing",
+            "https://directory.example/listing",
+        ))
+
+    def test_public_emails_ignores_placeholder_and_examples(self):
+        page = {
+            "contact_links": ["mailto:Office%40RealBusiness.com?subject=Hello", "tel:+15551234567"],
+            "text": "[email protected] Use sample@example.com for demos.",
+        }
+        self.assertEqual(web_tools.public_emails(page), ["office@realbusiness.com"])
+
+    def test_business_email_uses_live_mailto_source(self):
+        search = {"results": [{
+            "url": "https://puremichiganlawncare.com/contact",
+            "title": "Pure Michigan Lawn Care contact",
+        }]}
+        page = {
+            "source_url": "https://puremichiganlawncare.com/contact",
+            "title": "Pure Michigan Lawn Care",
+            "retrieved_at": "2026-10-31T00:00:00Z",
+            "contact_links": ["mailto:hello@puremichiganlawncare.com"],
+            "text": "Contact Pure Michigan Lawn Care.",
+        }
+        with (
+            patch.object(web_tools, "search_web", return_value=search),
+            patch.object(web_tools, "read_webpage", return_value=page) as read,
+        ):
+            result = web_tools.find_business_email("Pure Michigan Lawn Care")
+        read.assert_called_once_with(
+            "https://puremichiganlawncare.com/contact",
+            question="Pure Michigan Lawn Care public email address",
+        )
+        self.assertEqual(result["sources"][0]["email_addresses"], ["hello@puremichiganlawncare.com"])
+
     def test_question_selects_late_live_page_passage(self):
         body = "Opening notes.\n" + "Ordinary material.\n" * 1400
         body += "The current warranty code is W-4817.\n"
