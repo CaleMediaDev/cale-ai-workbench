@@ -172,6 +172,19 @@ def test_business_number_prefers_name_matching_site_and_discloses_conflicts():
     assert "can't confirm which is current" in conflict
 
 
+def test_business_number_can_cite_labeled_visible_text():
+    page = {
+        "source_url": "https://puremichiganlawncare.com/contact",
+        "page_title": "Pure Michigan Lawn Care",
+        "phone_links": [],
+        "visible_numbers": ["(517) 258-1313"],
+        "name_matching_domain": True,
+    }
+    answer = chat_assistant.business_contact_answer("Pure Michigan Lawn Care", [page])
+    assert "(517) 258-1313" in answer
+    assert page["source_url"] in answer
+
+
 def test_current_facts_use_web_but_stable_questions_stay_local():
     assert chat_assistant.needs_web("What's the weather in Howell today?")
     assert chat_assistant.needs_web("Search online for the latest release")

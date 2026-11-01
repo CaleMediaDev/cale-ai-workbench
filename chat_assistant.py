@@ -239,7 +239,10 @@ def business_contact_answer(name: str, sources: list[dict]) -> str:
     """Prefer matching business domains and disclose conflicting live numbers."""
     records = []
     for source in sources[:3]:
-        for link in source.get("phone_links", [])[:3]:
+        links = source.get("phone_links", [])[:3] or [
+            "tel:" + number for number in source.get("visible_numbers", [])[:3]
+        ]
+        for link in links:
             parsed = display_phone(link)
             if parsed:
                 records.append((parsed[0], parsed[1], source))

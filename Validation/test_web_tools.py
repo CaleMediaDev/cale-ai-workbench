@@ -138,6 +138,30 @@ class BusinessContactTests(unittest.TestCase):
         self.assertEqual(result["sources"], [])
         self.assertIn("No matching", result["error"])
 
+    def test_labeled_visible_phone_without_tel_link_is_found(self):
+        search = {"results": [{
+            "url": "https://puremichiganlawncare.example/contact",
+            "title": "Pure Michigan Lawn Care contact",
+        }]}
+        page = {
+            "source_url": "https://puremichiganlawncare.example/contact",
+            "title": "Pure Michigan Lawn Care",
+            "retrieved_at": "2026-11-01T00:00:00Z",
+            "contact_links": [],
+            "text": "Phone: (517) 258-1313\nFax: (517) 555-0100\nReference 5172589999",
+        }
+        with (
+            patch.object(web_tools, "search_web", return_value=search),
+            patch.object(web_tools, "read_webpage", return_value=page),
+        ):
+            result = web_tools.find_business_contact("Pure Michigan Lawn Care")
+        self.assertEqual(result["sources"][0]["phone_links"], [])
+        self.assertEqual(result["sources"][0]["visible_numbers"], ["(517) 258-1313"])
+
+    def test_unlabeled_number_is_not_treated_as_contact(self):
+        self.assertEqual(web_tools.visible_phone_numbers("Reference: 5172581313"), [])
+        self.assertEqual(web_tools.visible_phone_numbers("Fax: (517) 258-1313"), [])
+
     def test_contact_page_on_same_business_site_beats_earlier_directory(self):
         search = {"results": [
             {"url": "https://directory.example/pure-michigan", "title": "Pure Michigan Lawn Care listing"},

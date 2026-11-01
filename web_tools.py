@@ -291,6 +291,32 @@ def name_matching_domain(name: str, url: str) -> bool:
     return len(brand) >= 5 and brand in labels[-2]
 
 
+VISIBLE_PHONE = re.compile(
+    r"(?<!\d)(?:\+?1[\s().-]*)?(?:\(\d{3}\)|\d{3})[\s().-]*\d{3}[\s.-]*\d{4}(?!\d)"
+)
+PHONE_LABEL = re.compile(r"\b(?:phone|telephone|tel|call|text|mobile|office|contact|fax)\b", re.I)
+
+
+def visible_phone_numbers(text: str) -> list[str]:
+    """Find US numbers printed beside a contact label, excluding fax lines.
+
+    Unlabeled numeric strings are not enough evidence for a business phone.
+    A real ``tel:`` link remains the stronger source when one is present.
+    """
+    found = []
+    for match in VISIBLE_PHONE.finditer(text):
+        context = text[max(0, match.start() - 80):match.start()]
+        labels = list(PHONE_LABEL.finditer(context))
+        if not labels or labels[-1].group().casefold() == "fax":
+            continue
+        digits = re.sub(r"\D", "", match.group())
+        if len(digits) == 10 or (len(digits) == 11 and digits.startswith("1")):
+            found.append(match.group().strip())
+        if len(found) >= 8:
+            break
+    return list(dict.fromkeys(found))
+
+
 def business_name_matches(name: str, title: str, url: str) -> bool:
     """Require every meaningful name word before attributing contact details."""
     if name_matching_domain(name, url):
@@ -423,7 +449,8 @@ def find_business_contact(name: str, locality: str = "") -> dict:
                 if link.lower().startswith("tel:")
             )
         )
-        if not phones:
+        visible = visible_phone_numbers(page.get("text", ""))
+        if not phones and not visible:
             continue
         text = page["text"]
         marker = re.search(r"\+?\d[\d\s().-]{7,}\d", text)
@@ -434,6 +461,7 @@ def find_business_contact(name: str, locality: str = "") -> dict:
                 "page_title": page["title"],
                 "retrieved_at": page["retrieved_at"],
                 "phone_links": phones[:8],
+                "visible_numbers": visible,
                 "page_excerpt": text[start : start + 400],
                 "name_matching_domain": name_matching_domain(name, page["source_url"]),
             }
@@ -449,7 +477,7 @@ def find_business_contact(name: str, locality: str = "") -> dict:
             "not prove a site belongs to the business. Cite the source and say when "
             "ownership or currency could not be confirmed."
         ),
-        "error": "No matching live page with a phone link was found."
+        "error": "No matching live page with a phone number was found."
         if not candidates
         else None,
     }
