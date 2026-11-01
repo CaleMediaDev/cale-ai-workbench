@@ -13,5 +13,3 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not package release files.' }
 & $csc /nologo /target:winexe /platform:x64 /out:$exe "/win32icon:$(Join-Path $project 'assets/cale-icon.ico')" "/resource:$zip,CaleAI.Bundle.zip" /r:System.Windows.Forms.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll (Join-Path $project 'InstallerBootstrap.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Could not build the Windows installer.' }
 Get-FileHash -Algorithm SHA256 $zip,$exe | Select-Object Path,Hash
-
-\n

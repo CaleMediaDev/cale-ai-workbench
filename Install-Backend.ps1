@@ -197,5 +197,3 @@ try {
  if ($setupState) { Write-SetupStatus 0 ("Setup needs attention: " + $_.Exception.Message) 'error' }
  throw
 } finally { $taskLock.ReleaseMutex(); $taskLock.Dispose() }
-
-\n
