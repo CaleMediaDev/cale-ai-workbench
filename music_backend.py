@@ -78,6 +78,24 @@ def _capable_for_background() -> bool:
     return probe.returncode == 0 and probe.stdout.strip() == "1"
 
 
+@contextmanager
+def _music_gpu_lease():
+    """Give ACE-Step GPU room and keep routine voice lines from reloading Ollama."""
+    marker = ROOT / "LongTasks" / f"music-gpu-active-{os.getpid()}.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+    try:
+        try:
+            from media_worker import unload_local_models
+
+            unload_local_models()
+        except (OSError, RuntimeError, KeyError, ValueError):
+            pass  # Music also works if Ollama was not running.
+        yield
+    finally:
+        marker.unlink(missing_ok=True)
+
+
 def prefetch() -> None:
     """Install the model quietly after launch on a suitable PC."""
     marker = ENGINE / ".cale-model-ready"
@@ -199,7 +217,7 @@ def start_server() -> None:
     raise RuntimeError("The local music engine did not start. See Media/music/server.log.")
 
 
-def generate_music(
+def _generate_music(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
     instrumental: bool = False, source_path: str = "",
     existing_task_id: str = "", on_task_submitted=None,
@@ -282,6 +300,19 @@ def generate_music(
             "source_path": str(source) if source else None,
         }
     raise TimeoutError("Music generation exceeded two hours.")
+
+
+def generate_music(
+    prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
+    instrumental: bool = False, source_path: str = "",
+    existing_task_id: str = "", on_task_submitted=None,
+) -> dict:
+    """Reserve GPU space, then generate or resume a local music request."""
+    with _music_gpu_lease():
+        return _generate_music(
+            prompt, output_path, lyrics, duration_seconds, instrumental,
+            source_path, existing_task_id, on_task_submitted,
+        )
 
 
 def _job_path(job_id: str) -> Path:

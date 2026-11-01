@@ -2,12 +2,21 @@
 
 import io
 import json
+import os
 from contextlib import nullcontext
 from unittest.mock import patch
 
 import pytest
 
 import music_backend
+
+REAL_GPU_LEASE = music_backend._music_gpu_lease
+
+
+@pytest.fixture(autouse=True)
+def avoid_touching_the_live_gpu():
+    with patch.object(music_backend, "_music_gpu_lease", return_value=nullcontext()):
+        yield
 
 
 def test_rejects_invalid_request_before_install(tmp_path):
@@ -141,6 +150,17 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
 def test_music_job_id_cannot_escape_job_directory():
     with pytest.raises(ValueError, match="Invalid local music job ID"):
         music_backend.music_job_status("../outside")
+
+
+def test_music_lease_unloads_cale_models_and_cleans_marker(tmp_path):
+    with patch.object(music_backend, "ROOT", tmp_path), patch(
+        "media_worker.unload_local_models"
+    ) as unload:
+        with REAL_GPU_LEASE():
+            marker = tmp_path / "LongTasks" / f"music-gpu-active-{os.getpid()}.json"
+            assert marker.is_file()
+        assert not marker.exists()
+    unload.assert_called_once()
 
 
 def test_interrupted_music_job_recovers_without_restarting_live_worker(tmp_path):

@@ -10,6 +10,7 @@ import re
 import subprocess
 import tempfile
 import textwrap
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -82,11 +83,22 @@ def rephrase_status(line, recent=(), required=()):
     This is only for app-authored status lines. Chat replies are spoken exactly
     as displayed. Model failure leaves the original, factual line intact.
     """
-    from cloud_ai import FAST_MODEL, post
-
     original = str(line).strip()
     if not original:
         return original
+    # A music render needs the GPU. Avoid silently reloading a multi-GB LLM
+    # just to decorate a spoken status line while ACE-Step is working.
+    lease_dir = ROOT / "LongTasks"
+    for marker in lease_dir.glob("music-gpu-active-*.json"):
+        try:
+            pid = int(marker.stem.rsplit("-", 1)[-1])
+            import psutil
+
+            if psutil.pid_exists(pid) and time.time() - marker.stat().st_mtime < 8000:
+                return original
+        except (OSError, ValueError):
+            continue
+    from cloud_ai import FAST_MODEL, post
     previous = [str(item).strip() for item in recent if str(item).strip()][-6:]
     facts = [str(item).strip() for item in required if str(item).strip()]
     messages = [

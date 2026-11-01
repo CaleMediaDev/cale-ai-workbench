@@ -43,6 +43,23 @@ class VoiceTests(unittest.TestCase):
             )
         self.assertEqual(spoken, "Recipe app. Checking files.")
 
+    def test_music_render_keeps_status_speech_from_reloading_gpu_model(self):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            state = root / "LongTasks"
+            state.mkdir()
+            (state / "music-gpu-active-123.json").write_text('{"pid":123}')
+            with patch.object(voice_assistant, "ROOT", root), patch(
+                "psutil.pid_exists", return_value=True
+            ), patch.dict(sys.modules, {"cloud_ai": SimpleNamespace()}):
+                self.assertEqual(
+                    voice_assistant.rephrase_status("Recipe app. Checking files."),
+                    "Recipe app. Checking files.",
+                )
+
     def test_listen_returns_trimmed_local_transcript(self):
         with patch.object(
             voice_assistant, "media_call", return_value={"text": "  Hello  "}
