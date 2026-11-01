@@ -450,6 +450,25 @@ def test_quick_chat_never_presents_cut_off_answer_as_complete():
     assert post.call_count == 4
 
 
+def test_quick_chat_times_out_without_blocking_later_messages_for_many_minutes():
+    clock = [0.0]
+    timeouts = []
+
+    def unavailable(_url, _payload, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        clock[0] += kwargs["timeout"] + 1
+        raise OSError("model stalled")
+
+    with (
+        patch.object(chat_assistant.time, "monotonic", side_effect=lambda: clock[0]),
+        patch("cloud_ai.post", side_effect=unavailable),
+    ):
+        with pytest.raises(RuntimeError, match="took too long"):
+            chat_assistant.local_answer("Are you there?", [])
+    assert sum(timeouts) <= 150
+    assert len(timeouts) == 2
+
+
 def test_quick_chat_retries_model_refusal_with_derestricted():
     rejected = {"choices": [{"message": {"content": "I cannot help with that."}}]}
     accepted = {"choices": [{"message": {"content": "Here is the answer."}}]}

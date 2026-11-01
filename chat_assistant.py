@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -689,16 +690,22 @@ def local_answer(question: str, history: list[dict], file_evidence: str = "") ->
         if item["role"] in ("user", "assistant")
     )
     messages.append({"role": "user", "content": question})
+    # This worker handles chat requests in order. A stalled model must not
+    # hold every later question hostage for several 180/360-second attempts.
+    deadline = time.monotonic() + 150
     truncated = False
-    for model in dict.fromkeys((FAST_MODEL, LOCAL_MODEL)):
-        for limit, timeout in ((2048, 180), (4096, 360)):
+    for model_index, model in enumerate(dict.fromkeys((FAST_MODEL, LOCAL_MODEL))):
+        for limit, cap in ((2048, 60 if model_index == 0 else 90), (4096, 90)):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
                 result = post(
                     "http://127.0.0.1:11434/v1/chat/completions",
                     {"model": model, "messages": messages, "stream": False,
                      "max_tokens": limit, "temperature": 0.3,
                      "reasoning_effort": "none"},
-                    timeout=timeout,
+                    timeout=min(cap, remaining),
                 )
                 # Ollama can return nonempty text with finish_reason=length.
                 # That is an unfinished answer, not a successful chat turn.
@@ -707,7 +714,7 @@ def local_answer(question: str, history: list[dict], file_evidence: str = "") ->
                     continue
                 result = retry_derestricted(
                     {"messages": messages, "max_tokens": limit, "temperature": 0.3},
-                    result, model,
+                    result, model, deadline=time.monotonic() + 120,
                 )
                 choice = result["choices"][0]
                 if choice.get("finish_reason") == "length":
@@ -723,5 +730,10 @@ def local_answer(question: str, history: list[dict], file_evidence: str = "") ->
         raise RuntimeError(
             "The answer is too long for one chat reply. Ask me to make it a task "
             "so I can finish and save the whole result."
+        )
+    if time.monotonic() >= deadline:
+        raise RuntimeError(
+            "Local chat took too long. I stopped this answer so later messages "
+            "can continue. Ask me to make it a task if it needs more time."
         )
     raise RuntimeError("Local chat is still getting ready. Try again after the model finishes installing.")

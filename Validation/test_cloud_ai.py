@@ -507,6 +507,30 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(result, ANSWER)
         self.assertEqual(post.call_args.args[1]["model"], alias)
 
+    def test_quick_chat_refusal_retry_has_a_shared_deadline(self):
+        clock = [0.0]
+        completions = []
+
+        def response(url, _payload, **kwargs):
+            if url.endswith("/api/show"):
+                clock[0] += 1
+                return {"capabilities": ["completion", "tools"]}
+            completions.append(kwargs["timeout"])
+            clock[0] += kwargs["timeout"] + 1
+            raise OSError("model timed out")
+
+        with (
+            patch.object(cloud.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(cloud, "DERESTRICTED_PROFILES", ("permissive_small", "permissive")),
+            patch.object(cloud, "candidate_approved", return_value=True),
+            patch.object(cloud, "post", side_effect=response),
+        ):
+            self.assertEqual(cloud.retry_derestricted(
+                REQUEST, REFUSAL, cloud.LOCAL_MODEL, deadline=120
+            ), REFUSAL)
+        self.assertEqual(len(completions), 1)
+        self.assertLessEqual(completions[0], 120)
+
     def test_derestricted_retry_scales_with_task_size(self):
         small = cloud.CATALOG["permissive_small"]["alias"]
         large = cloud.CATALOG["permissive"]["alias"]

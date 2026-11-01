@@ -454,7 +454,7 @@ def is_refusal(result):
         return False
 
 
-def retry_derestricted(payload, result, original_model=""):
+def retry_derestricted(payload, result, original_model="", deadline=None):
     """Retry any rejected completion with installed local derestricted models.
 
     Models without tool capability are only used for text requests. The
@@ -468,6 +468,8 @@ def retry_derestricted(payload, result, original_model=""):
         else DERESTRICTED_PROFILES
     )
     for profile in profiles:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         item = CATALOG.get(profile)
         if not item or not candidate_approved(item):
             continue
@@ -475,7 +477,8 @@ def retry_derestricted(payload, result, original_model=""):
         if model == original_model:
             continue
         try:
-            info = post("http://127.0.0.1:11434/api/show", {"model": model}, timeout=10)
+            probe_timeout = min(10, max(0.1, deadline - time.monotonic())) if deadline else 10
+            info = post("http://127.0.0.1:11434/api/show", {"model": model}, timeout=probe_timeout)
             if info.get("remote_host") or info.get("remote_model"):
                 continue
             if payload.get("tools") and "tools" not in info.get("capabilities", []):
@@ -484,8 +487,12 @@ def retry_derestricted(payload, result, original_model=""):
             local.pop("stream_options", None)
             if item.get("tool_reasoning_effort"):
                 local["reasoning_effort"] = item["tool_reasoning_effort"]
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            response_timeout = min(1800, max(0.1, deadline - time.monotonic())) if deadline else 1800
             attempt = valid_completion(
-                post("http://127.0.0.1:11434/v1/chat/completions", local, timeout=1800), payload
+                post("http://127.0.0.1:11434/v1/chat/completions", local,
+                     timeout=response_timeout), payload
             )
             if not is_refusal(attempt):
                 record("local", "A model refused; an installed derestricted model answered.", model)
