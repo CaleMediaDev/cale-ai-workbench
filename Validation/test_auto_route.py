@@ -136,6 +136,12 @@ class AutoRouteTests(unittest.TestCase):
             "role": "assistant",
             "tool_calls": [{"function": {"name": "mcp__toolbox__toolbox_call"}}],
         })
+        self.assertEqual(task_size(messages), "quick")
+        for _ in range(5):
+            messages.append({
+                "role": "assistant",
+                "tool_calls": [{"function": {"name": "mcp__toolbox__toolbox_schema"}}],
+            })
         self.assertEqual(task_size(messages), "balanced")
 
     def test_ranking_respects_available_model_sizes(self):

@@ -26,6 +26,22 @@ def test_music_tool_is_discoverable_and_callable_from_toolbox_search():
     assert result["path"] == "song.mp3"
 
 
+def test_audio_stem_tool_is_discoverable_and_callable():
+    found = toolbox_mcp.toolbox_search("separate vocals instrumental")
+    assert any(tool["name"] == "local.separate_music" for tool in found["tools"])
+    schema = toolbox_mcp.toolbox_schema("local.separate_music")
+    assert schema["inputSchema"]["required"] == ["source_path", "output_dir"]
+
+    async def fake_separation(**arguments):
+        return {"files": [arguments["output_dir"] + "/vocals.wav"]}
+
+    with patch.object(toolbox_mcp, "separate_music", fake_separation):
+        result = asyncio.run(toolbox_mcp.toolbox_call(
+            "local.separate_music", json.dumps({"source_path": "song.mp3", "output_dir": "stems"})
+        ))
+    assert result["files"] == ["stems/vocals.wav"]
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):

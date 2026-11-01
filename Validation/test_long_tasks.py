@@ -93,6 +93,18 @@ class LongTaskTests(unittest.TestCase):
     def item(self):
         return task_module.projects()[0]
 
+    def test_new_project_has_recovery_notes_without_replacing_existing_notes(self):
+        notes = self.base / "project" / ".local-ai"
+        self.assertIn("not written milestones", (notes / "PLAN.md").read_text())
+        self.assertIn("No work has been completed", (notes / "PROGRESS.md").read_text())
+        existing = self.base / "other" / ".local-ai"
+        existing.mkdir(parents=True)
+        (existing / "PLAN.md").write_text("Keep this plan", encoding="utf-8")
+        (existing / "PROGRESS.md").write_text("Keep this progress", encoding="utf-8")
+        task_module.add_project("reuse", str(existing.parent), "Continue")
+        self.assertEqual((existing / "PLAN.md").read_text(), "Keep this plan")
+        self.assertEqual((existing / "PROGRESS.md").read_text(), "Keep this progress")
+
     def verify_script(self, text):
         (Path(self.item()["folder"]) / ".local-ai/verify.ps1").write_text(
             text, encoding="utf-8"

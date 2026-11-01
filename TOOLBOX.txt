@@ -71,6 +71,9 @@ tools also appear in toolbox_search as local.make_music, local.start_music_job,
 local.music_job_status and local.cover_music; read toolbox_schema and call them
 through toolbox_call when discovering tools by purpose. Do not use make_image
 for audio requests.
+separate_music: split a local song into vocal and instrumental WAV tracks for
+karaoke or remixing. It downloads its own local model on first use. Find it as
+local.separate_music in toolbox_search; give it a source file and empty output folder.
 see_image: describe a photo, screenshot or chart with local Qwen vision.
 hear_audio: transcribe a local audio/video file with Faster-Whisper base.
 watch_video: inspect up to eight sampled frames and optionally transcribe audio.

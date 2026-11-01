@@ -60,6 +60,12 @@ LOCAL_CATALOG = {
             "duration_seconds": {"type": "integer"},
         }, "required": ["source_path", "prompt", "output_path"]},
     },
+    "local.separate_music": {
+        "description": "Separate a local song into vocals and instrumental tracks for karaoke, remixing, or editing. Installs a local Audio Separator model on first use; no account or cloud AI needed.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_path": {"type": "string"}, "output_dir": {"type": "string"},
+        }, "required": ["source_path", "output_dir"]},
+    },
 }
 
 
@@ -241,6 +247,7 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "local.cover_music": cover_music,
             "local.start_music_job": start_music_job,
             "local.music_job_status": music_job_status,
+            "local.separate_music": separate_music,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -527,6 +534,17 @@ def music_job_status(job_id: str) -> dict:
     import music_backend
 
     return music_backend.music_job_status(job_id)
+
+
+@server.tool()
+async def separate_music(source_path: str, output_dir: str) -> dict:
+    """Split local audio into vocal and instrumental files without a cloud service."""
+    import music_stems
+
+    return await asyncio.wait_for(
+        asyncio.to_thread(music_stems.separate_stems, source_path, output_dir),
+        timeout=7500,
+    )
 
 
 @server.tool()

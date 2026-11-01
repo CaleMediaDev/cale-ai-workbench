@@ -349,7 +349,22 @@ def add_project(title, folder, brief, waiting_for_setup=False):
                 "That folder overlaps another task. Give the existing task more instructions in the chat."
             )
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / ".local-ai").mkdir(exist_ok=True)
+    notes = folder / ".local-ai"
+    notes.mkdir(exist_ok=True)
+    # New workers are asked to read these files before acting. Seed them so a
+    # first run can distinguish a fresh project from a failed file read.
+    plan = notes / "PLAN.md"
+    if not plan.exists():
+        plan.write_text(
+            "# Plan\n\nThe worker has not written milestones yet. Read the original request and user follow-ups, then replace this note with concrete acceptance checks.\n",
+            encoding="utf-8",
+        )
+    progress = notes / "PROGRESS.md"
+    if not progress.exists():
+        progress.write_text(
+            "# Progress\n\nNo work has been completed yet. Record verified milestones, the current problem, and the next step here.\n",
+            encoding="utf-8",
+        )
     project_memory.initialize(folder)
     rules = folder / "AGENTS.md"
     if not rules.exists():
