@@ -727,9 +727,15 @@ class Router:
                         3600 if exc.code in (401, 402, 403, 429) else 120)
                 except Exception:
                     self.provider_cooldowns[provider] = time.time() + 120
+        # A long balanced task can be slower than a deep task when its local
+        # model repeatedly prefills a large context. Use the connected free
+        # route when measured local throughput is poor, then fall back locally.
+        slow_long_context = (
+            size == "balanced" and prompt_estimate >= 16_000 and local_speed < 20
+        ) if profile == "main" and not offline_mode else False
         # Prefer an eligible direct free-plan account before spending the
-        # smaller shared OpenRouter free allowance on a demanding request.
-        if key and size == "deep" and self.reserve_free_request():
+        # smaller shared OpenRouter free allowance on demanding work.
+        if key and (size == "deep" or slow_long_context) and self.reserve_free_request():
             openrouter_attempted = True
             try:
                 result = valid_completion(post(

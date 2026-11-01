@@ -350,6 +350,41 @@ class CloudTests(unittest.TestCase):
         reserve.assert_not_called()
         post.assert_not_called()
 
+    def test_slow_long_balanced_task_tries_connected_free_route(self):
+        self.connected()
+        request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
+        with (patch.object(cloud, "task_size", return_value="balanced"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("usage_history.recent_local_speed", return_value=5),
+              patch.object(cloud.Router, "reserve_free_request", return_value=True),
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        self.assertTrue(post.call_args.args[0].startswith(cloud.API))
+
+    def test_fast_balanced_task_stays_local_even_with_free_route(self):
+        self.connected()
+        request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
+        with (patch.object(cloud, "task_size", return_value="balanced"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("usage_history.recent_local_speed", return_value=35),
+              patch.object(cloud.Router, "reserve_free_request") as reserve,
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        reserve.assert_not_called()
+        self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
+
+    def test_slow_balanced_task_falls_back_to_local_after_free_error(self):
+        self.connected()
+        request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
+        with (patch.object(cloud, "task_size", return_value="balanced"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("usage_history.recent_local_speed", return_value=5),
+              patch.object(cloud.Router, "reserve_free_request", return_value=True),
+              patch.object(cloud, "post", side_effect=[OSError("cloud unavailable"), ANSWER]) as post):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        self.assertTrue(post.call_args_list[0].args[0].startswith(cloud.API))
+        self.assertTrue(post.call_args_list[1].args[0].startswith("http://127.0.0.1:11434/"))
+
     def test_credentials_encrypted_for_windows_user(self):
         self.connected()
         self.assertNotIn(
