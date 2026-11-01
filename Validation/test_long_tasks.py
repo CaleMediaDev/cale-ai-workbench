@@ -525,6 +525,52 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("Use SQLite", (self.base / "project/.local-ai/USER-REQUESTS.md").read_text())
         self.assertTrue(any(c.args[0] == "unblock" for c in board.call_args_list))
 
+    def test_goal_turn_budget_rolls_to_new_worker_after_old_run_exits(self):
+        task_module.update(self.pid, card="old-card", status="working")
+        snapshot = {
+            "task": {"status": "blocked"},
+            "events": [{"kind": "blocked", "payload": {
+                "reason": "Goal-mode worker exhausted its turn budget (1000/1000) without completing the task."
+            }}],
+            "runs": [{"started_at": 100, "ended_at": 0}],
+        }
+        with patch.object(task_module, "board", return_value=snapshot) as board:
+            task_module.advance_project(self.item())
+            self.assertEqual(self.item()["card"], "old-card")
+            self.assertEqual(self.item()["status"], "working")
+            board.assert_called_once()
+            snapshot["runs"][0]["ended_at"] = time.time()
+            task_module.advance_project(self.item())
+            self.assertEqual(self.item()["card"], "old-card")
+            snapshot["runs"][0]["ended_at"] = time.time() - 200
+            task_module.advance_project(self.item())
+        self.assertEqual(self.item()["card"], "")
+        self.assertEqual(self.item()["generation"], 1)
+        self.assertEqual(self.item()["phase"], "build")
+        self.assertEqual(self.item()["status"], "working")
+        self.assertEqual(board.call_args.args, ("archive", "old-card"))
+        with patch.object(task_module, "board", return_value={"id": "new-card"}) as create:
+            task_module.advance_project(self.item())
+        self.assertEqual(self.item()["card"], "new-card")
+        args = create.call_args.args
+        self.assertIn("local-long-", args[args.index("--idempotency-key") + 1])
+        self.assertIn("Continuing from saved progress", Path(args[args.index("--body-file") + 1]).read_text())
+
+    def test_other_blocks_do_not_roll_over_automatically(self):
+        task_module.update(self.pid, card="old-card", status="working")
+        snapshot = {
+            "task": {"status": "blocked"},
+            "events": [
+                {"kind": "blocked", "payload": {"reason": "Goal-mode worker exhausted its turn budget (1000/1000) without completing the task."}},
+                {"kind": "unblocked", "payload": {}},
+                {"kind": "blocked", "payload": {"reason": "Need a decision about the design."}},
+            ],
+        }
+        with patch.object(task_module, "board", return_value=snapshot):
+            task_module.advance_project(self.item())
+        self.assertEqual(self.item()["status"], "needs_input")
+        self.assertEqual(self.item()["generation"], 0)
+
     def test_many_followups_remain_durable_without_filling_worker_context(self):
         for number in range(12):
             task_module.request(self.pid, "note", f"Requirement {number}: " + "detail " * 400)

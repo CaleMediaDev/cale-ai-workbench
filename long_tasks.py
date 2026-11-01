@@ -1257,6 +1257,19 @@ def tick():
                     log.write(time.ctime() + f"\nTask {p['id']}: " + traceback.format_exc() + "\n")
 
 
+def goal_budget_exhausted(snapshot):
+    """Distinguish Hermes' automatic turn-budget block from a real blocker."""
+    if snapshot.get("task", {}).get("status") != "blocked":
+        return False
+    for event in reversed(snapshot.get("events", [])):
+        if event.get("kind") in ("blocked", "unblocked", "block_loop_detected"):
+            reason = str((event.get("payload") or {}).get("reason", ""))
+            return event["kind"] == "blocked" and reason.startswith(
+                "Goal-mode worker exhausted its turn budget "
+            )
+    return False
+
+
 def advance_project(p):
     """Advance one task; failures are isolated by the supervisor's tick."""
     image_id = image_job_id(p)
@@ -1394,6 +1407,21 @@ def advance_project(p):
             )
             return
         handle_handoff(p, task)
+    elif task["status"] == "blocked" and goal_budget_exhausted(snapshot):
+        # Hermes' goal loop deliberately blocks after its turn budget. That is
+        # a worker boundary, not a request for human judgment. Start another
+        # generation from the plan, progress, and user follow-ups on disk.
+        runs = snapshot.get("runs", [])
+        if any(run.get("started_at") and not run.get("ended_at") for run in runs):
+            update(p["id"], status="working", detail="Worker budget reached. Waiting for the old run to exit.")
+            return
+        ended = max((run.get("ended_at") or 0 for run in runs), default=0)
+        if ended and time.time() - ended < 150:
+            update(p["id"], status="working", detail="Worker budget reached. Waiting for files to settle.")
+            return
+        board("archive", p["card"])
+        update(p["id"], card="", generation=p["generation"] + 1,
+               status="working", detail="Worker turn budget reached. Continuing from saved progress.")
     elif task["status"] in ("blocked", "triage", "archived"):
         comments = snapshot.get("comments", [])
         update(
