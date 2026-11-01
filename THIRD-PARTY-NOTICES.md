@@ -21,6 +21,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | ast-grep | https://github.com/ast-grep/ast-grep |
 | avoid-ai-design scanner (MIT; license bundled under `vendor/avoid-ai-design/LICENSE`) | https://github.com/funboy322/avoid-ai-design |
 | Diffusers and LCM Dreamshaper v7 | https://huggingface.co/SimianLuo/LCM_Dreamshaper_v7 |
+| Segmind SSD-1B (Apache-2.0 image model; downloaded on supported PCs) | https://huggingface.co/segmind/SSD-1B |
 | Faster-Whisper and PyAV | https://github.com/SYSTRAN/faster-whisper |
 | Qwen2.5-0.5B-Instruct training base | https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct |
 | PyTorch | https://pytorch.org/ |

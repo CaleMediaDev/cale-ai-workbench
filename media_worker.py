@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -47,7 +48,7 @@ def unload_local_models():
 
 
 def generate_image(prompt, output_path, width=512, height=512, seed=0):
-    """Create a local image in a new file using the installed diffusion model."""
+    """Use the stronger local model when installed, otherwise keep LCM available."""
     import torch
     from diffusers import DiffusionPipeline
 
@@ -57,18 +58,24 @@ def generate_image(prompt, output_path, width=512, height=512, seed=0):
     unload_local_models()
     started = time.monotonic()
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    enhanced = (
+        device == "cuda"
+        and torch.cuda.get_device_properties(0).total_memory >= 8 * 1024**3
+        and image_upgrade_complete()
+    )
+    model_path = MEDIA / "models" / ("ssd-1b" if enhanced else "lcm")
     pipeline = DiffusionPipeline.from_pretrained(
-        str(MEDIA / "models/lcm"),
-        local_files_only=True,
-        torch_dtype=torch.float32,
-        use_safetensors=True,
+        str(model_path), local_files_only=True,
+        torch_dtype=torch.float16 if enhanced and device == "cuda" else torch.float32,
+        variant="fp16" if enhanced else None, use_safetensors=True,
     )
     pipeline.to(device)
     pipeline.set_progress_bar_config(disable=True)
     result = pipeline(
         prompt=prompt,
-        num_inference_steps=4,
-        guidance_scale=8.0,
+        negative_prompt="blurry, distorted, poor quality" if enhanced else None,
+        num_inference_steps=25 if enhanced else 4,
+        guidance_scale=9.0 if enhanced else 8.0,
         width=width,
         height=height,
         generator=torch.Generator(device=device).manual_seed(int(seed)),
@@ -86,8 +93,8 @@ def generate_image(prompt, output_path, width=512, height=512, seed=0):
         "height": height,
         "device": device,
         "elapsed_seconds": round(time.monotonic() - started, 2),
-        "model": "LCM Dreamshaper v7",
-        "steps": 4,
+        "model": "Segmind SSD-1B" if enhanced else "LCM Dreamshaper v7",
+        "steps": 25 if enhanced else 4,
         "seed": seed,
     }
 
@@ -450,7 +457,10 @@ def download_models():
     from huggingface_hub import snapshot_download
 
     models = json.loads((ROOT / "media-models.json").read_text())
+    installed = []
     for index, (name, item) in enumerate(models.items()):
+        if name == "ssd-1b" and not image_upgrade_supported():
+            continue
         path = ROOT / "LongTasks/install-progress.json"
         path.parent.mkdir(exist_ok=True)
         temporary = path.with_suffix(f".{os.getpid()}.tmp")
@@ -479,13 +489,57 @@ def download_models():
                 allow_patterns=item["patterns"],
                 max_workers=4,
             )
-    return {"installed": list(models)}
+        installed.append(name)
+    return {"installed": installed}
+
+
+def image_upgrade_complete():
+    """Ignore interrupted downloads until all required fp16 weights exist."""
+    folder = MEDIA / "models/ssd-1b"
+    return all((folder / name).is_file() for name in (
+        "model_index.json",
+        "unet/diffusion_pytorch_model.fp16.safetensors",
+        "vae/diffusion_pytorch_model.fp16.safetensors",
+        "text_encoder/model.fp16.safetensors",
+        "text_encoder_2/model.fp16.safetensors",
+    ))
+
+
+def image_upgrade_supported():
+    """Reserve the larger image model for PCs that can run and store it."""
+    import torch
+
+    if image_upgrade_complete():
+        return True
+    MEDIA.mkdir(exist_ok=True)
+    return (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_properties(0).total_memory >= 8 * 1024**3
+        and shutil.disk_usage(MEDIA).free >= 8 * 1024**3
+    )
+
+
+def download_image_upgrade():
+    """Fill a pinned model snapshot after an app update, without an account."""
+    from huggingface_hub import snapshot_download
+
+    if not image_upgrade_supported():
+        return {"installed": False, "reason": "GPU memory or disk space is insufficient"}
+    item = json.loads((ROOT / "media-models.json").read_text())["ssd-1b"]
+    snapshot_download(
+        item["repo"], revision=item["revision"],
+        local_dir=str(MEDIA / "models/ssd-1b"),
+        allow_patterns=item["patterns"], max_workers=4,
+    )
+    return {"installed": True, "model": "Segmind SSD-1B"}
 
 
 if __name__ == "__main__":
     try:
         if "--download-models" in sys.argv:
             result = download_models()
+        elif "--download-image-upgrade" in sys.argv:
+            result = download_image_upgrade()
         elif "--download-voice" in sys.argv:
             result = download_natural_voice()
         else:

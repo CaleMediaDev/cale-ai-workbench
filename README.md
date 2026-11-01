@@ -62,7 +62,7 @@ This is an **early preview**, with an unsigned Windows installer. It has been de
 
 The agent's terminal can modify files with your Windows permissions. Choose a specific project folder and keep normal backups. It asks for review; passing tests does not prove an app is correct or production-ready.
 
-The image model uses LCM Dreamshaper v7; speech recognition uses Faster-Whisper base; the training base is Qwen2.5-0.5B-Instruct. The local image generator and voice tools are separate from the main coding model. Camera capture is off by default. When a task requests camera use, its card offers a one-hour permission button. Video analysis samples up to eight frames, so it can miss activity between them. Training does not let the assistant continuously learn from the camera or alter the main coding model.
+Image generation uses Segmind SSD-1B when the PC has at least 8 GB of GPU memory and enough free disk space; it downloads automatically in the background after an update. Smaller PCs keep LCM Dreamshaper v7. Speech recognition uses Faster-Whisper base; the training base is Qwen2.5-0.5B-Instruct. The local image generator and voice tools are separate from the main coding model. Camera capture is off by default. When a task requests camera use, its card offers a one-hour permission button. Video analysis samples up to eight frames, so it can miss activity between them. Training does not let the assistant continuously learn from the camera or alter the main coding model.
 
 ## Long tasks
 

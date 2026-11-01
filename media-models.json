@@ -23,6 +23,25 @@
       "feature_extractor/*.json"
     ]
   },
+  "ssd-1b": {
+    "repo": "segmind/SSD-1B",
+    "revision": "60987f37e94cd59c36b1cba832b9f97b57395a10",
+    "min_cuda_gb": 8,
+    "patterns": [
+      "model_index.json",
+      "scheduler/*.json",
+      "tokenizer/*",
+      "tokenizer_2/*",
+      "unet/*.json",
+      "unet/*.fp16.safetensors",
+      "vae/*.json",
+      "vae/*.fp16.safetensors",
+      "text_encoder/*.json",
+      "text_encoder/*.fp16.safetensors",
+      "text_encoder_2/*.json",
+      "text_encoder_2/*.fp16.safetensors"
+    ]
+  },
   "whisper": {
     "repo": "Systran/faster-whisper-base",
     "revision": "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66",

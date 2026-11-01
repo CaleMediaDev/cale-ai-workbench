@@ -1652,6 +1652,29 @@ def gui():
 
     threading.Thread(target=check_updates, daemon=True).start()
 
+    def check_image_upgrade():
+        """Download the optional local image model after existing installs update."""
+        media_python = ROOT / "Media/python/Scripts/python.exe"
+        model_folder = ROOT / "Media/models/ssd-1b"
+        weights = (
+            "model_index.json", "unet/diffusion_pytorch_model.fp16.safetensors",
+            "vae/diffusion_pytorch_model.fp16.safetensors",
+            "text_encoder/model.fp16.safetensors",
+            "text_encoder_2/model.fp16.safetensors",
+        )
+        if not media_python.is_file() or all((model_folder / name).is_file() for name in weights):
+            return
+        try:
+            subprocess.run(
+                [str(media_python), str(ROOT / "media_worker.py"), "--download-image-upgrade"],
+                cwd=ROOT, capture_output=True, timeout=3600,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # Image generation still has the smaller installed model.
+
+    threading.Thread(target=check_image_upgrade, daemon=True).start()
+
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
     voice_busy = threading.Event()
@@ -2176,53 +2199,21 @@ def gui():
                     else f"{number / 1_000:.1f}k" if number >= 1_000
                     else str(round(number)))
 
-        if period == "model":
-            models = summary["models"]
-            maximum = max((item["tokens"] for item in models), default=0)
-            columns = 2 if len(models) > 5 and width >= 720 else 1
-            column_width = width / columns
-            rows = (len(models) + columns - 1) // columns
-            model_height = max(135, rows * 31 + 12)
-            if int(usage_canvas["height"]) != model_height:
-                usage_canvas.configure(height=model_height)
-            for index, item in enumerate(models):
-                x = (index % columns) * column_width
-                y = 17 + (index // columns) * 31
-                label = item["model"]
-                limit = 30 if columns == 1 else 18
-                if len(label) > limit:
-                    label = label[:limit - 1] + "…"
-                bar_left = x + (min(230, column_width * 0.36) if columns == 1 else 155)
-                bar_right = x + column_width - 84
-                usage_canvas.create_text(
-                    x + 8, y, anchor="w", text=label, fill=text,
-                    font=("Segoe UI", 9),
-                )
-                usage_canvas.create_rectangle(
-                    bar_left, y - 6, bar_right, y + 6,
-                    fill="#273a55", outline="",
-                )
-                usage_canvas.create_rectangle(
-                    bar_left, y - 6,
-                    bar_left + (bar_right - bar_left) * item["tokens"] / maximum,
-                    y + 6, fill="#51e5d0" if index == 0 else "#8291f4",
-                    outline="",
-                )
-                usage_canvas.create_text(
-                    x + column_width - 7, y, anchor="e", text=f"{item['tokens']:,}",
-                    fill=muted, font=("Segoe UI", 9, "bold"),
-                )
-            if not models:
-                usage_canvas.create_text(
-                    width / 2, 68, text="Model totals appear after the next AI response",
-                    fill=muted, font=("Segoe UI", 11),
-                )
-            return
-        if int(usage_canvas["height"]) != 135:
-            usage_canvas.configure(height=135)
+        models = summary["models"]
+        # Keep every model and its lifetime total on the chart itself. The
+        # legend grows with the number of models; it never gets a scrollbar.
+        legend_columns = 3 if width >= 850 else 2 if width >= 560 else 1
+        legend_rows = (len(models) + legend_columns - 1) // legend_columns
+        chart_height = 158 + max(1, legend_rows) * 23
+        if int(usage_canvas["height"]) != chart_height:
+            usage_canvas.configure(height=chart_height)
+        colors = (
+            "#51e5d0", "#8291f4", "#ffbf69", "#f77bac", "#83d188",
+            "#70bbff", "#d2a5ff", "#ff8b72", "#e5d36b", "#8cd5cc",
+        )
         points = summary["points"]
         maximum = max((point["tokens"] for point in points), default=0)
-        left, right, top, bottom = 52, width - 24, 24, 106
+        left, right, top, bottom = 52, width - 24, 22, 108
         for fraction in (0, 0.5, 1):
             y = bottom - (bottom - top) * fraction
             usage_canvas.create_line(left, y, right, y, fill="#31415d", dash=(2, 5))
@@ -2234,30 +2225,55 @@ def gui():
                 text="Your token history will appear after the next AI response",
                 fill=muted, font=("Segoe UI", 11),
             )
-            return
-        if not points:
-            return
-        column = (right - left) / max(len(points) - 1, 1)
-        coordinates = []
-        for index, point in enumerate(points):
-            center = left + column * index
-            y = bottom - (bottom - top) * point["tokens"] / maximum
-            coordinates.extend((center, y))
-            if index % max(1, (len(points) - 1) // 4) == 0 or index == len(points) - 1:
-                label = point["date"][5:] if usage_period.get() == "day" else point["date"][2:]
-                usage_canvas.create_text(center, 122, text=label, fill=muted,
-                                         font=("Segoe UI", 9))
-        area = [left, bottom, *coordinates, right, bottom]
-        usage_canvas.create_polygon(*area, fill="#1b3b50", outline="")
-        usage_canvas.create_line(*coordinates, fill="#1b8b8c", width=7, smooth=True)
-        usage_canvas.create_line(*coordinates, fill="#51e5d0", width=3, smooth=True)
-        usage_canvas.create_oval(coordinates[-2] - 5, coordinates[-1] - 5,
-                                 coordinates[-2] + 5, coordinates[-1] + 5,
-                                 fill="#ad9cff", outline=card, width=2)
+        elif points:
+            slot = (right - left) / len(points)
+            bar_width = max(7, min(28, slot * 0.62))
+            for index, point in enumerate(points):
+                center = left + slot * (index + 0.5)
+                y = bottom
+                for model_index, item in enumerate(models):
+                    tokens = point["models"].get(item["model"], 0)
+                    if not tokens:
+                        continue
+                    next_y = y - (bottom - top) * tokens / maximum
+                    usage_canvas.create_rectangle(
+                        center - bar_width / 2, next_y, center + bar_width / 2, y,
+                        fill=colors[model_index % len(colors)], outline="",
+                    )
+                    y = next_y
+                if index % max(1, len(points) // 5) == 0 or index == len(points) - 1:
+                    label = point["date"][5:] if period == "day" else point["date"][2:]
+                    usage_canvas.create_text(center, 122, text=label, fill=muted,
+                                             font=("Segoe UI", 9))
         usage_canvas.create_text(
             right, 8, anchor="ne", text=f"Peak {maximum:,} tokens",
             fill=muted, font=("Segoe UI", 9),
         )
+        column_width = width / legend_columns
+        for index, item in enumerate(models):
+            x = (index % legend_columns) * column_width + 9
+            y = 152 + (index // legend_columns) * 23
+            usage_canvas.create_rectangle(
+                x, y - 5, x + 10, y + 5,
+                fill=colors[index % len(colors)], outline="",
+            )
+            label_limit = max(8, int((column_width - 110) / 7))
+            label = item["model"]
+            if len(label) > label_limit:
+                label = label[:label_limit - 1] + "…"
+            usage_canvas.create_text(
+                x + 16, y, anchor="w", text=label, fill=text,
+                font=("Segoe UI", 9),
+            )
+            usage_canvas.create_text(
+                x + column_width - 18, y, anchor="e", text=f"{item['tokens']:,}",
+                fill=muted, font=("Segoe UI", 9, "bold"),
+            )
+        if not models:
+            usage_canvas.create_text(
+                width / 2, 152, text="Model totals will appear here too",
+                fill=muted, font=("Segoe UI", 9),
+            )
 
     def set_usage_period(value):
         usage_period.set(value)
@@ -2268,9 +2284,6 @@ def gui():
     ).pack(side="right")
     ttk.Button(
         usage_header, text="Daily", command=lambda: set_usage_period("day")
-    ).pack(side="right", padx=(0, 5))
-    ttk.Button(
-        usage_header, text="Models", command=lambda: set_usage_period("model")
     ).pack(side="right", padx=(0, 5))
     usage_canvas.bind("<Configure>", lambda _: draw_usage())
 

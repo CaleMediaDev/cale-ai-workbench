@@ -20,7 +20,9 @@ def test_daily_monthly_and_lifetime_totals(tmp_path, monkeypatch):
     monthly = usage_history.history("month")
     assert daily["total"] == monthly["total"] == 200
     assert daily["points"][-1]["tokens"] == 200
+    assert daily["points"][-1]["models"] == {"m": 150, "cloud": 50}
     assert monthly["points"][-1]["tokens"] == 200
+    assert monthly["points"][-1]["models"] == {"m": 150, "cloud": 50}
     assert daily["current_speed"] == 5
     assert daily["top_speed"] == 5
     assert daily["models"] == [

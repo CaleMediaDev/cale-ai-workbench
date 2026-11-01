@@ -99,15 +99,24 @@ def history(period: str = "day") -> dict:
         rows = conn.execute(
             f"SELECT {expression}, SUM(total_tokens) FROM usage_events GROUP BY 1"
         ).fetchall()
+        model_rows = conn.execute(
+            f"SELECT {expression}, "
+            "COALESCE(NULLIF(TRIM(model),''), '[' || source || '] unnamed model'), "
+            "SUM(total_tokens) FROM usage_events GROUP BY 1, 2"
+        ).fetchall()
         models = conn.execute(
             "SELECT COALESCE(NULLIF(TRIM(model),''), '[' || source || '] unnamed model'), "
             "SUM(total_tokens) FROM usage_events GROUP BY 1 ORDER BY 2 DESC, 1"
         ).fetchall()
     counts = dict(rows)
+    model_counts = {}
+    for date, model, tokens in model_rows:
+        model_counts.setdefault(date, {})[model] = tokens
     return {"period": period, "total": total,
             "current_speed": latest[0] if latest else None,
             "top_speed": top_speed,
             "speed_source": latest[1] if latest else None,
             "speed_model": latest[2] if latest else None,
             "models": [{"model": name, "tokens": tokens} for name, tokens in models],
-            "points": [{"date": key, "tokens": counts.get(key, 0)} for key in keys]}
+            "points": [{"date": key, "tokens": counts.get(key, 0),
+                        "models": model_counts.get(key, {})} for key in keys]}
