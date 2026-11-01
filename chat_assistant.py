@@ -213,7 +213,7 @@ def web_sources(question: str) -> tuple[list[dict], list[dict]]:
             continue
         seen_hosts.add(host)
         try:
-            page = read_webpage(url)
+            page = read_webpage(url, question=question)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             continue
         text = page.get("text", "").strip()
@@ -277,6 +277,8 @@ def answer_from_web(question: str) -> str:
                     f"[{number}] {page['url']} (read live {page['retrieved_at']})"
                     for number, page in enumerate(pages, 1)
                 )
+                if any(page["excerpt"].startswith("[Selected excerpts from a longer page;") for page in pages):
+                    answer += "\nSelected passages only; other page sections were omitted."
                 return answer + "\nSources:\n" + references
         except (KeyError, IndexError, OSError, ValueError):
             continue

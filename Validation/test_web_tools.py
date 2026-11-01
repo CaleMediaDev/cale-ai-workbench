@@ -7,6 +7,33 @@ import web_tools
 
 
 class BusinessContactTests(unittest.TestCase):
+    def test_question_selects_late_live_page_passage(self):
+        body = "Opening notes.\n" + "Ordinary material.\n" * 1400
+        body += "The current warranty code is W-4817.\n"
+        body += "Ordinary material.\n" * 1400
+        with patch.object(
+            web_tools, "fetch", return_value=("https://example.org/details", body, "text/plain", 200)
+        ):
+            page = web_tools.read_webpage(
+                "https://example.org/details", question="What is the current warranty code?"
+            )
+        self.assertIn("W-4817", page["text"])
+        self.assertIn("Selected excerpts from a longer page", page["text"])
+        self.assertLessEqual(len(page["text"]), 3500)
+        self.assertTrue(page["text_truncated"])
+        self.assertIsNone(page["next_start_char"])
+
+    def test_exact_find_still_supports_paginated_reading(self):
+        body = "Intro. " + "Filler. " * 3000 + "NEEDLE at the end."
+        with patch.object(
+            web_tools, "fetch", return_value=("https://example.org/details", body, "text/plain", 200)
+        ):
+            page = web_tools.read_webpage(
+                "https://example.org/details", find="NEEDLE", question="What is the needle?"
+            )
+        self.assertIn("NEEDLE", page["text"])
+        self.assertNotIn("Selected excerpts", page["text"])
+
     def test_search_falls_back_after_brave_rate_limit(self):
         html = (
             '<a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.gov%2Fstory">'

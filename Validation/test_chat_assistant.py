@@ -113,7 +113,7 @@ def test_supplied_public_url_is_read_without_search():
     ):
         pages, leads = chat_assistant.web_sources("Summarize https://example.org/")
     search.assert_not_called()
-    read.assert_called_once_with("https://example.org/")
+    read.assert_called_once_with("https://example.org/", question="Summarize https://example.org/")
     assert pages[0]["excerpt"] == "Short page"
     assert leads[0]["url"] == page["source_url"]
 
@@ -185,3 +185,18 @@ def test_web_answer_rejects_citation_to_unread_page():
         answer = chat_assistant.answer_from_web("Current value?")
     assert "99 [9]" not in answer
     assert "could not summarize" in answer
+
+
+def test_web_answer_discloses_selected_passages():
+    pages = [{
+        "title": "Long page", "url": "https://example.gov/long",
+        "retrieved_at": "2026-11-01T00:00:00Z",
+        "excerpt": "[Selected excerpts from a longer page; other sections are omitted.]\nThe value is 42.",
+    }]
+    response = {"choices": [{"message": {"content": "The value is 42 [1]."}}]}
+    with (
+        patch.object(chat_assistant, "web_sources", return_value=(pages, [])),
+        patch("cloud_ai.post", return_value=response),
+    ):
+        answer = chat_assistant.answer_from_web("What is the value?")
+    assert "Selected passages only" in answer

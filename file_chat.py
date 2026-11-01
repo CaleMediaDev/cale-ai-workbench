@@ -28,7 +28,7 @@ STOP_WORDS = {
 }
 
 
-def select_excerpt(text: str, question: str, limit: int = 12000) -> str:
+def select_excerpt(text: str, question: str, limit: int = 12000, subject: str = "file") -> str:
     """Pick passages across a long file that are likely to answer the question.
 
     This is lexical retrieval, not a claim that the omitted text was reviewed.
@@ -37,7 +37,8 @@ def select_excerpt(text: str, question: str, limit: int = 12000) -> str:
     text = text.strip()
     if len(text) <= limit:
         return text
-    chunk_size = 2200
+    # Smaller web-answer budgets still need room for several distant passages.
+    chunk_size = min(2200, max(350, (limit - 250) // 5))
     words = {
         word for word in re.findall(r"[\w-]{3,}", question.casefold())
         if word not in STOP_WORDS
@@ -64,7 +65,7 @@ def select_excerpt(text: str, question: str, limit: int = 12000) -> str:
         if sum(map(len, result)) + len(span) + 100 > limit:
             break
         result.append(span)
-    return "[Selected excerpts from a longer file; other sections are omitted.]\n" + "\n\n".join(result)
+    return f"[Selected excerpts from a longer {subject}; other sections are omitted.]\n" + "\n\n".join(result)
 
 
 def image_description(path: Path, question: str) -> str:

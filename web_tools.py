@@ -174,9 +174,11 @@ class Page(HTMLParser):
 
 
 @server.tool()
-def read_webpage(url: str, find: str = "", start_char: int = 0) -> dict:
-    """Return readable page text, with optional find and pagination."""
-    """Read a public webpage live: text, links, contacts and retrieval time. For long pages use find to get an excerpt around a phrase, or start_char to read later text. No sign-in or cached business records."""
+def read_webpage(url: str, find: str = "", start_char: int = 0, question: str = "") -> dict:
+    """Read a public page live. Use question for relevant passages across a long
+    page, or find/start_char for an exact phrase or paginated reading. No
+    sign-in or cached business records are used.
+    """
     final_url, content, content_type, status = fetch(url)
     page = Page(final_url)
     if "html" in content_type:
@@ -196,6 +198,11 @@ def read_webpage(url: str, find: str = "", start_char: int = 0) -> dict:
     if match >= 0:
         start_char = max(0, match - 1000)
     end_char = min(len(text), start_char + 14000)
+    selected = None
+    if question and not find and start_char == 0:
+        from file_chat import select_excerpt
+
+        selected = select_excerpt(text, question, limit=3500, subject="page")
     contacts = list(
         dict.fromkeys(
             link["url"]
@@ -216,10 +223,10 @@ def read_webpage(url: str, find: str = "", start_char: int = 0) -> dict:
         "http_status": status,
         "title": " ".join(page.title),
         "contact_links": contacts,
-        "text": text[start_char:end_char],
-        "text_truncated": end_char < len(text),
+        "text": selected if selected is not None else text[start_char:end_char],
+        "text_truncated": (len(text) > 3500) if selected is not None else end_char < len(text),
         "start_char": start_char,
-        "next_start_char": end_char if end_char < len(text) else None,
+        "next_start_char": None if selected is not None else (end_char if end_char < len(text) else None),
         "find_matched": match >= 0 if find else None,
         "links": links[:50],
     }
