@@ -150,7 +150,7 @@ LOCAL_CATALOG = {
         }, "required": ["query"]},
     },
     "local.start_video_job": {
-        "description": "Generate a 1-5 second video clip locally with Wan 2.2 5B, optionally animating a supplied image. Starts a durable job; first use downloads the verified model and ComfyUI runtime. Needs NVIDIA GPU with at least 10 GB VRAM and 35 GB free disk. Check local.video_job_status; no account or cloud upload.",
+        "description": "Generate a 1-5 second video clip locally with Wan 2.2 5B, optionally animating a supplied image. Starts a durable job; first use downloads the verified model and ComfyUI runtime. Needs NVIDIA GPU with at least 10 GB VRAM, 35 GB free disk for first install or 5 GB afterward. Check local.video_job_status; no account or cloud upload.",
         "inputSchema": {"type": "object", "properties": {
             "prompt": {"type": "string"}, "output_path": {"type": "string"},
             "image_path": {"type": "string"}, "seconds": {"type": "number"},
@@ -158,7 +158,7 @@ LOCAL_CATALOG = {
         }, "required": ["prompt", "output_path"]},
     },
     "local.video_job_status": {
-        "description": "Check a durable local Wan video generation job by its returned job_id.",
+        "description": "Check a durable local Wan video job by job_id. Returns its current stage and sampler progress_percent while rendering.",
         "inputSchema": {"type": "object", "properties": {
             "job_id": {"type": "string"},
         }, "required": ["job_id"]},

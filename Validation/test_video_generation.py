@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -37,6 +38,51 @@ def test_video_job_persists_and_validates_inputs(tmp_path):
             video_generation.start_video_job("Hi", str(tmp_path / "another.mp4"))
         with pytest.raises(ValueError):
             video_generation.video_job_status("../outside")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows GPU setup")
+def test_disk_requirement_shrinks_after_verified_install(tmp_path):
+    gb = 1024 ** 3
+    output = tmp_path / "new" / "clip.mp4"
+    gpu = subprocess.CompletedProcess([], 0, "12288\n", "")
+    with patch.object(video_generation.subprocess, "run", return_value=gpu), patch.object(
+        video_generation, "_verified_runtime", return_value=False
+    ), patch.object(video_generation.shutil, "disk_usage", side_effect=[
+        SimpleNamespace(free=34 * gb)
+    ]):
+        with pytest.raises(RuntimeError, match="35 GB"):
+            video_generation._hardware_ready(output)
+    with patch.object(video_generation.subprocess, "run", return_value=gpu), patch.object(
+        video_generation, "_verified_runtime", return_value=True
+    ), patch.object(video_generation.shutil, "disk_usage", side_effect=[
+        SimpleNamespace(free=6 * gb), SimpleNamespace(free=2 * gb)
+    ]):
+        video_generation._hardware_ready(output)
+    with patch.object(video_generation.subprocess, "run", return_value=gpu), patch.object(
+        video_generation, "_verified_runtime", return_value=True
+    ), patch.object(video_generation.shutil, "disk_usage", side_effect=[
+        SimpleNamespace(free=6 * gb), SimpleNamespace(free=gb // 2)
+    ]):
+        with pytest.raises(RuntimeError, match="output drive"):
+            video_generation._hardware_ready(output)
+
+
+def test_video_status_reports_latest_sampler_progress(tmp_path):
+    job_id = "a" * 32
+    with patch.object(video_generation, "JOBS", tmp_path):
+        (tmp_path / f"{job_id}.json").write_text(
+            json.dumps({"job_id": job_id, "state": "rendering", "detail": "Generating frames"}),
+            encoding="utf-8",
+        )
+        log = tmp_path / f"{job_id}-comfy.log"
+        log.write_bytes(b"earlier 40%|####\rnow 65%|######")
+        result = video_generation.video_job_status(job_id)
+        assert result["progress_percent"] == 65
+        assert result["detail"] == "Generating frames"
+        (tmp_path / f"{job_id}.json").write_text(
+            json.dumps({"job_id": job_id, "state": "complete"}), encoding="utf-8"
+        )
+        assert video_generation.video_job_status(job_id)["progress_percent"] == 100
 
 
 def test_runtime_requires_all_verified_weights_before_reuse(tmp_path):

@@ -57,11 +57,30 @@ def _write(job_id: str, **changes) -> dict:
     return data
 
 
-def _hardware_ready() -> None:
+def _existing_parent(path: Path) -> Path:
+    """Find the drive that will hold a new output without creating folders yet."""
+    candidate = path.parent
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    if not candidate.is_dir():
+        raise ValueError("Choose an output location on an available drive.")
+    return candidate
+
+
+def _hardware_ready(output: Path) -> None:
     if os.name != "nt":
         raise RuntimeError("Automatic Wan video setup currently supports Windows with an NVIDIA GPU.")
-    if shutil.disk_usage(BASE.parent).free < 35 * 1024 ** 3:
-        raise RuntimeError("Video generation needs at least 35 GB free disk space.")
+    # The 35 GB allowance covers the first model/runtime download. Once those
+    # verified files exist, require only scratch space for a short render.
+    required_gb = 5 if _verified_runtime() else 35
+    if shutil.disk_usage(BASE.parent).free < required_gb * 1024 ** 3:
+        raise RuntimeError(f"Video generation needs {required_gb} GB free on Cale's runtime drive.")
+    try:
+        output_free = shutil.disk_usage(_existing_parent(output)).free
+    except OSError as exc:
+        raise ValueError("Choose an output location on an available drive.") from exc
+    if output_free < 1 * 1024 ** 3:
+        raise RuntimeError("The video output drive needs at least 1 GB free.")
     result = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
                             capture_output=True, text=True, timeout=15, creationflags=HIDE)
     if result.returncode or not any(int(match) >= 10000 for match in re.findall(r"\d+", result.stdout)):
@@ -87,7 +106,7 @@ def start_video_job(prompt: str, output_path: str, image_path: str = "",
             raise ValueError("Choose a local PNG, JPG or WebP starting image.")
         if image.stat().st_size > 20_000_000:
             raise ValueError("The starting image must be under 20 MB.")
-    _hardware_ready()
+    _hardware_ready(output)
     job_id = uuid.uuid4().hex
     payload = {"prompt": prompt.strip(), "output_path": str(output), "image_path": str(image or ""),
                "seconds": float(seconds), "layout": layout}
@@ -112,7 +131,32 @@ def video_job_status(job_id: str) -> dict:
                                capture_output=True, text=True, timeout=10, creationflags=HIDE)
         if check.returncode == 0 and f'"{pid}"' not in check.stdout:
             data = _write(job_id, state="failed", error="Video worker exited unexpectedly; see log_path.")
-    return {key: data.get(key) for key in ("job_id", "state", "detail", "output_path", "error", "log_path", "updated_at")}
+    status = {key: data.get(key) for key in (
+        "job_id", "state", "detail", "output_path", "error", "log_path", "updated_at"
+    )}
+    if data.get("state") == "complete":
+        status["progress_percent"] = 100
+    elif data.get("state") == "rendering":
+        status["progress_percent"] = _render_percent(job_id)
+    else:
+        status["progress_percent"] = None
+    return status
+
+
+def _render_percent(job_id: str) -> int:
+    """Read ComfyUI's latest sampler progress without loading a large log."""
+    path = JOBS / f"{job_id}-comfy.log"
+    if not path.is_file():
+        return 0
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 65536))
+            tail = stream.read()
+    except OSError:
+        return 0
+    matches = re.findall(rb"(\d{1,3})%\|", tail)
+    return max(0, min(100, int(matches[-1]))) if matches else 0
 
 
 @contextmanager

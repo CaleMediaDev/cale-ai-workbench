@@ -694,8 +694,10 @@ local.join_videos to assemble clips; and local.add_video_audio to add narration
 or music. These run locally without an account and leave originals untouched.
 Inspect the finished MP4 before reporting that a video edit is complete.
 For a short AI-generated clip, use local.start_video_job and poll
-local.video_job_status. First use may spend substantial time installing a local
-Wan model; report that honestly. Join several short clips for a longer video.
+local.video_job_status. Record its render progress_percent in PROGRESS.md, and
+wait for a complete state and readable MP4 before reporting success. First use
+may spend substantial time installing a local Wan model; report that honestly.
+Join several short clips for a longer video.
 For vocal music, a lyrics file is not proof that the rendered audio clearly
 says the requested names or phrases. Transcribe or listen to the finished audio
 and check those words there. If a proper name is unclear, improve the render or
