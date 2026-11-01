@@ -618,7 +618,12 @@ This is a persistent local project. Work in small verified milestones until the
 whole requested result works. A new worker must recover from the existing files,
 PLAN.md, PROGRESS.md, and the board's comments, never start over blindly.
 First inspect existing code/instructions and write .local-ai/PLAN.md with concrete
-milestones and acceptance checks. Update .local-ai/PROGRESS.md after each milestone:
+milestones and acceptance checks. Use `- [ ]` for pending milestones and
+`- [x]` only after their checks pass; the task progress bar reads these marks.
+Before a tool action likely to take over a minute, write a `Current task:` line
+to .local-ai/PROGRESS.md describing the action. Update it when that action ends
+so the person can see what is happening without guessing from a heartbeat.
+Update .local-ai/PROGRESS.md after each milestone:
 completed work, exact checks/results, current problem, next concrete step. Keep
 those files concise and current so recovery does not depend on conversation memory.
 The project's local SQLite memory is created automatically under .local-ai.

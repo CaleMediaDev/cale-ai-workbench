@@ -556,6 +556,8 @@ class LongTaskTests(unittest.TestCase):
             task_module.create_card(self.item())
         args = board.call_args.args
         body = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+        self.assertIn("task progress bar reads these marks", body)
+        self.assertIn("Current task:", body)
         self.assertIn("Fixture database choice", body)
         self.assertIn("project_memory_search", body)
 
