@@ -970,6 +970,23 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(create.call_count, 2)
         board.assert_not_called()
 
+    def test_verified_build_resets_failures_before_independent_review(self):
+        task_module.update(self.pid, card="build-card", failures=2)
+        with (
+            patch.object(task_module, "verify_project",
+                         side_effect=[(True, "build checks passed"),
+                                      (False, "review found a missing behavior")]),
+            patch.object(task_module, "board"),
+            patch.object(task_module, "create_card") as create,
+        ):
+            task_module.handle_handoff(self.item(), {"id": "build-card", "status": "review"})
+            self.assertEqual(self.item()["phase"], "review")
+            self.assertEqual(self.item()["failures"], 0)
+            task_module.handle_handoff(self.item(), {"id": "review-card", "status": "review"})
+        self.assertEqual(self.item()["failures"], 1)
+        self.assertEqual(self.item()["status"], "working")
+        self.assertEqual(create.call_count, 2)
+
     def test_verified_task_archives_ready_card_from_older_generation_once(self):
         folder = self.base / "project"
         task_module.update(

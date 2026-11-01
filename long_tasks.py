@@ -1411,6 +1411,7 @@ def handle_handoff(p, task, snapshot=None):
             p["id"],
             card="",
             phase="review",
+            failures=0,
             generation=p["generation"] + 1,
             detail=evidence,
         )
@@ -1425,6 +1426,7 @@ def handle_handoff(p, task, snapshot=None):
         update(
             p["id"],
             status="ready_for_review",
+            failures=0,
             detail=evidence,
             fingerprint=fingerprint(Path(p["folder"])),
         )
