@@ -672,6 +672,8 @@ class Router:
 
     def _complete(self, payload):
         """Return a validated completion from ChatGPT, free cloud, or Ollama."""
+        import usage_history
+
         if payload.get("model") not in (LOCAL_MODEL, LOCAL_MODEL + ":latest"):
             raise ValueError(
                 "Only the configured local model and automatic free routing are supported."
@@ -685,11 +687,13 @@ class Router:
         offline_mode = pc_offline.offline()
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         reason = "Cloud is not connected."
-        # Explicit plan usage can supercharge demanding work. Quick requests
-        # stay local so they do not spend the person's shared allowance.
+        # Explicit plan usage can supercharge demanding work. For balanced
+        # requests, use the lighter plan model only when local AI is slow.
+        # Quick requests stay local to preserve the shared allowance.
         if (
             profile == "main"
-            and size == "deep"
+            and (size == "deep" or (size == "balanced" and
+                 usage_history.recent_local_speed(35) < 25))
             and not offline_mode
             and time.time() >= self.chatgpt_cooldown
         ):
@@ -698,7 +702,7 @@ class Router:
 
                 if chatgpt_auth.status()["enabled"]:
                     started = time.monotonic()
-                    result = valid_completion(chatgpt_auth.complete(payload), payload)
+                    result = valid_completion(chatgpt_auth.complete(payload, size=size), payload)
                     import usage_history
 
                     usage_history.record_completion(result, "chatgpt", time.monotonic() - started)

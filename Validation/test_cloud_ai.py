@@ -560,6 +560,17 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(result, ANSWER)
         self.assertEqual(post.call_args.args[1]["model"], cloud.PERMISSIVE_MODEL)
 
+    def test_slow_balanced_task_uses_lighter_chatgpt_model(self):
+        with (
+            patch.object(cloud, "task_size", return_value="balanced"),
+            patch("usage_history.recent_local_speed", return_value=12),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete", return_value=ANSWER) as complete,
+        ):
+            result = cloud.Router().complete(REQUEST)
+        self.assertEqual(result, ANSWER)
+        self.assertEqual(complete.call_args.kwargs["size"], "balanced")
+
     def test_candidate_tool_calls_use_verified_reasoning_setting(self):
         request = dict(
             REQUEST, tools=[{"type": "function", "function": {"name": "multiply"}}]

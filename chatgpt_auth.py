@@ -344,6 +344,16 @@ def available_models(token):
     return models
 
 
+def choose_model(models, size):
+    """Prefer the lighter plan model for routine work and Sol for deep work."""
+    preferences = (
+        ("gpt-6-luna", "gpt-5.6-luna", "gpt-6.1-sol")
+        if size == "balanced"
+        else ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra")
+    )
+    return next((name for name in preferences if name in models), models[0])
+
+
 def response_payload(completion, model):
     """Translate Hermes chat messages and tool calls to Responses API input."""
     instructions = []
@@ -451,11 +461,11 @@ def response_to_completion(response):
     }
 
 
-def complete(completion):
+def complete(completion, size="deep"):
     """Stream a plan request and return only after response.completed arrives."""
     token = access_token()
     models = available_models(token)
-    model = "gpt-6.1-sol" if "gpt-6.1-sol" in models else models[0]
+    model = choose_model(models, size)
     payload = response_payload(completion, model)
     request = Request(
         RESOURCE + "/responses",
