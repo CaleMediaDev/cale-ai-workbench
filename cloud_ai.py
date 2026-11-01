@@ -674,19 +674,6 @@ class Router:
                 reason = "ChatGPT plan unavailable; trying free cloud or local AI."
         required_context = estimated_context(payload)
         openrouter_attempted = False
-        if key and size == "deep" and self.reserve_free_request():
-            openrouter_attempted = True
-            try:
-                result = valid_completion(post(
-                    API + "/chat/completions", cloud_payload(payload), key, timeout=120,
-                ), payload)
-                record("free cloud", "Free route accelerated demanding work.",
-                       result.get("model", "openrouter/free"))
-                return retry_derestricted(payload, result, result.get("model", ""))
-            except HTTPError as exc:
-                self.cooldown = time.time() + (3600 if exc.code in (401, 402, 403, 429) else 120)
-            except Exception:
-                self.cooldown = time.time() + 120
         # Free-plan connections are optional. A fast connected provider gets
         # the first shot when it can hold the whole request. Errors, quotas,
         # and offline mode leave the local route intact.
@@ -734,6 +721,21 @@ class Router:
                         3600 if exc.code in (401, 402, 403, 429) else 120)
                 except Exception:
                     self.provider_cooldowns[provider] = time.time() + 120
+        # Prefer an eligible direct free-plan account before spending the
+        # smaller shared OpenRouter free allowance on a demanding request.
+        if key and size == "deep" and self.reserve_free_request():
+            openrouter_attempted = True
+            try:
+                result = valid_completion(post(
+                    API + "/chat/completions", cloud_payload(payload), key, timeout=120,
+                ), payload)
+                record("free cloud", "Free route accelerated demanding work.",
+                       result.get("model", "openrouter/free"))
+                return retry_derestricted(payload, result, result.get("model", ""))
+            except HTTPError as exc:
+                self.cooldown = time.time() + (3600 if exc.code in (401, 402, 403, 429) else 120)
+            except Exception:
+                self.cooldown = time.time() + 120
         selected = (
             self.local_candidates(size, required_context)
             if profile == "main"

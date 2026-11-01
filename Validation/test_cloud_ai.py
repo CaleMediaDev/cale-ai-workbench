@@ -317,6 +317,22 @@ class CloudTests(unittest.TestCase):
         data["cloud_key"] = "sk-or-test-secret"
         cloud.save_credentials(data)
 
+    def test_direct_free_provider_precedes_openrouter_for_deep_task(self):
+        self.connected()
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        request = dict(REQUEST, messages=[{"role": "user", "content": "Build and test an app"}])
+        with (patch.object(cloud, "task_size", return_value="deep"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("chatgpt_auth.status", return_value={"enabled": False}),
+              patch("usage_history.recent_local_speed", return_value=15),
+              patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as direct,
+              patch.object(cloud, "post") as post,
+              patch.object(cloud.Router, "reserve_free_request") as reserve):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        self.assertEqual(direct.call_args.args[0], "groq")
+        reserve.assert_not_called()
+        post.assert_not_called()
+
     def test_credentials_encrypted_for_windows_user(self):
         self.connected()
         self.assertNotIn(
