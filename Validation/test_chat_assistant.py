@@ -68,6 +68,10 @@ def test_music_edits_reach_agent_tools_instead_of_plain_chat():
         "Separate vocals from this song",
         "Please isolate the instrumental track",
         "Transcribe this audio into MIDI notes",
+        "Trim this song to 30 seconds, fade out the end, and mix my voice over it",
+        "Fade the soundtrack out at the end",
+        "Mix my voice over the background music",
+        "Adjust the volume of this recording",
     ):
         assert chat_assistant.route(request, []) == "task"
     assert chat_assistant.route("What is MIDI?", []) == "answer"

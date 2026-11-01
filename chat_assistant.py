@@ -70,8 +70,16 @@ def music_request(text: str) -> dict | None:
 def music_edit_request(command: str) -> bool:
     """Recognize audio transformation work without hijacking music questions."""
     return bool(
-        re.match(r"^(?:turn|convert|transcribe|separate|split|isolate|remix|master|extract)\b", command)
-        and re.search(r"\b(?:audio|song|music|melody|recording|midi|vocals?|stems?|tracks?|instrumental)\b", command)
+        re.match(
+            r"^(?:turn|convert|transcribe|separate|split|isolate|remix|master|extract|"
+            r"trim|fade|mix|crop|cut|normalize|boost|lower|raise|adjust)\b",
+            command,
+        )
+        and re.search(
+            r"\b(?:audio|song|music|melody|recording|midi|vocals?|stems?|"
+            r"tracks?|instrumental|soundtrack|beat|voice|volume)\b",
+            command,
+        )
     )
 
 
