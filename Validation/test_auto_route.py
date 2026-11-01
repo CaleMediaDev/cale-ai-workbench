@@ -136,6 +136,15 @@ class AutoRouteTests(unittest.TestCase):
         messages += [{"role": "tool", "content": '{"output":"ok","exit_code":0,"error":null}'}] * 8
         self.assertEqual(task_size(messages), "quick")
 
+    def test_music_review_gets_strong_first_pass_and_balanced_followups(self):
+        prompt = ("# Kanban task t_123: Michigan song — review\n\n## Body\n" +
+                  project_prompt({"title": "Michigan song", "folder": "C:/Tasks/song",
+                                  "brief": "Make a rap song with music."}))
+        messages = [{"role": "user", "content": prompt}]
+        self.assertEqual(task_size(messages), "deep")
+        messages.append({"role": "assistant", "tool_calls": [{"function": {"name": "read_file"}}]})
+        self.assertEqual(task_size(messages), "balanced")
+
     def test_saved_project_brief_uses_same_step_routing_after_compaction(self):
         prompt = project_prompt({
             "title": "Recipe app", "folder": "C:/Tasks/recipe",

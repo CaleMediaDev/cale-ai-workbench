@@ -18,6 +18,7 @@ PROJECT_MARKER = re.compile(
     r"USER PROJECT:|persistent local project|\.local-ai/(?:PLAN|PROGRESS)\.md",
     re.IGNORECASE,
 )
+REVIEW_WORKER = re.compile(r"(?im)^# Kanban task [^\r\n]+\s[—-]\sreview\s*$")
 PROJECT_REQUEST = re.compile(
     r"REQUEST AND ACCEPTANCE CRITERIA:\s*\n(.*?)\n(?:END OF ORIGINAL REQUEST|\s*This is a persistent local project\.)",
     re.IGNORECASE | re.DOTALL,
@@ -164,6 +165,13 @@ def task_size(messages):
         return "deep"
     if (PROJECT_MARKER.search(beginning) or PROJECT_MARKER.search(request)) and not project:
         return "deep"
+    # The first independent review turn must reason about the saved result,
+    # even when the original request looked like a quick media generation.
+    review_worker = bool(REVIEW_WORKER.search(beginning))
+    if review_worker and tool_calls == 0:
+        return "deep"
+    if review_worker and SIMPLE_MUSIC.search(intent):
+        return "balanced"
     # An agent can spend several tool calls discovering the music engine. That
     # is routine media work, not evidence that it needs a 70B+ planning model.
     if (
