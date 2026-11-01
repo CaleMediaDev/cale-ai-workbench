@@ -28,10 +28,10 @@ WAKE_REFERENCE_SHA256 = "ec586df55a3e1431b4f08e0dae05e1078b2bf4a8a42f904a12bb448
 
 
 def speech_chunks(message, limit=280):
-    """Split a chat reply without dropping text at the voice engine's limit."""
+    """Bound each voice call while preserving line breaks in lyrics or verse."""
     return textwrap.wrap(
         str(message), width=limit, break_long_words=True,
-        break_on_hyphens=False, replace_whitespace=True, drop_whitespace=True,
+        break_on_hyphens=False, replace_whitespace=False, drop_whitespace=True,
     )
 
 

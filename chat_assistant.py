@@ -169,7 +169,12 @@ def spoken_replay_target(text: str, history: list[dict]) -> str | None:
         # latest actual reply so an explicit replay request still speaks it.
         if content and not fallback and content != "Let me check that locally…":
             fallback = content
-        if content and (not wants_rap or re.search(r"\brap\b", content, re.I)):
+        verse_lines = [line.strip() for line in content.splitlines() if line.strip()]
+        looks_like_verse = (
+            len(verse_lines) >= 2
+            and all(len(line) <= 140 for line in verse_lines[:8])
+        )
+        if content and (not wants_rap or looks_like_verse or re.search(r"\brap\b", content, re.I)):
             return content
     return fallback if wants_rap else ""
 

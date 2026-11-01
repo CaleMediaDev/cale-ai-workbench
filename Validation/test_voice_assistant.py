@@ -99,6 +99,10 @@ class VoiceTests(unittest.TestCase):
         self.assertTrue(all(0 < len(chunk) <= 280 for chunk in chunks))
         self.assertEqual(" ".join(chunks), message)
 
+    def test_verse_lines_remain_separate_speech_chunks(self):
+        verse = "The tide rolls in\nThe beat begins\nWe build again"
+        self.assertEqual(voice_assistant.speech_chunks(verse), [verse])
+
     def test_spoken_replay_can_preempt_a_long_ordinary_reply(self):
         import queue
 

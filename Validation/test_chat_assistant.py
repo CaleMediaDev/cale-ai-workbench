@@ -35,6 +35,16 @@ def test_voice_replay_reads_unlabelled_generated_verse():
     ) == history[0]["content"]
 
 
+def test_voice_replay_prefers_recent_unlabelled_verse_over_old_rap_mention():
+    verse = "The water shines beneath the moon,\nWe'll build that dream before it's noon."
+    history = [
+        {"role": "assistant", "content": "I can write a rap for you."},
+        {"role": "assistant", "content": verse},
+        {"role": "user", "content": "read the rap with your voice"},
+    ]
+    assert chat_assistant.spoken_replay_target("read the rap with your voice", history) == verse
+
+
 def test_explicit_work_creates_task():
     assert chat_assistant.route("Build me a bakery website", []) == "task"
     assert chat_assistant.route("Can you fix my app?", []) == "task"
