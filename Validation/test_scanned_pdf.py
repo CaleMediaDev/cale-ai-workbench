@@ -23,7 +23,7 @@ def test_empty_selectable_pdf_uses_local_scan_reader(tmp_path):
     runtime = tmp_path / "Media/python/Scripts/python.exe"
     runtime.parent.mkdir(parents=True)
     runtime.write_bytes(b"")
-    payload = {"text": "[Unverified transcription]\n[Page 1]\nINVOICE 4817"}
+    payload = {"has_scans": True, "text": "[Unverified transcription]\n[Page 1]\nINVOICE 4817"}
     process = SimpleNamespace(stdout=json.dumps(payload) + "\n", returncode=0)
     with patch.object(file_chat, "ROOT", tmp_path), patch(
         "markitdown.MarkItDown"
@@ -34,14 +34,36 @@ def test_empty_selectable_pdf_uses_local_scan_reader(tmp_path):
     assert request == {"action": "read_scanned_pdf", "path": str(pdf), "max_pages": 6}
 
 
-def test_text_pdf_never_calls_vision(tmp_path):
+def test_text_pdf_keeps_existing_extraction_when_no_scans(tmp_path):
     pdf = tmp_path / "ordinary.pdf"
-    with patch("markitdown.MarkItDown") as converter, patch.object(
-        file_chat.subprocess, "run"
-    ) as run:
+    runtime = tmp_path / "Media/python/Scripts/python.exe"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_bytes(b"")
+    process = SimpleNamespace(
+        stdout=json.dumps({"has_scans": False, "text": "PDFium text"}) + "\n", returncode=0
+    )
+    with patch.object(file_chat, "ROOT", tmp_path), patch(
+        "markitdown.MarkItDown"
+    ) as converter, patch.object(file_chat.subprocess, "run", return_value=process) as run:
         converter.return_value.convert.return_value.text_content = "Selectable text"
         assert file_chat.document_text(pdf) == "Selectable text"
-    run.assert_not_called()
+    run.assert_called_once()
+
+
+def test_mixed_pdf_keeps_native_text_and_reads_scanned_page(tmp_path):
+    pdf = tmp_path / "mixed.pdf"
+    runtime = tmp_path / "Media/python/Scripts/python.exe"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_bytes(b"")
+    combined = "[Page 1; selectable text]\nOrder A-1742\n[Page 2; vision transcription]\nINVOICE 4817"
+    process = SimpleNamespace(
+        stdout=json.dumps({"has_scans": True, "text": combined}) + "\n", returncode=0
+    )
+    with patch.object(file_chat, "ROOT", tmp_path), patch(
+        "markitdown.MarkItDown"
+    ) as converter, patch.object(file_chat.subprocess, "run", return_value=process):
+        converter.return_value.convert.return_value.text_content = "Order A-1742"
+        assert file_chat.document_text(pdf) == combined
 
 
 def test_scanned_pdf_is_indexed_and_agent_tool_uses_same_fallback(tmp_path):

@@ -94,29 +94,40 @@ def image_description(path: Path, question: str) -> str:
 
 
 def document_text(path: Path, max_scanned_pages: int = 6) -> str:
-    """Extract document text, falling back to offline vision for scan-only PDFs."""
+    """Extract documents and merge native/vision text in mixed-page PDFs."""
     from markitdown import MarkItDown
 
     text = MarkItDown(enable_plugins=False).convert(str(path)).text_content or ""
-    if path.suffix.casefold() != ".pdf" or text.strip():
+    if path.suffix.casefold() != ".pdf":
         return text
     python = ROOT / "Media/python/Scripts/python.exe"
     if not python.is_file():
+        if text.strip():
+            return text
         raise RuntimeError("The local scanned-PDF reader is still installing.")
-    result = subprocess.run(
-        [str(python), str(ROOT / "media_worker.py")],
-        input=json.dumps({"action": "read_scanned_pdf", "path": str(path),
-                          "max_pages": max_scanned_pages}),
-        text=True, capture_output=True, encoding="utf-8", errors="replace",
-        cwd=ROOT, timeout=1800, creationflags=HIDE,
-    )
+    try:
+        result = subprocess.run(
+            [str(python), str(ROOT / "media_worker.py")],
+            input=json.dumps({"action": "read_scanned_pdf", "path": str(path),
+                              "max_pages": max_scanned_pages}),
+            text=True, capture_output=True, encoding="utf-8", errors="replace",
+            cwd=ROOT, timeout=1800, creationflags=HIDE,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        if text.strip():
+            return text
+        raise
     try:
         answer = json.loads(result.stdout.splitlines()[-1])
     except (IndexError, ValueError) as exc:
+        if text.strip():
+            return text
         raise RuntimeError("The local scanned-PDF reader did not respond.") from exc
     if result.returncode or "error" in answer:
+        if text.strip():
+            return text  # Keep ordinary PDFs readable if optional vision is unavailable.
         raise RuntimeError(str(answer.get("error", "Could not read the scanned PDF.")))
-    return str(answer.get("text", ""))
+    return str(answer.get("text", "")) if answer.get("has_scans") or not text.strip() else text
 
 
 def file_excerpt(path: Path, question: str) -> str:
