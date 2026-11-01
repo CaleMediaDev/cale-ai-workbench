@@ -324,7 +324,11 @@ def task_progress(p):
     checklist = (
         plan.read_text(encoding="utf-8", errors="replace") if plan.is_file() else ""
     )
-    marks = re.findall(r"(?m)^\s*[-*]\s*\[([ xX])\]", checklist)
+    # A direct image/music render may be finished before the user asks for a
+    # revision. Count only the new revision milestones so its old completed
+    # render does not make fresh work appear almost done.
+    current_plan = re.split(r"(?im)^##\s+Current revision\s*$", checklist)[-1]
+    marks = re.findall(r"(?m)^\s*[-*]\s*\[([ xX])\]", current_plan)
     if marks:
         done = sum(mark.lower() == "x" for mark in marks)
         percent = min(80, 10 + round(70 * done / len(marks)))
@@ -1124,6 +1128,17 @@ def handle_handoff(p, task):
 REVIEW_PROJECTS_CHECKED = {}  # project id -> (generation, current card)
 
 
+def prepare_media_revision(p, artifact):
+    """Keep the finished render's plan and add fresh milestones for an edit."""
+    plan = Path(p["folder"]) / ".local-ai/PLAN.md"
+    with plan.open("a", encoding="utf-8") as output:
+        output.write(
+            "\n## Current revision\n\n"
+            "- [ ] Apply the latest user request to the existing " + artifact + ".\n"
+            "- [ ] Verify the revised " + artifact + " before review.\n"
+        )
+
+
 def process_image_request(p, action, note):
     """Apply task controls to an image render without a Hermes board card."""
     import quick_image
@@ -1137,6 +1152,8 @@ def process_image_request(p, action, note):
         update(p["id"], status="paused", detail="Paused. Continue will restart the image render.")
         return "Image paused"
     if action in ("stop", "delete", "note"):
+        if action == "note" and not note.strip():
+            raise ValueError("Tell Cale what to change in the image.")
         quick_image.hold_image_job(ROOT, job_id)
         if action == "delete":
             with database() as conn:
@@ -1145,8 +1162,7 @@ def process_image_request(p, action, note):
         if action == "stop":
             update(p["id"], status="stopped", detail="Image stopped. Files already made are preserved.")
             return "Image stopped"
-        if not note.strip():
-            raise ValueError("Tell Cale what to change in the image.")
+        prepare_media_revision(p, "image")
         update(p["id"], card="", generation=p["generation"] + 1,
                status="working", detail="Preparing the requested image changes")
         return "Instructions added"
@@ -1189,6 +1205,8 @@ def process_music_request(p, action, note):
                detail="Paused. The local engine may finish the current render; Continue will collect it.")
         return "Music paused"
     if action in ("stop", "delete", "note"):
+        if action == "note" and not note.strip():
+            raise ValueError("Tell Cale what to change in the song.")
         music_backend.stop_music_job(job_id)
         if action == "delete":
             with database() as conn:
@@ -1197,8 +1215,7 @@ def process_music_request(p, action, note):
         if action == "stop":
             update(p["id"], status="stopped", detail="Music stopped. Files already made are preserved.")
             return "Music stopped"
-        if not note.strip():
-            raise ValueError("Tell Cale what to change in the song.")
+        prepare_media_revision(p, "song")
         # Detailed revisions become an agent task, with the original render in
         # the same folder and the follow-up saved in USER-REQUESTS.md.
         update(p["id"], card="", generation=p["generation"] + 1,

@@ -195,6 +195,42 @@ class LongTaskTests(unittest.TestCase):
             self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "working")
             resume.assert_called_once_with(job_id)
 
+    def test_empty_music_revision_keeps_render_running(self):
+        job_id = "f" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make music", {"prompt": "piano", "duration_seconds": 10,
+                               "instrumental": True}, str(self.base / "music-empty-note"),
+            )
+        with patch("music_backend.stop_music_job") as stop:
+            task_module.request(pid, "note", " ")
+            task_module.process_requests()
+            stop.assert_not_called()
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(task["status"], "working")
+        self.assertEqual(task_module.music_job_id(task), job_id)
+
+    def test_music_revision_resets_progress_without_erasing_initial_plan(self):
+        job_id = "a" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make music", {"prompt": "piano", "duration_seconds": 10,
+                               "instrumental": True}, str(self.base / "music-revision"),
+            )
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        plan = Path(task["folder"]) / ".local-ai/PLAN.md"
+        plan.write_text(plan.read_text(encoding="utf-8").replace("[ ]", "[x]"),
+                        encoding="utf-8")
+        with patch("music_backend.stop_music_job") as stop:
+            task_module.request(pid, "note", "add vocals")
+            task_module.process_requests()
+            stop.assert_called_once_with(job_id)
+        revised = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(revised["status"], "working")
+        self.assertEqual(task_module.task_progress(revised)[0], 10)
+        self.assertIn("[x] Render the requested song", plan.read_text(encoding="utf-8"))
+        self.assertIn("[ ] Apply the latest user request", plan.read_text(encoding="utf-8"))
+
     def test_direct_image_task_reaches_review_without_a_board_card(self):
         from PIL import Image
 
@@ -216,6 +252,20 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(complete["status"], "ready_for_review")
         self.assertEqual(task_module.task_progress(complete)[0], 95)
         self.assertTrue((Path(task["folder"]) / ".local-ai/PROGRESS.md").is_file())
+
+    def test_empty_image_revision_keeps_render_running(self):
+        job_id = "c" * 32
+        with patch("quick_image.start_image_job", return_value={"job_id": job_id}):
+            pid = task_module.add_image_project(
+                "make an image of a dog", "a dog", str(self.base / "image-empty-note"),
+            )
+        with patch("quick_image.hold_image_job") as hold:
+            task_module.request(pid, "note", " ")
+            task_module.process_requests()
+            hold.assert_not_called()
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(task["status"], "working")
+        self.assertEqual(task_module.image_job_id(task), job_id)
 
     def verify_script(self, text):
         (Path(self.item()["folder"]) / ".local-ai/verify.ps1").write_text(
