@@ -105,6 +105,65 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual((existing / "PLAN.md").read_text(), "Keep this plan")
         self.assertEqual((existing / "PROGRESS.md").read_text(), "Keep this progress")
 
+    def test_direct_music_job_finishes_on_task_board_without_hermes(self):
+        job_id = "a" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make a 10-second instrumental jingle",
+                {"prompt": "beach guitar", "duration_seconds": 10, "instrumental": True},
+                str(self.base / "music-one"),
+            )
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(task_module.music_job_id(task), job_id)
+        output = Path(task["folder"]) / "song.mp3"
+        output.write_bytes(b"A" * 8192)
+        with patch("music_backend.music_job_status", return_value={
+            "status": "complete", "result": {"path": str(output)},
+        }), patch("music_backend.audio_file_ok", return_value=True), patch.object(task_module, "board") as board:
+            task_module.advance_project(task)
+            board.assert_not_called()
+        complete = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(complete["status"], "ready_for_review")
+        self.assertEqual(task_module.task_progress(complete)[0], 95)
+        self.assertTrue((Path(task["folder"]) / ".local-ai" / "PROGRESS.md").is_file())
+
+    def test_direct_music_stop_uses_exact_job_and_preserves_project_files(self):
+        job_id = "b" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make music", {"prompt": "piano", "duration_seconds": 10, "instrumental": True},
+                str(self.base / "music-two"),
+            )
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        with patch("music_backend.stop_music_job", return_value={"status": "stopped"}) as stop, patch.object(
+            task_module, "board"
+        ) as board:
+            task_module.request(pid, "stop")
+            task_module.process_requests()
+            stop.assert_called_once_with(job_id)
+            board.assert_not_called()
+        self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "stopped")
+        self.assertTrue(Path(task["folder"]).is_dir())
+
+    def test_direct_music_pause_and_continue_keep_same_job(self):
+        job_id = "d" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make music", {"prompt": "piano", "duration_seconds": 10, "instrumental": True},
+                str(self.base / "music-three"),
+            )
+        with patch("music_backend.pause_music_job") as pause, patch(
+            "music_backend.resume_music_job"
+        ) as resume:
+            task_module.request(pid, "pause")
+            task_module.process_requests()
+            self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "paused")
+            pause.assert_called_once_with(job_id)
+            task_module.request(pid, "resume")
+            task_module.process_requests()
+            self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "working")
+            resume.assert_called_once_with(job_id)
+
     def verify_script(self, text):
         (Path(self.item()["folder"]) / ".local-ai/verify.ps1").write_text(
             text, encoding="utf-8"

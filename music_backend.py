@@ -364,6 +364,78 @@ def music_job_status(job_id: str) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def hold_music_job(job_id: str, *, paused: bool = False) -> dict:
+    """Retire this job's worker without touching other local music jobs."""
+    import psutil
+
+    info = music_job_status(job_id)
+    if info.get("status") in ("complete", "error", "stopped", "paused"):
+        return info
+    if _worker_running(job_id, info):
+        try:
+            worker = psutil.Process(int(info["worker_pid"]))
+            worker.terminate()
+            worker.wait(timeout=10)
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            pass
+        except psutil.TimeoutExpired as exc:
+            raise RuntimeError("The music worker has not stopped yet. Try again shortly.") from exc
+    # Re-read after the worker exits so a server task ID saved meanwhile survives.
+    info = music_job_status(job_id)
+    if info.get("status") == "complete":
+        return info
+    state = "paused" if paused else "stopped"
+    stopped = {**info, "status": state,
+               "current": "Paused; local render may finish in the engine" if paused else "Stopped by user",
+               "worker_pid": None, "finished": time.time()}
+    _write_job(job_id, stopped)
+    return stopped
+
+
+def stop_music_job(job_id: str) -> dict:
+    """Stop one durable music job."""
+    return hold_music_job(job_id)
+
+
+def pause_music_job(job_id: str) -> dict:
+    """Pause Cale's worker; the ACE-Step server may finish its current render."""
+    return hold_music_job(job_id, paused=True)
+
+
+def resume_music_job(job_id: str) -> dict:
+    """Reattach to an in-flight ACE-Step task, or start one if none exists."""
+    info = music_job_status(job_id)
+    if info.get("status") != "paused":
+        raise ValueError("Only a paused music job can be continued.")
+    resumed = {**info, "status": "queued", "current": "Resuming local music",
+               "worker_pid": None, "created": time.time()}
+    _write_job(job_id, resumed)
+    _launch_job(job_id)
+    return resumed
+
+
+def audio_file_ok(path: str | Path) -> bool:
+    """Confirm a rendered file has a decodable audio frame, not just bytes."""
+    source = Path(path)
+    python = ROOT / "Media" / "python" / "Scripts" / "python.exe"
+    if not source.is_file() or source.stat().st_size < 4096 or not python.is_file():
+        return False
+    check = (
+        "import av,sys; container=av.open(sys.argv[1]); "
+        "stream=next((s for s in container.streams if s.type=='audio'),None); "
+        "assert stream is not None; "
+        "assert next(container.decode(stream),None) is not None"
+    )
+    try:
+        result = subprocess.run(
+            [str(python), "-c", check, str(source)], capture_output=True,
+            timeout=30, creationflags=HIDE,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def _launch_job(job_id: str) -> None:
     python = ROOT / "Toolbox" / "python" / "Scripts" / "python.exe"
     if not python.is_file():
@@ -465,6 +537,8 @@ def start_music_job(
 
 def _run_job(job_id: str) -> None:
     info = music_job_status(job_id)
+    if info.get("status") not in ("queued", "working"):
+        return
     working = {
         **info, "status": "working", "current": "Generating music locally",
         "worker_pid": os.getpid(),

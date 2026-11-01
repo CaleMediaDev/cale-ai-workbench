@@ -168,6 +168,61 @@ def test_music_job_id_cannot_escape_job_directory():
         music_backend.music_job_status("../outside")
 
 
+def test_stop_music_job_marks_only_the_selected_job_and_skips_later_worker(tmp_path):
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    chosen = "a" * 32
+    other = "b" * 32
+    for job_id in (chosen, other):
+        (jobs / (job_id + ".json")).write_text(json.dumps({
+            "job_id": job_id, "status": "queued", "current": "Starting",
+            "output_path": str(tmp_path / (job_id + ".mp3")),
+        }))
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_worker_running", return_value=False
+    ), patch.object(music_backend, "generate_music") as generate:
+        assert music_backend.stop_music_job(chosen)["status"] == "stopped"
+        music_backend._run_job(chosen)
+        generate.assert_not_called()
+        assert music_backend.music_job_status(other)["status"] == "queued"
+
+
+def test_audio_validation_requires_a_decodable_frame(tmp_path):
+    python = tmp_path / "Media" / "python" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"launcher")
+    audio = tmp_path / "song.mp3"
+    audio.write_bytes(b"A" * 8192)
+    with patch.object(music_backend, "ROOT", tmp_path), patch.object(
+        music_backend.subprocess, "run", return_value=type("Done", (), {"returncode": 0})()
+    ) as run:
+        assert music_backend.audio_file_ok(audio)
+        assert "container.decode" in run.call_args.args[0][2]
+    audio.write_bytes(b"bad")
+    with patch.object(music_backend, "ROOT", tmp_path):
+        assert not music_backend.audio_file_ok(audio)
+
+
+def test_paused_music_job_resumes_same_server_task(tmp_path):
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    job_id = "c" * 32
+    (jobs / (job_id + ".json")).write_text(json.dumps({
+        "job_id": job_id, "status": "working", "current": "Rendering",
+        "server_task_id": "ace-123", "worker_pid": 123,
+        "output_path": str(tmp_path / "song.mp3"),
+    }))
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_worker_running", return_value=False
+    ), patch.object(music_backend, "_launch_job") as launch:
+        assert music_backend.pause_music_job(job_id)["status"] == "paused"
+        music_backend.recover_music_jobs()
+        launch.assert_not_called()
+        resumed = music_backend.resume_music_job(job_id)
+        assert resumed["server_task_id"] == "ace-123"
+        launch.assert_called_once_with(job_id)
+
+
 def test_music_lease_unloads_cale_models_and_cleans_marker(tmp_path):
     with patch.object(music_backend, "ROOT", tmp_path), patch(
         "media_worker.unload_local_models"

@@ -41,6 +41,22 @@ def test_simple_image_uses_local_media_without_a_long_agent_task():
     assert chat_assistant.image_prompt("edit this image of a dog") is None
 
 
+def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():
+    request = "can you make a 10-second instrumental beach guitar jingle"
+    assert chat_assistant.music_request(request) == {
+        "prompt": "make a 10-second instrumental beach guitar jingle",
+        "duration_seconds": 10,
+        "instrumental": True,
+    }
+    assert chat_assistant.route(request, []) == "music"
+    assert chat_assistant.route_with_files(request, [], [r"C:\song.wav"]) == "task"
+    assert chat_assistant.route("make a cover of this song", []) == "task"
+    assert chat_assistant.route("make a music app", []) == "task"
+    assert chat_assistant.route("create a music video", []) == "task"
+    assert chat_assistant.route("write lyrics for a song", []) == "task"
+    assert chat_assistant.music_request("make a 2-minute beat")["duration_seconds"] == 120
+
+
 def test_followup_attaches_to_active_task():
     task = [{"id": "one"}]
     assert chat_assistant.route("Also add a contact page", task) == "note"

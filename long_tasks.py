@@ -164,6 +164,12 @@ def projects():
         ]
 
 
+def music_job_id(p):
+    """A direct music card stores its durable job ID without a board card."""
+    card = str(p.get("card") or "")
+    return card.split(":", 1)[1] if card.startswith("music-job:") else ""
+
+
 def chat_history(limit=50):
     """Read the most recent messages in conversation order."""
     with database() as conn:
@@ -249,6 +255,21 @@ def save_chat(role, content):
 def task_progress(p):
     """Best-effort milestone progress; reserve the last part for independent review."""
     state = p["status"]
+    job_id = music_job_id(p)
+    if job_id:
+        if state == "accepted":
+            return 100, "Finished and accepted"
+        if state == "ready_for_review":
+            return 95, "Music is ready. Open files to listen."
+        if state in ("paused", "stopped", "needs_input"):
+            return 0, p["detail"][:180] or state.replace("_", " ").capitalize()
+        try:
+            import music_backend
+
+            job = music_backend.music_job_status(job_id)
+            return (10 if job["status"] == "queued" else 45), str(job.get("current", "Rendering music"))[:180]
+        except (OSError, ValueError, KeyError):
+            return 10, "Checking local music job"
     if state == "accepted":
         return 100, "Finished and accepted"
     if state == "ready_for_review":
@@ -383,6 +404,31 @@ def add_project(title, folder, brief, waiting_for_setup=False):
                 time.time(), time.time(),
             ),
         )
+    return pid
+
+
+def add_music_project(request_text: str, spec: dict, folder: str = "") -> str:
+    """Start simple music directly, with a normal task folder and task card."""
+    import music_backend
+
+    pid = add_project("", folder, request_text, waiting_for_setup=True)
+    p = next(item for item in projects() if item["id"] == pid)
+    folder = Path(p["folder"])
+    (folder / ".local-ai" / "PLAN.md").write_text(
+        "# Plan\n\n- [ ] Render the requested song locally.\n- [ ] Check that the audio file exists and opens.\n",
+        encoding="utf-8",
+    )
+    try:
+        job = music_backend.start_music_job(
+            spec["prompt"], str(folder / "song.mp3"),
+            duration_seconds=spec["duration_seconds"],
+            instrumental=spec["instrumental"],
+        )
+    except Exception as exc:
+        update(pid, status="needs_input", detail=f"Local music could not start: {exc}")
+        raise
+    update(pid, card="music-job:" + job["job_id"], status="working",
+           detail="Starting local music render")
     return pid
 
 
@@ -853,6 +899,65 @@ def handle_handoff(p, task):
 REVIEW_PROJECTS_CHECKED = {}  # project id -> (generation, current card)
 
 
+def process_music_request(p, action, note):
+    """Apply task controls to a direct music render without touching Hermes."""
+    import music_backend
+
+    job_id = music_job_id(p)
+    if action == "pause":
+        held = music_backend.pause_music_job(job_id)
+        if held["status"] in ("complete", "error"):
+            advance_project(p)
+            return "The render already finished; check its task status."
+        update(p["id"], status="paused",
+               detail="Paused. The local engine may finish the current render; Continue will collect it.")
+        return "Music paused"
+    if action in ("stop", "delete", "note"):
+        music_backend.stop_music_job(job_id)
+        if action == "delete":
+            with database() as conn:
+                conn.execute("DELETE FROM projects WHERE id=?", (p["id"],))
+            return "Task removed"
+        if action == "stop":
+            update(p["id"], status="stopped", detail="Music stopped. Files already made are preserved.")
+            return "Music stopped"
+        if not note.strip():
+            raise ValueError("Tell Cale what to change in the song.")
+        # Detailed revisions become an agent task, with the original render in
+        # the same folder and the follow-up saved in USER-REQUESTS.md.
+        update(p["id"], card="", generation=p["generation"] + 1,
+               status="working", detail="Preparing the requested music changes")
+        return "Instructions added"
+    if action == "accept":
+        if p["status"] != "ready_for_review" or fingerprint(Path(p["folder"])) != p["fingerprint"]:
+            raise ValueError("The music file changed after review. Check it again first.")
+        update(p["id"], status="accepted", detail="Music accepted. Project files are preserved.")
+        return "Music accepted"
+    if action == "resume" and p["status"] == "paused":
+        music_backend.resume_music_job(job_id)
+        update(p["id"], status="working", detail="Resuming local music render")
+        return "Music resumed"
+    if action == "resume" and p["status"] == "needs_input":
+        previous = music_backend.music_job_status(job_id)
+        output = Path(previous["output_path"])
+        if output.exists():
+            # Keep a failed render for diagnosis; retries get a new name.
+            output = next(
+                output.with_name(f"{output.stem}-retry-{number}{output.suffix}")
+                for number in range(2, 1000)
+                if not output.with_name(f"{output.stem}-retry-{number}{output.suffix}").exists()
+            )
+        started = music_backend.start_music_job(
+            previous["prompt"], str(output), previous.get("lyrics", ""),
+            previous["duration_seconds"], previous["instrumental"],
+            previous.get("source_path", ""),
+        )
+        update(p["id"], card="music-job:" + started["job_id"],
+               status="working", detail="Retrying local music render")
+        return "Music restarted"
+    raise ValueError("This control is unavailable for a local music render.")
+
+
 def retire_review_cards(p):
     """Keep all generations of a verified task from being dispatched again.
 
@@ -898,6 +1003,16 @@ def process_requests():
             if not p:
                 raise ValueError("This task has already been removed.")
             action, note = req["action"], req["note"]
+            if music_job_id(p):
+                result = process_music_request(p, action, note)
+                with database() as conn:
+                    conn.execute(
+                        "UPDATE requests SET status='done',result=? WHERE id=?",
+                        (result, req["id"]),
+                    )
+                if action == "note":
+                    sync_user_requests(p)
+                continue
             snapshot = (
                 board("show", p["card"], "--json", parse=True) if p["card"] else {}
             )
@@ -1028,6 +1143,43 @@ def tick():
 
 def advance_project(p):
     """Advance one task; failures are isolated by the supervisor's tick."""
+    job_id = music_job_id(p)
+    if job_id:
+        if p["status"] in ("accepted", "stopped", "paused", "needs_input"):
+            return
+        if p["status"] == "ready_for_review":
+            if fingerprint(Path(p["folder"])) != p["fingerprint"]:
+                update(p["id"], status="needs_input",
+                       detail="Music files changed after review. Check them before accepting.")
+            return
+        import music_backend
+
+        job = music_backend.music_job_status(job_id)
+        status = job["status"]
+        if status == "complete":
+            output = Path(job["result"]["path"])
+            if not music_backend.audio_file_ok(output):
+                update(p["id"], status="needs_input",
+                       detail="The music engine returned a file that could not be decoded as audio.")
+                return
+            notes = Path(p["folder"]) / ".local-ai"
+            (notes / "PLAN.md").write_text(
+                "# Plan\n\n- [x] Render the requested song locally.\n- [x] Check that the audio file exists and opens.\n",
+                encoding="utf-8",
+            )
+            (notes / "PROGRESS.md").write_text(
+                f"# Progress\n\nMusic saved: {output.name} ({output.stat().st_size:,} bytes). Open files to listen and review.\n",
+                encoding="utf-8",
+            )
+            update(p["id"], status="ready_for_review", detail=f"Music is ready: {output.name}",
+                   fingerprint=fingerprint(Path(p["folder"])))
+        elif status in ("error", "stopped"):
+            update(p["id"], status="needs_input", detail=str(job.get("current", "Music stopped")))
+        else:
+            current = str(job.get("current", "Generating music locally"))
+            if p["detail"] != current or p["status"] != "working":
+                update(p["id"], status="working", detail=current)
+        return
     if p["status"] == "waiting_for_setup":
         setup = read_task_status(STATE / "install-progress.json")
         if setup and setup.get("status") != "complete":
@@ -1152,7 +1304,10 @@ def ensure_gateway_current():
 
 def dispatch_ready_fallback():
     """Kick an idle board when the embedded dispatcher misses a ready task."""
-    if any(p["status"] in ("queued", "working", "checking") for p in projects()):
+    if any(
+        p["status"] in ("queued", "working", "checking") and not music_job_id(p)
+        for p in projects()
+    ):
         return board("dispatch", "--max", "1", "--json", parse=True, timeout=60)
     return None
 
@@ -1220,7 +1375,7 @@ def monitor():
                 )
                 catalog_thread.start()
             active = any(
-                p["status"] in ("queued", "working", "checking")
+                p["status"] in ("queued", "working", "checking") and not music_job_id(p)
                 for p in projects()
             )
             if not active:
@@ -2522,6 +2677,15 @@ def gui():
             if action == "image":
                 assistant_reply("I'm making that image locally. I'll open it when it's ready.")
                 answer_requests.put((chat_assistant.image_prompt(raw_value), context, [], "image"))
+            elif action == "music":
+                setup = read_task_status(STATE / "install-progress.json")
+                if setup and setup.get("status") != "complete":
+                    pid = add_project("", "", value, waiting_for_setup=True)
+                    assistant_reply("I saved your music task. I'll start it after setup finishes.")
+                else:
+                    pid = add_music_project(value, chat_assistant.music_request(raw_value))
+                    assistant_reply("I'm making that music locally. Watch its progress in My Tasks.")
+                render_cards()
             elif action == "task":
                 setup = read_task_status(STATE / "install-progress.json")
                 waiting = bool(setup and setup.get("status") != "complete")
@@ -3067,13 +3231,15 @@ def gui():
         camera = "camera" in (item["brief"] + " " + item["detail"]).lower()
         consent = read_task_status(ROOT / "Media/camera-consent.json") if camera else {}
         allowed = bool(consent.get("until", 0) > time.time())
-        signature = (item["status"], camera, allowed)
+        direct_music = bool(music_job_id(item))
+        signature = (item["status"], camera, allowed, direct_music)
         if card_info.get("controls_signature") == signature:
             return
         controls = card_info["controls"]
         for child in controls.winfo_children():
             child.destroy()
-        for label, kind in choices_for(item["status"]):
+        controls_to_show = choices_for(item["status"])
+        for label, kind in controls_to_show:
             ttk.Button(
                 controls,
                 text=label,
@@ -3228,7 +3394,9 @@ def gui():
             update_progress_card(card_info, percent, "Current step: " + current, state)
             set_text(
                 card_info["eta"],
-                task_eta.countdown(STATE / "projects.db", pid, percent, item["status"]),
+                "Render time varies with the music model and song length."
+                if music_job_id(item) and item["status"] == "working"
+                else task_eta.countdown(STATE / "projects.db", pid, percent, item["status"]),
             )
             update_task_controls(card_info, item)
 

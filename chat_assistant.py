@@ -42,6 +42,31 @@ def image_prompt(text: str) -> str | None:
     return match.group(1).strip(" .?!") if match else None
 
 
+def music_request(text: str) -> dict | None:
+    """Recognize a new audio render, leaving covers and edits to the agent."""
+    value = re.sub(
+        r"^(?:(?:please|can you|could you|i want you to)\s+)+",
+        "", text.strip(), flags=re.IGNORECASE,
+    )
+    if not re.match(r"^(?:make|create|generate)\s+", value, re.IGNORECASE):
+        return None
+    if not re.search(r"\b(?:song|music|instrumental|jingle|beat|soundtrack)\b", value, re.IGNORECASE):
+        return None
+    if re.search(
+        r"\b(?:cover|remix|edit|change|extend|from this|using this file|"
+        r"music video|this song|song longer|music app|music website|"
+        r"music software|music tool|music player|music studio|song generator)\b",
+        value, re.IGNORECASE,
+    ):
+        return None
+    match = re.search(r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|minutes?|mins?|s|min)\b", value, re.IGNORECASE)
+    duration = int(match.group(1)) * (60 if match.group(2).lower().startswith("min") else 1) if match else 30
+    if not 10 <= duration <= 600:
+        raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
+    instrumental = bool(re.search(r"\b(?:instrumental|no vocals|without vocals|no singing)\b", value, re.IGNORECASE))
+    return {"prompt": value.strip(" .?!"), "duration_seconds": duration, "instrumental": instrumental}
+
+
 def route(text: str, active_tasks: list[dict]) -> str:
     """Keep ordinary questions in chat and send explicit work to the task queue."""
     value = text.strip().lower()
@@ -62,6 +87,8 @@ def route(text: str, active_tasks: list[dict]) -> str:
         or re.match(r"^(?:make|fix|update|improve|revise|redo|adjust)\s+(?:it|that|this)\b", command)
     ):
         return "note"
+    if music_request(text):
+        return "music"
     if re.match(r"^i (?:want|need) (?:a|an|some) (?:website|app|program|logo|design|image|report|plan|tool)\b", value):
         return "task"
     if any(re.match(r"^" + re.escape(verb) + r"\b", command) for verb in TASK_VERBS):
@@ -73,6 +100,8 @@ def route_with_files(text: str, active_tasks: list[dict], paths: list[str]) -> s
     """Answer small file questions in chat; leave lasting work on the board."""
     action = route(text, active_tasks)
     if paths and action == "image":
+        return "task"
+    if paths and action == "music":
         return "task"
     if not paths or action != "answer":
         return action
