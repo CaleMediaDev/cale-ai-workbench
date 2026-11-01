@@ -7,6 +7,8 @@ voice or music-generation dependencies.
 
 from __future__ import annotations
 
+import csv
+import json
 import os
 import shutil
 import subprocess
@@ -20,6 +22,7 @@ VERSION = "0.4.0"
 RUNTIME_REVISION = VERSION + "-2"
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
+NOTE_COLUMNS = ["start_time_s", "end_time_s", "pitch_midi", "velocity", "pitch_bend"]
 
 
 def _python() -> Path:
@@ -51,6 +54,30 @@ def install() -> Path:
     )
     marker.write_text(RUNTIME_REVISION, encoding="ascii")
     return _python()
+
+
+def normalize_note_events(path: Path) -> None:
+    """Make Basic Pitch's unquoted pitch-bend arrays valid five-column CSV."""
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with path.open("r", encoding="utf-8", newline="") as source, temporary.open(
+            "w", encoding="utf-8", newline=""
+        ) as target:
+            reader = csv.reader(source)
+            writer = csv.writer(target)
+            if next(reader, None) != NOTE_COLUMNS:
+                raise RuntimeError("Basic Pitch returned an unexpected note-event CSV format.")
+            writer.writerow(NOTE_COLUMNS)
+            for row in reader:
+                if not row:
+                    continue
+                if len(row) < 5:
+                    raise RuntimeError("Basic Pitch returned an incomplete note event.")
+                row = row[:4] + [json.dumps([float(value) for value in row[4:]])]
+                writer.writerow(row)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
@@ -85,6 +112,8 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
     midi = sorted(path for path in target.glob("*.mid") if path.stat().st_size > 0)
     if not midi:
         raise RuntimeError("Basic Pitch finished without a MIDI file.")
+    for notes in target.glob("*.csv"):
+        normalize_note_events(notes)
     files = sorted(path for path in target.iterdir() if path.is_file() and path.stat().st_size > 0)
     return {"source": str(source), "output_dir": str(target),
             "midi_path": str(midi[0]), "files": [str(path) for path in files],

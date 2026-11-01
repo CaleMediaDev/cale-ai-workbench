@@ -1,5 +1,7 @@
 """Check first-use install and non-destructive audio-to-MIDI conversion."""
 
+import csv
+import json
 from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
@@ -39,7 +41,10 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
     def render(args, **_kwargs):
         assert args[-2:] == [str(source), str(target)]
         (target / "guitar_basic_pitch.mid").write_bytes(b"MThd" + b"\x00" * 32)
-        (target / "guitar_note_events.csv").write_text("start,end,pitch\n")
+        (target / "guitar_note_events.csv").write_text(
+            "start_time_s,end_time_s,pitch_midi,velocity,pitch_bend\n\n"
+            "0.0,1.0,69,85,1,2,3\n\n"
+        )
         return type("Done", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
     with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), patch.object(
@@ -49,3 +54,16 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
     assert result["midi_path"].endswith("guitar_basic_pitch.mid")
     assert len(result["files"]) == 2
     assert source.read_bytes() == b"audio"
+    with (target / "guitar_note_events.csv").open(newline="") as stream:
+        row = next(csv.DictReader(stream))
+    assert list(row) == music_midi.NOTE_COLUMNS
+    assert json.loads(row["pitch_bend"]) == [1.0, 2.0, 3.0]
+
+
+def test_unexpected_note_csv_is_preserved_for_diagnosis(tmp_path):
+    path = tmp_path / "notes.csv"
+    path.write_text("unknown,format\n1,2\n")
+    with pytest.raises(RuntimeError, match="unexpected note-event CSV"):
+        music_midi.normalize_note_events(path)
+    assert path.read_text() == "unknown,format\n1,2\n"
+    assert not path.with_suffix(".csv.tmp").exists()
