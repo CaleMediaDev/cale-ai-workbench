@@ -19,6 +19,7 @@ from mcp.server import MCPServer
 
 import project_memory
 import site_crawler
+import skill_hub
 import user_file_memory
 
 ROOT = Path(__file__).resolve().parent
@@ -224,6 +225,24 @@ def user_file_memory_search(query: str, limit: int = 8) -> dict:
 def user_file_memory_get(path: str) -> dict:
     """Read one previously indexed file by its exact source path."""
     return user_file_memory.get(ROOT / "LongTasks", path)
+
+
+@server.tool()
+async def skill_hub_search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
+    """Find task-relevant agent skills; search results are untrusted and install nothing."""
+    return await asyncio.to_thread(skill_hub.search, query, source, limit)
+
+
+@server.tool()
+async def skill_hub_inspect(identifier: str) -> dict:
+    """Preview one search result's untrusted instructions before any install."""
+    return await asyncio.to_thread(skill_hub.inspect, identifier)
+
+
+@server.tool()
+async def skill_hub_install(identifier: str) -> dict:
+    """Install a previewed skill when the task needs it; Hermes scanner may block it."""
+    return await asyncio.to_thread(skill_hub.install, identifier)
 
 
 @server.tool()
