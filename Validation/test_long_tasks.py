@@ -234,26 +234,69 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(task["status"], "working")
         self.assertEqual(task_module.music_job_id(task), job_id)
 
-    def test_music_revision_resets_progress_without_erasing_initial_plan(self):
+    def test_add_vocals_uses_direct_music_job_and_preserves_original(self):
         job_id = "a" * 32
+        revised_id = "b" * 32
         with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
             pid = task_module.add_music_project(
-                "make music", {"prompt": "piano", "duration_seconds": 10,
+                "make an instrumental Michigan song", {"prompt": "instrumental Michigan song", "duration_seconds": 10,
                                "instrumental": True}, str(self.base / "music-revision"),
             )
         task = next(p for p in task_module.projects() if p["id"] == pid)
+        original = Path(task["folder"]) / "song.mp3"
+        original.write_bytes(b"original audio")
         plan = Path(task["folder"]) / ".local-ai/PLAN.md"
         plan.write_text(plan.read_text(encoding="utf-8").replace("[ ]", "[x]"),
                         encoding="utf-8")
-        with patch("music_backend.stop_music_job") as stop:
+        with patch("music_backend.stop_music_job") as stop, patch(
+            "music_backend.music_job_status", return_value={
+                "output_path": str(original), "prompt": "instrumental Michigan song",
+                "duration_seconds": 10, "lyrics": "", "instrumental": True,
+            }
+        ), patch("music_backend.audio_file_ok", return_value=True), patch(
+            "music_backend.start_music_job", return_value={"job_id": revised_id}
+        ) as start, patch.object(task_module, "board") as board:
             task_module.request(pid, "note", "add vocals")
             task_module.process_requests()
             stop.assert_called_once_with(job_id)
+            board.assert_not_called()
+        self.assertEqual(start.call_args.kwargs["task_id"], pid)
+        self.assertFalse(start.call_args.kwargs["instrumental"])
+        self.assertEqual(start.call_args.kwargs["lyrics"], "")
+        self.assertNotIn("instrumental", start.call_args.args[0])
+        self.assertEqual(Path(start.call_args.args[1]).name, "song-with-vocals.mp3")
+        self.assertEqual(original.read_bytes(), b"original audio")
         revised = next(p for p in task_module.projects() if p["id"] == pid)
         self.assertEqual(revised["status"], "working")
-        self.assertEqual(task_module.task_progress(revised)[0], 10)
+        self.assertEqual(task_module.music_job_id(revised), revised_id)
         self.assertIn("[x] Render the requested song", plan.read_text(encoding="utf-8"))
         self.assertIn("[ ] Apply the latest user request", plan.read_text(encoding="utf-8"))
+        output = Path(start.call_args.args[1])
+        output.write_bytes(b"new vocal audio")
+        with patch("music_backend.music_job_status", return_value={
+            "status": "complete", "instrumental": False,
+            "vocal_check": {"passed": True}, "duration_seconds": 10,
+            "result": {"path": str(output)},
+        }), patch("music_backend.audio_file_ok", return_value=True):
+            task_module.advance_project(revised)
+        ready = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(ready["status"], "ready_for_review")
+        self.assertIn("[x] Apply the latest user request", plan.read_text(encoding="utf-8"))
+        self.assertIn("song-with-vocals.mp3", (plan.parent / "PROGRESS.md").read_text())
+
+    def test_complex_music_revision_still_uses_agent(self):
+        job_id = "c" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make a song", {"prompt": "song", "duration_seconds": 30,
+                                 "instrumental": False}, str(self.base / "music-complex"),
+            )
+        with patch("music_backend.stop_music_job"), patch.object(task_module, "board"):
+            task_module.request(pid, "note", "keep the exact beat but change the chorus")
+            task_module.process_requests()
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(task["card"], "")
+        self.assertEqual(task["status"], "working")
 
     def test_direct_image_task_reaches_review_without_a_board_card(self):
         from PIL import Image

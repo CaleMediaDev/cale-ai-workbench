@@ -90,7 +90,7 @@ Automatic model sizing ignores Hermes's own board-finish reminders. A simple tas
 
 Updates wait for the actual Hermes worker process to exit, including the short retirement period after Pause or Stop changes a task card's status.
 
-When someone asks Cale to revise a finished image or song, the task keeps its original plan and adds fresh revision milestones. Its progress starts over for the new request. An empty revision message leaves the existing render running.
+When someone asks Cale to revise a finished image or song, the task keeps its original plan and adds fresh revision milestones. Its progress starts over for the new request. A simple **add vocals** follow-up starts a direct local job that creates a newly named vocal version beside the original audio. It uses the original theme and duration, then checks the rendered vocals; it does not claim to add vocals to the exact same backing track. Requests to keep or edit the exact backing still use the full agent workflow. An empty revision message leaves the existing render running.
 
 The supervisor handles task controls even when a local model or gateway is temporarily unavailable. A failure on one task is recorded for retry without preventing other saved tasks from advancing.
 The model router sizes each worker step using the original project and recent user follow-ups, so adding a substantial requirement can move the work to a stronger installed model even when the original request was simple.

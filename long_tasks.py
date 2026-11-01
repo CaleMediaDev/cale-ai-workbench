@@ -1140,6 +1140,16 @@ def prepare_media_revision(p, artifact):
         )
 
 
+def simple_vocal_revision(note):
+    """Recognize only a plain request for a new vocal version of this song."""
+    value = note.strip().rstrip(".!?").casefold()
+    return bool(re.fullmatch(
+        r"(?:please\s+)?(?:add|put in)\s+(?:some\s+)?(?:vocals?|singing|rap vocals)"
+        r"(?:\s+to\s+(?:it|the song))?",
+        value,
+    ))
+
+
 def process_image_request(p, action, note):
     """Apply task controls to an image render without a Hermes board card."""
     import quick_image
@@ -1216,6 +1226,41 @@ def process_music_request(p, action, note):
         if action == "stop":
             update(p["id"], status="stopped", detail="Music stopped. Files already made are preserved.")
             return "Music stopped"
+        if simple_vocal_revision(note):
+            previous = music_backend.music_job_status(job_id)
+            original = Path(previous["output_path"])
+            if original.is_file() and music_backend.audio_file_ok(original):
+                # ACE-Step's cover mode did not reliably introduce singing in
+                # a local smoke test. Render a fresh vocal take, clearly named,
+                # while preserving the original backing as a separate file.
+                clean_prompt = re.sub(
+                    r"\b(?:instrumental|no vocals|without vocals|no singing)\b",
+                    "", previous["prompt"], flags=re.IGNORECASE,
+                ).strip(" ,.;")
+                vocal_prompt = clean_prompt + ". Clear lead vocals throughout."
+                output = original.with_name(original.stem + "-with-vocals" + original.suffix)
+                if output.exists():
+                    output = next(
+                        original.with_name(
+                            f"{original.stem}-with-vocals-{number}{original.suffix}"
+                        )
+                        for number in range(2, 1000)
+                        if not original.with_name(
+                            f"{original.stem}-with-vocals-{number}{original.suffix}"
+                        ).exists()
+                    )
+                started = music_backend.start_music_job(
+                    vocal_prompt, str(output),
+                    lyrics=previous.get("lyrics", ""),
+                    duration_seconds=previous["duration_seconds"],
+                    instrumental=False, task_id=p["id"],
+                )
+                prepare_media_revision(p, "song")
+                update(p["id"], card="music-job:" + started["job_id"],
+                       phase="build", generation=p["generation"] + 1,
+                       status="working", fingerprint="",
+                       detail="Creating a new vocal version; the original song is preserved")
+                return "Creating a vocal version; original preserved"
         prepare_media_revision(p, "song")
         # Detailed revisions become an agent task, with the original render in
         # the same folder and the follow-up saved in USER-REQUESTS.md.
@@ -1244,7 +1289,7 @@ def process_music_request(p, action, note):
         started = music_backend.start_music_job(
             previous["prompt"], str(output), previous.get("lyrics", ""),
             previous["duration_seconds"], previous["instrumental"],
-            previous.get("source_path", ""),
+            previous.get("source_path", ""), task_id=p["id"],
         )
         update(p["id"], card="music-job:" + started["job_id"],
                status="working", detail="Retrying local music render")
@@ -1531,15 +1576,33 @@ def advance_project(p):
                            detail="The song plays, but it has too few clear vocals. Try again or add lyrics.")
                     return
             notes = Path(p["folder"]) / ".local-ai"
-            (notes / "PLAN.md").write_text(
-                "# Plan\n\n- [x] Render the requested song locally.\n"
-                "- [x] Check that the audio opens and requested vocals are present.\n",
-                encoding="utf-8",
-            )
-            (notes / "PROGRESS.md").write_text(
-                f"# Progress\n\nMusic saved: {output.name} ({output.stat().st_size:,} bytes). Open files to listen and review.\n",
-                encoding="utf-8",
-            )
+            plan = notes / "PLAN.md"
+            progress = notes / "PROGRESS.md"
+            if p["generation"] and plan.is_file():
+                current = plan.read_text(encoding="utf-8")
+                current = current.replace(
+                    "- [ ] Apply the latest user request to the existing song.",
+                    "- [x] Apply the latest user request to the existing song.",
+                ).replace(
+                    "- [ ] Verify the revised song before review.",
+                    "- [x] Verify the revised song before review.",
+                )
+                plan.write_text(current, encoding="utf-8")
+                with progress.open("a", encoding="utf-8") as stream:
+                    stream.write(
+                        f"\nVocal version ready: {output.name} "
+                        f"({output.stat().st_size:,} bytes). Original audio is preserved.\n"
+                    )
+            else:
+                plan.write_text(
+                    "# Plan\n\n- [x] Render the requested song locally.\n"
+                    "- [x] Check that the audio opens and requested vocals are present.\n",
+                    encoding="utf-8",
+                )
+                progress.write_text(
+                    f"# Progress\n\nMusic saved: {output.name} ({output.stat().st_size:,} bytes). Open files to listen and review.\n",
+                    encoding="utf-8",
+                )
             update(p["id"], status="ready_for_review", detail=f"Music is ready: {output.name}",
                    fingerprint=fingerprint(Path(p["folder"])))
         elif status in ("error", "stopped"):
