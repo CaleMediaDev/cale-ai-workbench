@@ -17,6 +17,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import textwrap
 import time
 import traceback
 import uuid
@@ -370,6 +371,39 @@ def read_task_status(path):
         return value if isinstance(value, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def token_legend_layout(models, width):
+    """Fit every full model name and total beneath the graph without scrolling."""
+    width = max(int(width), 400)
+    digits = max((len(f"{item['tokens']:,}") for item in models), default=1)
+    longest = max((len(item["model"]) for item in models), default=1)
+    # Prefer more columns only when the longest name and its number can both
+    # fit. Long provider IDs fall back to fewer columns and wrap as needed.
+    needed = max(180, 38 + longest * 7 + digits * 7)
+    columns = max(1, min(3, width // needed))
+    column_width = width / columns
+    label_chars = max(8, int((column_width - 48 - digits * 7) / 7))
+    labels = ["\n".join(textwrap.wrap(
+        item["model"], width=label_chars, break_long_words=True,
+        break_on_hyphens=True,
+    )) for item in models]
+    heights = []
+    for start in range(0, len(models), columns):
+        row = labels[start:start + columns]
+        heights.append(max(23, max(label.count("\n") + 1 for label in row) * 15 + 8))
+    offsets = []
+    y = 144
+    for height in heights:
+        offsets.append(y)
+        y += height
+    entries = [
+        {"x": (index % columns) * column_width + 9,
+         "y": offsets[index // columns], "label": label,
+         "tokens": models[index]["tokens"]}
+        for index, label in enumerate(labels)
+    ]
+    return max(158 + (23 if not models else 0), y + 8), column_width, entries
 
 
 def deferred_model_retry_ready(state, tasks):
@@ -3145,9 +3179,7 @@ def gui():
         models = summary["models"]
         # Keep every model and its lifetime total on the chart itself. The
         # legend grows with the number of models; it never gets a scrollbar.
-        legend_columns = 3 if width >= 850 else 2 if width >= 560 else 1
-        legend_rows = (len(models) + legend_columns - 1) // legend_columns
-        chart_height = 158 + max(1, legend_rows) * 23
+        chart_height, column_width, legend = token_legend_layout(models, width)
         if int(usage_canvas["height"]) != chart_height:
             usage_canvas.configure(height=chart_height)
         colors = (
@@ -3192,24 +3224,18 @@ def gui():
             right, 8, anchor="ne", text=f"Peak {maximum:,} tokens",
             fill=muted, font=("Segoe UI", 9),
         )
-        column_width = width / legend_columns
-        for index, item in enumerate(models):
-            x = (index % legend_columns) * column_width + 9
-            y = 152 + (index // legend_columns) * 23
+        for index, item in enumerate(legend):
+            x, y = item["x"], item["y"]
             usage_canvas.create_rectangle(
-                x, y - 5, x + 10, y + 5,
+                x, y + 3, x + 10, y + 13,
                 fill=colors[index % len(colors)], outline="",
             )
-            label_limit = max(8, int((column_width - 110) / 7))
-            label = item["model"]
-            if len(label) > label_limit:
-                label = label[:label_limit - 1] + "…"
             usage_canvas.create_text(
-                x + 16, y, anchor="w", text=label, fill=text,
+                x + 16, y, anchor="nw", text=item["label"], fill=text,
                 font=("Segoe UI", 9),
             )
             usage_canvas.create_text(
-                x + column_width - 18, y, anchor="e", text=f"{item['tokens']:,}",
+                x + column_width - 18, y + 3, anchor="ne", text=f"{item['tokens']:,}",
                 fill=muted, font=("Segoe UI", 9, "bold"),
             )
         if not models:

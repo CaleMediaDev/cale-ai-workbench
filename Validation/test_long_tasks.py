@@ -341,6 +341,21 @@ class LongTaskTests(unittest.TestCase):
             state, [{"status": "ready_for_review"}]
         ))
 
+    def test_token_legend_keeps_full_distinct_model_names_on_the_graph(self):
+        models = [
+            {"model": "qwen3-coder-local", "tokens": 267100},
+            {"model": "qwen3-coder-permissive", "tokens": 34606},
+            {"model": "provider/extra-long-model-name-with-many-parts", "tokens": 1200},
+        ]
+        height, width, entries = task_module.token_legend_layout(models, 560)
+        self.assertGreater(height, 150)
+        self.assertGreater(width, 0)
+        self.assertEqual(
+            [entry["label"].replace("\n", "") for entry in entries],
+            [item["model"] for item in models],
+        )
+        self.assertEqual(len({(entry["x"], entry["y"]) for entry in entries}), 3)
+
     def test_fresh_placeholder_notes_do_not_bloat_first_worker_prompt(self):
         self.assertEqual(task_module.recovery_snapshot(self.item()["folder"]), "")
 
