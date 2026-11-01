@@ -106,6 +106,14 @@ class VoiceTests(unittest.TestCase):
             ),
             ("pause", ""),
         )
+        # The installed offline transcriber produced this exact spelling
+        # when asked to recognize "Hey Cale, can you hear me?".
+        self.assertEqual(
+            voice_assistant.spoken_command(
+                "Hey, Cal, can you hear me?", require_wake=True
+            ),
+            ("hearing", ""),
+        )
         self.assertEqual(
             voice_assistant.spoken_command(
                 "Hey Cale, what's the status?", require_wake=True

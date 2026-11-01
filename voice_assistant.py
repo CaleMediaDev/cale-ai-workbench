@@ -15,7 +15,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-WAKE = re.compile(r"^\s*hey[\s,]+(?:cale|kale)\b[\s,.:;!-]*", re.IGNORECASE)
+# Whisper often writes the spoken name as "Cal". Accept that common spelling
+# while keeping a required "Hey" prefix and a whole-word name match.
+WAKE = re.compile(r"^\s*hey[\s,]+(?:cale|kale|cal)\b[\s,.:;!-]*", re.IGNORECASE)
 IDLE_TIMES = (120, 600, 1800, 3600)
 STUCK_TIMES = (120, 480, 1200, 3600)
 
