@@ -34,6 +34,14 @@ ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "LongTasks"
 BOARD = "long-tasks"
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+INITIAL_PLAN = (
+    "# Plan\n\nThe worker has not written milestones yet. Read the original request and "
+    "user follow-ups, then replace this note with concrete acceptance checks.\n"
+)
+INITIAL_PROGRESS = (
+    "# Progress\n\nNo work has been completed yet. Record verified milestones, "
+    "the current problem, and the next step here.\n"
+)
 PS = str(
     Path(os.environ.get("SystemRoot", "C:/Windows"))
     / "System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -397,16 +405,10 @@ def add_project(title, folder, brief, waiting_for_setup=False):
     # first run can distinguish a fresh project from a failed file read.
     plan = notes / "PLAN.md"
     if not plan.exists():
-        plan.write_text(
-            "# Plan\n\nThe worker has not written milestones yet. Read the original request and user follow-ups, then replace this note with concrete acceptance checks.\n",
-            encoding="utf-8",
-        )
+        plan.write_text(INITIAL_PLAN, encoding="utf-8")
     progress = notes / "PROGRESS.md"
     if not progress.exists():
-        progress.write_text(
-            "# Progress\n\nNo work has been completed yet. Record verified milestones, the current problem, and the next step here.\n",
-            encoding="utf-8",
-        )
+        progress.write_text(INITIAL_PROGRESS, encoding="utf-8")
     project_memory.initialize(folder)
     rules = folder / "AGENTS.md"
     if not rules.exists():
@@ -579,9 +581,20 @@ def recovery_snapshot(folder):
         if not path.is_file():
             continue
         content = path.read_text(encoding="utf-8", errors="replace").strip()
-        if content:
+        if content and content not in (INITIAL_PLAN.strip(), INITIAL_PROGRESS.strip()):
+            if len(content) > 6000:
+                # Plans usually put acceptance criteria first; progress puts
+                # the next action last. Keep both ends and tell the worker to
+                # re-read the live file for the omitted middle.
+                head = 3000 if name == "PLAN.md" else 1000
+                tail = 6000 - head
+                content = (
+                    content[:head]
+                    + f"\n...[{len(content) - 6000} characters omitted; re-read {name}]...\n"
+                    + content[-tail:]
+                )
             notes.append(
-                f"{name} (saved project data; re-read the live file):\n{content[-6000:]}"
+                f"{name} (saved project data; re-read the live file):\n{content}"
             )
     return "\n\n".join(notes)
 

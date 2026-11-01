@@ -110,7 +110,34 @@ class AutoRouteTests(unittest.TestCase):
             "deep",
         )
 
-    def test_tool_heavy_work_escalates_without_project_marker(self):
+    def test_short_build_uses_middle_model_after_initial_planning(self):
+        messages = [{"role": "user", "content": "Build and test a recipe app."}]
+        self.assertEqual(task_size(messages), "deep")
+        messages.append({
+            "role": "assistant", "tool_calls": [{"function": {"name": "read_file"}}],
+        })
+        self.assertEqual(task_size(messages), "balanced")
+        for _ in range(6):
+            messages.append({
+                "role": "assistant", "tool_calls": [{"function": {"name": "write_file"}}],
+            })
+        self.assertEqual(task_size(messages), "balanced")
+        messages[0]["content"] = "Build a production-ready multi-page recipe app."
+        self.assertEqual(task_size(messages), "deep")
+
+    def test_saved_project_brief_uses_same_step_routing_after_compaction(self):
+        prompt = project_prompt({
+            "title": "Recipe app", "folder": "C:/Tasks/recipe",
+            "brief": "Build and test a recipe app.",
+        })
+        messages = [{"role": "user", "content": prompt}]
+        self.assertEqual(task_size(messages), "deep")
+        messages.append({
+            "role": "assistant", "tool_calls": [{"function": {"name": "read_file"}}],
+        })
+        self.assertEqual(task_size(messages), "balanced")
+
+    def test_short_tool_work_stays_on_middle_model_without_project_marker(self):
         messages = [{"role": "user", "content": "Analyze the attached data."}]
         for _ in range(4):
             messages.append(
@@ -119,7 +146,7 @@ class AutoRouteTests(unittest.TestCase):
                     "tool_calls": [{"function": {"name": "read_file"}}],
                 }
             )
-        self.assertEqual(task_size(messages), "deep")
+        self.assertEqual(task_size(messages), "balanced")
 
     def test_short_music_request_stays_fast_through_tool_discovery(self):
         messages = [{"role": "user", "content": (

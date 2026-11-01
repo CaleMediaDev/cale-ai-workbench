@@ -1,8 +1,8 @@
 """Cheap, deterministic task sizing for the local model router.
 
 This does not consume a second AI request. The original user task, saved board
-brief and tool history remain in the request, so a long project stays on a
-stronger model after ordinary context compression and worker restarts.
+brief and tool history remain in the request, so a long project can scale up
+without forcing every routine tool step through the slowest model.
 """
 
 import re
@@ -62,6 +62,11 @@ SIMPLE_MUSIC = re.compile(
     r"\b(?:make|generate|create)\b.{0,100}\b(?:song|instrumental|jingle|music|beat|soundtrack)\b",
     re.IGNORECASE | re.DOTALL,
 )
+COMPLEX_PROJECT = re.compile(
+    r"\b(?:multi[- ](?:page|feature|module|agent)|enterprise|production[- ]ready|"
+    r"full[- ]stack|distributed|migration|security audit|large[- ]scale)\b",
+    re.IGNORECASE,
+)
 
 
 def has_media_input(messages):
@@ -109,10 +114,14 @@ def task_size(messages):
     # is routine media work, not evidence that it needs a 70B+ planning model.
     if len(intent) <= 280 and SIMPLE_MUSIC.search(intent):
         return "quick" if tool_calls <= 3 else "balanced"
-    if len(intent) > 800 or tool_calls >= 4:
+    if len(intent) > 800 or COMPLEX_PROJECT.search(intent):
         return "deep"
     if PROJECT_BUILD.search(intent):
-        return "deep"
+        # A short app request benefits from one strong planning turn. Keeping
+        # the 70B+ model on every file read and edit made local projects crawl.
+        return "deep" if tool_calls == 0 or len(intent) > 280 else "balanced"
+    if tool_calls >= 4:
+        return "deep" if len(intent) > 280 else "balanced"
     live_lookup = LIVE_FACT.search(intent) or (
         CONTACT_NUMBER.search(intent) and LOOKUP_WORD.search(intent)
     )
@@ -129,7 +138,7 @@ def task_size(messages):
     if has_media_input(messages) or TOOL_WORK.search(intent) or EXPLICIT_TOOL.search(intent):
         return "balanced"
     if BUILD_ACTION.search(intent):
-        return "deep"
+        return "deep" if tool_calls == 0 or len(intent) > 280 else "balanced"
     if live_lookup:
         return "balanced"
     # One or two tool calls can be routine discovery or a retry; they do not

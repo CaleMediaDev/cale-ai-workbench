@@ -277,6 +277,26 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("Next concrete step: test search", body)
         self.assertNotIn("x" * 6500, body)
 
+    def test_recovery_keeps_early_acceptance_checks_and_latest_progress(self):
+        notes = Path(self.item()["folder"]) / ".local-ai"
+        (notes / "PLAN.md").write_text(
+            "Acceptance: retain offline mode\n" + "middle\n" * 1500 + "Last milestone: packaging",
+            encoding="utf-8",
+        )
+        (notes / "PROGRESS.md").write_text(
+            "Initial setup complete\n" + "past work\n" * 1500 + "Next concrete step: run installer",
+            encoding="utf-8",
+        )
+        snapshot = task_module.recovery_snapshot(self.item()["folder"])
+        self.assertIn("Acceptance: retain offline mode", snapshot)
+        self.assertIn("Last milestone: packaging", snapshot)
+        self.assertIn("Next concrete step: run installer", snapshot)
+        self.assertIn("characters omitted; re-read PLAN.md", snapshot)
+        self.assertLess(len(snapshot), 13000)
+
+    def test_fresh_placeholder_notes_do_not_bloat_first_worker_prompt(self):
+        self.assertEqual(task_module.recovery_snapshot(self.item()["folder"]), "")
+
     def test_new_worker_receives_relevant_durable_memory(self):
         import project_memory
 
