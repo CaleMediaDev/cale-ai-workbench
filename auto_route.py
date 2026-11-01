@@ -107,24 +107,45 @@ def synthetic_worker_note(text):
 
 
 def repeated_tool_failures(messages):
-    """Escalate only when recent tool results show a real repair loop."""
+    """Escalate while the latest tool results show an unresolved repair loop."""
     recent = [message_text(msg.get("content")) for msg in messages
               if isinstance(msg, dict) and msg.get("role") == "tool"][-8:]
     failures = 0
-    for content in recent:
+    for content in reversed(recent):
         if "[Tool loop warning:" in content:
             failures += 1
             continue
         try:
             result, _ = json.JSONDecoder().raw_decode(content.lstrip())
         except (ValueError, TypeError):
-            continue
+            break
         if isinstance(result, dict) and (result.get("error") or
+                                         result.get("isError") is True or
+                                         result.get("success") is False or
                                          result.get("status") == "blocked" or
                                          isinstance(result.get("exit_code"), int)
                                          and result["exit_code"] != 0):
             failures += 1
+        else:
+            break
     return failures >= 3
+
+
+def repair_messages(messages):
+    """Nudge an escalated model to diagnose errors instead of replaying a failed step."""
+    if not repeated_tool_failures(messages):
+        return messages
+    hint = {
+        "role": "system",
+        "content": (
+            "Several recent tool actions failed. Inspect their exact errors before "
+            "calling another tool. Do not repeat the same command or arguments "
+            "unchanged. Check the path, tool schema, and prerequisites; then try "
+            "a different repair. If the blocker cannot be resolved, record the "
+            "specific problem and ask for the one missing input."
+        ),
+    }
+    return [hint, *messages]
 
 
 def task_size(messages):

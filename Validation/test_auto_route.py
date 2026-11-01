@@ -5,11 +5,25 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from auto_route import PROJECT_REQUEST, model_order, task_size
+from auto_route import PROJECT_REQUEST, model_order, repair_messages, task_size
 from long_tasks import project_prompt
 
 
 class AutoRouteTests(unittest.TestCase):
+    def test_mcp_errors_trigger_repair_guidance_without_mutating_history(self):
+        messages = [{"role": "user", "content": "Build an app"}]
+        messages.extend({"role": "tool", "content": '{"isError":true,"content":[]}'} for _ in range(3))
+        self.assertEqual(task_size(messages), "deep")
+        repaired = repair_messages(messages)
+        self.assertIsNot(repaired, messages)
+        self.assertEqual(len(repaired), len(messages) + 1)
+        self.assertIn("Do not repeat", repaired[0]["content"])
+        self.assertEqual(messages[0]["role"], "user")
+        short = messages[:2]
+        self.assertIs(repair_messages(short), short)
+        resolved = [*messages, {"role": "tool", "content": '{"success":true}'}]
+        self.assertIs(repair_messages(resolved), resolved)
+
     def test_current_business_contact_uses_tool_capable_middle_tier(self):
         self.assertEqual(
             task_size(

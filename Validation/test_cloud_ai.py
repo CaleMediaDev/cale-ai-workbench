@@ -255,6 +255,19 @@ class CloudTests(unittest.TestCase):
             self.assertEqual(cloud.Router().complete(request), tool_answer)
         self.assertEqual([call.args[1]["model"] for call in post.call_args_list], ["small", "strong"])
 
+    def test_repeated_tool_errors_add_repair_instruction_to_local_request(self):
+        request = dict(REQUEST, messages=[
+            {"role": "user", "content": "Build an app"},
+            *({"role": "tool", "content": '{"isError":true,"content":[]}'} for _ in range(3)),
+        ])
+        with (patch.object(cloud.pc_offline, "offline", return_value=True),
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        sent = post.call_args.args[1]["messages"]
+        self.assertEqual(sent[0]["role"], "system")
+        self.assertIn("Do not repeat", sent[0]["content"])
+        self.assertEqual(request["messages"][0]["role"], "user")
+
     def test_unoffered_tool_call_is_rejected_and_dict_arguments_are_normalized(self):
         request = dict(REQUEST, tools=[{"type": "function", "function": {"name": "multiply"}}])
         wrong = {"choices": [{"message": {"tool_calls": [

@@ -33,7 +33,7 @@ from jsonschema.validators import validator_for
 
 import pc_offline
 import cloud_providers
-from auto_route import model_order, task_size
+from auto_route import model_order, repair_messages, task_size
 from model_identity import configured_main_alias, configured_permissive_alias
 from model_library import CATALOG, STANDARD_MAIN_ALIAS, candidate_approved, refresh_catalog
 
@@ -677,7 +677,11 @@ class Router:
                 "Only the configured local model and automatic free routing are supported."
             )
         profile = local_profile()
-        size = task_size(payload.get("messages", [])) if profile == "main" else "manual"
+        messages = payload.get("messages", [])
+        size = task_size(messages) if profile == "main" else "manual"
+        repaired = repair_messages(messages)
+        if repaired is not messages:
+            payload = {**payload, "messages": repaired}
         offline_mode = pc_offline.offline()
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         reason = "Cloud is not connected."
