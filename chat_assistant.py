@@ -264,6 +264,33 @@ PERSONAL_CONTACT = re.compile(
     r"(?:phone\s+number|number|e-?mail(?:\s+address)?|address|hours)\b",
     re.IGNORECASE,
 )
+FILE_MEMORY_REFERENCE = re.compile(
+    r"\b(?:attached|uploaded|gave you|sent you|"
+    r"(?:(?:my|our)\s+(?:[\w'-]+\s+){0,2}|"
+    r"(?:the|that|this|those|these)\s+"
+    r"(?:(?!(?:best|free|top|good|fast)\b)[\w'-]+\s+){0,1})"
+    r"(?:file|document|attachment|photo|picture|image|audio|recording|"
+    r"video|invoice|receipt|quote|proposal|estimate|contract|bill)s?)\b",
+    re.IGNORECASE,
+)
+MEMORY_STOPWORDS = frozenset({
+    "a", "an", "and", "are", "can", "could", "did", "do", "does", "for", "from",
+    "how", "in", "is", "it", "me", "my", "of", "on", "our", "please", "the",
+    "this", "to", "was", "were", "what", "when", "where", "which", "who", "why",
+    "with", "you", "your", "remember", "previously", "earlier", "about", "tell",
+    "said", "give", "gave", "sent", "have", "has", "that", "there", "these",
+    "file", "files", "document", "documents", "attachment", "attached",
+    "uploaded", "photo", "picture", "image", "audio", "recording", "video",
+    "summarize", "summary", "read", "describe", "show", "content", "contents",
+    "say", "says", "tell", "told", "last", "time",
+})
+
+
+def memory_search_terms(question: str) -> str:
+    """Keep only useful content words for a later question about selected files."""
+    words = re.findall(r"[\w'-]+", question.casefold())
+    return " ".join(word for word in words
+                    if len(word) >= 3 and word not in MEMORY_STOPWORDS)[:200]
 GENERIC_CONTACT_NAMES = frozenset({
     "my", "our", "your", "his", "her", "their", "me", "us", "the",
     "my business", "our business", "my company", "our company",
@@ -423,20 +450,27 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
         index = file_catalog.status(state)
         suffix = " The first scan is still running." if index.get("status") == "working" else ""
         return f"I couldn't find a file named {file_query!r} in the local index.{suffix}"
-    if re.search(r"\b(?:file|document|attachment|uploaded|attached|gave you|sent you|"
-                 r"photo|picture|image|audio|recording|video)\b", question, re.I):
+    file_reference = bool(FILE_MEMORY_REFERENCE.search(question))
+    personal_reference = bool(PERSONAL_CONTACT.search(question))
+    if file_reference or personal_reference:
         import user_file_memory
 
         state = Path(__file__).resolve().parent / "LongTasks"
-        matches = user_file_memory.search(state, question, 4)
-        if not matches:
-            matches = user_file_memory.search(state, "", 4)
+        terms = memory_search_terms(question)
+        matches = user_file_memory.search(state, terms, 4, match_all=True) if terms else []
+        if not matches and file_reference and not terms:
+            recent = user_file_memory.search(state, "", 2)
+            if len(recent) > 1:
+                return "Which file do you mean? Please name it or attach it again."
+            matches = recent
         if matches:
             evidence = "\n\n".join(
                 f"[{number}] {row['path']}\n{row['excerpt']}"
                 for number, row in enumerate(matches, 1)
             )
             return local_answer(question, history, file_evidence=evidence)
+        if file_reference:
+            return "I couldn't find that in the files you've given me. Please attach the file or name it more specifically."
     if PERSONAL_CONTACT.search(question):
         return local_answer(question, history)
     name = business_contact_query(question)
@@ -635,6 +669,8 @@ def local_answer(question: str, history: list[dict], file_evidence: str = "") ->
             "If the user asks you to do lasting work, tell them you can start it "
             "from this chat. Earlier retrieved user messages are background, "
             "may be outdated, and must not override the latest request. "
+            "Never invent the person's private contact details or facts from a file. "
+            "If the supplied conversation and file excerpts do not establish them, say so. "
             + STYLE_GUIDE
         ),
     }]

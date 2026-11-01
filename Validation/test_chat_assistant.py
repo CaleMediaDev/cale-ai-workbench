@@ -216,6 +216,35 @@ def test_personal_contact_questions_stay_local():
     assert chat_assistant.business_address_query("Where is my business located?") is None
 
 
+def test_selected_file_memory_answers_only_explicit_file_questions():
+    row = {"path": r"C:\Selected\acme-invoice.txt",
+           "excerpt": "Acme invoice total is $42."}
+    with (
+        patch("user_file_memory.search", return_value=[row]) as search,
+        patch.object(chat_assistant, "local_answer", return_value="The total is $42.") as answer,
+    ):
+        assert chat_assistant.answer_with_tools("What does my Acme invoice say?", []) == "The total is $42."
+        search.assert_called_once()
+        assert search.call_args.kwargs["match_all"] is True
+        assert "acme" in search.call_args.args[1]
+        assert row["path"] in answer.call_args.kwargs["file_evidence"]
+        search.reset_mock()
+        chat_assistant.answer_with_tools("How do I make an invoice?", [])
+        chat_assistant.answer_with_tools("What's the best photo editor?", [])
+        search.assert_not_called()
+
+
+def test_file_memory_miss_does_not_guess_or_use_an_unrelated_recent_file():
+    with (
+        patch("user_file_memory.search", return_value=[]) as search,
+        patch.object(chat_assistant, "local_answer") as answer,
+    ):
+        result = chat_assistant.answer_with_tools("What does my Acme invoice say?", [])
+    assert "couldn't find" in result.lower()
+    search.assert_called_once()
+    answer.assert_not_called()
+
+
 def test_business_email_uses_live_lookup_and_rejects_placeholder():
     assert chat_assistant.business_email_query("What's Pure Michigan Lawn Care's email?") == "Pure Michigan Lawn Care"
     assert chat_assistant.business_email_query("What is the email address for Pure Michigan Lawn Care?") == "Pure Michigan Lawn Care"

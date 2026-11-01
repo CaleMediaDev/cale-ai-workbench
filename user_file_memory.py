@@ -260,7 +260,8 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
     return {"indexed": indexed, "unchanged": unchanged, "skipped": skipped}
 
 
-def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
+def search(state: str | Path, query: str, limit: int = 8,
+           *, match_all: bool = False) -> list[dict]:
     """Search SQLite first; verify hits and scan selected roots on a miss."""
     count = max(1, min(limit, 20))
     words = project_memory.WORD.findall(query)[:12]
@@ -272,7 +273,8 @@ def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
                     FROM files WHERE content<>'' ORDER BY indexed_at DESC LIMIT ?""",
                     (count * 3,)).fetchall()
             else:
-                expression = " OR ".join('"' + word + '"' for word in words)
+                joiner = " AND " if match_all else " OR "
+                expression = joiner.join('"' + word + '"' for word in words)
                 rows = conn.execute("""SELECT path,snippet(file_fts,2,'[',']',' … ',30) AS excerpt
                     FROM file_fts WHERE file_fts MATCH ? ORDER BY bm25(file_fts,0.0,4.0,1.0)
                     LIMIT ?""", (expression, count * 3)).fetchall()

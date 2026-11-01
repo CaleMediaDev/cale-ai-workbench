@@ -32,6 +32,15 @@ class UserFileMemoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             user_file_memory.get(self.state, str(path))
 
+    def test_precise_search_requires_all_query_terms(self):
+        acme = self.root / "acme-invoice.txt"
+        other = self.root / "other-invoice.txt"
+        acme.write_text("Acme invoice total is 42.", encoding="utf-8")
+        other.write_text("Other invoice total is 99.", encoding="utf-8")
+        user_file_memory.ingest(self.state, [str(acme), str(other)])
+        hits = user_file_memory.search(self.state, "acme invoice", match_all=True)
+        self.assertEqual([row["path"] for row in hits], [str(acme)])
+
     def test_get_refreshes_only_requested_file(self):
         first = self.root / "first.txt"
         second = self.root / "second.txt"
