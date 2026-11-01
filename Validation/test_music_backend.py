@@ -82,24 +82,39 @@ def test_recovery_polls_existing_server_task_without_submitting_twice(tmp_path):
     assert all(call.args[0] != "/release_task" for call in request.call_args_list)
 
 
-def test_cover_uses_local_source_path(tmp_path):
+def test_cover_uploads_source_audio_to_local_server(tmp_path):
     source = tmp_path / "original.wav"
     source.write_bytes(b"source audio")
-    responses = iter([
-        {"code": 200, "data": {"task_id": "task-2"}},
-        {"code": 200, "data": [{"status": 1, "result": '[{"file":"/v1/audio?path=cover"}]'}]},
-    ])
+    response = {"code": 200, "data": [{"status": 1, "result": '[{"file":"/v1/audio?path=cover"}]'}]}
     with patch.object(music_backend, "start_server"), patch.object(
-        music_backend, "_request", side_effect=lambda *_args, **_kwargs: next(responses)
-    ) as request, patch.object(
+        music_backend, "_request", return_value=response
+    ), patch.object(
+        music_backend, "_upload_cover", return_value={"code": 200, "data": {"task_id": "task-2"}}
+    ) as upload, patch.object(
         music_backend, "urlopen", return_value=io.BytesIO(b"cover audio")
     ), patch.object(music_backend.time, "sleep"):
         result = music_backend.generate_music(
             "jazzy cover", str(tmp_path / "cover.mp3"), source_path=str(source)
         )
     assert result["source_path"] == str(source)
-    assert request.call_args_list[0].args[1]["task_type"] == "cover"
-    assert request.call_args_list[0].args[1]["src_audio_path"] == str(source)
+    assert upload.call_args.args[1] == source
+    assert upload.call_args.args[0]["task_type"] == "cover"
+    assert upload.call_args.args[0]["audio_cover_strength"] == 0.2
+    assert "src_audio_path" not in upload.call_args.args[0]
+
+
+def test_cover_upload_is_multipart_and_loopback_only(tmp_path):
+    source = tmp_path / "original.mp3"
+    source.write_bytes(b"source audio")
+    response = type("Response", (), {"ok": True, "json": lambda self: {"code": 200}})()
+    with patch.object(music_backend.requests, "post", return_value=response) as post:
+        result = music_backend._upload_cover(
+            {"task_type": "cover", "thinking": False}, source
+        )
+    assert result["code"] == 200
+    assert post.call_args.args[0] == "http://127.0.0.1:8001/release_task"
+    assert post.call_args.kwargs["data"]["thinking"] == "false"
+    assert post.call_args.kwargs["files"]["src_audio"][0] == "original.mp3"
 
 
 def test_prefetch_downloads_in_background_on_capable_pc(tmp_path):

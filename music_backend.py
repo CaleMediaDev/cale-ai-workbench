@@ -16,8 +16,11 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
+import requests
 
 ROOT = Path(__file__).resolve().parent
 ENGINE = ROOT / "Media" / "music" / "ACE-Step-1.5"
@@ -139,8 +142,28 @@ def _request(path: str, data: dict | None = None, timeout: int = 30):
         data=json.dumps(data).encode("utf-8") if data is not None else None,
         headers={"Content-Type": "application/json"},
     )
-    with urlopen(request, timeout=timeout) as response:
-        return json.load(response)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return json.load(response)
+    except HTTPError as exc:
+        detail = exc.read(1024).decode("utf-8", errors="replace")
+        raise RuntimeError(f"Local music API error {exc.code}: {detail[:300]}") from exc
+
+
+def _upload_cover(request: dict, source: Path) -> dict:
+    """Send source audio to the loopback API; it rejects absolute file paths."""
+    fields = {key: json.dumps(value) if isinstance(value, bool) else str(value)
+              for key, value in request.items()}
+    with source.open("rb") as audio:
+        response = requests.post(
+            BASE + "/release_task", data=fields,
+            files={"src_audio": (source.name, audio)}, timeout=300,
+        )
+    if not response.ok:
+        raise RuntimeError(
+            f"Local music API error {response.status_code}: {response.text[:300]}"
+        )
+    return response.json()
 
 
 def healthy() -> bool:
@@ -242,9 +265,9 @@ def _generate_music(
         "thinking": False, "inference_steps": 8, "batch_size": 1,
     }
     if source:
-        request.update({"task_type": "cover", "src_audio_path": str(source)})
+        request.update({"task_type": "cover", "audio_cover_strength": 0.2})
     def submit() -> str:
-        submitted = _request("/release_task", request)
+        submitted = _upload_cover(request, source) if source else _request("/release_task", request)
         task_id = submitted.get("data", {}).get("task_id")
         if submitted.get("code") != 200 or not task_id:
             raise RuntimeError(f"Music generation was not accepted: {submitted.get('error')}")
