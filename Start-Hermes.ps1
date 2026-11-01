@@ -78,6 +78,8 @@ if ($Check) {
     if ($LASTEXITCODE -ne 0) { throw 'Browser tools failed to connect.' }
     & $taskEngine mcp test toolbox
     if ($LASTEXITCODE -ne 0) { throw 'Specialist tools failed to connect.' }
+    & $taskEngine mcp test design
+    if ($LASTEXITCODE -ne 0) { throw 'Local design tools failed to connect.' }
     return
 }
 New-Item -ItemType Directory -Force -Path $Folder | Out-Null

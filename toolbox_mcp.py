@@ -73,6 +73,9 @@ def child_environment():
 
 @asynccontextmanager
 async def lifespan(_server):
+    CATALOG.clear()
+    SESSIONS.clear()
+    ERRORS.clear()
     specs = {
         "rea": [str(BOX / "node_modules/rea-agents/scripts/rea.mjs"), "mcp"],
         "devtools": [
@@ -88,21 +91,30 @@ async def lifespan(_server):
     }
     async with AsyncExitStack() as stack:
         for group, args in specs.items():
-            # Failure is explicit; never label an unavailable backend healthy.
+            # Keep the other backend and our own local tools alive if one fails.
             params = StdioServerParameters(
                 command=str(NODE), args=args, env=child_environment()
             )
-            reader, writer = await stack.enter_async_context(stdio_client(params))
-            session = await stack.enter_async_context(
-                ClientSession(
-                    reader,
-                    writer,
-                    read_timeout_seconds=1200,
-                    list_roots_callback=project_roots,
+            backend_stack = AsyncExitStack()
+            try:
+                reader, writer = await backend_stack.enter_async_context(
+                    stdio_client(params)
                 )
-            )
-            await session.initialize()
-            listing = await session.list_tools()
+                session = await backend_stack.enter_async_context(
+                    ClientSession(
+                        reader,
+                        writer,
+                        read_timeout_seconds=1200,
+                        list_roots_callback=project_roots,
+                    )
+                )
+                await session.initialize()
+                listing = await session.list_tools()
+            except Exception as exc:
+                ERRORS[group] = str(exc) or type(exc).__name__
+                await backend_stack.aclose()
+                continue
+            await stack.enter_async_context(backend_stack)
             SESSIONS[group] = session
             for tool in listing.tools:
                 CATALOG[f"{group}.{tool.name}"] = tool.model_dump(
@@ -110,6 +122,8 @@ async def lifespan(_server):
                 )
         yield {}
         SESSIONS.clear()
+        CATALOG.clear()
+        ERRORS.clear()
 
 
 server = MCPServer(
@@ -123,6 +137,22 @@ server = MCPServer(
         "All inference remains in the calling local model; these servers do not call an LLM."
     ),
 )
+
+
+@server.tool()
+def toolbox_status() -> dict:
+    """Show which specialist backends started and explain any unavailable tools."""
+    return {
+        "backends": {
+            group: {
+                "available": group in SESSIONS,
+                "tools": sum(name.startswith(group + ".") for name in CATALOG),
+                "error": ERRORS.get(group),
+            }
+            for group in ("rea", "devtools")
+        },
+        "local_tools_available": True,
+    }
 
 
 @server.tool()
@@ -142,6 +172,7 @@ def toolbox_search(query: str = "", offset: int = 0) -> dict:
     offset = max(0, offset)
     return {
         "total_available": len(CATALOG),
+        "backend_errors": ERRORS.copy(),
         "matching": len(matches),
         "offset": offset,
         "tools": [

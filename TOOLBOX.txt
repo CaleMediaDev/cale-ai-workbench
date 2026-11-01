@@ -27,6 +27,8 @@ Call mcp__toolbox__toolbox_search with a short purpose, then toolbox_schema
 with an exact returned name. Pass its arguments to toolbox_call as arguments_json.
 This exposes the full installed REA and Chrome DevTools catalogs on demand.
 Always read the returned schema; never guess argument names.
+Use toolbox_status to check whether each specialist backend started. If one
+is unavailable, local memory, media, document, and training tools still work.
 
 REA (official morluto/rea, rea-agents 6.8.0): static JavaScript/Electron analysis,
 application structure, imports, routes, source maps, native binary inspection,
