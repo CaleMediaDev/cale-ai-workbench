@@ -1,0 +1,7 @@
+FROM huihui_ai/qwen3-coder-next-abliterated:q4_K
+PARAMETER num_ctx 65536
+PARAMETER num_predict 8192
+PARAMETER temperature 1
+PARAMETER top_p 0.95
+PARAMETER top_k 40
+PARAMETER repeat_penalty 1

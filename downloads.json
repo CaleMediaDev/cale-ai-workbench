@@ -1,0 +1,24 @@
+{
+  "hermes_commit": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+  "hermes_installer_sha256": "8d491a8b9b19934bb8d027b11962c394551798e969d244b68d4ab95295b970e2",
+  "node": {
+    "url": "https://nodejs.org/dist/v26.13.0/node-v26.13.0-win-x64.zip",
+    "sha256": "dcc60d59a0746999f99064a01c020445d54d84228c691cdbf25b49ac3b59150a"
+  },
+  "ollama": {
+    "url": "https://github.com/ollama/ollama/releases/download/v0.40.13/ollama-windows-amd64.zip",
+    "sha256": "7afa38624fa62ee5d8293422d0ab084c1bb4603134c7f4dafce11a033b57cc19"
+  },
+  "uv": {
+    "url": "https://github.com/astral-sh/uv/releases/download/0.13.5/uv-x86_64-pc-windows-msvc.zip",
+    "sha256": "a38b8d1902b7cfbc76b423ba1bb456f623f42064cdc72628b6075b89afd1019a"
+  },
+  "ghidra": {
+    "url": "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip",
+    "sha256": "ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db"
+  },
+  "java": {
+    "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_windows_hotspot_21.0.13_9.zip",
+    "sha256": "a4dbaa05fca4bd89d84584e58c459bd732efebb1722af80ab13c6516832004f9"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@ast-grep/cli": "0.51.0",
+    "chrome-devtools-mcp": "1.12.0",
+    "rea-agents": "6.8.0",
+    "@playwright/mcp": "0.0.84"
+  },
+  "private": true
+}

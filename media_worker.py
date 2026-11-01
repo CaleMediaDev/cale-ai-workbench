@@ -1,0 +1,220 @@
+"""Local image, speech and bounded video/camera tools; JSON in and JSON out."""
+import base64
+import json
+import os
+from pathlib import Path
+import sys
+import time
+from urllib.request import Request, urlopen
+
+ROOT = Path(__file__).resolve().parent
+MEDIA = ROOT / 'Media'
+os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
+os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '1'
+
+
+def output_file(path, suffix):
+    target = Path(path).resolve()
+    if target.suffix.lower() != suffix: raise ValueError(f'Output must be a {suffix} file.')
+    if target.exists(): raise ValueError('Output already exists. Choose a new filename.')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def ollama(path, data=None, timeout=600):
+    request = Request('http://127.0.0.1:11434' + path,
+        data=json.dumps(data).encode() if data is not None else None,
+        headers={'Content-Type':'application/json'})
+    with urlopen(request, timeout=timeout) as response: return json.load(response)
+
+
+def unload_local_models():
+    # Leave unrelated models owned by other applications alone.
+    owned = {'cale-local', 'cale-permissive', 'cale-local', 'cale-permissive',
+             'qwen3.5-local-fast', 'cale-vision'}
+    for model in ollama('/api/ps', timeout=10).get('models', []):
+        if model['name'].split(':')[0] in owned:
+            ollama('/api/generate', {'model':model['name'],'keep_alive':0}, timeout=120)
+
+
+def generate_image(prompt, output_path, width=512, height=512, seed=0):
+    import torch
+    from diffusers import DiffusionPipeline
+    if width not in (256,512,768) or height not in (256,512,768): raise ValueError('Use 256, 512 or 768 pixel dimensions.')
+    target = output_file(output_path, '.png')
+    unload_local_models()
+    started = time.monotonic()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    pipeline = DiffusionPipeline.from_pretrained(str(MEDIA/'models/lcm'), local_files_only=True,
+        torch_dtype=torch.float32, use_safetensors=True)
+    pipeline.to(device)
+    pipeline.set_progress_bar_config(disable=True)
+    result = pipeline(prompt=prompt, num_inference_steps=4, guidance_scale=8.0,
+        width=width, height=height, generator=torch.Generator(device=device).manual_seed(int(seed)))
+    if getattr(result, 'nsfw_content_detected', None) and any(result.nsfw_content_detected):
+        raise ValueError('The image pipeline did not return a usable image for this request.')
+    result.images[0].save(target)
+    return {'path':str(target), 'width':width, 'height':height, 'device':device,
+            'elapsed_seconds':round(time.monotonic()-started,2), 'model':'LCM Dreamshaper v7', 'steps':4, 'seed':seed}
+
+
+def transcribe_audio(path):
+    from faster_whisper import WhisperModel
+    source = Path(path).resolve()
+    if not source.is_file(): raise ValueError('Audio or video file not found.')
+    model = WhisperModel(str(MEDIA/'models/whisper'), device='cpu', compute_type='int8', local_files_only=True)
+    segments, info = model.transcribe(str(source), beam_size=3, vad_filter=True)
+    rows = [{'start':round(segment.start,2),'end':round(segment.end,2),'text':segment.text.strip()} for segment in segments]
+    return {'text':' '.join(row['text'] for row in rows),'language':info.language,'segments':rows}
+
+
+def recognize_image(path, question='Describe this image accurately, including readable text.'):
+    from PIL import Image
+    import io
+    source = Path(path).resolve()
+    with Image.open(source) as original:
+        original.thumbnail((1280,1280)); image=original.convert('RGB')
+        buffer=io.BytesIO(); image.save(buffer,format='JPEG',quality=88)
+    model='qwen3.5-local-fast'
+    settings=MEDIA/'settings.json'
+    if settings.exists(): model=json.loads(settings.read_text()).get('vision_model',model)
+    result=ollama('/api/chat', {'model':model,'stream':False,'think':False,
+        'messages':[{'role':'user','content':question,'images':[base64.b64encode(buffer.getvalue()).decode()]}],
+        'options':{'num_ctx':8192,'num_predict':1200,'temperature':0.2}}, timeout=900)
+    if result.get('error'): raise RuntimeError(result['error'])
+    return {'description':result['message']['content'],'model':model,'source':str(source)}
+
+
+def analyze_video(path, question='Summarize visible events and useful details.', max_frames=4, include_audio=False):
+    import cv2
+    import tempfile
+    max_frames = min(max(int(max_frames),1),8)
+    source=Path(path).resolve(strict=True)
+    (ROOT/'Temp').mkdir(exist_ok=True)
+    capture=cv2.VideoCapture(str(source))
+    if not capture.isOpened(): raise ValueError('The video could not be opened.')
+    try:
+        fps=capture.get(cv2.CAP_PROP_FPS); count=capture.get(cv2.CAP_PROP_FRAME_COUNT)
+        if fps <= 0 or count <= 0: raise ValueError('This video has no seekable frame timeline.')
+        duration=count/fps; observations=[]
+        with tempfile.TemporaryDirectory(dir=ROOT/'Temp') as temp:
+            for index in range(max_frames):
+                position=(count-1)*index/max(1,max_frames-1)
+                capture.set(cv2.CAP_PROP_POS_FRAMES,int(position)); ok, frame=capture.read()
+                if not ok: continue
+                frame_path=Path(temp)/f'frame-{index}.jpg'; cv2.imwrite(str(frame_path),frame)
+                result=recognize_image(frame_path,question)
+                observations.append({'timestamp_seconds':round(position/fps,2),'description':result['description']})
+        result={'duration_seconds':round(duration,2),'sampled_frames':observations,
+            'limitation':'Only the listed frames were inspected. Events between samples may be missed; no model training occurred.'}
+        if include_audio: result['audio']=transcribe_audio(path)
+        return result
+    finally: capture.release()
+
+
+def camera_permission():
+    try: return json.loads((MEDIA/'camera-consent.json').read_text()).get('until',0) > time.time()
+    except (OSError, ValueError): return False
+
+
+def capture_camera(output_path, device=0):
+    if not camera_permission(): raise ValueError('Camera is off. Enable Camera in the desktop app before requesting a capture.')
+    import cv2
+    target=output_file(output_path,'.png')
+    capture=cv2.VideoCapture(int(device),cv2.CAP_DSHOW)
+    try:
+        if not capture.isOpened(): raise ValueError('Camera unavailable. Check the selected device and Windows camera permissions.')
+        deadline=time.monotonic()+5; frame=None
+        while time.monotonic()<deadline:
+            if not camera_permission(): raise ValueError('Camera was turned off.')
+            ok, frame=capture.read()
+            if ok: break
+        if frame is None: raise ValueError('No camera frame received.')
+        if not cv2.imwrite(str(target),frame): raise RuntimeError('Camera image could not be saved.')
+        return {'path':str(target),'device':device,'captured_at':time.strftime('%Y-%m-%d %H:%M:%S')}
+    finally: capture.release()
+
+
+def watch_camera(seconds=10, device=0, max_frames=3,
+                 question='Describe visible activity in this camera frame.'):
+    if not camera_permission(): raise ValueError('Camera is off. Enable Camera in the desktop app first.')
+    import cv2
+    import tempfile
+    seconds=min(max(int(seconds),1),30); max_frames=min(max(int(max_frames),1),4)
+    (ROOT/'Temp').mkdir(exist_ok=True)
+    capture=cv2.VideoCapture(int(device),cv2.CAP_DSHOW)
+    if not capture.isOpened():
+        capture.release(); raise ValueError('Camera unavailable. Check Windows camera permissions.')
+    observations=[]; started=time.monotonic()
+    try:
+        with tempfile.TemporaryDirectory(dir=ROOT/'Temp') as temp:
+            for index in range(max_frames):
+                if not camera_permission(): raise ValueError('Camera was turned off.')
+                target_time=started+index*seconds/max_frames
+                while time.monotonic()<target_time: time.sleep(min(.2,target_time-time.monotonic()))
+                ok,frame=capture.read()
+                if not ok: raise RuntimeError('The camera stopped returning frames.')
+                frame_path=Path(temp)/f'camera-{index}.jpg'
+                if not cv2.imwrite(str(frame_path),frame): raise RuntimeError('Could not sample camera frame.')
+                description=recognize_image(frame_path,question)['description']
+                observations.append({'at_seconds':round(time.monotonic()-started,2),'description':description})
+        return {'observations':observations,'device':device,
+                'limitation':'Only these sampled frames were inspected; no continuous recording or automatic model training occurred.'}
+    finally: capture.release()
+
+
+def speak(text, output_path, play=False):
+    import win32com.client
+    import pythoncom
+    target=output_file(output_path,'.wav')
+    pythoncom.CoInitialize()
+    try:
+        voice=win32com.client.Dispatch('SAPI.SpVoice')
+        stream=win32com.client.Dispatch('SAPI.SpFileStream')
+        stream.Open(str(target),3,False)
+        try: voice.AudioOutputStream=stream; voice.Speak(str(text)[:12000])
+        finally: stream.Close()
+    finally: pythoncom.CoUninitialize()
+    if play:
+        import winsound
+        winsound.PlaySound(str(target),winsound.SND_FILENAME)
+    return {'path':str(target),'engine':'Windows offline speech'}
+
+
+def record_audio(seconds=10):
+    import sounddevice as sd
+    import soundfile as sf
+    import tempfile
+    seconds=min(max(int(seconds),1),30)
+    (ROOT/'Temp').mkdir(exist_ok=True)
+    audio=sd.rec(seconds*16000,samplerate=16000,channels=1,dtype='float32'); sd.wait()
+    with tempfile.TemporaryDirectory(dir=ROOT/'Temp') as temp:
+        path=Path(temp)/'dictation.wav'; sf.write(path,audio,16000)
+        return transcribe_audio(path)
+
+
+def download_models():
+    from huggingface_hub import snapshot_download
+    models=json.loads((ROOT/'media-models.json').read_text())
+    for name, item in models.items():
+        print('Downloading '+name+' model files...',file=sys.stderr,flush=True)
+        snapshot_download(item['repo'],revision=item['revision'],local_dir=str(MEDIA/'models'/name),
+            allow_patterns=item['patterns'],max_workers=4)
+    return {'installed':list(models)}
+
+
+if __name__=='__main__':
+    try:
+        if '--download-models' in sys.argv: result=download_models()
+        else:
+            request=json.load(sys.stdin); action=request.pop('action')
+            from small_training import train_classifier, predict_classifier, train_adapter, ask_adapter
+            allowed={'generate_image':generate_image,'transcribe_audio':transcribe_audio,'recognize_image':recognize_image,
+                     'analyze_video':analyze_video,'capture_camera':capture_camera,'speak':speak,'record_audio':record_audio,
+                     'watch_camera':watch_camera,
+                     'train_classifier':train_classifier,'predict_classifier':predict_classifier,
+                     'train_adapter':train_adapter,'ask_adapter':ask_adapter}
+            result=allowed[action](**request)
+        print(json.dumps(result,ensure_ascii=False),flush=True)
+    except Exception as exc:
+        print(json.dumps({'error':str(exc)}),flush=True); sys.exit(1)

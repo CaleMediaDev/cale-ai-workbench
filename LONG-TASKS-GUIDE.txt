@@ -1,0 +1,81 @@
+LOCAL AI LONG TASKS
+
+Open "Cale AI Workbench" on your desktop. Click New project, give it a name,
+choose a project folder (or leave blank), and describe what you want built.
+Include the features and what a working result should do. Click Start building.
+
+It will keep working through a saved plan, test its work, and use a separate
+local-model review pass. You can close the window while it runs. The normal
+"Local AI" shortcut still opens the interactive assistant.
+
+CONTROLS
+Pause: stops further progress; a retiring worker can take up to two minutes.
+Resume: continues from the project's files, saved plan and task history.
+Add instructions: answers a blocker or adds requirements and resumes the project.
+Open project: opens the actual files in Explorer.
+Accept result: records your acceptance after fresh checks and review.
+Logs: opens supervisor, verification and request history.
+
+STATUS
+Working: building, reviewing, queued for the single worker, or settling a handoff.
+Checking: the supervisor is running the project's tests independently.
+Needs input: a blocker, repeated failures, or changes after verification need attention.
+Ready for review: build + separate AI review + independent test execution passed.
+Accepted: you accepted the result; files and history remain on disk.
+
+WHAT SURVIVES RESTARTS
+Hermes stores tasks, claims, failures, comments and runs in its SQLite board.
+The companion separately stores projects, requests and verification state.
+The agent maintains .local-ai/PLAN.md and PROGRESS.md inside each project.
+After a crash, a replacement worker reads those files and prior task context.
+Context compression and fresh review sessions prevent one conversation growing forever.
+
+Windows task "CaleAI_LongTasks" starts the supervisor at your sign-in, restarts
+it after a crash, and has no execution-time expiry. It starts the local Hermes
+gateway and Ollama when queued work needs them. Only one board worker runs at once.
+Pause and blocked states persist. A verification process belongs to a Windows Job:
+if the supervisor crashes, its verification descendants are retired automatically.
+
+Your PC must be on and awake for work to run. It cannot build while shut down,
+asleep, or signed out. After restarting Windows, sign in and it resumes.
+Power settings were not changed. Locking the screen is fine while the PC stays awake.
+
+DEFAULT LIMITS AND CHECKS
+Each native goal card allows up to 1,000 continuation turns and a 30-day attempt.
+The native dispatcher recovers crashed workers and blocks repeated failures.
+The companion retries failed handoff checks twice, then asks for input on the
+third failure. Each independent verification has a 20-minute timeout.
+The agent must provide .local-ai/verify.ps1 with actual behavioral tests; missing
+or failed verification never produces Ready for review. A separate local worker
+reviews requirements, implementation and tests, followed by another independent run.
+Source changes after a pass invalidate acceptance. Paused workers are allowed to
+retire before a resume to avoid overlapping edits.
+
+These are bounded continuations, not a promise that every project can be finished
+without help. The local model can still misunderstand requirements or write weak
+tests. Review the actual app before accepting. Passing an agent-written test suite
+is evidence, not proof of complete correctness. This setup has been tested with
+short real tasks and simulated failures; it has not been run for several weeks.
+
+FILES AND TOOLS
+See TOOLBOX.txt for REA, Ghidra, Chrome DevTools, code search, documents and SQL.
+Existing project instructions are preserved. Use a dedicated folder per project;
+the companion rejects overlapping project folders in its queue.
+Queued projects use your Windows account permissions. No WordPress credentials,
+personal browser cookies or Codex connections were copied to this local assistant.
+No external AI fallback is configured. Local runs do not consume Codex model usage.
+
+STARTUP CONTROL
+Run "Disable Long Tasks Startup.ps1" to disable future automatic starts.
+Run "Install Long Tasks Startup.ps1" to re-enable it.
+Use Pause in the window to stop an already-running project.
+
+DIAGNOSTICS
+LongTasks/projects.db                         Project and request state
+LongTasks/monitor-errors.log                  Supervisor errors and history
+LongTasks/<project-id>-verification.log       Actual independent test output
+data/kanban/boards/long-tasks                  Hermes task board and worker history
+Validation/long-task-tests.txt                Controller behavior tests
+Validation/toolbox-exercise.json              Real specialist-tool test results
+Validation/rea-native-check.json              Ghidra Windows executable inspection
+Validation/rea-decompile-check.json           Real Ghidra decompilation evidence

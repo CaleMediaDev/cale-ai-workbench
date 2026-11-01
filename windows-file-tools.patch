@@ -1,0 +1,65 @@
+diff --git a/tools/file_operations.py b/tools/file_operations.py
+index efc2aa07e6..4e0d4349e2 100644
+--- a/tools/file_operations.py
++++ b/tools/file_operations.py
+@@ -966,6 +966,7 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
+         digest = hashlib.sha256()
+         try:
+             with open(full, "rb") as fh:
++                st = os.fstat(fh.fileno())
+                 sample = fh.read(1000)
+                 ext_binary = has_binary_extension(path)
+                 if ext_binary or self._is_likely_binary_bytes(sample):
+@@ -1639,6 +1640,12 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
+         # first-line match); the raw read becomes write_file's pre_content.
+         raw_content = data.decode("utf-8", "surrogateescape")
+         content, _ = _strip_bom(raw_content)
++        file_ending = _detect_line_ending(content)
++        if file_ending == "\r\n":
++            # read_file exposes LF lines, so a copied complete line must match
++            # the CRLF bytes too, including its trailing newline.
++            old_string = _normalize_line_endings(old_string, file_ending)
++            new_string = _normalize_line_endings(new_string, file_ending)
+ 
+         from tools.fuzzy_match import boundary_note, fuzzy_find_and_replace
+         correction_notes = []
+@@ -1648,7 +1655,6 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
+             return self._no_match_result(path, content, old_string, new_string, match_count, error)
+         # Models send bare-LF old/new strings; normalize the substituted region to
+         # the file's ending so CRLF files stay consistent.
+-        file_ending = _detect_line_ending(content)
+         if file_ending:
+             new_content = _normalize_line_endings(new_content, file_ending)
+         write_result = self.write_file(path, new_content, pre_content=raw_content)
+diff --git a/tools/file_tools_read_tracking.py b/tools/file_tools_read_tracking.py
+index 1054a42220..ff266a3911 100644
+--- a/tools/file_tools_read_tracking.py
++++ b/tools/file_tools_read_tracking.py
+@@ -249,6 +249,14 @@ def _update_read_timestamp(filepath: str, task_id: str) -> None:
+ def _file_metadata(resolved: str) -> tuple | None:
+     try:
+         st = os.stat(resolved)
++        if os.name == "nt":
++            if not stat.S_ISREG(st.st_mode):
++                return None
++            # Windows Python can report creation time from stat, but change
++            # time from fstat. Compare descriptor metadata on both sides;
++            # retaining change time also invalidates reads after mtime is reset.
++            with open(resolved, "rb") as stream:
++                st = os.fstat(stream.fileno())
+         return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+     except OSError:
+         return None
+@@ -265,10 +273,10 @@ def _file_version(resolved: str) -> tuple | None:
+             if not stat.S_ISREG(before.st_mode):
+                 return None
+             digest = hashlib.file_digest(stream, "sha256").digest()
+-            after = os.stat(resolved)
++            after = _file_metadata(resolved)
+         fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+         version = tuple(getattr(before, name) for name in fields)
+-        if version == tuple(getattr(after, name) for name in fields):
++        if version == after:
+             return (*version, digest)
+         return None
+     except OSError:

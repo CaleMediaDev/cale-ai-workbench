@@ -1,0 +1,26 @@
+{
+  "large": {
+    "source": "qwen3-coder-next:q4_K_M",
+    "ram_gb": 96,
+    "download_gb": 52,
+    "context": 65536
+  },
+  "compact": {
+    "source": "qwen3.5:9b",
+    "ram_gb": 24,
+    "download_gb": 7,
+    "context": 32768
+  },
+  "light": {
+    "source": "qwen3.5:4b",
+    "ram_gb": 16,
+    "download_gb": 4,
+    "context": 16384
+  },
+  "permissive": {
+    "source": "huihui_ai/qwen3-coder-next-abliterated:q4_K",
+    "ram_gb": 96,
+    "download_gb": 52,
+    "context": 65536
+  }
+}

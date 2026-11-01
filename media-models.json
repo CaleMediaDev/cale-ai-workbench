@@ -1,0 +1,36 @@
+{
+  "lcm": {
+    "repo": "SimianLuo/LCM_Dreamshaper_v7",
+    "revision": "a85df6a8bd976cdd08b4fd8f3b73f229c9e54df5",
+    "patterns": [
+      "model_index.json",
+      "scheduler/*.json",
+      "tokenizer/*",
+      "unet/*.json",
+      "unet/*.safetensors",
+      "vae/*.json",
+      "vae/*.safetensors",
+      "text_encoder/*.json",
+      "text_encoder/*.safetensors",
+      "safety_checker/*.json",
+      "safety_checker/*.safetensors",
+      "feature_extractor/*.json"
+    ]
+  },
+  "whisper": {
+    "repo": "Systran/faster-whisper-base",
+    "revision": "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66",
+    "patterns": [
+      "*.json",
+      "*.txt",
+      "*.safetensors",
+      "*.model",
+      "*.bin"
+    ]
+  },
+  "trainer": {
+    "repo": "Qwen/Qwen2.5-0.5B-Instruct",
+    "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+    "patterns": ["*.json", "*.txt", "*.safetensors"]
+  }
+}

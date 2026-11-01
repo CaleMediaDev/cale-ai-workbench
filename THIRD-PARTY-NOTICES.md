@@ -1,0 +1,36 @@
+# Third-party components
+
+Cale AI Workbench integrates these projects. Their original authors retain ownership. Our MIT license does not replace dependency or model licenses. The installer downloads dependencies from their upstream distributions; it does not redistribute account data or pretrained weights inside the source repository.
+
+| Component | Upstream |
+|---|---|
+| Hermes Agent, MIT, Copyright (c) 2025 Nous Research | https://github.com/NousResearch/hermes-agent |
+| Ollama | https://github.com/ollama/ollama |
+| REA / rea-agents | https://github.com/morluto/rea |
+| Chrome DevTools MCP | https://github.com/ChromeDevTools/chrome-devtools-mcp |
+| Playwright MCP | https://github.com/microsoft/playwright-mcp |
+| MarkItDown | https://github.com/microsoft/markitdown |
+| Ghidra | https://github.com/NationalSecurityAgency/ghidra |
+| Eclipse Temurin JDK | https://adoptium.net/temurin/releases/ |
+| Node.js | https://nodejs.org/ |
+| ast-grep | https://github.com/ast-grep/ast-grep |
+| Diffusers and LCM Dreamshaper v7 | https://huggingface.co/SimianLuo/LCM_Dreamshaper_v7 |
+| Faster-Whisper and PyAV | https://github.com/SYSTRAN/faster-whisper |
+| Qwen2.5-0.5B-Instruct training base | https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct |
+| PyTorch | https://pytorch.org/ |
+| uv | https://github.com/astral-sh/uv |
+
+The Windows compatibility patch contains modifications to MIT-licensed Hermes code. The upstream MIT notice is reproduced in `HERMES-LICENSE`.
+
+## Model sources
+
+- Qwen3-Coder-Next: https://huggingface.co/Qwen/Qwen3-Coder-Next — Apache-2.0. Ollama distribution: https://ollama.com/library/qwen3-coder-next.
+- Qwen 3.5: https://ollama.com/library/qwen3.5 — consult the selected model's upstream license.
+- Huihui Qwen Coder Next abliterated: https://huggingface.co/huihui-ai/Huihui-Qwen3-Coder-Next-abliterated — Apache-2.0. Publisher's Ollama distribution: https://ollama.com/huihui_ai/qwen3-coder-next-abliterated.
+- Huihui Llama 3.3 70B abliterated: https://huggingface.co/huihui-ai/Llama-3.3-70B-Instruct-abliterated — **Llama 3.3 Community License**, not our MIT license. Built with Llama. Publisher's distribution: https://ollama.com/huihui_ai/llama3.3-abliterated.
+- ArliAI GPT-OSS 20B Derestricted: https://huggingface.co/ArliAI/gpt-oss-20b-Derestricted — Apache-2.0. Community GGUF conversion: https://huggingface.co/MaziyarPanahi/gpt-oss-20b-Derestricted-GGUF.
+- ArliAI GLM 4.5 Air Derestricted: https://huggingface.co/ArliAI/GLM-4.5-Air-Derestricted — MIT. Community GGUF conversion: https://huggingface.co/mradermacher/GLM-4.5-Air-Derestricted-GGUF.
+
+Model names and logos belong to their respective owners. This project is not affiliated with those publishers, OpenRouter, or OpenAI. No claim is made that community derivatives retain the benchmarks of their base models.
+
+LCM Dreamshaper v7 derives from Dreamshaper and Stable Diffusion 1.5. Review the upstream model card and base licenses before redistribution or commercial use of generated material. The installer downloads these weights to the user's PC; this repository and release installer do not bundle them.

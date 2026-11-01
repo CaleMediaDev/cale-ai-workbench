@@ -1,0 +1,69 @@
+"""Download optional local weights with Ollama's verified, resumable model store."""
+import json
+from pathlib import Path
+from urllib.request import Request, urlopen
+
+ROOT = Path(__file__).resolve().parent
+CATALOG = {
+ 'main': {'label': 'Main coding + optional free cloud', 'alias': 'cale-local'},
+ 'permissive': {'label': 'Qwen Coder Next permissive (local)', 'alias': 'cale-permissive',
+   'source':'huihui_ai/qwen3-coder-next-abliterated:q4_K', 'download_gb':52, 'ram_gb':96,
+   'origin':'https://huggingface.co/huihui-ai/Huihui-Qwen3-Coder-Next-abliterated', 'license':'Apache-2.0', 'context':65536},
+ 'gptoss': {'label':'ArliAI GPT-OSS 20B (experimental)', 'alias':'cale-gptoss-derestricted',
+   'source':'hf.co/MaziyarPanahi/gpt-oss-20b-Derestricted-GGUF:Q4_K_M', 'download_gb':13, 'ram_gb':32,
+   'origin':'https://huggingface.co/ArliAI/gpt-oss-20b-Derestricted',
+   'conversion':'https://huggingface.co/MaziyarPanahi/gpt-oss-20b-Derestricted-GGUF', 'license':'Apache-2.0', 'context':32768},
+ 'llama': {'label':'Huihui Llama 3.3 70B (experimental)', 'alias':'cale-llama33-abliterated',
+   'source':'huihui_ai/llama3.3-abliterated:latest', 'download_gb':43, 'ram_gb':80,
+   'origin':'https://huggingface.co/huihui-ai/Llama-3.3-70B-Instruct-abliterated', 'license':'Llama 3.3 Community License', 'context':32768},
+ 'glm': {'label':'ArliAI GLM 4.5 Air (experimental)', 'alias':'cale-glm45-derestricted',
+   'source':'hf.co/mradermacher/GLM-4.5-Air-Derestricted-GGUF:Q4_K_M', 'download_gb':67, 'ram_gb':112,
+   'origin':'https://huggingface.co/ArliAI/GLM-4.5-Air-Derestricted',
+   'conversion':'https://huggingface.co/mradermacher/GLM-4.5-Air-Derestricted-GGUF', 'license':'MIT', 'context':32768},
+}
+
+
+def post(path, value, timeout=30):
+    with urlopen(Request('http://127.0.0.1:11434' + path, data=json.dumps(value).encode(),
+        headers={'Content-Type':'application/json'}), timeout=timeout) as response: return json.load(response)
+
+
+def install(profile, progress=print):
+    import shutil
+    import ctypes
+    class Memory(ctypes.Structure):
+        _fields_ = [('length', ctypes.c_ulong), ('load', ctypes.c_ulong)] + [(n, ctypes.c_ulonglong) for n in
+            ('total_phys', 'available_phys', 'total_page', 'available_page', 'total_virtual', 'available_virtual', 'extended')]
+    memory = Memory(); memory.length = ctypes.sizeof(memory)
+    ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory))
+    item = CATALOG[profile]
+    if profile == 'main': raise ValueError('Use the main installer to choose the base model.')
+    if memory.total_phys / 2**30 + 1 < item['ram_gb']:
+        raise ValueError(f"This model is intended for at least {item['ram_gb']} GB RAM. Choose a smaller option.")
+    # The Ollama store can be moved; disk space remains checked by Ollama at download time.
+    progress(f"Downloading {item['label']}: approximately {item['download_gb']} GB. Re-running resumes interrupted downloads.")
+    with urlopen(Request('http://127.0.0.1:11434/api/pull', data=json.dumps({'model':item['source'], 'stream':True}).encode(),
+        headers={'Content-Type':'application/json'}), timeout=3600) as response:
+        import time
+        last = 0
+        for line in response:
+            data = json.loads(line)
+            if data.get('error'): raise RuntimeError(data['error'])
+            if time.monotonic() - last > 2 or data.get('status') == 'success':
+                done, total = data.get('completed',0), data.get('total',0)
+                progress(f"{data.get('status','Downloading')}  {done / 1e9:.1f} / {total / 1e9:.1f} GB" if total else data.get('status','Working'))
+                last = time.monotonic()
+    result = post('/api/create', {'model':item['alias'], 'from':item['source'], 'stream':False,
+        'parameters':{'num_ctx':item['context'], 'num_predict':8192, 'temperature':0.7}}, timeout=120)
+    if result.get('error'): raise RuntimeError(result['error'])
+    info = post('/api/show', {'model':item['alias']})
+    if 'tools' not in info.get('capabilities', []):
+        raise RuntimeError('Weights installed, but Ollama did not advertise tool support. This model is not ready for agent tasks.')
+    progress('Installed. Tool capability is advertised; reliability still needs task-specific testing.')
+    return item['alias']
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(); parser.add_argument('profile', choices=list(CATALOG)[1:])
+    install(parser.parse_args().profile, lambda text: print(text, flush=True))

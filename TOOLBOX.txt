@@ -1,0 +1,81 @@
+LOCAL AI TOOLBOX
+
+Ask Local AI to use tools directly. Reasoning uses local Ollama by default;
+the optional connected account can use free cloud inference with local fallback.
+
+Already available: terminal commands, read/write/patch files, file search,
+Git, Python, Node, memory, reusable skills, public web search and page reading,
+Playwright browser automation, and persistent Hermes task boards.
+
+NEW SPECIALIST TOOLS
+Call mcp__toolbox__toolbox_search with a short purpose, then toolbox_schema
+with an exact returned name. Pass its arguments to toolbox_call as arguments_json.
+This exposes the full installed REA and Chrome DevTools catalogs on demand.
+Always read the returned schema; never guess argument names.
+
+REA (official morluto/rea, rea-agents 6.8.0): static JavaScript/Electron analysis,
+application structure, imports, routes, source maps, native binary inspection,
+Ghidra decompilation, .NET metadata/CIL, PE imports/certificates, packaged Python,
+SQLite inspection, model artifact metadata, HAR captures, web observations,
+evidence comparisons and reconstruction workflows. Some catalog tools require
+platforms, hardware or optional engines not installed here; read capability errors.
+Ghidra 12.1.4 and Temurin JDK 21 are included for supported Windows native PE analysis.
+REA's Windows Ghidra support is experimental and does not offer every Linux feature.
+
+Chrome DevTools 1.12.0: browser console errors, network requests, screenshots,
+DOM interaction, performance traces, memory debugging and device emulation.
+It uses an isolated browser, not your signed-in personal browser. Telemetry and
+CrUX URL lookup are disabled. Playwright remains available for repeatable tests.
+
+document_to_text: local PDF, Word, Excel, PowerPoint, HTML, CSV and text extraction
+using Microsoft MarkItDown. No external AI, image descriptions or cloud OCR.
+sqlite_read: read-only SQL on existing local databases.
+
+LOCAL MEDIA AND TRAINING TOOLS
+make_image: generate a PNG locally with LCM Dreamshaper v7.
+see_image: describe a photo, screenshot or chart with local Qwen vision.
+hear_audio: transcribe a local audio/video file with Faster-Whisper base.
+watch_video: inspect up to eight sampled frames and optionally transcribe audio.
+camera_snapshot: capture one frame only while Camera is enabled in the app.
+watch_camera: inspect up to four sampled live frames over at most 30 seconds.
+voice_file: create a spoken WAV file with offline Windows speech.
+train_text_classifier / classify_text: train a labeled CSV text classifier and
+predict with an inspectable JSON model. Evaluation uses held-out rows.
+train_small_adapter / ask_small_adapter: train and use a separate 0.5B Qwen
+LoRA adapter from JSONL input/output examples. The coding model is unchanged.
+Camera is off by default and the app's switch expires in one hour. Video frame
+sampling can miss events. The Dictate button records ten seconds from the mic
+and copies the recognized text to your clipboard.
+
+TERMINAL TOOLS (launchers put these on PATH)
+rea --help             Official reverse-engineering CLI (same workflows as MCP)
+ast-grep --help        Structural code search/refactoring across supported languages
+ruff check .           Python linting
+pytest                Python behavior tests
+python                Toolbox Python: DuckDB, pandas, Pillow, pefile, Capstone,
+                      openpyxl, python-pptx, MarkItDown and related document readers
+node / npm            Private Node 26 runtime and normal JavaScript package tooling
+git                   Existing Git installation; no GitHub account credentials added
+
+For repeatable browser tests use Node with require('playwright'), channel:'chrome'.
+Do not use ast-grep's sg alias (it can collide with unrelated system commands).
+
+EXAMPLES
+"Inspect this local app with REA and explain its modules with evidence."
+"Build a customer tracker, then test every main workflow with Playwright."
+"Use Chrome DevTools to find why my app is slow and fix it."
+"Read these PDFs and spreadsheets and build a searchable local index."
+"Analyze this SQLite database and summarize its tables."
+
+Official sources:
+https://github.com/morluto/rea
+https://github.com/ChromeDevTools/chrome-devtools-mcp
+https://github.com/ast-grep/ast-grep
+https://github.com/microsoft/markitdown
+https://github.com/NationalSecurityAgency/ghidra
+https://adoptium.net/temurin/releases/
+
+Packages are pinned locally. Updating them requires rechecking their compatibility.
+This is a local tool suite, not a sandbox: tools run with your Windows account's
+permissions. Use project-scoped tasks. Website administration still requires your
+own connection; Codex connections and signed-in cookies are not automatically copied.
