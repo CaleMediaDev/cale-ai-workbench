@@ -94,7 +94,7 @@ Your PC must be on and awake. The optional sign-in task restarts the supervisor 
 
 The background supervisor records task milestones even when the window is closed, so the estimated time to review reflects ongoing work. Pauses and time while the supervisor is stopped do not count.
 
-The desktop rechecks GitHub releases while long tasks are running. If a newer release appears before a task finishes, Cale stages the newest version and applies it when the task is idle. The first-run AI install holds tasks until the core runtime is ready; later updates to optional browser tools run in the background without stopping existing or newly submitted tasks.
+The desktop rechecks GitHub releases while long tasks are running. If a newer release appears before a task finishes, Cale stages the newest version and applies it when the task is idle. The first-run AI install holds tasks until the core runtime is ready; later updates to optional browser tools run in the background without stopping existing or newly submitted tasks. Setup repair checks which installer owns the progress record, so a quiet optional-tool download cannot trigger a second base install.
 
 Automatic model sizing ignores Hermes's own board-finish reminders. A simple task therefore stays on the appropriate fast or middle model after a reminder, while a real new user request can still scale it up.
 

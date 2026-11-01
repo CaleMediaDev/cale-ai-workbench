@@ -97,6 +97,25 @@ def test_slow_live_installer_is_not_restarted(tmp_path, monkeypatch):
     assert json.loads((state / "install-progress.json").read_text())["status"] == "working"
 
 
+def test_slow_optional_tool_install_is_not_mistaken_for_dead_base_installer(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    progress_path = state / "install-progress.json"
+    progress_path.write_text(json.dumps({
+        "owner": "runtime_features", "status": "working",
+        "current": "Downloading the crawler's local browser",
+        "updated": time.time() - 3600, "pid": 12345,
+    }), encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    monkeypatch.setattr(setup_recovery.subprocess, "Popen", lambda *args, **kwargs: 1 / 0)
+    assert not setup_recovery.recover()
+    assert json.loads(progress_path.read_text())["status"] == "working"
+    assert not (state / "base-install-repair.json").exists()
+
+
 def test_repair_exhaustion_requires_final_failure_and_dead_process(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()

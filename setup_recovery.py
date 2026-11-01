@@ -8,7 +8,6 @@ import subprocess
 import time
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "LongTasks"
 RETRY_DELAYS = (20, 120, 600)
@@ -55,7 +54,8 @@ def _installer_running(progress: dict) -> bool:
 
 def _stalled(progress: dict) -> bool:
     """A quiet download may take hours; only a dead installer is stalled."""
-    return (progress.get("status") == "working"
+    return (progress.get("owner") != "runtime_features"
+            and progress.get("status") == "working"
             and time.time() - float(progress.get("updated", 0)) >= STALE_SECONDS
             and not _installer_running(progress))
 
@@ -75,6 +75,11 @@ def recover() -> bool:
     """Retry a stopped base installer at most three times, preserving task files."""
     progress = _read(STATE / "install-progress.json")
     record_path = STATE / "base-install-repair.json"
+    # The optional crawler/Chrome installer owns this shared progress file
+    # while it runs. Its own recovery loop verifies its Python process; the
+    # base installer must never overwrite that status or start beside it.
+    if progress.get("owner") == "runtime_features":
+        return False
     if progress.get("status") == "complete":
         record_path.unlink(missing_ok=True)
         return False
@@ -107,6 +112,8 @@ def recover() -> bool:
         try:
             # Another monitor or a manual retry may have changed setup state.
             progress = _read(STATE / "install-progress.json")
+            if progress.get("owner") == "runtime_features":
+                return False
             record = _read(record_path)
             attempts = max(0, int(record.get("attempts", 0)))
             stalled = _stalled(progress)
