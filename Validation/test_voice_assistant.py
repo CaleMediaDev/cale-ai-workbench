@@ -3,6 +3,7 @@
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import ModuleType
 from unittest.mock import patch
 
@@ -21,7 +22,9 @@ class VoiceTests(unittest.TestCase):
             return {"choices": [{"message": {"content": "Recipe app: checking files, one folder at a time."}}]}
 
         fake.post = answer
-        with patch.dict(sys.modules, {"cloud_ai": fake}):
+        with TemporaryDirectory() as folder, patch.object(
+            voice_assistant, "ROOT", Path(folder)
+        ), patch.dict(sys.modules, {"cloud_ai": fake}):
             spoken = voice_assistant.rephrase_status(
                 "Recipe app. Checking files.", ["Still checking files"],
                 ("Recipe app", "checking files"),
@@ -37,14 +40,15 @@ class VoiceTests(unittest.TestCase):
         fake.post = lambda *_args, **_kwargs: {
             "choices": [{"message": {"content": "I'm making excellent progress!"}}]
         }
-        with patch.dict(sys.modules, {"cloud_ai": fake}):
+        with TemporaryDirectory() as folder, patch.object(
+            voice_assistant, "ROOT", Path(folder)
+        ), patch.dict(sys.modules, {"cloud_ai": fake}):
             spoken = voice_assistant.rephrase_status(
                 "Recipe app. Checking files.", required=("Recipe app", "Checking files")
             )
         self.assertEqual(spoken, "Recipe app. Checking files.")
 
     def test_music_render_keeps_status_speech_from_reloading_gpu_model(self):
-        from tempfile import TemporaryDirectory
         from types import SimpleNamespace
 
         with TemporaryDirectory() as folder:
