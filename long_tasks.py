@@ -2410,6 +2410,7 @@ def gui():
 
     task_cards = {}
     setup_card = None
+    setup_card_dismissed = STATE / "setup-card-dismissed"
     voice_card = None
     cale_voice_card = None
     ollama_card = None
@@ -2543,12 +2544,23 @@ def gui():
         """Update existing widgets in place so polling never resets the scroll."""
         nonlocal setup_card, voice_card, cale_voice_card, ollama_card, empty_label
         setup = read_task_status(STATE / "install-progress.json")
-        if setup:
+        if setup and not setup_card_dismissed.is_file():
             if setup_card is None:
                 first = next(
                     (entry["panel"] for entry in task_cards.values()), models_section
                 )
                 setup_card = create_progress_card("Set up your AI", first)
+                controls = ttk.Frame(setup_card["panel"], style="Card.TFrame")
+                controls.pack(fill="x", pady=(9, 0))
+
+                def dismiss_setup():
+                    nonlocal setup_card
+                    setup_card_dismissed.write_text("dismissed", encoding="utf-8")
+                    setup_card["panel"].destroy()
+                    setup_card = None
+                    render_cards()
+
+                ttk.Button(controls, text="Delete", command=dismiss_setup).pack(side="left")
             update_progress_card(
                 setup_card,
                 setup.get("percent", 0),
@@ -2616,7 +2628,7 @@ def gui():
         for pid in list(task_cards):
             if pid not in live_ids:
                 task_cards.pop(pid)["panel"].destroy()
-        if not all_tasks and not setup:
+        if not all_tasks and (not setup or setup_card_dismissed.is_file()):
             if empty_label is None:
                 empty_label = ttk.Label(
                     cards,
