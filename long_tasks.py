@@ -2144,8 +2144,6 @@ def gui():
             in ("queued", "waiting_for_setup", "working", "checking", "paused", "needs_input")
         ]
         if action == "new":
-            listening.clear()
-            mic_button.configure(text="🎤  Mic Off")
             voice_label.set("Heard: " + phrase[:100])
             submit_chat_text(note)
             return

@@ -442,7 +442,7 @@ async def make_music(
             music_backend.generate_music, prompt, output_path, lyrics,
             duration_seconds, instrumental,
         ),
-        timeout=5400,
+        timeout=7500,
     )
 
 

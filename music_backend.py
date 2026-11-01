@@ -136,7 +136,9 @@ def generate_music(
     task_id = submitted.get("data", {}).get("task_id")
     if submitted.get("code") != 200 or not task_id:
         raise RuntimeError(f"Music generation was not accepted: {submitted.get('error')}")
-    deadline = time.monotonic() + 1800
+    # First use can include several gigabytes of model downloads. Keep the
+    # request alive while that one-time setup finishes on slower connections.
+    deadline = time.monotonic() + 7200
     while time.monotonic() < deadline:
         time.sleep(3)
         result = _request("/query_result", {"task_id_list": [task_id]})
@@ -167,4 +169,4 @@ def generate_music(
         finally:
             temporary.unlink(missing_ok=True)
         return {"path": str(target), "model": "ACE-Step 1.5", "duration_seconds": duration_seconds}
-    raise TimeoutError("Music generation exceeded 30 minutes.")
+    raise TimeoutError("Music generation exceeded two hours.")

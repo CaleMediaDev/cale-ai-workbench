@@ -51,7 +51,9 @@ class VoiceTests(unittest.TestCase):
         call.assert_called_once_with("record_audio", seconds=8)
 
     def test_speech_uses_local_worker(self):
-        with patch.object(voice_assistant, "media_call", return_value={}) as call:
+        with patch("cale_voice.ready", return_value=False), patch.object(
+            voice_assistant, "media_call", return_value={}
+        ) as call:
             voice_assistant.say("Task completed", rate=2)
         self.assertEqual(call.call_args.args, ("speak",))
         self.assertEqual(call.call_args.kwargs["text"], "Task completed")
@@ -95,6 +97,10 @@ class VoiceTests(unittest.TestCase):
         )
         self.assertEqual(
             voice_assistant.spoken_command("Hey Cale can you hear me", require_wake=True),
+            ("hearing", ""),
+        )
+        self.assertEqual(
+            voice_assistant.spoken_command("Hey, Cale, can you hear me?", require_wake=True),
             ("hearing", ""),
         )
 
