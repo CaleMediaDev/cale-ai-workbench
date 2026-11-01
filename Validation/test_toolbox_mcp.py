@@ -42,6 +42,22 @@ def test_audio_stem_tool_is_discoverable_and_callable():
     assert result["files"] == ["stems/vocals.wav"]
 
 
+def test_audio_to_midi_tool_is_discoverable_and_callable():
+    found = toolbox_mcp.toolbox_search("audio midi transcribe")
+    assert any(tool["name"] == "local.audio_to_midi" for tool in found["tools"])
+    schema = toolbox_mcp.toolbox_schema("local.audio_to_midi")
+    assert schema["inputSchema"]["required"] == ["source_path", "output_dir"]
+
+    async def fake_transcription(**arguments):
+        return {"midi_path": arguments["output_dir"] + "/melody.mid"}
+
+    with patch.object(toolbox_mcp, "audio_to_midi", fake_transcription):
+        result = asyncio.run(toolbox_mcp.toolbox_call(
+            "local.audio_to_midi", json.dumps({"source_path": "melody.wav", "output_dir": "notes"})
+        ))
+    assert result["midi_path"] == "notes/melody.mid"
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):

@@ -66,6 +66,12 @@ LOCAL_CATALOG = {
             "source_path": {"type": "string"}, "output_dir": {"type": "string"},
         }, "required": ["source_path", "output_dir"]},
     },
+    "local.audio_to_midi": {
+        "description": "Transcribe a local melody or instrument recording to editable MIDI notes and a note-event CSV with Spotify Basic Pitch. Best on one instrument at a time; installs locally on first use and needs no account.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_path": {"type": "string"}, "output_dir": {"type": "string"},
+        }, "required": ["source_path", "output_dir"]},
+    },
 }
 
 
@@ -248,6 +254,7 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "local.start_music_job": start_music_job,
             "local.music_job_status": music_job_status,
             "local.separate_music": separate_music,
+            "local.audio_to_midi": audio_to_midi,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -544,6 +551,17 @@ async def separate_music(source_path: str, output_dir: str) -> dict:
     return await asyncio.wait_for(
         asyncio.to_thread(music_stems.separate_stems, source_path, output_dir),
         timeout=7500,
+    )
+
+
+@server.tool()
+async def audio_to_midi(source_path: str, output_dir: str) -> dict:
+    """Create a local MIDI transcription and note-event CSV from an audio file."""
+    import music_midi
+
+    return await asyncio.wait_for(
+        asyncio.to_thread(music_midi.transcribe_to_midi, source_path, output_dir),
+        timeout=3900,
     )
 
 
