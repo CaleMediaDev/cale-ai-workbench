@@ -9,16 +9,24 @@ if ($Mode -eq 'offline') {
     if (Test-Path -LiteralPath $state) { exit 0 }
     $adapters=@(Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' })
     if (-not $adapters) { throw 'No active physical network adapter was found.' }
-    $record=@{ names=@($adapters | ForEach-Object { $_.Name }); created=(Get-Date).ToString('o') }
+    $record=@{ names=@($adapters | ForEach-Object { $_.Name }); created=(Get-Date).ToString('o'); phase='switching' }
     $record | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $state -Encoding UTF8
+    $temporary="$state.tmp"
     try {
         foreach ($adapter in $adapters) {
             Disable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction Stop
         }
+        if (@(Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' }).Count -gt 0) {
+            throw 'A physical network adapter is still active.'
+        }
+        $record.phase='offline'
+        $record | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $temporary -Encoding UTF8
+        [IO.File]::Replace($temporary,$state,$null)
     } catch {
         foreach ($adapter in $adapters) {
             Enable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction SilentlyContinue
         }
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $state -Force -ErrorAction SilentlyContinue
         throw
     }

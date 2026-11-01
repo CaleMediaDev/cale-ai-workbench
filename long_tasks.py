@@ -578,7 +578,8 @@ Use the installed local tools; see {ROOT / "TOOLBOX.txt"} for specialist tools.
 For existing songs, discover local.analyze_music for tempo/key/chords, or
 local.separate_music and local.audio_to_midi for audio edits. For a finished
 clip use local.edit_music to trim/fade, or local.mix_music to layer narration
-over a soundtrack, with
+over a soundtrack. Use local.transcribe_song_lyrics for editable sung words and
+timed SRT captions. Find exact arguments with
 toolbox_search, read its schema, and save output in a fresh project folder.
 Before substantial design, coding, performance, security, or release work,
 check the installed Hermes skills for a relevant workflow. Load only skills
@@ -2019,6 +2020,7 @@ def gui():
         sampler = system_gauges.HardwareSampler()
         while True:
             reading = sampler.sample()
+            reading["offline_status"] = pc_offline.status()
             try:
                 gauge_events.put_nowait(reading)
             except queue.Full:
@@ -2052,7 +2054,9 @@ def gui():
                 down_rate = reading.get("net_down_mbps")
                 up_rate = reading.get("net_up_mbps")
                 net_rate_text.set(
-                    f"↓ {down_rate:.1f} · ↑ {up_rate:.1f} Mb/s"
+                    "Physical adapters off" if reading.get("offline_status") == "physical_off"
+                    else "Offline not verified" if reading.get("offline_status") == "unverified"
+                    else f"↓ {down_rate:.1f} · ↑ {up_rate:.1f} Mb/s"
                     if down_rate is not None and up_rate is not None else ""
                 )
                 if offline_button is not None and str(offline_button["state"]) != "disabled":

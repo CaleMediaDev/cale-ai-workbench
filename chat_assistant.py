@@ -77,7 +77,7 @@ def music_edit_request(command: str) -> bool:
         )
         and re.search(
             r"\b(?:audio|song|music|melody|recording|midi|vocals?|stems?|"
-            r"tracks?|instrumental|soundtrack|beat|voice|volume)\b",
+            r"tracks?|instrumental|soundtrack|beat|voice|volume|lyrics|captions?)\b",
             command,
         )
     )

@@ -66,6 +66,12 @@ LOCAL_CATALOG = {
             "source_path": {"type": "string"}, "output_dir": {"type": "string"},
         }, "required": ["source_path", "output_dir"]},
     },
+    "local.transcribe_song_lyrics": {
+        "description": "Separate a local song's vocals, then transcribe sung words offline with Whisper. Saves editable lyrics.txt, timed lyrics.srt captions, lyrics.json, and both stems in a fresh folder. Singing recognition is approximate; review before publishing.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_path": {"type": "string"}, "output_dir": {"type": "string"},
+        }, "required": ["source_path", "output_dir"]},
+    },
     "local.audio_to_midi": {
         "description": "Transcribe a local melody or instrument recording to editable MIDI notes and a note-event CSV with Spotify Basic Pitch. Best on one instrument at a time; installs locally on first use and needs no account.",
         "inputSchema": {"type": "object", "properties": {
@@ -285,6 +291,7 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "local.start_music_job": start_music_job,
             "local.music_job_status": music_job_status,
             "local.separate_music": separate_music,
+            "local.transcribe_song_lyrics": transcribe_song_lyrics,
             "local.audio_to_midi": audio_to_midi,
             "local.analyze_music": analyze_music,
             "local.master_music": master_music,
@@ -587,6 +594,18 @@ async def separate_music(source_path: str, output_dir: str) -> dict:
         asyncio.to_thread(music_stems.separate_stems, source_path, output_dir),
         timeout=7500,
     )
+
+
+@server.tool()
+async def transcribe_song_lyrics(source_path: str, output_dir: str) -> dict:
+    """Turn a finished song into local vocal stems, editable words and SRT captions."""
+    import music_lyrics
+
+    source, target = music_lyrics.prepare(source_path, output_dir)
+    stems = await separate_music(str(source), str(target / "stems"))
+    vocal = music_lyrics.vocal_file(stems["files"])
+    transcription = await media_run("transcribe_audio", 1800, path=str(vocal))
+    return music_lyrics.save(source, vocal, target, transcription)
 
 
 @server.tool()
