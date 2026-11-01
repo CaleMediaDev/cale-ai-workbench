@@ -19,6 +19,17 @@ import voice_assistant
 
 
 class VoiceTests(unittest.TestCase):
+    def test_mute_interrupts_current_spoken_reply_without_muting_microphone(self):
+        import queue
+
+        mic = threading.Event()
+        muted = threading.Event()
+        cancel = voice_assistant.SpeechCancel(mic, queue.PriorityQueue(), 0, muted)
+        self.assertFalse(cancel.is_set())
+        muted.set()
+        self.assertTrue(cancel.wait(0.1))
+        self.assertFalse(mic.is_set())
+
     def test_microphone_server_handles_multiple_requests_in_one_process(self):
         server = Path(__file__).resolve().parents[1] / "media_worker.py"
         result = subprocess.run(

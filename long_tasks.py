@@ -1895,6 +1895,13 @@ def advance_project(p):
                     update(p["id"], status="needs_input",
                            detail="The song plays, but it has too few clear vocals. Try again or add lyrics.")
                     return
+            video_info = job["result"].get("video") or {}
+            video = Path(video_info["path"]) if video_info.get("path") else None
+            captions = Path(video_info["captions_path"]) if video_info.get("captions_path") else None
+            if video_info and (not video or not video.is_file() or not captions or not captions.is_file()):
+                update(p["id"], status="needs_input",
+                       detail="The song is saved, but its captioned video needs repair.")
+                return
             notes = Path(p["folder"]) / ".local-ai"
             plan = notes / "PLAN.md"
             progress = notes / "PROGRESS.md"
@@ -1912,6 +1919,7 @@ def advance_project(p):
                     stream.write(
                         f"\nVocal version ready: {output.name} "
                         f"({output.stat().st_size:,} bytes). Original audio is preserved.\n"
+                        + (f"Captioned video: {video.name}; editable captions: {captions.name}.\n" if video else "")
                     )
             else:
                 plan.write_text(
@@ -1920,10 +1928,13 @@ def advance_project(p):
                     encoding="utf-8",
                 )
                 progress.write_text(
-                    f"# Progress\n\nMusic saved: {output.name} ({output.stat().st_size:,} bytes). Open files to listen and review.\n",
+                    f"# Progress\n\nMusic saved: {output.name} ({output.stat().st_size:,} bytes). Open files to listen and review.\n"
+                    + (f"Captioned video: {video.name}; editable captions: {captions.name}.\n" if video else ""),
                     encoding="utf-8",
                 )
-            update(p["id"], status="ready_for_review", detail=f"Music is ready: {output.name}",
+            update(p["id"], status="ready_for_review",
+                   detail=(f"Song and captioned video are ready: {video.name}" if video
+                           else f"Music is ready: {output.name}"),
                    fingerprint=fingerprint(Path(p["folder"])))
         elif status in ("error", "stopped"):
             if not retry_song_without_vocals(p, job):
@@ -3185,6 +3196,10 @@ def gui():
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
     voice_busy = threading.Event()
+    mute_marker = STATE / "voice-muted"
+    voice_muted = threading.Event()
+    if mute_marker.is_file():
+        voice_muted.set()
     mic_turn_requested = threading.Event()
     listening = threading.Event()
     mic_preflight_pending = threading.Event()
@@ -3229,6 +3244,10 @@ def gui():
         while True:
             rank, _, message, rate, vary, required, replay_id = speech_queue.get()
             try:
+                if voice_muted.is_set():
+                    if message == voice_assistant.WAKE_ACK:
+                        voice_events.put(("wake_ack_done", ""))
+                    continue
                 # A requested mic turn takes priority over speech that has not
                 # started yet. Queued chat remains available to read afterward.
                 while mic_turn_requested.is_set():
@@ -3248,6 +3267,9 @@ def gui():
                 interrupted = False
                 index = 1
                 for index, chunk in enumerate(chunks, 1):
+                    if voice_muted.is_set():
+                        interrupted = True
+                        break
                     if mic_turn_requested.is_set():
                         remainder = " ".join(chunks[index - 1:])
                         speech_queue.put((rank, next(speech_order), remainder, rate,
@@ -3259,7 +3281,9 @@ def gui():
                     voice_events.put(("speaking", f"Speaking aloud · part {index} of {len(chunks)}"))
                     result = voice_assistant.say(
                         chunk, rate=rate,
-                        cancel=voice_assistant.SpeechCancel(mic_turn_requested, speech_queue, rank),
+                        cancel=voice_assistant.SpeechCancel(
+                            mic_turn_requested, speech_queue, rank, voice_muted
+                        ),
                     )
                     if mic_turn_requested.is_set() and index < len(chunks):
                         remainder = " ".join(chunks[index:])
@@ -3306,9 +3330,10 @@ def gui():
             except cale_voice.SpeechInterrupted:
                 # Microphone use takes priority, but the person's requested
                 # spoken reply must resume after capture finishes.
-                remainder = " ".join(chunks[index - 1:])
-                speech_queue.put((rank, next(speech_order), remainder, rate,
-                                  False, (), replay_id))
+                if not voice_muted.is_set():
+                    remainder = " ".join(chunks[index - 1:])
+                    speech_queue.put((rank, next(speech_order), remainder, rate,
+                                      False, (), replay_id))
             except Exception as exc:
                 if message == voice_assistant.WAKE_ACK:
                     voice_events.put(("wake_ack_done", ""))
@@ -3331,6 +3356,8 @@ def gui():
 
     def speak_update(message, rate=0, vary=False, required=(), priority=None, replay_id=None):
         """Queue one audible update without blocking the task screen."""
+        if voice_muted.is_set():
+            return
         with speech_lock:
             voice_speaking.set()
             rank = (1 if vary else 0) if priority is None else int(priority)
@@ -3558,6 +3585,24 @@ def gui():
             voice_label.set("Heard: " + phrase[:100])
             submit_chat_text(note)
 
+    def toggle_voice_mute():
+        if voice_muted.is_set():
+            voice_muted.clear()
+            mute_marker.unlink(missing_ok=True)
+            mute_button.configure(text="🔊  Mute Cale")
+            voice_label.set("Cale's voice is on.")
+        else:
+            voice_muted.set()
+            mute_marker.parent.mkdir(parents=True, exist_ok=True)
+            mute_marker.write_text("muted\n", encoding="utf-8")
+            mute_button.configure(text="🔇  Unmute Cale")
+            voice_label.set("Cale's voice is muted. Chat and microphone still work.")
+
+    mute_button = ttk.Button(
+        title_row, text="🔇  Unmute Cale" if voice_muted.is_set() else "🔊  Mute Cale",
+        command=toggle_voice_mute,
+    )
+    mute_button.pack(side="right", padx=(0, 8), pady=(8, 0))
     mic_button = ttk.Button(title_row, text="🎤  Mic Off", command=toggle_listening)
     mic_button.pack(side="right", padx=(0, 8), pady=(8, 0))
     presence = tk.Canvas(

@@ -51,13 +51,15 @@ class SpeechCancel:
     """Let a mic turn or higher-priority speech interrupt the current line."""
 
     def __init__(self, microphone: threading.Event, pending: queue.PriorityQueue,
-                 rank: int):
+                 rank: int, muted: threading.Event | None = None):
         self.microphone = microphone
         self.pending = pending
         self.rank = rank
+        self.muted = muted
 
     def is_set(self) -> bool:
-        return self.microphone.is_set() or urgent_speech_waiting(self.pending, self.rank)
+        return (self.microphone.is_set() or bool(self.muted and self.muted.is_set())
+                or urgent_speech_waiting(self.pending, self.rank))
 
     def wait(self, timeout=None) -> bool:
         deadline = None if timeout is None else time.monotonic() + max(0, timeout)

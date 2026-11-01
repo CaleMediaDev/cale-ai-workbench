@@ -502,7 +502,8 @@ def vocal_evidence(path: str | Path, duration_seconds: int) -> dict:
     final_second = max((float(row.get("end", 0)) for row in segments), default=0)
     required_words = max(5, round(duration_seconds * 0.35))
     return {"recognized_words": words, "last_vocal_second": round(final_second, 1),
-            "passed": words >= required_words and final_second >= duration_seconds * 0.6}
+            "passed": words >= required_words and final_second >= duration_seconds * 0.6,
+            "segments": segments}
 
 
 def _launch_job(job_id: str) -> None:
@@ -554,9 +555,9 @@ def recover_music_jobs() -> None:
             output = Path(info["output_path"])
             if output.is_file():
                 if audio_file_ok(output):
-                    vocal_check = None
+                    vocal_check = info.get("vocal_check")
                     if (info.get("duration_seconds") and not info.get("instrumental")
-                            and not info.get("source_path")):
+                            and not info.get("source_path") and not (vocal_check or {}).get("passed")):
                         try:
                             vocal_check = vocal_evidence(output, info["duration_seconds"])
                         except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
@@ -573,11 +574,26 @@ def recover_music_jobs() -> None:
                                 "vocal_check": vocal_check, "finished": time.time(),
                             })
                             continue
+                    import song_video
+
+                    _write_job(job_id, {**info, "status": "working",
+                                        "current": "Finishing the captioned video"})
+                    try:
+                        video = song_video.render(
+                            str(output), segments=(vocal_check or {}).get("segments", []),
+                            lyrics=info.get("lyrics", ""), title=info.get("prompt", "Song"),
+                            instrumental=bool(info.get("instrumental")),
+                            duration=int(info.get("duration_seconds") or 30),
+                        )
+                    except Exception as exc:
+                        _write_job(job_id, {**info, "status": "error",
+                                            "current": "The audio is saved, but the video failed: " + str(exc)[:200],
+                                            "finished": time.time()})
+                        continue
                     _write_job(job_id, {
-                        **info, "status": "complete", "current": "Music is ready",
-                        "result": {"path": str(output), "model": "ACE-Step 1.5"},
-                        "vocal_check": vocal_check,
-                        "finished": time.time(),
+                        **info, "status": "complete", "current": "Music and captioned video are ready",
+                        "result": {"path": str(output), "model": "ACE-Step 1.5", "video": video},
+                        "vocal_check": vocal_check, "finished": time.time(),
                     })
                 else:
                     # The engine may have produced a damaged file before the
@@ -665,26 +681,45 @@ def _run_job(job_id: str) -> None:
             if not lyric_file.exists():
                 lyric_file.parent.mkdir(parents=True, exist_ok=True)
                 lyric_file.write_text(lyrics + "\n", encoding="utf-8")
-        working["current"] = "Generating music locally"
-        _write_job(job_id, working)
-        result = generate_music(
-            info["prompt"], info["output_path"], lyrics,
-            info["duration_seconds"], info["instrumental"], info["source_path"],
-            info.get("server_task_id", ""), remember_task,
-        )
-        check = None
-        if needs_vocals:
-            working["current"] = "Checking the vocals"
+        saved_audio = Path(info["output_path"])
+        if saved_audio.is_file() and audio_file_ok(saved_audio):
+            result = info.get("result") or {"path": str(saved_audio), "model": "ACE-Step 1.5"}
+        else:
+            working["current"] = "Generating music locally"
             _write_job(job_id, working)
-            check = vocal_evidence(result["path"], info["duration_seconds"])
+            result = generate_music(
+                info["prompt"], info["output_path"], lyrics,
+                info["duration_seconds"], info["instrumental"], info["source_path"],
+                info.get("server_task_id", ""), remember_task,
+            )
+        working["result"] = result
+        _write_job(job_id, working)
+        check = info.get("vocal_check")
+        if needs_vocals:
+            if not check or not check.get("passed"):
+                working["current"] = "Checking the vocals"
+                _write_job(job_id, working)
+                check = vocal_evidence(result["path"], info["duration_seconds"])
             if not check["passed"]:
                 raise RuntimeError(
                     "The song played, but sustained vocals were not detected. "
                     "The audio is saved; retry or provide your own lyrics."
                 )
+        working["vocal_check"] = check
+        import song_video
+
+        working["current"] = "Making a video with captions"
+        _write_job(job_id, working)
+        video = song_video.render(
+            result["path"], segments=(check or {}).get("segments", []),
+            lyrics=lyrics, title=info["prompt"],
+            instrumental=bool(info["instrumental"]),
+            duration=info["duration_seconds"],
+        )
         _write_job(job_id, {
-            **working, "status": "complete", "current": "Music is ready",
-            "result": result, "vocal_check": check, "finished": time.time(),
+            **working, "status": "complete", "current": "Music and captioned video are ready",
+            "result": {**result, "video": video}, "vocal_check": check,
+            "finished": time.time(),
         })
     except Exception as exc:
         _write_job(job_id, {
