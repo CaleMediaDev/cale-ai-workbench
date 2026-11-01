@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
+import wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -309,7 +310,41 @@ def background_prompt(
     return (slot, line, rate)
 
 
-def media_call(action, **arguments):
+def _stop_media_process(process):
+    """Stop a cancelled media action and its Windows venv launcher child."""
+    import psutil
+
+    try:
+        descendants = psutil.Process(process.pid).children(recursive=True)
+    except psutil.Error:
+        descendants = []
+    for child in reversed(descendants):
+        try:
+            child.terminate()
+        except psutil.Error:
+            pass
+    if process.poll() is None:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+    _, alive = psutil.wait_procs(descendants, timeout=2)
+    for child in alive:
+        try:
+            child.kill()
+        except psutil.Error:
+            pass
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.wait(timeout=2)
+        except OSError:
+            pass
+
+
+def media_call(action, cancel=None, **arguments):
     """Run one bounded media action and return its final JSON response."""
     python = ROOT / "Media/python/Scripts/python.exe"
     voice_files = ROOT / "Media/models/natural_voice"
@@ -322,24 +357,70 @@ def media_call(action, **arguments):
         python = ROOT / "Toolbox/python/Scripts/python.exe"
     if not python.is_file():
         raise RuntimeError("Voice is still installing. Please try again after setup.")
-    result = subprocess.run(
-        [str(python), str(ROOT / "media_worker.py")],
-        input=json.dumps({"action": action, **arguments}),
-        text=True,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        cwd=ROOT,
-        timeout=180,
-        creationflags=HIDE,
-    )
+    command = [str(python), str(ROOT / "media_worker.py")]
+    payload = json.dumps({"action": action, **arguments})
+    options = dict(text=True, encoding="utf-8", errors="replace", cwd=ROOT,
+                   creationflags=HIDE)
+    if cancel is None:
+        result = subprocess.run(command, input=payload, capture_output=True,
+                                timeout=180, **options)
+        stdout, returncode = result.stdout, result.returncode
+    else:
+        import cale_voice
+
+        if cancel.is_set():
+            raise cale_voice.SpeechInterrupted
+        process = subprocess.Popen(command, stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   **options)
+        deadline = time.monotonic() + 180
+        sent = False
+        try:
+            while True:
+                if cancel.is_set():
+                    raise cale_voice.SpeechInterrupted
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, 180)
+                try:
+                    stdout, _stderr = process.communicate(
+                        input=None if sent else payload, timeout=min(remaining, 0.1)
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    sent = True
+            returncode = process.returncode
+        except (cale_voice.SpeechInterrupted, subprocess.TimeoutExpired):
+            _stop_media_process(process)
+            raise
     try:
-        answer = json.loads(result.stdout.splitlines()[-1])
+        answer = json.loads(stdout.splitlines()[-1])
     except (IndexError, ValueError) as exc:
         raise RuntimeError("The local voice service did not respond.") from exc
-    if result.returncode or "error" in answer:
+    if returncode or "error" in answer:
         raise RuntimeError(str(answer.get("error", "Local voice failed.")))
     return answer
+
+
+def _play_file(path, cancel=None):
+    """Play a local WAV and stop promptly if the person needs the microphone."""
+    import winsound
+
+    if cancel is None:
+        winsound.PlaySound(str(path), winsound.SND_FILENAME)
+        return
+    import cale_voice
+
+    if cancel.is_set():
+        raise cale_voice.SpeechInterrupted
+    with wave.open(str(path), "rb") as audio:
+        duration = audio.getnframes() / audio.getframerate()
+    winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC)
+    deadline = time.monotonic() + duration
+    while time.monotonic() < deadline:
+        if cancel.wait(timeout=min(0.1, max(0, deadline - time.monotonic()))):
+            winsound.PlaySound(None, 0)
+            raise cale_voice.SpeechInterrupted
 
 
 def listen(seconds=8):
@@ -371,9 +452,7 @@ def say(message, rate=0, cancel=None):
         bundled = ROOT / "assets" / bundled_name
         if (reference.is_file() and bundled.is_file() and bundled.stat().st_size > 1000
                 and hashlib.sha256(reference.read_bytes()).hexdigest() == WAKE_REFERENCE_SHA256):
-            import winsound
-
-            winsound.PlaySound(str(bundled), winsound.SND_FILENAME)
+            _play_file(bundled, cancel)
             return {"path": str(bundled), "engine": "Cale's local voice (bundled)"}
     temp = ROOT / "Temp"
     temp.mkdir(exist_ok=True)
@@ -390,9 +469,7 @@ def say(message, rate=0, cancel=None):
                     stamp = reference.stat().st_mtime_ns
                     cached = ROOT / "Media" / "voice-cache" / f"wake-v1-{stamp}.wav"
                     if cached.is_file() and cached.stat().st_size > 1000:
-                        import winsound
-
-                        winsound.PlaySound(str(cached), winsound.SND_FILENAME)
+                        _play_file(cached, cancel)
                         return {"path": str(cached), "engine": "Cale's local voice (cached)"}
                 result = cale_voice.speak(str(message)[:280], Path(folder) / "update.wav", cancel=cancel)
                 if cached is not None:
@@ -408,10 +485,13 @@ def say(message, rate=0, cancel=None):
                 # Keep spoken updates available if the clone worker exits or
                 # a particular phrase cannot be synthesized.
                 pass
-        return media_call(
+        result = media_call(
             "speak",
             text=str(message)[:280],
             output_path=str(Path(folder) / "update.wav"),
-            play=True,
+            play=False,
             rate=rate,
+            **({"cancel": cancel} if cancel is not None else {}),
         )
+        _play_file(result["path"], cancel)
+        return result

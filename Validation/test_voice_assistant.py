@@ -4,6 +4,7 @@ import sys
 import threading
 import time
 import unittest
+import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType
@@ -76,24 +77,79 @@ class VoiceTests(unittest.TestCase):
 
     def test_speech_uses_local_worker(self):
         with patch("cale_voice.ready", return_value=False), patch.object(
-            voice_assistant, "media_call", return_value={}
-        ) as call:
+            voice_assistant, "media_call", return_value={"path": "speech.wav"}
+        ) as call, patch.object(voice_assistant, "_play_file") as play:
             voice_assistant.say("Task completed", rate=2)
         self.assertEqual(call.call_args.args, ("speak",))
         self.assertEqual(call.call_args.kwargs["text"], "Task completed")
-        self.assertTrue(call.call_args.kwargs["play"])
+        self.assertFalse(call.call_args.kwargs["play"])
         self.assertEqual(call.call_args.kwargs["rate"], 2)
+        play.assert_called_once_with("speech.wav", None)
 
     def test_failed_voice_clone_reaches_offline_fallback(self):
         with patch("cale_voice.ready", return_value=True), patch(
             "cale_voice.speak", side_effect=RuntimeError("clone unavailable")
         ), patch.object(voice_assistant, "media_call", return_value={
-            "engine": "Windows offline speech"
-        }) as fallback:
+            "engine": "Windows offline speech", "path": "fallback.wav"
+        }) as fallback, patch.object(voice_assistant, "_play_file") as play:
             result = voice_assistant.say("Your task is ready")
         self.assertEqual(result["engine"], "Windows offline speech")
         self.assertEqual(fallback.call_args.args, ("speak",))
-        self.assertTrue(fallback.call_args.kwargs["play"])
+        self.assertFalse(fallback.call_args.kwargs["play"])
+        play.assert_called_once_with("fallback.wav", None)
+
+    def test_fallback_synthesis_stops_for_microphone_turn(self):
+        from subprocess import TimeoutExpired
+        from unittest.mock import Mock
+
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Media/python/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            voice = root / "Media/models/natural_voice"
+            voice.mkdir(parents=True)
+            (voice / "kokoro-v1.0.int8.onnx").touch()
+            (voice / "voices-v1.0.bin").touch()
+            cancel = threading.Event()
+
+            def wait_for_voice(**_kwargs):
+                time.sleep(0.02)
+                raise TimeoutExpired("media worker", 0.1)
+
+            process = Mock()
+            process.communicate.side_effect = wait_for_voice
+            timer = threading.Timer(0.1, cancel.set)
+            timer.start()
+            try:
+                with patch.object(voice_assistant, "ROOT", root), patch.object(
+                    voice_assistant.subprocess, "Popen", return_value=process
+                ), patch.object(voice_assistant, "_stop_media_process") as stop:
+                    with self.assertRaises(cale_voice.SpeechInterrupted):
+                        voice_assistant.media_call("speak", cancel=cancel,
+                                                   text="hello", play=False)
+                stop.assert_called_once_with(process)
+            finally:
+                timer.join()
+
+    def test_fallback_playback_stops_for_microphone_turn(self):
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "speech.wav"
+            with wave.open(str(path), "wb") as audio:
+                audio.setnchannels(1)
+                audio.setsampwidth(2)
+                audio.setframerate(16000)
+                audio.writeframes(b"\0\0" * 16000)
+            cancel = threading.Event()
+            timer = threading.Timer(0.1, cancel.set)
+            timer.start()
+            try:
+                with patch("winsound.PlaySound") as play:
+                    with self.assertRaises(cale_voice.SpeechInterrupted):
+                        voice_assistant._play_file(path, cancel)
+                self.assertEqual(play.call_args.args, (None, 0))
+            finally:
+                timer.join()
 
     def test_voice_generation_stops_promptly_for_a_microphone_turn(self):
         release = threading.Event()
