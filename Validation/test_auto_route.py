@@ -33,6 +33,38 @@ class AutoRouteTests(unittest.TestCase):
             "quick",
         )
 
+    def test_short_tool_tasks_do_not_use_fast_tier(self):
+        for request in (
+            "Read the attached PDF and summarize it.",
+            "Search the web for the current rules.",
+            "Make an image of a beach.",
+            "Create a photo of a beach.",
+            "Analyze my CSV data.",
+            "Can you inspect this screenshot?",
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(task_size([{"role": "user", "content": request}]),
+                                 "balanced")
+
+    def test_media_part_and_short_project_request_escalate(self):
+        self.assertEqual(task_size([{"role": "user", "content": [
+            {"type": "text", "text": "What is in this?"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+        ]}]), "balanced")
+        self.assertEqual(task_size([{"role": "user", "content": "Make me an app."}]),
+                         "deep")
+
+    def test_short_implementation_requests_use_deep_tier(self):
+        for request in (
+            "Add a new tool to the app.",
+            "Improve its logic and capabilities.",
+            "Install the missing runtime.",
+            "Update the website UI.",
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(task_size([{"role": "user", "content": request}]),
+                                 "deep")
+
     def test_project_wrapper_does_not_force_every_task_to_large_model(self):
         def wrapped(brief):
             return [

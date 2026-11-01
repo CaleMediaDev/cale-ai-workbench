@@ -9,7 +9,8 @@ import re
 
 BUILD_ACTION = re.compile(
     r"\b(build|create|develop|implement|code|refactor|debug|fix|repair|"
-    r"redesign|migrate|integrate|train|automate|audit|reverse.engineer)\b",
+    r"redesign|migrate|integrate|train|automate|audit|reverse.engineer|"
+    r"add|improve|upgrade|install|connect|set\s+up|update|change|remove)\b",
     re.IGNORECASE,
 )
 PROJECT_MARKER = re.compile(
@@ -36,6 +37,38 @@ LOOKUP_WORD = re.compile(
     r"\b(?:find|lookup|look\s+up|search|what(?:'?s| is)?|where(?:'?s| is)?)\b",
     re.IGNORECASE,
 )
+TOOL_WORK = re.compile(
+    r"\b(?:read|open|inspect|analy[sz]e|summari[sz]e|extract|transcribe|"
+    r"index|edit|search|browse|visit|scrape|crawl|generate|draw|make|create)\b"
+    r".{0,90}\b(?:attached|uploaded|selected|my\s+(?:file|folder|document|"
+    r"image|photo|video|audio|data)|this\s+(?:file|folder|document|pdf|"
+    r"image|photo|video|audio|website|page|repo)|"
+    r"(?:pdf|csv|spreadsheet|screenshot|audio|video|image|photo|"
+    r"website|webpage|browser|url|repository|repo|file|folder))\b",
+    re.IGNORECASE | re.DOTALL,
+)
+EXPLICIT_TOOL = re.compile(
+    r"\b(?:use\s+(?:your\s+)?tools|search\s+(?:the\s+)?web|"
+    r"look\s+it\s+up|browse\s+(?:the\s+)?internet)\b",
+    re.IGNORECASE,
+)
+PROJECT_BUILD = re.compile(
+    r"\b(?:build|create|develop|implement|code|redesign|make)\b"
+    r".{0,80}\b(?:app|application|website|software|program|extension|"
+    r"plugin|dashboard)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def has_media_input(messages):
+    """Detect image/audio/video parts that are not represented by text."""
+    return any(
+        isinstance(part, dict)
+        and part.get("type") not in (None, "text", "input_text")
+        for msg in messages
+        if isinstance(msg, dict) and msg.get("role") == "user"
+        for part in (msg.get("content") if isinstance(msg.get("content"), list) else [])
+    )
 
 
 def message_text(content):
@@ -70,6 +103,8 @@ def task_size(messages):
         return "deep"
     if len(intent) > 800 or tool_calls >= 4:
         return "deep"
+    if PROJECT_BUILD.search(intent):
+        return "deep"
     live_lookup = LIVE_FACT.search(intent) or (
         CONTACT_NUMBER.search(intent) and LOOKUP_WORD.search(intent)
     )
@@ -79,8 +114,12 @@ def task_size(messages):
         and tool_calls == 0
         and QUESTION_START.match(latest)
         and not live_lookup
+        and not has_media_input(messages)
+        and not EXPLICIT_TOOL.search(intent)
     ):
         return "quick"
+    if has_media_input(messages) or TOOL_WORK.search(intent) or EXPLICIT_TOOL.search(intent):
+        return "balanced"
     if BUILD_ACTION.search(intent):
         return "deep"
     if live_lookup:
