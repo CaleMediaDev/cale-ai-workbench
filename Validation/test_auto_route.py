@@ -125,6 +125,17 @@ class AutoRouteTests(unittest.TestCase):
         messages[0]["content"] = "Build a production-ready multi-page recipe app."
         self.assertEqual(task_size(messages), "deep")
 
+    def test_recent_tool_failure_loop_uses_stronger_model(self):
+        messages = [{"role": "user", "content": "Make a rap song with music."}]
+        messages += [
+            {"role": "tool", "content": '{"error":"Cannot read binary file"}'},
+            {"role": "tool", "content": '{"output":"missing file","exit_code":2,"error":null}'},
+            {"role": "tool", "content": '{"output":"","exit_code":-1,"status":"blocked"}'},
+        ]
+        self.assertEqual(task_size(messages), "deep")
+        messages += [{"role": "tool", "content": '{"output":"ok","exit_code":0,"error":null}'}] * 8
+        self.assertEqual(task_size(messages), "quick")
+
     def test_saved_project_brief_uses_same_step_routing_after_compaction(self):
         prompt = project_prompt({
             "title": "Recipe app", "folder": "C:/Tasks/recipe",

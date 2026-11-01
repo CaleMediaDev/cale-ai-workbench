@@ -5,6 +5,7 @@ brief and tool history remain in the request, so a long project can scale up
 without forcing every routine tool step through the slowest model.
 """
 
+import json
 import re
 
 BUILD_ACTION = re.compile(
@@ -104,6 +105,27 @@ def synthetic_worker_note(text):
     return text.lstrip().startswith("[System: You are a Hermes kanban worker.")
 
 
+def repeated_tool_failures(messages):
+    """Escalate only when recent tool results show a real repair loop."""
+    recent = [message_text(msg.get("content")) for msg in messages
+              if isinstance(msg, dict) and msg.get("role") == "tool"][-8:]
+    failures = 0
+    for content in recent:
+        if "[Tool loop warning:" in content:
+            failures += 1
+            continue
+        try:
+            result, _ = json.JSONDecoder().raw_decode(content.lstrip())
+        except (ValueError, TypeError):
+            continue
+        if isinstance(result, dict) and (result.get("error") or
+                                         result.get("status") == "blocked" or
+                                         isinstance(result.get("exit_code"), int)
+                                         and result["exit_code"] != 0):
+            failures += 1
+    return failures >= 3
+
+
 def task_size(messages):
     """Return quick, balanced, or deep from user intent and actual tool history."""
     users = [
@@ -138,6 +160,8 @@ def task_size(messages):
         for msg in messages
         if isinstance(msg, dict) and msg.get("role") == "assistant"
     )
+    if repeated_tool_failures(messages):
+        return "deep"
     if (PROJECT_MARKER.search(beginning) or PROJECT_MARKER.search(request)) and not project:
         return "deep"
     # An agent can spend several tool calls discovering the music engine. That
