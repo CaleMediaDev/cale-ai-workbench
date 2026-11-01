@@ -595,6 +595,7 @@ def recover_music_jobs() -> None:
 def start_music_job(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
     instrumental: bool = False, source_path: str = "", task_id: str = "",
+    vocal_retry: int = 0,
 ) -> dict:
     """Launch a persistent local job; the agent can continue while it runs."""
     if not prompt.strip() or not 10 <= duration_seconds <= 600:
@@ -610,6 +611,7 @@ def start_music_job(
         "prompt": prompt, "output_path": str(target), "lyrics": lyrics,
         "duration_seconds": duration_seconds, "instrumental": bool(instrumental),
         "source_path": source_path, "task_id": task_id, "created": time.time(),
+        "vocal_retry": int(vocal_retry),
     }
     _write_job(job_id, info)
     try:

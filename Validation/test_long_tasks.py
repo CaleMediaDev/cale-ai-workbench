@@ -23,6 +23,30 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_missing_vocals_retry_uses_saved_lyrics_and_stops_after_two(self):
+        import music_backend
+
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "song.mp3"
+            output.write_bytes(b"saved audio")
+            task = {"id": "country-task"}
+            job = {
+                "status": "error", "current": "The song played, but sustained vocals were not detected.",
+                "vocal_retry": 0, "instrumental": False, "source_path": "",
+                "lyrics": "country road and summer skies " * 5,
+                "output_path": str(output), "prompt": "make a country song",
+                "duration_seconds": 30,
+            }
+            with (patch.object(music_backend, "start_music_job", return_value={"job_id": "retry-1"}) as start,
+                  patch.object(task_module, "update") as update):
+                self.assertTrue(task_module.retry_song_without_vocals(task, job))
+            self.assertIn("clear lead singing vocals", start.call_args.args[0])
+            self.assertEqual(start.call_args.kwargs["lyrics"], job["lyrics"].strip())
+            self.assertEqual(start.call_args.kwargs["vocal_retry"], 1)
+            self.assertEqual(update.call_args.kwargs["card"], "music-job:retry-1")
+            job["vocal_retry"] = 2
+            self.assertFalse(task_module.retry_song_without_vocals(task, job))
+
     def test_blocked_rap_without_music_tool_recovers_to_direct_renderer(self):
         task = {
             "id": "rap-task", "status": "needs_input", "card": "t-rap",

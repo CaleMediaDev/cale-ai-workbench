@@ -626,6 +626,42 @@ def recover_blocked_music_project(p: dict) -> bool:
     return True
 
 
+def retry_song_without_vocals(p: dict, job: dict) -> bool:
+    """Retry a completed but mostly instrumental render with its saved lyrics."""
+    reason = str(job.get("current", ""))
+    attempt = int(job.get("vocal_retry", 0))
+    lyrics = str(job.get("lyrics", "")).strip()
+    if (job.get("status") != "error" or attempt >= 2
+            or "sustained vocals were not detected" not in reason
+            or job.get("instrumental") or job.get("source_path")
+            or len(lyrics.split()) < 20):
+        return False
+    import music_backend
+
+    previous = Path(job["output_path"])
+    output = previous.with_name(f"{previous.stem}-vocal-retry-{attempt + 1}{previous.suffix}")
+    if output.exists():
+        output = next(
+            previous.with_name(f"{previous.stem}-vocal-retry-{attempt + 1}-{number}{previous.suffix}")
+            for number in range(2, 1000)
+            if not previous.with_name(
+                f"{previous.stem}-vocal-retry-{attempt + 1}-{number}{previous.suffix}"
+            ).exists()
+        )
+    prompt = str(job["prompt"]).rstrip(" .") + (
+        ". Prominent clear lead singing vocals throughout, following the supplied "
+        "lyrics; do not render an instrumental track."
+    )
+    started = music_backend.start_music_job(
+        prompt, str(output), lyrics=lyrics,
+        duration_seconds=int(job["duration_seconds"]), instrumental=False,
+        task_id=p["id"], vocal_retry=attempt + 1,
+    )
+    update(p["id"], card="music-job:" + started["job_id"], status="working",
+           detail=f"Trying the song again with clearer vocals ({attempt + 1}/2)")
+    return True
+
+
 def add_image_project(request_text: str, prompt: str, folder: str = "") -> str:
     """Keep a quick local image request in My Tasks across app restarts."""
 
@@ -1885,7 +1921,8 @@ def advance_project(p):
             update(p["id"], status="ready_for_review", detail=f"Music is ready: {output.name}",
                    fingerprint=fingerprint(Path(p["folder"])))
         elif status in ("error", "stopped"):
-            update(p["id"], status="needs_input", detail=str(job.get("current", "Music stopped")))
+            if not retry_song_without_vocals(p, job):
+                update(p["id"], status="needs_input", detail=str(job.get("current", "Music stopped")))
         else:
             current = str(job.get("current", "Generating music locally"))
             if p["detail"] != current or p["status"] != "working":
