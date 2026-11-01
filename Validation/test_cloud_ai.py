@@ -143,6 +143,26 @@ class CloudTests(unittest.TestCase):
         self.assertNotIn("models", body)
         self.assertNotIn("provider", body)
 
+    def test_new_free_provider_routes_use_fixed_models_and_endpoints(self):
+        expected = {
+            "sambanova": ("https://api.sambanova.ai/v1/chat/completions",
+                          "Meta-Llama-3.3-70B-Instruct"),
+            "bigmodel": ("https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                         "glm-4.7-flash"),
+        }
+        for provider, (url, model) in expected.items():
+            with self.subTest(provider=provider):
+                request = dict(REQUEST, model="paid-model", max_tokens=999999)
+                body = cloud_providers.request_body(provider, request)
+                self.assertEqual(body["model"], model)
+                self.assertLessEqual(body["max_tokens"], 8192)
+                with patch.object(cloud_providers, "urlopen", side_effect=OSError("offline")) as fetch:
+                    with self.assertRaises(OSError):
+                        cloud_providers.complete(provider, "test-key-value", request)
+                sent = fetch.call_args.args[0]
+                self.assertEqual(sent.full_url, url)
+                self.assertEqual(json.loads(sent.data)["model"], model)
+
     def test_hugging_face_has_small_monthly_budget_and_short_output(self):
         request = dict(REQUEST, max_tokens=8192)
         body = cloud_providers.request_body("huggingface", request)
