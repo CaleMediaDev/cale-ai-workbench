@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -13,6 +13,23 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_update_restarts_only_its_own_router_process(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cloud = root / "Cloud"
+            cloud.mkdir()
+            (cloud / "router-pid.txt").write_text("1234")
+            process = MagicMock()
+            process.cmdline.return_value = [
+                "pythonw.exe", str(root / "cloud_ai.py"), "--serve"
+            ]
+            with (patch.object(self_update, "ROOT", root),
+                  patch("psutil.Process", return_value=process),
+                  patch("cloud_ai.ensure_router") as start):
+                self_update.restart_router_after_update()
+            process.terminate.assert_called_once()
+            start.assert_called_once()
+
     def test_candidate_needs_digest_and_newer_version(self):
         asset = {
             "name": "Cale-AI-Workbench-0.5.0.zip",

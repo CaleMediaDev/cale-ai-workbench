@@ -263,6 +263,30 @@ def wait_for_exit(pid):
             ctypes.windll.kernel32.CloseHandle(handle)
 
 
+def restart_router_after_update():
+    """Replace the old in-memory routing code after the UI has gone idle."""
+    import psutil
+
+    pid_file = ROOT / "Cloud/router-pid.txt"
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8"))
+        process = psutil.Process(pid)
+        command = process.cmdline()
+        script = str((ROOT / "cloud_ai.py").resolve()).lower()
+        if script in [part.lower() for part in command] and "--serve" in command:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except psutil.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+    except (OSError, ValueError, psutil.Error):
+        pass
+    from cloud_ai import ensure_router
+
+    ensure_router()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", type=Path)
@@ -287,6 +311,7 @@ def main():
     wait_for_exit(args.parent_pid)
     try:
         apply(args.apply, tuple(map(int, args.version.split("."))))
+        restart_router_after_update()
     except Exception as exc:
         log = ROOT / "Updates/last-error.txt"
         log.parent.mkdir(exist_ok=True)
