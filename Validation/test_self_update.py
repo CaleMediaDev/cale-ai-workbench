@@ -97,6 +97,36 @@ class SelfUpdateTests(unittest.TestCase):
             self.assertEqual((backup / "long_tasks.py").read_text(), "old")
             self.assertIn("0.5.0", (root / ".cale-ai-install").read_text())
 
+    def test_failed_version_commit_rolls_back_source_and_keeps_old_marker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            marker = root / ".cale-ai-install"
+            marker.write_text("Cale AI Workbench 0.4.0")
+            source = root / "long_tasks.py"
+            source.write_text("old")
+            archive_path = root / "release.zip"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("install-files.json", json.dumps(["long_tasks.py"]))
+                archive.writestr("long_tasks.py", "new")
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "active_tasks", return_value=False),
+                  patch.object(self_update, "write_version_marker", side_effect=OSError("disk full"))):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    self_update.apply(archive_path, (0, 5, 0))
+            self.assertEqual(source.read_text(), "old")
+            self.assertEqual(marker.read_text(), "Cale AI Workbench 0.4.0")
+
+    def test_version_marker_replace_failure_keeps_previous_version(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            marker = root / ".cale-ai-install"
+            marker.write_text("Cale AI Workbench 0.4.0")
+            with patch.object(self_update.os, "replace", side_effect=OSError("busy")):
+                with self.assertRaisesRegex(OSError, "busy"):
+                    self_update.write_version_marker(root, (0, 5, 0))
+            self.assertEqual(marker.read_text(), "Cale AI Workbench 0.4.0")
+            self.assertFalse((root / ".cale-ai-install.updating").exists())
+
     def test_design_tools_migrate_without_replacing_existing_settings(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

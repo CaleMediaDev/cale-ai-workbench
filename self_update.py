@@ -218,6 +218,19 @@ def add_design_tools_to_config(root, backup):
     return config, previous
 
 
+def write_version_marker(root, version):
+    """Commit the installed version only after its source files are in place."""
+    marker = root / ".cale-ai-install"
+    temporary = root / ".cale-ai-install.updating"
+    try:
+        temporary.write_text(
+            "Cale AI Workbench " + ".".join(map(str, version)), encoding="utf-8"
+        )
+        os.replace(temporary, marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def apply(archive_path, version):
     """Keep the old source recoverable and swap only files in the manifest."""
     if active_tasks():
@@ -251,10 +264,7 @@ def apply(archive_path, version):
             migration = add_design_tools_to_config(ROOT, backup)
             if migration:
                 replaced.append(migration)
-            marker = ROOT / ".cale-ai-install"
-            marker.write_text(
-                "Cale AI Workbench " + ".".join(map(str, version)), encoding="utf-8"
-            )
+            write_version_marker(ROOT, version)
         except Exception:
             for target, previous in reversed(replaced):
                 if previous.is_file():
