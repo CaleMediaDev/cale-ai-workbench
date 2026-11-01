@@ -1533,8 +1533,10 @@ def monitor():
     last_media_recovery = 0
     service_error = ""
     catalog_thread = None
-    last_catalog_finish = None
     catalog_refresh_seconds = 24 * 60 * 60
+    next_catalog_refresh = time.monotonic() + file_catalog.refresh_delay(
+        file_catalog.status(STATE), catalog_refresh_seconds
+    )
     while True:
         if (ROOT / ".cale-ai-install").exists() and (
             ROOT / ".cale-ai-install"
@@ -1548,11 +1550,8 @@ def monitor():
                 continue
             if catalog_thread is not None and not catalog_thread.is_alive():
                 catalog_thread = None
-                last_catalog_finish = time.monotonic()
-            if catalog_thread is None and (
-                last_catalog_finish is None
-                or time.monotonic() - last_catalog_finish >= catalog_refresh_seconds
-            ):
+                next_catalog_refresh = time.monotonic() + catalog_refresh_seconds
+            if catalog_thread is None and time.monotonic() >= next_catalog_refresh:
                 catalog_thread = threading.Thread(
                     target=file_catalog.scan_computer,
                     args=(STATE,),

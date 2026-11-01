@@ -100,6 +100,25 @@ def status(state: str | Path) -> dict:
         return {"status": "not_started", "files": 0, "folders": 0}
 
 
+def refresh_delay(snapshot: dict, refresh_seconds: int = 24 * 60 * 60,
+                  now: float | None = None) -> float:
+    """Reuse a recent completed catalog across app restarts.
+
+    The status is written only after the whole scan and stale-path pruning
+    finish. Interrupted scans therefore start again instead of being mistaken
+    for a complete index.
+    """
+    if snapshot.get("status") != "complete":
+        return 0.0
+    try:
+        completed_at = float(snapshot["updated"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+    now = time.time() if now is None else now
+    age = max(0.0, now - completed_at)
+    return max(0.0, refresh_seconds - age)
+
+
 def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> dict:
     """Catalog accessible names/paths without reading document contents."""
     roots = [Path(root) for root in (local_roots() if roots is None else roots)]

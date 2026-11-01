@@ -10,6 +10,13 @@ import file_catalog
 
 
 class FileCatalogTests(unittest.TestCase):
+    def test_recent_complete_catalog_is_reused_after_restart(self):
+        snapshot = {"status": "complete", "updated": 1000.0}
+        self.assertEqual(file_catalog.refresh_delay(snapshot, 86400, now=4600), 82800)
+        self.assertEqual(file_catalog.refresh_delay(snapshot, 86400, now=90000), 0)
+        self.assertEqual(file_catalog.refresh_delay({**snapshot, "status": "working"}, now=1001), 0)
+        self.assertEqual(file_catalog.refresh_delay({"status": "complete"}, now=1001), 0)
+
     def test_low_space_keeps_previous_results(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"
