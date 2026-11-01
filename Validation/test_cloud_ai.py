@@ -309,6 +309,31 @@ class CloudTests(unittest.TestCase):
                 [],
             )
 
+    def test_approved_recommended_35b_model_becomes_balanced_preference(self):
+        self.candidates.stop()
+        catalog = dict(cloud.CATALOG, newer={
+            "alias": "cale-qwen36", "source": "qwen3.6:35b", "candidate": True,
+        })
+        sizes = {cloud.BALANCED_MODEL: "34.7B", "cale-qwen36": "35.5B"}
+
+        def show(_url, payload, **_kwargs):
+            if payload["model"] not in sizes:
+                raise OSError("not installed")
+            return {"capabilities": ["completion", "tools"],
+                    "parameters": "num_ctx 65536\n",
+                    "details": {"parameter_size": sizes[payload["model"]]}}
+
+        with (patch.object(cloud, "CATALOG", catalog),
+              patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "candidate_approved", return_value=True),
+              patch.object(cloud, "post", side_effect=show)):
+            self.assertEqual(cloud.Router().local_candidates("balanced")[0], "cale-qwen36")
+        with (patch.object(cloud, "CATALOG", catalog),
+              patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "candidate_approved", side_effect=lambda item: not item.get("candidate")),
+              patch.object(cloud, "post", side_effect=show)):
+            self.assertEqual(cloud.Router().local_candidates("balanced")[0], cloud.BALANCED_MODEL)
+
     def test_oversized_request_uses_connected_free_fallback(self):
         self.candidates.stop()
         self.connected()

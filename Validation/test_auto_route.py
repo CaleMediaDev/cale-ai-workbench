@@ -195,6 +195,11 @@ class AutoRouteTests(unittest.TestCase):
             model_order("deep", models, "main", "fast", "balanced")[0], "other"
         )
 
+    def test_approved_newer_middle_model_wins_within_same_size_band(self):
+        models = {"old": 34.7, "new": 35.5, "fast": 9, "main": 79}
+        self.assertEqual(model_order("balanced", models, "main", "fast", "new")[0], "new")
+        self.assertEqual(model_order("balanced", models, "main", "fast", "fast")[0], "old")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

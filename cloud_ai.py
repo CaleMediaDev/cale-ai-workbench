@@ -502,11 +502,27 @@ class Router:
             self.model_cache = available
             self.model_contexts = contexts
             self.model_cache_until = time.monotonic() + 60
+        balanced_preferred = BALANCED_MODEL
+        if size == "balanced":
+            # A newly recommended model must pass the on-device tool probe
+            # before replacing the older 35B preference. Keep the old model
+            # as a fallback when the recommendation is absent or unsuitable.
+            for item in reversed(tuple(CATALOG.values())):
+                alias = item["alias"]
+                parameters = self.model_cache.get(alias, 0)
+                if (
+                    item.get("candidate")
+                    and candidate_approved(item)
+                    and 30 <= parameters <= 40
+                    and self.model_contexts.get(alias, 0) >= required_context
+                ):
+                    balanced_preferred = alias
+                    break
         ordered = model_order(
             size,
             {name: size_gb for name, size_gb in self.model_cache.items()
              if self.model_contexts.get(name, 0) >= required_context},
-            LOCAL_MODEL, FAST_MODEL, BALANCED_MODEL
+            LOCAL_MODEL, FAST_MODEL, balanced_preferred
         )
         # Keep the main alias as a fallback when Ollama metadata is missing,
         # but do not send a prompt to a model known to be too small for it.

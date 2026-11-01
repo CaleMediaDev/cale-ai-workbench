@@ -157,7 +157,12 @@ def model_order(size, available, main, fast, balanced):
         preference = sorted(ready, key=lambda name: ready[name], reverse=True)
     else:
         preference = sorted(
-            ready, key=lambda name: (abs(ready[name] - 35), name != balanced)
+            ready,
+            key=lambda name: (
+                abs(ready[name] - 35) > 5,
+                name != balanced,
+                abs(ready[name] - 35),
+            ),
         )
     ordered = []
     for name in [*preference, main]:
