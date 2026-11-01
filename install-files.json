@@ -7,7 +7,7 @@
   "media_worker.py", "natural_voice.py", "small_training.py", "user_file_memory.py", "media-models.json", "media-requirements.txt",
   "read-settings.py", "configure_install.py", "config-template.yaml", "downloads.json", "pyproject.toml",
   "requirements-windows.txt", "package.json", "package-lock.json",
-  "TOOLBOX.txt", "LONG-TASKS-GUIDE.txt", "windows-file-tools.patch", "hermes-read-consistency.patch",
+  "TOOLBOX.txt", "LONG-TASKS-GUIDE.txt", "windows-file-tools.patch", "hermes-read-consistency.patch", "hermes-host-read-consistency.patch",
   "Start-Hermes.ps1", "Local AI Hermes.cmd", "Long Tasks.cmd", "Choose Task Folder.cmd",
   "Connect Free Cloud AI.cmd", "Install Long Tasks Startup.ps1", "Disable Long Tasks Startup.ps1",
   "models/manifest.json", "models/recommendations.json", "models/large.Modelfile", "models/compact.Modelfile",

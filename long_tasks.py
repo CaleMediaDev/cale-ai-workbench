@@ -47,20 +47,25 @@ def sync_hermes_source_patch():
     """
     if any(task["status"] in ("queued", "working", "checking") for task in projects()):
         return
-    patch = ROOT / "hermes-read-consistency.patch"
-    if not patch.is_file() or not (ROOT / "app/.git").exists():
+    if not (ROOT / "app/.git").exists():
         return
     managed = ROOT / "data/tools/git-2.53.0+3-win32-x64/cmd/git.exe"
     git = str(managed) if managed.is_file() else shutil.which("git")
     if not git:
         raise RuntimeError("Git is unavailable for the Hermes source update.")
     command = [git, "-C", str(ROOT / "app"), "apply", "--ignore-space-change"]
-    if subprocess.run([*command, "--reverse", "--check", str(patch)], capture_output=True).returncode == 0:
-        return
-    check = subprocess.run([*command, "--check", str(patch)], capture_output=True)
-    if check.returncode:
-        raise RuntimeError("Hermes source patch does not match this checkout.")
-    subprocess.run([*command, str(patch)], check=True)
+    for name in ("hermes-read-consistency.patch", "hermes-host-read-consistency.patch"):
+        patch = ROOT / name
+        if not patch.is_file():
+            raise RuntimeError(f"Hermes source patch {name} is missing.")
+        if subprocess.run(
+            [*command, "--reverse", "--check", str(patch)], capture_output=True
+        ).returncode == 0:
+            continue
+        check = subprocess.run([*command, "--check", str(patch)], capture_output=True)
+        if check.returncode:
+            raise RuntimeError(f"Hermes source patch {name} does not match this checkout.")
+        subprocess.run([*command, str(patch)], check=True)
 
 
 def environment():

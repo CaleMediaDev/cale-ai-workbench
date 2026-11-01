@@ -1,0 +1,43 @@
+diff --git a/tools/file_tools.py b/tools/file_tools.py
+--- a/tools/file_tools.py
++++ b/tools/file_tools.py
+@@ -695,6 +695,12 @@ def read_file_tool(path: str, offset: int = 1, limit: int = DEFAULT_READ_LIMIT,
+         if _err or result_dict.get("is_binary"):
+             return json.dumps(result_dict, ensure_ascii=False)
+ 
++        # A shell read is multiple probes on Windows. If another process edits
++        # the file between them, the page and line count can describe different
++        # versions. Do not hand that mixed content to the agent as a valid read.
++        if version_before is not None and _file_metadata(resolved_str) != version_before:
++            return tool_error(f"File changed while being read: {path}. Retry the read.")
++
+         # Char budget on the FORMATTED content (what enters context), BEFORE
+         # redaction (skip the regex pass on huge content); truncate gracefully
+         # with a next_offset instead of rejecting.
+diff --git a/tests/tools/test_host_read_consistency.py b/tests/tools/test_host_read_consistency.py
+new file mode 100644
+--- /dev/null
++++ b/tests/tools/test_host_read_consistency.py
+@@ -0,0 +1,22 @@
++"""A changing host file must yield a retry, not a mixed read result."""
++
++import json
++
++from tools import file_tools
++from tools.file_operations_common import ReadResult
++
++
++def test_host_read_retries_after_concurrent_change(tmp_path, monkeypatch):
++    path = tmp_path / "changing.txt"
++    path.write_text("before\n", encoding="utf-8")
++
++    class ChangingFileOps:
++        def read_file(self, _path, _offset, _limit):
++            path.write_text("after\n", encoding="utf-8")
++            return ReadResult(content="before\n", total_lines=1, file_size=7)
++
++    monkeypatch.setattr(file_tools, "_get_file_ops", lambda _task_id: ChangingFileOps())
++    result = json.loads(file_tools.read_file_tool(str(path), task_id="changing-host-file"))
++
++    assert "changed while being read" in result["error"]
++    assert "before" not in str(result)

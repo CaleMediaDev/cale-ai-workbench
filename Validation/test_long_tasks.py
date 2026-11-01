@@ -25,16 +25,17 @@ class LongTaskTests(unittest.TestCase):
             root = Path(folder)
             (root / "app/.git").mkdir(parents=True)
             (root / "hermes-read-consistency.patch").write_text("patch")
+            (root / "hermes-host-read-consistency.patch").write_text("patch")
             replies = [subprocess.CompletedProcess([], 1), subprocess.CompletedProcess([], 0),
-                       subprocess.CompletedProcess([], 0)]
+                       subprocess.CompletedProcess([], 0), subprocess.CompletedProcess([], 0)]
             with (patch.object(task_module, "ROOT", root),
                   patch.object(task_module, "projects", return_value=[]),
                   patch.object(task_module.shutil, "which", return_value="git"),
                   patch.object(task_module.subprocess, "run", side_effect=replies) as run):
                 task_module.sync_hermes_source_patch()
-            self.assertEqual(run.call_count, 3)
+            self.assertEqual(run.call_count, 4)
             self.assertIn("--reverse", run.call_args_list[0].args[0])
-            self.assertEqual(run.call_args_list[-1].args[0][-1], str(root / "hermes-read-consistency.patch"))
+            self.assertEqual(run.call_args_list[-1].args[0][-1], str(root / "hermes-host-read-consistency.patch"))
 
     def test_busy_tasks_defer_hermes_source_fix(self):
         with (patch.object(task_module, "projects", return_value=[{"status": "working"}]),

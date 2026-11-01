@@ -221,14 +221,15 @@ def configure(root, profile):
         capture_output=True,
     ).returncode:
         raise RuntimeError("The Windows file patch did not match this Hermes version.")
-    patch = root / "hermes-read-consistency.patch"
     command = [git, "-C", str(root / "app"), "apply", "--ignore-space-change"]
-    if subprocess.run([*command, "--check", str(patch)], capture_output=True).returncode == 0:
-        subprocess.run([*command, str(patch)], check=True)
-    elif subprocess.run(
-        [*command, "--reverse", "--check", str(patch)], capture_output=True
-    ).returncode:
-        raise RuntimeError("The Hermes read-consistency patch did not match this version.")
+    for name in ("hermes-read-consistency.patch", "hermes-host-read-consistency.patch"):
+        patch = root / name
+        if subprocess.run([*command, "--check", str(patch)], capture_output=True).returncode == 0:
+            subprocess.run([*command, str(patch)], check=True)
+        elif subprocess.run(
+            [*command, "--reverse", "--check", str(patch)], capture_output=True
+        ).returncode:
+            raise RuntimeError(f"The Hermes source patch {name} did not match this version.")
     skill = root / "Toolbox/node_modules/rea-agents/skills/reverse-engineer-anything"
     if skill.exists():
         shutil.copytree(
