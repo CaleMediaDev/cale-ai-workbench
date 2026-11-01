@@ -38,8 +38,8 @@ class AutoModelTests(unittest.TestCase):
             ),
             patch.object(library, "install", side_effect=fake_install),
         ):
-            library.auto_install(folder)
-            library.auto_install(folder)
+            library.auto_install(folder, refresh=False)
+            library.auto_install(folder, refresh=False)
             state = json.loads((Path(folder) / "optional-model-small.json").read_text())
             self.assertEqual(state["status"], "complete")
             worker = json.loads((Path(folder) / "auto-model-worker.json").read_text())
@@ -64,7 +64,7 @@ class AutoModelTests(unittest.TestCase):
             ),
             patch.object(library, "install") as install,
         ):
-            library.auto_install(folder)
+            library.auto_install(folder, refresh=False)
             state = json.loads((Path(folder) / "optional-model-small.json").read_text())
             self.assertEqual(state["status"], "waiting_storage")
             install.assert_not_called()
@@ -93,7 +93,7 @@ class AutoModelTests(unittest.TestCase):
         ):
             status = Path(folder) / "optional-model-small.json"
             library.save_download_status(status, "complete", "Old result", 100)
-            library.auto_install(folder)
+            library.auto_install(folder, refresh=False)
             install.assert_called_once()
             self.assertEqual(json.loads(status.read_text())["status"], "complete")
 
@@ -115,7 +115,7 @@ class AutoModelTests(unittest.TestCase):
             patch.object(library, "install") as install,
             patch.object(library.shutil, "disk_usage") as disk_usage,
         ):
-            library.auto_install(folder)
+            library.auto_install(folder, refresh=False)
             install.assert_not_called()
             disk_usage.assert_not_called()
             self.assertEqual(
@@ -147,7 +147,7 @@ class AutoModelTests(unittest.TestCase):
             patch.object(library, "total_ram_gb", return_value=128),
             patch.object(library, "install") as install,
         ):
-            library.auto_install(folder)
+            library.auto_install(folder, refresh=False)
             install.assert_not_called()
             self.assertFalse(
                 (Path(folder) / "optional-model-experimental.json").exists()

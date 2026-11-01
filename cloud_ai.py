@@ -29,7 +29,7 @@ from urllib.request import Request, urlopen
 import win32crypt
 
 from auto_route import model_order, task_size
-from model_library import CATALOG
+from model_library import CATALOG, candidate_approved, refresh_catalog
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "Cloud"
@@ -322,11 +322,17 @@ class Router:
     def local_candidates(self, size):
         """Rank installed tool-capable models and refresh after new downloads."""
         if time.monotonic() >= self.model_cache_until:
+            refresh_catalog(online=False)
             available = {}
             aliases = dict.fromkeys(
                 [FAST_MODEL, *(item["alias"] for item in CATALOG.values())]
             )
             for name in aliases:
+                item = next(
+                    (item for item in CATALOG.values() if item["alias"] == name), None
+                )
+                if item and not candidate_approved(item):
+                    continue
                 try:
                     info = post(
                         "http://127.0.0.1:11434/api/show",

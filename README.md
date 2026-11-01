@@ -10,9 +10,15 @@ Created by [Cale Media](https://calemedia.com/). Built on Hermes Agent, Ollama, 
 
 1. Download `Cale-AI-Workbench-Setup.exe` and open it.
 2. Setup begins automatically. The workbench opens during setup and shows downloads under **My tasks**.
-3. When setup reaches 100%, click **New task** and describe what you want done in everyday language. The app creates a task folder for you.
+3. Click **Connect GitHub** on the first screen if you want the AI to save projects in your own account. Approve GitHub's browser sign-in once. Then click **New task** and describe what you want done in everyday language. The app creates a task folder for you.
 
 The installer downloads the runtime, tools, browser, image/voice models, and model files. No Python, Git, Node, terminal commands, or API keys need to be installed manually. The ZIP alternative contains `Install.cmd` with the same setup screen.
+
+GitHub CLI is installed automatically. The button opens GitHub's own browser approval flow; GitHub may ask you to confirm a device code. Your login remains on your PC and is never bundled with the public installer. When you ask the AI to save or publish a project, it can create a repository and push your code. [GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages) can publish static HTML/CSS/JavaScript sites from suitable repositories. It does not run a backend, and [GitHub's Pages rules](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits) rule out using it as free hosting for an online business, ecommerce site or commercial SaaS. Repository and storage limits still apply.
+
+On launch, the assistant says hello and reports setup or active work aloud. It announces major setup steps and task changes. Click **Mic On** to give it a spoken instruction after “Hey Cale”; click **Mic Off** to stop continuous listening. The shortcut records a single instruction while the app is focused. The screen also shows task progress, and voice updates are paced so a busy download does not speak every percentage point.
+
+The app checks Cale Media's GitHub releases at startup. When a newer release has a published SHA-256 digest, it downloads and verifies the ZIP in the background. It installs source updates only after current tasks finish, keeps the previous source in `Updates/backups`, preserves projects and credentials, then reopens. A public model recommendation feed can add official Ollama models that fit RAM and disk; each new model must pass a local tool-use check before the router uses it. Runtime and Ollama package updates are handled separately from these source updates.
 
 **Windows x64, 16 GB RAM minimum.** Automatic setup chooses a smaller model for smaller PCs. The large coding model needs about 96 GB RAM and downloads roughly 52 GB. The installer also downloads a 9B vision model, a diffusion image model, speech recognition weights, and a small training base. Allow at least 32 GB more disk space than the chosen coding model's download size. The initial download needs internet; installed local models can run offline. Public web tools still require internet.
 
@@ -29,7 +35,7 @@ This is an **early preview**, with an unsigned Windows installer. It has been de
 - Connect your own free OpenRouter account with one browser sign-in, then fall back to local inference when limits or errors occur. No API key copying is needed.
 - Optionally connect ChatGPT and explicitly enable your shared ChatGPT/Codex plan allowance for tasks. Connecting alone does not use that allowance.
 - Automatically download additional tool-ready local models that fit the PC's RAM and available storage, one at a time after setup. The AI picks a smaller installed model for quick questions and a stronger one for demanding projects.
-- Speak task updates aloud. Use **Talk** or **Ctrl+Alt+Space** while the app is focused to give spoken instructions, or switch on **Hands-free** for repeated eight-second listening clips. The microphone is off by default; speech recognition and playback run locally.
+- Speak task updates aloud. Switch **Mic On** to listen for “Hey Cale” and a spoken instruction; click again for **Mic Off**. **Ctrl+Alt+Space** while the app is focused records one instruction. The microphone is off by default; speech recognition and playback run locally.
 - Generate images locally, describe photos and screenshots, transcribe audio, and create offline spoken WAV files.
 - Inspect sampled video frames and optionally transcribe a video's audio. Agents can capture a camera frame or watch up to four snapshots over 30 seconds only after you enable Camera in the app; that switch expires after one hour.
 - Train a small text classifier from labeled CSV rows or a separate 0.5B LoRA adapter from JSONL examples, with held-out evaluations saved beside the result.

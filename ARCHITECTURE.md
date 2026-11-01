@@ -24,6 +24,8 @@ Ollama model store                  cloud_ai.py → ChatGPT (opt-in)
 | `model_library.py` | Defines optional Ollama models, checks RAM and disk space, downloads sequentially, and writes private progress JSON. |
 | `auto_route.py`, `cloud_ai.py` | Sizes each request without an extra AI call, chooses an installed tool-capable local model, and handles explicit ChatGPT plan use plus free OpenRouter fallback. |
 | `voice_assistant.py` | Runs offline speech recording and playback in the installed media runtime for the desktop task screen. |
+| `github_account.py` | Starts GitHub CLI browser sign-in and reports the connected account name without reading tokens. |
+| `self_update.py` | Checks public releases, verifies the published ZIP digest and manifest, backs up old source, and updates while tasks are idle. |
 | `chatgpt_auth.py` | Public-client ChatGPT sign-in, identity validation, DPAPI token storage, refresh, and Responses API adaptation. |
 | `configure_install.py` | Creates the main and vision Ollama models and configures Hermes. |
 | `toolbox_mcp.py`, `web_tools.py`, `media_worker.py`, `small_training.py` | Tools available to the agent for files, browsers, media, and small-model training. |
@@ -38,6 +40,8 @@ The UI inserts user requests into `LongTasks/projects.db`. The monitor handles t
 The UI polls every five seconds. Existing task widgets are updated in place; a widget is created or destroyed only when a task is added or removed. Mouse-wheel scrolling is scoped to the task list, and the canvas keeps its pixel position across ordinary refreshes. Progress percentages are estimates from the saved milestone checklist, not a time estimate.
 
 `LongTasks/install-progress.json` is read by the UI during first-run setup. The optional downloader writes `LongTasks/optional-model-*.json` in the background, uses a Windows file lock to prevent duplicate automatic runs, and leaves weights in Ollama's model store. It checks Ollama for a usable local model before trusting a saved completion status, and checks physical RAM plus at least 12 GB of extra space on the model store's drive before each pull. A catalog signature makes the app rescan when a release adds or changes model sources. Optional model downloads are kept off the main task screen.
+
+The public `models/recommendations.json` feed can add official Ollama models without a full app release. New entries are bounded to Ollama library sources; after download, a real local function-call probe must pass before routing uses the model. On launch, `self_update.py` checks GitHub releases, verifies the ZIP's published SHA-256 digest, and installs source changes once tasks are idle. It backs up replaced source in `Updates/backups` and excludes `Projects`, `LongTasks`, `Cloud`, model weights, and runtime folders.
 
 ## Accounts and model routing
 

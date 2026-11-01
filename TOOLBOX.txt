@@ -56,6 +56,8 @@ python                Toolbox Python: DuckDB, pandas, Pillow, pefile, Capstone,
                       openpyxl, python-pptx, MarkItDown and related document readers
 node / npm            Private Node 26 runtime and normal JavaScript package tooling
 git                   Existing Git installation; no GitHub account credentials added
+gh                    GitHub CLI. Connect your own account in the app first.
+                      Use for requested repos, pushes, releases and static Pages sites.
 
 For repeatable browser tests use Node with require('playwright'), channel:'chrome'.
 Do not use ast-grep's sg alias (it can collide with unrelated system commands).
@@ -77,5 +79,5 @@ https://adoptium.net/temurin/releases/
 
 Packages are pinned locally. Updating them requires rechecking their compatibility.
 This is a local tool suite, not a sandbox: tools run with your Windows account's
-permissions. Use project-scoped tasks. Website administration still requires your
-own connection; Codex connections and signed-in cookies are not automatically copied.
+permissions. Use project-scoped tasks. GitHub Pages hosts static sites, not servers
+or online stores. Codex connections and signed-in cookies are not automatically copied.

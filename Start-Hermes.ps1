@@ -13,7 +13,7 @@ New-Item -ItemType Directory -Force -Path $taskTemp | Out-Null
 $env:TEMP = $taskTemp
 $env:TMP = $taskTemp
 $taskToolbox = Join-Path $PSScriptRoot 'Toolbox'
-$env:PATH = (Join-Path $taskToolbox 'node-v26.13.0-win-x64') + ';' + (Join-Path $taskToolbox 'node_modules/.bin') + ';' + (Join-Path $taskToolbox 'python/Scripts') + ';' + $env:PATH
+$env:PATH = (Join-Path $taskToolbox 'gh_2.103.3_windows_amd64/bin') + ';' + (Join-Path $taskToolbox 'node-v26.13.0-win-x64') + ';' + (Join-Path $taskToolbox 'node_modules/.bin') + ';' + (Join-Path $taskToolbox 'python/Scripts') + ';' + $env:PATH
 $env:GHIDRA_INSTALL_DIR = Join-Path $taskToolbox 'ghidra_12.1.4_PUBLIC'
 $env:JAVA_HOME = Join-Path $taskToolbox 'jdk-21.0.13+9'
 $taskBrowserModules = Join-Path $env:APPDATA 'npm/node_modules/@playwright/mcp/node_modules'

@@ -6,6 +6,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 |---|---|
 | Hermes Agent, MIT, Copyright (c) 2025 Nous Research | https://github.com/NousResearch/hermes-agent |
 | Ollama | https://github.com/ollama/ollama |
+| GitHub CLI | https://github.com/cli/cli |
 | REA / rea-agents | https://github.com/morluto/rea |
 | Chrome DevTools MCP | https://github.com/ChromeDevTools/chrome-devtools-mcp |
 | Playwright MCP | https://github.com/microsoft/playwright-mcp |
@@ -31,6 +32,7 @@ The Windows compatibility patch contains modifications to MIT-licensed Hermes co
 - ArliAI GPT-OSS 20B Derestricted: https://huggingface.co/ArliAI/gpt-oss-20b-Derestricted — Apache-2.0. Community GGUF conversion: https://huggingface.co/MaziyarPanahi/gpt-oss-20b-Derestricted-GGUF.
 - OpenAI GPT-OSS 20B via Ollama: https://ollama.com/library/gpt-oss — Apache-2.0; downloaded separately from this source release.
 - Qwen 3.5 35B via Ollama: https://ollama.com/library/qwen3.5 — Apache-2.0; downloaded separately from this source release.
+- Qwen 3.6 35B via Ollama: https://ollama.com/library/qwen3.6 — Apache-2.0; offered by the public recommendation feed when the PC has enough RAM and storage.
 - ArliAI GLM 4.5 Air Derestricted: https://huggingface.co/ArliAI/GLM-4.5-Air-Derestricted — MIT. Community GGUF conversion: https://huggingface.co/mradermacher/GLM-4.5-Air-Derestricted-GGUF.
 
 Model names and logos belong to their respective owners. This project is not affiliated with those publishers, OpenRouter, or OpenAI. No claim is made that community derivatives retain the benchmarks of their base models.

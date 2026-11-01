@@ -321,7 +321,7 @@ def watch_camera(
         capture.release()
 
 
-def speak(text, output_path, play=False):
+def speak(text, output_path, play=False, rate=0):
     import pythoncom
     import win32com.client
 
@@ -329,6 +329,7 @@ def speak(text, output_path, play=False):
     pythoncom.CoInitialize()
     try:
         voice = win32com.client.Dispatch("SAPI.SpVoice")
+        voice.Rate = min(max(int(rate), -5), 5)
         stream = win32com.client.Dispatch("SAPI.SpFileStream")
         stream.Open(str(target), 3, False)
         try:

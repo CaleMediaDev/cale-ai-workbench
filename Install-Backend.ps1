@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.4.0')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.4.1')
  $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
  function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
    New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
@@ -80,6 +80,12 @@ try {
    Expand-Archive -LiteralPath $archive -DestinationPath $box -Force
  }
  $node=Join-Path $box 'node-v26.13.0-win-x64/node.exe'
+ $githubCli=Join-Path $box 'gh_2.103.3_windows_amd64/bin/gh.exe'
+ if (-not (Test-Path -LiteralPath $githubCli)) {
+   $archive=Download-Verified $pins.github_cli.url $pins.github_cli.sha256 'gh_2.103.3_windows_amd64.zip'
+   Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $box 'gh_2.103.3_windows_amd64') -Force
+   if (-not (Test-Path -LiteralPath $githubCli)) { throw 'GitHub CLI installation failed.' }
+ }
  $env:PATH=(Split-Path $node)+';'+(Join-Path $box 'python/Scripts')+';'+$env:PATH
  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'package.json') -Destination $box -Force
  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'package-lock.json') -Destination $box -Force

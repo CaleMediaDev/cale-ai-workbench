@@ -14,6 +14,10 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
+RECOMMENDATIONS_URL = (
+    "https://raw.githubusercontent.com/CaleMediaDev/"
+    "cale-ai-workbench/main/models/recommendations.json"
+)
 CATALOG = {
     "main": {"label": "Main coding + optional free cloud", "alias": "cale-local"},
     "qwen35": {
@@ -83,6 +87,165 @@ CATALOG = {
 }
 
 
+def validated_recommendations(document):
+    """Accept only bounded, official Ollama model records from the owner's feed."""
+    if not isinstance(document, dict) or document.get("schema") != 1:
+        raise ValueError("Unsupported model recommendation format.")
+    entries = document.get("models")
+    if not isinstance(entries, dict) or len(entries) > 12:
+        raise ValueError("Model recommendation count is invalid.")
+    accepted = {}
+    for profile, item in entries.items():
+        if not re.fullmatch(r"[a-z][a-z0-9_]{2,24}", profile) or (
+            profile in CATALOG and not CATALOG[profile].get("candidate")
+        ):
+            continue
+        if not isinstance(item, dict):
+            continue
+        alias = item.get("alias", "")
+        source = item.get("source", "")
+        origin = item.get("origin", "")
+        if not (
+            re.fullmatch(r"cale-[a-z0-9-]{3,40}", alias)
+            and re.fullmatch(
+                r"[a-z0-9][a-z0-9._-]{1,50}:[a-z0-9][a-z0-9._-]{1,50}", source
+            )
+            and origin == "https://ollama.com/library/" + source.split(":", 1)[0]
+            and item.get("license")
+            and item.get("auto") is True
+        ):
+            continue
+        try:
+            size = int(item["download_gb"])
+            ram = int(item["ram_gb"])
+            context = int(item["context"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (1 <= size <= 80 and 16 <= ram <= 256 and 8192 <= context <= 65536):
+            continue
+        accepted[profile] = {
+            "label": str(item.get("label", profile))[:80],
+            "alias": alias,
+            "source": source,
+            "download_gb": size,
+            "ram_gb": ram,
+            "origin": origin,
+            "license": str(item["license"])[:60],
+            "context": context,
+            "auto": True,
+            "candidate": True,
+        }
+    return accepted
+
+
+def candidate_approved(item):
+    """Only route a new recommendation after its local tool probe passes."""
+    if not item.get("candidate"):
+        return True
+    try:
+        approvals = json.loads((ROOT / "LongTasks/model-approvals.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return approvals.get(item["alias"]) == item["source"]
+
+
+def approve_candidate(item):
+    path = ROOT / "LongTasks/model-approvals.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        approvals = json.loads(path.read_text())
+    except (OSError, ValueError):
+        approvals = {}
+    approvals[item["alias"]] = item["source"]
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(approvals), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def probe_tool_use(alias):
+    """Require a real local function call before auto-promoting a new model."""
+    result = post(
+        "/api/chat",
+        {
+            "model": alias,
+            "stream": False,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Call multiply with a=7 and b=13. Do not answer in text.",
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "multiply",
+                        "description": "Multiply two integers",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "a": {"type": "integer"},
+                                "b": {"type": "integer"},
+                            },
+                            "required": ["a", "b"],
+                        },
+                    },
+                }
+            ],
+            "options": {"num_predict": 128},
+        },
+        timeout=240,
+    )
+    for call in result.get("message", {}).get("tool_calls", []):
+        function = call.get("function", {})
+        args = function.get("arguments", {})
+        if (
+            function.get("name") == "multiply"
+            and args.get("a") == 7
+            and args.get("b") == 13
+        ):
+            return True
+    raise RuntimeError(
+        "Model downloaded, but it did not pass the local tool-use check."
+    )
+
+
+def refresh_catalog(online=True):
+    """Check Cale Media's public feed; use cached or bundled data offline."""
+    cache = ROOT / "LongTasks/model-recommendations.json"
+    bundled = ROOT / "models/recommendations.json"
+    if online:
+        try:
+            with urlopen(
+                Request(
+                    RECOMMENDATIONS_URL, headers={"User-Agent": "Cale-AI-Workbench"}
+                ),
+                timeout=10,
+            ) as response:
+                raw = response.read(256_000)
+            document = json.loads(raw)
+            accepted = validated_recommendations(document)
+            if accepted:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                temporary = cache.with_suffix(f".{os.getpid()}.tmp")
+                temporary.write_bytes(raw)
+                os.replace(temporary, cache)
+                CATALOG.update(accepted)
+                return accepted
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+    for path in (cache, bundled):
+        try:
+            accepted = validated_recommendations(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+            CATALOG.update(accepted)
+            return accepted
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return {}
+
+
 def post(path, value, timeout=30):
     with urlopen(
         Request(
@@ -136,6 +299,7 @@ def model_ready(profile):
         not info.get("remote_host")
         and not info.get("remote_model")
         and "tools" in info.get("capabilities", [])
+        and candidate_approved(CATALOG[profile])
     )
 
 
@@ -206,6 +370,9 @@ def install(profile, progress=print):
         raise RuntimeError(
             "Weights installed, but Ollama did not advertise tool support. This model is not ready for agent tasks."
         )
+    if item.get("candidate"):
+        probe_tool_use(item["alias"])
+        approve_candidate(item)
     progress(
         "Installed. Tool capability is advertised; reliability still needs task-specific testing."
     )
@@ -232,7 +399,7 @@ def save_download_status(path, state, current, percent=0, metadata=None):
     os.replace(temporary, path)
 
 
-def auto_install(status_dir):
+def auto_install(status_dir, refresh=True):
     """Install every RAM-compatible optional model, sequentially and with disk headroom.
 
     A Windows file lock prevents the setup process and open app from pulling the
@@ -241,6 +408,8 @@ def auto_install(status_dir):
     """
     import msvcrt
 
+    if refresh:
+        refresh_catalog()
     status_dir = Path(status_dir)
     status_dir.mkdir(parents=True, exist_ok=True)
     with (status_dir / "auto-models.lock").open("a+b") as lock:

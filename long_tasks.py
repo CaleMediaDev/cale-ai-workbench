@@ -43,6 +43,7 @@ def environment():
         GHIDRA_INSTALL_DIR=str(ROOT / "Toolbox/ghidra_12.1.4_PUBLIC"),
     )
     paths = [
+        ROOT / "Toolbox/gh_2.103.3_windows_amd64/bin",
         ROOT / "Toolbox/node-v26.13.0-win-x64",
         ROOT / "Toolbox/node_modules/.bin",
         ROOT / "Toolbox/python/Scripts",
@@ -737,9 +738,18 @@ def monitor():
     except OSError:
         return
     (STATE / "monitor-pid.txt").write_text(str(os.getpid()), encoding="utf-8")
+    installed_marker = (
+        (ROOT / ".cale-ai-install").read_bytes()
+        if (ROOT / ".cale-ai-install").exists()
+        else b""
+    )
     # Native gateway startup is idempotent and owns its own process lock.
     last_start = 0
     while True:
+        if (ROOT / ".cale-ai-install").exists() and (
+            ROOT / ".cale-ai-install"
+        ).read_bytes() != installed_marker:
+            return  # A newly installed version starts its own supervisor.
         try:
             active = any(
                 p["status"]
@@ -857,6 +867,8 @@ def gui():
     from PIL import Image, ImageTk
 
     import chatgpt_auth
+    import github_account
+    import self_update
     import voice_assistant
     from cloud_ai import (
         connect_account,
@@ -866,7 +878,7 @@ def gui():
     from cloud_ai import (
         status as cloud_status,
     )
-    from model_library import catalog_signature, save_download_status
+    from model_library import save_download_status
 
     start_monitor()
     window = tk.Tk()
@@ -973,6 +985,42 @@ def gui():
         font=("Segoe UI", 14),
         style="Muted.TLabel",
     ).pack(anchor="w", pady=(5, 12))
+    ttk.Label(
+        super_page, text="Your projects on GitHub", font=("Segoe UI", 18, "bold")
+    ).pack(anchor="w", pady=(2, 4))
+    github_text = tk.StringVar(
+        value="Connect your own GitHub account to save projects online."
+    )
+    github_events = queue.Queue()
+
+    def connect_github():
+        try:
+            github_account.connect()
+            github_text.set(
+                "Finish the GitHub approval in the browser. The sign-in window shows the code if needed."
+            )
+        except Exception as exc:
+            github_text.set(str(exc))
+
+    github_button = ttk.Button(
+        super_page,
+        text="Connect GitHub",
+        command=connect_github,
+        style="Accent.TButton",
+    )
+    github_button.pack(anchor="w", ipadx=43, ipady=4)
+    ttk.Label(
+        super_page, textvariable=github_text, style="Muted.TLabel", wraplength=720
+    ).pack(anchor="w", pady=(6, 2))
+    ttk.Label(
+        super_page,
+        text="Save code in your repositories. Publish suitable static sites with GitHub Pages.",
+        style="Muted.TLabel",
+        wraplength=720,
+    ).pack(anchor="w", pady=(0, 16))
+    ttk.Label(super_page, text="More AI help", font=("Segoe UI", 18, "bold")).pack(
+        anchor="w", pady=(2, 8)
+    )
     cloud_events = queue.Queue()
     cloud_text = tk.StringVar(value="Your local AI still works without this.")
 
@@ -1134,6 +1182,17 @@ def gui():
         style="Muted.TLabel",
     ).pack(anchor="w", pady=(3, 0))
     status = tk.StringVar(value="")
+    update_events = queue.Queue()
+    pending_update = None
+    updating = False
+
+    def check_updates():
+        try:
+            update_events.put(self_update.stage())
+        except Exception as exc:
+            update_events.put(("error", str(exc)))
+
+    threading.Thread(target=check_updates, daemon=True).start()
 
     def new(initial_text=""):
         setup = read_task_status(STATE / "install-progress.json")
@@ -1223,23 +1282,60 @@ def gui():
     voice_busy = threading.Event()
     voice_speaking = threading.Event()
     listening = threading.Event()
+    speech_queue = queue.Queue()
+    speech_lock = threading.Lock()
     spoken_updates = {}
     last_spoken_at = {}
+    stuck_since = {}
+    stuck_slot = {}
+    idle_since = time.monotonic()
+    idle_slot = -1
     voice_label = tk.StringVar(value="Voice ready · Ctrl+Alt+Space")
 
-    def speak_update(message):
-        """Keep speech off the UI thread and avoid recording the app's voice."""
-
-        def worker():
-            voice_speaking.set()
+    def speech_worker():
+        """Speak queued updates one at a time, after microphone clips finish."""
+        while True:
+            message, rate = speech_queue.get()
             try:
-                voice_assistant.say(message)
+                while voice_busy.is_set():
+                    time.sleep(0.2)
+                voice_assistant.say(message, rate=rate)
             except Exception as exc:
                 voice_events.put(("error", str(exc)))
             finally:
-                voice_speaking.clear()
+                with speech_lock:
+                    if speech_queue.empty():
+                        voice_speaking.clear()
+                speech_queue.task_done()
 
-        threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=speech_worker, daemon=True).start()
+
+    def speak_update(message, rate=0):
+        """Queue one audible update without blocking the task screen."""
+        with speech_lock:
+            voice_speaking.set()
+            speech_queue.put((message, rate))
+
+    initial_setup = read_task_status(STATE / "install-progress.json")
+    setup_spoken_step = str(initial_setup.get("current", "")) if initial_setup else ""
+    if initial_setup and initial_setup.get("status") != "complete":
+        speak_update(
+            "Hi, Cale here. I'm setting up your AI. Right now, "
+            + setup_spoken_step
+            + "."
+        )
+    else:
+        current_tasks = [
+            item
+            for item in projects()
+            if item["status"] in ("queued", "working", "checking")
+        ]
+        if current_tasks:
+            speak_update(
+                "Hi, Cale here. I'm working on " + current_tasks[-1]["title"] + "."
+            )
+        else:
+            speak_update("Hi, Cale here. I'm ready when you are.")
 
     def record_voice(repeat=False):
         if voice_busy.is_set() or voice_speaking.is_set():
@@ -1251,7 +1347,7 @@ def gui():
             try:
                 phrase = voice_assistant.listen(8)
                 if phrase:
-                    voice_events.put(("heard", phrase))
+                    voice_events.put(("heard_handsfree" if repeat else "heard", phrase))
                 elif not repeat:
                     voice_events.put(
                         ("state", "I didn't hear anything. Try Talk again.")
@@ -1269,40 +1365,60 @@ def gui():
     def toggle_listening():
         if listening.is_set():
             listening.clear()
-            listen_button.configure(text="Hands-free: Off")
-            voice_label.set("Hands-free listening stopped.")
+            mic_button.configure(text="🎤  Mic Off")
+            voice_label.set("Microphone off. Press Ctrl+Alt+Space to talk once.")
         else:
             listening.set()
-            listen_button.configure(text="Hands-free: On")
+            mic_button.configure(text="🎤  Mic On")
+            voice_label.set("Microphone on. Say Hey Cale before an instruction.")
             maybe_listen()
 
-    def use_spoken_request(phrase):
+    def use_spoken_request(phrase, handsfree=False):
         """Send spoken instructions to the current task, or start a new one."""
+        parsed = voice_assistant.spoken_command(phrase, require_wake=handsfree)
+        if parsed is None:
+            return
+        action, note = parsed
         active = [
             item
             for item in projects()
             if item["status"]
             in ("queued", "working", "checking", "paused", "needs_input")
         ]
+        if action == "new":
+            listening.clear()
+            mic_button.configure(text="🎤  Mic Off")
+            voice_label.set("Heard: " + phrase[:100])
+            new(note)
+            return
         if active:
             selected = max(active, key=lambda item: item["updated"] or 0)
-            request(selected["id"], "note", phrase)
-            voice_label.set(
-                "Heard: " + phrase[:100] + " · added to " + selected["title"]
-            )
+            if action == "status":
+                current = task_progress(selected)[1]
+                speak_update(selected["title"] + ". " + current)
+                voice_label.set("Current step: " + current)
+            elif action in ("pause", "resume", "stop", "open"):
+                task_action(selected["id"], action)
+                voice_label.set("Heard: " + phrase[:100])
+            else:
+                request(selected["id"], "note", note)
+                voice_label.set(
+                    "Heard: " + note[:100] + " · added to " + selected["title"]
+                )
         else:
+            if action == "status":
+                speak_update("There are no active tasks. I'm ready for a new one.")
+                return
+            if action != "note":
+                voice_label.set("There is no active task to " + action + ".")
+                return
             listening.clear()
-            listen_button.configure(text="Hands-free: Off")
+            mic_button.configure(text="🎤  Mic Off")
             voice_label.set("Heard: " + phrase[:100])
-            new(phrase)
+            new(note)
 
-    ttk.Button(title_row, text="🎤  Talk", command=record_voice).pack(
-        side="right", padx=(0, 8), pady=(8, 0)
-    )
-    listen_button = ttk.Button(
-        title_row, text="Hands-free: Off", command=toggle_listening
-    )
-    listen_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    mic_button = ttk.Button(title_row, text="🎤  Mic Off", command=toggle_listening)
+    mic_button.pack(side="right", padx=(0, 8), pady=(8, 0))
     window.bind("<Control-Alt-space>", lambda _: record_voice())
     ttk.Label(main_page, textvariable=voice_label, style="Muted.TLabel").pack(
         anchor="w", pady=(0, 5)
@@ -1310,6 +1426,20 @@ def gui():
     ttk.Label(
         main_page, textvariable=status, style="Muted.TLabel", wraplength=1000
     ).pack(anchor="w", pady=(0, 6))
+    github_banner = ttk.Frame(main_page, style="Card.TFrame", padding=12)
+    ttk.Label(
+        github_banner,
+        text="Save your projects online with GitHub",
+        style="Card.TLabel",
+        font=("Segoe UI", 13, "bold"),
+    ).pack(side="left", padx=(0, 12))
+    ttk.Button(
+        github_banner,
+        text="Connect GitHub",
+        command=connect_github,
+        style="Accent.TButton",
+    ).pack(side="right")
+    github_banner.pack(fill="x", pady=(0, 10))
 
     list_wrap = ttk.Frame(main_page)
     list_wrap.pack(fill="both", expand=True)
@@ -1442,22 +1572,16 @@ def gui():
         detail.insert("1.0", content)
         detail.configure(state="disabled")
 
+    auto_models_started = False
+
     def start_auto_models(setup):
         """Resume automatic downloads when the app opens after setup."""
+        nonlocal auto_models_started
         if setup and setup.get("status") != "complete":
             return
+        if auto_models_started:
+            return
         path = STATE / "auto-model-worker.json"
-        worker = read_task_status(path)
-        if (
-            worker.get("status") in ("complete", "error")
-            and worker.get("catalog") == catalog_signature()
-        ):
-            return
-        if (
-            worker.get("status") == "working"
-            and time.time() - worker.get("updated", 0) < 600
-        ):
-            return
         save_download_status(path, "working", "Checking this PC for optional models", 0)
         try:
             subprocess.Popen(
@@ -1474,6 +1598,7 @@ def gui():
                 stderr=subprocess.DEVNULL,
                 creationflags=HIDE,
             )
+            auto_models_started = True
         except Exception as exc:
             save_download_status(path, "error", str(exc), 0)
 
@@ -1673,16 +1798,16 @@ def gui():
         try:
             while True:
                 event, value = voice_events.get_nowait()
-                if event == "heard":
+                if event in ("heard", "heard_handsfree"):
                     try:
-                        use_spoken_request(value)
+                        use_spoken_request(value, handsfree=event == "heard_handsfree")
                     except Exception as exc:
                         voice_label.set("Could not add spoken request: " + str(exc))
                 elif event == "again":
                     maybe_listen()
                 elif event == "error":
                     voice_label.set("Voice unavailable: " + value[:140])
-                    listen_button.configure(text="Hands-free: Off")
+                    mic_button.configure(text="🎤  Mic Off")
                 else:
                     voice_label.set(value)
         except queue.Empty:
@@ -1690,7 +1815,13 @@ def gui():
         window.after(500, voice_poll)
 
     def refresh():
+        nonlocal idle_since, idle_slot, setup_spoken_step
         setup = read_task_status(STATE / "install-progress.json")
+        if setup:
+            current_step = str(setup.get("current", ""))
+            if current_step and current_step != setup_spoken_step:
+                setup_spoken_step = current_step
+                speak_update("Setup update. " + current_step + ".")
         new_button.configure(
             state="disabled"
             if setup and setup.get("status") != "complete"
@@ -1718,7 +1849,9 @@ def gui():
         elif disconnect_button.winfo_manager():
             disconnect_button.pack_forget()
         render_cards()
-        for item in projects():
+        all_projects = projects()
+        now = time.monotonic()
+        for item in all_projects:
             current = (item["status"], task_progress(item)[1])
             previous = spoken_updates.get(item["id"])
             spoken_updates[item["id"]] = current
@@ -1730,9 +1863,47 @@ def gui():
                 "accepted",
                 "stopped",
             )
-            if important or time.monotonic() - last_spoken_at.get(item["id"], 0) > 120:
-                last_spoken_at[item["id"]] = time.monotonic()
+            if important or now - last_spoken_at.get(item["id"], 0) > 120:
+                last_spoken_at[item["id"]] = now
                 speak_update(item["title"] + ". " + current[1])
+        blocked = [item for item in all_projects if item["status"] == "needs_input"]
+        for item in blocked:
+            started = stuck_since.setdefault(item["id"], now)
+            prompt = voice_assistant.background_prompt(
+                "stuck", now - started, stuck_slot.get(item["id"], -1), item["title"]
+            )
+            if prompt:
+                stuck_slot[item["id"]] = prompt[0]
+                speak_update(prompt[1], rate=prompt[2])
+        blocked_ids = {item["id"] for item in blocked}
+        for pid in list(stuck_since):
+            if pid not in blocked_ids:
+                stuck_since.pop(pid)
+                stuck_slot.pop(pid, None)
+        running = any(
+            item["status"] in ("queued", "working", "checking") for item in all_projects
+        )
+        if blocked or running or (setup and setup.get("status") != "complete"):
+            idle_since, idle_slot = now, -1
+        else:
+            finished = next(
+                (
+                    item
+                    for item in reversed(all_projects)
+                    if item["status"] == "ready_for_review"
+                ),
+                None,
+            )
+            prompt = voice_assistant.background_prompt(
+                "idle",
+                now - idle_since,
+                idle_slot,
+                finished["title"] if finished else "",
+                mic_off=not listening.is_set(),
+            )
+            if prompt:
+                idle_slot = prompt[0]
+                speak_update(prompt[1], rate=prompt[2])
         with database() as conn:
             last = conn.execute(
                 "SELECT status,result FROM requests ORDER BY id DESC LIMIT 1"
@@ -1743,7 +1914,85 @@ def gui():
     first_connect = STATE / "browser-connection-offered"
 
     def poll():
+        nonlocal pending_update, updating
         refresh()
+        try:
+            while True:
+                candidate = update_events.get_nowait()
+                if candidate and candidate[0] == "error":
+                    status.set(
+                        "Update check will retry next time: " + candidate[1][:140]
+                    )
+                elif candidate:
+                    pending_update = candidate
+                    status.set(
+                        "A verified update is ready. It will install when tasks are idle."
+                    )
+        except queue.Empty:
+            pass
+        if (
+            pending_update
+            and not updating
+            and not self_update.active_tasks()
+            and not any(
+                isinstance(child, tk.Toplevel) for child in window.winfo_children()
+            )
+        ):
+            setup_state = read_task_status(STATE / "install-progress.json")
+            if not setup_state or setup_state.get("status") == "complete":
+                archive, version = pending_update
+                try:
+                    subprocess.Popen(
+                        [
+                            sys.executable,
+                            str(ROOT / "self_update.py"),
+                            "--apply",
+                            str(archive),
+                            "--version",
+                            ".".join(map(str, version)),
+                            "--parent-pid",
+                            str(os.getpid()),
+                        ],
+                        cwd=ROOT,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=HIDE,
+                    )
+                    updating = True
+                    status.set("Installing the update and reopening your AI…")
+                    window.after(1000, window.destroy)
+                    return
+                except OSError as exc:
+                    status.set("Could not start the update: " + str(exc))
+                    pending_update = None
+        heartbeat = STATE / "heartbeat.txt"
+        if heartbeat.is_file() and time.time() - heartbeat.stat().st_mtime > 35:
+            start_monitor()
+        if not github_events.empty():
+            account = github_events.get_nowait()
+            if account:
+                github_text.set(
+                    "Connected as @"
+                    + account
+                    + ". Your AI can use your repositories when you ask it to."
+                )
+                github_button.configure(text="GitHub connected")
+                github_banner.pack_forget()
+        if (
+            not getattr(window, "github_checking", False)
+            and time.monotonic() - getattr(window, "github_checked_at", 0) > 20
+        ):
+            window.github_checking = True
+            window.github_checked_at = time.monotonic()
+
+            def check_github():
+                try:
+                    github_events.put(github_account.account())
+                finally:
+                    window.github_checking = False
+
+            threading.Thread(target=check_github, daemon=True).start()
         setup = read_task_status(STATE / "install-progress.json")
         start_auto_models(setup)
         if (
