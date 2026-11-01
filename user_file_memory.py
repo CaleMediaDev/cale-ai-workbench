@@ -37,7 +37,10 @@ def _files(paths: list[str]):
     count = 0
     for raw in paths[:MAX_ROOTS]:
         try:
-            root = Path(raw).resolve(strict=True)
+            selected = Path(raw)
+            if selected.is_symlink():
+                continue
+            root = selected.resolve(strict=True)
         except OSError:
             continue
         if not root.is_file() and not root.is_dir():
@@ -225,7 +228,8 @@ def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
     def available(raw: str) -> bool:
         path = Path(raw)
         try:
-            return (path.is_file() and path.suffix.casefold() in SUPPORTED
+            return (not path.is_symlink() and path.is_file()
+                    and path.suffix.casefold() in SUPPORTED
                     and path.stat().st_size <= _file_limit(path))
         except OSError:
             return False
@@ -254,9 +258,27 @@ def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
 
 def get(state: str | Path, path: str) -> dict:
     """Return an indexed document only while its source still exists."""
-    search(state, "", 1)
-    if not Path(path).is_file():
+    with _connection(state) as conn:
+        selected = conn.execute("SELECT 1 FROM files WHERE path=?", (path,)).fetchone()
+    if selected is None:
         raise ValueError("That file is no longer in memory. Select it again.")
+    source = Path(path)
+    try:
+        available = (
+            not source.is_symlink() and source.is_file()
+            and source.suffix.casefold() in SUPPORTED
+            and source.stat().st_size <= _file_limit(source)
+        )
+    except OSError:
+        available = False
+    if not available:
+        with _connection(state) as conn:
+            conn.execute("DELETE FROM files WHERE path=?", (path,))
+            conn.execute("DELETE FROM file_fts WHERE path=?", (path,))
+        raise ValueError("That file is no longer in memory. Select it again.")
+    # Refresh only the requested source. Searching can still refresh the full
+    # selected library, but opening one record should stay fast as it grows.
+    ingest(state, [path])
     with _connection(state) as conn:
         row = conn.execute("SELECT path,content,indexed_at FROM files WHERE path=?", (path,)).fetchone()
     if row is None or not row["content"]:

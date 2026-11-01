@@ -32,6 +32,61 @@ class UserFileMemoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             user_file_memory.get(self.state, str(path))
 
+    def test_get_refreshes_only_requested_file(self):
+        first = self.root / "first.txt"
+        second = self.root / "second.txt"
+        first.write_text("first memory", encoding="utf-8")
+        second.write_text("second memory", encoding="utf-8")
+        user_file_memory.ingest(self.state, [str(first), str(second)])
+        actual_version = user_file_memory._file_version
+        seen = []
+
+        def record_version(source):
+            seen.append(source)
+            return actual_version(source)
+
+        with patch.object(user_file_memory, "_file_version", side_effect=record_version):
+            self.assertIn("first memory", user_file_memory.get(self.state, str(first))["content"])
+        self.assertEqual(seen, [first])
+
+    def test_get_does_not_index_an_unselected_file(self):
+        path = self.root / "never-selected.txt"
+        path.write_text("private notes", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            user_file_memory.get(self.state, str(path))
+        self.assertEqual(user_file_memory.search(self.state, "private"), [])
+
+    def test_replaced_selected_file_link_does_not_index_target(self):
+        selected = self.root / "selected.txt"
+        target = self.root / "target.txt"
+        selected.write_text("old selected text", encoding="utf-8")
+        target.write_text("unselected secret text", encoding="utf-8")
+        user_file_memory.ingest(self.state, [str(selected)])
+        selected.unlink()
+        try:
+            selected.symlink_to(target)
+        except OSError:
+            self.skipTest("File symlinks are not enabled on this Windows account")
+        self.assertEqual(user_file_memory.search(self.state, "secret"), [])
+        self.assertEqual(user_file_memory.search(self.state, "old"), [])
+        with self.assertRaises(ValueError):
+            user_file_memory.get(self.state, str(selected))
+        self.assertEqual(user_file_memory.search(self.state, "secret"), [])
+
+    def test_link_guard_removes_cached_text_even_without_symlink_privilege(self):
+        selected = self.root / "selected.txt"
+        selected.write_text("cached detail", encoding="utf-8")
+        user_file_memory.ingest(self.state, [str(selected)])
+        original_is_link = Path.is_symlink
+
+        def simulated_link(path):
+            return path == selected or original_is_link(path)
+
+        with patch.object(Path, "is_symlink", simulated_link):
+            self.assertEqual(user_file_memory.search(self.state, "cached"), [])
+            with self.assertRaises(ValueError):
+                user_file_memory.get(self.state, str(selected))
+
     def test_same_size_edit_with_restored_mtime_refreshes_memory(self):
         path = self.root / "notes.txt"
         path.write_text("forest", encoding="utf-8")
