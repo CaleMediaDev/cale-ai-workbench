@@ -373,7 +373,31 @@ def task_progress(p):
         setup = read_task_status(STATE / "install-progress.json")
         if setup.get("status") in ("failed", "error"):
             step = "AI setup needs attention: " + str(setup.get("current", "Unknown error"))
+    elif state == "working":
+        step = active_worker_wait(p) or step
     return percent, step[:180]
+
+
+def active_worker_wait(p):
+    """Show a live first-token wait instead of a stale milestone description."""
+    db = ROOT / "data/state.db"
+    if not db.is_file():
+        return ""
+    try:
+        with contextlib.closing(sqlite3.connect(db, timeout=0.2)) as conn:
+            row = conn.execute(
+                "SELECT last_activity_description, last_activity_at, model FROM sessions "
+                "WHERE cwd=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+                (str(Path(p["folder"])),),
+            ).fetchone()
+    except (OSError, sqlite3.Error):
+        return ""
+    if not row or not row[1] or time.time() - row[1] > 120:
+        return ""
+    match = re.fullmatch(r"waiting for stream response \((\d+)s, first_chunk\)", row[0] or "")
+    if not match or int(match.group(1)) < 60:
+        return ""
+    return f"{row[2] or 'Local AI'} is processing a long request ({match.group(1)}s waiting for its first reply)"
 
 
 def read_task_status(path):

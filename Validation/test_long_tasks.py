@@ -1,9 +1,11 @@
 """Behavior checks for the companion (no model or native board writes)."""
 
 import importlib.util
+import contextlib
 import io
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -626,6 +628,24 @@ class LongTaskTests(unittest.TestCase):
         snapshot = task_module.recovery_snapshot(project)
         self.assertIn("song_final.wav (15 bytes)", snapshot)
         self.assertIn("Run it before any new render", snapshot)
+
+    def test_task_card_explains_live_first_token_wait(self):
+        root = self.base / "app"
+        db = root / "data/state.db"
+        db.parent.mkdir(parents=True)
+        with contextlib.closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE sessions (cwd TEXT, ended_at REAL, started_at REAL, "
+                         "last_activity_description TEXT, last_activity_at REAL, model TEXT)")
+            conn.execute("INSERT INTO sessions VALUES (?, NULL, ?, ?, ?, ?)", (
+                self.item()["folder"], time.time() - 600,
+                "waiting for stream response (150s, first_chunk)", time.time(),
+                "qwen3-coder-local",
+            ))
+            conn.commit()
+        task_module.update(self.pid, status="working")
+        with patch.object(task_module, "ROOT", root):
+            _, step = task_module.task_progress(self.item())
+        self.assertIn("150s waiting for its first reply", step)
 
     def test_success_starts_separate_review(self):
         self.verify_script(
