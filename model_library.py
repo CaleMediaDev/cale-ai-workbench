@@ -34,6 +34,7 @@ CATALOG = {
         "origin": "https://ollama.com/library/qwen3.5",
         "license": "Apache-2.0",
         "context": 65536,
+        "context_policy": "fixed",
         "candidate": True,
         "tool_reasoning_effort": "none",
     },
@@ -388,14 +389,17 @@ def model_ready(profile):
     item = CATALOG[profile]
     info = post("/api/show", {"model": item["alias"]}, timeout=10)
     configured = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", info.get("parameters", ""))
-    return (
-        not info.get("remote_host")
-        and not info.get("remote_model")
-        and "tools" in info.get("capabilities", [])
-        and configured is not None
-        and int(configured.group(1)) >= preferred_context(item, info, item["alias"])
-        and candidate_approved(item)
+    if (info.get("remote_host") or info.get("remote_model")
+            or "tools" not in info.get("capabilities", []) or configured is None):
+        return False
+    desired = preferred_context(item, info, item["alias"])
+    configured_size = int(configured.group(1))
+    context_ready = (
+        configured_size == desired
+        if item.get("context_policy") == "fixed"
+        else configured_size >= desired
     )
+    return context_ready and candidate_approved(item)
 
 
 def preferred_context(item, info, model):
@@ -406,6 +410,8 @@ def preferred_context(item, info, model):
     omitted optional metadata.
     """
     minimum = max(64000, item["context"])
+    if item.get("context_policy") == "fixed":
+        return minimum
     import context_window
 
     if not info.get("model_info"):
@@ -425,7 +431,8 @@ def catalog_signature():
     """Change when the optional download set or its model sources change."""
     options = {
         profile: {"source": item.get("source", ""), "auto": item.get("auto", True),
-                  "context": item.get("context", 0)}
+                  "context": item.get("context", 0),
+                  "context_policy": item.get("context_policy", "native")}
         for profile, item in CATALOG.items()
         if profile != "main"
     }

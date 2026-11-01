@@ -38,6 +38,21 @@ class AutoModelTests(unittest.TestCase):
             details["parameters"] = "num_ctx 98304\n"
             self.assertTrue(library.model_ready("qwen35"))
 
+    def test_fast_model_keeps_its_small_tested_window(self):
+        self.assertEqual(library.CATALOG["fast"]["context_policy"], "fixed")
+        details = {
+            "capabilities": ["tools"],
+            "parameters": "num_ctx 262144\n",
+            "model_info": {"qwen.context_length": 262144},
+        }
+        with (
+            patch.object(library, "post", return_value=details),
+            patch.object(library, "candidate_approved", return_value=True),
+        ):
+            self.assertFalse(library.model_ready("fast"))
+            details["parameters"] = "num_ctx 65536\n"
+            self.assertTrue(library.model_ready("fast"))
+
     def test_recommendation_can_require_more_than_64k_context(self):
         document = {"schema": 1, "models": {"wide": {
             "label": "Wide model", "alias": "cale-wide-model", "source": "qwen3.6:35b",
