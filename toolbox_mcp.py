@@ -119,6 +119,65 @@ LOCAL_CATALOG = {
             "captions_path": {"type": "string"},
         }, "required": ["source_path", "output_path"]},
     },
+    "local.edit_video": {
+        "description": "Edit a local video offline: trim, resize to wide/vertical/square, and change speed. Saves a new MP4 without touching the original.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_path": {"type": "string"}, "output_path": {"type": "string"},
+            "start_seconds": {"type": "number"}, "duration_seconds": {"type": "number"},
+            "layout": {"type": "string", "enum": ["original", "wide", "vertical", "square"]},
+            "speed": {"type": "number"},
+        }, "required": ["source_path", "output_path"]},
+    },
+    "local.join_videos": {
+        "description": "Join 2 to 30 local video clips in order into a new MP4. Normalizes their size and frame rate; add a soundtrack separately if needed.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_paths": {"type": "array", "items": {"type": "string"}},
+            "output_path": {"type": "string"},
+            "layout": {"type": "string", "enum": ["wide", "vertical", "square"]},
+        }, "required": ["source_paths", "output_path"]},
+    },
+    "local.add_video_audio": {
+        "description": "Replace a local video's soundtrack with a song or narration, adjusting audio gain. Saves a new MP4 offline.",
+        "inputSchema": {"type": "object", "properties": {
+            "source_path": {"type": "string"}, "audio_path": {"type": "string"},
+            "output_path": {"type": "string"}, "audio_gain_db": {"type": "number"},
+        }, "required": ["source_path", "audio_path", "output_path"]},
+    },
+    "local.search_public_apis": {
+        "description": "Find public API leads that a daily open catalog labels as no-key and reachable. No account or gateway required. Always verify the provider's official docs and current terms before use.",
+        "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string"}, "max_results": {"type": "integer"},
+        }, "required": ["query"]},
+    },
+    "local.start_video_job": {
+        "description": "Generate a 1-5 second video clip locally with Wan 2.2 5B, optionally animating a supplied image. Starts a durable job; first use downloads the verified model and ComfyUI runtime. Needs NVIDIA GPU with at least 10 GB VRAM and 35 GB free disk. Check local.video_job_status; no account or cloud upload.",
+        "inputSchema": {"type": "object", "properties": {
+            "prompt": {"type": "string"}, "output_path": {"type": "string"},
+            "image_path": {"type": "string"}, "seconds": {"type": "number"},
+            "layout": {"type": "string", "enum": ["wide", "vertical", "square"]},
+        }, "required": ["prompt", "output_path"]},
+    },
+    "local.video_job_status": {
+        "description": "Check a durable local Wan video generation job by its returned job_id.",
+        "inputSchema": {"type": "object", "properties": {
+            "job_id": {"type": "string"},
+        }, "required": ["job_id"]},
+    },
+    "local.train_table_model": {
+        "description": "Train a small local classifier or regression model from labeled CSV rows. Saves safe JSON weights and reports holdout performance against a baseline. Useful for predictions from spreadsheet data; no cloud or account.",
+        "inputSchema": {"type": "object", "properties": {
+            "csv_path": {"type": "string"}, "target_column": {"type": "string"},
+            "model_path": {"type": "string"},
+            "problem_type": {"type": "string", "enum": ["auto", "classification", "regression"]},
+        }, "required": ["csv_path", "target_column", "model_path"]},
+    },
+    "local.predict_table_model": {
+        "description": "Use a locally trained CSV model to add a prediction column to a new CSV. Uses safe JSON coefficients only, no executable model files or cloud.",
+        "inputSchema": {"type": "object", "properties": {
+            "model_path": {"type": "string"}, "csv_path": {"type": "string"},
+            "output_path": {"type": "string"},
+        }, "required": ["model_path", "csv_path", "output_path"]},
+    },
 }
 
 
@@ -308,6 +367,14 @@ async def toolbox_call(tool: str, arguments_json: str = "{}") -> dict:
             "local.edit_music": edit_music,
             "local.mix_music": mix_music,
             "local.make_music_video": make_music_video,
+            "local.edit_video": edit_video,
+            "local.join_videos": join_videos,
+            "local.add_video_audio": add_video_audio,
+            "local.search_public_apis": search_public_apis,
+            "local.start_video_job": start_video_job,
+            "local.video_job_status": video_job_status,
+            "local.train_table_model": train_table_model,
+            "local.predict_table_model": predict_table_model,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -712,6 +779,75 @@ async def make_music_video(source_path: str, output_path: str, layout: str = "wi
         music_video.make_music_video, source_path, output_path, layout,
         background_image, captions_path
     )
+
+
+@server.tool()
+async def edit_video(source_path: str, output_path: str, start_seconds: float = 0,
+                     duration_seconds: float | None = None, layout: str = "original",
+                     speed: float = 1) -> dict:
+    """Trim, resize or retime a video locally."""
+    import video_edit
+    return await asyncio.to_thread(video_edit.edit_video, source_path, output_path,
+                                   start_seconds, duration_seconds, layout, speed)
+
+
+@server.tool()
+async def join_videos(source_paths: list[str], output_path: str,
+                      layout: str = "wide") -> dict:
+    """Join local clips into a single MP4."""
+    import video_edit
+    return await asyncio.to_thread(video_edit.join_videos, source_paths, output_path, layout)
+
+
+@server.tool()
+async def add_video_audio(source_path: str, audio_path: str, output_path: str,
+                          audio_gain_db: float = 0) -> dict:
+    """Put a local song or narration over a video."""
+    import video_edit
+    return await asyncio.to_thread(video_edit.add_video_audio, source_path, audio_path,
+                                   output_path, audio_gain_db)
+
+
+@server.tool()
+async def search_public_apis(query: str, max_results: int = 10) -> dict:
+    """Discover potential no-key public data sources for a task."""
+    import public_api_catalog
+    return await asyncio.to_thread(public_api_catalog.search_public_apis, query,
+                                   max_results)
+
+
+@server.tool()
+async def train_table_model(csv_path: str, target_column: str, model_path: str,
+                            problem_type: str = "auto") -> dict:
+    """Train a bounded local predictor from CSV examples."""
+    import table_ml
+    return await asyncio.to_thread(table_ml.train_table_model, csv_path,
+                                   target_column, model_path, problem_type)
+
+
+@server.tool()
+async def predict_table_model(model_path: str, csv_path: str,
+                              output_path: str) -> dict:
+    """Apply a locally saved JSON table model to new CSV rows."""
+    import table_ml
+    return await asyncio.to_thread(table_ml.predict_table_model, model_path,
+                                   csv_path, output_path)
+
+
+@server.tool()
+async def start_video_job(prompt: str, output_path: str, image_path: str = "",
+                          seconds: float = 2, layout: str = "wide") -> dict:
+    """Start a local Wan video render that survives this tool call."""
+    import video_generation
+    return await asyncio.to_thread(video_generation.start_video_job, prompt,
+                                   output_path, image_path, seconds, layout)
+
+
+@server.tool()
+async def video_job_status(job_id: str) -> dict:
+    """Check an asynchronous local video render."""
+    import video_generation
+    return await asyncio.to_thread(video_generation.video_job_status, job_id)
 
 
 @server.tool()

@@ -33,6 +33,11 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Spotify Basic Pitch 0.4.0 (Apache-2.0; optional local audio-to-MIDI transcription installed on first use) | https://github.com/spotify/basic-pitch |
 | Matchering 2.0.6 (GPL-3.0; optional separate local reference-mastering runtime installed on first use, not bundled in the release) | https://github.com/sergree/matchering |
 | imageio-ffmpeg 0.6.0 (BSD-2-Clause; bundles FFmpeg binary used for local trim, fade and mix; FFmpeg carries its own component licenses) | https://github.com/imageio/imageio-ffmpeg |
+| OpenVideo Studio (MIT; pinned optional local Wan/ComfyUI installer fetched on first video generation) | https://github.com/melayyoub/openvideo-studio |
+| ComfyUI (GPL-3.0; installed separately on first video generation) | https://github.com/Comfy-Org/ComfyUI |
+| Wan 2.2 (Apache-2.0; checksum-verified model files downloaded separately) | https://huggingface.co/Comfy-Org/Wan-2.2 |
+| public-apis-live (MIT; its daily catalog is queried on demand for public API research leads, not bundled) | https://github.com/Manavarya09/public-apis-live |
+| scikit-learn 1.9.1 (BSD-3-Clause; local CSV classification and regression training, installed as a Python dependency) | https://github.com/scikit-learn/scikit-learn |
 
 The Windows compatibility patch contains modifications to MIT-licensed Hermes code. The upstream MIT notice is reproduced in `HERMES-LICENSE`.
 

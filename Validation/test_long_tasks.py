@@ -672,6 +672,52 @@ class LongTaskTests(unittest.TestCase):
             task_module.recover_media_artifacts(self.item(), snapshot)
         self.assertEqual((self.base / "project/song_final.wav").read_bytes(), source.read_bytes())
 
+    def test_finished_scratch_image_and_video_are_recovered_but_external_files_are_not(self):
+        root = self.base / "app"
+        scratch = root / "data/cache/scratch"
+        scratch.mkdir(parents=True)
+        image = scratch / "beach.png"
+        video = scratch / "preview.mp4"
+        external = self.base / "private.png"
+        image.write_bytes(b"image output")
+        video.write_bytes(b"video output")
+        external.write_bytes(b"outside scratch")
+        snapshot = {"runs": [{"metadata": {"artifacts": [
+            str(image), str(video), str(external),
+        ]}}]}
+        with patch.object(task_module, "ROOT", root):
+            task_module.recover_media_artifacts(self.item(), snapshot)
+        project = self.base / "project"
+        self.assertEqual((project / "beach.png").read_bytes(), image.read_bytes())
+        self.assertEqual((project / "preview.mp4").read_bytes(), video.read_bytes())
+        self.assertFalse((project / "private.png").exists())
+
+    def test_hermes_preserved_media_is_recovered_only_from_its_own_card(self):
+        root = self.base / "app"
+        item = self.item()
+        card = "t_123"
+        task_attachments = root / "data/kanban/boards/long-tasks/attachments" / card
+        other_attachments = task_attachments.parent / "t_other"
+        task_attachments.mkdir(parents=True)
+        other_attachments.mkdir(parents=True)
+        image = task_attachments / "finished.webp"
+        other = other_attachments / "other.webp"
+        no_card = task_attachments / "no-card.webp"
+        image.write_bytes(b"finished image")
+        other.write_bytes(b"another task")
+        no_card.write_bytes(b"must have a matching card")
+        snapshot = {"runs": [{"metadata": {"artifacts": [str(image), str(other)]}}]}
+        with patch.object(task_module, "ROOT", root):
+            task_module.recover_media_artifacts({**item, "card": card}, snapshot)
+            task_module.recover_media_artifacts(
+                {**item, "card": ""},
+                {"runs": [{"metadata": {"artifacts": [str(no_card)]}}]},
+            )
+        project = self.base / "project"
+        self.assertEqual((project / "finished.webp").read_bytes(), image.read_bytes())
+        self.assertFalse((project / "other.webp").exists())
+        self.assertFalse((project / "no-card.webp").exists())
+
     def test_recovery_brief_lists_existing_artifact_before_new_worker_starts(self):
         project = self.base / "project"
         (project / "song_final.wav").write_bytes(b"completed audio")

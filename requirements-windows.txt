@@ -59,6 +59,7 @@ requests==2.34.2
 ruamel.yaml==0.18.16
 rpds-py==2026.9.1
 ruff==0.17.3
+scikit-learn==1.9.1
 six==1.17.0
 soupsieve==3.0.4
 sse-starlette==3.6.0

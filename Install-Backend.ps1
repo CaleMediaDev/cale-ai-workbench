@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.179')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.180')
  $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
  function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
    New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
@@ -90,14 +90,23 @@ try {
    if (-not (Test-Path -LiteralPath $githubCli)) { throw 'GitHub CLI installation failed.' }
  }
  $env:PATH=(Split-Path $node)+';'+(Join-Path $box 'python/Scripts')+';'+$env:PATH
+ $installedLock=Join-Path $box 'package-lock.json'
+ $sourceLock=Join-Path $PSScriptRoot 'package-lock.json'
+ $reuseNode=(Test-Path -LiteralPath $installedLock -PathType Leaf) -and ((Get-FileHash -LiteralPath $installedLock -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $sourceLock -Algorithm SHA256).Hash)
+ foreach ($module in @('rea-agents','chrome-devtools-mcp','@playwright/mcp','@ast-grep/cli')) {
+   if (-not (Test-Path -LiteralPath (Join-Path $box "node_modules/$module/package.json") -PathType Leaf)) { $reuseNode=$false }
+ }
  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'package.json') -Destination $box -Force
  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'package-lock.json') -Destination $box -Force
  Push-Location $box
  try {
-   & (Join-Path (Split-Path $node) 'npm.cmd') ci --ignore-scripts --no-audit --no-fund
-   if ($LASTEXITCODE -ne 0) { throw 'JavaScript tool installation failed.' }
-   & $node (Join-Path $box 'node_modules/playwright/cli.js') install chromium
-   if ($LASTEXITCODE -ne 0) { throw 'Browser download failed.' }
+   if ($reuseNode) { Write-Output 'JavaScript tools are already current; keeping the running browser and agent tools.' }
+   else {
+     & (Join-Path (Split-Path $node) 'npm.cmd') ci --ignore-scripts --no-audit --no-fund
+     if ($LASTEXITCODE -ne 0) { throw 'JavaScript tool installation failed.' }
+     & $node (Join-Path $box 'node_modules/playwright/cli.js') install chromium
+     if ($LASTEXITCODE -ne 0) { throw 'Browser download failed.' }
+   }
  } finally { Pop-Location }
  foreach ($entry in @(@{Name='java';Folder='jdk-21.0.13+9';Archive='jdk.zip'},@{Name='ghidra';Folder='ghidra_12.1.4_PUBLIC';Archive='ghidra-12.1.4.zip'})) {
    if (-not (Test-Path -LiteralPath (Join-Path $box $entry.Folder))) {

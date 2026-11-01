@@ -225,7 +225,20 @@ def configure(root, profile):
         ],
         capture_output=True,
     ).returncode:
-        raise RuntimeError("The Windows file patch did not match this Hermes version.")
+        # Later read-consistency patches extend the same functions, so a
+        # reverse-apply check can fail on an already-patched live install.
+        # Check the actual Windows compatibility behavior before accepting it.
+        operations = (root / "app/tools/file_operations.py").read_text(encoding="utf-8")
+        tracking = (root / "app/tools/file_tools_read_tracking.py").read_text(encoding="utf-8")
+        if not all(snippet in operations for snippet in (
+            "st = os.fstat(fh.fileno())",
+            "old_string = _normalize_line_endings(old_string, file_ending)",
+            "new_string = _normalize_line_endings(new_string, file_ending)",
+        )) or not all(snippet in tracking for snippet in (
+            'if os.name == "nt":',
+            "st = os.fstat(stream.fileno())",
+        )):
+            raise RuntimeError("The Windows file patch did not match this Hermes version.")
     command = [git, "-C", str(root / "app"), "apply", "--ignore-space-change"]
     for name in ("hermes-read-consistency.patch", "hermes-host-read-consistency.patch"):
         patch = root / name

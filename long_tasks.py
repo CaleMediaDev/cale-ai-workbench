@@ -668,6 +668,13 @@ re-read source files before relying on indexed excerpts.
 For research spanning several pages on one public website, use crawl_website.
 It saves pages as Markdown in Research/Web and indexes them in project memory.
 Verify important facts on the live source; a saved crawl may become outdated.
+When a project needs public data, local.search_public_apis can find no-key API
+leads. Its catalog only checks URL reachability; read the provider's own current
+documentation and terms before using an API. Never send private project files
+to an API merely because a catalog lists it.
+For labeled spreadsheet data, local.train_table_model can fit a local CSV
+predictor and report holdout performance against a baseline. Use
+local.predict_table_model on new rows only after checking that score.
 If the user attaches a signed-in Chrome tab through Hermes Connector, first
 call bridge_status, then use bridge_* tools for that exact attached session.
 Never claim access to personal Chrome when no tab is attached.
@@ -682,6 +689,13 @@ timed SRT captions. Use local.make_music_video to render a finished song as an
 offline visualizer MP4; pass reviewed lyrics.srt as captions_path for on-screen
 lyrics. Find exact arguments with
 toolbox_search, read its schema, and save output in a fresh project folder.
+For user-supplied videos, use local.edit_video to trim, reframe, or change speed;
+local.join_videos to assemble clips; and local.add_video_audio to add narration
+or music. These run locally without an account and leave originals untouched.
+Inspect the finished MP4 before reporting that a video edit is complete.
+For a short AI-generated clip, use local.start_video_job and poll
+local.video_job_status. First use may spend substantial time installing a local
+Wan model; report that honestly. Join several short clips for a longer video.
 For vocal music, a lyrics file is not proof that the rendered audio clearly
 says the requested names or phrases. Transcribe or listen to the finished audio
 and check those words there. If a proper name is unclear, improve the render or
@@ -1110,9 +1124,21 @@ def verify_audio_handoff(p):
 
 
 def recover_media_artifacts(p, snapshot):
-    """Copy a worker's finished scratch render into its durable project folder."""
+    """Save finished scratch or Hermes-preserved media in the task folder."""
     folder = Path(p["folder"])
     scratch = (ROOT / "data/cache/scratch").resolve()
+    # Hermes moves declared scratch artifacts here during handoff. Restrict
+    # recovery to this task's own directory, never the whole attachment tree.
+    card = str(p.get("card") or "")
+    attachment_root = (
+        (ROOT / "data/kanban/boards" / BOARD / "attachments" / card).resolve()
+        if re.fullmatch(r"t_[A-Za-z0-9_-]+", card) else None
+    )
+    media_extensions = {
+        ".wav", ".mp3", ".flac", ".ogg", ".m4a",
+        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg",
+        ".mp4", ".mov", ".webm", ".mkv",
+    }
     for run in reversed(snapshot.get("runs", [])):
         metadata = run.get("metadata") or {}
         if isinstance(metadata, str):
@@ -1124,11 +1150,14 @@ def recover_media_artifacts(p, snapshot):
             continue
         for item in metadata.get("artifacts", []):
             source = Path(str(item))
-            if source.suffix.lower() not in (".wav", ".mp3", ".flac", ".ogg", ".m4a"):
+            if source.suffix.lower() not in media_extensions:
                 continue
             try:
                 resolved = source.resolve(strict=True)
-                if not resolved.is_relative_to(scratch) or not resolved.is_file():
+                if not resolved.is_file() or not (
+                    resolved.is_relative_to(scratch)
+                    or (attachment_root is not None and resolved.is_relative_to(attachment_root))
+                ):
                     continue
                 target = folder / resolved.name
                 if target.is_file() and target.stat().st_size >= resolved.stat().st_size:
