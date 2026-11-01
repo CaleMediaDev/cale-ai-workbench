@@ -282,6 +282,10 @@ PROJECT FOLDER: {p["folder"]}
 REQUEST AND ACCEPTANCE CRITERIA:
 {p["brief"]}
 
+Later user instructions are saved in .local-ai/USER-REQUESTS.md. Read that
+file in full before planning or resuming work. Its numbered entries are
+authoritative user follow-ups; keep all of them in the acceptance checks.
+
 This is a persistent local project. Work in small verified milestones until the
 whole requested result works. A new worker must recover from the existing files,
 PLAN.md, PROGRESS.md, and the board's comments, never start over blindly.
@@ -368,6 +372,39 @@ def recovery_snapshot(folder):
     return "\n\n".join(notes)
 
 
+def sync_user_requests(p):
+    """Mirror completed follow-ups into a readable, durable project file.
+
+    The SQLite queue is authoritative. Rebuilding the file makes a retry
+    idempotent and lets a new worker recover every instruction without putting
+    an ever-growing transcript in its first model message.
+    """
+    with database() as conn:
+        rows = conn.execute(
+            "SELECT id, note FROM requests WHERE project=? AND action IN ('note','resume') "
+            "AND status='done' AND note!='' ORDER BY id",
+            (p["id"],),
+        ).fetchall()
+    # Older versions appended every completed note to the brief. Compact only
+    # when the suffix exactly matches the queue, so we never discard a request.
+    legacy_suffix = "".join(
+        "\n\nUSER FOLLOW-UP:\n" + row["note"] for row in rows
+    )
+    if legacy_suffix and p["brief"].endswith(legacy_suffix):
+        original = p["brief"][:-len(legacy_suffix)]
+        if original.strip():
+            update(p["id"], brief=original)
+            p["brief"] = original
+    path = Path(p["folder"]) / ".local-ai/USER-REQUESTS.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = "# User follow-ups\n\nRead every entry alongside the original request.\n"
+    content += "".join(f"\n## Request {row['id']}\n\n{row['note'].strip()}\n" for row in rows)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(content, encoding="utf-8")
+    temporary.replace(path)
+    return rows
+
+
 def create_card(p, extra=""):
     """Create a board card once per generation so restarts cannot duplicate work."""
     # Stable key makes a crash between native create and our DB update recoverable.
@@ -376,6 +413,11 @@ def create_card(p, extra=""):
     if p["phase"] == "review":
         extra += "\nREVIEW PASS: Independently inspect EVERY requirement, test the app, fix omissions and add regression tests. Do not trust prior claims. Then request review."
     saved = recovery_snapshot(p["folder"])
+    followups = sync_user_requests(p)
+    recent = "\n".join(
+        f"Request {row['id']}: {row['note'][:1200]}"
+        for row in followups[-3:]
+    )
     try:
         remembered = project_memory.search(p["folder"], p["brief"], limit=5)
     except (OSError, sqlite3.Error, ValueError):
@@ -389,6 +431,7 @@ def create_card(p, extra=""):
             p,
             extra
             + ("\nSaved recovery snapshot:\n" + saved if saved else "")
+            + ("\nRecent user follow-ups (read the full file):\n" + recent if recent else "")
             + ("\nRelevant local memory (verify against files):\n" + memory_note if memory_note else "")
             + "\nPrevious supervisor result:\n"
             + p.get("detail", ""),
@@ -771,7 +814,6 @@ def process_requests():
                         "The paused worker is retiring. Wait up to three minutes before resuming to avoid overlapping edits."
                     )
                 if note:
-                    update(p["id"], brief=p["brief"] + "\n\nUSER FOLLOW-UP:\n" + note)
                     if task and task["status"] != "review":
                         board("comment", p["card"], "USER FOLLOW-UP: " + note)
                 if task and task["status"] in ("blocked", "scheduled"):
@@ -825,6 +867,14 @@ def process_requests():
                 "UPDATE requests SET status=?,result=? WHERE id=?",
                 (status, result, req["id"]),
             )
+        if status == "done" and action in ("resume", "note") and note:
+            try:
+                sync_user_requests(p)
+            except OSError:
+                # The board comment already delivered the note. A later card
+                # creation rebuilds this file from the committed queue.
+                with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
+                    log.write(time.ctime() + "\nFollow-up file: " + traceback.format_exc() + "\n")
 
 
 def tick():

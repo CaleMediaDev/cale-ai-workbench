@@ -36,7 +36,7 @@ This is an **early preview**, with an unsigned Windows installer. It has been de
 
 ## What it can do
 
-- Work through a saved project plan, build in milestones, run tests, and recover from saved progress.
+- Work through a saved project plan, build in milestones, run tests, and recover from saved progress. Follow-up instructions are kept in a project file so weeks of changes remain readable without filling the model's first message.
 - Create a local SQLite memory database automatically in each project. It indexes plans, progress, project documents, and selected code for fast full-text search; the agent can save typed requirements, decisions, lessons, app components, and reusable skill recipes. Project files remain the source of truth. No database account, server, or extra installer step is needed.
 - Compress conversation history automatically as its context fills. Project plans and progress files remain on disk for a fresh worker to resume; summaries can still omit details, so important requirements belong in those files. Agent models are configured for at least a 64K context window, which the bundled Hermes runtime requires.
 - Track task milestones with progress bars, the current step, and an estimated countdown to review. The countdown appears after enough measured progress, excludes pauses and app downtime, and says when an estimate is unavailable. Pause, stop, delete, resume, receive new instructions, and review completed work. Deleting a task removes it from the list but preserves its project files.

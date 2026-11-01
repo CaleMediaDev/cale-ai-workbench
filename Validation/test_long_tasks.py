@@ -120,7 +120,8 @@ class LongTaskTests(unittest.TestCase):
         task_module.process_requests()
         updated = next(p for p in task_module.projects() if p["id"] == pid)
         self.assertEqual(updated["status"], "waiting_for_setup")
-        self.assertIn("Add large buttons", updated["brief"])
+        self.assertEqual(updated["brief"], "Build a website")
+        self.assertIn("Add large buttons", (Path(updated["folder"]) / ".local-ai/USER-REQUESTS.md").read_text())
 
     def test_new_worker_receives_saved_plan_and_latest_progress(self):
         notes = Path(self.item()["folder"]) / ".local-ai"
@@ -256,7 +257,8 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(updated["card"], "")
         self.assertEqual(updated["generation"], 1)
         self.assertEqual(updated["status"], "working")
-        self.assertIn("Add a larger search box", updated["brief"])
+        self.assertEqual(updated["brief"], "Build and test a working fixture")
+        self.assertIn("Add a larger search box", (Path(updated["folder"]) / ".local-ai/USER-REQUESTS.md").read_text())
         self.assertFalse(any(call.args[0] == "reopen-review" for call in board.call_args_list))
 
     def test_failed_review_repair_card_carries_failure_evidence(self):
@@ -333,8 +335,40 @@ class LongTaskTests(unittest.TestCase):
         ) as board:
             task_module.process_requests()
         self.assertEqual(self.item()["status"], "working")
-        self.assertIn("Use SQLite", self.item()["brief"])
+        self.assertEqual(self.item()["brief"], "Build and test a working fixture")
+        self.assertIn("Use SQLite", (self.base / "project/.local-ai/USER-REQUESTS.md").read_text())
         self.assertTrue(any(c.args[0] == "unblock" for c in board.call_args_list))
+
+    def test_many_followups_remain_durable_without_filling_worker_context(self):
+        for number in range(12):
+            task_module.request(self.pid, "note", f"Requirement {number}: " + "detail " * 400)
+        task_module.process_requests()
+        self.assertEqual(self.item()["brief"], "Build and test a working fixture")
+        history = (self.base / "project/.local-ai/USER-REQUESTS.md").read_text()
+        for number in range(12):
+            self.assertIn(f"Requirement {number}:", history)
+        with patch.object(task_module, "board", return_value={"id": "card-1"}) as board:
+            task_module.create_card(self.item())
+        args = board.call_args.args
+        prompt = Path(args[args.index("--body-file") + 1]).read_text()
+        self.assertIn("USER-REQUESTS.md", prompt)
+        self.assertIn("Requirement 11:", prompt)
+        self.assertNotIn("Requirement 0:", prompt)
+        self.assertLess(len(prompt), 15_000)
+
+    def test_legacy_followups_compact_only_when_queue_matches(self):
+        legacy = "Build and test a working fixture\n\nUSER FOLLOW-UP:\nAdd search"
+        task_module.update(self.pid, brief=legacy)
+        task_module.request(self.pid, "note", "Add search")
+        with task_module.database() as conn:
+            conn.execute("UPDATE requests SET status='done'")
+        item = self.item()
+        task_module.sync_user_requests(item)
+        self.assertEqual(self.item()["brief"], "Build and test a working fixture")
+        self.assertIn("Add search", (self.base / "project/.local-ai/USER-REQUESTS.md").read_text())
+        task_module.update(self.pid, brief=legacy + " with extra detail")
+        task_module.sync_user_requests(self.item())
+        self.assertEqual(self.item()["brief"], legacy + " with extra detail")
 
     def test_scheduled_card_waits_for_automatic_dispatch(self):
         task_module.update(self.pid, card="scheduled-card", status="working")
