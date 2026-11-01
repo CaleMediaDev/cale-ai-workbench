@@ -616,18 +616,12 @@ def handle_handoff(p, task):
             "Independent verification failed. Fix the underlying behavior and rerun tests.\n"
             + evidence
         )
-        if task["status"] == "review":
-            board("comment", task["id"], note)
-            board(
-                "reopen-review",
-                task["id"],
-                "--reason",
-                "Independent verification failed",
-            )
-        else:
-            update(p["id"], card="", generation=p["generation"] + 1)
-            p = next(x for x in projects() if x["id"] == p["id"])
-            create_card(p, note)
+        # A review card's goal judge can reject reopen-review even after our
+        # independent check fails. A new generation keeps the original brief,
+        # progress files, and failure evidence while giving a worker a real turn.
+        update(p["id"], card="", generation=p["generation"] + 1)
+        p = next(x for x in projects() if x["id"] == p["id"])
+        create_card(p, note)
         return
     if p["phase"] == "build":
         # Fresh worker/context reviews the finished work against the original request.
@@ -716,7 +710,7 @@ def process_requests():
                     )
                 if note:
                     update(p["id"], brief=p["brief"] + "\n\nUSER FOLLOW-UP:\n" + note)
-                    if task:
+                    if task and task["status"] != "review":
                         board("comment", p["card"], "USER FOLLOW-UP: " + note)
                 if task and task["status"] in ("blocked", "scheduled"):
                     board(
@@ -726,12 +720,7 @@ def process_requests():
                         note or "User requested resume",
                     )
                 elif task and task["status"] == "review":
-                    board(
-                        "reopen-review",
-                        p["card"],
-                        "--reason",
-                        note or "Continue and recheck the project",
-                    )
+                    update(p["id"], card="", generation=p["generation"] + 1)
                 elif task and task["status"] in ("done", "archived", "triage"):
                     update(p["id"], card="", generation=p["generation"] + 1)
                 setup = read_task_status(STATE / "install-progress.json")

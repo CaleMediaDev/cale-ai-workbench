@@ -134,16 +134,47 @@ class LongTaskTests(unittest.TestCase):
 
     def test_three_failures_stop_automatic_repairs(self):
         self.verify_script("exit 3")
-        with patch.object(task_module, "board") as board:
+        with (
+            patch.object(task_module, "board") as board,
+            patch.object(task_module, "create_card") as create,
+        ):
             for _ in range(3):
                 task_module.handle_handoff(
                     self.item(), {"id": "test", "status": "review"}
                 )
         self.assertEqual(self.item()["failures"], 3)
         self.assertEqual(self.item()["status"], "needs_input")
-        self.assertEqual(
-            sum(c.args[0] == "reopen-review" for c in board.call_args_list), 2
-        )
+        self.assertEqual(create.call_count, 2)
+        board.assert_not_called()
+
+    def test_review_feedback_starts_a_new_saved_generation(self):
+        task_module.update(self.pid, card="review-card", phase="review", status="ready_for_review")
+        task_module.request(self.pid, "note", "Add a larger search box")
+        with patch.object(
+            task_module, "board", return_value={"task": {"status": "review"}}
+        ) as board:
+            task_module.process_requests()
+        updated = self.item()
+        self.assertEqual(updated["card"], "")
+        self.assertEqual(updated["generation"], 1)
+        self.assertEqual(updated["status"], "working")
+        self.assertIn("Add a larger search box", updated["brief"])
+        self.assertFalse(any(call.args[0] == "reopen-review" for call in board.call_args_list))
+
+    def test_failed_review_repair_card_carries_failure_evidence(self):
+        self.verify_script('Write-Output "missing behavior"; exit 3')
+        task_module.update(self.pid, card="old-review", phase="review")
+        with patch.object(task_module, "board", return_value={"id": "repair-card"}) as board:
+            task_module.handle_handoff(
+                self.item(), {"id": "old-review", "status": "review"}
+            )
+        self.assertEqual(self.item()["card"], "repair-card")
+        self.assertEqual(self.item()["generation"], 1)
+        args = board.call_args.args
+        body = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+        self.assertIn("Build and test a working fixture", body)
+        self.assertIn("missing behavior", body)
+        self.assertIn("REVIEW PASS", body)
 
     def test_pause_queued_work_survives_ticks(self):
         task_module.request(self.pid, "pause")
