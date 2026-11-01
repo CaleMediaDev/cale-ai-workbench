@@ -22,6 +22,18 @@ class ToneAdaptationTests(unittest.TestCase):
             self.assertEqual(tone_adaptation.social_reply("Hello"),
                              "I heard you. What do you need?")
 
+    def test_next_speaker_does_not_inherit_previous_rudeness(self):
+        result = {"choices": [{"message": {"content": "Glad I could help!"}}]}
+        with patch("cloud_ai.post", return_value=result) as post:
+            tone_adaptation.social_reply("You are useless.")
+            tone_adaptation.social_reply("Thanks, Cale!")
+        first = post.call_args_list[0].args[1]["messages"]
+        second = post.call_args_list[1].args[1]["messages"]
+        self.assertEqual(first[-1]["content"], "You are useless.")
+        self.assertEqual(second[-1]["content"], "Thanks, Cale!")
+        self.assertNotIn("useless", str(second))
+        self.assertIn("Reset your tone every turn", second[0]["content"])
+
 
 if __name__ == "__main__":
     unittest.main()

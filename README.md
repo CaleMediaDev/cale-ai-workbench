@@ -24,7 +24,7 @@ Setup starts with the built-in Windows voice while it downloads the offline Koko
 
 Ask Cale to “say that again” or “read the rap aloud” to replay an earlier chat reply. A requested replay shows progress in the voice status and saves a completion or failure note in chat. That note is not itself used as the target of the next replay.
 
-The fast local model adjusts Cale's conversational tone to the latest person's own words. Friendly speech gets a warm response; rude speech can get a dry, cheeky answer. This also applies to a visitor speaking after a camera greeting. It does not infer attitude from a face, quoted material, or a prior visitor, and tone does not change facts or task status.
+The fast local model adjusts Cale's conversational tone to the latest person's own words. Friendly speech gets a warm response; rude speech can get a dry, cheeky answer before Cale helps with the request. This also applies to a visitor speaking after a camera greeting. The model resets its tone each turn, so a rude remark does not make it hostile to the next person. It does not infer attitude from a face, quoted material, or a prior visitor, and tone does not change facts or task status.
 
 Camera Greeting tracks separate visible faces when the local face models are ready. It can greet a new arrival while someone else remains in view, and speaks one greeting for a group entering together. Face learning still requires a single visible person so a volunteered name is not assigned to someone nearby.
 
