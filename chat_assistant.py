@@ -20,6 +20,15 @@ QUICK_FILE_TYPES = {
     ".yml", ".py", ".js", ".ts", ".css", ".png", ".jpg",
     ".jpeg", ".webp", ".bmp", ".gif",
 }
+FOLLOWUP_STATUSES = frozenset({
+    "queued", "waiting_for_setup", "working", "checking", "paused",
+    "needs_input", "ready_for_review",
+})
+
+
+def followup_tasks(tasks: list[dict]) -> list[dict]:
+    """Include work awaiting review so chat feedback can reopen it."""
+    return [task for task in tasks if task["status"] in FOLLOWUP_STATUSES]
 
 
 def image_prompt(text: str) -> str | None:
@@ -38,7 +47,7 @@ def route(text: str, active_tasks: list[dict]) -> str:
     value = text.strip().lower()
     if not value:
         return "empty"
-    if not active_tasks and image_prompt(text):
+    if image_prompt(text):
         return "image"
     if re.search(r"\b(?:what(?:'s| is) the status|status (?:of|for)|how(?:'s| is) (?:it|the task) going|what are you working on)\b", value):
         return "status"
@@ -48,7 +57,10 @@ def route(text: str, active_tasks: list[dict]) -> str:
         r"^(?:(?:please|can you|could you|i want you to|i need you to|i want to|i need to|help me(?: to)?)\s+)+",
         "", value,
     )
-    if active_tasks and command.startswith(("add ", "change ")):
+    if active_tasks and (
+        command.startswith(("add ", "change "))
+        or re.match(r"^(?:make|fix|update|improve|revise|redo|adjust)\s+(?:it|that|this)\b", command)
+    ):
         return "note"
     if re.match(r"^i (?:want|need) (?:a|an|some) (?:website|app|program|logo|design|image|report|plan|tool)\b", value):
         return "task"

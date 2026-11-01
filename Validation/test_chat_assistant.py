@@ -26,6 +26,7 @@ def test_simple_image_uses_local_media_without_a_long_agent_task():
     request = "can you make a image of a dog"
     assert chat_assistant.image_prompt(request) == "a dog"
     assert chat_assistant.route(request, []) == "image"
+    assert chat_assistant.route(request, [{"id": "other-task"}]) == "image"
     assert chat_assistant.route_with_files(request, [], [r"C:\photo.png"]) == "task"
     assert chat_assistant.image_prompt("edit this image of a dog") is None
 
@@ -34,6 +35,20 @@ def test_followup_attaches_to_active_task():
     task = [{"id": "one"}]
     assert chat_assistant.route("Also add a contact page", task) == "note"
     assert chat_assistant.route("What is the status?", task) == "status"
+
+
+def test_reviewed_task_can_receive_chat_feedback():
+    tasks = [
+        {"id": "review", "title": "Build bakery site", "status": "ready_for_review"},
+        {"id": "finished", "title": "Old site", "status": "accepted"},
+    ]
+    candidates = chat_assistant.followup_tasks(tasks)
+    assert [task["id"] for task in candidates] == ["review"]
+    assert chat_assistant.route("Also add a contact page", candidates) == "note"
+    assert chat_assistant.choose_task("Also add a contact page", candidates)["id"] == "review"
+    assert chat_assistant.route("Can you make it mobile friendly?", candidates) == "note"
+    assert chat_assistant.route("Please fix that button", candidates) == "note"
+    assert chat_assistant.route("Make a new recipe app", candidates) == "task"
 
 
 def test_multiple_tasks_require_a_clear_followup_target():

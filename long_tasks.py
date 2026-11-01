@@ -2182,8 +2182,7 @@ def gui():
             displayed += "\nFiles: " + names
         save_chat("user", displayed)
         show_chat("user", displayed)
-        active = [p for p in projects() if p["status"] in (
-            "queued", "waiting_for_setup", "working", "checking", "paused", "needs_input")]
+        active = chat_assistant.followup_tasks(projects())
         if pending_followup:
             note, ids = pending_followup
             candidates = [p for p in active if p["id"] in ids]
