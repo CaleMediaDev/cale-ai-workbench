@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 def _duration(seconds: float) -> str:
-    seconds = max(1, int(seconds))
+    seconds = max(0, int(seconds))
     if seconds < 60:
         return f"{seconds}s"
     if seconds < 3600:
@@ -22,6 +22,25 @@ def _duration(seconds: float) -> str:
     if seconds < 86400:
         return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
     return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
+
+
+def total_time(created: float, updated: float, status: str,
+               now: float | None = None) -> str:
+    """Show a task's wall-clock lifetime, frozen when accepted or stopped.
+
+    This is elapsed time since the request was created, including setup and
+    pauses. It is deliberately separate from the active-time ETA estimator.
+    """
+    now = time.time() if now is None else now
+    try:
+        start = float(created)
+        last_change = float(updated)
+    except (TypeError, ValueError):
+        return "—"
+    if start <= 0:
+        return "—"
+    end = last_change if status in ("accepted", "stopped") and last_change >= start else now
+    return _duration(max(0, end - start))
 
 
 def countdown(db_path: Path, task_id: str, percent: int, status: str,

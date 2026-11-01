@@ -4757,7 +4757,7 @@ def gui():
                 controls = ttk.Frame(card_info["panel"], style="Card.TFrame")
                 controls.pack(fill="x", pady=(9, 0))
                 card_info["controls"] = controls
-                token_var = tk.StringVar(value="Tokens: 0")
+                token_var = tk.StringVar(value="Tokens: 0    Total time: 0s")
                 ttk.Label(card_info["panel"], textvariable=token_var,
                           style="CardMuted.TLabel").pack(anchor="w", before=controls,
                                                           pady=(3, 0))
@@ -4765,7 +4765,11 @@ def gui():
                 task_cards[pid] = card_info
             card_info = task_cards[pid]
             set_text(card_info["title"], item["title"])
-            set_text(card_info["tokens"], f"Tokens: {tokens_by_task.get(pid, 0):,}")
+            set_text(
+                card_info["tokens"],
+                f"Tokens: {tokens_by_task.get(pid, 0):,}    "
+                f"Total time: {task_eta.total_time(item['created'], item['updated'], item['status'])}",
+            )
             percent, current = task_progress(item)
             state = item["status"].replace("_", " ").capitalize()
             update_progress_card(card_info, percent, "Current step: " + current, state)
