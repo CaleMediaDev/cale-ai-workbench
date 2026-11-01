@@ -18,6 +18,8 @@ STATE = ROOT / "LongTasks"
 REPORT = STATE / "self-check.json"
 LOG = STATE / "self-check.log"
 INTERVAL = 7 * 24 * 60 * 60
+FAILURE_RETRY = 60 * 60
+MAX_FAILURES = 3
 MAX_SECONDS = 20 * 60
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -44,6 +46,12 @@ def version(root: Path = ROOT) -> str:
         return "development"
 
 
+def persistent_failure(report: dict, current: str) -> bool:
+    """Tell the person only after a problem repeats on this installed release."""
+    return (report.get("version") == current and report.get("status") == "failed"
+            and int(report.get("failures", 0)) >= 2)
+
+
 def _running(report: dict) -> bool:
     """Reject PID reuse; a stale report must not suppress the next check."""
     import psutil
@@ -65,9 +73,14 @@ def schedule(root: Path = ROOT, state: Path = STATE, now: float | None = None) -
     current = version(root)
     if report.get("status") == "running" and _running(report):
         return False
-    if (report.get("version") == current and report.get("status") in ("passed", "failed")
-            and now - float(report.get("checked_at", 0)) < INTERVAL):
-        return False
+    if report.get("version") == current and report.get("status") in ("passed", "failed"):
+        retry_after = (
+            FAILURE_RETRY
+            if report["status"] == "failed" and int(report.get("failures", 1)) < MAX_FAILURES
+            else INTERVAL
+        )
+        if now - float(report.get("checked_at", 0)) < retry_after:
+            return False
     python = root / "Toolbox/python/Scripts/python.exe"
     if not python.is_file() or not (root / "Validation/test_long_tasks.py").is_file():
         return False
@@ -89,6 +102,7 @@ def schedule(root: Path = ROOT, state: Path = STATE, now: float | None = None) -
     _write(report_path, {
         "version": current, "status": "running", "started_at": now,
         "pid": process.pid, "process_started": process_started,
+        "failures": int(report.get("failures", 0)) if report.get("version") == current else 0,
     })
     return True
 
@@ -96,6 +110,7 @@ def schedule(root: Path = ROOT, state: Path = STATE, now: float | None = None) -
 def run(root: Path = ROOT, state: Path = STATE) -> dict:
     """Execute real packaged tests; persist their output even on failure."""
     started = time.time()
+    previous = _read(state / "self-check.json")
     python = root / "Toolbox/python/Scripts/python.exe"
     try:
         result = subprocess.run(
@@ -116,9 +131,14 @@ def run(root: Path = ROOT, state: Path = STATE) -> dict:
     state.mkdir(parents=True, exist_ok=True)
     log = state / "self-check.log"
     log.write_text(output, encoding="utf-8")
+    current = version(root)
+    failures = 0
+    if not passed:
+        failures = int(previous.get("failures", 0)) + 1 if previous.get("version") == current else 1
     report = {
-        "version": version(root),
+        "version": current,
         "status": "passed" if passed else "failed",
+        "failures": failures,
         "checked_at": time.time(),
         "duration_seconds": round(time.time() - started, 1),
         "summary": "\n".join(output.strip().splitlines()[-8:]),

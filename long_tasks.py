@@ -28,6 +28,7 @@ import cale_voice
 import chrome_connector
 import project_memory
 import runtime_features
+import self_diagnostics
 import setup_recovery
 import skill_catalog
 import task_eta
@@ -4920,6 +4921,20 @@ def gui():
         nonlocal idle_since, idle_slot, setup_spoken_step, voice_upgrade_queued
         setup = read_task_status(STATE / "install-progress.json")
         introduce_if_ready(setup)
+        check = read_task_status(STATE / "self-check.json")
+        check_version = self_diagnostics.version(ROOT)
+        check_notice = STATE / "self-check-notified.txt"
+        if self_diagnostics.persistent_failure(check, check_version):
+            try:
+                notified = check_notice.read_text(encoding="utf-8").strip()
+            except OSError:
+                notified = ""
+            if notified != check_version:
+                assistant_reply(
+                    "I found the same problem twice in my own software checks. "
+                    "I saved the details and will retry while idle. You can keep working."
+                )
+                check_notice.write_text(check_version, encoding="utf-8")
         voice_setup = read_task_status(STATE / "natural-voice-progress.json")
         ollama_setup = read_task_status(STATE / "ollama-upgrade.json")
         voice_folder = ROOT / "Media/models/natural_voice"
