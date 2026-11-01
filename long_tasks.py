@@ -2853,11 +2853,12 @@ def gui():
     conversation.tag_configure("assistant", foreground=text, spacing1=8)
     entry_row = ttk.Frame(chat_panel, style="Card.TFrame")
     entry_row.pack(fill="x", pady=(8, 0))
-    chat_input = tk.Entry(
+    chat_input = tk.Text(
         entry_row, background=field, foreground=text, insertbackground=text,
         relief="flat", font=("Segoe UI", 12), highlightthickness=0,
+        height=2, wrap="word", padx=8, pady=6,
     )
-    chat_input.pack(side="left", fill="x", expand=True, ipady=10, padx=(0, 8))
+    chat_input.pack(side="left", fill="both", expand=True, padx=(0, 8))
     attachments = []
     attachment_text = tk.StringVar(value="")
     attachment_label = ttk.Label(
@@ -3034,7 +3035,9 @@ def gui():
 
     def submit_chat_text(value=None):
         nonlocal pending_followup
-        raw_value = (chat_input.get() if value is None else value).strip()
+        raw_value = (
+            chat_input.get("1.0", "end-1c") if value is None else value
+        ).strip()
         if not raw_value:
             if attachments:
                 assistant_reply("Tell me what you'd like me to do with the selected files or folder.")
@@ -3047,8 +3050,8 @@ def gui():
                 conversation_events.put("I couldn't save those files to long-term memory yet.")
             index_requests.put(selected_paths)
         value = chat_assistant.attach_request(raw_value, selected_paths)
-        if raw_value == chat_input.get().strip():
-            chat_input.delete(0, "end")
+        if raw_value == chat_input.get("1.0", "end-1c").strip():
+            chat_input.delete("1.0", "end")
         attachments.clear()
         show_attachments()
 
@@ -3162,7 +3165,14 @@ def gui():
     send_button = ttk.Button(entry_row, text="Send", command=submit_chat_text, style="Accent.TButton")
     send_button.pack(side="right")
     attach_button.pack(side="right", padx=(0, 8))
-    chat_input.bind("<Return>", lambda _: submit_chat_text())
+    def composer_return(event):
+        if event.state & 0x0001:  # Shift+Enter adds a line; Enter sends.
+            chat_input.insert("insert", "\n")
+        else:
+            submit_chat_text()
+        return "break"
+
+    chat_input.bind("<Return>", composer_return)
     chat_input.focus_set()
 
     def poll_chat():

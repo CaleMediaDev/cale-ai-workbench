@@ -20,7 +20,7 @@ Ollama model store                  cloud_ai.py → ChatGPT (opt-in)
 | --- | --- |
 | `Setup.ps1` | Simple Windows installer window. Starts setup automatically and shows the log. |
 | `Install-Backend.ps1` | Checks hardware and disk space; installs pinned runtimes and tools; downloads the required models; starts optional model checks. |
-| `long_tasks.py` | Stores human tasks in SQLite, supervises the Hermes board, runs independent verification, and draws the desktop UI. `gui()` is the window entry point; `monitor()` is the background entry point. |
+| `long_tasks.py` | Stores human tasks in SQLite, supervises the Hermes board, runs independent verification, and draws the desktop UI. Its compact multiline chat composer sends on Enter and inserts a line on Shift+Enter, so task instructions and lyrics retain their structure. `gui()` is the window entry point; `monitor()` is the background entry point. |
 | `project_memory.py` | Creates each project's private SQLite FTS5 database, indexes project files, and stores typed requirements, decisions, lessons, components, and skill recipes. |
 | `user_file_memory.py` | Indexes files explicitly selected in chat, verifies matching files before showing snippets, scans selected roots when a query misses so later additions can be found, retries failed local extraction, and hides stale text until it can be re-read. |
 | `skill_catalog.py`, `vendor/agent-skills/` | Install seven pinned, local Agent Skills workflows into Hermes; track managed file hashes so updates preserve user edits. |
