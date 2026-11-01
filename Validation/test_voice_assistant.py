@@ -171,6 +171,73 @@ class VoiceTests(unittest.TestCase):
         self.assertIsNone(listener.consume("stop the task", now=121))
         self.assertEqual(listener.consume("Hey Cale, stop the task", now=122), ("stop", ""))
 
+    def test_split_wake_allows_time_for_spoken_acknowledgement(self):
+        listener = voice_assistant.WakeSequence()
+        self.assertIsNone(listener.consume("Hey Cale", now=100))
+        self.assertEqual(listener.consume("can you hear me", now=119), ("hearing", ""))
+
+    def test_split_wake_window_renews_after_spoken_acknowledgement(self):
+        listener = voice_assistant.WakeSequence(timeout=24)
+        self.assertIsNone(listener.consume("Hey Cale", now=100))
+        listener.renew_after_ack(now=122)
+        self.assertEqual(listener.consume("can you hear me", now=139), ("hearing", ""))
+
+    def test_fixed_wake_reply_reuses_cloned_voice_audio(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import cale_voice
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            reference = root / "reference.wav"
+            reference.write_bytes(b"voice")
+
+            def synthesize(_message, output):
+                Path(output).write_bytes(b"wave" * 300)
+                return {"path": str(output), "engine": "Cale's local voice"}
+
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(cale_voice, "REFERENCE", reference),
+                patch.object(cale_voice, "ready", return_value=True),
+                patch.object(cale_voice, "speak", side_effect=synthesize) as speak,
+                patch("winsound.PlaySound") as playback,
+            ):
+                first = voice_assistant.say(voice_assistant.WAKE_ACK)
+                second = voice_assistant.say(voice_assistant.WAKE_ACK)
+            self.assertEqual(first["engine"], "Cale's local voice")
+            self.assertEqual(second["engine"], "Cale's local voice (cached)")
+            self.assertEqual(speak.call_count, 1)
+            playback.assert_called_once()
+
+    def test_bundled_wake_reply_plays_without_model_startup(self):
+        import hashlib
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import cale_voice
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            assets = root / "assets"
+            assets.mkdir()
+            (assets / "cale-voice-reference.wav").write_bytes(b"original voice")
+            (assets / "cale-wake-ack.wav").write_bytes(b"wave" * 300)
+            digest = hashlib.sha256(b"original voice").hexdigest()
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant, "WAKE_REFERENCE_SHA256", digest),
+                patch.object(cale_voice, "ready") as ready,
+                patch("winsound.PlaySound") as playback,
+            ):
+                result = voice_assistant.say(voice_assistant.WAKE_ACK)
+            self.assertEqual(result["engine"], "Cale's local voice (bundled)")
+            ready.assert_not_called()
+            playback.assert_called_once()
+
     def test_saved_rap_is_cleaned_for_speech(self):
         self.assertEqual(
             voice_assistant.spoken_text("**The Rap**\n\n*Great Lakes*\n---\nLine one"),

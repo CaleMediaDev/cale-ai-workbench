@@ -4,10 +4,12 @@ Audio is handled by the installed media runtime. No microphone recording or
 spoken task text is sent to an online provider by this module.
 """
 
+import hashlib
 import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -21,6 +23,8 @@ HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 WAKE = re.compile(r"^\s*hey[\s,]+(?:cale|kale|cal)\b[\s,.:;!-]*", re.IGNORECASE)
 IDLE_TIMES = (120, 600, 1800, 3600)
 STUCK_TIMES = (120, 480, 1200, 3600)
+WAKE_ACK = "I'm listening. What should I do?"
+WAKE_REFERENCE_SHA256 = "ec586df55a3e1431b4f08e0dae05e1078b2bf4a8a42f904a12bb448551d2e3cc"
 
 
 def speech_chunks(message, limit=280):
@@ -193,7 +197,7 @@ class WakeSequence:
     the request. Only the immediately following clip gets this exception.
     """
 
-    def __init__(self, timeout=12):
+    def __init__(self, timeout=24):
         self.timeout = timeout
         self.pending_until = 0.0
 
@@ -215,6 +219,11 @@ class WakeSequence:
 
     def reset(self):
         self.pending_until = 0.0
+
+    def renew_after_ack(self, now=None):
+        """Give the next mic clip a full window after audible acknowledgement."""
+        if self.pending_until:
+            self.pending_until = (time.monotonic() if now is None else now) + self.timeout
 
     @property
     def awaiting_command(self):
@@ -350,6 +359,17 @@ def listen_result(seconds=8):
 
 def say(message, rate=0):
     """Speak one short status message through Windows' offline voice."""
+    if str(message).strip() == WAKE_ACK:
+        # Ship this two-second line in the owner's real voice, so the first
+        # wake response does not wait for GPU voice synthesis or downloads.
+        reference = ROOT / "assets" / "cale-voice-reference.wav"
+        bundled = ROOT / "assets" / "cale-wake-ack.wav"
+        if (reference.is_file() and bundled.is_file() and bundled.stat().st_size > 1000
+                and hashlib.sha256(reference.read_bytes()).hexdigest() == WAKE_REFERENCE_SHA256):
+            import winsound
+
+            winsound.PlaySound(str(bundled), winsound.SND_FILENAME)
+            return {"path": str(bundled), "engine": "Cale's local voice (bundled)"}
     temp = ROOT / "Temp"
     temp.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=temp) as folder:
@@ -357,7 +377,28 @@ def say(message, rate=0):
 
         if cale_voice.ready():
             try:
-                return cale_voice.speak(str(message)[:280], Path(folder) / "update.wav")
+                # The short wake reply is repeated frequently. Keep its exact
+                # cloned audio so waking Cale never reloads a large voice model.
+                reference = cale_voice.REFERENCE
+                cached = None
+                if str(message).strip() == WAKE_ACK:
+                    stamp = reference.stat().st_mtime_ns
+                    cached = ROOT / "Media" / "voice-cache" / f"wake-v1-{stamp}.wav"
+                    if cached.is_file() and cached.stat().st_size > 1000:
+                        import winsound
+
+                        winsound.PlaySound(str(cached), winsound.SND_FILENAME)
+                        return {"path": str(cached), "engine": "Cale's local voice (cached)"}
+                result = cale_voice.speak(str(message)[:280], Path(folder) / "update.wav")
+                if cached is not None:
+                    try:
+                        cached.parent.mkdir(parents=True, exist_ok=True)
+                        temporary = cached.with_suffix(".tmp")
+                        shutil.copyfile(result["path"], temporary)
+                        os.replace(temporary, cached)
+                    except OSError:
+                        pass  # The spoken reply worked even if caching failed.
+                return result
             except (OSError, RuntimeError, ValueError):
                 # Keep spoken updates available if the clone worker exits or
                 # a particular phrase cannot be synthesized.

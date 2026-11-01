@@ -2449,6 +2449,8 @@ def gui():
                 if interrupted:
                     continue
                 voice_events.put(("spoken", "Finished speaking aloud."))
+                if message == voice_assistant.WAKE_ACK:
+                    voice_events.put(("wake_ack_done", ""))
                 if vary:
                     recent_spoken_status.append(spoken)
                     del recent_spoken_status[:-6]
@@ -2473,6 +2475,8 @@ def gui():
                         "Introduction spoken.\n", encoding="utf-8"
                     )
             except Exception as exc:
+                if message == voice_assistant.WAKE_ACK:
+                    voice_events.put(("wake_ack_done", ""))
                 if replay_id is not None:
                     try:
                         voice_events.put(("replay_error", record_replay_outcome(replay_id, False)))
@@ -2611,11 +2615,11 @@ def gui():
         )
         if parsed is None:
             if handsfree and phrase.strip():
-                voice_label.set(
-                    "Heard Hey Cale. What should I do?"
-                    if wake_sequence.awaiting_command
-                    else "I heard audio, but not Hey Cale at the start. Please try again."
-                )
+                if wake_sequence.awaiting_command:
+                    voice_label.set("Heard Hey Cale. What should I do?")
+                    speak_update(voice_assistant.WAKE_ACK, priority=-1)
+                else:
+                    voice_label.set("I heard audio, but not Hey Cale at the start. Please try again.")
             return
         action, note = parsed
         if action == "hearing":
@@ -3849,6 +3853,9 @@ def gui():
                     mic_button.configure(text="🎤  Mic Off")
                 elif event == "mic_quiet":
                     voice_label.set("Mic on, but " + value[:140])
+                elif event == "wake_ack_done":
+                    if listening.is_set():
+                        wake_sequence.renew_after_ack()
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
                 elif event in ("replay_done", "replay_error"):

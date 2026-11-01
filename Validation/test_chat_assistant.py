@@ -18,6 +18,8 @@ def test_voice_replay_finds_saved_rap_without_another_model_call():
     ]
     assert chat_assistant.spoken_replay_target("say the rap with your voice", history).startswith("Here")
     assert chat_assistant.spoken_replay_target("say that with your voice", history).startswith("Here")
+    assert chat_assistant.spoken_replay_target("read aloud the rap", history).startswith("Here")
+    assert chat_assistant.spoken_replay_target("please read me the rap", history).startswith("Here")
     assert chat_assistant.spoken_replay_target("what is the rap about", history) is None
     history.append({"role": "assistant", "content": "Finished reading that aloud."})
     assert chat_assistant.spoken_replay_target("say that again", history).startswith("Here")

@@ -141,7 +141,7 @@ def spoken_replay_target(text: str, history: list[dict]) -> str | None:
     """
     request = re.sub(r"^(?:(?:please|can you|could you)\s+)+", "", text.strip(), flags=re.I)
     if not re.match(
-        r"^(?:say|read|speak|play)\s+(?:that|it|the rap|your rap|that rap|"
+        r"^(?:say|read|speak|play)(?:\s+(?:aloud|out loud|me))?\s+(?:that|it|the rap|your rap|that rap|"
         r"what you (?:just )?(?:said|wrote)|your (?:last|previous) (?:answer|reply))\b",
         request, re.I,
     ):
