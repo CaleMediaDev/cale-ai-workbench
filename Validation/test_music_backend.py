@@ -257,3 +257,34 @@ def test_interrupted_music_job_recovers_without_restarting_live_worker(tmp_path)
         resumed = music_backend.music_job_status(job_id)
     assert resumed["status"] == "queued"
     assert resumed["recoveries"] == 1
+
+
+def test_recovery_only_marks_playable_saved_song_complete(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    job_id = "d" * 32
+    output = tmp_path / "song.mp3"
+    output.write_bytes(b"incomplete audio")
+    (jobs / (job_id + ".json")).write_text(json.dumps({
+        "job_id": job_id, "status": "working", "current": "Generating",
+        "output_path": str(output), "created": 1,
+    }))
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_worker_running", return_value=False
+    ), patch.object(music_backend, "audio_file_ok", return_value=False), patch.object(
+        music_backend, "_launch_job"
+    ) as launch:
+        music_backend.recover_music_jobs()
+        assert music_backend.music_job_status(job_id)["status"] == "error"
+        launch.assert_not_called()
+        assert output.read_bytes() == b"incomplete audio"
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_worker_running", return_value=False
+    ), patch.object(music_backend, "audio_file_ok", return_value=True), patch.object(
+        music_backend, "_launch_job"
+    ) as launch:
+        record = music_backend.music_job_status(job_id)
+        music_backend._write_job(job_id, {**record, "status": "working"})
+        music_backend.recover_music_jobs()
+        assert music_backend.music_job_status(job_id)["status"] == "complete"
+        launch.assert_not_called()

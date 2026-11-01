@@ -59,8 +59,23 @@ def music_request(text: str) -> dict | None:
         value, re.IGNORECASE,
     ):
         return None
-    match = re.search(r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|minutes?|mins?|s|min)\b", value, re.IGNORECASE)
-    duration = int(match.group(1)) * (60 if match.group(2).lower().startswith("min") else 1) if match else 30
+    clock = re.search(r"\b(\d{1,2}):([0-5]\d)\b", value)
+    combined = re.search(
+        r"\b(\d+)\s*(?:minutes?|mins?|min)\s*(?:and\s*)?"
+        r"(\d+)\s*(?:seconds?|secs?|sec|s)\b", value, re.IGNORECASE,
+    )
+    single = re.search(
+        r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|minutes?|mins?|min|s)\b",
+        value, re.IGNORECASE,
+    )
+    if clock:
+        duration = int(clock.group(1)) * 60 + int(clock.group(2))
+    elif combined:
+        duration = int(combined.group(1)) * 60 + int(combined.group(2))
+    elif single:
+        duration = int(single.group(1)) * (60 if single.group(2).lower().startswith("min") else 1)
+    else:
+        duration = 30
     if not 10 <= duration <= 600:
         raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
     instrumental = bool(re.search(r"\b(?:instrumental|no vocals|without vocals|no singing)\b", value, re.IGNORECASE))

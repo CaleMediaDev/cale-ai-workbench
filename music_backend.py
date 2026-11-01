@@ -483,12 +483,22 @@ def recover_music_jobs() -> None:
             if _worker_running(job_id, info):
                 continue
             output = Path(info["output_path"])
-            if output.is_file() and output.stat().st_size:
-                _write_job(job_id, {
-                    **info, "status": "complete", "current": "Music is ready",
-                    "result": {"path": str(output), "model": "ACE-Step 1.5"},
-                    "finished": time.time(),
-                })
+            if output.is_file():
+                if audio_file_ok(output):
+                    _write_job(job_id, {
+                        **info, "status": "complete", "current": "Music is ready",
+                        "result": {"path": str(output), "model": "ACE-Step 1.5"},
+                        "finished": time.time(),
+                    })
+                else:
+                    # The engine may have produced a damaged file before the
+                    # worker died. Keep it for diagnosis, and avoid claiming
+                    # success or starting a duplicate render at the same path.
+                    _write_job(job_id, {
+                        **info, "status": "error",
+                        "current": "The saved song could not be played. Try a new render.",
+                        "finished": time.time(),
+                    })
                 continue
             attempts = int(info.get("recoveries", 0)) + 1
             if attempts > 3:
