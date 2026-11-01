@@ -20,6 +20,24 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_spoken_replay_outcome_is_saved_for_chat_after_playback(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(
+            task_module, "STATE", Path(folder)
+        ):
+            message = task_module.record_replay_outcome(18, True)
+            self.assertEqual(message, "Finished reading that aloud.")
+            self.assertEqual(task_module.chat_history()[-1]["content"], message)
+            self.assertEqual((Path(folder) / "voice-replay-served.txt").read_text(), "18")
+
+    def test_failed_replay_is_visible_without_marking_it_played(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(
+            task_module, "STATE", Path(folder)
+        ):
+            message = task_module.record_replay_outcome(19, False)
+            self.assertIn("couldn't finish", message)
+            self.assertEqual(task_module.chat_history()[-1]["content"], message)
+            self.assertFalse((Path(folder) / "voice-replay-served.txt").exists())
+
     def test_idle_launch_applies_hermes_source_fix_once(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

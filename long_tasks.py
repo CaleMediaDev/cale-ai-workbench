@@ -266,6 +266,19 @@ def save_chat(role, content):
         )
 
 
+def record_replay_outcome(replay_id: int, succeeded: bool) -> str:
+    """Persist spoken-replay feedback so a completed request is visible later."""
+    message = (
+        "Finished reading that aloud."
+        if succeeded else "I couldn't finish reading that aloud. Check Voice status and try again."
+    )
+    save_chat("assistant", message)
+    if succeeded:
+        marker = STATE / "voice-replay-served.txt"
+        marker.write_text(str(replay_id), encoding="ascii")
+    return message
+
+
 def task_progress(p):
     """Best-effort milestone progress; reserve the last part for independent review."""
     state = p["status"]
@@ -2396,9 +2409,7 @@ def gui():
                     )
                     os.replace(temporary, recent_spoken_path)
                 if replay_id is not None:
-                    (STATE / "voice-replay-served.txt").write_text(
-                        str(replay_id), encoding="ascii"
-                    )
+                    voice_events.put(("replay_done", record_replay_outcome(replay_id, True)))
                 if (
                     message.startswith("Oh my God, that's better")
                     and result.get("engine") == "Kokoro natural voice"
@@ -2412,7 +2423,13 @@ def gui():
                         "Introduction spoken.\n", encoding="utf-8"
                     )
             except Exception as exc:
-                voice_events.put(("speech_error", str(exc)))
+                if replay_id is not None:
+                    try:
+                        voice_events.put(("replay_error", record_replay_outcome(replay_id, False)))
+                    except (OSError, sqlite3.Error):
+                        voice_events.put(("speech_error", str(exc)))
+                else:
+                    voice_events.put(("speech_error", str(exc)))
             finally:
                 with speech_lock:
                     if speech_queue.empty():
@@ -3775,6 +3792,9 @@ def gui():
                     voice_label.set("Mic on, but " + value[:140])
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
+                elif event in ("replay_done", "replay_error"):
+                    show_chat("assistant", value, speak=False)
+                    voice_label.set(value)
                 elif event in ("speaking", "spoken"):
                     voice_label.set(value)
                 else:

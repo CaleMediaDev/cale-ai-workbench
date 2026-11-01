@@ -151,6 +151,11 @@ def spoken_replay_target(text: str, history: list[dict]) -> str | None:
         if item.get("role") != "assistant":
             continue
         content = str(item.get("content", ""))
+        if content in {
+            "Finished reading that aloud.",
+            "I couldn't finish reading that aloud. Check Voice status and try again.",
+        }:
+            continue
         if content and (not wants_rap or re.search(r"\brap\b", content, re.I)):
             return content
     return ""
