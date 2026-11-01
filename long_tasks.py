@@ -598,9 +598,25 @@ def recovery_snapshot(folder):
         path = folder / name
         if not path.is_file():
             continue
-        content = path.read_text(encoding="utf-8", errors="replace").strip()
+        size = path.stat().st_size
+        if size > 24_000:
+            # A project may run for weeks. Read only the useful ends of a huge
+            # progress log; the worker can open the full live file when needed.
+            head = 3000 if name == "PLAN.md" else 1000
+            tail = 6000 - head
+            with path.open("rb") as stream:
+                beginning = stream.read(head * 4 + 16).decode("utf-8", errors="replace")[:head]
+                stream.seek(max(0, size - tail * 4 - 16))
+                ending = stream.read().decode("utf-8", errors="replace")[-tail:]
+            content = (
+                beginning
+                + f"\n...[large file truncated; re-read {name} for the middle]...\n"
+                + ending
+            ).strip()
+        else:
+            content = path.read_text(encoding="utf-8", errors="replace").strip()
         if content and content not in (INITIAL_PLAN.strip(), INITIAL_PROGRESS.strip()):
-            if len(content) > 6000:
+            if size <= 24_000 and len(content) > 6000:
                 # Plans usually put acceptance criteria first; progress puts
                 # the next action last. Keep both ends and tell the worker to
                 # re-read the live file for the omitted middle.

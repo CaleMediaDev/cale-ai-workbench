@@ -312,6 +312,23 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("characters omitted; re-read PLAN.md", snapshot)
         self.assertLess(len(snapshot), 13000)
 
+    def test_recovery_of_large_notes_still_keeps_first_and_latest_requirements(self):
+        notes = Path(self.item()["folder"]) / ".local-ai"
+        (notes / "PLAN.md").write_text(
+            "First requirement: work offline\n" + "old milestone\n" * 100_000
+            + "Final requirement: export the app", encoding="utf-8",
+        )
+        (notes / "PROGRESS.md").write_text(
+            "Original setup\n" + "completed work\n" * 100_000
+            + "Next action: run the installer", encoding="utf-8",
+        )
+        snapshot = task_module.recovery_snapshot(self.item()["folder"])
+        self.assertIn("First requirement: work offline", snapshot)
+        self.assertIn("Final requirement: export the app", snapshot)
+        self.assertIn("Next action: run the installer", snapshot)
+        self.assertIn("large file truncated", snapshot)
+        self.assertLess(len(snapshot), 13_000)
+
     def test_fresh_placeholder_notes_do_not_bloat_first_worker_prompt(self):
         self.assertEqual(task_module.recovery_snapshot(self.item()["folder"]), "")
 
