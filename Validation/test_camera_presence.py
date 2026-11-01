@@ -56,6 +56,35 @@ class CameraPresenceTests(unittest.TestCase):
         self.assertEqual(tracker.observe([], 3), [])
         self.assertEqual(tracker.observe([alex], 4), [])
 
+    def test_person_staying_in_view_is_not_greeted_again_after_cooldown(self):
+        tracker = VisitorTracker(cooldown=10)
+        face = [1.0, 0.0]
+        self.assertEqual(tracker.observe([face], 0), [])
+        self.assertEqual(tracker.observe([face], 0.5), [face])
+        for now in (1, 5, 10.5, 20, 30):
+            self.assertEqual(tracker.observe([face], now), [])
+
+    def test_return_after_departure_and_cooldown_is_greeted(self):
+        tracker = VisitorTracker(cooldown=10)
+        face = [1.0, 0.0]
+        tracker.observe([face], 0)
+        self.assertEqual(tracker.observe([face], 0.5), [face])
+        for now in (1, 2, 3, 4, 5):
+            self.assertEqual(tracker.observe([], now), [])
+        self.assertEqual(tracker.observe([face], 11), [])
+        self.assertEqual(tracker.observe([face], 11.5), [face])
+
+    def test_early_return_does_not_greet_when_cooldown_expires_indoors(self):
+        tracker = VisitorTracker(cooldown=10)
+        face = [1.0, 0.0]
+        tracker.observe([face], 0)
+        self.assertEqual(tracker.observe([face], 0.5), [face])
+        for now in (1, 2, 3, 4, 5):
+            tracker.observe([], now)
+        self.assertEqual(tracker.observe([face], 6), [])
+        self.assertEqual(tracker.observe([face], 6.5), [])
+        self.assertEqual(tracker.observe([face], 20), [])
+
     def test_group_greeting_invites_one_at_a_time_enrollment(self):
         line = greeting_line(["Alex", None])
         self.assertIn("Alex", line)

@@ -69,7 +69,7 @@ class VisitorState:
 
 
 class VisitorTracker:
-    """Track individual face embeddings and greet each stable arrival once."""
+    """Track individual faces and greet once per arrival, subject to cooldown."""
 
     def __init__(self, cooldown=120, similarity=0.68):
         self.cooldown = cooldown
@@ -93,17 +93,29 @@ class VisitorTracker:
             if score >= self.similarity:
                 track = self.tracks[index]
                 matched.add(index)
-                track["hits"] = track["hits"] + 1 if now - track["last_seen"] <= 1.5 else 1
+                if track["misses"] >= 5:
+                    # A real departure starts a new visit. Decide eligibility
+                    # now, so waiting in the room cannot outlast a cooldown.
+                    track["hits"] = 1
+                    track["pending_greeting"] = now - track["last_greeted"] >= self.cooldown
+                else:
+                    track["hits"] = track["hits"] + 1 if now - track["last_seen"] <= 1.5 else 1
                 track["last_seen"] = now
                 track["feature"] = feature
+                track["misses"] = 0
             else:
                 track = {"feature": feature, "last_seen": now,
-                         "hits": 1, "last_greeted": float("-inf")}
+                         "hits": 1, "last_greeted": float("-inf"),
+                         "misses": 0, "pending_greeting": True}
                 self.tracks.append(track)
                 matched.add(len(self.tracks) - 1)
-            if track["hits"] >= 2 and now - track["last_greeted"] >= self.cooldown:
+            if track["hits"] >= 2 and track["pending_greeting"]:
+                track["pending_greeting"] = False
                 track["last_greeted"] = now
                 greetings.append(feature)
+        for index, track in enumerate(self.tracks):
+            if index not in matched:
+                track["misses"] += 1
         return greetings
 
 
