@@ -680,6 +680,10 @@ timed SRT captions. Use local.make_music_video to render a finished song as an
 offline visualizer MP4; pass reviewed lyrics.srt as captions_path for on-screen
 lyrics. Find exact arguments with
 toolbox_search, read its schema, and save output in a fresh project folder.
+For vocal music, a lyrics file is not proof that the rendered audio clearly
+says the requested names or phrases. Transcribe or listen to the finished audio
+and check those words there. If a proper name is unclear, improve the render or
+tell the person what could not be verified before requesting review.
 Before substantial design, coding, performance, security, or release work,
 check the installed Hermes skills for a relevant workflow. Load only skills
 that fit the task so unrelated instructions do not fill the context window.
