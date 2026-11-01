@@ -89,8 +89,13 @@ def release_candidate(releases, installed):
 
 
 def fetch_json(url):
+    # GitHub's release list can be cached for a newly published version. Each
+    # check needs a fresh URL so an idle app can see the newest signed asset.
+    separator = "&" if "?" in url else "?"
+    fresh_url = f"{url}{separator}checked_at={time.time_ns()}"
     with urlopen(
-        Request(url, headers={"User-Agent": "Cale-AI-Workbench"}), timeout=15
+        Request(fresh_url, headers={"User-Agent": "Cale-AI-Workbench",
+                                    "Cache-Control": "no-cache"}), timeout=15
     ) as response:
         return json.load(response)
 

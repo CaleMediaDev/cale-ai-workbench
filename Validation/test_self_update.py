@@ -1,6 +1,7 @@
 """Release updates protect user data and require a published digest."""
 
 import json
+import io
 from contextlib import nullcontext
 import sys
 import tempfile
@@ -14,6 +15,13 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_release_check_bypasses_stale_feed_cache(self):
+        with patch.object(self_update, "urlopen", return_value=io.BytesIO(b"[]")) as open_url:
+            self.assertEqual(self_update.fetch_json(self_update.RELEASES), [])
+        request = open_url.call_args.args[0]
+        self.assertIn("&checked_at=", request.full_url)
+        self.assertEqual(request.get_header("Cache-control"), "no-cache")
+
     def test_two_updaters_cannot_hold_the_update_lock_together(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(
             self_update, "ROOT", Path(folder)
