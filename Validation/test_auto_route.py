@@ -189,6 +189,20 @@ class AutoRouteTests(unittest.TestCase):
             })
         self.assertEqual(task_size(messages), "balanced")
 
+    def test_music_shortcut_does_not_downgrade_app_or_video_work(self):
+        self.assertEqual(
+            task_size([{"role": "user", "content": "Create a music app."}]),
+            "deep",
+        )
+        self.assertEqual(
+            task_size([{"role": "user", "content": "Build a production-ready music website."}]),
+            "deep",
+        )
+        self.assertEqual(
+            task_size([{"role": "user", "content": "Make a music video from this song."}]),
+            "balanced",
+        )
+
     def test_ranking_respects_available_model_sizes(self):
         models = {"fast": 9, "balanced": 35, "main": 79}
         self.assertEqual(

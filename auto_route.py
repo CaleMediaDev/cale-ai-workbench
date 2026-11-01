@@ -67,6 +67,7 @@ SIMPLE_MUSIC = re.compile(
     r"\b(?:make|generate|create)\b.{0,100}\b(?:song|instrumental|jingle|music|beat|soundtrack)\b",
     re.IGNORECASE | re.DOTALL,
 )
+MUSIC_VIDEO = re.compile(r"\bmusic\s+video\b", re.IGNORECASE)
 COMPLEX_PROJECT = re.compile(
     r"\b(?:multi[- ](?:page|feature|module|agent)|enterprise|production[- ]ready|"
     r"full[- ]stack|distributed|migration|security audit|large[- ]scale)\b",
@@ -127,7 +128,13 @@ def task_size(messages):
         return "deep"
     # An agent can spend several tool calls discovering the music engine. That
     # is routine media work, not evidence that it needs a 70B+ planning model.
-    if len(intent) <= 280 and SIMPLE_MUSIC.search(intent):
+    if (
+        len(intent) <= 280
+        and SIMPLE_MUSIC.search(intent)
+        and not PROJECT_BUILD.search(intent)
+        and not COMPLEX_PROJECT.search(intent)
+        and not MUSIC_VIDEO.search(intent)
+    ):
         return "quick" if tool_calls <= 3 else "balanced"
     if len(intent) > 800 or COMPLEX_PROJECT.search(intent):
         return "deep"
