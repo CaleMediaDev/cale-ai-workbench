@@ -180,6 +180,24 @@ class LongTaskTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "bad configuration"):
                     task_module.ensure_gateway_current()
 
+    def test_idle_health_repairs_all_services_even_if_one_fails(self):
+        import cloud_ai
+
+        with (patch.object(task_module, "ensure_ollama", side_effect=OSError("offline")) as ollama,
+              patch.object(cloud_ai, "ensure_router") as router,
+              patch.object(task_module, "ensure_gateway_current") as gateway):
+            with self.assertRaisesRegex(RuntimeError, "Ollama.*offline"):
+                task_module.ensure_idle_services()
+        ollama.assert_called_once_with(None)
+        router.assert_called_once_with()
+        gateway.assert_called_once_with()
+
+    def test_idle_ollama_health_does_not_rewrite_model(self):
+        with patch("urllib.request.urlopen", return_value=io.BytesIO(b'{"models":[]}')) as fetch:
+            task_module.ensure_ollama(None)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertIn("/api/tags", fetch.call_args.args[0])
+
     def test_supervisor_can_dispatch_ready_work_when_gateway_misses_it(self):
         with (patch.object(task_module, "projects", return_value=[{"status": "working"}]),
               patch.object(task_module, "board", return_value={"spawned": []}) as board):

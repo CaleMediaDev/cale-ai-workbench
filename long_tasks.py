@@ -2117,6 +2117,28 @@ def ensure_gateway_current():
     pending.unlink(missing_ok=True)
 
 
+def ensure_idle_services():
+    """Repair idle local services without requiring a new user task.
+
+    Each check runs even if another fails, so one outage cannot hide the
+    status of the remaining services. No model inference is requested.
+    """
+    from cloud_ai import ensure_router
+
+    failures = []
+    for name, check in (
+        ("Ollama", lambda: ensure_ollama(None)),
+        ("AI router", ensure_router),
+        ("Hermes gateway", ensure_gateway_current),
+    ):
+        try:
+            check()
+        except Exception as exc:
+            failures.append(f"{name}: {type(exc).__name__}: {exc}")
+    if failures:
+        raise RuntimeError("; ".join(failures))
+
+
 def dispatch_ready_fallback():
     """Kick an idle board when the embedded dispatcher misses a ready task."""
     if any(
@@ -2164,6 +2186,7 @@ def monitor():
     last_media_recovery = 0
     last_setup_recovery = 0
     last_self_check = 0
+    last_idle_health = 0
     service_error = ""
     catalog_thread = None
     catalog_refresh_seconds = 24 * 60 * 60
@@ -2212,13 +2235,16 @@ def monitor():
                 for p in projects()
             )
             if not active:
-                service_error = ""
                 if time.monotonic() - last_self_check >= 3600:
                     last_self_check = time.monotonic()
                     import self_diagnostics
 
                     self_diagnostics.schedule(ROOT, STATE)
             prepare = None
+            if (not active and setup.get("status") == "complete"
+                    and time.monotonic() - last_idle_health >= 300):
+                last_idle_health = time.monotonic()
+                prepare = ensure_idle_services
             if active and time.monotonic() - last_start > 120:
                 last_start = time.monotonic()
 
@@ -2297,6 +2323,8 @@ def ensure_ollama(model):
             except OSError:
                 if attempt == 14:
                     raise RuntimeError("Ollama did not start")
+    if model is None:
+        return  # Idle health only needs the local service, not model edits.
     request = Request(
         "http://127.0.0.1:11434/api/show",
         data=json.dumps({"model": model}).encode(),
