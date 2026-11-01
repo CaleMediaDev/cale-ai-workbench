@@ -594,7 +594,19 @@ class LongTaskTests(unittest.TestCase):
         task_module.update(self.pid, brief="Make a 3 minute rap song")
         passed, evidence = task_module.verify_project(self.item())
         self.assertFalse(passed)
-        self.assertIn("No finished WAV", evidence)
+        self.assertIn("No finished audio", evidence)
+
+    def test_finished_mp3_uses_duration_probe(self):
+        task_module.update(self.pid, brief="Make a 0.1 minute instrumental song")
+        (self.base / "project/song_final.mp3").write_bytes(b"encoded")
+        with (patch("imageio_ffmpeg.get_ffmpeg_exe", return_value="ffmpeg"),
+              patch.object(task_module.subprocess, "run", return_value=subprocess.CompletedProcess(
+                  [], 1, "", "Duration: 00:00:06.00, start: 0.000000, bitrate: 128 kb/s"
+              )),
+              patch("music_backend.audio_file_ok", return_value=True)):
+            passed, evidence = task_module.verify_project(self.item())
+        self.assertTrue(passed)
+        self.assertIn("song_final.mp3", evidence)
 
     def test_finished_scratch_audio_is_recovered_into_project(self):
         root = self.base / "app"
@@ -606,6 +618,14 @@ class LongTaskTests(unittest.TestCase):
         with patch.object(task_module, "ROOT", root):
             task_module.recover_media_artifacts(self.item(), snapshot)
         self.assertEqual((self.base / "project/song_final.wav").read_bytes(), source.read_bytes())
+
+    def test_recovery_brief_lists_existing_artifact_before_new_worker_starts(self):
+        project = self.base / "project"
+        (project / "song_final.wav").write_bytes(b"completed audio")
+        (project / ".local-ai/verify.ps1").write_text("exit 0", encoding="utf-8")
+        snapshot = task_module.recovery_snapshot(project)
+        self.assertIn("song_final.wav (15 bytes)", snapshot)
+        self.assertIn("Run it before any new render", snapshot)
 
     def test_success_starts_separate_review(self):
         self.verify_script(

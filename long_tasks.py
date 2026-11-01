@@ -715,8 +715,28 @@ the result and evidence. Do not call kanban_complete: the desktop supervisor che
 
 def recovery_snapshot(folder):
     """Carry bounded on-disk milestones into a fresh worker's first message."""
-    folder = Path(folder) / ".local-ai"
+    project = Path(folder)
+    folder = project / ".local-ai"
     notes = []
+    # A previous worker can finish an artifact and fail only at handoff. A
+    # concise inventory lets its successor verify the existing result instead
+    # of repeating an expensive model render or rewriting completed files.
+    files = sorted(
+        (path for path in project.iterdir()
+         if path.is_file() and path.name.upper() != "AGENTS.MD"),
+        key=lambda path: path.name.lower(),
+    )[:40]
+    if files:
+        inventory = "\n".join(
+            f"- {path.name} ({path.stat().st_size:,} bytes)" for path in files
+        )
+        notes.append(
+            "Existing project files (inspect and verify before regenerating):\n"
+            + inventory
+        )
+    verifier = folder / "verify.ps1"
+    if verifier.is_file():
+        notes.append("Existing independent check: .local-ai/verify.ps1. Run it before any new render.")
     for name in ("PLAN.md", "PROGRESS.md"):
         path = folder / name
         if not path.is_file():
@@ -990,16 +1010,32 @@ def verify_audio_handoff(p):
         return None
     folder = Path(p["folder"])
     audio = sorted(
-        (path for path in folder.glob("*.wav") if path.is_file()),
+        (path for path in folder.iterdir()
+         if path.is_file() and path.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg", ".m4a")),
         key=lambda path: ("final" not in path.stem.lower(), -path.stat().st_mtime),
     )
     if not audio:
-        return False, "No finished WAV was saved in the project folder."
+        return False, "No finished audio was saved in the project folder."
     selected = audio[0]
     try:
-        with wave.open(str(selected), "rb") as recording:
-            duration = recording.getnframes() / recording.getframerate()
-            channels = recording.getnchannels()
+        try:
+            if selected.suffix.lower() != ".wav":
+                raise wave.Error("Compressed audio needs an FFmpeg duration probe")
+            with wave.open(str(selected), "rb") as recording:
+                duration = recording.getnframes() / recording.getframerate()
+                channels = recording.getnchannels()
+        except wave.Error:
+            import imageio_ffmpeg
+
+            probe = subprocess.run(
+                [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-i", str(selected)],
+                capture_output=True, text=True, timeout=30, creationflags=HIDE,
+            )
+            stamp = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr)
+            if not stamp:
+                return False, "The finished audio has no readable duration."
+            duration = int(stamp.group(1)) * 3600 + int(stamp.group(2)) * 60 + float(stamp.group(3))
+            channels = 1
         minutes = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:min(?:ute)?s?)\b", brief, re.I)
         if minutes and abs(duration - float(minutes.group(1)) * 60) > 10:
             return False, f"Song duration {duration:.1f}s misses the requested {minutes.group(1)} minutes."
@@ -1019,7 +1055,7 @@ def verify_audio_handoff(p):
             vocal_note = f"; {evidence['recognized_words']} recognized vocal words"
         else:
             vocal_note = ""
-    except (OSError, ValueError, RuntimeError, EOFError, KeyError) as exc:
+    except (OSError, ValueError, RuntimeError, EOFError, KeyError, subprocess.TimeoutExpired) as exc:
         return False, f"Could not independently verify the song: {exc}"
     return True, f"Built-in audio verification passed: {selected.name}, {duration:.1f}s, {channels} channel(s){vocal_note}."
 
