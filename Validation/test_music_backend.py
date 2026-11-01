@@ -1,6 +1,7 @@
 """The music adapter must preserve local paths and never fetch remote results."""
 
 import io
+import json
 from contextlib import nullcontext
 from unittest.mock import patch
 
@@ -51,6 +52,24 @@ def test_rejects_remote_audio_url(tmp_path):
     ), patch.object(music_backend.time, "sleep"):
         with pytest.raises(RuntimeError, match="unexpected audio URL"):
             music_backend.generate_music("jazz", str(tmp_path / "song.mp3"))
+
+
+def test_recovery_polls_existing_server_task_without_submitting_twice(tmp_path):
+    response = {"code": 200, "data": [
+        {"status": 1, "result": '[{"file":"/v1/audio?path=existing"}]'}
+    ]}
+    with patch.object(music_backend, "start_server"), patch.object(
+        music_backend, "_request", return_value=response
+    ) as request, patch.object(
+        music_backend, "urlopen", return_value=io.BytesIO(b"song")
+    ), patch.object(music_backend.time, "sleep"):
+        music_backend.generate_music(
+            "jazz", str(tmp_path / "song.mp3"), existing_task_id="existing"
+        )
+    assert request.call_args_list[0].args == (
+        "/query_result", {"task_id_list": ["existing"]}
+    )
+    assert all(call.args[0] != "/release_task" for call in request.call_args_list)
 
 
 def test_cover_uses_local_source_path(tmp_path):
@@ -107,9 +126,12 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
         assert started["status"] == "queued"
         assert music_backend.music_job_status(started["job_id"])["status"] == "queued"
         process.assert_called_once()
-        with patch.object(
-            music_backend, "generate_music", return_value={"path": str(output)}
-        ):
+        def finish(*args):
+            args[7]("server-task-1")
+            assert music_backend.music_job_status(started["job_id"])["server_task_id"] == "server-task-1"
+            return {"path": str(output)}
+
+        with patch.object(music_backend, "generate_music", side_effect=finish):
             music_backend._run_job(started["job_id"])
         completed = music_backend.music_job_status(started["job_id"])
     assert completed["status"] == "complete"
@@ -119,3 +141,28 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
 def test_music_job_id_cannot_escape_job_directory():
     with pytest.raises(ValueError, match="Invalid local music job ID"):
         music_backend.music_job_status("../outside")
+
+
+def test_interrupted_music_job_recovers_without_restarting_live_worker(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    job_id = "a" * 32
+    record = {
+        "job_id": job_id, "status": "working", "current": "Generating",
+        "output_path": str(tmp_path / "song.mp3"), "created": 1,
+        "worker_pid": 12345,
+    }
+    (jobs / (job_id + ".json")).write_text(json.dumps(record))
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_worker_running", return_value=True
+    ), patch.object(music_backend, "_launch_job") as launch:
+        music_backend.recover_music_jobs()
+        launch.assert_not_called()
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_worker_running", return_value=False
+    ), patch.object(music_backend, "_launch_job") as launch:
+        music_backend.recover_music_jobs()
+        launch.assert_called_once_with(job_id)
+        resumed = music_backend.music_job_status(job_id)
+    assert resumed["status"] == "queued"
+    assert resumed["recoveries"] == 1

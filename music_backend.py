@@ -202,6 +202,7 @@ def start_server() -> None:
 def generate_music(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
     instrumental: bool = False, source_path: str = "",
+    existing_task_id: str = "", on_task_submitted=None,
 ) -> dict:
     """Generate or cover music and save it to a new WAV/MP3/FLAC file."""
     if not prompt.strip():
@@ -224,19 +225,34 @@ def generate_music(
     }
     if source:
         request.update({"task_type": "cover", "src_audio_path": str(source)})
-    submitted = _request("/release_task", request)
-    task_id = submitted.get("data", {}).get("task_id")
-    if submitted.get("code") != 200 or not task_id:
-        raise RuntimeError(f"Music generation was not accepted: {submitted.get('error')}")
+    def submit() -> str:
+        submitted = _request("/release_task", request)
+        task_id = submitted.get("data", {}).get("task_id")
+        if submitted.get("code") != 200 or not task_id:
+            raise RuntimeError(f"Music generation was not accepted: {submitted.get('error')}")
+        if on_task_submitted:
+            on_task_submitted(task_id)
+        return task_id
+
+    task_id = existing_task_id or submit()
     # First use can include several gigabytes of model downloads. Keep the
     # request alive while that one-time setup finishes on slower connections.
     deadline = time.monotonic() + 7200
+    missing_polls = 0
     while time.monotonic() < deadline:
         time.sleep(3)
         result = _request("/query_result", {"task_id_list": [task_id]})
         rows = result.get("data") or []
         if not rows:
+            if existing_task_id:
+                missing_polls += 1
+                if missing_polls >= 10:
+                    # The API server restarted and forgot the old in-memory task.
+                    # Only then submit a replacement; a live task is never doubled.
+                    task_id = submit()
+                    existing_task_id = ""
             continue
+        missing_polls = 0
         row = rows[0]
         if row.get("status") == 2:
             raise RuntimeError("The local music engine could not finish this song.")
@@ -290,6 +306,77 @@ def music_job_status(job_id: str) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _launch_job(job_id: str) -> None:
+    python = ROOT / "Toolbox" / "python" / "Scripts" / "python.exe"
+    if not python.is_file():
+        raise RuntimeError("The local Toolbox runtime is missing.")
+    log_path = JOBS / (job_id + ".log")
+    with log_path.open("ab") as log:
+        subprocess.Popen(
+            [str(python), str(ROOT / "music_backend.py"), "--run-job", job_id],
+            cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+            creationflags=HIDE,
+        )
+
+
+def _worker_running(job_id: str, info: dict) -> bool:
+    """Check the exact worker command, since Windows can reuse process IDs."""
+    import psutil
+
+    try:
+        pid = int(info.get("worker_pid") or 0)
+        if pid <= 0:
+            return False
+        command = psutil.Process(pid).cmdline()
+        return "--run-job" in command and job_id in command and any(
+            str(item).endswith("music_backend.py") for item in command
+        )
+    except (psutil.NoSuchProcess, psutil.ZombieProcess, ValueError, TypeError):
+        return False
+    except psutil.AccessDenied:
+        return True  # Never launch a duplicate when ownership is uncertain.
+
+
+def recover_music_jobs() -> None:
+    """Resume queued or working jobs whose worker died during a reboot."""
+    if not JOBS.is_dir():
+        return
+    for path in JOBS.glob("*.json"):
+        try:
+            info = json.loads(path.read_text(encoding="utf-8"))
+            job_id = path.stem
+            _job_path(job_id)
+            if info.get("job_id") != job_id or info.get("status") not in ("queued", "working"):
+                continue
+            if info["status"] == "queued" and time.time() - float(info.get("created", 0)) < 30:
+                continue
+            if _worker_running(job_id, info):
+                continue
+            output = Path(info["output_path"])
+            if output.is_file() and output.stat().st_size:
+                _write_job(job_id, {
+                    **info, "status": "complete", "current": "Music is ready",
+                    "result": {"path": str(output), "model": "ACE-Step 1.5"},
+                    "finished": time.time(),
+                })
+                continue
+            attempts = int(info.get("recoveries", 0)) + 1
+            if attempts > 3:
+                _write_job(job_id, {
+                    **info, "status": "error", "current": "Music stopped after repeated recovery attempts.",
+                    "finished": time.time(),
+                })
+                continue
+            resumed = {
+                **info, "status": "queued", "current": "Resuming local music",
+                "recoveries": attempts, "worker_pid": None, "created": time.time(),
+            }
+            _write_job(job_id, resumed)
+            _launch_job(job_id)
+        except (OSError, ValueError, KeyError, RuntimeError):
+            continue  # One damaged record must not prevent recovery of others.
+
+
 def start_music_job(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
     instrumental: bool = False, source_path: str = "",
@@ -302,9 +389,6 @@ def start_music_job(
         raise ValueError("Choose a new WAV, MP3 or FLAC output file.")
     if source_path and not Path(source_path).resolve().is_file():
         raise ValueError("The cover source file does not exist.")
-    python = ROOT / "Toolbox" / "python" / "Scripts" / "python.exe"
-    if not python.is_file():
-        raise RuntimeError("The local Toolbox runtime is missing.")
     job_id = uuid.uuid4().hex
     info = {
         "job_id": job_id, "status": "queued", "current": "Starting local music",
@@ -313,14 +397,8 @@ def start_music_job(
         "source_path": source_path, "created": time.time(),
     }
     _write_job(job_id, info)
-    log_path = JOBS / (job_id + ".log")
     try:
-        with log_path.open("ab") as log:
-            subprocess.Popen(
-                [str(python), str(ROOT / "music_backend.py"), "--run-job", job_id],
-                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                creationflags=HIDE,
-            )
+        _launch_job(job_id)
     except OSError as exc:
         _write_job(job_id, {**info, "status": "error", "current": str(exc)[:300]})
         raise
@@ -329,11 +407,20 @@ def start_music_job(
 
 def _run_job(job_id: str) -> None:
     info = music_job_status(job_id)
-    _write_job(job_id, {**info, "status": "working", "current": "Generating music locally"})
+    working = {
+        **info, "status": "working", "current": "Generating music locally",
+        "worker_pid": os.getpid(),
+    }
+    _write_job(job_id, working)
+
+    def remember_task(task_id: str) -> None:
+        _write_job(job_id, {**working, "server_task_id": task_id})
+
     try:
         result = generate_music(
             info["prompt"], info["output_path"], info["lyrics"],
             info["duration_seconds"], info["instrumental"], info["source_path"],
+            info.get("server_task_id", ""), remember_task,
         )
         _write_job(job_id, {
             **info, "status": "complete", "current": "Music is ready",

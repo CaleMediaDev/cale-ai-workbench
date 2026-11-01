@@ -1954,6 +1954,19 @@ def gui():
 
     threading.Thread(target=prepare_music_in_background, daemon=True).start()
 
+    def monitor_music_jobs():
+        """Bring interrupted music work back after reboot or a worker crash."""
+        import music_backend
+
+        while True:
+            try:
+                music_backend.recover_music_jobs()
+            except Exception:
+                pass
+            time.sleep(60)
+
+    threading.Thread(target=monitor_music_jobs, daemon=True).start()
+
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
     voice_busy = threading.Event()
