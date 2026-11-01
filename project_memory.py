@@ -193,34 +193,80 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
             "unchanged": unchanged, "removed": len(stale), "truncated": truncated}
 
 
+def _refresh_file_record(root: Path, row) -> bool:
+    """Recheck a recalled file before using indexed text as evidence.
+
+    Code scans are explicit and bounded, but a search hit may outlive a later
+    edit or deletion. Refresh only the touched hit rather than walking the
+    whole project on every memory lookup.
+    """
+    if row["kind"] != "file":
+        return False
+    path = root / row["source_path"]
+    if not _eligible(root, path):
+        with connection(root) as conn:
+            conn.execute("DELETE FROM memories WHERE id=?", (row["id"],))
+            conn.execute("DELETE FROM memory_fts WHERE id=?", (row["id"],))
+        return True
+    data = path.read_bytes()
+    if b"\x00" in data:
+        with connection(root) as conn:
+            conn.execute("DELETE FROM memories WHERE id=?", (row["id"],))
+            conn.execute("DELETE FROM memory_fts WHERE id=?", (row["id"],))
+        return True
+    digest = hashlib.sha256(data).hexdigest()
+    if digest == row["source_hash"]:
+        return False
+    index_file(root, path)
+    return True
+
+
 def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> list[dict]:
     """Return ranked snippets, not entire files, from the local FTS5 index."""
     if kind and kind not in KINDS:
         raise ValueError("Unknown memory kind.")
-    index(folder)
+    root = Path(folder).resolve(strict=True)
+    index(root)
     words = WORD.findall(query)[:12]
     limit = max(1, min(int(limit), 20))
-    with connection(folder) as conn:
-        if words:
-            expression = " OR ".join('"' + word + '"' for word in words)
-            rows = conn.execute("""SELECT m.id,m.kind,m.title,m.tags,m.source_path,m.updated,
-                snippet(memory_fts, 2, '[', ']', ' … ', 24) AS excerpt
-                FROM memory_fts JOIN memories AS m ON m.id=memory_fts.id
-                WHERE memory_fts MATCH ? AND (?='' OR m.kind=?)
-                ORDER BY bm25(memory_fts, 0.0, 4.0, 1.0, 2.0), m.updated DESC LIMIT ?""",
-                (expression, kind, kind, limit)).fetchall()
-        else:
-            rows = conn.execute("""SELECT id,kind,title,tags,source_path,updated,
-                substr(body,1,500) AS excerpt FROM memories
+    def query_rows():
+        with connection(root) as conn:
+            if words:
+                expression = " OR ".join('"' + word + '"' for word in words)
+                return conn.execute("""SELECT m.id,m.kind,m.title,m.tags,m.source_path,
+                    m.source_hash,m.updated,
+                    snippet(memory_fts, 2, '[', ']', ' … ', 24) AS excerpt
+                    FROM memory_fts JOIN memories AS m ON m.id=memory_fts.id
+                    WHERE memory_fts MATCH ? AND (?='' OR m.kind=?)
+                    ORDER BY bm25(memory_fts, 0.0, 4.0, 1.0, 2.0), m.updated DESC LIMIT ?""",
+                    (expression, kind, kind, limit * 5)).fetchall()
+            return conn.execute("""SELECT id,kind,title,tags,source_path,
+                source_hash,updated,substr(body,1,500) AS excerpt FROM memories
                 WHERE (?='' OR kind=?) ORDER BY updated DESC LIMIT ?""",
-                (kind, kind, limit)).fetchall()
-    return [dict(row) for row in rows]
+                (kind, kind, limit * 5)).fetchall()
+
+    for _ in range(3):
+        rows = query_rows()
+        changed = [_refresh_file_record(root, row) for row in rows]
+        if not any(changed):
+            break
+    else:
+        # A large number of stale hits or rapid edits must not surface old text.
+        rows = [row for row in query_rows() if not _refresh_file_record(root, row)]
+    return [{key: row[key] for key in ("id", "kind", "title", "tags", "source_path", "updated", "excerpt")}
+            for row in rows[:limit]]
 
 
 def get(folder: str | Path, memory_id: str) -> dict:
     """Fetch one complete record after search identifies it."""
-    with connection(folder) as conn:
+    root = Path(folder).resolve(strict=True)
+    with connection(root) as conn:
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     if row is None:
         raise ValueError("Memory was not found in this project.")
+    if _refresh_file_record(root, row):
+        with connection(root) as conn:
+            row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+        if row is None:
+            raise ValueError("Memory source file was removed or is no longer safe to read.")
     return dict(row)

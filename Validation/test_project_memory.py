@@ -61,6 +61,26 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertFalse(memory.search(self.folder, "private"))
         self.assertFalse(memory.search(self.folder, "hidden_package_marker"))
 
+    def test_recalled_code_file_refreshes_after_edit_and_deletion(self):
+        source = self.folder / "app.py"
+        source.write_text("def old_recipe(): return 1", encoding="utf-8")
+        memory.index(self.folder, include_code=True)
+        identifier = "file:app.py"
+        self.assertTrue(memory.search(self.folder, "old_recipe", kind="file"))
+        before = source.stat()
+        source.write_text("def new_budget(): return 2", encoding="utf-8")
+        os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertIn("new_budget", memory.get(self.folder, identifier)["body"])
+        self.assertFalse(memory.search(self.folder, "old_recipe", kind="file"))
+        self.assertTrue(memory.search(self.folder, "new_budget", kind="file"))
+        source.write_text("def fresh_invoice(): return 3", encoding="utf-8")
+        self.assertFalse(memory.search(self.folder, "new_budget", kind="file"))
+        self.assertIn("fresh_invoice", memory.get(self.folder, identifier)["body"])
+        source.unlink()
+        with self.assertRaisesRegex(ValueError, "source file was removed"):
+            memory.get(self.folder, identifier)
+        self.assertFalse(memory.search(self.folder, "fresh_invoice", kind="file"))
+
     def test_memory_is_isolated_and_source_cannot_escape_project(self):
         other = Path(self.temp.name) / "other"
         other.mkdir()
