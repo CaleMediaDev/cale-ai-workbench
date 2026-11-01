@@ -14,6 +14,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import threading
@@ -27,6 +28,7 @@ from urllib.request import Request, urlopen
 
 import win32crypt
 
+from auto_route import model_order, task_size
 from model_library import CATALOG
 
 ROOT = Path(__file__).resolve().parent
@@ -34,6 +36,8 @@ STATE = ROOT / "Cloud"
 PORT = 11435
 LOCAL_MODEL = "cale-local"
 PERMISSIVE_MODEL = "cale-permissive"
+FAST_MODEL = "cale-fast"
+BALANCED_MODEL = "cale-qwen35"
 API = "https://openrouter.ai/api/v1"
 LOCK = threading.RLock()
 POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -312,6 +316,37 @@ class Router:
         self.chatgpt_cooldown = 0
         self.last_attempt = 0
         self.lock = threading.Lock()
+        self.model_cache = {}
+        self.model_cache_until = 0
+
+    def local_candidates(self, size):
+        """Rank installed tool-capable models and refresh after new downloads."""
+        if time.monotonic() >= self.model_cache_until:
+            available = {}
+            aliases = dict.fromkeys(
+                [FAST_MODEL, *(item["alias"] for item in CATALOG.values())]
+            )
+            for name in aliases:
+                try:
+                    info = post(
+                        "http://127.0.0.1:11434/api/show",
+                        {"model": name},
+                        timeout=10,
+                    )
+                    if info.get("remote_host") or info.get("remote_model"):
+                        continue
+                    if "tools" not in info.get("capabilities", []):
+                        continue
+                    label = str(info.get("details", {}).get("parameter_size", ""))
+                    match = re.search(r"(\d+(?:\.\d+)?)B", label, re.IGNORECASE)
+                    available[name] = float(match.group(1)) if match else 1.0
+                except Exception:
+                    continue
+            self.model_cache = available
+            self.model_cache_until = time.monotonic() + 60
+        return model_order(
+            size, self.model_cache, LOCAL_MODEL, FAST_MODEL, BALANCED_MODEL
+        )
 
     def reserve_free_request(self):
         with self.lock:
@@ -340,9 +375,16 @@ class Router:
                 "Only the configured local model and automatic free routing are supported."
             )
         profile = local_profile()
+        size = task_size(payload.get("messages", [])) if profile == "main" else "manual"
         key = credentials().get("cloud_key") if profile == "main" else ""
         reason = "Cloud is not connected."
-        if profile == "main" and time.time() >= self.chatgpt_cooldown:
+        # Explicit plan usage can supercharge demanding work. Quick requests
+        # stay local so they do not spend the person's shared allowance.
+        if (
+            profile == "main"
+            and size == "deep"
+            and time.time() >= self.chatgpt_cooldown
+        ):
             try:
                 import chatgpt_auth
 
@@ -357,6 +399,34 @@ class Router:
             except Exception:
                 self.chatgpt_cooldown = time.time() + 120
                 reason = "ChatGPT plan unavailable; trying free cloud or local AI."
+        selected = (
+            self.local_candidates(size)
+            if profile == "main"
+            else [CATALOG[profile]["alias"]]
+        )
+        last_error = None
+        for selected_model in selected:
+            local = dict(payload)
+            local.update(model=selected_model, stream=False)
+            local.pop("stream_options", None)
+            try:
+                result = valid_completion(
+                    post(
+                        "http://127.0.0.1:11434/v1/chat/completions",
+                        local,
+                        timeout=1800,
+                    )
+                )
+                record(
+                    "local",
+                    f"Auto scale: {size}; local model responded.",
+                    selected_model,
+                )
+                return result
+            except Exception as exc:
+                last_error = exc
+        # Free cloud is a fallback after installed local models fail. It never
+        # uses paid OpenRouter models and has a persisted daily request cap.
         if key and self.reserve_free_request():
             try:
                 result = valid_completion(
@@ -378,22 +448,16 @@ class Router:
                 self.cooldown = time.time() + (
                     3600 if exc.code in (401, 402, 403, 429) else 120
                 )
-                reason = f"Free cloud HTTP {exc.code}; using local Qwen."
+                reason = f"Free cloud HTTP {exc.code}; no model responded."
             except Exception:
                 self.cooldown = time.time() + 120
-                reason = "Free cloud unavailable or incompatible; using local Qwen."
+                reason = "Free cloud unavailable or incompatible."
         elif key:
-            reason = "Free quota, rate limit or cooldown reached; using local Qwen."
-        selected_model = CATALOG[profile]["alias"]
-        if profile != "main":
-            reason = "Optional model selected; this profile runs locally."
-        local = dict(payload)
-        local.update(model=selected_model, stream=False)
-        local.pop("stream_options", None)
-        record("local", reason, selected_model)
-        return valid_completion(
-            post("http://127.0.0.1:11434/v1/chat/completions", local, timeout=1800)
-        )
+            reason = "Free quota, rate limit or cooldown reached."
+        record("unavailable", reason, selected[-1] if selected else "")
+        if last_error:
+            raise last_error
+        raise RuntimeError("No configured local or free cloud model responded.")
 
 
 def stream_chunks(result):

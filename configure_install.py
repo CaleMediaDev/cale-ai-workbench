@@ -124,6 +124,24 @@ def configure(root, profile):
         data = json.load(response)
         if data.get("error"):
             raise RuntimeError(data["error"])
+    # The vision weights are also the fast, tool-capable route for short tasks.
+    fast = {
+        "model": "cale-fast",
+        "from": vision_source,
+        "stream": False,
+        "parameters": {"num_ctx": 32768, "num_predict": 4096, "temperature": 0.7},
+    }
+    with urlopen(
+        Request(
+            "http://127.0.0.1:11434/api/create",
+            data=json.dumps(fast).encode(),
+            headers={"Content-Type": "application/json"},
+        ),
+        timeout=180,
+    ) as response:
+        data = json.load(response)
+        if data.get("error"):
+            raise RuntimeError(data["error"])
     setup_progress(root, 78, "Configuring the local AI")
     yaml = YAML()
     config = yaml.load(

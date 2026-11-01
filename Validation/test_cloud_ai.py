@@ -41,9 +41,14 @@ class CloudTests(unittest.TestCase):
         self.state.start()
         self.root = patch.object(cloud, "ROOT", Path(self.temp.name))
         self.root.start()
+        self.candidates = patch.object(
+            cloud.Router, "local_candidates", return_value=[cloud.LOCAL_MODEL]
+        )
+        self.candidates.start()
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(self.state.stop)
         self.addCleanup(self.root.stop)
+        self.addCleanup(self.candidates.stop)
 
     def connected(self):
         data = cloud.credentials()
@@ -66,6 +71,36 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(post.call_count, 1)
         self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
 
+    def test_installed_tool_models_auto_join_routing(self):
+        self.candidates.stop()
+        sizes = {
+            cloud.LOCAL_MODEL: "79B",
+            cloud.FAST_MODEL: "9B",
+            cloud.BALANCED_MODEL: "35B",
+            cloud.CATALOG["gptoss_official"]["alias"]: "20B",
+        }
+
+        def show(url, payload, **kwargs):
+            name = payload["model"]
+            if name not in sizes:
+                raise OSError("not installed")
+            return {
+                "capabilities": ["completion", "tools"],
+                "details": {"parameter_size": sizes[name]},
+            }
+
+        with patch.object(cloud, "post", side_effect=show):
+            router = cloud.Router()
+            self.assertEqual(router.local_candidates("quick")[0], cloud.FAST_MODEL)
+            self.assertEqual(
+                router.local_candidates("balanced")[0], cloud.BALANCED_MODEL
+            )
+            self.assertEqual(router.local_candidates("deep")[0], cloud.LOCAL_MODEL)
+            self.assertIn(
+                cloud.CATALOG["gptoss_official"]["alias"],
+                router.local_candidates("deep"),
+            )
+
     def test_paid_model_rejected_before_network(self):
         self.connected()
         with patch.object(cloud, "post") as post:
@@ -81,30 +116,38 @@ class CloudTests(unittest.TestCase):
             models=["paid/model"],
             provider={"max_price": {"prompt": 100}},
         )
-        with patch.object(cloud, "post", return_value=ANSWER) as post:
+        with patch.object(
+            cloud, "post", side_effect=[OSError("offline"), ANSWER]
+        ) as post:
             cloud.Router().complete(request)
-        body = post.call_args.args[1]
+        body = post.call_args_list[1].args[1]
         self.assertEqual(body["model"], "openrouter/free")
         self.assertNotIn("models", body)
         self.assertNotIn("plugins", body)
         self.assertTrue(all(v == 0 for v in body["provider"]["max_price"].values()))
-        self.assertEqual(post.call_count, 1)
+        self.assertEqual(post.call_count, 2)
 
     def test_quota_http_error_falls_back_without_cloud_key(self):
         self.connected()
         with patch.object(
             cloud,
             "post",
-            side_effect=[HTTPError("cloud", 429, "quota", {}, None), ANSWER, ANSWER],
+            side_effect=[
+                OSError("local offline"),
+                HTTPError("cloud", 429, "quota", {}, None),
+                OSError("local offline"),
+            ],
         ) as post:
             router = cloud.Router()
-            router.complete(REQUEST)
-            router.complete(REQUEST)
+            with self.assertRaises(OSError):
+                router.complete(REQUEST)
+            with self.assertRaises(OSError):
+                router.complete(REQUEST)
         self.assertEqual(post.call_count, 3)
         self.assertTrue(
-            post.call_args_list[1].args[0].startswith("http://127.0.0.1:11434/")
+            post.call_args_list[2].args[0].startswith("http://127.0.0.1:11434/")
         )
-        self.assertEqual(len(post.call_args_list[1].args), 2)
+        self.assertEqual(len(post.call_args_list[2].args), 2)
 
     def test_invalid_cloud_response_falls_back(self):
         self.connected()

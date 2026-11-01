@@ -346,18 +346,50 @@ def speak(text, output_path, play=False):
 
 
 def record_audio(seconds=10):
+    """Capture a bounded clip from the default or first usable microphone."""
     import tempfile
 
     import sounddevice as sd
     import soundfile as sf
 
     seconds = min(max(int(seconds), 1), 30)
+    devices = sd.query_devices()
+    preferred = sd.default.device[0]
+    candidates = [preferred] if isinstance(preferred, int) and preferred >= 0 else []
+    microphones = [
+        index
+        for index, device in enumerate(devices)
+        if device["max_input_channels"] > 0 and "microphone" in device["name"].lower()
+    ]
+    other_inputs = [
+        index
+        for index, device in enumerate(devices)
+        if device["max_input_channels"] > 0 and index not in microphones
+    ]
+    candidates.extend(
+        index for index in microphones + other_inputs if index not in candidates
+    )
+    chosen = None
+    for index in candidates:
+        rate = int(devices[index]["default_samplerate"])
+        try:
+            sd.check_input_settings(device=index, samplerate=rate, channels=1)
+            chosen = index
+            break
+        except (ValueError, sd.PortAudioError):
+            continue
+    if chosen is None:
+        raise RuntimeError(
+            "No working microphone was found. Connect a microphone and try again."
+        )
     (ROOT / "Temp").mkdir(exist_ok=True)
-    audio = sd.rec(seconds * 16000, samplerate=16000, channels=1, dtype="float32")
+    audio = sd.rec(
+        seconds * rate, samplerate=rate, channels=1, dtype="float32", device=chosen
+    )
     sd.wait()
     with tempfile.TemporaryDirectory(dir=ROOT / "Temp") as temp:
         path = Path(temp) / "dictation.wav"
-        sf.write(path, audio, 16000)
+        sf.write(path, audio, rate)
         return transcribe_audio(path)
 
 

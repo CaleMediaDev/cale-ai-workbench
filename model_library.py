@@ -16,6 +16,16 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent
 CATALOG = {
     "main": {"label": "Main coding + optional free cloud", "alias": "cale-local"},
+    "qwen35": {
+        "label": "Qwen 3.5 35B (balanced local)",
+        "alias": "cale-qwen35",
+        "source": "qwen3.5:35b",
+        "download_gb": 22,
+        "ram_gb": 48,
+        "origin": "https://ollama.com/library/qwen3.5",
+        "license": "Apache-2.0",
+        "context": 32768,
+    },
     "permissive": {
         "label": "Qwen Coder Next permissive (local)",
         "alias": "cale-permissive",
@@ -59,15 +69,16 @@ CATALOG = {
         "context": 32768,
     },
     "glm": {
-        "label": "ArliAI GLM 4.5 Air (experimental)",
+        "label": "ArliAI GLM 4.5 Air (manual experimental)",
         "alias": "cale-glm45-derestricted",
-        "source": "hf.co/mradermacher/GLM-4.5-Air-Derestricted-GGUF:Q4_K_M",
-        "download_gb": 67,
-        "ram_gb": 112,
+        "source": "hf.co/mradermacher/GLM-4.5-Air-Derestricted-GGUF:Q2_K",
+        "download_gb": 45,
+        "ram_gb": 80,
         "origin": "https://huggingface.co/ArliAI/GLM-4.5-Air-Derestricted",
         "conversion": "https://huggingface.co/mradermacher/GLM-4.5-Air-Derestricted-GGUF",
         "license": "MIT",
         "context": 32768,
+        "auto": False,
     },
 }
 

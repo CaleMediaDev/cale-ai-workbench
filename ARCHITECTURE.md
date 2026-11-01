@@ -21,8 +21,9 @@ Ollama model store                  cloud_ai.py → ChatGPT (opt-in)
 | `Setup.ps1` | Simple Windows installer window. Starts setup automatically and shows the log. |
 | `Install-Backend.ps1` | Checks hardware and disk space; installs pinned runtimes and tools; downloads the required models; starts optional model checks. |
 | `long_tasks.py` | Stores human tasks in SQLite, supervises the Hermes board, runs independent verification, and draws the desktop UI. `gui()` is the window entry point; `monitor()` is the background entry point. |
-| `model_library.py` | Defines optional Ollama models, checks RAM and disk space, downloads sequentially, and writes progress JSON for the task list. |
-| `cloud_ai.py` | Loopback API for model requests. Routes to an explicitly enabled ChatGPT plan, then a free OpenRouter route, then local Ollama. |
+| `model_library.py` | Defines optional Ollama models, checks RAM and disk space, downloads sequentially, and writes private progress JSON. |
+| `auto_route.py`, `cloud_ai.py` | Sizes each request without an extra AI call, chooses an installed tool-capable local model, and handles explicit ChatGPT plan use plus free OpenRouter fallback. |
+| `voice_assistant.py` | Runs offline speech recording and playback in the installed media runtime for the desktop task screen. |
 | `chatgpt_auth.py` | Public-client ChatGPT sign-in, identity validation, DPAPI token storage, refresh, and Responses API adaptation. |
 | `configure_install.py` | Creates the main and vision Ollama models and configures Hermes. |
 | `toolbox_mcp.py`, `web_tools.py`, `media_worker.py`, `small_training.py` | Tools available to the agent for files, browsers, media, and small-model training. |
@@ -36,11 +37,11 @@ The UI inserts user requests into `LongTasks/projects.db`. The monitor handles t
 
 The UI polls every five seconds. Existing task widgets are updated in place; a widget is created or destroyed only when a task is added or removed. Mouse-wheel scrolling is scoped to the task list, and the canvas keeps its pixel position across ordinary refreshes. Progress percentages are estimates from the saved milestone checklist, not a time estimate.
 
-`LongTasks/install-progress.json` and `LongTasks/optional-model-*.json` are small atomic status files read by the UI. The optional downloader runs independently, uses a Windows file lock to prevent duplicate automatic runs, and leaves weights in Ollama's model store. It checks Ollama for a usable local model before trusting a saved completion status, and checks physical RAM plus at least 12 GB of extra space on the model store's drive before each pull. A catalog signature makes the app rescan when a release adds or changes model sources. Models that cannot fit stay visible, with a manual Start/Retry button and their requirements.
+`LongTasks/install-progress.json` is read by the UI during first-run setup. The optional downloader writes `LongTasks/optional-model-*.json` in the background, uses a Windows file lock to prevent duplicate automatic runs, and leaves weights in Ollama's model store. It checks Ollama for a usable local model before trusting a saved completion status, and checks physical RAM plus at least 12 GB of extra space on the model store's drive before each pull. A catalog signature makes the app rescan when a release adds or changes model sources. Optional model downloads are kept off the main task screen.
 
 ## Accounts and model routing
 
-Cloud credentials are encrypted for the current Windows user with DPAPI under `Cloud/`; they are never included in the release. The local loopback router requires its own random bearer token. ChatGPT connection and ChatGPT plan use are separate choices. The router only tries that plan after the user enables it; a failure falls through to free OpenRouter and then local Ollama. Optional local models are selected from their task rows and apply to the next request.
+Cloud credentials are encrypted for the current Windows user with DPAPI under `Cloud/`; they are never included in the release. The local loopback router requires its own random bearer token. ChatGPT connection and ChatGPT plan use are separate choices. The router only tries that plan after the user enables it and for demanding tasks. Otherwise it ranks installed local models by task size and tool capability; free OpenRouter is a fallback if local inference fails. The list of usable models refreshes as background downloads complete.
 
 The router records provider choice and error categories in `Cloud/routing.jsonl`, not prompts, tool results, or account keys. `cloud_ai.py` exposes an OpenAI-compatible loopback endpoint because Hermes expects chat-completion-shaped messages; `chatgpt_auth.py` translates them to OpenAI Responses API requests when the user opts in.
 

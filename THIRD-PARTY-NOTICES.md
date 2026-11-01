@@ -30,6 +30,7 @@ The Windows compatibility patch contains modifications to MIT-licensed Hermes co
 - Huihui Llama 3.3 70B abliterated: https://huggingface.co/huihui-ai/Llama-3.3-70B-Instruct-abliterated — **Llama 3.3 Community License**, not our MIT license. Built with Llama. Publisher's distribution: https://ollama.com/huihui_ai/llama3.3-abliterated.
 - ArliAI GPT-OSS 20B Derestricted: https://huggingface.co/ArliAI/gpt-oss-20b-Derestricted — Apache-2.0. Community GGUF conversion: https://huggingface.co/MaziyarPanahi/gpt-oss-20b-Derestricted-GGUF.
 - OpenAI GPT-OSS 20B via Ollama: https://ollama.com/library/gpt-oss — Apache-2.0; downloaded separately from this source release.
+- Qwen 3.5 35B via Ollama: https://ollama.com/library/qwen3.5 — Apache-2.0; downloaded separately from this source release.
 - ArliAI GLM 4.5 Air Derestricted: https://huggingface.co/ArliAI/GLM-4.5-Air-Derestricted — MIT. Community GGUF conversion: https://huggingface.co/mradermacher/GLM-4.5-Air-Derestricted-GGUF.
 
 Model names and logos belong to their respective owners. This project is not affiliated with those publishers, OpenRouter, or OpenAI. No claim is made that community derivatives retain the benchmarks of their base models.

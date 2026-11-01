@@ -857,17 +857,16 @@ def gui():
     from PIL import Image, ImageTk
 
     import chatgpt_auth
+    import voice_assistant
     from cloud_ai import (
         connect_account,
         disconnect,
         ensure_router,
-        local_profile,
-        select_profile,
     )
     from cloud_ai import (
         status as cloud_status,
     )
-    from model_library import CATALOG, catalog_signature, save_download_status
+    from model_library import catalog_signature, save_download_status
 
     start_monitor()
     window = tk.Tk()
@@ -1136,7 +1135,7 @@ def gui():
     ).pack(anchor="w", pady=(3, 0))
     status = tk.StringVar(value="")
 
-    def new():
+    def new(initial_text=""):
         setup = read_task_status(STATE / "install-progress.json")
         if setup and setup.get("status") != "complete":
             messagebox.showinfo(
@@ -1175,6 +1174,8 @@ def gui():
             pady=10,
         )
         brief.pack(fill="both", expand=True)
+        if initial_text:
+            brief.insert("1.0", initial_text)
         folder_label = tk.StringVar(
             value="A new folder will be made automatically for this task."
         )
@@ -1218,6 +1219,94 @@ def gui():
         title_row, text="+  New task", command=new, style="Accent.TButton"
     )
     new_button.pack(side="right", pady=(8, 0))
+    voice_events = queue.Queue()
+    voice_busy = threading.Event()
+    voice_speaking = threading.Event()
+    listening = threading.Event()
+    spoken_updates = {}
+    last_spoken_at = {}
+    voice_label = tk.StringVar(value="Voice ready · Ctrl+Alt+Space")
+
+    def speak_update(message):
+        """Keep speech off the UI thread and avoid recording the app's voice."""
+
+        def worker():
+            voice_speaking.set()
+            try:
+                voice_assistant.say(message)
+            except Exception as exc:
+                voice_events.put(("error", str(exc)))
+            finally:
+                voice_speaking.clear()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def record_voice(repeat=False):
+        if voice_busy.is_set() or voice_speaking.is_set():
+            return
+        voice_busy.set()
+        voice_events.put(("state", "Listening… speak now."))
+
+        def worker():
+            try:
+                phrase = voice_assistant.listen(8)
+                if phrase:
+                    voice_events.put(("heard", phrase))
+                elif not repeat:
+                    voice_events.put(
+                        ("state", "I didn't hear anything. Try Talk again.")
+                    )
+            except Exception as exc:
+                listening.clear()
+                voice_events.put(("error", str(exc)))
+            finally:
+                voice_busy.clear()
+                if repeat and listening.is_set():
+                    voice_events.put(("again", ""))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def toggle_listening():
+        if listening.is_set():
+            listening.clear()
+            listen_button.configure(text="Hands-free: Off")
+            voice_label.set("Hands-free listening stopped.")
+        else:
+            listening.set()
+            listen_button.configure(text="Hands-free: On")
+            maybe_listen()
+
+    def use_spoken_request(phrase):
+        """Send spoken instructions to the current task, or start a new one."""
+        active = [
+            item
+            for item in projects()
+            if item["status"]
+            in ("queued", "working", "checking", "paused", "needs_input")
+        ]
+        if active:
+            selected = max(active, key=lambda item: item["updated"] or 0)
+            request(selected["id"], "note", phrase)
+            voice_label.set(
+                "Heard: " + phrase[:100] + " · added to " + selected["title"]
+            )
+        else:
+            listening.clear()
+            listen_button.configure(text="Hands-free: Off")
+            voice_label.set("Heard: " + phrase[:100])
+            new(phrase)
+
+    ttk.Button(title_row, text="🎤  Talk", command=record_voice).pack(
+        side="right", padx=(0, 8), pady=(8, 0)
+    )
+    listen_button = ttk.Button(
+        title_row, text="Hands-free: Off", command=toggle_listening
+    )
+    listen_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    window.bind("<Control-Alt-space>", lambda _: record_voice())
+    ttk.Label(main_page, textvariable=voice_label, style="Muted.TLabel").pack(
+        anchor="w", pady=(0, 5)
+    )
     ttk.Label(
         main_page, textvariable=status, style="Muted.TLabel", wraplength=1000
     ).pack(anchor="w", pady=(0, 6))
@@ -1353,45 +1442,6 @@ def gui():
         detail.insert("1.0", content)
         detail.configure(state="disabled")
 
-    def start_model(profile):
-        setup = read_task_status(STATE / "install-progress.json")
-        if setup and setup.get("status") != "complete":
-            messagebox.showinfo(
-                "Finish setup first",
-                "Your AI is still being installed. This download can start when setup finishes.",
-                parent=window,
-            )
-            return
-        path = STATE / f"optional-model-{profile}.json"
-        save_download_status(path, "working", "Starting download", 0)
-        try:
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    str(ROOT / "model_library.py"),
-                    profile,
-                    "--status-file",
-                    str(path),
-                ],
-                cwd=ROOT,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=HIDE,
-            )
-        except Exception as exc:
-            save_download_status(path, "error", str(exc), 0)
-        render_cards()
-
-    def use_model(profile):
-        """Switch the next task to a downloaded local model."""
-        try:
-            select_profile(profile)
-            status.set("Local model selected for the next task.")
-            render_cards()
-        except Exception as exc:
-            messagebox.showerror("Could not use model", str(exc), parent=window)
-
     def start_auto_models(setup):
         """Resume automatic downloads when the app opens after setup."""
         if setup and setup.get("status") != "complete":
@@ -1428,19 +1478,12 @@ def gui():
             save_download_status(path, "error", str(exc), 0)
 
     task_cards = {}
-    model_cards = {}
     setup_card = None
     empty_label = None
+    # Keep a layout anchor for task cards without showing model installation
+    # details on the main screen. The separate model worker owns downloads.
     models_section = ttk.Frame(cards)
-    models_section.pack(fill="x", pady=(12, 0))
-    ttk.Label(
-        models_section, text="More local models", font=("Segoe UI", 17, "bold")
-    ).pack(anchor="w", pady=(0, 3))
-    ttk.Label(
-        models_section,
-        text="Tool-ready models download automatically. You can start experimental variants here.",
-        style="Muted.TLabel",
-    ).pack(anchor="w", pady=(0, 10))
+    models_section.pack(fill="x")
 
     def set_text(variable, value):
         if variable.get() != value:
@@ -1549,43 +1592,6 @@ def gui():
         ).pack(side="right")
         card_info["controls_signature"] = signature
 
-    for profile, model in CATALOG.items():
-        if profile == "main":
-            continue
-        panel = ttk.Frame(models_section, style="Card.TFrame", padding=(15, 10))
-        panel.pack(fill="x", pady=(0, 7))
-        title = ttk.Frame(panel, style="Card.TFrame")
-        title.pack(fill="x")
-        button = ttk.Button(
-            title,
-            text="Start",
-            style="Accent.TButton",
-            command=lambda key=profile: start_model(key),
-        )
-        button.pack(side="right", padx=(12, 0))
-        name = ttk.Label(
-            title,
-            text=model["label"],
-            style="Card.TLabel",
-            font=("Segoe UI", 12, "bold"),
-            wraplength=610,
-        )
-        name.pack(side="left")
-        note = tk.StringVar(value="")
-        ttk.Label(
-            panel, textvariable=note, style="CardMuted.TLabel", wraplength=900
-        ).pack(anchor="w", pady=(3, 0))
-        bar = ttk.Progressbar(
-            panel, value=0, maximum=100, style="Cale.Horizontal.TProgressbar"
-        )
-        model_cards[profile] = {
-            "button": button,
-            "note": note,
-            "bar": bar,
-            "bar_visible": False,
-            "model": model,
-        }
-
     def render_cards():
         """Update existing widgets in place so polling never resets the scroll."""
         nonlocal setup_card, empty_label
@@ -1656,51 +1662,32 @@ def gui():
             update_progress_card(card_info, percent, "Current step: " + current, state)
             update_task_controls(card_info, item)
 
-        for profile, card_info in model_cards.items():
-            state = read_task_status(STATE / f"optional-model-{profile}.json")
-            state_name = state.get("status", "not_started")
-            if state_name == "working" and time.time() - state.get("updated", 0) > 300:
-                state_name = "interrupted"
-            model = card_info["model"]
-            description = (
-                state.get("current")
-                or f"{model['download_gb']} GB download · needs {model['ram_gb']} GB RAM"
-            )
-            if state_name == "interrupted":
-                description = "Download interrupted. Start again to resume."
-            if state_name == "complete":
-                description = "Ready to use"
-            set_text(card_info["note"], description)
-            button = card_info["button"]
-            if state_name == "working":
-                if button.winfo_manager():
-                    button.pack_forget()
-            elif state_name == "complete":
-                selected = local_profile() == profile
-                button.configure(
-                    text="Using" if selected else "Use",
-                    state="disabled" if selected else "normal",
-                    command=lambda key=profile: use_model(key),
-                )
-                if not button.winfo_manager():
-                    button.pack(side="right", padx=(12, 0))
+    def maybe_listen():
+        if listening.is_set():
+            if voice_speaking.is_set() or voice_busy.is_set():
+                window.after(500, maybe_listen)
             else:
-                button.configure(
-                    text="Retry" if state_name in ("error", "interrupted") else "Start",
-                    state="normal",
-                    command=lambda key=profile: start_model(key),
-                )
-                if not button.winfo_manager():
-                    button.pack(side="right", padx=(12, 0))
-            bar = card_info["bar"]
-            if state_name == "working":
-                bar.configure(value=max(0, min(100, int(state.get("percent", 0)))))
-                if not card_info["bar_visible"]:
-                    bar.pack(fill="x", pady=(7, 0))
-                    card_info["bar_visible"] = True
-            elif card_info["bar_visible"]:
-                bar.pack_forget()
-                card_info["bar_visible"] = False
+                record_voice(repeat=True)
+
+    def voice_poll():
+        try:
+            while True:
+                event, value = voice_events.get_nowait()
+                if event == "heard":
+                    try:
+                        use_spoken_request(value)
+                    except Exception as exc:
+                        voice_label.set("Could not add spoken request: " + str(exc))
+                elif event == "again":
+                    maybe_listen()
+                elif event == "error":
+                    voice_label.set("Voice unavailable: " + value[:140])
+                    listen_button.configure(text="Hands-free: Off")
+                else:
+                    voice_label.set(value)
+        except queue.Empty:
+            pass
+        window.after(500, voice_poll)
 
     def refresh():
         setup = read_task_status(STATE / "install-progress.json")
@@ -1731,6 +1718,21 @@ def gui():
         elif disconnect_button.winfo_manager():
             disconnect_button.pack_forget()
         render_cards()
+        for item in projects():
+            current = (item["status"], task_progress(item)[1])
+            previous = spoken_updates.get(item["id"])
+            spoken_updates[item["id"]] = current
+            if previous is None or previous == current:
+                continue
+            important = item["status"] in (
+                "needs_input",
+                "ready_for_review",
+                "accepted",
+                "stopped",
+            )
+            if important or time.monotonic() - last_spoken_at.get(item["id"], 0) > 120:
+                last_spoken_at[item["id"]] = time.monotonic()
+                speak_update(item["title"] + ". " + current[1])
         with database() as conn:
             last = conn.execute(
                 "SELECT status,result FROM requests ORDER BY id DESC LIMIT 1"
@@ -1756,6 +1758,7 @@ def gui():
             window.after(900, connect)
         window.after(5000, poll)
 
+    voice_poll()
     poll()
     window.mainloop()
 
