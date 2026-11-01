@@ -550,15 +550,20 @@ def answer_from_web(question: str, preferred_business: str = "") -> str:
             result = post(
                 "http://127.0.0.1:11434/v1/chat/completions",
                 {"model": model, "messages": messages, "stream": False,
-                 "max_tokens": 550, "temperature": 0.1,
+                 "max_tokens": 1100, "temperature": 0.1,
                  "reasoning_effort": "none"},
                 timeout=180,
             )
+            if result["choices"][0].get("finish_reason") == "length":
+                continue
             result = retry_derestricted(
-                {"messages": messages, "max_tokens": 550, "temperature": 0.1},
+                {"messages": messages, "max_tokens": 1100, "temperature": 0.1},
                 result, model,
             )
-            answer = (result["choices"][0]["message"].get("content") or "").strip()
+            choice = result["choices"][0]
+            if choice.get("finish_reason") == "length":
+                continue
+            answer = (choice["message"].get("content") or "").strip()
             citations = {int(value) for value in re.findall(r"\[(\d+)\]", answer)}
             if answer and citations and min(citations) >= 1 and max(citations) <= len(pages):
                 references = "\n".join(
@@ -601,22 +606,39 @@ def local_answer(question: str, history: list[dict], file_evidence: str = "") ->
         if item["role"] in ("user", "assistant")
     )
     messages.append({"role": "user", "content": question})
+    truncated = False
     for model in dict.fromkeys((FAST_MODEL, LOCAL_MODEL)):
-        try:
-            result = post(
-                "http://127.0.0.1:11434/v1/chat/completions",
-                {"model": model, "messages": messages, "stream": False,
-                 "max_tokens": 450, "temperature": 0.3,
-                 "reasoning_effort": "none"},
-                timeout=120,
-            )
-            result = retry_derestricted(
-                {"messages": messages, "max_tokens": 450, "temperature": 0.3},
-                result, model,
-            )
-            answer = (result["choices"][0]["message"].get("content") or "").strip()
-            if answer:
-                return answer
-        except (KeyError, IndexError, OSError, ValueError):
-            continue
+        for limit, timeout in ((2048, 180), (4096, 360)):
+            try:
+                result = post(
+                    "http://127.0.0.1:11434/v1/chat/completions",
+                    {"model": model, "messages": messages, "stream": False,
+                     "max_tokens": limit, "temperature": 0.3,
+                     "reasoning_effort": "none"},
+                    timeout=timeout,
+                )
+                # Ollama can return nonempty text with finish_reason=length.
+                # That is an unfinished answer, not a successful chat turn.
+                if result["choices"][0].get("finish_reason") == "length":
+                    truncated = True
+                    continue
+                result = retry_derestricted(
+                    {"messages": messages, "max_tokens": limit, "temperature": 0.3},
+                    result, model,
+                )
+                choice = result["choices"][0]
+                if choice.get("finish_reason") == "length":
+                    truncated = True
+                    continue
+                answer = (choice["message"].get("content") or "").strip()
+                if answer:
+                    return answer
+                break
+            except (KeyError, IndexError, OSError, ValueError):
+                break
+    if truncated:
+        raise RuntimeError(
+            "The answer is too long for one chat reply. Ask me to make it a task "
+            "so I can finish and save the whole result."
+        )
     raise RuntimeError("Local chat is still getting ready. Try again after the model finishes installing.")

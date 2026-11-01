@@ -3,6 +3,8 @@
 import json
 from unittest.mock import patch
 
+import pytest
+
 import chat_assistant
 
 
@@ -342,12 +344,48 @@ def test_web_answer_uses_local_model_and_lists_read_sources():
     assert post.call_args.args[1]["reasoning_effort"] == "none"
 
 
+def test_web_answer_does_not_present_a_cut_off_citation_as_complete():
+    pages = [{"title": "Official page", "url": "https://example.gov/fact",
+              "retrieved_at": "2026-11-01T00:00:00Z", "excerpt": "The value is 42."}]
+    partial = {"choices": [{"message": {"content": "The value is 42 [1], and"},
+                            "finish_reason": "length"}]}
+    complete = {"choices": [{"message": {"content": "The value is 42 [1]."},
+                             "finish_reason": "stop"}]}
+    with (
+        patch.object(chat_assistant, "web_sources", return_value=(pages, [])),
+        patch("cloud_ai.post", side_effect=[partial, complete]) as post,
+    ):
+        answer = chat_assistant.answer_from_web("What is the value?")
+    assert "The value is 42 [1]." in answer
+    assert "and\nSources:" not in answer
+    assert post.call_count == 2
+
+
 def test_quick_chat_disables_reasoning_trace_to_leave_room_for_answer():
     response = {"choices": [{"message": {"content": "Hello!"}}]}
     with patch("cloud_ai.post", return_value=response) as post:
         answer = chat_assistant.local_answer("Say hello", [])
     assert answer == "Hello!"
     assert post.call_args.args[1]["reasoning_effort"] == "none"
+
+
+def test_quick_chat_retries_cut_off_writing_before_displaying_it():
+    partial = {"choices": [{"message": {"content": "The rap starts... Keep"},
+                            "finish_reason": "length"}]}
+    complete = {"choices": [{"message": {"content": "The full rap ends cleanly."},
+                             "finish_reason": "stop"}]}
+    with patch("cloud_ai.post", side_effect=[partial, complete]) as post:
+        answer = chat_assistant.local_answer("Old-school Michigan rap", [])
+    assert answer == "The full rap ends cleanly."
+    assert [call.args[1]["max_tokens"] for call in post.call_args_list] == [2048, 4096]
+
+
+def test_quick_chat_never_presents_cut_off_answer_as_complete():
+    partial = {"choices": [{"message": {"content": "Keep"}, "finish_reason": "length"}]}
+    with patch("cloud_ai.post", return_value=partial) as post:
+        with pytest.raises(RuntimeError, match="too long for one chat reply"):
+            chat_assistant.local_answer("A very long story", [])
+    assert post.call_count == 4
 
 
 def test_quick_chat_retries_model_refusal_with_derestricted():
