@@ -198,22 +198,44 @@ def search(state: str | Path, query: str, limit: int = 10) -> list[dict]:
     words = re.findall(r"[^\W_]+", query, re.UNICODE)[:10]
     if not words:
         return []
-    expression = " AND ".join(f'"{word}"' for word in words)
     count = max(1, min(limit, 30))
     with database(state) as conn:
-        rows = conn.execute(
-            """SELECT entries.path,entries.name,entries.kind
-            FROM entry_fts JOIN entries ON entries.id=entry_fts.rowid
-            WHERE entry_fts MATCH ? ORDER BY bm25(entry_fts,8.0,1.0)
-            LIMIT ?""",
-            (expression, count * 3),
-        ).fetchall()
-        found = []
-        for row in rows:
-            if Path(row["path"]).exists():
-                found.append(dict(row))
-                if len(found) >= count:
-                    break
-            else:
-                conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
-        return found
+        def matches(expression: str, candidate_limit: int) -> list[dict]:
+            rows = conn.execute(
+                """SELECT entries.path,entries.name,entries.kind
+                FROM entry_fts JOIN entries ON entries.id=entry_fts.rowid
+                WHERE entry_fts MATCH ? ORDER BY bm25(entry_fts,8.0,1.0)
+                LIMIT ?""",
+                (expression, candidate_limit),
+            ).fetchall()
+            found = []
+            for row in rows:
+                if Path(row["path"]).exists():
+                    found.append(dict(row))
+                else:
+                    conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
+            return found
+
+        exact = matches(" AND ".join(f'"{word}"' for word in words), count * 3)
+        if exact:
+            return exact[:count]
+        # Natural requests often contain a word absent from the real filename.
+        # Use the most distinctive remaining words, then rank by term coverage.
+        filler = {"my", "the", "a", "an", "file", "folder", "document", "from",
+                  "in", "on", "for", "of", "please", "called", "named"}
+        terms = [word for word in words if word.casefold() not in filler]
+        if not terms:
+            return []
+        loose = matches(" OR ".join(f'"{word}"' for word in terms), count * 20)
+
+        def score(row: dict) -> tuple[int, int]:
+            name = row["name"].casefold()
+            path = row["path"].casefold()
+            return (
+                sum(word.casefold() in path for word in terms),
+                sum(word.casefold() in name for word in terms),
+            )
+
+        minimum_coverage = 2 if len(terms) >= 3 else 1
+        relevant = [row for row in loose if score(row)[0] >= minimum_coverage]
+        return sorted(relevant, key=score, reverse=True)[:count]

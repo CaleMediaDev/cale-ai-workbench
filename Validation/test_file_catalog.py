@@ -78,6 +78,20 @@ class FileCatalogTests(unittest.TestCase):
             self.assertEqual(file_catalog.search(state, "sunset")[0]["path"], str(replacement))
             self.assertEqual(file_catalog.status(state)["status"], "complete")
 
+    def test_natural_phrase_returns_closest_filename(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            target = root / "budget-2024.xlsx"
+            target.write_bytes(b"spreadsheet contents")
+            (root / "spreadsheet-notes.txt").write_text("notes", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            results = file_catalog.search(state, "my budget spreadsheet from 2024")
+            self.assertEqual(results[0]["path"], str(target))
+            self.assertEqual(file_catalog.search(state, "my budget")[0]["path"], str(target))
+            self.assertEqual(file_catalog.search(state, "my budget spreadsheet from 2025"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2847,7 +2847,6 @@ def gui():
     voice_card = None
     cale_voice_card = None
     ollama_card = None
-    file_index_card = None
     empty_label = None
     preview_window = None
     preview_label = None
@@ -2976,35 +2975,7 @@ def gui():
 
     def render_cards():
         """Update existing widgets in place so polling never resets the scroll."""
-        nonlocal setup_card, voice_card, cale_voice_card, ollama_card, file_index_card, empty_label
-        import file_catalog
-
-        index_status = file_catalog.status(STATE)
-        if index_status.get("status") in ("working", "error", "waiting_for_space"):
-            if file_index_card is None:
-                file_index_card = create_progress_card("Find files on this PC", models_section)
-                file_index_card["bar"].configure(mode="indeterminate")
-                file_index_card["bar"].start(25)
-            set_text(file_index_card["percent"], "")
-            set_text(
-                file_index_card["current"],
-                f"{index_status.get('files', 0):,} files, "
-                f"{index_status.get('folders', 0):,} folders found"
-                if index_status.get("status") == "working"
-                else str(index_status.get("message") or index_status.get("error", "Index needs attention")),
-            )
-            set_text(
-                file_index_card["state"],
-                "Scanning" if index_status.get("status") == "working"
-                else "Needs space" if index_status.get("status") == "waiting_for_space"
-                else "Needs attention",
-            )
-            if index_status.get("status") != "working":
-                file_index_card["bar"].stop()
-        elif file_index_card is not None:
-            file_index_card["bar"].stop()
-            file_index_card["panel"].destroy()
-            file_index_card = None
+        nonlocal setup_card, voice_card, cale_voice_card, ollama_card, empty_label
         setup = read_task_status(STATE / "install-progress.json")
         if setup and not setup_card_dismissed.is_file():
             if setup_card is None:
