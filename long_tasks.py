@@ -2169,7 +2169,13 @@ def monitor():
         msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
         return
+    import psutil
+
     (STATE / "monitor-pid.txt").write_text(str(os.getpid()), encoding="utf-8")
+    (STATE / "monitor-process.json").write_text(
+        json.dumps({"pid": os.getpid(), "created": psutil.Process().create_time()}),
+        encoding="utf-8",
+    )
     for item in projects():
         try:
             project_memory.initialize(item["folder"])
@@ -2367,6 +2373,58 @@ def start_monitor():
         stderr=subprocess.DEVNULL,
         creationflags=HIDE,
     )
+
+
+def monitor_restart_needed(now=None, tasks_active=None):
+    """Recover a missing monitor, or an idle one stalled for ten minutes.
+
+    A live task can make a supervisor call slow. Never terminate its monitor.
+    The exact executable, script, arguments, and creation time must match the
+    recorded process before this code may terminate anything.
+    """
+    import psutil
+
+    current = time.time() if now is None else now
+    heartbeat = STATE / "heartbeat.txt"
+    try:
+        age = current - heartbeat.stat().st_mtime
+    except OSError:
+        age = float("inf")
+    if age <= 35:
+        return False
+    try:
+        saved = json.loads((STATE / "monitor-process.json").read_text(encoding="utf-8"))
+        process = psutil.Process(int(saved["pid"]))
+        command = process.cmdline()
+        exact = (
+            abs(process.create_time() - float(saved["created"])) < 2
+            and len(command) == 3
+            and Path(command[0]).resolve() == (ROOT / "Toolbox/python/Scripts/pythonw.exe").resolve()
+            and Path(command[1]).resolve() == (ROOT / "long_tasks.py").resolve()
+            and command[2] == "--monitor"
+        )
+    except (OSError, ValueError, KeyError, TypeError, psutil.Error):
+        exact = False
+    if not exact:
+        return True  # A stale PID cannot prevent recovery, and is never killed.
+    if age < 600:
+        return False
+    if tasks_active is None:
+        import self_update
+
+        tasks_active = self_update.active_tasks()
+    if tasks_active:
+        return False
+    try:
+        process.terminate()
+        process.wait(timeout=10)
+    except psutil.NoSuchProcess:
+        pass
+    except (OSError, psutil.Error):
+        return False
+    with (STATE / "monitor-recovery.log").open("a", encoding="utf-8") as log:
+        log.write(time.ctime() + " Retired an idle monitor with a stale heartbeat.\n")
+    return True
 
 
 def gui():
@@ -2640,6 +2698,8 @@ def gui():
     super_canvas = tk.Canvas(
         super_shell, background=bg, borderwidth=0, highlightthickness=0,
     )
+
+
     super_scroll = ttk.Scrollbar(
         super_shell, orient="vertical", command=super_canvas.yview,
     )
@@ -5130,8 +5190,9 @@ def gui():
                 except OSError as exc:
                     status.set("Could not start the update: " + str(exc))
                     pending_update = None
-        heartbeat = STATE / "heartbeat.txt"
-        if heartbeat.is_file() and time.time() - heartbeat.stat().st_mtime > 35:
+        if (time.monotonic() - getattr(window, "monitor_restart_at", 0) > 15
+                and monitor_restart_needed()):
+            window.monitor_restart_at = time.monotonic()
             start_monitor()
         if not github_events.empty():
             account = github_events.get_nowait()

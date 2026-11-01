@@ -198,6 +198,50 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(fetch.call_count, 1)
         self.assertIn("/api/tags", fetch.call_args.args[0])
 
+    def test_stale_monitor_recovers_only_when_idle_and_identity_matches(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            state = root / "LongTasks"
+            state.mkdir()
+            heartbeat = state / "heartbeat.txt"
+            heartbeat.write_text("healthy")
+            os.utime(heartbeat, (1000, 1000))
+            (state / "monitor-process.json").write_text(
+                json.dumps({"pid": 123, "created": 500})
+            )
+            with (patch.object(task_module, "ROOT", root),
+                  patch.object(task_module, "STATE", state),
+                  patch("psutil.Process") as process):
+                worker = process.return_value
+                worker.create_time.return_value = 500
+                worker.cmdline.return_value = [
+                    str(root / "Toolbox/python/Scripts/pythonw.exe"),
+                    str(root / "long_tasks.py"), "--monitor",
+                ]
+                self.assertFalse(task_module.monitor_restart_needed(now=1100))
+                self.assertFalse(task_module.monitor_restart_needed(
+                    now=1700, tasks_active=True))
+                worker.terminate.assert_not_called()
+                self.assertTrue(task_module.monitor_restart_needed(
+                    now=1700, tasks_active=False))
+                worker.terminate.assert_called_once_with()
+                worker.wait.assert_called_once_with(timeout=10)
+
+    def test_stale_pid_is_never_terminated(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            state = root / "LongTasks"
+            state.mkdir()
+            (state / "monitor-process.json").write_text(
+                json.dumps({"pid": 123, "created": 500})
+            )
+            with (patch.object(task_module, "ROOT", root),
+                  patch.object(task_module, "STATE", state),
+                  patch("psutil.Process") as process):
+                process.return_value.create_time.return_value = 900
+                self.assertTrue(task_module.monitor_restart_needed(now=1700))
+                process.return_value.terminate.assert_not_called()
+
     def test_supervisor_can_dispatch_ready_work_when_gateway_misses_it(self):
         with (patch.object(task_module, "projects", return_value=[{"status": "working"}]),
               patch.object(task_module, "board", return_value={"spawned": []}) as board):
