@@ -7,6 +7,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Hermes Agent, MIT, Copyright (c) 2025 Nous Research | https://github.com/NousResearch/hermes-agent |
 | Ollama | https://github.com/ollama/ollama |
 | GitHub CLI | https://github.com/cli/cli |
+| Kokoro-ONNX (MIT) and Kokoro 82M voice weights (Apache-2.0) | https://github.com/thewh1teagle/kokoro-onnx and https://huggingface.co/hexgrad/Kokoro-82M |
 | REA / rea-agents | https://github.com/morluto/rea |
 | Chrome DevTools MCP | https://github.com/ChromeDevTools/chrome-devtools-mcp |
 | Playwright MCP | https://github.com/microsoft/playwright-mcp |

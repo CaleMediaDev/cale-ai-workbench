@@ -94,7 +94,11 @@ def background_prompt(kind, elapsed, previous_slot=-1, title="", mic_off=True):
 def media_call(action, **arguments):
     """Run one bounded media action and return its final JSON response."""
     python = ROOT / "Media/python/Scripts/python.exe"
-    if action == "speak" and not python.is_file():
+    voice_files = ROOT / "Media/models/natural_voice"
+    natural_ready = (voice_files / "kokoro-v1.0.int8.onnx").is_file() and (
+        voice_files / "voices-v1.0.bin"
+    ).is_file()
+    if action == "speak" and not natural_ready:
         # The lighter toolbox runtime is ready before image and audio models.
         # This lets setup speak while those larger downloads are still running.
         python = ROOT / "Toolbox/python/Scripts/python.exe"
@@ -131,7 +135,7 @@ def say(message, rate=0):
     temp = ROOT / "Temp"
     temp.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=temp) as folder:
-        media_call(
+        return media_call(
             "speak",
             text=str(message)[:280],
             output_path=str(Path(folder) / "update.wav"),

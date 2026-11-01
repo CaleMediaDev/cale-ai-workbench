@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.4.1')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.4.2')
  $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
  function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
    New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
@@ -151,7 +151,7 @@ try {
  & $python (Join-Path $Destination 'configure_install.py') --root $Destination --profile $Profile
  if ($LASTEXITCODE -ne 0) { throw 'Model/configuration setup failed.' }
  Write-Output 'Downloading local image, speech and small training models...'
- Write-SetupStatus 80 'Downloading image, speech, and training models'
+ Write-SetupStatus 80 'Downloading a natural voice, image, speech, and training models'
  & $mediaPython (Join-Path $Destination 'media_worker.py') --download-models
  if ($LASTEXITCODE -ne 0) { throw 'Media model download failed. Re-run to resume.' }
  if ($ExtraModels) {

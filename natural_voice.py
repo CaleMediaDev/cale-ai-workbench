@@ -1,0 +1,88 @@
+"""Upgrade an existing installation's offline voice without blocking the UI."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+from model_library import save_download_status
+
+ROOT = Path(__file__).resolve().parent
+MEDIA_PYTHON = ROOT / "Media/python/Scripts/python.exe"
+STATUS = ROOT / "LongTasks/natural-voice-progress.json"
+VOICE = ROOT / "Media/models/natural_voice"
+HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
+def ready():
+    return (VOICE / "kokoro-v1.0.int8.onnx").is_file() and (
+        VOICE / "voices-v1.0.bin"
+    ).is_file()
+
+
+def install():
+    """Install the pinned synthesizer and verified weights once per PC."""
+    import msvcrt
+
+    STATUS.parent.mkdir(exist_ok=True)
+    with (STATUS.parent / "natural-voice.lock").open("a+b") as lock:
+        lock.seek(0)
+        if not lock.read(1):
+            lock.write(b"1")
+            lock.flush()
+        lock.seek(0)
+        try:
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return
+        if not MEDIA_PYTHON.is_file():
+            return
+        try:
+            save_download_status(STATUS, "working", "Checking the natural voice", 5)
+            check = subprocess.run(
+                [str(MEDIA_PYTHON), "-c", "import kokoro_onnx"],
+                capture_output=True,
+                timeout=30,
+                creationflags=HIDE,
+            )
+            if check.returncode:
+                save_download_status(
+                    STATUS, "working", "Installing the natural voice engine", 20
+                )
+                subprocess.run(
+                    [
+                        str(MEDIA_PYTHON),
+                        "-m",
+                        "pip",
+                        "install",
+                        "--disable-pip-version-check",
+                        "kokoro-onnx==0.6.1",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    timeout=600,
+                    creationflags=HIDE,
+                )
+            if not ready():
+                save_download_status(
+                    STATUS, "working", "Downloading the natural voice", 50
+                )
+                subprocess.run(
+                    [
+                        str(MEDIA_PYTHON),
+                        str(ROOT / "media_worker.py"),
+                        "--download-voice",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    timeout=600,
+                    creationflags=HIDE,
+                )
+            save_download_status(STATUS, "complete", "Natural voice ready", 100)
+        except Exception as exc:
+            save_download_status(STATUS, "error", str(exc)[:400], 0)
+
+
+if __name__ == "__main__":
+    install()

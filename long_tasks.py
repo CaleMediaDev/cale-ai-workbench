@@ -1284,6 +1284,8 @@ def gui():
     listening = threading.Event()
     speech_queue = queue.Queue()
     speech_lock = threading.Lock()
+    voice_upgrade_marker = STATE / "natural-voice-greeted"
+    voice_upgrade_queued = voice_upgrade_marker.is_file()
     spoken_updates = {}
     last_spoken_at = {}
     stuck_since = {}
@@ -1299,7 +1301,15 @@ def gui():
             try:
                 while voice_busy.is_set():
                     time.sleep(0.2)
-                voice_assistant.say(message, rate=rate)
+                result = voice_assistant.say(message, rate=rate)
+                if (
+                    message.startswith("Oh my God, that's better")
+                    and result.get("engine") == "Kokoro natural voice"
+                ):
+                    voice_upgrade_marker.parent.mkdir(exist_ok=True)
+                    voice_upgrade_marker.write_text(
+                        "Natural voice greeted.", encoding="utf-8"
+                    )
             except Exception as exc:
                 voice_events.put(("error", str(exc)))
             finally:
@@ -1573,6 +1583,29 @@ def gui():
         detail.configure(state="disabled")
 
     auto_models_started = False
+    auto_voice_started = False
+
+    def start_natural_voice(setup):
+        """Finish the voice upgrade on PCs installed before it was bundled."""
+        nonlocal auto_voice_started
+        if auto_voice_started or (setup and setup.get("status") != "complete"):
+            return
+        if not (ROOT / "Media/python/Scripts/python.exe").is_file():
+            return
+        auto_voice_started = True
+        path = STATE / "natural-voice-progress.json"
+        save_download_status(path, "working", "Checking the natural voice", 0)
+        try:
+            subprocess.Popen(
+                [sys.executable, str(ROOT / "natural_voice.py")],
+                cwd=ROOT,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=HIDE,
+            )
+        except OSError as exc:
+            save_download_status(path, "error", str(exc), 0)
 
     def start_auto_models(setup):
         """Resume automatic downloads when the app opens after setup."""
@@ -1604,6 +1637,7 @@ def gui():
 
     task_cards = {}
     setup_card = None
+    voice_card = None
     empty_label = None
     # Keep a layout anchor for task cards without showing model installation
     # details on the main screen. The separate model worker owns downloads.
@@ -1719,7 +1753,7 @@ def gui():
 
     def render_cards():
         """Update existing widgets in place so polling never resets the scroll."""
-        nonlocal setup_card, empty_label
+        nonlocal setup_card, voice_card, empty_label
         setup = read_task_status(STATE / "install-progress.json")
         if setup:
             if setup_card is None:
@@ -1736,6 +1770,24 @@ def gui():
         elif setup_card is not None:
             setup_card["panel"].destroy()
             setup_card = None
+
+        voice_setup = read_task_status(STATE / "natural-voice-progress.json")
+        if voice_setup.get("status") in ("working", "error"):
+            if voice_card is None:
+                voice_card = create_progress_card(
+                    "Improve Cale's voice", models_section
+                )
+            update_progress_card(
+                voice_card,
+                voice_setup.get("percent", 0),
+                "Current step: " + str(voice_setup.get("current", "Preparing")),
+                "Installing"
+                if voice_setup.get("status") == "working"
+                else "Needs attention",
+            )
+        elif voice_card is not None:
+            voice_card["panel"].destroy()
+            voice_card = None
 
         all_tasks = list(reversed(projects()))
         live_ids = {item["id"] for item in all_tasks}
@@ -1815,8 +1867,18 @@ def gui():
         window.after(500, voice_poll)
 
     def refresh():
-        nonlocal idle_since, idle_slot, setup_spoken_step
+        nonlocal idle_since, idle_slot, setup_spoken_step, voice_upgrade_queued
         setup = read_task_status(STATE / "install-progress.json")
+        voice_folder = ROOT / "Media/models/natural_voice"
+        if (
+            not voice_upgrade_queued
+            and (voice_folder / "kokoro-v1.0.int8.onnx").is_file()
+            and (voice_folder / "voices-v1.0.bin").is_file()
+        ):
+            voice_upgrade_queued = True
+            speak_update(
+                "Oh my God, that's better. I finally sound like I had a cup of coffee!"
+            )
         if setup:
             current_step = str(setup.get("current", ""))
             if current_step and current_step != setup_spoken_step:
@@ -1995,6 +2057,7 @@ def gui():
             threading.Thread(target=check_github, daemon=True).start()
         setup = read_task_status(STATE / "install-progress.json")
         start_auto_models(setup)
+        start_natural_voice(setup)
         if (
             not cloud_status()["connected"]
             and not first_connect.exists()

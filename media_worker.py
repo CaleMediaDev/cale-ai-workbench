@@ -1,6 +1,7 @@
 """Local image, speech and bounded video/camera tools; JSON in and JSON out."""
 
 import base64
+import hashlib
 import json
 import os
 import sys
@@ -322,28 +323,46 @@ def watch_camera(
 
 
 def speak(text, output_path, play=False, rate=0):
-    import pythoncom
-    import win32com.client
-
     target = output_file(output_path, ".wav")
-    pythoncom.CoInitialize()
-    try:
-        voice = win32com.client.Dispatch("SAPI.SpVoice")
-        voice.Rate = min(max(int(rate), -5), 5)
-        stream = win32com.client.Dispatch("SAPI.SpFileStream")
-        stream.Open(str(target), 3, False)
+    voice_dir = MEDIA / "models/natural_voice"
+    model = voice_dir / "kokoro-v1.0.int8.onnx"
+    voices = voice_dir / "voices-v1.0.bin"
+    if model.is_file() and voices.is_file():
+        import soundfile as sf
+        from kokoro_onnx import Kokoro
+
+        speaker = Kokoro(str(model), str(voices))
+        samples, sample_rate = speaker.create(
+            str(text)[:12000],
+            voice="af_sarah",
+            speed=max(0.7, min(1.3, 1 + int(rate) * 0.08)),
+            lang="en-us",
+        )
+        sf.write(target, samples, sample_rate)
+        engine = "Kokoro natural voice"
+    else:
+        import pythoncom
+        import win32com.client
+
+        pythoncom.CoInitialize()
         try:
-            voice.AudioOutputStream = stream
-            voice.Speak(str(text)[:12000])
+            voice = win32com.client.Dispatch("SAPI.SpVoice")
+            voice.Rate = min(max(int(rate), -5), 5)
+            stream = win32com.client.Dispatch("SAPI.SpFileStream")
+            stream.Open(str(target), 3, False)
+            try:
+                voice.AudioOutputStream = stream
+                voice.Speak(str(text)[:12000])
+            finally:
+                stream.Close()
         finally:
-            stream.Close()
-    finally:
-        pythoncom.CoUninitialize()
+            pythoncom.CoUninitialize()
+        engine = "Windows offline speech"
     if play:
         import winsound
 
         winsound.PlaySound(str(target), winsound.SND_FILENAME)
-    return {"path": str(target), "engine": "Windows offline speech"}
+    return {"path": str(target), "engine": engine}
 
 
 def record_audio(seconds=10):
@@ -394,6 +413,42 @@ def record_audio(seconds=10):
         return transcribe_audio(path)
 
 
+def download_natural_voice(item=None):
+    """Verify both offline voice files before making the new voice available."""
+    if item is None:
+        item = json.loads((ROOT / "media-models.json").read_text())["natural_voice"]
+    folder = MEDIA / "models/natural_voice"
+    folder.mkdir(parents=True, exist_ok=True)
+    for filename, url_key, hash_key in (
+        ("kokoro-v1.0.int8.onnx", "model_url", "model_sha256"),
+        ("voices-v1.0.bin", "voices_url", "voices_sha256"),
+    ):
+        destination = folder / filename
+        expected = item[hash_key]
+        if (
+            destination.is_file()
+            and hashlib.sha256(destination.read_bytes()).hexdigest() == expected
+        ):
+            continue
+        temporary_file = destination.with_suffix(destination.suffix + ".partial")
+        digest = hashlib.sha256()
+        with (
+            urlopen(
+                Request(item[url_key], headers={"User-Agent": "Cale-AI-Workbench"}),
+                timeout=60,
+            ) as response,
+            temporary_file.open("wb") as output,
+        ):
+            while chunk := response.read(1024 * 1024):
+                output.write(chunk)
+                digest.update(chunk)
+        if digest.hexdigest() != expected:
+            temporary_file.unlink(missing_ok=True)
+            raise RuntimeError("Natural voice file failed its SHA-256 check.")
+        os.replace(temporary_file, destination)
+    return {"installed": "natural_voice"}
+
+
 def download_models():
     """Fetch pinned media weights and report each stage to the setup card."""
     from huggingface_hub import snapshot_download
@@ -407,7 +462,9 @@ def download_models():
             json.dumps(
                 {
                     "percent": 80 + round(10 * index / max(1, len(models))),
-                    "current": "Downloading " + name + " model files",
+                    "current": "Downloading a more natural voice"
+                    if name == "natural_voice"
+                    else "Downloading " + name + " model files",
                     "status": "working",
                     "updated": time.time(),
                 }
@@ -416,13 +473,16 @@ def download_models():
         )
         os.replace(temporary, path)
         print("Downloading " + name + " model files...", file=sys.stderr, flush=True)
-        snapshot_download(
-            item["repo"],
-            revision=item["revision"],
-            local_dir=str(MEDIA / "models" / name),
-            allow_patterns=item["patterns"],
-            max_workers=4,
-        )
+        if name == "natural_voice":
+            download_natural_voice(item)
+        else:
+            snapshot_download(
+                item["repo"],
+                revision=item["revision"],
+                local_dir=str(MEDIA / "models" / name),
+                allow_patterns=item["patterns"],
+                max_workers=4,
+            )
     return {"installed": list(models)}
 
 
@@ -430,6 +490,8 @@ if __name__ == "__main__":
     try:
         if "--download-models" in sys.argv:
             result = download_models()
+        elif "--download-voice" in sys.argv:
+            result = download_natural_voice()
         else:
             request = json.load(sys.stdin)
             action = request.pop("action")

@@ -26,7 +26,7 @@ def call(action, **arguments):
 
 
 def main():
-    for name in ("lcm", "whisper", "trainer"):
+    for name in ("natural_voice", "lcm", "whisper", "trainer"):
         assert (ROOT / "Media/models" / name).is_dir(), f"Missing {name} model"
     with urlopen(
         Request(
@@ -44,6 +44,7 @@ def main():
             "speak", text="The offline voice test is working.", output_path=target
         )
         assert Path(speech["path"]).is_file()
+        assert speech["engine"] == "Kokoro natural voice", speech
         transcript = call("transcribe_audio", path=target)["text"].lower()
         assert "offline" in transcript and "voice" in transcript, transcript
     print("PASS: media weights, local vision model, offline speech and transcription")
