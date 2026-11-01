@@ -81,6 +81,17 @@ class VoiceTests(unittest.TestCase):
         self.assertTrue(call.call_args.kwargs["play"])
         self.assertEqual(call.call_args.kwargs["rate"], 2)
 
+    def test_failed_voice_clone_reaches_offline_fallback(self):
+        with patch("cale_voice.ready", return_value=True), patch(
+            "cale_voice.speak", side_effect=RuntimeError("clone unavailable")
+        ), patch.object(voice_assistant, "media_call", return_value={
+            "engine": "Windows offline speech"
+        }) as fallback:
+            result = voice_assistant.say("Your task is ready")
+        self.assertEqual(result["engine"], "Windows offline speech")
+        self.assertEqual(fallback.call_args.args, ("speak",))
+        self.assertTrue(fallback.call_args.kwargs["play"])
+
     def test_long_chat_reply_is_spoken_without_truncation(self):
         message = " ".join(f"word{index}" for index in range(150))
         chunks = voice_assistant.speech_chunks(message)

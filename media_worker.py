@@ -328,22 +328,28 @@ def speak(text, output_path, play=False, rate=0):
     voice_dir = MEDIA / "models/natural_voice"
     model = voice_dir / "kokoro-v1.0.int8.onnx"
     voices = voice_dir / "voices-v1.0.bin"
+    engine = None
     if model.is_file() and voices.is_file():
-        import soundfile as sf
-        from kokoro_onnx import Kokoro
+        try:
+            import soundfile as sf
+            from kokoro_onnx import Kokoro
 
-        speaker = Kokoro(str(model), str(voices))
-        samples, sample_rate = speaker.create(
-            str(text)[:12000],
-            # Michael is bundled in the local Kokoro voice pack. Keep a calm,
-            # conversational pace so status updates sound less robotic.
-            voice="am_michael",
-            speed=max(0.78, min(1.18, 0.96 + int(rate) * 0.06)),
-            lang="en-us",
-        )
-        sf.write(target, samples, sample_rate)
-        engine = "Kokoro natural voice"
-    else:
+            speaker = Kokoro(str(model), str(voices))
+            samples, sample_rate = speaker.create(
+                str(text)[:12000],
+                # Michael is bundled in the local Kokoro voice pack. Keep a calm,
+                # conversational pace so status updates sound less robotic.
+                voice="am_michael",
+                speed=max(0.78, min(1.18, 0.96 + int(rate) * 0.06)),
+                lang="en-us",
+            )
+            sf.write(target, samples, sample_rate)
+            engine = "Kokoro natural voice"
+        except Exception:
+            # A corrupt voice file, missing package, or failed synthesis must
+            # not turn a spoken chat reply into silence. SAPI works offline.
+            target.unlink(missing_ok=True)
+    if engine is None:
         import pythoncom
         import win32com.client
 
