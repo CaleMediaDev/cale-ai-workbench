@@ -173,7 +173,7 @@ def configure(root, profile):
     import context_window
 
     context_window.sync(root, "cale-local")
-    # Compatibility patch is MIT-licensed upstream code plus a Windows fix.
+    # Apply version-pinned fixes to the MIT-licensed Hermes source.
     patch = root / "windows-file-tools.patch"
     managed_git = root / "data/tools/git-2.53.0+3-win32-x64/cmd/git.exe"
     git = str(managed_git) if managed_git.exists() else shutil.which("git")
@@ -221,6 +221,14 @@ def configure(root, profile):
         capture_output=True,
     ).returncode:
         raise RuntimeError("The Windows file patch did not match this Hermes version.")
+    patch = root / "hermes-read-consistency.patch"
+    command = [git, "-C", str(root / "app"), "apply", "--ignore-space-change"]
+    if subprocess.run([*command, "--check", str(patch)], capture_output=True).returncode == 0:
+        subprocess.run([*command, str(patch)], check=True)
+    elif subprocess.run(
+        [*command, "--reverse", "--check", str(patch)], capture_output=True
+    ).returncode:
+        raise RuntimeError("The Hermes read-consistency patch did not match this version.")
     skill = root / "Toolbox/node_modules/rea-agents/skills/reverse-engineer-anything"
     if skill.exists():
         shutil.copytree(

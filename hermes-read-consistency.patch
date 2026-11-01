@@ -1,0 +1,69 @@
+diff --git a/tools/file_operations.py b/tools/file_operations.py
+--- a/tools/file_operations.py
++++ b/tools/file_operations.py
+@@ -967,6 +967,11 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
+         try:
+             with open(full, "rb") as fh:
+                 st = os.fstat(fh.fileno())
++                if not _stat.S_ISREG(st.st_mode):
++                    return self._not_regular_error(path)
++                # The path may have changed between the initial stat and open.
++                # Use the size of the descriptor that supplies the actual bytes.
++                file_size = st.st_size
+                 sample = fh.read(1000)
+                 ext_binary = has_binary_extension(path)
+                 if ext_binary or self._is_likely_binary_bytes(sample):
+@@ -1002,8 +1007,15 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
+                         total_lines += 1
+                         lineno += 1
+                         pos = nl + 1
++                after = os.fstat(fh.fileno())
++                current = os.stat(full)
+         except OSError:
+             return self._read_file_sequential(path, offset, limit)
++        fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
++        initial_version = tuple(getattr(st, field) for field in fields)
++        if (initial_version != tuple(getattr(after, field) for field in fields)
++                or initial_version != tuple(getattr(current, field) for field in fields)):
++            return ReadResult(error=f"File changed while being read: {path}. Retry the read.")
+         if have_partial and offset <= lineno <= end_line:
+             # ``sed`` prints a final line that lacks a newline; ``cut`` adds one.
+             page.append(bytes(kept) + b"\n")
+diff --git a/tests/tools/test_native_read_consistency.py b/tests/tools/test_native_read_consistency.py
+new file mode 100644
+--- /dev/null
++++ b/tests/tools/test_native_read_consistency.py
+@@ -0,0 +1,33 @@
++"""The native reader must not report a mixed version of a changing file."""
++
++import os
++
++from tools import file_operations
++from tools.file_operations import ShellFileOperations
++
++
++class LocalEnvironment:
++    def __init__(self, cwd):
++        self.cwd = str(cwd)
++
++
++def test_native_read_retries_when_file_changes_during_scan(tmp_path, monkeypatch):
++    path = tmp_path / "changing.txt"
++    path.write_bytes(b"before\n")
++    operations = ShellFileOperations(LocalEnvironment(tmp_path))
++    real_fstat = os.fstat
++    calls = 0
++
++    def changing_fstat(fd):
++        nonlocal calls
++        calls += 1
++        if calls == 2:
++            path.write_bytes(b"after\n")
++        return real_fstat(fd)
++
++    monkeypatch.setattr(file_operations.os, "fstat", changing_fstat)
++    result = operations._read_file_native(str(path), 1, 20)
++
++    assert "changed while being read" in result.error
++    assert result._snapshot is None
++    assert calls == 2
