@@ -51,3 +51,46 @@ def test_prompt_clarification_falls_back_if_model_changes_subject_or_is_offline(
         assert quick_image.clarify_prompt(prompt) == prompt
     with patch.object(quick_image, "urlopen", side_effect=OSError("offline")):
         assert quick_image.clarify_prompt(prompt) == prompt
+
+
+def test_direct_image_job_survives_starting_process_and_verifies_pixels(tmp_path):
+    python = tmp_path / "Toolbox/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"launcher")
+    output = tmp_path / "project/image.png"
+    with patch.object(quick_image.subprocess, "Popen") as process:
+        started = quick_image.start_image_job(tmp_path, "a dog", str(output))
+        process.assert_called_once()
+    job_id = started["job_id"]
+    assert quick_image.image_job_status(tmp_path, job_id)["status"] == "queued"
+    output.parent.mkdir()
+    Image.new("RGB", (64, 64), "orange").save(output)
+    assert quick_image.image_file_ok(output)
+    with patch.object(quick_image, "_worker_running", return_value=False), patch.object(
+        quick_image, "_launch_job"
+    ) as relaunch:
+        quick_image.recover_image_jobs(tmp_path)
+        relaunch.assert_not_called()
+    # Fresh queued jobs are allowed 30 seconds to start before recovery.
+    info = quick_image.image_job_status(tmp_path, job_id)
+    info["created"] = 1
+    quick_image._write_job(tmp_path, job_id, info)
+    with patch.object(quick_image, "_worker_running", return_value=False):
+        quick_image.recover_image_jobs(tmp_path)
+    assert quick_image.image_job_status(tmp_path, job_id)["status"] == "complete"
+
+
+def test_image_job_pause_and_resume_reuse_same_id(tmp_path):
+    job_id = "a" * 32
+    quick_image._write_job(tmp_path, job_id, {
+        "job_id": job_id, "status": "working", "current": "Generating",
+        "prompt": "a dog", "output_path": str(tmp_path / "dog.png"),
+    })
+    with patch.object(quick_image, "_worker_running", return_value=False), patch.object(
+        quick_image, "_launch_job"
+    ) as launch:
+        assert quick_image.hold_image_job(tmp_path, job_id, paused=True)["status"] == "paused"
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_not_called()
+        assert quick_image.resume_image_job(tmp_path, job_id)["status"] == "queued"
+        launch.assert_called_once_with(tmp_path, job_id)

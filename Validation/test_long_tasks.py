@@ -164,6 +164,28 @@ class LongTaskTests(unittest.TestCase):
             self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "working")
             resume.assert_called_once_with(job_id)
 
+    def test_direct_image_task_reaches_review_without_a_board_card(self):
+        from PIL import Image
+
+        job_id = "e" * 32
+        with patch("quick_image.start_image_job", return_value={"job_id": job_id}):
+            pid = task_module.add_image_project(
+                "make an image of a dog", "a dog", str(self.base / "image-one"),
+            )
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(task_module.image_job_id(task), job_id)
+        output = Path(task["folder"]) / "image.png"
+        Image.new("RGB", (64, 64), "orange").save(output)
+        with patch("quick_image.image_job_status", return_value={
+            "status": "complete", "result": {"path": str(output)},
+        }), patch.object(task_module, "board") as board:
+            task_module.advance_project(task)
+            board.assert_not_called()
+        complete = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(complete["status"], "ready_for_review")
+        self.assertEqual(task_module.task_progress(complete)[0], 95)
+        self.assertTrue((Path(task["folder"]) / ".local-ai/PROGRESS.md").is_file())
+
     def verify_script(self, text):
         (Path(self.item()["folder"]) / ".local-ai/verify.ps1").write_text(
             text, encoding="utf-8"

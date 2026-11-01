@@ -170,6 +170,12 @@ def music_job_id(p):
     return card.split(":", 1)[1] if card.startswith("music-job:") else ""
 
 
+def image_job_id(p):
+    """Identify a direct image task without asking the Hermes board."""
+    card = str(p.get("card") or "")
+    return card.split(":", 1)[1] if card.startswith("image-job:") else ""
+
+
 def chat_history(limit=50):
     """Read the most recent messages in conversation order."""
     with database() as conn:
@@ -255,6 +261,21 @@ def save_chat(role, content):
 def task_progress(p):
     """Best-effort milestone progress; reserve the last part for independent review."""
     state = p["status"]
+    image_id = image_job_id(p)
+    if image_id:
+        if state == "accepted":
+            return 100, "Finished and accepted"
+        if state == "ready_for_review":
+            return 95, "Image is ready. Open files to view it."
+        if state in ("paused", "stopped", "needs_input"):
+            return 0, p["detail"][:180] or state.replace("_", " ").capitalize()
+        try:
+            import quick_image
+
+            job = quick_image.image_job_status(ROOT, image_id)
+            return (10 if job["status"] == "queued" else 45), str(job.get("current", "Generating image"))[:180]
+        except (OSError, ValueError, KeyError):
+            return 10, "Checking local image job"
     job_id = music_job_id(p)
     if job_id:
         if state == "accepted":
@@ -429,6 +450,27 @@ def add_music_project(request_text: str, spec: dict, folder: str = "") -> str:
         raise
     update(pid, card="music-job:" + job["job_id"], status="working",
            detail="Starting local music render")
+    return pid
+
+
+def add_image_project(request_text: str, prompt: str, folder: str = "") -> str:
+    """Keep a quick local image request in My Tasks across app restarts."""
+    import quick_image
+
+    pid = add_project("", folder, request_text, waiting_for_setup=True)
+    p = next(item for item in projects() if item["id"] == pid)
+    target = Path(p["folder"]) / "image.png"
+    (target.parent / ".local-ai" / "PLAN.md").write_text(
+        "# Plan\n\n- [ ] Generate the requested image locally.\n- [ ] Check that the PNG has decodable pixels.\n",
+        encoding="utf-8",
+    )
+    try:
+        job = quick_image.start_image_job(ROOT, prompt, str(target))
+    except Exception as exc:
+        update(pid, status="needs_input", detail=f"Local image could not start: {exc}")
+        raise
+    update(pid, card="image-job:" + job["job_id"], status="working",
+           detail="Starting local image render")
     return pid
 
 
@@ -899,6 +941,57 @@ def handle_handoff(p, task):
 REVIEW_PROJECTS_CHECKED = {}  # project id -> (generation, current card)
 
 
+def process_image_request(p, action, note):
+    """Apply task controls to an image render without a Hermes board card."""
+    import quick_image
+
+    job_id = image_job_id(p)
+    if action == "pause":
+        held = quick_image.hold_image_job(ROOT, job_id, paused=True)
+        if held["status"] in ("complete", "error"):
+            advance_project(p)
+            return "The image render already finished; check its task status."
+        update(p["id"], status="paused", detail="Paused. Continue will restart the image render.")
+        return "Image paused"
+    if action in ("stop", "delete", "note"):
+        quick_image.hold_image_job(ROOT, job_id)
+        if action == "delete":
+            with database() as conn:
+                conn.execute("DELETE FROM projects WHERE id=?", (p["id"],))
+            return "Task removed"
+        if action == "stop":
+            update(p["id"], status="stopped", detail="Image stopped. Files already made are preserved.")
+            return "Image stopped"
+        if not note.strip():
+            raise ValueError("Tell Cale what to change in the image.")
+        update(p["id"], card="", generation=p["generation"] + 1,
+               status="working", detail="Preparing the requested image changes")
+        return "Instructions added"
+    if action == "accept":
+        if p["status"] != "ready_for_review" or fingerprint(Path(p["folder"])) != p["fingerprint"]:
+            raise ValueError("The image changed after review. Check it again first.")
+        update(p["id"], status="accepted", detail="Image accepted. Project files are preserved.")
+        return "Image accepted"
+    if action == "resume" and p["status"] == "paused":
+        quick_image.resume_image_job(ROOT, job_id)
+        update(p["id"], status="working", detail="Resuming local image render")
+        return "Image resumed"
+    if action == "resume" and p["status"] == "needs_input":
+        previous = quick_image.image_job_status(ROOT, job_id)
+        output = Path(previous["output_path"])
+        if output.exists():
+            output = next(
+                output.with_name(f"{output.stem}-retry-{number}{output.suffix}")
+                for number in range(2, 1000)
+                if not output.with_name(f"{output.stem}-retry-{number}{output.suffix}").exists()
+            )
+        started = quick_image.start_image_job(ROOT, previous["prompt"], str(output))
+        update(p["id"], card="image-job:" + started["job_id"], status="working",
+               detail="Retrying local image render")
+        return "Image restarted"
+    raise ValueError("This control is unavailable for a local image render.")
+
+
 def process_music_request(p, action, note):
     """Apply task controls to a direct music render without touching Hermes."""
     import music_backend
@@ -1003,6 +1096,16 @@ def process_requests():
             if not p:
                 raise ValueError("This task has already been removed.")
             action, note = req["action"], req["note"]
+            if image_job_id(p):
+                result = process_image_request(p, action, note)
+                with database() as conn:
+                    conn.execute(
+                        "UPDATE requests SET status='done',result=? WHERE id=?",
+                        (result, req["id"]),
+                    )
+                if action == "note":
+                    sync_user_requests(p)
+                continue
             if music_job_id(p):
                 result = process_music_request(p, action, note)
                 with database() as conn:
@@ -1143,6 +1246,43 @@ def tick():
 
 def advance_project(p):
     """Advance one task; failures are isolated by the supervisor's tick."""
+    image_id = image_job_id(p)
+    if image_id:
+        if p["status"] in ("accepted", "stopped", "paused", "needs_input"):
+            return
+        if p["status"] == "ready_for_review":
+            if fingerprint(Path(p["folder"])) != p["fingerprint"]:
+                update(p["id"], status="needs_input",
+                       detail="Image files changed after review. Check them before accepting.")
+            return
+        import quick_image
+
+        job = quick_image.image_job_status(ROOT, image_id)
+        status = job["status"]
+        if status == "complete":
+            output = Path(job["result"]["path"])
+            if not quick_image.image_file_ok(output):
+                update(p["id"], status="needs_input",
+                       detail="The image maker returned a file that could not be decoded as a PNG.")
+                return
+            notes = Path(p["folder"]) / ".local-ai"
+            (notes / "PLAN.md").write_text(
+                "# Plan\n\n- [x] Generate the requested image locally.\n- [x] Check that the PNG has decodable pixels.\n",
+                encoding="utf-8",
+            )
+            (notes / "PROGRESS.md").write_text(
+                f"# Progress\n\nImage saved: {output.name} ({output.stat().st_size:,} bytes). Open files to view and review.\n",
+                encoding="utf-8",
+            )
+            update(p["id"], status="ready_for_review", detail=f"Image is ready: {output.name}",
+                   fingerprint=fingerprint(Path(p["folder"])))
+        elif status in ("error", "stopped"):
+            update(p["id"], status="needs_input", detail=str(job.get("current", "Image stopped")))
+        else:
+            current = str(job.get("current", "Generating image locally"))
+            if p["detail"] != current or p["status"] != "working":
+                update(p["id"], status="working", detail=current)
+        return
     job_id = music_job_id(p)
     if job_id:
         if p["status"] in ("accepted", "stopped", "paused", "needs_input"):
@@ -1305,7 +1445,8 @@ def ensure_gateway_current():
 def dispatch_ready_fallback():
     """Kick an idle board when the embedded dispatcher misses a ready task."""
     if any(
-        p["status"] in ("queued", "working", "checking") and not music_job_id(p)
+        p["status"] in ("queued", "working", "checking")
+        and not music_job_id(p) and not image_job_id(p)
         for p in projects()
     ):
         return board("dispatch", "--max", "1", "--json", parse=True, timeout=60)
@@ -1345,6 +1486,7 @@ def monitor():
     # Native gateway startup is idempotent and owns its own process lock.
     last_start = 0
     last_dispatch = 0
+    last_media_recovery = 0
     service_error = ""
     catalog_thread = None
     last_catalog_finish = None
@@ -1374,8 +1516,16 @@ def monitor():
                     name="computer-file-index",
                 )
                 catalog_thread.start()
+            if time.monotonic() - last_media_recovery >= 60:
+                last_media_recovery = time.monotonic()
+                import music_backend
+                import quick_image
+
+                music_backend.recover_music_jobs()
+                quick_image.recover_image_jobs(ROOT)
             active = any(
-                p["status"] in ("queued", "working", "checking") and not music_job_id(p)
+                p["status"] in ("queued", "working", "checking")
+                and not music_job_id(p) and not image_job_id(p)
                 for p in projects()
             )
             if not active:
@@ -2124,19 +2274,6 @@ def gui():
 
     threading.Thread(target=prepare_music_in_background, daemon=True).start()
 
-    def monitor_music_jobs():
-        """Bring interrupted music work back after reboot or a worker crash."""
-        import music_backend
-
-        while True:
-            try:
-                music_backend.recover_music_jobs()
-            except Exception:
-                pass
-            time.sleep(60)
-
-    threading.Thread(target=monitor_music_jobs, daemon=True).start()
-
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
     voice_busy = threading.Event()
@@ -2583,18 +2720,12 @@ def gui():
         while True:
             question, context, paths, kind = answer_requests.get()
             try:
-                if kind == "image":
-                    import quick_image
-
-                    destination = quick_image.generate(ROOT, question)
-                    conversation_events.put({"image": str(destination)})
-                else:
-                    answer = (
-                        file_chat.answer_from_files(question, paths)
-                        if paths
-                        else chat_assistant.answer_with_tools(question, context)
-                    )
-                    conversation_events.put(answer)
+                answer = (
+                    file_chat.answer_from_files(question, paths)
+                    if paths
+                    else chat_assistant.answer_with_tools(question, context)
+                )
+                conversation_events.put(answer)
             except Exception as exc:
                 conversation_events.put("I couldn't answer that yet: " + str(exc))
 
@@ -2675,8 +2806,14 @@ def gui():
         try:
             action = chat_assistant.route_with_files(raw_value, active, selected_paths)
             if action == "image":
-                assistant_reply("I'm making that image locally. I'll open it when it's ready.")
-                answer_requests.put((chat_assistant.image_prompt(raw_value), context, [], "image"))
+                setup = read_task_status(STATE / "install-progress.json")
+                if setup and setup.get("status") != "complete":
+                    add_project("", "", value, waiting_for_setup=True)
+                    assistant_reply("I saved your image task. I'll start it after setup finishes.")
+                else:
+                    add_image_project(value, chat_assistant.image_prompt(raw_value))
+                    assistant_reply("I'm making that image locally. Watch its progress in My Tasks.")
+                render_cards()
             elif action == "music":
                 setup = read_task_status(STATE / "install-progress.json")
                 if setup and setup.get("status") != "complete":
@@ -3396,6 +3533,8 @@ def gui():
                 card_info["eta"],
                 "Render time varies with the music model and song length."
                 if music_job_id(item) and item["status"] == "working"
+                else "Image generation time varies with this PC's GPU."
+                if image_job_id(item) and item["status"] == "working"
                 else task_eta.countdown(STATE / "projects.db", pid, percent, item["status"]),
             )
             update_task_controls(card_info, item)
