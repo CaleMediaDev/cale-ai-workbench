@@ -25,6 +25,13 @@ class VoiceTests(unittest.TestCase):
         self.assertTrue(call.call_args.kwargs["play"])
         self.assertEqual(call.call_args.kwargs["rate"], 2)
 
+    def test_long_chat_reply_is_spoken_without_truncation(self):
+        message = " ".join(f"word{index}" for index in range(150))
+        chunks = voice_assistant.speech_chunks(message)
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(0 < len(chunk) <= 280 for chunk in chunks))
+        self.assertEqual(" ".join(chunks), message)
+
     def test_handsfree_requires_name_and_recognizes_task_controls(self):
         self.assertIsNone(
             voice_assistant.spoken_command("pause the task", require_wake=True)

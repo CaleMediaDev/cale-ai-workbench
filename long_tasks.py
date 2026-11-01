@@ -1190,7 +1190,12 @@ def gui():
     icon_path = ROOT / "assets/cale-icon.ico"
     if icon_path.is_file():
         window.iconbitmap(default=str(icon_path))
-    window.geometry("1120x900")
+    # Use the available desktop height so the task list is visible at launch.
+    # Users can still restore and resize the window whenever they like.
+    if os.name == "nt":
+        window.state("zoomed")
+    else:
+        window.geometry("1120x900")
     window.minsize(850, 600)
     bg, card, field = "#0b1020", "#151d31", "#202d46"
     text, muted, accent = "#edf3ff", "#aab8d3", "#6e82ff"
@@ -1779,9 +1784,11 @@ def gui():
         while True:
             message, rate = speech_queue.get()
             try:
-                while voice_busy.is_set():
-                    time.sleep(0.2)
-                result = voice_assistant.say(message, rate=rate)
+                result = {}
+                for chunk in voice_assistant.speech_chunks(message):
+                    while voice_busy.is_set():
+                        time.sleep(0.2)
+                    result = voice_assistant.say(chunk, rate=rate)
                 if (
                     message.startswith("Oh my God, that's better")
                     and result.get("engine") == "Kokoro natural voice"
@@ -2036,7 +2043,7 @@ def gui():
 
     attach_button = ttk.Button(entry_row, text="Add files", command=show_attachment_menu)
 
-    def show_chat(role, content):
+    def show_chat(role, content, speak=True):
         at_bottom = conversation.yview()[1] >= 0.98
         conversation.configure(state="normal")
         prefix = ("You" if role == "user" else "Cale") + ": "
@@ -2057,13 +2064,15 @@ def gui():
         conversation.configure(state="disabled")
         if at_bottom:
             conversation.see("end")
+        if role == "assistant" and speak:
+            speak_update(content)
 
     def assistant_reply(content):
         save_chat("assistant", content)
         show_chat("assistant", content)
 
     for previous in chat_history(500):
-        show_chat(previous["role"], previous["content"])
+        show_chat(previous["role"], previous["content"], speak=False)
     conversation.see("end")
     if not chat_history():
         show_chat("assistant", "Hi! Ask me anything, or tell me what you'd like me to build.")

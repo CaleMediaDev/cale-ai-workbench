@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import tempfile
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -16,6 +17,14 @@ HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 WAKE = re.compile(r"^\s*hey\s+(?:cale|kale)\b[\s,.:;!-]*", re.IGNORECASE)
 IDLE_TIMES = (120, 600, 1800, 3600)
 STUCK_TIMES = (120, 480, 1200, 3600)
+
+
+def speech_chunks(message, limit=280):
+    """Split a chat reply without dropping text at the voice engine's limit."""
+    return textwrap.wrap(
+        str(message), width=limit, break_long_words=True,
+        break_on_hyphens=False, replace_whitespace=True, drop_whitespace=True,
+    )
 
 
 def opening_line(mode, subject="", sequence=0):
