@@ -434,7 +434,7 @@ async def make_music(
     prompt: str, output_path: str, lyrics: str = "",
     duration_seconds: int = 30, instrumental: bool = False,
 ) -> dict:
-    """Create a local song or instrumental with ACE-Step 1.5; first use installs its model."""
+    """Create a local song or instrumental with ACE-Step. For long work, use start_music_job instead."""
     import music_backend
 
     return await asyncio.wait_for(
@@ -451,7 +451,7 @@ async def cover_music(
     source_path: str, prompt: str, output_path: str,
     duration_seconds: int = 30,
 ) -> dict:
-    """Create a local style cover of an existing WAV, MP3 or FLAC file with ACE-Step."""
+    """Create a local style cover. For long work, use start_music_job with source_path."""
     import music_backend
 
     return await asyncio.wait_for(
@@ -461,6 +461,28 @@ async def cover_music(
         ),
         timeout=7500,
     )
+
+
+@server.tool()
+def start_music_job(
+    prompt: str, output_path: str, lyrics: str = "",
+    duration_seconds: int = 30, instrumental: bool = False,
+    source_path: str = "",
+) -> dict:
+    """Start a durable local song, instrumental, or cover job and return its ID immediately. Poll music_job_status."""
+    import music_backend
+
+    return music_backend.start_music_job(
+        prompt, output_path, lyrics, duration_seconds, instrumental, source_path
+    )
+
+
+@server.tool()
+def music_job_status(job_id: str) -> dict:
+    """Check a started local music job; complete status includes the saved audio path."""
+    import music_backend
+
+    return music_backend.music_job_status(job_id)
 
 
 @server.tool()

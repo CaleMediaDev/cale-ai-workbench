@@ -11,7 +11,9 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -22,6 +24,7 @@ ENGINE = ROOT / "Media" / "music" / "ACE-Step-1.5"
 REVISION = "ca1e85fe9430179831e6bc6be790c332190a3866"
 BASE = "http://127.0.0.1:8001"
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+JOBS = ROOT / "LongTasks" / "music-jobs"
 
 
 @contextmanager
@@ -263,3 +266,85 @@ def generate_music(
             "source_path": str(source) if source else None,
         }
     raise TimeoutError("Music generation exceeded two hours.")
+
+
+def _job_path(job_id: str) -> Path:
+    if len(job_id) != 32 or any(char not in "0123456789abcdef" for char in job_id):
+        raise ValueError("Invalid local music job ID.")
+    return JOBS / (job_id + ".json")
+
+
+def _write_job(job_id: str, info: dict) -> None:
+    path = _job_path(job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def music_job_status(job_id: str) -> dict:
+    """Read a durable music job without waiting for model setup or generation."""
+    path = _job_path(job_id)
+    if not path.is_file():
+        raise ValueError("Music job not found.")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def start_music_job(
+    prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
+    instrumental: bool = False, source_path: str = "",
+) -> dict:
+    """Launch a persistent local job; the agent can continue while it runs."""
+    if not prompt.strip() or not 10 <= duration_seconds <= 600:
+        raise ValueError("Describe 10 to 600 seconds of music to create.")
+    target = Path(output_path).resolve()
+    if target.suffix.lower() not in (".wav", ".mp3", ".flac") or target.exists():
+        raise ValueError("Choose a new WAV, MP3 or FLAC output file.")
+    if source_path and not Path(source_path).resolve().is_file():
+        raise ValueError("The cover source file does not exist.")
+    python = ROOT / "Toolbox" / "python" / "Scripts" / "python.exe"
+    if not python.is_file():
+        raise RuntimeError("The local Toolbox runtime is missing.")
+    job_id = uuid.uuid4().hex
+    info = {
+        "job_id": job_id, "status": "queued", "current": "Starting local music",
+        "prompt": prompt, "output_path": str(target), "lyrics": lyrics,
+        "duration_seconds": duration_seconds, "instrumental": bool(instrumental),
+        "source_path": source_path, "created": time.time(),
+    }
+    _write_job(job_id, info)
+    log_path = JOBS / (job_id + ".log")
+    try:
+        with log_path.open("ab") as log:
+            subprocess.Popen(
+                [str(python), str(ROOT / "music_backend.py"), "--run-job", job_id],
+                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                creationflags=HIDE,
+            )
+    except OSError as exc:
+        _write_job(job_id, {**info, "status": "error", "current": str(exc)[:300]})
+        raise
+    return {"job_id": job_id, "status": "queued", "output_path": str(target)}
+
+
+def _run_job(job_id: str) -> None:
+    info = music_job_status(job_id)
+    _write_job(job_id, {**info, "status": "working", "current": "Generating music locally"})
+    try:
+        result = generate_music(
+            info["prompt"], info["output_path"], info["lyrics"],
+            info["duration_seconds"], info["instrumental"], info["source_path"],
+        )
+        _write_job(job_id, {
+            **info, "status": "complete", "current": "Music is ready",
+            "result": result, "finished": time.time(),
+        })
+    except Exception as exc:
+        _write_job(job_id, {
+            **info, "status": "error", "current": str(exc)[:300],
+            "finished": time.time(),
+        })
+
+
+if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--run-job":
+    _run_job(sys.argv[2])

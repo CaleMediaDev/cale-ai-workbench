@@ -92,3 +92,30 @@ def test_prefetch_downloads_in_background_on_capable_pc(tmp_path):
     assert '"status": "complete"' in (
         tmp_path / "LongTasks" / "music-install-progress.json"
     ).read_text()
+
+
+def test_durable_music_job_survives_the_starting_process(tmp_path):
+    python = tmp_path / "Toolbox" / "python" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"launcher")
+    jobs = tmp_path / "LongTasks" / "music-jobs"
+    output = tmp_path / "song.mp3"
+    with patch.object(music_backend, "ROOT", tmp_path), patch.object(
+        music_backend, "JOBS", jobs
+    ), patch.object(music_backend.subprocess, "Popen") as process:
+        started = music_backend.start_music_job("upbeat piano", str(output))
+        assert started["status"] == "queued"
+        assert music_backend.music_job_status(started["job_id"])["status"] == "queued"
+        process.assert_called_once()
+        with patch.object(
+            music_backend, "generate_music", return_value={"path": str(output)}
+        ):
+            music_backend._run_job(started["job_id"])
+        completed = music_backend.music_job_status(started["job_id"])
+    assert completed["status"] == "complete"
+    assert completed["result"]["path"] == str(output)
+
+
+def test_music_job_id_cannot_escape_job_directory():
+    with pytest.raises(ValueError, match="Invalid local music job ID"):
+        music_backend.music_job_status("../outside")
