@@ -1917,6 +1917,7 @@ def gui():
     import voice_assistant
     from cloud_ai import (
         connect_account,
+        credentials,
         disconnect,
         disconnect_provider,
         ensure_router,
@@ -2362,7 +2363,8 @@ def gui():
         text=("Optional: connect your own provider account. Cale may send task text and tool results "
               "there when it is faster. Confirm your account is on its free plan first; "
               "a paid account key can still incur charges. Hugging Face includes only a tiny monthly "
-              "credit, so Cale allows at most two calls there each month. Go offline to keep all work on this PC."),
+              "credit, so Cale allows at most two calls there each month. NVIDIA's free hosted "
+              "endpoints are for prototyping. Go offline to keep all work on this PC."),
         style="Muted.TLabel", wraplength=720,
     ).pack(anchor="w", pady=(0, 7))
     provider_names = {spec["name"]: code for code, spec in cloud_providers.PROVIDERS.items()}
@@ -2380,7 +2382,12 @@ def gui():
     free_plan = tk.BooleanVar(value=False)
     ttk.Checkbutton(super_page, text="I checked that this account uses the provider's free plan or credits",
                     variable=free_plan).pack(anchor="w")
-    provider_status = tk.StringVar(value="No other provider connected yet.")
+    connected_providers = credentials().get("provider_keys") or {}
+    connected_names = [cloud_providers.PROVIDERS[code]["name"] for code in connected_providers
+                       if code in cloud_providers.PROVIDERS]
+    provider_status = tk.StringVar(value=(
+        "Connected: " + ", ".join(connected_names) if connected_names
+        else "No other provider connected yet."))
 
     def save_cloud_provider():
         try:
