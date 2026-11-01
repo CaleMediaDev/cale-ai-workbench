@@ -10,7 +10,7 @@ import tempfile
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import quote, unquote, urljoin, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlsplit
 
 from mcp.server import MCPServer
 
@@ -227,37 +227,50 @@ def read_webpage(url: str, find: str = "", start_char: int = 0) -> dict:
 
 @server.tool()
 def search_web(query: str) -> dict:
-    """Search the public web; result snippets are leads, not verified facts."""
-    """Search the public web using Brave Search. Returns links to investigate, not verified facts. Follow relevant official links with read_webpage. No paid API required."""
+    """Search the public web; Brave falls back to DuckDuckGo Lite if needed."""
     if not query.strip() or len(query) > 1000:
         raise ValueError("Provide a search query between 1 and 1000 characters.")
-    url, content, _, _ = fetch("https://search.brave.com/search?q=" + quote(query))
-    page = Page(url)
-    page.feed(content)
-    results, seen = [], set()
-    for link in page.links:
-        p = urlsplit(link["url"])
-        if p.scheme not in ("http", "https") or not p.hostname or not link["title"]:
+    errors = []
+    searches = (
+        ("Brave", "https://search.brave.com/search?q=" + quote(query)),
+        ("DuckDuckGo Lite", "https://lite.duckduckgo.com/lite/?q=" + quote(query)),
+    )
+    for engine, search_url in searches:
+        try:
+            url, content, _, _ = fetch(search_url)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+            errors.append(f"{engine}: {str(exc)[:160]}")
             continue
-        if (
-            p.hostname == "brave.com"
-            or p.hostname.endswith(".brave.com")
-            or link["url"] in seen
-        ):
-            continue
-        seen.add(link["url"])
-        results.append(link)
-    if not results:
-        return {
-            "query": query,
-            "results": [],
-            "error": "Search returned no usable links, possibly blocked. Try an official URL directly or browser search; do not invent results.",
-        }
+        page = Page(url)
+        page.feed(content)
+        results, seen = [], set()
+        for link in page.links:
+            target = link["url"]
+            parsed = urlsplit(target)
+            if parsed.hostname and parsed.hostname.endswith("duckduckgo.com"):
+                target = parse_qs(parsed.query).get("uddg", [target])[0]
+                parsed = urlsplit(target)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname or not link["title"]:
+                continue
+            if parsed.hostname in ("brave.com", "duckduckgo.com") or parsed.hostname.endswith((".brave.com", ".duckduckgo.com")):
+                continue
+            if target in seen:
+                continue
+            seen.add(target)
+            results.append({"title": link["title"], "url": target})
+        if results:
+            return {
+                "query": query,
+                "search_url": url,
+                "search_engine": engine,
+                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                "results": results[:12],
+            }
+        errors.append(f"{engine}: no usable links")
     return {
         "query": query,
-        "search_url": url,
-        "retrieved_at": datetime.now(timezone.utc).isoformat(),
-        "results": results[:12],
+        "results": [],
+        "error": "Search returned no usable links. " + "; ".join(errors),
     }
 
 

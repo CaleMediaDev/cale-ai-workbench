@@ -1481,7 +1481,21 @@ def gui():
 
     def show_chat(role, content):
         conversation.configure(state="normal")
-        conversation.insert("end", ("You" if role == "user" else "Cale") + ": " + content + "\n", role)
+        prefix = ("You" if role == "user" else "Cale") + ": "
+        start = conversation.index("end-1c")
+        conversation.insert("end", prefix + content + "\n", role)
+        for match in re.finditer(r"https?://[^\s<>]+", content):
+            url = match.group().rstrip(".,;)")
+            if not url:
+                continue
+            tag = "link-" + uuid.uuid4().hex
+            first = f"{start}+{len(prefix) + match.start()}c"
+            last = f"{first}+{len(url)}c"
+            conversation.tag_add(tag, first, last)
+            conversation.tag_configure(tag, foreground="#8ec9ff", underline=True)
+            conversation.tag_bind(tag, "<Button-1>", lambda _, link=url: webbrowser.open(link))
+            conversation.tag_bind(tag, "<Enter>", lambda _: conversation.configure(cursor="hand2"))
+            conversation.tag_bind(tag, "<Leave>", lambda _: conversation.configure(cursor=""))
         conversation.configure(state="disabled")
         conversation.see("end")
 

@@ -7,6 +7,23 @@ import web_tools
 
 
 class BusinessContactTests(unittest.TestCase):
+    def test_search_falls_back_after_brave_rate_limit(self):
+        html = (
+            '<a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.gov%2Fstory">'
+            'Official story</a>'
+        )
+        with patch.object(
+            web_tools, "fetch",
+            side_effect=[RuntimeError("HTTP 429"), (
+                "https://lite.duckduckgo.com/lite/?q=test", html,
+                "text/html", 200,
+            )],
+        ) as fetch:
+            result = web_tools.search_web("test")
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(result["search_engine"], "DuckDuckGo Lite")
+        self.assertEqual(result["results"][0]["url"], "https://example.gov/story")
+
     def test_contact_from_matching_live_page(self):
         search = {
             "results": [

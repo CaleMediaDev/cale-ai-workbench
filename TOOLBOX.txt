@@ -6,6 +6,8 @@ the optional connected account can use free cloud inference with local fallback.
 Already available: terminal commands, read/write/patch files, file search,
 Git, Python, Node, memory, reusable skills, public web search and page reading,
 Playwright browser automation, and persistent Hermes task boards.
+Public search uses Brave with DuckDuckGo Lite fallback if the first service is
+rate limited. Search links are leads; read the destination page for evidence.
 
 NEW SPECIALIST TOOLS
 Call mcp__toolbox__toolbox_search with a short purpose, then toolbox_schema
