@@ -646,6 +646,62 @@ class CloudTests(unittest.TestCase):
             paid.assert_called_once()
             free.assert_called_once()
 
+    def test_paid_saver_uses_fast_free_account_before_enabled_paid_plan(self):
+        cloud.routing_mode.save(cloud.STATE, "paid_saver")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (
+            patch.object(cloud, "task_size", return_value="deep"),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete") as paid,
+            patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
+        ):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        free.assert_called_once()
+        paid.assert_not_called()
+
+    def test_paid_saver_uses_enabled_plan_only_after_local_failure(self):
+        cloud.routing_mode.save(cloud.STATE, "paid_saver")
+        with (
+            patch.object(cloud, "task_size", return_value="deep"),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
+            patch.object(cloud, "post", side_effect=OSError("local model unavailable")),
+        ):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        paid.assert_called_once()
+
+    def test_floor_it_chooses_fastest_eligible_connected_route(self):
+        cloud.routing_mode.save(cloud.STATE, "floor_it")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (
+            patch.object(cloud, "task_size", return_value="quick"),
+            patch("usage_history.recent_local_speed", return_value=30),
+            patch("usage_history.recent_provider_speed",
+                  side_effect=lambda name, default: {"groq": 900, "chatgpt": 150}.get(name, default)),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete") as paid,
+            patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
+        ):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        free.assert_called_once()
+        paid.assert_not_called()
+
+    def test_floor_it_can_spend_enabled_plan_on_quick_work_when_fastest(self):
+        cloud.routing_mode.save(cloud.STATE, "floor_it")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (
+            patch.object(cloud, "task_size", return_value="quick"),
+            patch("usage_history.recent_local_speed", return_value=30),
+            patch("usage_history.recent_provider_speed",
+                  side_effect=lambda name, default: {"groq": 150, "chatgpt": 900}.get(name, default)),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
+            patch.object(cloud_providers, "complete") as free,
+        ):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        paid.assert_called_once()
+        free.assert_not_called()
+
     def test_paid_quota_error_is_learned_and_falls_back_to_free(self):
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
         with (

@@ -34,6 +34,7 @@ from jsonschema.validators import validator_for
 import cloud_providers
 import pc_offline
 import routing_memory
+import routing_mode
 from auto_route import model_order, repair_messages, task_size
 from model_identity import configured_main_alias, configured_permissive_alias
 from model_library import (
@@ -726,61 +727,79 @@ class Router:
             payload = {**payload, "messages": repaired}
         offline_mode = pc_offline.offline()
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
+        mode = routing_mode.load(STATE) if profile == "main" else routing_mode.DEFAULT
         reason = "Cloud is not connected."
         local_speed = usage_history.recent_local_speed(
             70 if size == "quick" else 35 if size == "balanced" else 15,
             models=local_speed_models(size),
         )
         paid_pressure = routing_memory.pressure("chatgpt")
-        # Learn from observed limits without pretending to know the account's
-        # remaining allowance. Quick work is kept local; repeated plan limits
-        # reserve paid access for deep work after its cooldown expires.
-        if (
-            profile == "main"
-            and routing_memory.use_paid(size, local_speed, paid_pressure)
-            and not offline_mode
-            and time.time() >= self.chatgpt_cooldown
-        ):
+        account = credentials() if profile == "main" and not offline_mode else {}
+        keys = account.get("provider_keys") or {}
+        confirmed = account.get("free_confirmed") or {}
+        connected = [(provider, spec) for provider, spec in cloud_providers.PROVIDERS.items()
+                     if keys.get(provider) and confirmed.get(provider)]
+        measured_speeds = {
+            provider: usage_history.recent_provider_speed(provider, spec["speed"])
+            for provider, spec in connected
+        }
+        paid_speed = (
+            usage_history.recent_provider_speed("chatgpt", 140)
+            if mode == "floor_it" else 140
+        )
+        openrouter_speed = usage_history.recent_provider_speed("openrouter", 120) if key else 0
+        fastest_free_speed = max([openrouter_speed, *measured_speeds.values()], default=0)
+        paid_attempted = False
+
+        def try_paid():
+            nonlocal paid_attempted, reason
+            if (profile != "main" or offline_mode or paid_attempted
+                    or time.time() < self.chatgpt_cooldown
+                    or time.time() - paid_pressure["last_limit"] < 3600):
+                return None
             try:
                 import chatgpt_auth
 
-                if chatgpt_auth.status()["enabled"]:
-                    started = time.monotonic()
-                    result = valid_completion(chatgpt_auth.complete(payload, size=size), payload)
-                    routing_memory.record("chatgpt", size, "success")
-                    usage_history.record_completion(result, "chatgpt", time.monotonic() - started)
-                    record(
-                        "ChatGPT plan",
-                        "User-enabled ChatGPT plan response received.",
-                        result.get("model", ""),
-                    )
-                    return retry_derestricted(payload, result, result.get("model", ""))
+                if not chatgpt_auth.status()["enabled"]:
+                    return None
+                paid_attempted = True
+                started = time.monotonic()
+                result = valid_completion(chatgpt_auth.complete(payload, size=size), payload)
+                routing_memory.record("chatgpt", size, "success")
+                usage_history.record_completion(result, "chatgpt", time.monotonic() - started)
+                record("ChatGPT plan", "User-enabled ChatGPT plan response received.",
+                       result.get("model", ""))
+                return retry_derestricted(payload, result, result.get("model", ""))
             except Exception as exc:
+                paid_attempted = True
                 kind = routing_memory.failure_kind(exc)
                 routing_memory.record("chatgpt", size, kind)
                 self.chatgpt_cooldown = time.time() + (3600 if kind == "limit" else 120)
                 reason = "ChatGPT plan unavailable; trying free cloud or local AI."
+                return None
+
+        # Learn from observed limits without pretending to know the account's
+        # remaining allowance. Quick work is kept local; repeated plan limits
+        # reserve paid access for deep work after its cooldown expires.
+        if profile == "main" and routing_mode.paid_first(
+            mode, size, local_speed, paid_speed, fastest_free_speed,
+            routing_memory.use_paid(size, local_speed, paid_pressure),
+        ):
+            paid_result = try_paid()
+            if paid_result is not None:
+                return paid_result
         required_context = estimated_context(payload)
         openrouter_attempted = False
         # Free-plan connections are optional. A fast connected provider gets
         # the first shot when it can hold the whole request. Errors, quotas,
         # and offline mode leave the local route intact.
         if profile == "main" and not offline_mode:
-            account = credentials()
-            keys = account.get("provider_keys") or {}
-            confirmed = account.get("free_confirmed") or {}
             expected_output = min(8192, int(payload.get("max_tokens") or
                                             payload.get("max_completion_tokens") or 4096))
             prompt_estimate = max(1, len(json.dumps({
                 "messages": payload.get("messages", []),
                 "tools": payload.get("tools", []),
             }, ensure_ascii=True).encode("utf-8")) // 3)
-            connected = [(provider, spec) for provider, spec in cloud_providers.PROVIDERS.items()
-                         if keys.get(provider) and confirmed.get(provider)]
-            measured_speeds = {
-                provider: usage_history.recent_provider_speed(provider, spec["speed"])
-                for provider, spec in connected
-            }
             for provider, spec in sorted(connected,
                                          key=lambda pair: measured_speeds[pair[0]], reverse=True):
                 provider_key = keys.get(provider)
@@ -791,8 +810,11 @@ class Router:
                 if (not provider_key or not confirmed.get(provider)
                         or provider_context > spec["context"]
                         or (time.time() - provider_pressure["last_limit"] < 3600)
-                        or not routing_memory.use_free(size, local_speed, provider_pressure)
-                        or not cloud_providers.likely_faster(size, measured_speeds[provider], local_speed)
+                        or not routing_mode.free_first(
+                            mode,
+                            routing_memory.use_free(size, local_speed, provider_pressure),
+                            cloud_providers.likely_faster(size, measured_speeds[provider], local_speed),
+                        )
                         or not self.reserve_provider_request(provider, estimated_cost, estimated_tokens)):
                     continue
                 try:
@@ -822,9 +844,13 @@ class Router:
         ) if profile == "main" and not offline_mode else False
         # Prefer an eligible direct free-plan account before spending the
         # smaller shared OpenRouter free allowance on demanding work.
-        if (key and (size == "deep" or slow_long_context)
-                and routing_memory.use_free(
-                    size, local_speed, routing_memory.pressure("openrouter"))
+        if (key and routing_mode.free_first(
+                    mode,
+                    routing_memory.use_free(
+                        size, local_speed, routing_memory.pressure("openrouter")),
+                    (size == "deep" or slow_long_context) if mode == "medium" else
+                    cloud_providers.likely_faster(size, openrouter_speed, local_speed),
+                )
                 and self.reserve_free_request()):
             openrouter_attempted = True
             try:
@@ -841,6 +867,11 @@ class Router:
             except Exception as exc:
                 routing_memory.record("openrouter", size, routing_memory.failure_kind(exc))
                 self.cooldown = time.time() + 120
+        if (mode == "floor_it" and profile == "main" and not offline_mode
+                and paid_speed > local_speed):
+            paid_result = try_paid()
+            if paid_result is not None:
+                return paid_result
         selected = (
             self.local_candidates(size, required_context)
             if profile == "main"
@@ -910,6 +941,10 @@ class Router:
                 reason = "Free cloud unavailable or incompatible."
         elif key:
             reason = "Free quota, rate limit or cooldown reached."
+        if mode in ("paid_saver", "floor_it") and profile == "main" and not offline_mode:
+            paid_result = try_paid()
+            if paid_result is not None:
+                return paid_result
         record("unavailable", reason, selected[-1] if selected else "")
         if last_error:
             raise last_error

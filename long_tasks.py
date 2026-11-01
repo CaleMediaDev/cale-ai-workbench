@@ -27,6 +27,7 @@ from pathlib import Path
 import cale_voice
 import chrome_connector
 import project_memory
+import routing_mode
 import runtime_diagnostics
 import runtime_features
 import self_diagnostics
@@ -2518,6 +2519,10 @@ def gui():
     style.map("Accent.TButton", background=[("active", "#8797ff")])
     style.configure("Danger.TButton", background="#a94358", foreground="white")
     style.map("Danger.TButton", background=[("active", "#c15367")])
+    style.configure("Mode.TButton", padding=(7, 4), font=("Segoe UI", 9, "bold"))
+    style.configure("SelectedMode.TButton", background=accent, foreground="white",
+                    padding=(7, 4), font=("Segoe UI", 9, "bold"))
+    style.map("SelectedMode.TButton", background=[("active", "#8797ff")])
     style.configure("Tiny.TButton", padding=(2, 2), font=("Segoe UI", 8, "bold"))
     style.configure(
         "Cale.Horizontal.TProgressbar",
@@ -3681,8 +3686,37 @@ def gui():
     ).pack(anchor="w", pady=(0, 3))
     chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=12)
     chat_panel.pack(side="left", fill="both", expand=True)
-    ttk.Label(chat_panel, text="Chat with Cale", style="Card.TLabel",
-              font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 5))
+    chat_heading = ttk.Frame(chat_panel, style="Card.TFrame")
+    chat_heading.pack(fill="x", pady=(0, 5))
+    ttk.Label(chat_heading, text="Chat with Cale", style="Card.TLabel",
+              font=("Segoe UI", 12, "bold")).pack(side="left")
+    mode_row = ttk.Frame(chat_heading, style="Card.TFrame")
+    mode_row.pack(side="right")
+    selected_mode = [routing_mode.load(ROOT / "Cloud")]
+    mode_buttons = {}
+
+    def select_mode(mode):
+        try:
+            routing_mode.save(ROOT / "Cloud", mode)
+            selected_mode[0] = mode
+            for key, button in mode_buttons.items():
+                button.configure(style="SelectedMode.TButton" if key == mode else "Mode.TButton")
+            status.set({
+                "paid_saver": "Paid saver: free and local first; paid help only if they fail.",
+                "medium": "Medium: Cale balances speed and available allowance.",
+                "floor_it": "Floor it: fastest eligible connected route first, within account limits.",
+            }[mode])
+        except OSError as exc:
+            status.set("Could not save routing mode: " + str(exc)[:120])
+
+    for mode, label in (("paid_saver", "Paid saver"), ("medium", "Medium"),
+                        ("floor_it", "Floor it")):
+        button = ttk.Button(
+            mode_row, text=label, command=lambda choice=mode: select_mode(choice),
+            style="SelectedMode.TButton" if selected_mode[0] == mode else "Mode.TButton",
+        )
+        button.pack(side="left", padx=(4, 0))
+        mode_buttons[mode] = button
     conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=142)
     conversation_frame.pack(fill="both", expand=True)
     conversation_frame.pack_propagate(False)
@@ -4541,10 +4575,53 @@ def gui():
         ttk.Label(top, textvariable=state_var, style="CardMuted.TLabel").pack(
             side="right", padx=(0, 15)
         )
-        bar = ttk.Progressbar(
-            panel, value=0, maximum=100, style="Cale.Horizontal.TProgressbar"
-        )
-        bar.pack(fill="x", pady=(10, 7))
+        # A segmented gauge remains readable even when several tasks are
+        # visible. Its tick marks give progress a scale without extra rows.
+        gauge = tk.Canvas(panel, height=31, background=card, highlightthickness=0)
+        gauge.pack(fill="x", pady=(9, 5))
+
+        def draw_gauge(_event=None):
+            width = gauge.winfo_width()
+            if width < 60:
+                return
+            gauge.delete("all")
+            value = int(gauge.percent)
+            step_count = 32
+            gap = 3
+            usable = width - 2
+            step_width = (usable - gap * (step_count - 1)) / step_count
+            active = round(value * step_count / 100)
+            state = gauge.task_state
+            for index in range(step_count):
+                x = 1 + index * (step_width + gap)
+                if index < active:
+                    if state in ("paused", "needs_input"):
+                        fill = "#f3b85b"
+                    elif state in ("failed", "stopped"):
+                        fill = "#ef697d"
+                    elif state in ("accepted", "ready_for_review", "complete"):
+                        fill = "#48d9a0"
+                    else:
+                        blend = index / max(1, step_count - 1)
+                        start, end = (38, 213, 199), (120, 111, 255)
+                        fill = "#{:02x}{:02x}{:02x}".format(*(
+                            round(a + (b - a) * blend)
+                            for a, b in zip(start, end)
+                        ))
+                else:
+                    fill = "#2b3853"
+                gauge.create_rectangle(x, 2, x + step_width, 16,
+                                       fill=fill, outline="")
+            for value_label in (0, 25, 50, 75, 100):
+                x = 3 + (width - 6) * value_label / 100
+                gauge.create_text(x, 25, text=str(value_label), fill="#788bab",
+                                  anchor="w" if value_label == 0 else
+                                  "e" if value_label == 100 else "center",
+                                  font=("Segoe UI", 8))
+
+        gauge.percent = 0
+        gauge.task_state = ""
+        gauge.bind("<Configure>", draw_gauge)
         current_var = tk.StringVar(value="")
         ttk.Label(
             panel, textvariable=current_var, style="CardMuted.TLabel", wraplength=900
@@ -4559,7 +4636,8 @@ def gui():
             "title": title_var,
             "percent": percent_var,
             "state": state_var,
-            "bar": bar,
+            "gauge": gauge,
+            "draw_gauge": draw_gauge,
             "current": current_var,
             "eta": eta_var,
         }
@@ -4569,8 +4647,11 @@ def gui():
         set_text(card_info["percent"], f"{percent}%")
         set_text(card_info["current"], current)
         set_text(card_info["state"], state)
-        if int(float(card_info["bar"]["value"])) != percent:
-            card_info["bar"].configure(value=percent)
+        gauge = card_info["gauge"]
+        if gauge.percent != percent or gauge.task_state != state.lower().replace(" ", "_"):
+            gauge.percent = percent
+            gauge.task_state = state.lower().replace(" ", "_")
+            card_info["draw_gauge"]()
 
     def choices_for(state):
         if state in ("queued", "waiting_for_setup", "working", "checking"):
