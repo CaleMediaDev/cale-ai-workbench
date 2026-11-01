@@ -176,10 +176,13 @@ class SelfUpdateTests(unittest.TestCase):
             ]
             with (patch.object(self_update, "ROOT", root),
                   patch("psutil.Process", return_value=process),
-                  patch("cloud_ai.ensure_router") as start):
+                  patch.object(self_update.subprocess, "run",
+                               return_value=MagicMock(returncode=0)) as start):
                 self_update.restart_router_after_update()
             process.terminate.assert_called_once()
             start.assert_called_once()
+            self.assertEqual(start.call_args.args[0][-2:],
+                             [str(root / "cloud_ai.py"), "--ensure"])
 
     def test_candidate_needs_digest_and_newer_version(self):
         asset = {

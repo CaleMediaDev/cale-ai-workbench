@@ -1056,6 +1056,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--ensure-token", action="store_true")
+    parser.add_argument("--ensure", action="store_true")
     parser.add_argument("--connect", action="store_true")
     parser.add_argument("--status", action="store_true")
     args = parser.parse_args()
@@ -1063,6 +1064,8 @@ if __name__ == "__main__":
         serve()
     elif args.ensure_token:
         print(ensure_router())  # Launchers capture; never log this output.
+    elif args.ensure:
+        ensure_router()
     elif args.connect:
         connect_account()
     elif args.status:

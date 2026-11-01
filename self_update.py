@@ -457,9 +457,17 @@ def restart_router_after_update():
                 process.wait(timeout=5)
     except (OSError, ValueError, psutil.Error):
         pass
-    from cloud_ai import ensure_router
-
-    ensure_router()
+    # active_tasks() imported the old long_tasks/model_library modules earlier
+    # in this updater process. Starting the new router in a fresh interpreter
+    # avoids mixing those cached modules with newly swapped cloud_ai.py.
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "cloud_ai.py"), "--ensure"],
+        cwd=ROOT, stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode:
+        raise RuntimeError("The updated local AI router could not start.")
 
 
 def reopen_desktop():
