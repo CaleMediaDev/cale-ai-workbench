@@ -140,6 +140,69 @@ def chat_history(limit=50):
     return [dict(row) for row in reversed(rows)]
 
 
+CHAT_SEARCH_STOPWORDS = frozenset({
+    "a", "about", "am", "an", "and", "are", "can", "did", "do", "for", "from",
+    "have", "how", "i", "in", "is", "it", "me", "my", "of", "on", "our", "please",
+    "remember", "tell", "that", "the", "this", "to", "was", "were", "what",
+    "when", "where", "which", "who", "why", "you", "your",
+})
+
+
+def chat_context(question, recent=10, recall=2):
+    """Recall matching older user details without sending the whole chat log.
+
+    FTS5 is built once for existing installations. A trigger indexes future
+    user messages; assistant replies are excluded because they are not an
+    authoritative record of the user's preferences or facts.
+    """
+    with database() as conn:
+        latest = conn.execute(
+            "SELECT id,role,content FROM chat_messages ORDER BY id DESC LIMIT ?",
+            (recent,),
+        ).fetchall()
+        history = [
+            {"role": row["role"], "content": row["content"][:1800]}
+            for row in reversed(latest)
+        ]
+        words = list(dict.fromkeys(
+            word.casefold() for word in re.findall(r"\w+", question)
+            if len(word) >= 2 and word.casefold() not in CHAT_SEARCH_STOPWORDS
+        ))[:8]
+        if not words or not latest or recall <= 0:
+            return history
+        try:
+            conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chat_user_fts USING fts5(content, tokenize='unicode61')")
+            conn.execute("CREATE TABLE IF NOT EXISTS chat_search_meta (key TEXT PRIMARY KEY)")
+            conn.execute("""CREATE TRIGGER IF NOT EXISTS chat_user_fts_insert
+                AFTER INSERT ON chat_messages WHEN new.role='user'
+                BEGIN INSERT INTO chat_user_fts(rowid,content) VALUES(new.id,new.content); END""")
+            conn.commit()
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute(
+                "SELECT 1 FROM chat_search_meta WHERE key='backfilled'"
+            ).fetchone():
+                conn.execute("""INSERT INTO chat_user_fts(rowid,content)
+                    SELECT m.id,m.content FROM chat_messages m WHERE m.role='user'
+                    AND NOT EXISTS (SELECT 1 FROM chat_user_fts f WHERE f.rowid=m.id)""")
+                conn.execute("INSERT INTO chat_search_meta(key) VALUES('backfilled')")
+            conn.commit()
+            query = " OR ".join(f'"{word}"' for word in words)
+            older = conn.execute(
+                """SELECT m.id,m.content FROM chat_user_fts
+                   JOIN chat_messages m ON m.id=chat_user_fts.rowid
+                   WHERE chat_user_fts MATCH ? AND m.id<?
+                   ORDER BY bm25(chat_user_fts),m.id DESC LIMIT ?""",
+                (query, latest[-1]["id"], recall),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return history  # Recent chat still works if the search index is unavailable.
+    recalled = [
+        {"role": "user", "content": "Earlier user message from saved chat (may be outdated): " + row["content"][:900]}
+        for row in sorted(older, key=lambda item: item["id"])
+    ]
+    return recalled + history
+
+
 def save_chat(role, content):
     if role not in ("user", "assistant"):
         raise ValueError("Invalid chat role")
@@ -2173,7 +2236,7 @@ def gui():
         # The pending question belongs only once in the model conversation.
         # Keep machine-readable paths in the task brief, while the chat shows
         # a short, readable reminder of what the person selected.
-        context = chat_history(12)
+        context = chat_context(raw_value)
         displayed = raw_value
         if selected_paths:
             names = ", ".join(Path(path).name for path in selected_paths[:3])

@@ -93,6 +93,30 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(item["title"], "Make a simple recipe app")
         self.assertTrue((Path(item["folder"]) / ".local-ai").is_dir())
 
+    def test_chat_recalls_older_user_detail_without_trusting_old_answers(self):
+        task_module.save_chat("user", "My dog's name is Rufus.")
+        task_module.save_chat("assistant", "Your dog's name is Wrong.")
+        for number in range(12):
+            task_module.save_chat("user", f"Unrelated message {number}")
+            task_module.save_chat("assistant", f"Reply {number}")
+        context = task_module.chat_context("What is my dog's name?", recent=4)
+        self.assertEqual(len(context), 5)
+        self.assertIn("Rufus", context[0]["content"])
+        self.assertIn("may be outdated", context[0]["content"])
+        self.assertNotIn("Wrong", str(context))
+        self.assertEqual(context[-1]["content"], "Reply 11")
+        import chat_assistant
+        with patch("cloud_ai.post", return_value={"choices": [{"message": {"content": "Rufus"}}]}) as model:
+            self.assertEqual(chat_assistant.local_answer("What is my dog's name?", context), "Rufus")
+        self.assertTrue(any("Rufus" in item["content"] for item in model.call_args.args[1]["messages"]))
+
+        # The insert trigger also indexes messages added after migration.
+        task_module.save_chat("user", "My favorite color is teal.")
+        for number in range(4):
+            task_module.save_chat("assistant", f"Other reply {number}")
+        later = task_module.chat_context("What is my favorite color?", recent=2)
+        self.assertIn("teal", later[0]["content"])
+
     def test_task_saved_during_setup_starts_after_setup_finishes(self):
         task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"

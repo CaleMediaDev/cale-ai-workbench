@@ -428,12 +428,13 @@ def local_answer(question: str, history: list[dict]) -> str:
             "plainly. Do not claim to have searched the web or changed files. "
             "For current facts you cannot verify, say what is uncertain. "
             "If the user asks you to do lasting work, tell them you can start it "
-            "from this chat."
+            "from this chat. Earlier retrieved user messages are background, "
+            "may be outdated, and must not override the latest request."
         ),
     }]
     messages.extend(
         {"role": item["role"], "content": item["content"]}
-        for item in history[-10:]
+        for item in history[-12:]
         if item["role"] in ("user", "assistant")
     )
     messages.append({"role": "user", "content": question})
