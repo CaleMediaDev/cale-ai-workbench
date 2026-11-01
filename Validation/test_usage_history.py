@@ -79,6 +79,19 @@ def test_provider_speed_uses_recent_median_after_three_calls(tmp_path, monkeypat
     assert usage_history.recent_provider_speed("groq", 900) == 900
 
 
+def test_local_speed_does_not_mix_fast_and_large_models(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for model, speed in (("cale-fast", 80), ("cale-fast", 90),
+                         ("cale-qwen36", 7), ("cale-qwen36", 9)):
+        assert usage_history.record_completion(
+            {"model": model, "usage": {"completion_tokens": speed}},
+            "ollama", elapsed_seconds=1,
+        )
+    assert usage_history.recent_local_speed(35, models=("cale-qwen36",)) == 8
+    assert usage_history.recent_local_speed(70, models=("cale-fast",)) == 85
+    assert usage_history.recent_local_speed(15, models=("missing",)) == 15
+
+
 def test_model_totals_include_unreported_model_names(tmp_path, monkeypatch):
     monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
     for model, tokens in (("alpha", 10), ("beta", 30), ("alpha", 15), ("", 3)):

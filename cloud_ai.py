@@ -55,6 +55,28 @@ LOCK = threading.RLock()
 POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 
+def local_speed_models(size):
+    """Compare cloud speed with the local model tier this task would use."""
+    refresh_catalog(online=False)
+    if size == "quick":
+        return (FAST_MODEL,)
+    if size == "balanced":
+        aliases = [BALANCED_MODEL]
+        aliases.extend(
+            item["alias"] for item in CATALOG.values()
+            if (not item.get("fallback_only") and candidate_approved(item)
+                and 12 <= item.get("download_gb", 0) < 35)
+        )
+    else:
+        aliases = [LOCAL_MODEL, STANDARD_MAIN_ALIAS]
+        aliases.extend(
+            item["alias"] for item in CATALOG.values()
+            if (not item.get("fallback_only") and candidate_approved(item)
+                and item.get("download_gb", 0) >= 35)
+        )
+    return tuple(dict.fromkeys(aliases))
+
+
 def atomic(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + "." + secrets.token_hex(8) + ".tmp")
@@ -699,7 +721,9 @@ class Router:
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         reason = "Cloud is not connected."
         local_speed = usage_history.recent_local_speed(
-            70 if size == "quick" else 35 if size == "balanced" else 15)
+            70 if size == "quick" else 35 if size == "balanced" else 15,
+            models=local_speed_models(size),
+        )
         paid_pressure = routing_memory.pressure("chatgpt")
         # Learn from observed limits without pretending to know the account's
         # remaining allowance. Quick work is kept local; repeated plan limits

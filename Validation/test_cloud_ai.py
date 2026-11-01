@@ -44,6 +44,24 @@ REQUEST = {
 
 
 class CloudTests(unittest.TestCase):
+    def test_speed_estimate_uses_the_expected_local_model_tier(self):
+        self.assertEqual(cloud.local_speed_models("quick"), (cloud.FAST_MODEL,))
+        balanced = cloud.local_speed_models("balanced")
+        self.assertIn(cloud.BALANCED_MODEL, balanced)
+        self.assertNotIn(cloud.FAST_MODEL, balanced)
+        self.assertIn(cloud.LOCAL_MODEL, cloud.local_speed_models("deep"))
+        with (patch("usage_history.recent_local_speed", return_value=30) as speed,
+              patch.object(cloud, "post", return_value=ANSWER)):
+            cloud.Router().complete(REQUEST)
+        speed.assert_called_once_with(70, models=(cloud.FAST_MODEL,))
+
+    def test_approved_new_balanced_model_contributes_to_speed_estimate(self):
+        candidate = {"alias": "cale-qwen36", "download_gb": 23, "candidate": True}
+        with (patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "candidate_approved", return_value=True),
+              patch.dict(cloud.CATALOG, {"new_balanced": candidate})):
+            self.assertIn("cale-qwen36", cloud.local_speed_models("balanced"))
+
     def test_provider_key_requires_free_plan_and_is_encrypted(self):
         with self.assertRaisesRegex(ValueError, "free plan"):
             cloud.save_provider_key("groq", "gsk_test_secret_value")

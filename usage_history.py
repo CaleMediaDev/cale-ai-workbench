@@ -1,9 +1,9 @@
 """Persist actual provider-reported token counts for the desktop graph."""
 
+import re
 import sqlite3
 import statistics
 import time
-import re
 from contextlib import closing
 from contextvars import ContextVar
 from datetime import datetime, timedelta
@@ -94,15 +94,23 @@ def task_totals() -> dict[str, int]:
         return {}
 
 
-def recent_local_speed(default: float = 35.0) -> float:
-    """Use actual recent Ollama output speed to decide if cloud is worthwhile."""
+def recent_local_speed(default: float = 35.0, models=None) -> float:
+    """Measure recent local speed for comparable models only.
+
+    A fast 9B answer must not make a 35B project appear fast. Missing samples
+    use the caller's tier estimate rather than an unrelated model's history.
+    """
+    aliases = tuple(dict.fromkeys(models or ()))
+    model_filter = f"AND model IN ({','.join('?' for _ in aliases)}) " if aliases else ""
     try:
         with closing(_connection()) as conn:
             rows = conn.execute(
                 "SELECT tokens_per_second FROM usage_events WHERE source='ollama' "
-                "AND tokens_per_second > 0 ORDER BY id DESC LIMIT 12"
+                "AND tokens_per_second > 0 AND timestamp > ? "
+                + model_filter + "ORDER BY id DESC LIMIT 12",
+                (time.time() - 30 * 86400, *aliases),
             ).fetchall()
-        return sum(row[0] for row in rows) / len(rows) if rows else default
+        return statistics.median(row[0] for row in rows) if rows else default
     except (OSError, sqlite3.Error):
         return default
 
