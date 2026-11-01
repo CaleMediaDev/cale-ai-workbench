@@ -288,7 +288,10 @@ MEMORY_STOPWORDS = frozenset({
 
 def memory_search_terms(question: str) -> str:
     """Keep only useful content words for a later question about selected files."""
-    words = re.findall(r"[\w'-]+", question.casefold())
+    # Match the index's Unicode word boundaries; contractions then yield
+    # short fragments that the length filter drops instead of impossible FTS
+    # terms such as "what's" becoming both "what" and "s".
+    words = re.findall(r"[^\W_]+", question.casefold())
     return " ".join(word for word in words
                     if len(word) >= 3 and word not in MEMORY_STOPWORDS)[:200]
 GENERIC_CONTACT_NAMES = frozenset({

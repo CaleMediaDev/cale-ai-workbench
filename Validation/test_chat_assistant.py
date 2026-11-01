@@ -245,6 +245,10 @@ def test_file_memory_miss_does_not_guess_or_use_an_unrelated_recent_file():
     answer.assert_not_called()
 
 
+def test_file_memory_terms_ignore_contraction_fragments():
+    assert chat_assistant.memory_search_terms("What's in my Acme invoice?") == "acme invoice"
+
+
 def test_business_email_uses_live_lookup_and_rejects_placeholder():
     assert chat_assistant.business_email_query("What's Pure Michigan Lawn Care's email?") == "Pure Michigan Lawn Care"
     assert chat_assistant.business_email_query("What is the email address for Pure Michigan Lawn Care?") == "Pure Michigan Lawn Care"
