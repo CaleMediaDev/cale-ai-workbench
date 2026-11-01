@@ -12,6 +12,9 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 MEDIA = ROOT / "Media"
+# Use the same level for clip detection and the "too quiet" diagnosis. A
+# smaller cutoff here sent background hiss to Whisper as if it were speech.
+MIC_VOICE_LEVEL = 0.012
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
@@ -397,7 +400,7 @@ def _capture_microphone(sd, device: int, rate: int, seconds: int):
             captured += len(block)
             # A low fixed threshold avoids treating faint background hiss as a
             # voice. The final Whisper pass decides whether words were spoken.
-            if float(np.max(np.abs(block))) >= 0.012:
+            if float(np.max(np.abs(block))) >= MIC_VOICE_LEVEL:
                 speaking = True
                 last_voice_frame = captured
             if speaking and captured >= rate and captured - last_voice_frame >= round(rate * 1.2):
@@ -459,7 +462,7 @@ def record_audio(seconds=10):
         sd.wait()
     peak = float(abs(audio).max())
     microphone = str(devices[chosen]["name"])
-    if peak < 0.003:
+    if peak < MIC_VOICE_LEVEL:
         # Muted or disconnected inputs otherwise look exactly like a missed
         # wake phrase. Skip Whisper and tell the UI what the device captured.
         return {"text": "", "segments": [], "language": "",

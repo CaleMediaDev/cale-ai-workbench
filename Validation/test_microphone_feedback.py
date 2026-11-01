@@ -26,13 +26,16 @@ def _audio_modules(level):
 
 
 def test_quiet_microphone_skips_transcription_and_names_device(tmp_path):
-    sd, sf = _audio_modules(0.0001)
+    # This low input level was observed on the default FIFINE microphone in a
+    # live quiet-room capture; it must not look like usable speech.
+    sd, sf = _audio_modules(0.0104)
     with patch.dict(sys.modules, {"sounddevice": sd, "soundfile": sf}), patch.object(
         media_worker, "ROOT", tmp_path
     ), patch.object(media_worker, "transcribe_audio") as transcribe:
         result = media_worker.record_audio(seconds=1)
     assert result["quiet"] is True
     assert result["input_device"] == "Fifine Microphone"
+    assert result["input_peak"] == 0.0104
     assert result["text"] == ""
     transcribe.assert_not_called()
     sf.write.assert_not_called()
