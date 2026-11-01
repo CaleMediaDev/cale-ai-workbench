@@ -1,0 +1,205 @@
+---
+import { uniqueId } from '../../utils/unique-id';
+import TextShimmer from './TextShimmer.astro';
+interface StreamingThinkingProps {
+  isStreaming?: true;
+  phases?: string[];
+  autoCycle?: boolean;
+  cycleIntervalMs?: number;
+  class?: string;
+  id?: string;
+}
+
+interface IdleThinkingProps {
+  isStreaming: false;
+  phases?: never;
+  autoCycle?: never;
+  cycleIntervalMs?: never;
+  class?: string;
+  id?: string;
+}
+
+export type Props = StreamingThinkingProps | IdleThinkingProps;
+
+const defaultPhases: string[] = [
+  'Thinking...',
+  'Working through the request...',
+  'Preparing a response...'
+];
+
+const {
+  phases = defaultPhases,
+  isStreaming = true,
+  autoCycle = true,
+  cycleIntervalMs = 4000,
+  class: className = '',
+  id = uniqueId('thinking-bar'),
+} = Astro.props;
+
+const initialPhase = phases[0] || 'Thinking...';
+---
+
+<div
+  class={`ai-thinking-bar ${isStreaming ? 'is-streaming' : 'is-idle'} ${className}`}
+  data-thinking-bar
+  id={id}
+  data-phases={JSON.stringify(phases)}
+  data-autocycle={autoCycle ? 'true' : 'false'}
+  data-interval={cycleIntervalMs}
+>
+  <div class="ai-thinking-left">
+    
+    <div class="ai-thinking-icon" aria-hidden="true">
+      <svg class="ai-thinking-spinner animate-spin" viewBox="0 0 24 24" fill="none" width="16" height="16">
+        <circle class="ai-spinner-bg" cx="12" cy="12" r="9" stroke="#e4e4e7" stroke-width="2.5"></circle>
+        <path class="ai-spinner-head" d="M12 3a9 9 0 0 1 9 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path>
+      </svg>
+    </div>
+
+    
+    <div class="ai-thinking-text" data-phase-text>
+      <TextShimmer class="ai-shimmer-sweep">{initialPhase}</TextShimmer>
+    </div>
+  </div>
+
+  <span class="ai-thinking-brand">Assistant</span>
+</div>
+
+<style>
+  @layer components {
+  .ai-thinking-bar {
+    container-type: inline-size;
+    container-name: ai-ui;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 18px;
+    background: var(--surface, #ffffff);
+    border: 1px solid var(--border, #e4e4e7);
+    border-radius: var(--radius-pill, 9999px);
+    font-family: var(--font-sans);
+    letter-spacing: var(--tracking-ui, -0.02em);
+    box-shadow: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .ai-thinking-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .ai-thinking-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+  }
+
+  .ai-thinking-spinner {
+    display: block;
+  }
+
+  .ai-spinner-head {
+    color: var(--primary, var(--heat, #ED5F45));
+    stroke: var(--primary, var(--heat, #ED5F45));
+  }
+
+  .ai-thinking-text {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  
+  .ai-shimmer-sweep {
+    display: inline-block;
+    background-image: linear-gradient(
+      90deg,
+      #71717a 0%,
+      #09090b 22%,
+      var(--primary, var(--heat, #ED5F45)) 50%,
+      #09090b 78%,
+      #71717a 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: ai-shimmer-left-to-right 2.6s linear infinite;
+  }
+
+  :root[data-theme="dark"] .ai-shimmer-sweep,
+  .dark .ai-shimmer-sweep {
+    background-image: linear-gradient(
+      90deg,
+      #a1a1aa 0%,
+      #ffffff 22%,
+      var(--primary, var(--heat, #ED5F45)) 50%,
+      #ffffff 78%,
+      #a1a1aa 100%
+    );
+    background-size: 200% 100%;
+  }
+
+  @keyframes ai-shimmer-left-to-right {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .ai-thinking-brand {
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary, var(--heat, #ED5F45));
+    text-align: right;
+    flex-shrink: 0;
+    letter-spacing: -0.01em;
+  }
+  }
+</style>
+
+<script>
+  function initThinkingBars() {
+    document.querySelectorAll<HTMLElement>('[data-thinking-bar]').forEach((bar) => {
+      const phasesRaw = bar.getAttribute('data-phases');
+      const intervalMs = parseInt(bar.getAttribute('data-interval') || '3500', 10);
+      const textEl = bar.querySelector<HTMLElement>('[data-phase-text]');
+
+      if (!phasesRaw || !textEl) return;
+
+      try {
+        const phases: string[] = JSON.parse(phasesRaw);
+        if (phases.length <= 1) return;
+
+        let currentIndex = 0;
+        setInterval(() => {
+          currentIndex = (currentIndex + 1) % phases.length;
+          const span = textEl.querySelector('.ai-shimmer-sweep');
+          if (span) {
+            span.textContent = phases[currentIndex];
+          } else {
+            textEl.innerHTML = `<span class="ai-shimmer-sweep">${phases[currentIndex]}</span>`;
+          }
+        }, Math.max(intervalMs, 3000));
+      } catch (err) {
+        
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initThinkingBars);
+  } else {
+    initThinkingBars();
+  }
+</script>

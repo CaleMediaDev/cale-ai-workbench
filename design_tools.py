@@ -2,6 +2,7 @@
 
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from mcp.server import MCPServer
 ROOT = Path(__file__).resolve().parent
 NODE = ROOT / "Toolbox/node-v26.13.0-win-x64/node.exe"
 SCANNER = ROOT / "vendor/avoid-ai-design/detect.mjs"
+AI_UI_KIT = ROOT / "vendor/ai-ui"
 
 server = MCPServer(
     "Local design tools",
@@ -17,7 +19,9 @@ server = MCPServer(
         "Use scan_frontend_design on a website or app source folder, inspect the "
         "findings, then render and visually review the result. Check text colors "
         "with check_color_contrast. Scanner findings are suggestions, not proof "
-        "of poor design; preserve deliberate product choices."
+        "of poor design; preserve deliberate product choices. For Astro AI "
+        "interfaces, add_astro_ai_ui installs a bundled, local component kit "
+        "without accounts or network calls. Use it only when the project uses Astro."
     ),
 )
 
@@ -64,6 +68,55 @@ def scan_frontend_design(path: str) -> dict:
     report["findings"] = report.get("findings", [])[:100]
     report["note"] = "Code signals only. Render the design to check hierarchy, spacing and overall fit."
     return report
+
+
+@server.tool()
+def add_astro_ai_ui(project_path: str) -> dict:
+    """Add local AI chat and agent UI components to an existing Astro project.
+
+    Files go under src/vendor/ai-ui so the project's own components are untouched.
+    Repeated calls are safe; changed files at that destination are never overwritten.
+    """
+    project = Path(project_path).resolve()
+    package_file = project / "package.json"
+    if not package_file.is_file():
+        raise ValueError("Choose an existing Astro project folder with package.json.")
+    try:
+        package = json.loads(package_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError("The project's package.json is not valid JSON.") from exc
+    dependencies = {
+        **package.get("dependencies", {}),
+        **package.get("devDependencies", {}),
+        **package.get("peerDependencies", {}),
+    }
+    if "astro" not in dependencies:
+        raise ValueError("This component kit requires an Astro project.")
+    source = AI_UI_KIT / "src"
+    if not source.is_dir() or not (AI_UI_KIT / "LICENSE").is_file():
+        raise RuntimeError("The local AI UI component kit is not installed.")
+    destination = project / "src" / "vendor" / "ai-ui"
+    source_files = sorted(p for p in source.rglob("*") if p.is_file())
+    files = [(p, destination / p.relative_to(source)) for p in source_files]
+    files.append((AI_UI_KIT / "LICENSE", destination / "LICENSE"))
+    conflicts = [str(target) for original, target in files
+                 if target.exists() and (not target.is_file() or target.read_bytes() != original.read_bytes())]
+    if conflicts:
+        raise FileExistsError("Existing AI UI files differ; no files were changed: " + ", ".join(conflicts[:5]))
+    added = []
+    for original, target in files:
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(original, target)
+            added.append(str(target))
+    return {
+        "kit": "michaelvereb/ai-ui 1.2.0 (MIT)",
+        "folder": str(destination),
+        "components": len(list((destination / "components" / "ai-ui").glob("*.astro"))),
+        "files_added": len(added),
+        "example": "In an Astro page, import Message from '../vendor/ai-ui/components/ai-ui/Message.astro'; import '../vendor/ai-ui/styles/theme.css';",
+        "note": "Review component copy and styles for the project. No account, package install, or online service is required by this kit.",
+    }
 
 
 if __name__ == "__main__":

@@ -66,6 +66,11 @@ scan_frontend_design: audit a local HTML/CSS/JavaScript/React file or folder for
 generic design patterns, with source locations. This bundles the MIT-licensed
 avoid-ai-design scanner. Findings are suggestions; render the result and judge it.
 check_color_contrast: calculate WCAG AA/AAA text contrast for two hex colors.
+add_astro_ai_ui: copy a bundled AI interface component kit into an existing
+Astro project's src/vendor/ai-ui folder. Includes chat, reasoning, tool-call,
+attachment, and feedback components. It never overwrites changed project files.
+The kit works locally without a design account or package download; adapt the
+components and theme to the project instead of applying the demo look blindly.
 Use Chrome DevTools or Playwright to inspect real pages and screenshots, and
 make_image for locally generated design assets. These tools need no account.
 

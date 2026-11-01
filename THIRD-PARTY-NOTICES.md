@@ -21,6 +21,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Node.js | https://nodejs.org/ |
 | ast-grep | https://github.com/ast-grep/ast-grep |
 | avoid-ai-design scanner (MIT; license bundled under `vendor/avoid-ai-design/LICENSE`) | https://github.com/funboy322/avoid-ai-design |
+| michaelvereb/ai-ui 1.2.0 Astro component kit (MIT; selected components pinned at commit `73afdce6c3bc6bd33e1f8656184fbd5980e2e50d`; license bundled under `vendor/ai-ui/LICENSE`; local-default text and offline styling modified) | https://github.com/michaelvereb/ai-ui |
 | Addy Osmani's Agent Skills (MIT; seven selected skills pinned at commit `8bfcc1f9916f2eea55494d8c1fa7f4bde867dd9e`; license bundled under `vendor/agent-skills/LICENSE`) | https://github.com/addyosmani/agent-skills |
 | Diffusers and LCM Dreamshaper v7 | https://huggingface.co/SimianLuo/LCM_Dreamshaper_v7 |
 | Segmind SSD-1B (Apache-2.0 image model; downloaded on supported PCs) | https://huggingface.co/segmind/SSD-1B |

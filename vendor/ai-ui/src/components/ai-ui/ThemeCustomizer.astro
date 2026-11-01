@@ -1,0 +1,1158 @@
+---
+interface Props {
+  class?: string;
+  defaultOpen?: boolean;
+}
+
+const {
+  class: className = '',
+  defaultOpen = false,
+} = Astro.props;
+---
+
+
+<div class="ai-customizer-trigger-wrapper">
+  <button
+    type="button"
+    class="ai-customizer-trigger"
+    id="ai-theme-trigger"
+    aria-label="Open Theme Customizer"
+    title="Customize Theme & Styles"
+  >
+    <svg class="ai-trigger-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+    </svg>
+    <span class="ai-trigger-label">Customize</span>
+  </button>
+</div>
+
+
+<div class="ai-customizer-backdrop" id="ai-customizer-backdrop" hidden></div>
+
+
+<div
+  class={`ai-customizer-drawer ${className}`}
+  id="ai-customizer-drawer"
+  role="dialog"
+  aria-modal="false"
+  aria-labelledby="ai-customizer-title"
+  hidden
+>
+  
+  <div class="ai-drawer-header">
+    <div class="ai-header-left">
+      <h3 class="ai-drawer-title" id="ai-customizer-title">Design Tokens</h3>
+      <span class="ai-badge-live">Live</span>
+    </div>
+    <div class="ai-drawer-header-actions">
+      <button
+        type="button"
+        class="ai-btn-reset"
+        id="ai-btn-reset-theme"
+        title="Reset all settings to defaults"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+          <path d="M3 3v5h5"></path>
+        </svg>
+        <span>Reset</span>
+      </button>
+      <button
+        type="button"
+        class="ai-btn-close"
+        id="ai-btn-close-drawer"
+        aria-label="Close Theme Settings"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  
+  <div class="ai-drawer-body">
+
+    
+    <div class="ai-setting-row">
+      <span class="ai-setting-label">Theme Mode</span>
+      <div class="ai-pill-grid-mini" id="ai-theme-mode-group">
+        <button type="button" class="ai-mini-pill is-active" data-mode="light">Light</button>
+        <button type="button" class="ai-mini-pill" data-mode="dark">Dark</button>
+      </div>
+    </div>
+
+    
+    <div class="ai-setting-stack">
+      <div class="ai-setting-row">
+        <span class="ai-setting-label">Base Color</span>
+        <span class="ai-setting-val-name" id="ai-active-color-name">Heat Orange</span>
+      </div>
+      <div class="ai-swatches-row" id="ai-color-swatches">
+        <button
+          type="button"
+          class="ai-color-swatch is-active"
+          data-color="#ED5F45"
+          data-oklch="oklch(0.66 0.19 32.5)"
+          data-name="Heat Orange"
+          style="--swatch-color: #ED5F45;"
+          title="Heat Orange"
+        >
+          <span class="ai-swatch-check">✓</span>
+        </button>
+        <button
+          type="button"
+          class="ai-color-swatch"
+          data-color="#18181b"
+          data-oklch="oklch(0.205 0 0)"
+          data-name="Zinc"
+          style="--swatch-color: #18181b;"
+          title="Zinc"
+        >
+          <span class="ai-swatch-check">✓</span>
+        </button>
+        <button
+          type="button"
+          class="ai-color-swatch"
+          data-color="#2563eb"
+          data-oklch="oklch(0.54 0.22 258.4)"
+          data-name="Blue"
+          style="--swatch-color: #2563eb;"
+          title="Blue"
+        >
+          <span class="ai-swatch-check">✓</span>
+        </button>
+        <button
+          type="button"
+          class="ai-color-swatch"
+          data-color="#059669"
+          data-oklch="oklch(0.59 0.17 160.2)"
+          data-name="Emerald"
+          style="--swatch-color: #059669;"
+          title="Emerald"
+        >
+          <span class="ai-swatch-check">✓</span>
+        </button>
+        <button
+          type="button"
+          class="ai-color-swatch"
+          data-color="#7c3aed"
+          data-oklch="oklch(0.53 0.25 293.7)"
+          data-name="Violet"
+          style="--swatch-color: #7c3aed;"
+          title="Violet"
+        >
+          <span class="ai-swatch-check">✓</span>
+        </button>
+        <button
+          type="button"
+          class="ai-color-swatch"
+          data-color="#e11d48"
+          data-oklch="oklch(0.58 0.23 15.3)"
+          data-name="Rose"
+          style="--swatch-color: #e11d48;"
+          title="Rose"
+        >
+          <span class="ai-swatch-check">✓</span>
+        </button>
+        <label class="ai-color-picker-btn" for="ai-custom-color-input" title="Pick custom color">
+          <input type="color" id="ai-custom-color-input" value="#ED5F45" aria-label="Custom brand accent color" />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M12 2v20M2 12h20"></path>
+          </svg>
+        </label>
+      </div>
+    </div>
+
+    
+    <div class="ai-setting-stack">
+      <div class="ai-setting-row">
+        <span class="ai-setting-label">Background</span>
+        <span class="ai-setting-val-name" id="ai-active-neutral-name">Pure White</span>
+      </div>
+      <div class="ai-neutrals-row" id="ai-neutral-group">
+        <button type="button" class="ai-neutral-chip is-active" data-neutral="white" data-bg="#ffffff" data-name="Pure White">White</button>
+        <button type="button" class="ai-neutral-chip" data-neutral="zinc" data-bg="#fafafa" data-name="Zinc">Zinc</button>
+        <button type="button" class="ai-neutral-chip" data-neutral="slate" data-bg="#f8fafc" data-name="Slate">Slate</button>
+        <button type="button" class="ai-neutral-chip" data-neutral="stone" data-bg="#fafaf9" data-name="Stone">Stone</button>
+        <button type="button" class="ai-neutral-chip" data-neutral="cream" data-bg="#faf8f5" data-name="Warm Cream">Cream</button>
+        <label class="ai-neutral-chip ai-picker-chip" title="Custom background color">
+          <input type="color" id="ai-custom-bg-input" value="#ffffff" />
+          <span>Hex</span>
+        </label>
+      </div>
+    </div>
+
+    
+    <div class="ai-setting-row">
+      <label class="ai-setting-label" for="ai-heading-font-select">Heading Font</label>
+      <select id="ai-heading-font-select" class="ai-figma-select">
+        <option value="-apple-system, BlinkMacSystemFont, 'SF Pro', 'SF Pro Display', 'Segoe UI', sans-serif" selected>SF Pro</option>
+        <option value="'Geist', -apple-system, sans-serif">Geist</option>
+        <option value="'Space Grotesk', sans-serif">Space Grotesk</option>
+        <option value="'DM Sans', sans-serif">DM Sans</option>
+        <option value="'Outfit', sans-serif">Outfit</option>
+        <option value="'Inter', sans-serif">Inter</option>
+        <option value="'Geist Mono', monospace">Geist Mono</option>
+      </select>
+    </div>
+
+    
+    <div class="ai-setting-row">
+      <label class="ai-setting-label" for="ai-body-font-select">Body Font</label>
+      <select id="ai-body-font-select" class="ai-figma-select">
+        <option value="-apple-system, BlinkMacSystemFont, 'SF Pro', 'SF Pro Text', 'Segoe UI', sans-serif" selected>SF Pro</option>
+        <option value="'Geist', -apple-system, sans-serif">Geist</option>
+        <option value="'DM Sans', sans-serif">DM Sans</option>
+        <option value="'Inter', sans-serif">Inter</option>
+        <option value="'Outfit', sans-serif">Outfit</option>
+        <option value="'Space Grotesk', sans-serif">Space Grotesk</option>
+        <option value="'Geist Mono', monospace">Geist Mono</option>
+      </select>
+    </div>
+
+    
+    <div class="ai-setting-row">
+      <label class="ai-setting-label" for="ai-custom-radius-input">Border Radius</label>
+      <input
+        type="text"
+        id="ai-custom-radius-input"
+        class="ai-figma-input"
+        value="14px"
+        placeholder="14px, 50%, 0.75rem"
+      />
+    </div>
+
+    
+    <div class="ai-setting-row">
+      <label class="ai-setting-label" for="ai-custom-border-input">Border Weight</label>
+      <input
+        type="text"
+        id="ai-custom-border-input"
+        class="ai-figma-input"
+        value="1px"
+        placeholder="1px, 0px, 1.5px"
+      />
+    </div>
+
+    
+    <div class="ai-setting-row">
+      <label class="ai-setting-label" for="ai-icon-select">Icon Library</label>
+      <select id="ai-icon-select" class="ai-figma-select">
+        <option value="lucide" selected>Lucide (2.0)</option>
+        <option value="minimal">Minimal Line (1.5)</option>
+        <option value="tabler">Tabler Bold (2.4)</option>
+        <option value="phosphor">Phosphor Round</option>
+      </select>
+    </div>
+
+    
+    <div class="ai-setting-row">
+      <label class="ai-setting-label">Letter Spacing</label>
+      <div class="ai-pill-grid-mini" id="ai-tracking-group">
+        <button type="button" class="ai-mini-pill is-active" data-tracking="-0.02em" data-name="Tight">-0.02</button>
+        <button type="button" class="ai-mini-pill" data-tracking="-0.035em" data-name="Compact">-0.03</button>
+        <button type="button" class="ai-mini-pill" data-tracking="0em" data-name="Normal">0</button>
+      </div>
+    </div>
+
+    
+    <div class="ai-setting-row">
+      <label class="ai-setting-label">Stage Padding</label>
+      <div class="ai-pill-grid-mini" id="ai-padding-group">
+        <button type="button" class="ai-mini-pill" data-padding="28px 20px" data-name="Compact">Compact</button>
+        <button type="button" class="ai-mini-pill is-active" data-padding="44px 28px" data-name="Default">Default</button>
+        <button type="button" class="ai-mini-pill" data-padding="64px 36px" data-name="Spacious">Spacious</button>
+      </div>
+    </div>
+
+    
+    <div class="ai-export-card">
+      <div class="ai-export-header">
+        <div class="ai-export-tabs" id="ai-code-format-tabs">
+          <button type="button" class="ai-tab-btn is-active" data-fmt="oklch">OKLCH</button>
+          <button type="button" class="ai-tab-btn" data-fmt="hex">Hex CSS</button>
+        </div>
+        <button
+          type="button"
+          class="ai-btn-copy-css"
+          id="ai-btn-copy-css"
+          title="Copy generated theme CSS variables to clipboard"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+          </svg>
+          <span id="ai-copy-css-label">Copy Code</span>
+        </button>
+      </div>
+
+      <div class="ai-code-preview-wrap">
+        <pre class="ai-code-pre"><code id="ai-css-code-output"></code></pre>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  @layer components {
+  .ai-customizer-trigger-wrapper {
+    container-type: inline-size;
+    container-name: ai-ui;
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 100;
+  }
+
+  .ai-customizer-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    background: #09090b;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: var(--radius-pill, 9999px);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    transition: all 0.18s ease;
+  }
+
+  .ai-customizer-trigger:hover {
+    transform: translateY(-1px);
+    background: #18181b;
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  
+  .ai-customizer-backdrop {
+    display: none !important;
+  }
+
+  
+  .ai-customizer-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 330px;
+    max-width: 90vw;
+    background: var(--surface, #ffffff);
+    color: var(--text, #09090b);
+    border-left: 1px solid var(--border, #e4e4e7);
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -2px 0 20px rgba(0, 0, 0, 0.05);
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
+    letter-spacing: -0.015em;
+    transform: translateX(100%);
+    transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .ai-customizer-drawer.is-open {
+    transform: translateX(0);
+  }
+
+  
+  .ai-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border, #e4e4e7);
+    background: var(--surface, #ffffff);
+    flex-shrink: 0;
+  }
+
+  .ai-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ai-drawer-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text, #09090b);
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
+
+  .ai-badge-live {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--primary, #ED5F45) 12%, transparent);
+    color: var(--primary, #ED5F45);
+  }
+
+  .ai-drawer-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ai-btn-reset {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border: 1px solid var(--border, #e4e4e7);
+    border-radius: 6px;
+    background: var(--surface, #ffffff);
+    color: var(--text-muted, #52525b);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .ai-btn-reset:hover {
+    color: var(--text, #09090b);
+    border-color: var(--border-strong, #d4d4d8);
+    background: var(--bg-subtle, #f4f4f5);
+  }
+
+  .ai-btn-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border, #e4e4e7);
+    border-radius: 6px;
+    background: var(--surface, #ffffff);
+    color: var(--text-muted, #71717a);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .ai-btn-close:hover {
+    color: var(--text, #09090b);
+    background: var(--bg-subtle, #f4f4f5);
+  }
+
+  
+  .ai-drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  
+  .ai-setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 32px;
+  }
+
+  .ai-setting-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .ai-setting-label {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text, #09090b);
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .ai-setting-val-name {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-subtle, #71717a);
+  }
+
+  
+  .ai-figma-select {
+    width: 145px;
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-family: inherit;
+    color: var(--text, #09090b);
+    background: var(--bg-subtle, #f4f4f5);
+    border: 1px solid var(--border, #e4e4e7);
+    border-radius: 6px;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+
+  .ai-figma-select:focus {
+    border-color: var(--primary, #ED5F45);
+  }
+
+  
+  .ai-figma-input {
+    width: 95px;
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-family: var(--font-mono, monospace);
+    color: var(--text, #09090b);
+    background: var(--bg-subtle, #f4f4f5);
+    border: 1px solid var(--border, #e4e4e7);
+    border-radius: 6px;
+    outline: none;
+    text-align: right;
+    transition: border-color 0.15s ease;
+  }
+
+  .ai-figma-input:focus {
+    border-color: var(--primary, #ED5F45);
+    box-shadow: 0 0 0 1px var(--primary, #ED5F45);
+  }
+
+  
+  .ai-pill-grid-mini {
+    display: inline-flex;
+    background: var(--bg-subtle, #f4f4f5);
+    border: 1px solid var(--border, #e4e4e7);
+    border-radius: 6px;
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .ai-mini-pill {
+    padding: 4px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted, #71717a);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+  }
+
+  .ai-mini-pill.is-active {
+    background: var(--surface, #ffffff);
+    color: var(--text, #09090b);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    font-weight: 600;
+  }
+
+  
+  .ai-swatches-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ai-color-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--swatch-color);
+    border: 2px solid transparent;
+    cursor: pointer;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease;
+  }
+
+  .ai-color-swatch:hover {
+    transform: scale(1.12);
+  }
+
+  .ai-color-swatch.is-active {
+    box-shadow: 0 0 0 2px var(--surface, #ffffff), 0 0 0 3.5px var(--swatch-color);
+  }
+
+  .ai-swatch-check {
+    display: none;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .ai-color-swatch.is-active .ai-swatch-check {
+    display: block;
+  }
+
+  .ai-color-picker-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px dashed var(--border-strong, #a1a1aa);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+    color: var(--text-muted, #71717a);
+    transition: all 0.15s ease;
+  }
+
+  .ai-color-picker-btn:hover {
+    border-color: var(--text, #09090b);
+    color: var(--text, #09090b);
+  }
+
+  .ai-color-picker-btn input[type="color"] {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
+
+  
+  .ai-neutrals-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .ai-neutral-chip {
+    padding: 4px 9px;
+    background: var(--bg-subtle, #f4f4f5);
+    border: 1px solid var(--border, #e4e4e7);
+    border-radius: 6px;
+    color: var(--text-muted, #52525b);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+  }
+
+  .ai-neutral-chip:hover {
+    background: var(--surface, #ffffff);
+    color: var(--text, #09090b);
+  }
+
+  .ai-neutral-chip.is-active {
+    background: var(--surface, #ffffff);
+    color: var(--text, #09090b);
+    border-color: var(--primary, #ED5F45);
+    font-weight: 600;
+  }
+
+  .ai-picker-chip {
+    position: relative;
+    cursor: pointer;
+  }
+
+  .ai-picker-chip input[type="color"] {
+    position: absolute;
+    opacity: 0;
+    inset: 0;
+    cursor: pointer;
+  }
+
+  
+  .ai-export-card {
+    margin-top: 6px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border, #e4e4e7);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ai-export-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .ai-export-tabs {
+    display: inline-flex;
+    background: var(--bg-subtle, #f4f4f5);
+    border: 1px solid var(--border, #e4e4e7);
+    border-radius: 6px;
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .ai-tab-btn {
+    padding: 3px 8px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted, #71717a);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s ease;
+  }
+
+  .ai-tab-btn.is-active {
+    background: var(--surface, #ffffff);
+    color: var(--text, #09090b);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  .ai-btn-copy-css {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    background: var(--surface, #ffffff);
+    border: 1px solid var(--border, #e4e4e7);
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text, #09090b);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s ease;
+  }
+
+  .ai-btn-copy-css:hover {
+    background: var(--bg-subtle, #f4f4f5);
+    border-color: var(--border-strong, #d4d4d8);
+  }
+
+  .ai-code-preview-wrap {
+    background: #0d0d10;
+    border: 1px solid #27272a;
+    border-radius: 6px;
+    overflow: hidden;
+    max-height: 140px;
+  }
+
+  .ai-code-pre {
+    margin: 0;
+    padding: 10px 12px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: #e4e4e7;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 140px;
+    white-space: pre;
+  }
+  }
+</style>
+
+<script>
+  function initThemeCustomizer() {
+    const trigger = document.getElementById('ai-theme-trigger');
+    const drawer = document.getElementById('ai-customizer-drawer');
+    const closeBtn = document.getElementById('ai-btn-close-drawer');
+    const resetBtn = document.getElementById('ai-btn-reset-theme');
+    const copyCssBtn = document.getElementById('ai-btn-copy-css');
+    const codeOutput = document.getElementById('ai-css-code-output');
+    const activeColorDot = document.getElementById('ai-active-color-dot');
+    const activeColorName = document.getElementById('ai-active-color-name');
+    const activeNeutralName = document.getElementById('ai-active-neutral-name');
+
+    const headingFontSelect = document.getElementById('ai-heading-font-select') as HTMLSelectElement;
+    const bodyFontSelect = document.getElementById('ai-body-font-select') as HTMLSelectElement;
+    const iconSelect = document.getElementById('ai-icon-select') as HTMLSelectElement;
+    const customColorInput = document.getElementById('ai-custom-color-input') as HTMLInputElement;
+    const customBgInput = document.getElementById('ai-custom-bg-input') as HTMLInputElement;
+    const customRadiusInput = document.getElementById('ai-custom-radius-input') as HTMLInputElement;
+    const customBorderInput = document.getElementById('ai-custom-border-input') as HTMLInputElement;
+
+    
+    const defaultState = {
+      mode: 'light',
+      baseColor: '#ED5F45',
+      baseColorOklch: 'oklch(0.66 0.19 32.5)',
+      baseColorName: 'Heat Orange',
+      neutral: 'white',
+      neutralBg: '#ffffff',
+      neutralName: 'Pure White',
+      headingFont: "-apple-system, BlinkMacSystemFont, 'SF Pro', 'SF Pro Display', 'Segoe UI', sans-serif",
+      headingFontName: 'SF Pro',
+      bodyFont: "-apple-system, BlinkMacSystemFont, 'SF Pro', 'SF Pro Text', 'Segoe UI', sans-serif",
+      bodyFontName: 'SF Pro',
+      radius: '14px',
+      borderWidth: '1px',
+      icon: 'lucide',
+      iconName: 'Lucide',
+      tracking: '-0.02em',
+      trackingName: 'Tight',
+      padding: '44px 28px',
+      paddingName: 'Default',
+      format: 'oklch',
+    };
+
+    let state = { ...defaultState };
+
+    
+    function openDrawer() {
+      if (!drawer) return;
+      drawer.removeAttribute('hidden');
+      requestAnimationFrame(() => {
+        drawer.classList.add('is-open');
+      });
+    }
+
+    function closeDrawer() {
+      if (!drawer) return;
+      drawer.classList.remove('is-open');
+      setTimeout(() => {
+        drawer.setAttribute('hidden', '');
+      }, 250);
+    }
+
+    trigger?.addEventListener('click', openDrawer);
+    closeBtn?.addEventListener('click', closeDrawer);
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && drawer?.classList.contains('is-open')) {
+        closeDrawer();
+      }
+    });
+
+    
+    function generateCssCode(): string {
+      const isDark = state.mode === 'dark';
+
+      if (state.format === 'oklch') {
+        return `:root {
+  --background: ${isDark ? 'oklch(0.145 0 0)' : 'oklch(1 0 0)'};
+  --foreground: ${isDark ? 'oklch(0.985 0 0)' : 'oklch(0.145 0 0)'};
+  --card: ${isDark ? 'oklch(0.205 0 0)' : 'oklch(1 0 0)'};
+  --primary: ${state.baseColorOklch};
+  --accent: ${state.baseColorOklch};
+  --border: ${isDark ? 'oklch(1 0 0 / 10%)' : 'oklch(0.922 0 0)'};
+  --border-width: ${state.borderWidth};
+  --radius: ${state.radius};
+  --font-heading: ${state.headingFont};
+  --font-body: ${state.bodyFont};
+  --tracking-ui: ${state.tracking};
+}`;
+      }
+
+      
+      return `:root {
+  --primary: ${state.baseColor};
+  --heat: ${state.baseColor};
+  --accent: ${state.baseColor};
+  --background: ${isDark ? '#09090b' : state.neutralBg};
+  --surface: ${isDark ? '#131316' : '#ffffff'};
+  --border: ${isDark ? '#27272a' : '#e4e4e7'};
+  --border-width: ${state.borderWidth};
+  --radius: ${state.radius};
+  --font-heading: ${state.headingFont};
+  --font-sans: ${state.bodyFont};
+  --tracking-ui: ${state.tracking};
+}`;
+    }
+
+    
+    function applyState() {
+      const root = document.documentElement;
+      const isDark = state.mode === 'dark';
+
+      
+      if (isDark) {
+        root.setAttribute('data-theme', 'dark');
+        root.classList.add('dark');
+        document.body.style.backgroundColor = '#09090b';
+        root.style.setProperty('--bg', '#09090b');
+        root.style.setProperty('--surface', '#131316');
+      } else {
+        root.removeAttribute('data-theme');
+        root.classList.remove('dark');
+        document.body.style.backgroundColor = state.neutralBg;
+        root.style.setProperty('--bg', state.neutralBg);
+        root.style.setProperty('--surface', '#ffffff');
+      }
+      if (activeNeutralName) activeNeutralName.textContent = state.neutralName;
+
+      
+      root.style.setProperty('--heat', state.baseColor);
+      root.style.setProperty('--primary', state.baseColor);
+      root.style.setProperty('--accent', state.baseColor);
+      root.style.setProperty('--ring', state.baseColor);
+      root.style.setProperty('--heat-subtle', `${state.baseColor}18`);
+      root.style.setProperty('--heat-gradient', `linear-gradient(180deg, ${state.baseColor} 0%, ${state.baseColor}dd 100%)`);
+      root.style.setProperty('--btn-primary-bg', `linear-gradient(180deg, ${state.baseColor} 0%, ${state.baseColor}ee 100%)`);
+
+      if (activeColorDot) activeColorDot.style.backgroundColor = state.baseColor;
+      if (activeColorName) activeColorName.textContent = state.baseColorName;
+
+      
+      document.querySelectorAll<HTMLElement>('.logo-badge').forEach((el) => {
+        el.style.background = state.baseColor;
+      });
+      document.querySelectorAll<HTMLElement>('.demo-btn-primary').forEach((el) => {
+        el.style.background = state.baseColor;
+      });
+      document.querySelectorAll<HTMLElement>('.ai-prompt-submit-btn').forEach((el) => {
+        el.style.background = state.baseColor;
+      });
+      document.querySelectorAll<HTMLElement>('.ai-model-dot, .loader-progress-dot').forEach((el) => {
+        el.style.background = state.baseColor;
+      });
+      document.querySelectorAll<HTMLElement>('.anim-card-tag, .table-badge-pass, .badge-completed').forEach((el) => {
+        el.style.color = state.baseColor;
+        el.style.borderColor = `${state.baseColor}40`;
+        el.style.backgroundColor = `${state.baseColor}15`;
+      });
+      document.querySelectorAll<SVGElement>('.ai-spinner-head').forEach((el) => {
+        el.style.stroke = state.baseColor;
+        el.style.color = state.baseColor;
+      });
+      document.querySelectorAll<SVGElement>('[data-primary-fill]').forEach((el) => {
+        el.setAttribute('fill', state.baseColor);
+      });
+
+      
+      root.style.setProperty('--font-heading', state.headingFont);
+      document.querySelectorAll<HTMLElement>('h1, h2, h3, .section-title, .brand-name').forEach((el) => {
+        el.style.fontFamily = state.headingFont;
+      });
+
+      root.style.setProperty('--font-sans', state.bodyFont);
+      document.body.style.fontFamily = state.bodyFont;
+
+      
+      root.style.setProperty('--radius', state.radius);
+      root.style.setProperty('--radius-card', state.radius);
+      root.style.setProperty('--radius-md', state.radius);
+      document.querySelectorAll<HTMLElement>('.component-stage, .anim-list-item, .demo-card').forEach((el) => {
+        el.style.borderRadius = state.radius;
+      });
+      if (customRadiusInput && customRadiusInput.value !== state.radius) {
+        customRadiusInput.value = state.radius;
+      }
+
+      
+      root.style.setProperty('--border-width', state.borderWidth);
+      document.querySelectorAll<HTMLElement>('.component-stage, .anim-list-item, .loader-thinking-pill').forEach((el) => {
+        el.style.borderWidth = state.borderWidth;
+      });
+      if (customBorderInput && customBorderInput.value !== state.borderWidth) {
+        customBorderInput.value = state.borderWidth;
+      }
+
+      
+      root.style.setProperty('--tracking-ui', state.tracking);
+      document.body.style.letterSpacing = state.tracking;
+
+      
+      document.querySelectorAll<HTMLElement>('.component-stage').forEach((el) => {
+        el.style.padding = state.padding;
+      });
+
+      
+      if (state.icon === 'minimal') {
+        document.querySelectorAll<SVGElement>('svg:not(.ai-trigger-icon)').forEach((svg) => {
+          svg.setAttribute('stroke-width', '1.5');
+        });
+      } else if (state.icon === 'tabler') {
+        document.querySelectorAll<SVGElement>('svg:not(.ai-trigger-icon)').forEach((svg) => {
+          svg.setAttribute('stroke-width', '2.4');
+        });
+      } else {
+        document.querySelectorAll<SVGElement>('svg:not(.ai-trigger-icon)').forEach((svg) => {
+          svg.setAttribute('stroke-width', '2.0');
+        });
+      }
+
+      
+      if (codeOutput) {
+        codeOutput.textContent = generateCssCode();
+      }
+    }
+
+    
+    document.querySelectorAll<HTMLButtonElement>('#ai-theme-mode-group [data-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#ai-theme-mode-group [data-mode]').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        state.mode = btn.getAttribute('data-mode') || 'light';
+        applyState();
+      });
+    });
+
+    
+    document.querySelectorAll<HTMLButtonElement>('#ai-color-swatches .ai-color-swatch').forEach((swatch) => {
+      swatch.addEventListener('click', () => {
+        document.querySelectorAll('#ai-color-swatches .ai-color-swatch').forEach((s) => s.classList.remove('is-active'));
+        swatch.classList.add('is-active');
+        state.baseColor = swatch.getAttribute('data-color') || '#ED5F45';
+        state.baseColorOklch = swatch.getAttribute('data-oklch') || 'oklch(0.66 0.19 32.5)';
+        state.baseColorName = swatch.getAttribute('data-name') || 'Custom';
+        applyState();
+      });
+    });
+
+    
+    customColorInput?.addEventListener('input', (e) => {
+      const val = (e.target as HTMLInputElement).value;
+      document.querySelectorAll('#ai-color-swatches .ai-color-swatch').forEach((s) => s.classList.remove('is-active'));
+      state.baseColor = val;
+      state.baseColorOklch = `oklch(from ${val} l c h)`;
+      state.baseColorName = val.toUpperCase();
+      applyState();
+    });
+
+    
+    document.querySelectorAll<HTMLButtonElement>('#ai-neutral-group [data-neutral]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#ai-neutral-group [data-neutral]').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        state.neutral = btn.getAttribute('data-neutral') || 'white';
+        state.neutralBg = btn.getAttribute('data-bg') || '#ffffff';
+        state.neutralName = btn.getAttribute('data-name') || 'White';
+        applyState();
+      });
+    });
+
+    
+    customBgInput?.addEventListener('input', (e) => {
+      const val = (e.target as HTMLInputElement).value;
+      document.querySelectorAll('#ai-neutral-group [data-neutral]').forEach((b) => b.classList.remove('is-active'));
+      state.neutral = 'custom';
+      state.neutralBg = val;
+      state.neutralName = val.toUpperCase();
+      applyState();
+    });
+
+    
+    headingFontSelect?.addEventListener('change', () => {
+      state.headingFont = headingFontSelect.value;
+      state.headingFontName = headingFontSelect.options[headingFontSelect.selectedIndex].text;
+      applyState();
+    });
+
+    
+    bodyFontSelect?.addEventListener('change', () => {
+      state.bodyFont = bodyFontSelect.value;
+      state.bodyFontName = bodyFontSelect.options[bodyFontSelect.selectedIndex].text;
+      applyState();
+    });
+
+    
+    iconSelect?.addEventListener('change', () => {
+      state.icon = iconSelect.value;
+      state.iconName = iconSelect.options[iconSelect.selectedIndex].text;
+      applyState();
+    });
+
+    
+    customRadiusInput?.addEventListener('input', () => {
+      let val = customRadiusInput.value.trim();
+      if (!val) return;
+      if (/^\d+$/.test(val)) val = `${val}px`;
+      state.radius = val;
+      applyState();
+    });
+
+    
+    customBorderInput?.addEventListener('input', () => {
+      let val = customBorderInput.value.trim();
+      if (!val) return;
+      if (/^\d+$/.test(val)) val = `${val}px`;
+      state.borderWidth = val;
+      applyState();
+    });
+
+    
+    document.querySelectorAll<HTMLButtonElement>('#ai-tracking-group [data-tracking]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#ai-tracking-group [data-tracking]').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        state.tracking = btn.getAttribute('data-tracking') || '-0.02em';
+        state.trackingName = btn.getAttribute('data-name') || state.tracking;
+        applyState();
+      });
+    });
+
+    
+    document.querySelectorAll<HTMLButtonElement>('#ai-padding-group [data-padding]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#ai-padding-group [data-padding]').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        state.padding = btn.getAttribute('data-padding') || '44px 28px';
+        state.paddingName = btn.getAttribute('data-name') || 'Default';
+        applyState();
+      });
+    });
+
+    
+    document.querySelectorAll<HTMLButtonElement>('#ai-code-format-tabs [data-fmt]').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('#ai-code-format-tabs [data-fmt]').forEach((t) => t.classList.remove('is-active'));
+        tab.classList.add('is-active');
+        state.format = tab.getAttribute('data-fmt') || 'oklch';
+        if (codeOutput) codeOutput.textContent = generateCssCode();
+      });
+    });
+
+    
+    resetBtn?.addEventListener('click', () => {
+      state = { ...defaultState };
+
+      document.querySelectorAll('#ai-theme-mode-group [data-mode]').forEach((b) => {
+        b.classList.toggle('is-active', b.getAttribute('data-mode') === 'light');
+      });
+      document.querySelectorAll('#ai-color-swatches .ai-color-swatch').forEach((s) => {
+        s.classList.toggle('is-active', s.getAttribute('data-color') === '#ED5F45');
+      });
+      document.querySelectorAll('#ai-neutral-group [data-neutral]').forEach((b) => {
+        b.classList.toggle('is-active', b.getAttribute('data-neutral') === 'white');
+      });
+      document.querySelectorAll('#ai-tracking-group [data-tracking]').forEach((b) => {
+        b.classList.toggle('is-active', b.getAttribute('data-tracking') === '-0.02em');
+      });
+      document.querySelectorAll('#ai-padding-group [data-padding]').forEach((b) => {
+        b.classList.toggle('is-active', b.getAttribute('data-name') === 'Default');
+      });
+
+      if (headingFontSelect) headingFontSelect.selectedIndex = 0;
+      if (bodyFontSelect) bodyFontSelect.selectedIndex = 0;
+      if (iconSelect) iconSelect.selectedIndex = 0;
+      if (customRadiusInput) customRadiusInput.value = '14px';
+      if (customBorderInput) customBorderInput.value = '1px';
+
+      applyState();
+      if (typeof (window as any).aiToast === 'function') {
+        (window as any).aiToast('Theme reset to defaults');
+      }
+    });
+
+    
+    copyCssBtn?.addEventListener('click', () => {
+      const code = generateCssCode();
+      navigator.clipboard.writeText(code).then(() => {
+        if (typeof (window as any).aiToast === 'function') {
+          (window as any).aiToast('Theme CSS variables copied to clipboard');
+        }
+      });
+    });
+
+    
+    applyState();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initThemeCustomizer);
+  } else {
+    initThemeCustomizer();
+  }
+</script>
