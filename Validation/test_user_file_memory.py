@@ -112,6 +112,37 @@ class UserFileMemoryTests(unittest.TestCase):
             self.assertEqual(user_file_memory.search(self.state, "desert")[0]["path"], str(path))
         self.assertEqual(describe.call_count, 2)
 
+    def test_media_version_detects_in_place_bytes_even_with_unchanged_metadata(self):
+        from types import SimpleNamespace
+
+        path = self.root / "clip.mov"
+        path.write_bytes(b"a" * 12_288)
+        stable = SimpleNamespace(
+            st_dev=1, st_ino=2, st_size=12_288, st_mtime_ns=3, st_ctime_ns=4
+        )
+        with patch.object(user_file_memory.os, "fstat", return_value=stable):
+            before = user_file_memory._file_version(path)
+            with path.open("r+b") as stream:
+                stream.seek(6144)
+                stream.write(b"changed")
+            after = user_file_memory._file_version(path)
+        self.assertNotEqual(before, after)
+
+    def test_changed_image_replaces_stale_search_description(self):
+        path = self.root / "receipt.png"
+        path.write_bytes(b"a" * 12_288)
+        with patch.object(user_file_memory.file_chat, "image_description",
+                          side_effect=["forest receipt", "desert receipt"]) as describe:
+            user_file_memory.ingest(self.state, [str(path)])
+            before = path.stat()
+            with path.open("r+b") as stream:
+                stream.seek(6144)
+                stream.write(b"changed")
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+            self.assertEqual(user_file_memory.search(self.state, "forest"), [])
+            self.assertEqual(user_file_memory.search(self.state, "desert")[0]["path"], str(path))
+        self.assertEqual(describe.call_count, 2)
+
     def test_search_refreshes_selected_file_beyond_twentieth(self):
         folder = self.root / "selected"
         folder.mkdir()
