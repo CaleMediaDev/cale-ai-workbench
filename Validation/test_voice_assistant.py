@@ -72,6 +72,20 @@ class VoiceTests(unittest.TestCase):
             voice_assistant.background_prompt("idle", 120, -1, mic_off=False)[1],
         )
 
+    def test_personality_varies_across_launches_and_keeps_real_status(self):
+        first = voice_assistant.opening_line("working", "Recipe app", 0)
+        second = voice_assistant.opening_line("working", "Recipe app", 1)
+        self.assertNotEqual(first, second)
+        self.assertIn("Recipe app", second)
+        self.assertNotEqual(
+            voice_assistant.progress_line("Recipe app", "Checking files", 0),
+            voice_assistant.progress_line("Recipe app", "Checking files", 1),
+        )
+        idle_first = voice_assistant.background_prompt("idle", 120, variation=0)
+        idle_next = voice_assistant.background_prompt("idle", 120, variation=1)
+        self.assertNotEqual(idle_first[1], idle_next[1])
+        self.assertIn("mic is off", idle_next[1])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

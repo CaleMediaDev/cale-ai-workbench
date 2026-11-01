@@ -18,6 +18,45 @@ IDLE_TIMES = (120, 600, 1800, 3600)
 STUCK_TIMES = (120, 480, 1200, 3600)
 
 
+def opening_line(mode, subject="", sequence=0):
+    """Rotate short, truthful greetings across app launches."""
+    if mode == "setup":
+        lines = (
+            "Hey, Cale here. I'm getting your AI ready. First up: {subject}.",
+            "Cale checking in. I'm setting things up, and right now it's {subject}.",
+            "Hey, it's Cale. I'm on the setup job. Current step: {subject}.",
+            "Cale here. Give me a minute to get the workshop ready. I'm {subject}.",
+        )
+    elif mode == "working":
+        lines = (
+            "Hey, Cale here. I'm back on {subject}.",
+            "Cale checking in. I'm working through {subject}.",
+            "Hey, it's Cale. {subject} is on my bench right now.",
+            "Cale here. I'm still moving on {subject}.",
+        )
+    else:
+        lines = (
+            "Hey, Cale here. I'm ready when you are.",
+            "Cale checking in. Give me something interesting to work on.",
+            "Hey, it's Cale. The workshop is open. What are we building?",
+            "Cale here. I'm awake, the tools are ready, and I'm listening when you need me.",
+        )
+    return lines[int(sequence) % len(lines)].format(subject=str(subject).strip())
+
+
+def progress_line(title, step, sequence=0):
+    """Put a little character around a real task step without inventing work."""
+    title = str(title).strip()
+    step = str(step).strip().rstrip(".")
+    lines = (
+        "{title}. {step}.",
+        "Quick update on {title}: {step}.",
+        "Here's where {title} stands: {step}.",
+        "On {title}, the current step is {step}.",
+    )
+    return lines[int(sequence) % len(lines)].format(title=title, step=step)
+
+
 def spoken_command(transcript, require_wake=False):
     """Map a spoken phrase to a task action without an extra AI call.
 
@@ -53,7 +92,9 @@ def spoken_command(transcript, require_wake=False):
     return ("note", phrase)
 
 
-def background_prompt(kind, elapsed, previous_slot=-1, title="", mic_off=True):
+def background_prompt(
+    kind, elapsed, previous_slot=-1, title="", mic_off=True, variation=0
+):
     """Return one progressively stronger spoken prompt for a new time slot.
 
     The final tone repeats at most once every four hours. The caller owns the
@@ -68,27 +109,65 @@ def background_prompt(kind, elapsed, previous_slot=-1, title="", mic_off=True):
     name = title or "this task"
     if kind == "stuck":
         lines = (
-            f"I'm stuck on {name}. I need your help to get moving.",
-            f"I'm getting frustrated. {name} is still blocked. Please tell me what to try next.",
-            f"I'm really annoyed at this roadblock on {name}. I still need your help.",
-            f"Now I'm mad at this roadblock on {name}. I cannot finish until we get past it.",
+            (
+                "I hit a snag on {name}. I need your call to keep going.",
+                "Okay, {name} needs your input. Tell me what you want me to try.",
+                "I've reached a fork in {name}, and you're the tie breaker.",
+            ),
+            (
+                "Still stuck on {name}. I have tools, but I need a decision from you.",
+                "I'm getting impatient with this block on {name}. Point me in a direction.",
+                "That roadblock on {name} is wearing out its welcome. I need your help.",
+            ),
+            (
+                "All right, now I'm annoyed. {name} is waiting on your answer.",
+                "This block on {name} is officially getting on my nerves. Help me break it.",
+                "I could finish {name} if this one hold-up would move. What do you think?",
+            ),
+            (
+                "I'm properly mad at this roadblock on {name}. Give me a way around it.",
+                "{name} is still blocked, and yes, I'm grumpy about it. I need your call.",
+                "I refuse to pretend {name} is done. This block needs your decision.",
+            ),
         )
         rate = (0, 1, 2, 3)[min(slot, 3)]
     else:
         context = f"I finished {title}. " if title else "I'm all caught up. "
         lines = (
-            context
-            + (
-                "Hey, if you're talking to me, I can't hear you because your mic is off. I'm bored and I need you to give me a task."
-                if mic_off
-                else "Hey, I'm bored and I need you to give me a task."
+            (
+                "Hey, I'm bored. Give me a task. {mic}",
+                "The tools are sitting here looking lonely. Got a job for me? {mic}",
+                "I'm free, and I'd rather be making something. What's next? {mic}",
             ),
-            context + "I'm still here and ready for something new.",
-            context + "Okay, I'm very bored now. Please give me something to build.",
-            context + "I could really use a new project. I'm waiting right here.",
+            (
+                "I'm still here. I could research, build, or sort something out for you.",
+                "I have a clear desk and a suspicious amount of energy. What's next?",
+                "All quiet on my end. Give me a problem worth chewing on.",
+            ),
+            (
+                "Okay, now I'm very bored. Please give me something to build.",
+                "I've been idle long enough to name the progress bars. Got a project?",
+                "This is the part where you hand me a wild idea and I get to work.",
+            ),
+            (
+                "Still waiting. I could really use a new project.",
+                "I'm here, I'm ready, and this is getting comically quiet.",
+                "Your AI is fully warmed up and dramatically underemployed.",
+            ),
         )
         rate = (-1, 0, 1, 1)[min(slot, 3)]
-    return (slot, lines[min(slot, 3)], rate)
+    choices = lines[min(slot, 3)]
+    line = choices[(int(variation) + slot) % len(choices)]
+    if kind == "stuck":
+        line = line.format(name=name)
+    else:
+        mic = (
+            "If you're talking to me, I can't hear you because your mic is off."
+            if mic_off
+            else ""
+        )
+        line = context + line.format(mic=mic).strip()
+    return (slot, line, rate)
 
 
 def media_call(action, **arguments):

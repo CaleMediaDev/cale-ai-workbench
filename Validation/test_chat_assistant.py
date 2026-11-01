@@ -1,5 +1,6 @@
 """The chat should answer questions and create durable tasks only for work."""
 
+import json
 from unittest.mock import patch
 
 import chat_assistant
@@ -30,6 +31,13 @@ def test_multiple_tasks_require_a_clear_followup_target():
     assert chat_assistant.choose_task("For Build bakery site, add a contact page", tasks)["id"] == "a"
     assert chat_assistant.choose_task("3", tasks) is None
     assert chat_assistant.choose_task("start something else", tasks[:1], allow_single=False) is None
+
+
+def test_selected_file_paths_are_preserved_as_data_in_task_brief():
+    paths = [r"C:\Users\Cale\My Photos\logo.png", r"C:\Work\app folder"]
+    brief = chat_assistant.attach_request("Use these to build my site", paths)
+    assert brief.startswith("Use these to build my site\n")
+    assert json.loads(brief.split("\n", 3)[3]) == paths
 
 
 def test_business_number_question_uses_live_lookup_path():

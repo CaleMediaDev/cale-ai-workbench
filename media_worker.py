@@ -334,8 +334,10 @@ def speak(text, output_path, play=False, rate=0):
         speaker = Kokoro(str(model), str(voices))
         samples, sample_rate = speaker.create(
             str(text)[:12000],
-            voice="af_sarah",
-            speed=max(0.7, min(1.3, 1 + int(rate) * 0.08)),
+            # Michael is bundled in the local Kokoro voice pack. Keep a calm,
+            # conversational pace so status updates sound less robotic.
+            voice="am_michael",
+            speed=max(0.78, min(1.18, 0.96 + int(rate) * 0.06)),
             lang="en-us",
         )
         sf.write(target, samples, sample_rate)
