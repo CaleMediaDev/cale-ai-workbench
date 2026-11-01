@@ -10,7 +10,7 @@ Created by [Cale Media](https://calemedia.com/). Built on Hermes Agent, Ollama, 
 
 1. Download `Cale-AI-Workbench-Setup.exe` and open it.
 2. Setup begins automatically. The workbench opens during setup and shows downloads under **My tasks**.
-3. Type into the chat. Simple questions get a local answer; requests to build or research something become saved tasks with progress shown below the chat. Cale can search older user chat messages locally when a new question refers to a detail beyond the recent conversation. No account is needed for the default experience.
+3. Type into the chat. Simple questions get a local answer; requests to build or research something become saved tasks with progress shown below the chat. Finished task cards have **Reuse prompt**, which restores the original request to the chat editor for changes before sending. Cale can search older user chat messages locally when a new question refers to a detail beyond the recent conversation. No account is needed for the default experience.
 
 The installer downloads the runtime, tools, browser, image/voice models, and model files. It creates a desktop shortcut with the Cale Media logo, which also appears on the app window and taskbar. No Python, Git, Node, terminal commands, or API keys need to be installed manually. The ZIP alternative contains `Install.cmd` with the same setup screen.
 

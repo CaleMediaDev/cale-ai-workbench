@@ -105,7 +105,7 @@ def generate_image(prompt, output_path, width=512, height=512, seed=0):
     }
 
 
-def transcribe_audio(path):
+def transcribe_audio(path, fast=False):
     """Transcribe a local audio file with the installed offline speech model."""
     from faster_whisper import WhisperModel
 
@@ -118,7 +118,9 @@ def transcribe_audio(path):
         compute_type="int8",
         local_files_only=True,
     )
-    segments, info = model.transcribe(str(source), beam_size=3, vad_filter=True)
+    # Live microphone turns favor a fast first answer; longer file analysis
+    # retains its wider beam for accuracy.
+    segments, info = model.transcribe(str(source), beam_size=1 if fast else 3, vad_filter=True)
     rows = [
         {
             "start": round(segment.start, 2),
@@ -420,7 +422,7 @@ def _capture_microphone(sd, device: int, rate: int, seconds: int):
                     and float(np.sqrt(np.mean(np.square(block)))) >= MIC_VOICE_RMS_LEVEL):
                 speaking = True
                 last_voice_frame = captured
-            if speaking and captured >= rate and captured - last_voice_frame >= round(rate * 1.2):
+            if speaking and captured >= rate and captured - last_voice_frame >= round(rate * 0.9):
                 break
     return np.concatenate(pieces, axis=0)
 
@@ -502,7 +504,7 @@ def record_audio(seconds=10):
     with tempfile.TemporaryDirectory(dir=ROOT / "Temp") as temp:
         path = Path(temp) / "dictation.wav"
         sf.write(path, audio, rate)
-        transcript = transcribe_audio(path)
+        transcript = transcribe_audio(path, fast=True)
         # Background hiss can cross the near-silence cutoff. If no words were
         # found and the whole clip stayed below the speech level, give the
         # user the actionable low-input diagnosis. Recognized soft speech wins.

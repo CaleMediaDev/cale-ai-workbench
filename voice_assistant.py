@@ -30,7 +30,7 @@ REPLAY_ACK = "Got it. I will read that out loud now."
 WAKE_REFERENCE_SHA256 = "ec586df55a3e1431b4f08e0dae05e1078b2bf4a8a42f904a12bb448551d2e3cc"
 
 
-def speech_chunks(message, limit=280):
+def speech_chunks(message, limit=180):
     """Bound each voice call while preserving line breaks in lyrics or verse."""
     return textwrap.wrap(
         str(message), width=limit, break_long_words=True,
@@ -159,7 +159,7 @@ def rephrase_status(line, recent=(), required=()):
             "http://127.0.0.1:11434/v1/chat/completions",
             {"model": FAST_MODEL, "messages": messages, "stream": False,
              "max_tokens": 72, "temperature": 0.85, "reasoning_effort": "none"},
-            timeout=12,
+            timeout=3,
         )
         candidate = str(result["choices"][0]["message"].get("content") or "").strip().strip('"')
     except (KeyError, IndexError, OSError, ValueError, TimeoutError):

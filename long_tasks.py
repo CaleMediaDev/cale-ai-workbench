@@ -4068,6 +4068,18 @@ def gui():
         if kind == "open":
             os.startfile(item["folder"])
             return
+        if kind == "reuse":
+            # Keep the draft editable; never start another task from one click.
+            saved = original_request_path(item["folder"], pid)
+            prompt = saved.read_text(encoding="utf-8") if saved.is_file() else item["brief"]
+            existing = chat_input.get("1.0", "end-1c")
+            if existing.strip():
+                chat_input.insert("end", "\n\n")
+            chat_input.insert("end", prompt)
+            chat_input.focus_set()
+            chat_input.see("end")
+            status.set("Original request copied into chat. Edit it, then send when ready.")
+            return
         if kind == "delete":
             if not messagebox.askyesno(
                 "Delete task",
@@ -4327,8 +4339,11 @@ def gui():
             return (
                 ("Looks good", "accept"),
                 ("Request changes", "note"),
+                ("Reuse prompt", "reuse"),
                 ("Delete", "delete"),
             )
+        if state == "accepted":
+            return (("Reuse prompt", "reuse"), ("Delete", "delete"))
         return (("Delete", "delete"),)
 
     def update_task_controls(card_info, item):
