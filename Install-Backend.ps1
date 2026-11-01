@@ -19,11 +19,11 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.164')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.165')
  $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
  function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
    New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
-   $payload=@{percent=$percent;current=$current;status=$status;updated=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()} | ConvertTo-Json -Compress
+   $payload=@{percent=$percent;current=$current;status=$status;updated=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds();pid=$PID} | ConvertTo-Json -Compress
    $temporary=$setupState+'.'+$PID+'.tmp'
    [IO.File]::WriteAllText($temporary,$payload)
    Move-Item -LiteralPath $temporary -Destination $setupState -Force

@@ -55,3 +55,43 @@ def test_success_clears_retry_count(tmp_path, monkeypatch):
     monkeypatch.setattr(setup_recovery, "STATE", state)
     assert not setup_recovery.recover()
     assert not record.exists()
+
+
+def test_stopped_installer_turns_stale_work_into_retry(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    progress_path = state / "install-progress.json"
+    progress_path.write_text(json.dumps({
+        "status": "working", "current": "Downloading the AI model",
+        "updated": time.time() - setup_recovery.STALE_SECONDS - 30,
+        "pid": 12345,
+    }), encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    launches = []
+    monkeypatch.setattr(setup_recovery.subprocess, "Popen", lambda *args, **kwargs: launches.append(args))
+    assert not setup_recovery.recover()  # Show the failure, then honor the retry backoff.
+    assert json.loads(progress_path.read_text())["status"] == "error"
+    progress = json.loads(progress_path.read_text())
+    progress["updated"] = time.time() - 60
+    progress_path.write_text(json.dumps(progress), encoding="utf-8")
+    assert setup_recovery.recover()
+    assert len(launches) == 1
+
+
+def test_slow_live_installer_is_not_restarted(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    (state / "install-progress.json").write_text(json.dumps({
+        "status": "working", "current": "Downloading the AI model",
+        "updated": time.time() - 3600,
+    }), encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: True)
+    monkeypatch.setattr(setup_recovery.subprocess, "Popen", lambda *args, **kwargs: 1 / 0)
+    assert not setup_recovery.recover()
+    assert json.loads((state / "install-progress.json").read_text())["status"] == "working"
