@@ -176,6 +176,17 @@ class VoiceTests(unittest.TestCase):
         self.assertIsNone(listener.consume("Hey Cale", now=100))
         self.assertEqual(listener.consume("can you hear me", now=119), ("hearing", ""))
 
+    def test_whisper_phonetic_wake_spelling_reaches_hearing_command(self):
+        self.assertEqual(
+            voice_assistant.spoken_command("Hey Kaeln, can you hear me?", require_wake=True),
+            ("hearing", ""),
+        )
+        self.assertEqual(
+            voice_assistant.WakeSequence().consume("Hey Kaeln, can you hear me?"),
+            ("hearing", ""),
+        )
+        self.assertIsNone(voice_assistant.spoken_command("Hey Kaleb, can you hear me?", require_wake=True))
+
     def test_split_wake_window_renews_after_spoken_acknowledgement(self):
         listener = voice_assistant.WakeSequence(timeout=24)
         self.assertIsNone(listener.consume("Hey Cale", now=100))
