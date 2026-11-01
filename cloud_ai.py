@@ -305,7 +305,8 @@ def cloud_payload(payload):
     return result
 
 
-def valid_completion(result):
+def valid_completion(result, request=None):
+    """Validate model output before a worker can act on its tool calls."""
     if not isinstance(result, dict) or result.get("error") or not result.get("choices"):
         raise ValueError("Invalid inference response")
     message = result["choices"][0].get("message", {})
@@ -313,10 +314,38 @@ def valid_completion(result):
             and not message.get("refusal")
             and result["choices"][0].get("finish_reason") != "content_filter"):
         raise ValueError("Empty inference response")
-    for call in message.get("tool_calls", []):
-        if not call.get("id") or not call.get("function", {}).get("name"):
+    offered = {
+        tool.get("function", {}).get("name")
+        for tool in (request or {}).get("tools", [])
+        if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
+    }
+    calls = message.get("tool_calls") or []
+    for call in calls:
+        if not isinstance(call, dict):
             raise ValueError("Invalid tool response")
-        json.loads(call["function"]["arguments"])
+        function = call.get("function", {})
+        name = function.get("name") if isinstance(function, dict) else None
+        if not call.get("id") or not name:
+            raise ValueError("Invalid tool response")
+        if request is not None and name not in offered:
+            raise ValueError("Model called a tool that was not offered")
+        arguments = function.get("arguments")
+        if isinstance(arguments, dict):
+            function["arguments"] = json.dumps(arguments, ensure_ascii=False)
+        elif not isinstance(arguments, str) or not isinstance(json.loads(arguments), dict):
+            raise ValueError("Invalid tool arguments")
+    choice = (request or {}).get("tool_choice")
+    named_choice = choice.get("function") if isinstance(choice, dict) else None
+    required_name = (
+        named_choice.get("name")
+        if isinstance(named_choice, dict) and choice.get("type") == "function" else None
+    )
+    if (not is_refusal(result) and request is not None
+            and (choice == "required" or required_name)
+            and (not calls or (required_name and not any(
+                call["function"]["name"] == required_name for call in calls
+            )))):
+        raise ValueError("Required tool call was missing")
     return result
 
 
@@ -377,7 +406,7 @@ def retry_derestricted(payload, result, original_model=""):
             if item.get("tool_reasoning_effort"):
                 local["reasoning_effort"] = item["tool_reasoning_effort"]
             attempt = valid_completion(
-                post("http://127.0.0.1:11434/v1/chat/completions", local, timeout=1800)
+                post("http://127.0.0.1:11434/v1/chat/completions", local, timeout=1800), payload
             )
             if not is_refusal(attempt):
                 record("local", "A model refused; an installed derestricted model answered.", model)
@@ -513,7 +542,7 @@ class Router:
 
                 if chatgpt_auth.status()["enabled"]:
                     started = time.monotonic()
-                    result = valid_completion(chatgpt_auth.complete(payload))
+                    result = valid_completion(chatgpt_auth.complete(payload), payload)
                     import usage_history
 
                     usage_history.record_completion(result, "chatgpt", time.monotonic() - started)
@@ -554,7 +583,7 @@ class Router:
                         "http://127.0.0.1:11434/v1/chat/completions",
                         local,
                         timeout=1800,
-                    )
+                    ), payload
                 )
                 record(
                     "local",
@@ -574,7 +603,7 @@ class Router:
                         cloud_payload(payload),
                         key,
                         timeout=120,
-                    )
+                    ), payload
                 )
                 record(
                     "free cloud",

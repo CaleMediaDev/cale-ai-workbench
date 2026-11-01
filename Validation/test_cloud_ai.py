@@ -40,6 +40,50 @@ REQUEST = {
 
 
 class CloudTests(unittest.TestCase):
+    def test_missing_required_tool_call_falls_back_to_next_local_model(self):
+        request = dict(
+            REQUEST,
+            tools=[{"type": "function", "function": {"name": "multiply"}}],
+            tool_choice="required",
+        )
+        tool_answer = {
+            **ANSWER,
+            "choices": [{"message": {"role": "assistant", "content": None,
+                "tool_calls": [{"id": "call-1", "type": "function",
+                                "function": {"name": "multiply", "arguments": '{"a":7,"b":13}'}}]}}],
+        }
+        with (
+            patch.object(cloud.Router, "local_candidates", return_value=["small", "strong"]),
+            patch.object(cloud, "post", side_effect=[ANSWER, tool_answer]) as post,
+        ):
+            self.assertEqual(cloud.Router().complete(request), tool_answer)
+        self.assertEqual([call.args[1]["model"] for call in post.call_args_list], ["small", "strong"])
+
+    def test_unoffered_tool_call_is_rejected_and_dict_arguments_are_normalized(self):
+        request = dict(REQUEST, tools=[{"type": "function", "function": {"name": "multiply"}}])
+        wrong = {"choices": [{"message": {"tool_calls": [
+            {"id": "call-1", "function": {"name": "erase", "arguments": "{}"}}
+        ]}}]}
+        with self.assertRaisesRegex(ValueError, "not offered"):
+            cloud.valid_completion(wrong, request)
+        correct = {"choices": [{"message": {"tool_calls": [
+            {"id": "call-2", "function": {"name": "multiply", "arguments": {"a": 7, "b": 13}}}
+        ]}}]}
+        result = cloud.valid_completion(correct, request)
+        self.assertEqual(json.loads(result["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]),
+                         {"a": 7, "b": 13})
+
+    def test_named_tool_choice_requires_the_selected_tool(self):
+        request = dict(REQUEST, tools=[
+            {"type": "function", "function": {"name": "multiply"}},
+            {"type": "function", "function": {"name": "divide"}},
+        ], tool_choice={"type": "function", "function": {"name": "multiply"}})
+        other = {"choices": [{"message": {"tool_calls": [
+            {"id": "call-1", "function": {"name": "divide", "arguments": "{}"}}
+        ]}}]}
+        with self.assertRaisesRegex(ValueError, "Required tool call"):
+            cloud.valid_completion(other, request)
+
     def test_request_size_keeps_short_work_on_small_model(self):
         short = {"messages": [{"role": "user", "content": "Hello"}], "tools": []}
         long = {"messages": [{"role": "user", "content": "x" * 300_000}], "tools": []}
@@ -163,6 +207,10 @@ class CloudTests(unittest.TestCase):
         self.assertFalse(cloud.is_refusal({"choices": [{"message": {
             "content": "I can't help with that.", "tool_calls": [{"id": "x"}]}}]}))
         cloud.valid_completion({"choices": [{"message": {"refusal": "blocked"}}]})
+        cloud.valid_completion(REFUSAL, {
+            "tools": [{"type": "function", "function": {"name": "multiply"}}],
+            "tool_choice": "required",
+        })
 
     def test_connected_chatgpt_refusal_retries_locally(self):
         with (
