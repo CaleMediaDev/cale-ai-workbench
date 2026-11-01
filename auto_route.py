@@ -111,7 +111,7 @@ def task_size(messages):
     latest = intent.strip()
     if (
         len(intent) <= 280
-        and tool_calls == 0
+        and tool_calls <= 2
         and QUESTION_START.match(latest)
         and not live_lookup
         and not has_media_input(messages)
@@ -124,7 +124,9 @@ def task_size(messages):
         return "deep"
     if live_lookup:
         return "balanced"
-    if len(intent) <= 280 and tool_calls == 0:
+    # One or two tool calls can be routine discovery or a retry; they do not
+    # turn a short request into a large project by themselves.
+    if len(intent) <= 280 and tool_calls <= 2:
         return "quick"
     return "balanced"
 
