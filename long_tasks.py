@@ -2109,17 +2109,20 @@ def gui():
     usage_peak = ttk.Label(usage_header, text="", style="CardMuted.TLabel")
     usage_peak.pack(side="left", padx=(16, 0))
     usage_period = tk.StringVar(value="day")
+    usage_plot = ttk.Frame(usage_panel, style="Card.TFrame")
+    usage_plot.pack(fill="x", pady=(5, 0))
     usage_canvas = tk.Canvas(
-        usage_panel, height=135, background=card, borderwidth=0,
+        usage_plot, height=135, background=card, borderwidth=0,
         highlightthickness=0,
     )
-    usage_canvas.pack(fill="x", pady=(5, 0))
+    usage_canvas.pack(fill="x")
 
     def draw_usage():
-        """Draw zero-filled local-day or local-month history from actual usage."""
+        """Draw recorded history over time or a lifetime total for every model."""
         usage_canvas.delete("all")
+        period = usage_period.get()
         try:
-            summary = usage_history.history(usage_period.get())
+            summary = usage_history.history(period if period in ("day", "month") else "day")
         except (OSError, sqlite3.Error):
             usage_total.configure(text="Usage history is unavailable")
             return
@@ -2133,14 +2136,58 @@ def gui():
             text=f"Top {peak:.1f} tokens/s" if peak is not None else ""
         )
         width = max(usage_canvas.winfo_width(), 400)
-        points = summary["points"]
-        maximum = max((point["tokens"] for point in points), default=0)
-        left, right, top, bottom = 52, width - 24, 24, 106
         def compact(number):
             return (f"{number / 1_000_000:.1f}m" if number >= 1_000_000
                     else f"{number / 1_000:.1f}k" if number >= 1_000
                     else str(round(number)))
 
+        if period == "model":
+            models = summary["models"]
+            maximum = max((item["tokens"] for item in models), default=0)
+            columns = 2 if len(models) > 5 and width >= 720 else 1
+            column_width = width / columns
+            rows = (len(models) + columns - 1) // columns
+            model_height = max(135, rows * 31 + 12)
+            if int(usage_canvas["height"]) != model_height:
+                usage_canvas.configure(height=model_height)
+            for index, item in enumerate(models):
+                x = (index % columns) * column_width
+                y = 17 + (index // columns) * 31
+                label = item["model"]
+                limit = 30 if columns == 1 else 18
+                if len(label) > limit:
+                    label = label[:limit - 1] + "…"
+                bar_left = x + (min(230, column_width * 0.36) if columns == 1 else 155)
+                bar_right = x + column_width - 84
+                usage_canvas.create_text(
+                    x + 8, y, anchor="w", text=label, fill=text,
+                    font=("Segoe UI", 9),
+                )
+                usage_canvas.create_rectangle(
+                    bar_left, y - 6, bar_right, y + 6,
+                    fill="#273a55", outline="",
+                )
+                usage_canvas.create_rectangle(
+                    bar_left, y - 6,
+                    bar_left + (bar_right - bar_left) * item["tokens"] / maximum,
+                    y + 6, fill="#51e5d0" if index == 0 else "#8291f4",
+                    outline="",
+                )
+                usage_canvas.create_text(
+                    x + column_width - 7, y, anchor="e", text=f"{item['tokens']:,}",
+                    fill=muted, font=("Segoe UI", 9, "bold"),
+                )
+            if not models:
+                usage_canvas.create_text(
+                    width / 2, 68, text="Model totals appear after the next AI response",
+                    fill=muted, font=("Segoe UI", 11),
+                )
+            return
+        if int(usage_canvas["height"]) != 135:
+            usage_canvas.configure(height=135)
+        points = summary["points"]
+        maximum = max((point["tokens"] for point in points), default=0)
+        left, right, top, bottom = 52, width - 24, 24, 106
         for fraction in (0, 0.5, 1):
             y = bottom - (bottom - top) * fraction
             usage_canvas.create_line(left, y, right, y, fill="#31415d", dash=(2, 5))
@@ -2186,6 +2233,9 @@ def gui():
     ).pack(side="right")
     ttk.Button(
         usage_header, text="Daily", command=lambda: set_usage_period("day")
+    ).pack(side="right", padx=(0, 5))
+    ttk.Button(
+        usage_header, text="Models", command=lambda: set_usage_period("model")
     ).pack(side="right", padx=(0, 5))
     usage_canvas.bind("<Configure>", lambda _: draw_usage())
 
