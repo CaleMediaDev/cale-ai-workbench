@@ -1,6 +1,6 @@
 [
   "README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "LICENSE", "HERMES-LICENSE", "THIRD-PARTY-NOTICES.md", "ASSETS.md",
-  "assets/cale-logo.png", "assets/cale-logo-original.jpg",
+  "assets/cale-logo.png", "assets/cale-logo-original.jpg", "assets/cale-icon.ico",
   "cloud_ai.py", "chatgpt_auth.py", "github_account.py", "self_update.py", "ollama_runtime.py", "project_preview.py", "preview_capture.js", "model_library.py", "auto_route.py", "voice_assistant.py", "long_tasks.py", "toolbox_mcp.py", "web_tools.py",
   "media_worker.py", "natural_voice.py", "small_training.py", "media-models.json", "media-requirements.txt",
   "read-settings.py", "configure_install.py", "config-template.yaml", "downloads.json", "pyproject.toml",

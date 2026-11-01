@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 $taskPython = Join-Path $taskRoot 'Toolbox/python/Scripts/pythonw.exe'
 $taskScript = Join-Path $taskRoot 'long_tasks.py'
+$taskIcon = Join-Path $taskRoot 'assets/cale-icon.ico'
 $taskArguments = '"' + $taskScript + '" --monitor'
 $taskName = 'CaleAI_LongTasks'
 $taskExisting = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -24,6 +25,7 @@ try {
     $taskShortcut.Arguments = $taskArguments
     $taskShortcut.WorkingDirectory = $taskRoot
     $taskShortcut.WindowStyle = 7
+    if (Test-Path -LiteralPath $taskIcon) { $taskShortcut.IconLocation = $taskIcon + ',0' }
     $taskShortcut.Save()
     'Scheduled Task unavailable; installed current-user Startup shortcut. Resume at sign-in is enabled.'
 }
@@ -34,6 +36,7 @@ $taskShortcut.TargetPath = $taskPython
 $taskShortcut.Arguments = '"' + $taskScript + '"'
 $taskShortcut.WorkingDirectory = $taskRoot
 $taskShortcut.Description = 'Persistent local AI projects, progress, pause/resume and verification'
+if (Test-Path -LiteralPath $taskIcon) { $taskShortcut.IconLocation = $taskIcon + ',0' }
 $taskShortcut.Save()
 'Desktop shortcut created: Cale AI Workbench'
 # Register the task supervisor at Windows sign-in so saved work can resume.

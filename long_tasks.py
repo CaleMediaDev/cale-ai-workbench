@@ -897,8 +897,18 @@ def gui():
     from model_library import save_download_status
 
     start_monitor()
+    if os.name == "nt":
+        # Give the taskbar a stable Cale identity instead of Python's generic one.
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "CaleMedia.AIWorkbench"
+        )
     window = tk.Tk()
     window.title("Cale AI Workbench")
+    icon_path = ROOT / "assets/cale-icon.ico"
+    if icon_path.is_file():
+        window.iconbitmap(default=str(icon_path))
     window.geometry("1120x790")
     window.minsize(850, 600)
     bg, card, field = "#0b1020", "#151d31", "#202d46"

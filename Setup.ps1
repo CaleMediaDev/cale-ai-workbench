@@ -5,6 +5,8 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Cale AI Workbench - Install'
+$iconPath=Join-Path $PSScriptRoot 'assets\cale-icon.ico'
+if (Test-Path -LiteralPath $iconPath) { $form.Icon=New-Object Drawing.Icon($iconPath) }
 $form.Size = New-Object Drawing.Size(820,680)
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object Drawing.Font('Segoe UI',10)
