@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from model_identity import configured_main_alias, configured_permissive_alias
 
 ROOT = Path(__file__).resolve().parent
+STANDARD_MAIN_ALIAS = "cale-main-64k"
 RECOMMENDATIONS_URL = (
     "https://raw.githubusercontent.com/CaleMediaDev/"
     "cale-ai-workbench/main/models/recommendations.json"
@@ -320,6 +321,41 @@ def post(path, value, timeout=30):
         return json.load(response)
 
 
+def ensure_main_standard():
+    """Share main-model weights with a smaller routine context window.
+
+    The original alias retains its full window for long requests. Rebuilding
+    this metadata-only alias waits until project workers are idle.
+    """
+    try:
+        from long_tasks import projects
+
+        if any(task["status"] in ("queued", "working", "checking") for task in projects()):
+            return False
+    except Exception:
+        return False
+    main = CATALOG["main"]["alias"]
+    info = post("/api/show", {"model": main}, timeout=10)
+    if info.get("remote_host") or info.get("remote_model") or "tools" not in info.get("capabilities", []):
+        return False
+    current = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", info.get("parameters", ""))
+    if not current or int(current.group(1)) <= 65536:
+        return False
+    result = post("/api/create", {
+        "model": STANDARD_MAIN_ALIAS, "from": main, "stream": False,
+        "parameters": {"num_ctx": 65536, "num_predict": 8192},
+    }, timeout=120)
+    if result.get("error"):
+        raise RuntimeError(result["error"])
+    ready = post("/api/show", {"model": STANDARD_MAIN_ALIAS}, timeout=10)
+    configured = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", ready.get("parameters", ""))
+    if (ready.get("remote_host") or ready.get("remote_model") or
+            "tools" not in ready.get("capabilities", []) or
+            not configured or int(configured.group(1)) != 65536):
+        raise RuntimeError("The standard-context alias did not pass local verification.")
+    return True
+
+
 def total_ram_gb():
     """Return physical RAM, which is the limit for optional local weights."""
     import ctypes
@@ -561,6 +597,22 @@ def auto_install(status_dir, refresh=True):
             return
         worker_status = status_dir / "auto-model-worker.json"
         try:
+            standard_status = status_dir / "optional-model-main-standard.json"
+            try:
+                from long_tasks import projects
+
+                active = any(task["status"] in ("queued", "working", "checking")
+                             for task in projects())
+                if active:
+                    save_download_status(standard_status, "waiting_tasks",
+                                         "Waiting to prepare the routine context window", 0)
+                else:
+                    ensure_main_standard()
+                    save_download_status(standard_status, "complete",
+                                         "Routine context window ready", 100)
+            except Exception as exc:
+                save_download_status(standard_status, "error", str(exc), 0)
+                # A full-context alias remains usable; other downloads continue.
             ram = total_ram_gb()
             candidates = sorted(
                 (

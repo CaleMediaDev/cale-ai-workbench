@@ -2,11 +2,13 @@
 
 import base64
 import hashlib
+import io
 import json
 import sys
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -324,10 +326,44 @@ class CloudTests(unittest.TestCase):
             cloud.Router, "local_candidates", return_value=[cloud.LOCAL_MODEL]
         )
         self.candidates.start()
+        self.loaded = patch.object(cloud, "loaded_local_models", return_value=[])
+        self.loaded.start()
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(self.state.stop)
         self.addCleanup(self.root.stop)
         self.addCleanup(self.candidates.stop)
+        self.addCleanup(self.loaded.stop)
+
+    def test_loaded_balanced_model_avoids_unnecessary_model_swap(self):
+        self.candidates.stop()
+        sizes = {cloud.FAST_MODEL: "9B", cloud.BALANCED_MODEL: "35B",
+                 cloud.LOCAL_MODEL: "79B", cloud.STANDARD_MAIN_ALIAS: "79B"}
+
+        def show(_url, payload, **_kwargs):
+            return {"capabilities": ["tools"], "parameters":
+                    "num_ctx 65536\n" if payload["model"] != cloud.LOCAL_MODEL
+                    else "num_ctx 262144\n",
+                    "details": {"parameter_size": sizes[payload["model"]]}}
+
+        with (patch.object(cloud, "post", side_effect=show),
+              patch.object(cloud, "candidate_approved", return_value=True),
+              patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "loaded_local_models", return_value=[cloud.BALANCED_MODEL])):
+            router = cloud.Router()
+            self.assertEqual(router.local_candidates("quick")[0], cloud.BALANCED_MODEL)
+            self.assertEqual(router.local_candidates("balanced")[0], cloud.BALANCED_MODEL)
+            self.assertEqual(router.local_candidates("deep")[0], cloud.STANDARD_MAIN_ALIAS)
+            self.assertEqual(router.local_candidates("deep", required_context=100000)[0], cloud.LOCAL_MODEL)
+
+    def test_loaded_model_lookup_excludes_unloading_runner(self):
+        now = datetime.now(timezone.utc)
+        response = {"models": [
+            {"name": "cale-qwen35:latest", "expires_at": (now + timedelta(minutes=4)).isoformat()},
+            {"name": "qwen3-coder-local:latest", "expires_at": (now - timedelta(minutes=1)).isoformat()},
+        ]}
+        self.loaded.stop()
+        with patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(response).encode())):
+            self.assertEqual(cloud.loaded_local_models(), ["cale-qwen35"])
 
     def connected(self):
         data = cloud.credentials()

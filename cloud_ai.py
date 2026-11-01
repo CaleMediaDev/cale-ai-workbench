@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -34,7 +35,7 @@ import pc_offline
 import cloud_providers
 from auto_route import model_order, task_size
 from model_identity import configured_main_alias, configured_permissive_alias
-from model_library import CATALOG, candidate_approved, refresh_catalog
+from model_library import CATALOG, STANDARD_MAIN_ALIAS, candidate_approved, refresh_catalog
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "Cloud"
@@ -481,6 +482,23 @@ def estimated_context(payload):
     return max(8192, input_bytes // 3 + 8192)
 
 
+def loaded_local_models():
+    """Return active Ollama aliases, excluding models already unloading."""
+    try:
+        with urlopen("http://127.0.0.1:11434/api/ps", timeout=2) as response:
+            entries = json.load(response).get("models", [])
+        now = datetime.now(timezone.utc)
+        loaded = []
+        for item in entries:
+            expiry = datetime.fromisoformat(str(item.get("expires_at", "")))
+            name = str(item.get("name") or item.get("model") or "")
+            if expiry.tzinfo and expiry > now and name:
+                loaded.append(name.removesuffix(":latest"))
+        return loaded
+    except (OSError, ValueError, TypeError, KeyError):
+        return []
+
+
 class Router:
     """Choose a provider for one request while preserving local fallback."""
 
@@ -546,7 +564,8 @@ class Router:
             available = {}
             contexts = {}
             aliases = dict.fromkeys(
-                [FAST_MODEL, *(item["alias"] for item in CATALOG.values())]
+                [FAST_MODEL, STANDARD_MAIN_ALIAS,
+                 *(item["alias"] for item in CATALOG.values())]
             )
             for name in aliases:
                 item = next(
@@ -601,6 +620,17 @@ class Router:
              if self.model_contexts.get(name, 0) >= required_context},
             LOCAL_MODEL, FAST_MODEL, balanced_preferred
         )
+        if (size == "deep" and required_context <= 65536 and
+                STANDARD_MAIN_ALIAS in ordered):
+            ordered.remove(STANDARD_MAIN_ALIAS)
+            ordered.insert(0, STANDARD_MAIN_ALIAS)
+        elif size in ("quick", "balanced"):
+            for loaded in loaded_local_models():
+                if (loaded in ordered and
+                        (size == "quick" or self.model_cache.get(loaded, 0) >= 20)):
+                    ordered.remove(loaded)
+                    ordered.insert(0, loaded)
+                    break
         # Keep the main alias as a fallback when Ollama metadata is missing,
         # but do not send a prompt to a model known to be too small for it.
         return [

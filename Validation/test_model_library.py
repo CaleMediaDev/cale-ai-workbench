@@ -15,6 +15,32 @@ import model_library as library
 
 
 class AutoModelTests(unittest.TestCase):
+    def test_main_standard_alias_shares_weights_without_shortening_full_alias(self):
+        calls = []
+
+        def fake_post(path, payload, **_kwargs):
+            calls.append((path, payload))
+            if path == "/api/create":
+                return {}
+            return {"capabilities": ["tools"], "parameters":
+                    "num_ctx 65536\n" if payload["model"] == library.STANDARD_MAIN_ALIAS
+                    else "num_ctx 262144\n"}
+
+        with (patch("long_tasks.projects", return_value=[]),
+              patch.object(library, "post", side_effect=fake_post),
+              patch.object(library, "CATALOG", {"main": {"alias": "qwen3-coder-local"}})):
+            self.assertTrue(library.ensure_main_standard())
+        create = next(payload for path, payload in calls if path == "/api/create")
+        self.assertEqual(create["from"], "qwen3-coder-local")
+        self.assertEqual(create["model"], library.STANDARD_MAIN_ALIAS)
+        self.assertEqual(create["parameters"]["num_ctx"], 65536)
+
+    def test_main_standard_alias_waits_for_active_project(self):
+        with (patch("long_tasks.projects", return_value=[{"status": "working"}]),
+              patch.object(library, "post") as post):
+            self.assertFalse(library.ensure_main_standard())
+        post.assert_not_called()
+
     def test_agent_model_needs_64k_context(self):
         details = {"capabilities": ["tools"], "parameters": "num_ctx 32768\n"}
         with patch.object(library, "post", return_value=details):
