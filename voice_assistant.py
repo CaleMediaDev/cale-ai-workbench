@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
+import threading
 import time
 import wave
 from pathlib import Path
@@ -41,6 +42,28 @@ def urgent_speech_waiting(pending: queue.PriorityQueue, current_rank: int) -> bo
     """Check the next speech item without racing another queue producer."""
     with pending.mutex:
         return bool(pending.queue and pending.queue[0][0] < current_rank)
+
+
+class SpeechCancel:
+    """Let a mic turn or higher-priority speech interrupt the current line."""
+
+    def __init__(self, microphone: threading.Event, pending: queue.PriorityQueue,
+                 rank: int):
+        self.microphone = microphone
+        self.pending = pending
+        self.rank = rank
+
+    def is_set(self) -> bool:
+        return self.microphone.is_set() or urgent_speech_waiting(self.pending, self.rank)
+
+    def wait(self, timeout=None) -> bool:
+        deadline = None if timeout is None else time.monotonic() + max(0, timeout)
+        while not self.is_set():
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return False
+            self.microphone.wait(timeout=min(0.05, remaining) if remaining is not None else 0.05)
+        return True
 
 
 def spoken_text(message):

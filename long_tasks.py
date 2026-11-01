@@ -2560,7 +2560,10 @@ def gui():
                     while voice_busy.is_set():
                         time.sleep(0.2)
                     voice_events.put(("speaking", f"Speaking aloud · part {index} of {len(chunks)}"))
-                    result = voice_assistant.say(chunk, rate=rate, cancel=mic_turn_requested)
+                    result = voice_assistant.say(
+                        chunk, rate=rate,
+                        cancel=voice_assistant.SpeechCancel(mic_turn_requested, speech_queue, rank),
+                    )
                     if mic_turn_requested.is_set() and index < len(chunks):
                         remainder = " ".join(chunks[index:])
                         speech_queue.put((rank, next(speech_order), remainder, rate,

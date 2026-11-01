@@ -206,6 +206,44 @@ class VoiceTests(unittest.TestCase):
         self.assertFalse(voice_assistant.urgent_speech_waiting(pending, -2))
         self.assertEqual(pending.get()[2], "requested replay")
 
+    def test_spoken_replay_interrupts_active_speech_without_a_mic_turn(self):
+        import queue
+
+        pending = queue.PriorityQueue()
+        mic = threading.Event()
+        cancel = voice_assistant.SpeechCancel(mic, pending, 0)
+        self.assertFalse(cancel.is_set())
+        self.assertFalse(cancel.wait(timeout=0.01))
+        pending.put((-2, 1, "requested replay"))
+        self.assertTrue(cancel.is_set())
+        self.assertTrue(cancel.wait(timeout=0.01))
+        replay_cancel = voice_assistant.SpeechCancel(mic, pending, -2)
+        self.assertFalse(replay_cancel.is_set())
+        mic.set()
+        self.assertTrue(replay_cancel.is_set())
+
+    def test_requested_replay_stops_current_audio_playback(self):
+        import queue
+
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "speech.wav"
+            with wave.open(str(path), "wb") as audio:
+                audio.setnchannels(1)
+                audio.setsampwidth(2)
+                audio.setframerate(16000)
+                audio.writeframes(b"\0\0" * 16000)
+            pending = queue.PriorityQueue()
+            cancel = voice_assistant.SpeechCancel(threading.Event(), pending, 0)
+            timer = threading.Timer(0.1, lambda: pending.put((-2, 1, "requested replay")))
+            timer.start()
+            try:
+                with patch("winsound.PlaySound") as play:
+                    with self.assertRaises(cale_voice.SpeechInterrupted):
+                        voice_assistant._play_file(path, cancel)
+                self.assertEqual(play.call_args.args, (None, 0))
+            finally:
+                timer.join()
+
     def test_handsfree_requires_name_and_recognizes_task_controls(self):
         self.assertIsNone(
             voice_assistant.spoken_command("pause the task", require_wake=True)
