@@ -2334,6 +2334,7 @@ def gui():
     voice_events = queue.Queue()
     voice_busy = threading.Event()
     listening = threading.Event()
+    manual_voice_requested = threading.Event()
     speech_queue = queue.PriorityQueue()
     speech_order = itertools.count()
     speech_lock = threading.Lock()
@@ -2434,6 +2435,8 @@ def gui():
                 with speech_lock:
                     if speech_queue.empty():
                         voice_speaking.clear()
+                if manual_voice_requested.is_set():
+                    voice_events.put(("again", ""))
                 speech_queue.task_done()
 
     threading.Thread(target=speech_worker, daemon=True).start()
@@ -2499,6 +2502,9 @@ def gui():
 
     def record_voice(repeat=False):
         if voice_busy.is_set() or voice_speaking.is_set():
+            if not repeat:
+                manual_voice_requested.set()
+                voice_label.set("I'll listen as soon as the current audio finishes.")
             return
         voice_busy.set()
         if not repeat:
@@ -2521,10 +2527,11 @@ def gui():
                     voice_events.put(("state", "Mic on. Waiting for Hey Cale."))
             except Exception as exc:
                 listening.clear()
+                manual_voice_requested.clear()
                 voice_events.put(("mic_error", str(exc)))
             finally:
                 voice_busy.clear()
-                if repeat and listening.is_set():
+                if manual_voice_requested.is_set() or listening.is_set():
                     voice_events.put(("again", ""))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -3768,11 +3775,14 @@ def gui():
             threading.Thread(target=capture, daemon=True).start()
 
     def maybe_listen():
-        if listening.is_set():
+        if manual_voice_requested.is_set() or listening.is_set():
             if voice_speaking.is_set() or voice_busy.is_set():
                 window.after(500, maybe_listen)
             else:
-                record_voice(repeat=True)
+                manual = manual_voice_requested.is_set()
+                if manual:
+                    manual_voice_requested.clear()
+                record_voice(repeat=not manual)
 
     def voice_poll():
         try:
