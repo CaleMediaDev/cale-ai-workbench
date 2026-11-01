@@ -425,6 +425,8 @@ def find_business_contact(name: str, locality: str = "") -> dict:
     candidates = []
     seen_urls = set()
     host_counts = {}
+    matching_pages = 0
+    unreadable_pages = 0
     ranked = sorted(
         found.get("results", [])[:12],
         key=lambda result: not name_matching_domain(name, result.get("url", "")),
@@ -436,11 +438,13 @@ def find_business_contact(name: str, locality: str = "") -> dict:
             continue
         if not business_name_matches(name, result.get("title", ""), url):
             continue
+        matching_pages += 1
         seen_urls.add(url)
         host_counts[host] = host_counts.get(host, 0) + 1
         try:
             page = read_webpage(url)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            unreadable_pages += 1
             continue
         phones = list(
             dict.fromkeys(
@@ -472,6 +476,11 @@ def find_business_contact(name: str, locality: str = "") -> dict:
         "business": name.strip(),
         "locality": locality.strip(),
         "sources": candidates,
+        "lookup_status": (
+            "search_unavailable" if not found.get("results") and found.get("error")
+            else "pages_unavailable" if matching_pages and matching_pages == unreadable_pages
+            else "not_found" if not candidates else "verified_pages"
+        ),
         "note": (
             "These numbers were read from live pages, but search ranking alone does "
             "not prove a site belongs to the business. Cite the source and say when "

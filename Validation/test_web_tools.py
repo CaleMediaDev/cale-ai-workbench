@@ -138,6 +138,21 @@ class BusinessContactTests(unittest.TestCase):
         self.assertEqual(result["sources"], [])
         self.assertIn("No matching", result["error"])
 
+    def test_contact_lookup_reports_unreadable_live_pages(self):
+        search = {"results": [{"url": "https://business.example/contact", "title": "Business contact"}]}
+        with (
+            patch.object(web_tools, "search_web", return_value=search),
+            patch.object(web_tools, "read_webpage", side_effect=RuntimeError("TLS error")),
+        ):
+            result = web_tools.find_business_contact("Business")
+        self.assertEqual(result["lookup_status"], "pages_unavailable")
+        self.assertEqual(result["sources"], [])
+
+    def test_contact_lookup_reports_failed_live_search(self):
+        with patch.object(web_tools, "search_web", return_value={"results": [], "error": "search failed"}):
+            result = web_tools.find_business_contact("Business")
+        self.assertEqual(result["lookup_status"], "search_unavailable")
+
     def test_labeled_visible_phone_without_tel_link_is_found(self):
         search = {"results": [{
             "url": "https://puremichiganlawncare.example/contact",

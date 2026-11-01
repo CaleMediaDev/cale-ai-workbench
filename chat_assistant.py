@@ -224,7 +224,9 @@ def business_contact_query(text: str) -> str | None:
     value = text.strip().rstrip("? .")
     patterns = (
         r"^(?:what(?:'s| is|s)\s+)?(.+?)(?:'s)?\s+(?:phone\s+)?number$",
+        r"^(?:(?:what(?:'s| is|s)|do you know)\s+)?(?:the\s+)?(?:phone\s+)?number\s+(?:for|of)\s+(.+)$",
         r"^(?:find|look up|give me)\s+(?:the\s+)?(?:phone\s+)?number\s+(?:for|of)\s+(.+)$",
+        r"^can you\s+(?:find|give me)\s+(?:the\s+)?(?:phone\s+)?number\s+(?:for|of)\s+(.+)$",
     )
     for pattern in patterns:
         match = re.match(pattern, value, re.IGNORECASE)
@@ -305,11 +307,13 @@ def display_phone(link: str) -> tuple[str, str] | None:
     return digits, display
 
 
-def business_contact_answer(name: str, sources: list[dict]) -> str:
+def business_contact_answer(name: str, sources: list[dict], lookup_status: str = "") -> str:
     """Prefer matching business domains and disclose conflicting live numbers."""
     records = []
     for source in sources[:3]:
-        links = source.get("phone_links", [])[:3] or [
+        # A tel link can be stale or even point to a fax line. Compare it
+        # against numbers printed beside contact labels on the same page.
+        links = source.get("phone_links", [])[:3] + [
             "tel:" + number for number in source.get("visible_numbers", [])[:3]
         ]
         for link in links:
@@ -317,6 +321,10 @@ def business_contact_answer(name: str, sources: list[dict]) -> str:
             if parsed:
                 records.append((parsed[0], parsed[1], source))
     if not records:
+        if lookup_status == "search_unavailable":
+            return f"I couldn't verify a phone number for {name} because live search was unavailable."
+        if lookup_status == "pages_unavailable":
+            return f"I couldn't verify a phone number for {name} because the matching live pages could not be read."
         return "I couldn't find a live page listing a phone number for " + name + "."
     distinct = list(dict.fromkeys(number for number, _, _ in records))
     if len(distinct) > 1:
@@ -378,7 +386,7 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
         from web_tools import find_business_contact
 
         result = find_business_contact(name)
-        return business_contact_answer(name, result.get("sources", []))
+        return business_contact_answer(name, result.get("sources", []), result.get("lookup_status", ""))
     email_name = business_email_query(question)
     if email_name:
         from web_tools import find_business_email

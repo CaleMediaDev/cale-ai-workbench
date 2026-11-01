@@ -135,6 +135,8 @@ def test_business_number_question_uses_live_lookup_path():
         == "Pure Michigan Lawn Care"
     )
     assert chat_assistant.business_contact_query("What's Ross number?") == "Ross"
+    assert chat_assistant.business_contact_query("What's the phone number for Pure Michigan Lawn Care?") == "Pure Michigan Lawn Care"
+    assert chat_assistant.business_contact_query("Can you find the number of Pure Michigan Lawn Care?") == "Pure Michigan Lawn Care"
 
 
 def test_personal_contact_questions_stay_local():
@@ -226,6 +228,28 @@ def test_business_number_can_cite_labeled_visible_text():
     answer = chat_assistant.business_contact_answer("Pure Michigan Lawn Care", [page])
     assert "(517) 258-1313" in answer
     assert page["source_url"] in answer
+
+
+def test_business_number_discloses_tel_and_visible_conflict():
+    page = {
+        "source_url": "https://shop.example/contact",
+        "page_title": "Shop",
+        "phone_links": ["tel:+15175550100"],
+        "visible_numbers": ["(517) 258-1313"],
+        "name_matching_domain": True,
+    }
+    answer = chat_assistant.business_contact_answer("Shop", [page])
+    assert "different phone numbers" in answer
+    assert "(517) 555-0100" in answer
+    assert "(517) 258-1313" in answer
+
+
+def test_business_number_distinguishes_failed_lookup_from_no_listing():
+    with patch("web_tools.find_business_contact", return_value={
+        "sources": [], "lookup_status": "pages_unavailable"
+    }):
+        answer = chat_assistant.answer_with_tools("What's the phone number for Shop?", [])
+    assert "could not be read" in answer
 
 
 def test_current_facts_use_web_but_stable_questions_stay_local():
