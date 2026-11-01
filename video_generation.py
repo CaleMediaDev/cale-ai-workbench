@@ -7,6 +7,7 @@ This module never sends prompts or input images to a cloud generation service.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import random
 import re
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -31,6 +33,11 @@ UPSTREAM = "https://github.com/melayyoub/openvideo-studio.git"
 COMMIT = "2dc15aa7656a111fe4b956ed7f4abbc5edc28c60"
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 FINISHED = {"complete", "failed"}
+MODEL_HASHES = {
+    "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors": "c3355d30191f1f066b26d93fba017ae9809dce6c627dda5f6a66eaa651204f68",
+    "vae/wan2.2_vae.safetensors": "e40321bd36b9709991dae2530eb4ac303dd168276980d3e9bc4b6e2b75fed156",
+    "diffusion_models/wan2.2_ti2v_5B_fp16.safetensors": "456f901338bd9eadbded3828b819109a9b68e8a525ca5cf8d0049a69fcfeca1e",
+}
 
 
 def _job_path(job_id: str) -> Path:
@@ -105,13 +112,89 @@ def video_job_status(job_id: str) -> dict:
                                capture_output=True, text=True, timeout=10, creationflags=HIDE)
         if check.returncode == 0 and f'"{pid}"' not in check.stdout:
             data = _write(job_id, state="failed", error="Video worker exited unexpectedly; see log_path.")
-    return {key: data.get(key) for key in ("job_id", "state", "output_path", "error", "log_path", "updated_at")}
+    return {key: data.get(key) for key in ("job_id", "state", "detail", "output_path", "error", "log_path", "updated_at")}
+
+
+@contextmanager
+def _installation_lock():
+    """Serialize model installation across separate agent worker processes."""
+    if os.name != "nt":
+        raise RuntimeError("Automatic video setup currently requires Windows.")
+    import msvcrt
+    BASE.mkdir(parents=True, exist_ok=True)
+    lock_file = BASE / "runtime-install.lock"
+    with lock_file.open("a+b") as stream:
+        stream.seek(0, os.SEEK_END)
+        if stream.tell() == 0:
+            stream.write(b"0")
+            stream.flush()
+        deadline = time.monotonic() + 14400
+        while True:
+            stream.seek(0)
+            try:
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Another video runtime installation is still active.")
+                time.sleep(2)
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def _model_fingerprints() -> dict | None:
+    """Cheap validation after the first checksum pass; a partial download has no marker."""
+    model_root = RUNTIME / "ComfyUI" / "models"
+    fingerprints = {}
+    for relative in MODEL_HASHES:
+        path = model_root / relative
+        if not path.is_file():
+            return None
+        stat = path.stat()
+        if stat.st_size < 100_000_000:
+            return None
+        fingerprints[relative] = [stat.st_size, stat.st_mtime_ns]
+    return fingerprints
+
+
+def _verified_runtime() -> bool:
+    python = RUNTIME / "ComfyUI" / ".venv" / "Scripts" / "python.exe"
+    marker = RUNTIME / "cale-video-ready.json"
+    fingerprints = _model_fingerprints()
+    if not python.is_file() or not fingerprints:
+        return False
+    if marker.is_file():
+        try:
+            if json.loads(marker.read_text(encoding="utf-8")) == fingerprints:
+                return True
+        except (OSError, ValueError):
+            pass
+    # Existing installs predate the marker. Hash all three files once before
+    # trusting them, and rehash whenever their size or timestamp changes.
+    for relative, expected in MODEL_HASHES.items():
+        try:
+            with (RUNTIME / "ComfyUI" / "models" / relative).open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256")
+        except OSError:
+            return False
+        if digest.hexdigest() != expected:
+            return False
+    temporary = marker.with_suffix(".tmp")
+    temporary.write_text(json.dumps(fingerprints), encoding="utf-8")
+    temporary.replace(marker)
+    return True
 
 
 def _ensure_runtime(job_id: str) -> None:
-    python = RUNTIME / "ComfyUI" / ".venv" / "Scripts" / "python.exe"
-    model = RUNTIME / "ComfyUI" / "models" / "diffusion_models" / "wan2.2_ti2v_5B_fp16.safetensors"
-    if python.is_file() and model.is_file():
+    with _installation_lock():
+        _ensure_runtime_locked(job_id)
+
+
+def _ensure_runtime_locked(job_id: str) -> None:
+    if _verified_runtime():
         return
     _write(job_id, state="installing", detail="Installing local ComfyUI and verified Wan 2.2 models")
     SOURCE.parent.mkdir(parents=True, exist_ok=True)
@@ -129,6 +212,20 @@ def _ensure_runtime(job_id: str) -> None:
     installer = SOURCE / "install.ps1"
     if not installer.is_file():
         raise RuntimeError("Pinned video installer is missing.")
+    _patch_installer(installer)
+    command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer),
+               "-Cuda", "cu128", "-Models", "5b", "-PyVersion", "3.11", "-BasePath", str(RUNTIME),
+               "-SkipNodes", "-ReuseVenv", "-LockedVenvAction", "Fail"]
+    try:
+        subprocess.run(command, cwd=str(SOURCE), check=True, timeout=14400, creationflags=HIDE)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError("Local video runtime installation failed; inspect the job log.") from exc
+    if not _verified_runtime():
+        raise RuntimeError("Video runtime installation did not produce verified model files and Python runtime.")
+
+
+def _patch_installer(installer: Path) -> None:
+    """Repair two PowerShell 5.1 Python invocations in the pinned installer."""
     # Windows PowerShell 5.1 strips quotes from Python -c arguments in this
     # upstream installer. Put those two fixed checks in .py files instead so
     # the default Windows shell runs the same code without quote mangling.
@@ -146,16 +243,19 @@ def _ensure_runtime(job_id: str) -> None:
             script = script.replace(marker, replacement, 1)
         elif replacement not in script:
             raise RuntimeError("Pinned video installer changed unexpectedly.")
+    warning_marker = "& $venvPython -m pip show dac *> $null\nif ($LASTEXITCODE -eq 0) {"
+    warning_replacement = (
+        "$calePreviousErrorAction = $ErrorActionPreference\n"
+        "$ErrorActionPreference = 'Continue'\n"
+        "try { & $venvPython -m pip show dac *> $null; $caleLegacyDacInstalled = ($LASTEXITCODE -eq 0) }\n"
+        "finally { $ErrorActionPreference = $calePreviousErrorAction }\n"
+        "if ($caleLegacyDacInstalled) {"
+    )
+    if warning_marker in script:
+        script = script.replace(warning_marker, warning_replacement, 1)
+    elif warning_replacement not in script:
+        raise RuntimeError("Pinned video installer package check changed unexpectedly.")
     installer.write_text(script, encoding="utf-8")
-    command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer),
-               "-Cuda", "cu128", "-Models", "5b", "-PyVersion", "3.11", "-BasePath", str(RUNTIME),
-               "-SkipNodes", "-ReuseVenv", "-LockedVenvAction", "Fail"]
-    try:
-        subprocess.run(command, cwd=str(SOURCE), check=True, timeout=14400, creationflags=HIDE)
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError("Local video runtime installation failed; inspect the job log.") from exc
-    if not python.is_file() or not model.is_file():
-        raise RuntimeError("Video runtime installation did not produce its model and Python runtime.")
 
 
 def _request(url: str, payload: dict | None = None, timeout: int = 20) -> dict:
