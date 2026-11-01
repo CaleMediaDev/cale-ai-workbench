@@ -61,18 +61,31 @@ class FaceModel:
         self.detector = cv2.FaceDetectorYN.create(str(MODELS / "yunet.onnx"), "", (320, 320), 0.85)
         self.recognizer = cv2.FaceRecognizerSF.create(str(MODELS / "sface.onnx"), "")
 
-    def feature(self, frame):
+    def features(self, frame):
+        """Return one normalized embedding per visible face, up to eight."""
         import numpy as np
 
         height, width = frame.shape[:2]
         self.detector.setInputSize((width, height))
         _, faces = self.detector.detect(frame)
-        if faces is None or len(faces) != 1:
-            return None
-        aligned = self.recognizer.alignCrop(frame, faces[0])
-        vector = self.recognizer.feature(aligned).flatten().astype(float)
-        norm = np.linalg.norm(vector)
-        return (vector / norm).tolist() if norm else None
+        if faces is None:
+            return []
+        results = []
+        for face in faces[:8]:
+            try:
+                aligned = self.recognizer.alignCrop(frame, face)
+                vector = self.recognizer.feature(aligned).flatten().astype(float)
+                norm = np.linalg.norm(vector)
+            except (self.cv2.error, ValueError):
+                continue  # One blurred face must not disable the whole camera.
+            if np.isfinite(norm) and norm > 0:
+                results.append((vector / norm).tolist())
+        return results
+
+    def feature(self, frame):
+        """Enrollment requires exactly one visible face to avoid a wrong label."""
+        found = self.features(frame)
+        return found[0] if len(found) == 1 else None
 
     def identify(self, feature):
         """Require a conservative cosine similarity and a gap to the runner-up."""

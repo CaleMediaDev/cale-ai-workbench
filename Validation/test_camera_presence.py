@@ -3,10 +3,12 @@
 import os
 import unittest
 
+import numpy as np
 import psutil
 
 from camera_network import _local_stream
-from camera_presence import VisitorState, owner_alive
+from camera_presence import VisitorState, VisitorTracker, greeting_line, owner_alive
+from face_identity import FaceModel
 from visitor_memory import name_from_intro
 
 
@@ -41,6 +43,51 @@ class CameraPresenceTests(unittest.TestCase):
         self.assertTrue(owner_alive(current.pid, current.create_time()))
         self.assertFalse(owner_alive(current.pid, current.create_time() - 30))
         self.assertFalse(owner_alive(99999999, current.create_time()))
+
+    def test_two_faces_are_greeted_independently(self):
+        tracker = VisitorTracker(cooldown=30)
+        alex = [1.0, 0.0, 0.0]
+        jamie = [0.0, 1.0, 0.0]
+        self.assertEqual(tracker.observe([alex], 0), [])
+        self.assertEqual(tracker.observe([alex], 0.5), [alex])
+        self.assertEqual(tracker.observe([alex, jamie], 1), [])
+        self.assertEqual(tracker.observe([jamie, alex], 1.5), [jamie])
+        self.assertEqual(tracker.observe([alex, jamie], 2), [])
+        self.assertEqual(tracker.observe([], 3), [])
+        self.assertEqual(tracker.observe([alex], 4), [])
+
+    def test_group_greeting_invites_one_at_a_time_enrollment(self):
+        line = greeting_line(["Alex", None])
+        self.assertIn("Alex", line)
+        self.assertIn("one at a time", line)
+        self.assertIn("Who are you?", line)
+
+    def test_enrollment_rejects_multiple_visible_faces(self):
+        model = FaceModel.__new__(FaceModel)
+        model.features = lambda _frame: [[1.0, 0.0], [0.0, 1.0]]
+        self.assertIsNone(model.feature(None))
+
+    def test_face_model_returns_separate_features_for_two_faces(self):
+        class Detector:
+            def setInputSize(self, _size):
+                pass
+
+            def detect(self, _frame):
+                return None, np.array([[3.0, 4.0], [4.0, 3.0]])
+
+        class Recognizer:
+            def alignCrop(self, _frame, face):
+                return face
+
+            def feature(self, aligned):
+                return np.asarray(aligned)
+
+        model = FaceModel.__new__(FaceModel)
+        model.detector = Detector()
+        model.recognizer = Recognizer()
+        model.cv2 = type("CV2", (), {"error": RuntimeError})
+        features = model.features(np.zeros((8, 8, 3)))
+        self.assertEqual(features, [[0.6, 0.8], [0.8, 0.6]])
 
 
 if __name__ == "__main__":

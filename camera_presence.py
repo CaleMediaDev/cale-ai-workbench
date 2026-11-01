@@ -68,6 +68,61 @@ class VisitorState:
         return False
 
 
+class VisitorTracker:
+    """Track individual face embeddings and greet each stable arrival once."""
+
+    def __init__(self, cooldown=120, similarity=0.68):
+        self.cooldown = cooldown
+        self.similarity = similarity
+        self.tracks = []
+
+    def observe(self, features, now):
+        # Keep recently departed faces long enough to avoid repeated greetings
+        # when someone briefly turns away from the camera.
+        self.tracks = [track for track in self.tracks
+                       if now - track["last_seen"] <= max(self.cooldown, 30)]
+        greetings = []
+        matched = set()
+        for feature in features[:8]:
+            candidates = [
+                (sum(a * b for a, b in zip(feature, track["feature"])), index)
+                for index, track in enumerate(self.tracks)
+                if index not in matched and len(feature) == len(track["feature"])
+            ]
+            score, index = max(candidates, default=(-1, -1))
+            if score >= self.similarity:
+                track = self.tracks[index]
+                matched.add(index)
+                track["hits"] = track["hits"] + 1 if now - track["last_seen"] <= 1.5 else 1
+                track["last_seen"] = now
+                track["feature"] = feature
+            else:
+                track = {"feature": feature, "last_seen": now,
+                         "hits": 1, "last_greeted": float("-inf")}
+                self.tracks.append(track)
+                matched.add(len(self.tracks) - 1)
+            if track["hits"] >= 2 and now - track["last_greeted"] >= self.cooldown:
+                track["last_greeted"] = now
+                greetings.append(feature)
+        return greetings
+
+
+def greeting_line(names):
+    """Speak once for a group while keeping unknown visitors invited to answer."""
+    known = list(dict.fromkeys(name for name in names if name))
+    unknown = len(names) - sum(bool(name) for name in names)
+    if len(names) == 1:
+        if known:
+            return f"Hey {known[0]}! Good to see you. Say Hey Cale if you need anything."
+        return ("Hey there! I'm Cale. Who are you? If you'd like me to remember "
+                "your name and learn your face on this PC, say Hey Cale, then tell me your name.")
+    if unknown:
+        hello = ("Hey " + " and ".join(known) + ", and hello to everyone else!") if known else "Hey everyone!"
+        return (hello + " I'm Cale. Who are you? If you'd like me to learn your "
+                "faces, step in front of the camera one at a time and say Hey Cale, then your name.")
+    return "Hey " + " and ".join(known) + "! Good to see you. Say Hey Cale if you need anything."
+
+
 def emit(kind, message=""):
     print(json.dumps({"event": kind, "message": message}), flush=True)
 
@@ -104,6 +159,7 @@ def watch(device=0, parent_pid=None, parent_started=None):
         emit("error", "Webcam unavailable. Check Windows camera access or close another camera app.")
         return 1
     state = VisitorState()
+    tracker = VisitorTracker()
     enrolling_name = None
     enrolling_features = []
     enrolling_started = 0.0
@@ -129,17 +185,18 @@ def watch(device=0, parent_pid=None, parent_started=None):
             if width > 640:
                 gray = cv2.resize(gray, (640, round(height * 640 / width)))
             try:
-                feature = face_model.feature(frame) if face_model else None
+                features = face_model.features(frame) if face_model else []
             except Exception:
                 face_model = None
-                feature = None
+                features = []
                 emit("notice", "Face recognition is unavailable; generic greetings still work.")
             if face_model:
-                seen = feature is not None
+                seen = bool(features)
             else:
                 faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
                                                  minSize=(45, 45))
                 seen = len(faces) > 0
+            feature = features[0] if len(features) == 1 else None
             if face_model and ENROLL_REQUEST.is_file():
                 try:
                     enrolling_name = str(json.loads(ENROLL_REQUEST.read_text(encoding="utf-8"))["name"])
@@ -157,12 +214,13 @@ def watch(device=0, parent_pid=None, parent_started=None):
                     if enroll(enrolling_name, enrolling_features):
                         emit("enrolled", f"I learned {enrolling_name}'s face locally. I might still make mistakes, so please correct me if I do.")
                     enrolling_name = None
-            if state.observe(seen, time.monotonic()):
-                name = face_model.identify(feature) if face_model else None
-                if name:
-                    emit("visitor", f"Hey {name}! Good to see you. Say Hey Cale if you need anything.")
-                else:
-                    emit("visitor", "Hey there! I'm Cale. Who are you? If you'd like me to remember your name and learn your face on this PC, say Hey Cale, then tell me your name.")
+            now = time.monotonic()
+            if face_model:
+                arrivals = tracker.observe(features, now)
+                if arrivals:
+                    emit("visitor", greeting_line([face_model.identify(item) for item in arrivals]))
+            elif state.observe(seen, now):
+                emit("visitor", greeting_line([None]))
             time.sleep(0.35)
     finally:
         camera.release()
