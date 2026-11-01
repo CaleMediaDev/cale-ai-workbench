@@ -8,6 +8,17 @@ import file_catalog
 
 
 class FileCatalogTests(unittest.TestCase):
+    def test_personal_folders_scan_first(self):
+        home = Path("C:/Users/person")
+        self.assertGreater(
+            file_catalog.folder_priority(home / "Documents", home),
+            file_catalog.folder_priority(Path("C:/Windows"), home),
+        )
+        self.assertGreater(
+            file_catalog.folder_priority(home, home),
+            file_catalog.folder_priority(Path("C:/Windows"), home),
+        )
+
     def test_scan_search_and_prune(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"

@@ -22,6 +22,19 @@ STATUS_NAME = "computer-files-status.json"
 BATCH = 1000
 
 
+def folder_priority(folder: Path, home: Path | None = None) -> int:
+    """Visit personal files before large system trees during a full-drive scan."""
+    home = home or Path.home()
+    if folder == home or home.is_relative_to(folder):
+        return 3
+    if folder.is_relative_to(home):
+        first = folder.relative_to(home).parts[0].casefold()
+        if first in {"documents", "desktop", "downloads", "pictures", "videos", "music"}:
+            return 5
+        return 4
+    return 0
+
+
 def local_roots() -> list[Path]:
     """List fixed and removable Windows drives; never crawl network shares."""
     if os.name != "nt":
@@ -93,6 +106,7 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> d
                 pending = [root]
                 while pending:
                     folder = pending.pop()
+                    child_folders = []
                     try:
                         with os.scandir(folder) as entries:
                             for entry in entries:
@@ -113,7 +127,7 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> d
                                     )
                                     if directory:
                                         folders += 1
-                                        pending.append(Path(entry.path))
+                                        child_folders.append(Path(entry.path))
                                     else:
                                         files += 1
                                     processed += 1
@@ -128,6 +142,9 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> d
                                     unreadable += 1
                     except OSError:
                         unreadable += 1
+                    # A stack pops its last entry first. Sort each directory's
+                    # children so the user's profile wins over Windows trees.
+                    pending.extend(sorted(child_folders, key=folder_priority))
             # Prune only after a complete pass. An interrupted process leaves
             # the prior catalog intact for the next launch to recover.
             for root in roots:

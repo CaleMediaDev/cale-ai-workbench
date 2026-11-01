@@ -2243,6 +2243,24 @@ def gui():
             conversation.tag_bind(tag, "<Button-1>", lambda _, link=url: webbrowser.open(link))
             conversation.tag_bind(tag, "<Enter>", lambda _: conversation.configure(cursor="hand2"))
             conversation.tag_bind(tag, "<Leave>", lambda _: conversation.configure(cursor=""))
+        if role == "assistant":
+            for match in re.finditer(r"(?m)^.+? — ([A-Za-z]:\\[^\n]+)$", content):
+                path = match.group(1)
+                tag = "local-file-" + uuid.uuid4().hex
+                first = f"{start}+{len(prefix) + match.start(1)}c"
+                last = f"{first}+{len(path)}c"
+                conversation.tag_add(tag, first, last)
+                conversation.tag_configure(tag, foreground="#8ec9ff", underline=True)
+
+                def reveal_file(_event, selected=path):
+                    if Path(selected).exists():
+                        subprocess.Popen(["explorer.exe", "/select,", selected], creationflags=HIDE)
+                    else:
+                        messagebox.showinfo("File moved", "This file is no longer at that location.", parent=window)
+
+                conversation.tag_bind(tag, "<Button-1>", reveal_file)
+                conversation.tag_bind(tag, "<Enter>", lambda _: conversation.configure(cursor="hand2"))
+                conversation.tag_bind(tag, "<Leave>", lambda _: conversation.configure(cursor=""))
         conversation.configure(state="disabled")
         if at_bottom:
             conversation.see("end")
