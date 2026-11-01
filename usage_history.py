@@ -1,6 +1,7 @@
 """Persist actual provider-reported token counts for the desktop graph."""
 
 import sqlite3
+import statistics
 import time
 import re
 from contextlib import closing
@@ -102,6 +103,25 @@ def recent_local_speed(default: float = 35.0) -> float:
                 "AND tokens_per_second > 0 ORDER BY id DESC LIMIT 12"
             ).fetchall()
         return sum(row[0] for row in rows) / len(rows) if rows else default
+    except (OSError, sqlite3.Error):
+        return default
+
+
+def recent_provider_speed(source: str, default: float) -> float:
+    """Use a provider's measured throughput once three calls establish a sample.
+
+    Cloud speeds include network latency, so the median of recent calls is
+    more useful than a single peak or a model-card tokens-per-second claim.
+    """
+    try:
+        with closing(_connection()) as conn:
+            rows = conn.execute(
+                "SELECT tokens_per_second FROM usage_events WHERE source=? "
+                "AND tokens_per_second > 0 AND timestamp > ? "
+                "ORDER BY id DESC LIMIT 8",
+                (source, time.time() - 30 * 86400),
+            ).fetchall()
+        return statistics.median(row[0] for row in rows) if len(rows) >= 3 else default
     except (OSError, sqlite3.Error):
         return default
 

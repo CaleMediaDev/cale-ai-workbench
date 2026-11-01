@@ -703,14 +703,20 @@ class Router:
                 "messages": payload.get("messages", []),
                 "tools": payload.get("tools", []),
             }, ensure_ascii=True).encode("utf-8")) // 3)
-            for provider, spec in sorted(cloud_providers.PROVIDERS.items(),
-                                         key=lambda pair: pair[1]["speed"], reverse=True):
+            connected = [(provider, spec) for provider, spec in cloud_providers.PROVIDERS.items()
+                         if keys.get(provider) and confirmed.get(provider)]
+            measured_speeds = {
+                provider: usage_history.recent_provider_speed(provider, spec["speed"])
+                for provider, spec in connected
+            }
+            for provider, spec in sorted(connected,
+                                         key=lambda pair: measured_speeds[pair[0]], reverse=True):
                 provider_key = keys.get(provider)
                 provider_context = prompt_estimate + min(expected_output, spec.get("max_tokens", 8192)) + 1024
                 estimated_cost = cloud_providers.estimated_neurons(provider, payload)
                 if (not provider_key or not confirmed.get(provider)
                         or provider_context > spec["context"]
-                        or not cloud_providers.likely_faster(size, spec["speed"], local_speed)
+                        or not cloud_providers.likely_faster(size, measured_speeds[provider], local_speed)
                         or not self.reserve_provider_request(provider, estimated_cost)):
                     continue
                 try:

@@ -105,6 +105,21 @@ class CloudTests(unittest.TestCase):
         remote.assert_called_once()
         local.assert_not_called()
 
+    def test_measured_provider_speed_changes_cloud_order(self):
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        cloud.save_provider_key("bigmodel", "bigmodel-test-secret", True)
+        request = dict(REQUEST, messages=[{"role": "user", "content": "Build a working website"}])
+        with (patch.object(cloud, "task_size", return_value="balanced"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("usage_history.recent_local_speed", return_value=25),
+              patch("usage_history.recent_provider_speed",
+                    side_effect=lambda name, default: {"groq": 8, "bigmodel": 200}[name]),
+              patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as remote,
+              patch.object(cloud, "post") as local):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        self.assertEqual(remote.call_args.args[0], "bigmodel")
+        local.assert_not_called()
+
     def test_offline_switch_keeps_connected_provider_local(self):
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
         with (patch.object(cloud.pc_offline, "offline", return_value=True),

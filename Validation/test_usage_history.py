@@ -63,6 +63,22 @@ def test_top_speed_survives_slower_later_response(tmp_path, monkeypatch):
     assert summary["top_speed"] == 50
 
 
+def test_provider_speed_uses_recent_median_after_three_calls(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for speed in (20, 40):
+        assert usage_history.record_completion(
+            {"model": "cloud", "usage": {"completion_tokens": speed}},
+            "bigmodel", elapsed_seconds=1,
+        )
+    assert usage_history.recent_provider_speed("bigmodel", 150) == 150
+    assert usage_history.record_completion(
+        {"model": "cloud", "usage": {"completion_tokens": 300}},
+        "bigmodel", elapsed_seconds=1,
+    )
+    assert usage_history.recent_provider_speed("bigmodel", 150) == 40
+    assert usage_history.recent_provider_speed("groq", 900) == 900
+
+
 def test_model_totals_include_unreported_model_names(tmp_path, monkeypatch):
     monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
     for model, tokens in (("alpha", 10), ("beta", 30), ("alpha", 15), ("", 3)):
