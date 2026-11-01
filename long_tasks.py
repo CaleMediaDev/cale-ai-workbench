@@ -3261,6 +3261,12 @@ def gui():
                     "If you're in view, I'll try to learn your face locally for future greetings."
                 )
                 return
+            if chat_assistant.route(note, []) == "answer":
+                visitor_awaiting_intro_until[0] = 0
+                save_chat("user", note)
+                show_chat("user", note, speak=False)
+                answer_requests.put((note, [], [], "visitor"))
+                return
         if action == "hearing":
             voice_label.set("Heard: " + phrase[:100])
             speak_update("Yep, I can hear you. What would you like me to do?")
@@ -3574,11 +3580,16 @@ def gui():
         while True:
             question, context, paths, kind = answer_requests.get()
             try:
-                answer = (
-                    file_chat.answer_from_files(question, paths)
-                    if paths
-                    else chat_assistant.answer_with_tools(question, context)
-                )
+                if kind == "visitor":
+                    import tone_adaptation
+
+                    answer = tone_adaptation.social_reply(question)
+                else:
+                    answer = (
+                        file_chat.answer_from_files(question, paths)
+                        if paths
+                        else chat_assistant.answer_with_tools(question, context)
+                    )
                 conversation_events.put(answer)
             except Exception as exc:
                 conversation_events.put("I couldn't answer that yet: " + str(exc))
