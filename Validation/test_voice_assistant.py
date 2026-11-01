@@ -3,6 +3,7 @@
 import sys
 import unittest
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,6 +11,38 @@ import voice_assistant
 
 
 class VoiceTests(unittest.TestCase):
+    def test_status_rephrasing_uses_fast_local_model_and_keeps_facts(self):
+        fake = ModuleType("cloud_ai")
+        fake.FAST_MODEL = "cale-fast"
+        calls = []
+
+        def answer(url, payload, **options):
+            calls.append((url, payload, options))
+            return {"choices": [{"message": {"content": "Recipe app: checking files, one folder at a time."}}]}
+
+        fake.post = answer
+        with patch.dict(sys.modules, {"cloud_ai": fake}):
+            spoken = voice_assistant.rephrase_status(
+                "Recipe app. Checking files.", ["Still checking files"],
+                ("Recipe app", "checking files"),
+            )
+        self.assertEqual(spoken, "Recipe app: checking files, one folder at a time.")
+        self.assertEqual(calls[0][0], "http://127.0.0.1:11434/v1/chat/completions")
+        self.assertEqual(calls[0][1]["model"], "cale-fast")
+        self.assertLessEqual(calls[0][2]["timeout"], 12)
+
+    def test_status_rephrasing_rejects_missing_fact(self):
+        fake = ModuleType("cloud_ai")
+        fake.FAST_MODEL = "cale-fast"
+        fake.post = lambda *_args, **_kwargs: {
+            "choices": [{"message": {"content": "I'm making excellent progress!"}}]
+        }
+        with patch.dict(sys.modules, {"cloud_ai": fake}):
+            spoken = voice_assistant.rephrase_status(
+                "Recipe app. Checking files.", required=("Recipe app", "Checking files")
+            )
+        self.assertEqual(spoken, "Recipe app. Checking files.")
+
     def test_listen_returns_trimmed_local_transcript(self):
         with patch.object(
             voice_assistant, "media_call", return_value={"text": "  Hello  "}
@@ -59,6 +92,16 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(
             voice_assistant.spoken_command("Build a recipe app"),
             ("note", "Build a recipe app"),
+        )
+        self.assertEqual(
+            voice_assistant.spoken_command("Hey Cale can you hear me", require_wake=True),
+            ("hearing", ""),
+        )
+
+    def test_saved_rap_is_cleaned_for_speech(self):
+        self.assertEqual(
+            voice_assistant.spoken_text("**The Rap**\n\n*Great Lakes*\n---\nLine one"),
+            "The Rap\n\nGreat Lakes\n\nLine one",
         )
 
     def test_idle_and_stuck_voice_escalate_without_polling_spam(self):

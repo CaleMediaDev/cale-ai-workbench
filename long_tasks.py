@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -1945,8 +1946,17 @@ def gui():
     voice_events = queue.Queue()
     voice_busy = threading.Event()
     listening = threading.Event()
-    speech_queue = queue.Queue()
+    speech_queue = queue.PriorityQueue()
+    speech_order = itertools.count()
     speech_lock = threading.Lock()
+    recent_spoken_path = STATE / "recent-spoken-status.json"
+    try:
+        remembered_speech = json.loads(recent_spoken_path.read_text(encoding="utf-8"))
+        recent_spoken_status = [
+            item for item in remembered_speech if isinstance(item, str)
+        ][-6:] if isinstance(remembered_speech, list) else []
+    except (OSError, ValueError):
+        recent_spoken_status = []
     voice_upgrade_marker = STATE / "natural-voice-greeted"
     voice_upgrade_queued = voice_upgrade_marker.is_file()
     spoken_updates = {}
@@ -1972,13 +1982,30 @@ def gui():
     def speech_worker():
         """Speak queued updates one at a time, after microphone clips finish."""
         while True:
-            message, rate = speech_queue.get()
+            _, _, message, rate, vary, required, replay_id = speech_queue.get()
             try:
+                spoken = (
+                    voice_assistant.rephrase_status(message, recent_spoken_status, required)
+                    if vary else message
+                )
                 result = {}
-                for chunk in voice_assistant.speech_chunks(message):
+                for chunk in voice_assistant.speech_chunks(spoken):
                     while voice_busy.is_set():
                         time.sleep(0.2)
                     result = voice_assistant.say(chunk, rate=rate)
+                if vary:
+                    recent_spoken_status.append(spoken)
+                    del recent_spoken_status[:-6]
+                    recent_spoken_path.parent.mkdir(parents=True, exist_ok=True)
+                    temporary = recent_spoken_path.with_suffix(".tmp")
+                    temporary.write_text(
+                        json.dumps(recent_spoken_status, ensure_ascii=False), encoding="utf-8"
+                    )
+                    os.replace(temporary, recent_spoken_path)
+                if replay_id is not None:
+                    (STATE / "voice-replay-served.txt").write_text(
+                        str(replay_id), encoding="ascii"
+                    )
                 if (
                     message.startswith("Oh my God, that's better")
                     and result.get("engine") == "Kokoro natural voice"
@@ -1992,7 +2019,7 @@ def gui():
                         "Introduction spoken.\n", encoding="utf-8"
                     )
             except Exception as exc:
-                voice_events.put(("error", str(exc)))
+                voice_events.put(("speech_error", str(exc)))
             finally:
                 with speech_lock:
                     if speech_queue.empty():
@@ -2001,11 +2028,12 @@ def gui():
 
     threading.Thread(target=speech_worker, daemon=True).start()
 
-    def speak_update(message, rate=0):
+    def speak_update(message, rate=0, vary=False, required=(), priority=None, replay_id=None):
         """Queue one audible update without blocking the task screen."""
         with speech_lock:
             voice_speaking.set()
-            speech_queue.put((message, rate))
+            rank = (1 if vary else 0) if priority is None else int(priority)
+            speech_queue.put((rank, next(speech_order), message, rate, vary, tuple(required), replay_id))
 
     initial_setup = read_task_status(STATE / "install-progress.json")
     introduction_marker = STATE / "introduction-spoken-v2"
@@ -2013,7 +2041,8 @@ def gui():
     setup_spoken_step = str(initial_setup.get("current", "")) if initial_setup else ""
     if initial_setup and initial_setup.get("status") != "complete":
         speak_update(
-            voice_assistant.opening_line("setup", setup_spoken_step, opening_count)
+            voice_assistant.opening_line("setup", setup_spoken_step, opening_count),
+            vary=True, required=(setup_spoken_step,),
         )
     else:
         current_tasks = [
@@ -2025,10 +2054,11 @@ def gui():
             speak_update(
                 voice_assistant.opening_line(
                     "working", current_tasks[-1]["title"], opening_count
-                )
+                ),
+                vary=True, required=(current_tasks[-1]["title"],),
             )
         else:
-            speak_update(voice_assistant.opening_line("ready", sequence=opening_count))
+            speak_update(voice_assistant.opening_line("ready", sequence=opening_count), vary=True)
 
     def introduce_if_ready(setup):
         """Explain the app once, after the installer and natural voice are ready."""
@@ -2053,7 +2083,8 @@ def gui():
             "You can also press Control Alt Space to speak once without a wake phrase. I'll tell you what I'm "
             "doing, and a side window will show website, app, and Chrome work. "
             "If you want stronger online AI, use Supercharge my AI at the top. "
-            "What should we make first?"
+            "What should we make first?",
+            priority=2,
         )
 
     def record_voice(repeat=False):
@@ -2071,9 +2102,11 @@ def gui():
                     voice_events.put(
                         ("state", "I didn't hear anything. Try Talk again.")
                     )
+                else:
+                    voice_events.put(("state", "Mic on. Waiting for Hey Cale."))
             except Exception as exc:
                 listening.clear()
-                voice_events.put(("error", str(exc)))
+                voice_events.put(("mic_error", str(exc)))
             finally:
                 voice_busy.clear()
                 if repeat and listening.is_set():
@@ -2096,8 +2129,14 @@ def gui():
         """Send spoken instructions to the current task, or start a new one."""
         parsed = voice_assistant.spoken_command(phrase, require_wake=handsfree)
         if parsed is None:
+            if handsfree and phrase.strip():
+                voice_label.set("I heard audio, but not Hey Cale at the start. Please try again.")
             return
         action, note = parsed
+        if action == "hearing":
+            voice_label.set("Heard: " + phrase[:100])
+            speak_update("Yep, I can hear you. What would you like me to do?")
+            return
         active = [
             item
             for item in projects()
@@ -2117,30 +2156,28 @@ def gui():
                 speak_update(
                     voice_assistant.progress_line(
                         selected["title"], current, next_speech_sequence()
-                    )
+                    ),
+                    vary=True, required=(selected["title"], current),
                 )
                 voice_label.set("Current step: " + current)
             elif action in ("pause", "resume", "stop", "open"):
                 task_action(selected["id"], action)
                 voice_label.set("Heard: " + phrase[:100])
             else:
-                request(selected["id"], "note", note)
-                voice_label.set(
-                    "Heard: " + note[:100] + " · added to " + selected["title"]
-                )
+                voice_label.set("Heard: " + note[:100])
+                submit_chat_text(note)
         else:
             if action == "status":
                 speak_update(
                     voice_assistant.opening_line(
                         "ready", sequence=next_speech_sequence()
-                    )
+                    ),
+                    vary=True,
                 )
                 return
             if action != "note":
                 voice_label.set("There is no active task to " + action + ".")
                 return
-            listening.clear()
-            mic_button.configure(text="🎤  Mic Off")
             voice_label.set("Heard: " + phrase[:100])
             submit_chat_text(note)
 
@@ -2282,6 +2319,27 @@ def gui():
     for previous in chat_history(500):
         show_chat(previous["role"], previous["content"], speak=False)
     conversation.see("end")
+    # A restart can interrupt a spoken replay. Resume the latest request once
+    # the chat and speech queue are ready, without inventing a new task.
+    with database() as conn:
+        last_chat_row = conn.execute(
+            "SELECT id, role, content FROM chat_messages ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    if last_chat_row and last_chat_row["role"] == "user":
+        requested_replay = chat_assistant.spoken_replay_target(
+            last_chat_row["content"], chat_history(100)
+        )
+        replay_marker = STATE / "voice-replay-served.txt"
+        try:
+            served_replay = replay_marker.read_text(encoding="ascii").strip()
+        except OSError:
+            served_replay = ""
+        if requested_replay and served_replay != str(last_chat_row["id"]):
+            show_chat("assistant", "I found it. I'll read it aloud now.", speak=False)
+            speak_update(
+                voice_assistant.spoken_text(requested_replay),
+                replay_id=last_chat_row["id"],
+            )
     if not chat_history():
         show_chat("assistant", "Hi! Ask me anything, or tell me what you'd like me to build.")
     pending_followup = None
@@ -2373,6 +2431,20 @@ def gui():
             displayed += "\nFiles: " + names
         save_chat("user", displayed)
         show_chat("user", displayed)
+        replay = chat_assistant.spoken_replay_target(raw_value, chat_history(100))
+        if replay is not None:
+            if replay:
+                show_chat("assistant", "I found it. I'll read it aloud now.")
+                with database() as conn:
+                    replay_id = conn.execute(
+                        "SELECT MAX(id) FROM chat_messages"
+                    ).fetchone()[0]
+                speak_update(
+                    voice_assistant.spoken_text(replay), replay_id=replay_id
+                )
+            else:
+                assistant_reply("I can't find an earlier reply to read aloud yet.")
+            return
         active = chat_assistant.followup_tasks(projects())
         if pending_followup:
             note, ids = pending_followup
@@ -3270,9 +3342,11 @@ def gui():
                         voice_label.set("Could not add spoken request: " + str(exc))
                 elif event == "again":
                     maybe_listen()
-                elif event == "error":
-                    voice_label.set("Voice unavailable: " + value[:140])
+                elif event == "mic_error":
+                    voice_label.set("Microphone unavailable: " + value[:140])
                     mic_button.configure(text="🎤  Mic Off")
+                elif event == "speech_error":
+                    voice_label.set("Speech unavailable: " + value[:140])
                 else:
                     voice_label.set(value)
         except queue.Empty:
@@ -3302,7 +3376,8 @@ def gui():
                 speak_update(
                     voice_assistant.progress_line(
                         "Setup", current_step, next_speech_sequence()
-                    )
+                    ),
+                    vary=True, required=("Setup", current_step),
                 )
         try:
             while True:
@@ -3346,7 +3421,8 @@ def gui():
                 speak_update(
                     voice_assistant.progress_line(
                         item["title"], current[1], next_speech_sequence()
-                    )
+                    ),
+                    vary=True, required=(item["title"], current[1]),
                 )
         blocked = [item for item in all_projects if item["status"] == "needs_input"]
         for item in blocked:
@@ -3357,7 +3433,9 @@ def gui():
             )
             if prompt:
                 stuck_slot[item["id"]] = prompt[0]
-                speak_update(prompt[1], rate=prompt[2])
+                speak_update(
+                    prompt[1], rate=prompt[2], vary=True, required=(item["title"],)
+                )
         blocked_ids = {item["id"] for item in blocked}
         for pid in list(stuck_since):
             if pid not in blocked_ids:
@@ -3396,7 +3474,13 @@ def gui():
             )
             if prompt:
                 idle_slot = prompt[0]
-                speak_update(prompt[1], rate=prompt[2])
+                speak_update(
+                    prompt[1], rate=prompt[2], vary=True,
+                    required=(
+                        (finished["title"] if finished else ""),
+                        ("mic is off" if "mic is off" in prompt[1] else ""),
+                    ),
+                )
         with database() as conn:
             last = conn.execute(
                 "SELECT status,result FROM requests ORDER BY id DESC LIMIT 1"

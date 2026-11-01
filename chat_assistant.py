@@ -91,6 +91,29 @@ def route_with_files(text: str, active_tasks: list[dict], paths: list[str]) -> s
     return "file_answer"
 
 
+def spoken_replay_target(text: str, history: list[dict]) -> str | None:
+    """Find text the person explicitly asked Cale to repeat aloud.
+
+    None means this is an ordinary chat request. An empty string means a replay
+    was requested but no matching earlier assistant reply is available.
+    """
+    request = re.sub(r"^(?:(?:please|can you|could you)\s+)+", "", text.strip(), flags=re.I)
+    if not re.match(
+        r"^(?:say|read|speak|play)\s+(?:that|it|the rap|your rap|that rap|"
+        r"what you (?:just )?(?:said|wrote)|your (?:last|previous) (?:answer|reply))\b",
+        request, re.I,
+    ):
+        return None
+    wants_rap = bool(re.search(r"\brap\b", request, re.I))
+    for item in reversed(history):
+        if item.get("role") != "assistant":
+            continue
+        content = str(item.get("content", ""))
+        if content and (not wants_rap or re.search(r"\brap\b", content, re.I)):
+            return content
+    return ""
+
+
 def status_reply(question: str, tasks: list[dict], progress) -> str:
     """Report every active task unless the question names one unambiguously."""
     if not tasks:

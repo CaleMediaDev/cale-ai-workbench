@@ -99,6 +99,7 @@ EXAMPLES
 "Use Chrome DevTools to find why my app is slow and fix it."
 "Read these PDFs and spreadsheets and build a searchable local index."
 "Analyze this SQLite database and summarize its tables."
+"Make a 30-second instrumental using the local ACE-Step music tool."
 
 Official sources:
 https://github.com/morluto/rea

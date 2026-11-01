@@ -27,6 +27,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Qwen2.5-0.5B-Instruct training base | https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct |
 | PyTorch | https://pytorch.org/ |
 | uv | https://github.com/astral-sh/uv |
+| ACE-Step 1.5 (MIT; optional local music engine installed from pinned upstream source on first use) | https://github.com/ace-step/ACE-Step-1.5 |
 
 The Windows compatibility patch contains modifications to MIT-licensed Hermes code. The upstream MIT notice is reproduced in `HERMES-LICENSE`.
 

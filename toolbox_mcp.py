@@ -430,6 +430,23 @@ async def see_image(
 
 
 @server.tool()
+async def make_music(
+    prompt: str, output_path: str, lyrics: str = "",
+    duration_seconds: int = 30, instrumental: bool = False,
+) -> dict:
+    """Create a local song or instrumental with ACE-Step 1.5; first use installs its model."""
+    import music_backend
+
+    return await asyncio.wait_for(
+        asyncio.to_thread(
+            music_backend.generate_music, prompt, output_path, lyrics,
+            duration_seconds, instrumental,
+        ),
+        timeout=5400,
+    )
+
+
+@server.tool()
 async def hear_audio(path: str) -> dict:
     """Transcribe a local audio or video file offline with Whisper. Returns timestamped text."""
     return await media_run("transcribe_audio", 900, path=path)

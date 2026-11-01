@@ -27,6 +27,16 @@ def speech_chunks(message, limit=280):
     )
 
 
+def spoken_text(message):
+    """Remove common Markdown marks before reading a saved chat reply aloud."""
+    value = str(message)
+    value = re.sub(r"```[\s\S]*?```", "", value)
+    value = re.sub(r"!?(?:\[([^\]]+)\])\([^)]*\)", r"\1", value)
+    value = re.sub(r"(?m)^\s*[-=]{3,}\s*$", "", value)
+    value = re.sub(r"[*_`#>]", "", value)
+    return re.sub(r"\n{3,}", "\n\n", value).strip()
+
+
 def opening_line(mode, subject="", sequence=0):
     """Rotate short, truthful greetings across app launches."""
     if mode == "setup":
@@ -66,6 +76,54 @@ def progress_line(title, step, sequence=0):
     return lines[int(sequence) % len(lines)].format(title=title, step=step)
 
 
+def rephrase_status(line, recent=(), required=()):
+    """Give scripted speech fresh wording with the fast *local* model.
+
+    This is only for app-authored status lines. Chat replies are spoken exactly
+    as displayed. Model failure leaves the original, factual line intact.
+    """
+    from cloud_ai import FAST_MODEL, post
+
+    original = str(line).strip()
+    if not original:
+        return original
+    previous = [str(item).strip() for item in recent if str(item).strip()][-6:]
+    facts = [str(item).strip() for item in required if str(item).strip()]
+    messages = [
+        {"role": "system", "content": (
+            "You write one short spoken status line for Cale, a friendly, witty male "
+            "desktop assistant. Reword the supplied line so it sounds natural and "
+            "different from recent lines. Keep every fact and the same intent. "
+            "Include each required phrase exactly. Do not invent progress, completed "
+            "work, dates, features, or user decisions. No quotation marks, labels, "
+            "markdown, profanity, or extra sentences. Stay under 35 words."
+        )},
+        {"role": "user", "content": (
+            f"Line to vary: {original}\n"
+            f"Required phrases: {', '.join(facts) if facts else '(none)'}\n"
+            f"Recently spoken: {' | '.join(previous) if previous else '(none)'}"
+        )},
+    ]
+    try:
+        result = post(
+            "http://127.0.0.1:11434/v1/chat/completions",
+            {"model": FAST_MODEL, "messages": messages, "stream": False,
+             "max_tokens": 72, "temperature": 0.85, "reasoning_effort": "none"},
+            timeout=12,
+        )
+        candidate = str(result["choices"][0]["message"].get("content") or "").strip().strip('"')
+    except (KeyError, IndexError, OSError, ValueError, TimeoutError):
+        return original
+    if (
+        not candidate or len(candidate) > 240 or "\n" in candidate
+        or candidate.casefold() == original.casefold()
+        or candidate.casefold() in {item.casefold() for item in previous}
+        or any(phrase.casefold() not in candidate.casefold() for phrase in facts)
+    ):
+        return original
+    return candidate
+
+
 def spoken_command(transcript, require_wake=False):
     """Map a spoken phrase to a task action without an extra AI call.
 
@@ -96,6 +154,11 @@ def spoken_command(transcript, require_wake=False):
         r"(?:what(?:'s| is) (?:the )?status|status|what are you doing)", normalized
     ):
         return ("status", "")
+    if re.fullmatch(
+        r"(?:can you hear me|do you hear me|are you listening|mic check|test (?:the )?mic)",
+        normalized,
+    ):
+        return ("hearing", "")
     if normalized.startswith("new task "):
         return ("new", phrase[9:].strip())
     return ("note", phrase)

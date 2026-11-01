@@ -39,7 +39,7 @@ Ollama model store                  cloud_ai.py → ChatGPT (opt-in)
 | `ollama_runtime.py` | Migrates older portable Ollama installs to the native Windows application after project and model workers are idle. |
 | `chatgpt_auth.py` | Public-client ChatGPT sign-in, identity validation, DPAPI token storage, refresh, and Responses API adaptation. |
 | `configure_install.py` | Creates the main and vision Ollama models and configures Hermes. |
-| `toolbox_mcp.py`, `web_tools.py`, `media_worker.py`, `small_training.py` | Tools available to the agent for files, browsers, media, and small-model training. The public page reader can select query-relevant passages across long pages while preserving exact-find and pagination modes. |
+| `toolbox_mcp.py`, `web_tools.py`, `media_worker.py`, `music_backend.py`, `small_training.py` | Tools available to the agent for files, browsers, media, local music generation, and small-model training. ACE-Step 1.5 installs in a separate pinned environment on first use and serves only on loopback. The public page reader can select query-relevant passages across long pages while preserving exact-find and pagination modes. |
 | `chat_assistant.py`, `file_chat.py` | Route short chat requests and answer bounded questions about selected local files using installed models. Long files use lexical passage selection across the document before inference. |
 | `quick_calculator.py` | Calculates explicit chat arithmetic with exact rational values and a bounded numeric grammar, before a model is consulted. |
 | `system_gauges.py` | Samples Windows CPU and RAM load, NVIDIA GPU load, drive capacity and PC-wide disk/network transfer counters for live header rings. Missing sensors stay visibly unavailable. |

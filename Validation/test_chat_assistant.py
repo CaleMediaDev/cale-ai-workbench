@@ -11,6 +11,16 @@ def test_questions_stay_in_chat():
     assert chat_assistant.route("How do I build a website?", []) == "answer"
 
 
+def test_voice_replay_finds_saved_rap_without_another_model_call():
+    history = [
+        {"role": "assistant", "content": "Here is the rap: Great Lakes beat."},
+        {"role": "user", "content": "say the rap with your voice"},
+    ]
+    assert chat_assistant.spoken_replay_target("say the rap with your voice", history).startswith("Here")
+    assert chat_assistant.spoken_replay_target("say that with your voice", history).startswith("Here")
+    assert chat_assistant.spoken_replay_target("what is the rap about", history) is None
+
+
 def test_explicit_work_creates_task():
     assert chat_assistant.route("Build me a bakery website", []) == "task"
     assert chat_assistant.route("Can you fix my app?", []) == "task"
