@@ -1,7 +1,10 @@
 """Selected documents are indexed locally and remain source-backed."""
 
+import os
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,6 +31,72 @@ class UserFileMemoryTests(unittest.TestCase):
         self.assertEqual(user_file_memory.search(self.state, "invoices"), [])
         with self.assertRaises(ValueError):
             user_file_memory.get(self.state, str(path))
+
+    def test_same_size_edit_with_restored_mtime_refreshes_memory(self):
+        path = self.root / "notes.txt"
+        path.write_text("forest", encoding="utf-8")
+        user_file_memory.ingest(self.state, [str(path)])
+        before = path.stat()
+        path.write_text("desert", encoding="utf-8")
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertEqual(user_file_memory.search(self.state, "forest"), [])
+        self.assertEqual(user_file_memory.search(self.state, "desert")[0]["path"], str(path))
+
+    def test_replaced_image_with_same_size_and_mtime_is_reanalyzed(self):
+        path = self.root / "receipt.png"
+        path.write_bytes(b"first")
+        with patch.object(user_file_memory.file_chat, "image_description",
+                          side_effect=["forest receipt", "desert receipt"]) as describe:
+            user_file_memory.ingest(self.state, [str(path)])
+            original = path.stat()
+            replacement = self.root / "replacement.png"
+            replacement.write_bytes(b"other")
+            os.utime(replacement, ns=(original.st_atime_ns, original.st_mtime_ns))
+            os.replace(replacement, path)
+            self.assertEqual(user_file_memory.search(self.state, "forest"), [])
+            self.assertEqual(user_file_memory.search(self.state, "desert")[0]["path"], str(path))
+        self.assertEqual(describe.call_count, 2)
+
+    def test_search_refreshes_selected_file_beyond_twentieth(self):
+        folder = self.root / "selected"
+        folder.mkdir()
+        for number in range(25):
+            (folder / f"note-{number:02}.txt").write_text("forest", encoding="utf-8")
+        self.assertEqual(user_file_memory.ingest(self.state, [str(folder)])["indexed"], 25)
+        last = folder / "note-24.txt"
+        last.write_text("desert", encoding="utf-8")
+        self.assertEqual(user_file_memory.search(self.state, "desert")[0]["path"], str(last))
+
+    def test_failed_extraction_keeps_selected_file_for_retry(self):
+        path = self.root / "notes.txt"
+        path.write_text("recoverable", encoding="utf-8")
+        actual_text = user_file_memory._text
+        attempts = 0
+
+        def read_once(source):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("The offline reader is still installing")
+            return actual_text(source)
+
+        with patch.object(user_file_memory, "_text", side_effect=read_once):
+            self.assertEqual(user_file_memory.ingest(self.state, [str(path)])["skipped"], 1)
+            self.assertEqual(user_file_memory.search(self.state, "recoverable")[0]["path"], str(path))
+        self.assertEqual(attempts, 2)
+
+    def test_existing_index_migrates_and_rechecks_file_version(self):
+        self.state.mkdir()
+        path = self.root / "legacy.txt"
+        path.write_text("updated fact", encoding="utf-8")
+        with closing(sqlite3.connect(self.state / "user-files.sqlite3")) as conn:
+            conn.execute("""CREATE TABLE files (path TEXT PRIMARY KEY, size INTEGER NOT NULL,
+                modified_ns INTEGER NOT NULL, content TEXT NOT NULL,
+                indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+            conn.execute("INSERT INTO files(path,size,modified_ns,content) VALUES(?,?,?,?)",
+                         (str(path), path.stat().st_size, path.stat().st_mtime_ns, "old fact"))
+            conn.commit()
+        self.assertEqual(user_file_memory.search(self.state, "updated")[0]["path"], str(path))
 
     def test_folder_walk_skips_secrets_and_dependencies(self):
         folder = self.root / "selected"

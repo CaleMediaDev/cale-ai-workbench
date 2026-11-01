@@ -6,6 +6,7 @@ search refreshes indexed files so edits and deletions do not return stale text.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -21,6 +22,7 @@ AUDIO = frozenset({".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"})
 VIDEO = frozenset({".mp4", ".mov", ".mkv", ".avi", ".webm"})
 SUPPORTED = file_chat.PLAIN_TEXT | file_chat.DOCUMENTS | IMAGES | AUDIO | VIDEO
 MAX_FILES = 200
+MAX_ROOTS = 20
 MAX_BYTES = 15 * 1024 * 1024
 MAX_MEDIA_BYTES = 100 * 1024 * 1024
 MAX_TEXT = 256_000
@@ -33,7 +35,7 @@ def _file_limit(path: Path) -> int:
 def _files(paths: list[str]):
     """Walk only user-selected roots, without following directory links."""
     count = 0
-    for raw in paths[:20]:
+    for raw in paths[:MAX_ROOTS]:
         try:
             root = Path(raw).resolve(strict=True)
         except OSError:
@@ -125,6 +127,27 @@ def _text(path: Path) -> str:
     return MarkItDown(enable_plugins=False).convert(str(path)).text_content[:MAX_TEXT]
 
 
+def _file_version(path: Path) -> str:
+    """Identify the bytes behind a selected file, including timestamp-preserved edits.
+
+    Descriptor change time is reliable on Windows where path stat may expose
+    creation time instead. Hash the indexed prefix of plain text; media files
+    stay cheap to check even when they are many gigabytes long.
+    """
+    with path.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+        digest = (
+            hashlib.sha256(stream.read(MAX_TEXT)).hexdigest()
+            if path.suffix.casefold() in file_chat.PLAIN_TEXT else ""
+        )
+        after = os.fstat(stream.fileno())
+    fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+    initial = tuple(getattr(before, field) for field in fields)
+    if initial != tuple(getattr(after, field) for field in fields):
+        raise RuntimeError("File changed during indexing; retry on the next search.")
+    return json.dumps([*initial, digest])
+
+
 @contextmanager
 def _connection(state: str | Path):
     root = Path(state)
@@ -134,8 +157,11 @@ def _connection(state: str | Path):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("""CREATE TABLE IF NOT EXISTS files (
         path TEXT PRIMARY KEY, size INTEGER NOT NULL, modified_ns INTEGER NOT NULL,
+        version TEXT NOT NULL DEFAULT '',
         content TEXT NOT NULL, indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )""")
+    if "version" not in {row[1] for row in conn.execute("PRAGMA table_info(files)")}:
+        conn.execute("ALTER TABLE files ADD COLUMN version TEXT NOT NULL DEFAULT ''")
     conn.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
         path UNINDEXED, filename, content, tokenize='unicode61'
     )""")
@@ -154,27 +180,37 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
             source = str(path)
             try:
                 stat = path.stat()
-                previous = conn.execute("SELECT size,modified_ns FROM files WHERE path=?", (source,)).fetchone()
-                if previous and (previous["size"], previous["modified_ns"]) == (stat.st_size, stat.st_mtime_ns):
+                version = _file_version(path)
+                previous = conn.execute("SELECT version FROM files WHERE path=?", (source,)).fetchone()
+                if previous and previous["version"] == version:
                     unchanged += 1
                     continue
                 content = _text(path).strip()
+                if _file_version(path) != version:
+                    raise RuntimeError("File changed during indexing; retry on the next search.")
                 if not content:
-                    if previous:
-                        conn.execute("DELETE FROM files WHERE path=?", (source,))
-                        conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
+                    conn.execute("""INSERT INTO files(path,size,modified_ns,version,content)
+                        VALUES(?,?,?,?, '') ON CONFLICT(path) DO UPDATE SET
+                        size=excluded.size, modified_ns=excluded.modified_ns,
+                        version=excluded.version, content=''""",
+                        (source, stat.st_size, stat.st_mtime_ns, version))
+                    conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
                     skipped += 1
                     continue
-                conn.execute("""INSERT INTO files(path,size,modified_ns,content) VALUES(?,?,?,?)
+                conn.execute("""INSERT INTO files(path,size,modified_ns,version,content) VALUES(?,?,?,?,?)
                     ON CONFLICT(path) DO UPDATE SET size=excluded.size,
-                    modified_ns=excluded.modified_ns, content=excluded.content,
-                    indexed_at=CURRENT_TIMESTAMP""", (source, stat.st_size, stat.st_mtime_ns, content))
+                    modified_ns=excluded.modified_ns, version=excluded.version,
+                    content=excluded.content, indexed_at=CURRENT_TIMESTAMP""",
+                    (source, stat.st_size, stat.st_mtime_ns, version, content))
                 conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
                 conn.execute("INSERT INTO file_fts(path,filename,content) VALUES(?,?,?)",
                              (source, path.name, content))
                 indexed += 1
             except (OSError, ValueError, RuntimeError, KeyError, ImportError, subprocess.TimeoutExpired):
-                conn.execute("DELETE FROM files WHERE path=?", (source,))
+                # Keep the selected path for a later retry, but hide stale text.
+                conn.execute("""INSERT INTO files(path,size,modified_ns,version,content)
+                    VALUES(?, -1, -1, '', '') ON CONFLICT(path) DO UPDATE SET
+                    size=-1, modified_ns=-1, version='', content=''""", (source,))
                 conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
                 skipped += 1
         conn.commit()
@@ -186,20 +222,26 @@ def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
     with _connection(state) as conn:
         paths = [row[0] for row in conn.execute("SELECT path FROM files")]
     # A disappeared file must not remain available as apparent current evidence.
-    existing = [
-        path for path in paths
-        if Path(path).is_file() and Path(path).suffix.casefold() in SUPPORTED
-        and Path(path).stat().st_size <= _file_limit(Path(path))
-    ]
-    for start in range(0, len(existing), MAX_FILES):
-        ingest(state, existing[start:start + MAX_FILES])
+    def available(raw: str) -> bool:
+        path = Path(raw)
+        try:
+            return (path.is_file() and path.suffix.casefold() in SUPPORTED
+                    and path.stat().st_size <= _file_limit(path))
+        except OSError:
+            return False
+
+    existing = [path for path in paths if available(path)]
+    # ingest limits user-selected roots to twenty. Refresh in that same size
+    # so every previously indexed file is revisited, even past the first page.
+    for start in range(0, len(existing), MAX_ROOTS):
+        ingest(state, existing[start:start + MAX_ROOTS])
     with _connection(state) as conn:
         for path in set(paths) - set(existing):
             conn.execute("DELETE FROM files WHERE path=?", (path,))
             conn.execute("DELETE FROM file_fts WHERE path=?", (path,))
         words = project_memory.WORD.findall(query)[:12]
         if not words:
-            rows = conn.execute("SELECT path,substr(content,1,700) AS excerpt FROM files ORDER BY indexed_at DESC LIMIT ?",
+            rows = conn.execute("SELECT path,substr(content,1,700) AS excerpt FROM files WHERE content<>'' ORDER BY indexed_at DESC LIMIT ?",
                                 (max(1, min(limit, 20)),)).fetchall()
         else:
             expression = " OR ".join('"' + word + '"' for word in words)
@@ -217,6 +259,6 @@ def get(state: str | Path, path: str) -> dict:
         raise ValueError("That file is no longer in memory. Select it again.")
     with _connection(state) as conn:
         row = conn.execute("SELECT path,content,indexed_at FROM files WHERE path=?", (path,)).fetchone()
-    if row is None:
+    if row is None or not row["content"]:
         raise ValueError("That file is no longer in memory. Select it again.")
     return dict(row)

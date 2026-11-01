@@ -22,6 +22,7 @@ Ollama model store                  cloud_ai.py → ChatGPT (opt-in)
 | `Install-Backend.ps1` | Checks hardware and disk space; installs pinned runtimes and tools; downloads the required models; starts optional model checks. |
 | `long_tasks.py` | Stores human tasks in SQLite, supervises the Hermes board, runs independent verification, and draws the desktop UI. `gui()` is the window entry point; `monitor()` is the background entry point. |
 | `project_memory.py` | Creates each project's private SQLite FTS5 database, indexes project files, and stores typed requirements, decisions, lessons, components, and skill recipes. |
+| `user_file_memory.py` | Indexes files explicitly selected in chat, refreshes all tracked files during search, retries failed local extraction, and hides stale text until it can be re-read. |
 | `skill_catalog.py`, `vendor/agent-skills/` | Install seven pinned, local Agent Skills workflows into Hermes; track managed file hashes so updates preserve user edits. |
 | `skill_hub.py` | Let task workers search, inspect, and install a task-specific public skill through Hermes' scanner, without force-installing blocked skills. |
 | `site_crawler.py` | Runs bounded same-host public website crawls with the local Crawl4AI browser, saves Markdown under each project, and indexes each saved page for fast memory search. |
