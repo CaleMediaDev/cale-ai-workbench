@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "LongTasks"
 RETRY_DELAYS = (20, 120, 600)
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-STALE_SECONDS = 10 * 60
+STALE_SECONDS = 90
 
 
 def _read(path: Path) -> dict:

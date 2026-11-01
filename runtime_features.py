@@ -32,7 +32,8 @@ def progress(percent: int, current: str, status: str = "working", attempts: int 
         except (OSError, ValueError, TypeError):
             attempts = 0
     value = {"percent": percent, "current": current, "status": status,
-             "updated": time.time(), "attempts": attempts, "owner": "runtime_features"}
+             "updated": time.time(), "attempts": attempts, "owner": "runtime_features",
+             "pid": os.getpid()}
     temporary = PROGRESS.with_name(PROGRESS.name + "." + str(os.getpid()) + ".tmp")
     temporary.write_text(json.dumps(value), encoding="utf-8")
     os.replace(temporary, PROGRESS)
@@ -56,6 +57,27 @@ def _ensure_pip(python: str) -> None:
         progress(8, "Repairing the local Python package installer")
         _run([python, "-m", "ensurepip", "--default-pip"], timeout=120)
         _run([python, "-m", "pip", "--version"], timeout=30)
+
+
+def _installer_running(pid=None) -> bool:
+    """Recognize only this feature installer, so stale or reused PIDs cannot block repair."""
+    import psutil
+
+    script = Path(__file__).resolve()
+    try:
+        processes = [psutil.Process(int(pid))] if pid else psutil.process_iter(["cmdline"])
+        for process in processes:
+            try:
+                command = process.cmdline()
+                if ("--install" in command and any(
+                    Path(part).resolve() == script for part in command[1:]
+                )):
+                    return True
+            except (OSError, ValueError, psutil.Error):
+                continue
+    except (OSError, ValueError, TypeError, psutil.Error):
+        return False
+    return False
 
 
 def install() -> None:
@@ -121,7 +143,7 @@ def start_background() -> bool:
         # A previous installer can leave a failed progress file after another
         # process has already installed and verified every required tool.
         # Tasks must not wait indefinitely on that stale status.
-        if owned and current.get("status") == "failed":
+        if owned and current.get("status") != "complete":
             progress(100, "Your local tools are ready", "complete", attempts=0)
         return False
     # The base installer also writes this file while downloading models.
@@ -130,8 +152,13 @@ def start_background() -> bool:
         return False
     age = time.time() - current.get("updated", 0)
     attempts = max(0, int(current.get("attempts", 0)))
-    if current.get("status") == "working" and age < 900:
-        return False
+    if current.get("status") == "working":
+        # Installation commands can be quiet for a long time. A live process
+        # is progress; a dead one should be repaired promptly.
+        if _installer_running(current.get("pid")):
+            return False
+        if age < 90:
+            return False
     if attempts >= len(RETRY_DELAYS):
         if current.get("status") != "failed":
             progress(0, "Automatic setup repair could not finish. Check the tool installation.", "failed")

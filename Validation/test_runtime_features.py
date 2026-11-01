@@ -42,6 +42,45 @@ def test_verified_tools_clear_stale_failed_setup(tmp_path, monkeypatch):
     assert json.loads(progress.read_text(encoding="utf-8"))["status"] == "complete"
 
 
+def test_verified_tools_clear_stale_working_setup(tmp_path, monkeypatch):
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({"status": "working", "current": "Installing tools", "owner": "runtime_features"}), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ready", lambda: True)
+    assert not runtime_features.start_background()
+    assert json.loads(progress.read_text(encoding="utf-8"))["status"] == "complete"
+
+
+def test_dead_feature_installer_is_restarted_after_short_delay(tmp_path, monkeypatch):
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({
+        "status": "working", "updated": time.time() - 91,
+        "attempts": 1, "owner": "runtime_features", "pid": 12345,
+    }), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "ROOT", tmp_path)
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ready", lambda: False)
+    monkeypatch.setattr(runtime_features, "_installer_running", lambda pid: False)
+    launches = []
+    monkeypatch.setattr(runtime_features.subprocess, "Popen", lambda *args, **kwargs: launches.append(args))
+    assert runtime_features.start_background()
+    assert len(launches) == 1
+    assert json.loads(progress.read_text(encoding="utf-8"))["attempts"] == 2
+
+
+def test_live_feature_installer_is_not_restarted(tmp_path, monkeypatch):
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({
+        "status": "working", "updated": time.time() - 3600,
+        "attempts": 1, "owner": "runtime_features", "pid": 12345,
+    }), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ready", lambda: False)
+    monkeypatch.setattr(runtime_features, "_installer_running", lambda pid: True)
+    monkeypatch.setattr(runtime_features.subprocess, "Popen", lambda *args, **kwargs: 1 / 0)
+    assert not runtime_features.start_background()
+
+
 def test_missing_pip_is_bootstrapped(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_features, "PROGRESS", tmp_path / "install-progress.json")
     calls = []
