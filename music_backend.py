@@ -446,26 +446,40 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
     from cloud_ai import FAST_MODEL, post
 
     target_words = max(20, min(450, round(duration_seconds * 1.6)))
-    result = post(
-        "http://127.0.0.1:11434/v1/chat/completions",
-        {"model": FAST_MODEL, "stream": False, "temperature": 0.7,
-         "max_tokens": 768, "reasoning_effort": "none",
-         "messages": [
-             {"role": "system", "content": (
-                 "Write original English song lyrics for a local music generator. "
-                 f"Aim for about {target_words} words. Include [Verse] and [Chorus] "
-                 "labels. Begin with a sung or rapped line and keep words going "
-                 "through most of the track. Return lyrics only, no explanation."
-             )},
-             {"role": "user", "content": prompt[:3000]},
-         ]}, timeout=120,
-    )
-    choice = result["choices"][0]
-    lyrics = str(choice["message"].get("content") or "").strip()
-    lyrics = re.sub(r"^```[^\n]*\n|\n```$", "", lyrics).strip()
-    if choice.get("finish_reason") == "length" or not 20 <= len(lyrics.split()) <= 650:
-        raise RuntimeError("The local lyric writer did not finish usable lyrics. Retry the song or supply lyrics.")
-    return lyrics
+    minimum_words = max(20, round(duration_seconds * 0.7))
+    failures = []
+    for attempt in range(2):
+        try:
+            result = post(
+                "http://127.0.0.1:11434/v1/chat/completions",
+                {"model": FAST_MODEL, "stream": False, "temperature": 0.7,
+                 "max_tokens": min(2048, max(1024, target_words * (4 + attempt))),
+                 "reasoning_effort": "none",
+                 "messages": [
+                     {"role": "system", "content": (
+                         "Write original English song lyrics for a local music generator. "
+                         f"Aim for about {target_words} words. Include [Verse] and [Chorus] "
+                         "labels. Begin with a sung or rapped line and keep words going "
+                         "through most of the track. Return lyrics only, no explanation. "
+                         + ("Use short lines and finish the whole song before your response ends."
+                            if attempt else "")
+                     )},
+                     {"role": "user", "content": prompt[:3000]},
+                 ]}, timeout=120,
+            )
+            choice = result["choices"][0]
+            lyrics = str(choice["message"].get("content") or "").strip()
+        except (OSError, RuntimeError, KeyError, IndexError, ValueError, TypeError) as exc:
+            failures.append(f"draft {attempt + 1}: {type(exc).__name__}")
+            continue
+        lyrics = re.sub(r"^```[^\n]*\n|\n```$", "", lyrics).strip()
+        words = len(lyrics.split())
+        finish = choice.get("finish_reason")
+        if minimum_words <= words <= 650 and (finish != "length" or words >= target_words):
+            return lyrics
+        failures.append(f"draft {attempt + 1}: {words} words, finish={finish or 'unknown'}")
+    raise RuntimeError("The local lyric writer could not finish a usable song ("
+                       + "; ".join(failures) + ").")
 
 
 def vocal_evidence(path: str | Path, duration_seconds: int) -> dict:

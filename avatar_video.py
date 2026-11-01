@@ -1,10 +1,35 @@
 """Render a bundled, animated Cale portrait when the assistant speaks."""
 
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps
 
 SIZE = (320, 132)
+CAMERA_SIZE = (200, 132)
+
+
+def camera_frame(jpeg: bytes) -> Image.Image:
+    """Style a live, never-saved webcam frame to sit beside Cale's portrait."""
+    with Image.open(BytesIO(jpeg)) as source:
+        fitted = ImageOps.fit(
+            ImageOps.mirror(source.convert("RGB")),
+            (CAMERA_SIZE[0] - 4, CAMERA_SIZE[1] - 4),
+            method=Image.Resampling.LANCZOS,
+        )
+    border = Image.new("RGB", CAMERA_SIZE, "#151d31")
+    border.paste(fitted, (2, 2))
+    mask = Image.new("L", CAMERA_SIZE, 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (0, 0, CAMERA_SIZE[0] - 1, CAMERA_SIZE[1] - 1), radius=15, fill=255,
+    )
+    rounded = Image.new("RGB", CAMERA_SIZE, "#0b1020")
+    rounded.paste(border, (0, 0), mask)
+    ImageDraw.Draw(rounded).rounded_rectangle(
+        (0, 0, CAMERA_SIZE[0] - 1, CAMERA_SIZE[1] - 1), radius=15,
+        outline="#51e5d0", width=2,
+    )
+    return rounded
 
 
 def load_frames(path: str | Path) -> tuple[list[Image.Image], list[int]]:

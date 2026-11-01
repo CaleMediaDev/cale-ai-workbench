@@ -2311,6 +2311,7 @@ def start_monitor():
 
 def gui():
     """Show the desktop shell; the monitor and model workers run separately."""
+    import base64
     import queue
     import threading
     import tkinter as tk
@@ -2963,15 +2964,47 @@ def gui():
     title_row.pack(side="left", anchor="n", padx=(0, 14))
     title_copy = ttk.Frame(title_row)
     title_copy.pack(side="left")
-    if not avatar_video.attach(title_copy, ROOT / "assets/cale-talking.webp", voice_speaking):
-        ttk.Label(title_copy, text="Talk to Cale", font=("Segoe UI", 29, "bold")).pack(
+    beach_scene = ttk.Frame(title_copy)
+    beach_scene.pack(anchor="w")
+    cale_scene = ttk.Frame(beach_scene)
+    cale_scene.pack(side="left", anchor="n", padx=(0, 8))
+    if not avatar_video.attach(cale_scene, ROOT / "assets/cale-talking.webp", voice_speaking):
+        ttk.Label(cale_scene, text="Talk to Cale", font=("Segoe UI", 29, "bold")).pack(
             anchor="w"
         )
         ttk.Label(
-            title_copy,
+            cale_scene,
             text="Ask a question or describe something you'd like me to make.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(3, 0))
+    ttk.Label(cale_scene, text="CALE  •  BEACH SIDE", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+    camera_scene = ttk.Frame(beach_scene)
+    camera_scene.pack(side="left", anchor="n")
+    camera_frame = tk.Frame(camera_scene, width=200, height=132, bg="#0b1020")
+    camera_frame.pack_propagate(False)
+    camera_frame.pack()
+    camera_preview = tk.Label(
+        camera_frame, text="Your camera\nTurn it on to join Cale", bg="#13243c",
+        fg="#d8e8f5", font=("Segoe UI", 10), borderwidth=0,
+    )
+    camera_preview.pack(fill="both", expand=True)
+    ttk.Label(camera_scene, text="YOU  •  LOCAL WEBCAM", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+
+    def clear_camera_preview():
+        camera_preview.configure(image="", text="Your camera\nTurn it on to join Cale")
+        camera_preview.cale_photo = None
+
+    def show_camera_preview(payload):
+        if greeting_until[0] <= time.time() or len(payload) > 200_000:
+            return
+        try:
+            photo = ImageTk.PhotoImage(
+                avatar_video.camera_frame(base64.b64decode(payload, validate=True))
+            )
+        except (ValueError, OSError):
+            return
+        camera_preview.configure(image=photo, text="")
+        camera_preview.cale_photo = photo
     status = tk.StringVar(value=config_migration_error)
     update_events = queue.Queue()
     pending_update = None
@@ -3500,20 +3533,21 @@ def gui():
         greeting_config.parent.mkdir(exist_ok=True)
         greeting_config.write_text(json.dumps({"until": until}), encoding="utf-8")
         camera_consent.write_text(json.dumps({"until": until}), encoding="utf-8")
-        camera_button.configure(text="📷  Greeting On" if enabled else "📷  Greeting Off")
+        camera_button.configure(text="📷  Camera On" if enabled else "📷  Camera Off")
         if enabled:
             start_camera_greeting()
         else:
+            clear_camera_preview()
             process = greeting_process[0]
             if process is not None and process.poll() is None:
                 process.terminate()
             status.set("Camera greeting turned off.")
 
     camera_button = ttk.Button(
-        title_row, text="📷  Greeting On" if greeting_until[0] > time.time()
-        else "📷  Greeting Off", command=toggle_camera_greeting,
+        title_copy, text="📷  Camera On" if greeting_until[0] > time.time()
+        else "📷  Camera Off", command=toggle_camera_greeting,
     )
-    camera_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    camera_button.pack(anchor="w", pady=(8, 0))
     if greeting_until[0] > time.time():
         start_camera_greeting()
     window.bind("<Control-Alt-space>", lambda _: record_voice())
@@ -4120,7 +4154,8 @@ def gui():
             if kind == "camera_off":
                 greeting_until[0] = 0
                 greeting_config.write_text(json.dumps({"until": 0}), encoding="utf-8")
-                camera_button.configure(text="📷  Greeting Off")
+                camera_button.configure(text="📷  Camera Off")
+                clear_camera_preview()
                 process = greeting_process[0]
                 if process is not None and process.poll() is None:
                     process.terminate()
@@ -4753,7 +4788,8 @@ def gui():
     def voice_poll():
         if greeting_until[0] and greeting_until[0] <= time.time():
             greeting_until[0] = 0
-            camera_button.configure(text="📷  Greeting Off")
+            camera_button.configure(text="📷  Camera Off")
+            clear_camera_preview()
         try:
             while True:
                 event, value = voice_events.get_nowait()
@@ -4794,6 +4830,8 @@ def gui():
                         wake_sequence.renew_after_ack()
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
+                elif event == "camera_frame":
+                    show_camera_preview(value)
                 elif event in ("camera_visitor", "camera_enrolled"):
                     if event == "camera_visitor" and "Who are you?" in value:
                         visitor_awaiting_intro_until[0] = time.monotonic() + 45
@@ -4801,7 +4839,8 @@ def gui():
                 elif event in ("camera_ready", "camera_stopped", "camera_error", "camera_setup", "camera_notice"):
                     status.set(value[:220])
                     if event == "camera_error":
-                        camera_button.configure(text="📷  Greeting Off")
+                        camera_button.configure(text="📷  Camera Off")
+                        clear_camera_preview()
                         greeting_until[0] = 0
                         greeting_config.write_text(json.dumps({"until": 0}), encoding="utf-8")
                         camera_consent.write_text(json.dumps({"until": 0}), encoding="utf-8")

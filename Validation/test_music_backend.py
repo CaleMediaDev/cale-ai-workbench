@@ -130,8 +130,14 @@ def test_compose_lyrics_uses_small_local_model_and_rejects_truncation():
     assert post.call_args.args[1]["model"] == FAST_MODEL
     bad = {"choices": [{"finish_reason": "length", "message": {
         "content": good["choices"][0]["message"]["content"]}}]}
+    with patch("cloud_ai.post", side_effect=[bad, good]) as retry:
+        assert music_backend.compose_lyrics("Michigan rap", 60).startswith("[Verse]")
+    assert retry.call_count == 2
+    with patch("cloud_ai.post", side_effect=[TimeoutError("model busy"), good]) as retry:
+        assert music_backend.compose_lyrics("Michigan rap", 60).startswith("[Verse]")
+    assert retry.call_count == 2
     with patch("cloud_ai.post", return_value=bad):
-        with pytest.raises(RuntimeError, match="did not finish"):
+        with pytest.raises(RuntimeError, match="could not finish"):
             music_backend.compose_lyrics("Michigan rap", 60)
 
 

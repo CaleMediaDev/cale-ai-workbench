@@ -1,18 +1,46 @@
 """Visitor greeting and local camera configuration checks without a real webcam."""
 
+import base64
+import io
 import os
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 import psutil
+from PIL import Image
 
+import avatar_video
 from camera_network import _local_stream
-from camera_presence import VisitorState, VisitorTracker, greeting_line, owner_alive
+from camera_presence import (
+    VisitorState,
+    VisitorTracker,
+    greeting_line,
+    owner_alive,
+    preview_frame,
+)
 from face_identity import FaceModel
 from visitor_memory import name_from_intro
 
 
 class CameraPresenceTests(unittest.TestCase):
+    def test_live_preview_is_bounded_and_styled_without_saving_frames(self):
+        source = Image.new("RGB", (640, 480), "#4a8fc1")
+        buffer = io.BytesIO()
+        source.save(buffer, format="JPEG")
+        preview = avatar_video.camera_frame(buffer.getvalue())
+        self.assertEqual(preview.size, (200, 132))
+        self.assertEqual(preview.getpixel((0, 0)), (11, 16, 32))
+
+        jpeg = np.array([1, 2, 3], dtype=np.uint8)
+        fake_cv2 = SimpleNamespace(
+            IMWRITE_JPEG_QUALITY=1,
+            resize=lambda _frame, size: np.zeros((size[1], size[0], 3), dtype=np.uint8),
+            imencode=lambda *_args: (True, jpeg),
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        self.assertEqual(base64.b64decode(preview_frame(frame, fake_cv2)), b"\x01\x02\x03")
+
     def test_greeting_needs_stable_face_and_empty_room(self):
         state = VisitorState(cooldown=10)
         self.assertFalse(state.observe(True, 0))

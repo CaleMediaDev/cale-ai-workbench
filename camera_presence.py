@@ -1,6 +1,7 @@
 """Opt-in, local webcam visitor greetings. Frames are never saved or uploaded."""
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -139,6 +140,18 @@ def emit(kind, message=""):
     print(json.dumps({"event": kind, "message": message}), flush=True)
 
 
+def preview_frame(frame, cv2):
+    """Encode a small in-memory frame for the desktop's local beach scene."""
+    try:
+        width = 200
+        height = max(1, min(160, round(frame.shape[0] * width / frame.shape[1])))
+        small = cv2.resize(frame, (width, height))
+        ok, encoded = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 62])
+        return base64.b64encode(encoded.tobytes()).decode("ascii") if ok else ""
+    except Exception:
+        return ""  # Preview failure must not stop local visitor detection.
+
+
 def watch(device=0, parent_pid=None, parent_started=None):
     """Detect faces on-device; release the webcam immediately when permission ends."""
     if not allowed() or not owner_alive(parent_pid, parent_started):
@@ -182,6 +195,7 @@ def watch(device=0, parent_pid=None, parent_started=None):
     emit("ready", "Camera greeting is on. Faces are checked locally; no video is saved.")
     try:
         failed_reads = 0
+        last_preview = 0.0
         while allowed() and owner_alive(parent_pid, parent_started):
             ok, frame = camera.read()
             if not ok:
@@ -192,6 +206,12 @@ def watch(device=0, parent_pid=None, parent_started=None):
                 time.sleep(0.5)
                 continue
             failed_reads = 0
+            preview_now = time.monotonic()
+            if preview_now - last_preview >= 1:
+                payload = preview_frame(frame, cv2)
+                if payload:
+                    emit("frame", payload)
+                last_preview = preview_now
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             height, width = gray.shape[:2]
             if width > 640:
