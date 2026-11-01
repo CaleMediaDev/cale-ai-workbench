@@ -92,6 +92,17 @@ class FileCatalogTests(unittest.TestCase):
             self.assertEqual(file_catalog.search(state, "my budget")[0]["path"], str(target))
             self.assertEqual(file_catalog.search(state, "my budget spreadsheet from 2025"), [])
 
+    def test_filler_word_does_not_hide_compound_filename(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            target = root / "file_catalog.py"
+            target.write_text("module", encoding="utf-8")
+            (root / "catalog.py").write_text("other", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            self.assertEqual(file_catalog.search(state, "my file_catalog.py")[0]["path"], str(target))
+
 
 if __name__ == "__main__":
     unittest.main()

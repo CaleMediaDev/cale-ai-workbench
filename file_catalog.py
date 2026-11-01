@@ -198,6 +198,14 @@ def search(state: str | Path, query: str, limit: int = 10) -> list[dict]:
     words = re.findall(r"[^\W_]+", query, re.UNICODE)[:10]
     if not words:
         return []
+    filler = {"my", "the", "a", "an", "file", "folder", "document", "from",
+              "in", "on", "for", "of", "please", "called", "named"}
+    # Remove whole conversational words before splitting filenames. The regex
+    # treats an underscore as part of a name, so "file_catalog.py" stays intact.
+    cleaned = re.sub(
+        r"(?i)\b(?:" + "|".join(sorted(filler)) + r")\b", " ", query,
+    )
+    terms = re.findall(r"[^\W_]+", cleaned, re.UNICODE)[:10] or words
     count = max(1, min(limit, 30))
     with database(state) as conn:
         def matches(expression: str, candidate_limit: int) -> list[dict]:
@@ -216,16 +224,11 @@ def search(state: str | Path, query: str, limit: int = 10) -> list[dict]:
                     conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
             return found
 
-        exact = matches(" AND ".join(f'"{word}"' for word in words), count * 3)
+        exact = matches(" AND ".join(f'"{word}"' for word in terms), count * 3)
         if exact:
             return exact[:count]
         # Natural requests often contain a word absent from the real filename.
         # Use the most distinctive remaining words, then rank by term coverage.
-        filler = {"my", "the", "a", "an", "file", "folder", "document", "from",
-                  "in", "on", "for", "of", "please", "called", "named"}
-        terms = [word for word in words if word.casefold() not in filler]
-        if not terms:
-            return []
         loose = matches(" OR ".join(f'"{word}"' for word in terms), count * 20)
 
         def score(row: dict) -> tuple[int, int]:
