@@ -335,6 +335,10 @@ class CloudTests(unittest.TestCase):
         self.state.start()
         self.root = patch.object(cloud, "ROOT", Path(self.temp.name))
         self.root.start()
+        self.routing_db = patch.object(
+            cloud.routing_memory, "DATABASE", Path(self.temp.name) / "routing.db"
+        )
+        self.routing_db.start()
         self.candidates = patch.object(
             cloud.Router, "local_candidates", return_value=[cloud.LOCAL_MODEL]
         )
@@ -344,6 +348,7 @@ class CloudTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(self.state.stop)
         self.addCleanup(self.root.stop)
+        self.addCleanup(self.routing_db.stop)
         self.addCleanup(self.candidates.stop)
         self.addCleanup(self.loaded.stop)
 
@@ -570,6 +575,67 @@ class CloudTests(unittest.TestCase):
             result = cloud.Router().complete(REQUEST)
         self.assertEqual(result, ANSWER)
         self.assertEqual(complete.call_args.kwargs["size"], "balanced")
+
+    def test_abundant_paid_plan_expands_then_limit_reserves_it_for_deep_work(self):
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        for _ in range(15):
+            cloud.routing_memory.record("chatgpt", "deep", "success")
+        with (
+            patch.object(cloud, "task_size", return_value="balanced"),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
+            patch("usage_history.recent_local_speed", return_value=40),
+            patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
+        ):
+            cloud.Router().complete(REQUEST)
+            paid.assert_called_once()
+            free.assert_not_called()
+            cloud.routing_memory.record("chatgpt", "deep", "limit")
+            cloud.Router().complete(REQUEST)
+            paid.assert_called_once()
+            free.assert_called_once()
+
+    def test_paid_quota_error_is_learned_and_falls_back_to_free(self):
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (
+            patch.object(cloud, "task_size", return_value="deep"),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete", side_effect=HTTPError(
+                "plan", 429, "quota", {}, None)),
+            patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
+        ):
+            cloud.Router().complete(REQUEST)
+        self.assertEqual(cloud.routing_memory.pressure("chatgpt")["limits"], 1)
+        free.assert_called_once()
+
+    def test_repeated_free_limits_move_balanced_work_local(self):
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        cloud.routing_memory.record("groq", "balanced", "limit")
+        cloud.routing_memory.record("openrouter", "deep", "limit")
+        with (
+            patch.object(cloud, "task_size", return_value="balanced"),
+            patch("usage_history.recent_local_speed", return_value=30),
+            patch.object(cloud_providers, "complete") as free,
+            patch.object(cloud, "post", return_value=ANSWER) as local,
+        ):
+            cloud.Router().complete(REQUEST)
+        free.assert_not_called()
+        self.assertTrue(local.call_args.args[0].startswith("http://127.0.0.1:11434/"))
+
+    def test_one_exhausted_free_provider_does_not_hide_another(self):
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        cloud.save_provider_key("google", "google-test-secret", True)
+        cloud.routing_memory.record("groq", "balanced", "limit")
+        cloud.routing_memory.record("groq", "balanced", "limit")
+        with (
+            patch.object(cloud, "task_size", return_value="balanced"),
+            patch("usage_history.recent_local_speed", return_value=30),
+            patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
+            patch.object(cloud, "post") as local,
+        ):
+            cloud.Router().complete(REQUEST)
+        self.assertEqual(free.call_args.args[0], "google")
+        local.assert_not_called()
 
     def test_candidate_tool_calls_use_verified_reasoning_setting(self):
         request = dict(

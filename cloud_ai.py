@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -21,6 +20,7 @@ import subprocess
 import threading
 import time
 import webbrowser
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -31,11 +31,17 @@ import win32crypt
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import validator_for
 
-import pc_offline
 import cloud_providers
+import pc_offline
+import routing_memory
 from auto_route import model_order, repair_messages, task_size
 from model_identity import configured_main_alias, configured_permissive_alias
-from model_library import CATALOG, STANDARD_MAIN_ALIAS, candidate_approved, refresh_catalog
+from model_library import (
+    CATALOG,
+    STANDARD_MAIN_ALIAS,
+    candidate_approved,
+    refresh_catalog,
+)
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "Cloud"
@@ -532,15 +538,18 @@ class Router:
                 usage = {"day": today, "attempts": {}, "monthly": usage.get("monthly", {})}
             attempts = usage.setdefault("attempts", {})
             if attempts.get(provider, 0) >= spec["daily"]:
+                routing_memory.record_budget_limit(provider)
                 return False
             if spec.get("daily_neurons"):
                 spent = usage.setdefault("neurons", {}).get(provider, 0)
                 if estimated_cost <= 0 or spent + estimated_cost > spec["daily_neurons"]:
+                    routing_memory.record_budget_limit(provider)
                     return False
                 usage["neurons"][provider] = spent + estimated_cost
             if spec.get("daily_tokens"):
                 spent = usage.setdefault("tokens", {}).get(provider, 0)
                 if estimated_tokens <= 0 or spent + estimated_tokens > spec["daily_tokens"]:
+                    routing_memory.record_budget_limit(provider)
                     return False
                 usage["tokens"][provider] = spent + estimated_tokens
             if spec.get("monthly"):
@@ -550,6 +559,7 @@ class Router:
                     monthly.clear()
                     monthly.update(month=month, attempts={})
                 if monthly["attempts"].get(provider, 0) >= spec["monthly"]:
+                    routing_memory.record_budget_limit(provider)
                     return False
                 monthly["attempts"][provider] = monthly["attempts"].get(provider, 0) + 1
             attempts[provider] = attempts.get(provider, 0) + 1
@@ -652,6 +662,7 @@ class Router:
                 usage = {}
             count = usage.get("attempts", 0) if usage.get("day") == today else 0
             if count >= 50:
+                routing_memory.record_budget_limit("openrouter")
                 return False
             atomic(
                 STATE / "quota.json",
@@ -687,13 +698,15 @@ class Router:
         offline_mode = pc_offline.offline()
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         reason = "Cloud is not connected."
-        # Explicit plan usage can supercharge demanding work. For balanced
-        # requests, use the lighter plan model only when local AI is slow.
-        # Quick requests stay local to preserve the shared allowance.
+        local_speed = usage_history.recent_local_speed(
+            70 if size == "quick" else 35 if size == "balanced" else 15)
+        paid_pressure = routing_memory.pressure("chatgpt")
+        # Learn from observed limits without pretending to know the account's
+        # remaining allowance. Quick work is kept local; repeated plan limits
+        # reserve paid access for deep work after its cooldown expires.
         if (
             profile == "main"
-            and (size == "deep" or (size == "balanced" and
-                 usage_history.recent_local_speed(35) < 25))
+            and routing_memory.use_paid(size, local_speed, paid_pressure)
             and not offline_mode
             and time.time() >= self.chatgpt_cooldown
         ):
@@ -703,8 +716,7 @@ class Router:
                 if chatgpt_auth.status()["enabled"]:
                     started = time.monotonic()
                     result = valid_completion(chatgpt_auth.complete(payload, size=size), payload)
-                    import usage_history
-
+                    routing_memory.record("chatgpt", size, "success")
                     usage_history.record_completion(result, "chatgpt", time.monotonic() - started)
                     record(
                         "ChatGPT plan",
@@ -712,8 +724,10 @@ class Router:
                         result.get("model", ""),
                     )
                     return retry_derestricted(payload, result, result.get("model", ""))
-            except Exception:
-                self.chatgpt_cooldown = time.time() + 120
+            except Exception as exc:
+                kind = routing_memory.failure_kind(exc)
+                routing_memory.record("chatgpt", size, kind)
+                self.chatgpt_cooldown = time.time() + (3600 if kind == "limit" else 120)
                 reason = "ChatGPT plan unavailable; trying free cloud or local AI."
         required_context = estimated_context(payload)
         openrouter_attempted = False
@@ -724,9 +738,6 @@ class Router:
             account = credentials()
             keys = account.get("provider_keys") or {}
             confirmed = account.get("free_confirmed") or {}
-            import usage_history
-            local_speed = usage_history.recent_local_speed(
-                70 if size == "quick" else 35 if size == "balanced" else 15)
             expected_output = min(8192, int(payload.get("max_tokens") or
                                             payload.get("max_completion_tokens") or 4096))
             prompt_estimate = max(1, len(json.dumps({
@@ -745,8 +756,11 @@ class Router:
                 provider_context = prompt_estimate + min(expected_output, spec.get("max_tokens", 8192)) + 1024
                 estimated_cost = cloud_providers.estimated_neurons(provider, payload)
                 estimated_tokens = cloud_providers.estimated_tokens(provider, payload)
+                provider_pressure = routing_memory.pressure(provider)
                 if (not provider_key or not confirmed.get(provider)
                         or provider_context > spec["context"]
+                        or (time.time() - provider_pressure["last_limit"] < 3600)
+                        or not routing_memory.use_free(size, local_speed, provider_pressure)
                         or not cloud_providers.likely_faster(size, measured_speeds[provider], local_speed)
                         or not self.reserve_provider_request(provider, estimated_cost, estimated_tokens)):
                     continue
@@ -755,15 +769,17 @@ class Router:
                         provider, provider_key, payload,
                         account_id=(account.get("provider_accounts") or {}).get(provider, ""))
                     result = valid_completion(result, payload)
-                    import usage_history
+                    routing_memory.record(provider, size, "success")
                     usage_history.record_completion(result, provider, elapsed)
                     record(provider, "Connected free-plan cloud response received.",
                            result.get("model", spec["model"]))
                     return retry_derestricted(payload, result, result.get("model", ""))
                 except HTTPError as exc:
+                    routing_memory.record(provider, size, routing_memory.failure_kind(exc))
                     self.provider_cooldowns[provider] = time.time() + (
                         3600 if exc.code in (401, 402, 403, 429) else 120)
-                except Exception:
+                except Exception as exc:
+                    routing_memory.record(provider, size, routing_memory.failure_kind(exc))
                     self.provider_cooldowns[provider] = time.time() + 120
         # A long balanced task can be slower than a deep task when its local
         # model repeatedly prefills a large context. Use the connected free
@@ -775,18 +791,24 @@ class Router:
         ) if profile == "main" and not offline_mode else False
         # Prefer an eligible direct free-plan account before spending the
         # smaller shared OpenRouter free allowance on demanding work.
-        if key and (size == "deep" or slow_long_context) and self.reserve_free_request():
+        if (key and (size == "deep" or slow_long_context)
+                and routing_memory.use_free(
+                    size, local_speed, routing_memory.pressure("openrouter"))
+                and self.reserve_free_request()):
             openrouter_attempted = True
             try:
                 result = valid_completion(post(
                     API + "/chat/completions", cloud_payload(payload), key, timeout=120,
                 ), payload)
+                routing_memory.record("openrouter", size, "success")
                 record("free cloud", "Free route accelerated demanding work.",
                        result.get("model", "openrouter/free"))
                 return retry_derestricted(payload, result, result.get("model", ""))
             except HTTPError as exc:
+                routing_memory.record("openrouter", size, routing_memory.failure_kind(exc))
                 self.cooldown = time.time() + (3600 if exc.code in (401, 402, 403, 429) else 120)
-            except Exception:
+            except Exception as exc:
+                routing_memory.record("openrouter", size, routing_memory.failure_kind(exc))
                 self.cooldown = time.time() + 120
         selected = (
             self.local_candidates(size, required_context)
@@ -837,6 +859,7 @@ class Router:
                         timeout=120,
                     ), payload
                 )
+                routing_memory.record("openrouter", size, "success")
                 record(
                     "free cloud",
                     "Free cloud response received.",
@@ -844,12 +867,14 @@ class Router:
                 )
                 return retry_derestricted(payload, result, result.get("model", ""))
             except HTTPError as exc:
+                routing_memory.record("openrouter", size, routing_memory.failure_kind(exc))
                 # No response body, keys or project text is written into logs.
                 self.cooldown = time.time() + (
                     3600 if exc.code in (401, 402, 403, 429) else 120
                 )
                 reason = f"Free cloud HTTP {exc.code}; no model responded."
-            except Exception:
+            except Exception as exc:
+                routing_memory.record("openrouter", size, routing_memory.failure_kind(exc))
                 self.cooldown = time.time() + 120
                 reason = "Free cloud unavailable or incompatible."
         elif key:

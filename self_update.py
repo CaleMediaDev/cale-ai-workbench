@@ -7,7 +7,6 @@ models, runtime folders and account credentials are never part of an update.
 from __future__ import annotations
 
 import argparse
-from contextlib import closing, contextmanager
 import hashlib
 import json
 import os
@@ -17,6 +16,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing, contextmanager
 from pathlib import Path, PurePosixPath
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
@@ -107,7 +107,7 @@ def validated_manifest(archive):
     if "install-files.json" not in names:
         raise ValueError("Release has no install manifest.")
     manifest = json.loads(archive.read("install-files.json"))
-    if not isinstance(manifest, list) or not manifest or len(manifest) > 200:
+    if not isinstance(manifest, list) or not manifest or len(manifest) > 250:
         raise ValueError("Invalid release manifest.")
     files = [*manifest, "install-files.json"]
     if len(set(files)) != len(files):

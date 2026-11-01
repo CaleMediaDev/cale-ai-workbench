@@ -1,13 +1,13 @@
 """Release updates protect user data and require a published digest."""
 
-import json
 import io
+import json
 import sqlite3
-from contextlib import closing, nullcontext
 import sys
 import tempfile
 import time
 import unittest
+from contextlib import closing, nullcontext
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from zipfile import ZipFile
@@ -212,6 +212,23 @@ class SelfUpdateTests(unittest.TestCase):
                 archive.writestr("Projects/secret.txt", "bad")
             with ZipFile(archive_path) as archive:
                 with self.assertRaises(ValueError):
+                    self_update.validated_manifest(archive)
+
+    def test_manifest_allows_current_source_count_but_keeps_a_bound(self):
+        with tempfile.TemporaryDirectory() as folder:
+            archive_path = Path(folder) / "release.zip"
+            names = [f"source-{index:03}.py" for index in range(202)]
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("install-files.json", json.dumps(names))
+                for name in names:
+                    archive.writestr(name, "# source")
+            with ZipFile(archive_path) as archive:
+                self.assertEqual(len(self_update.validated_manifest(archive)), 203)
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("install-files.json", json.dumps(names +
+                                 [f"extra-{index}.py" for index in range(49)]))
+            with ZipFile(archive_path) as archive:
+                with self.assertRaisesRegex(ValueError, "manifest"):
                     self_update.validated_manifest(archive)
 
     def test_apply_preserves_user_project_and_makes_backup(self):
