@@ -20,6 +20,9 @@ REFERENCE = ROOT / "assets/cale-voice-reference.wav"
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 _worker = None
 _lock = threading.Lock()
+_idle_timer = None
+_generation = 0
+IDLE_SECONDS = 60
 
 
 def ready() -> bool:
@@ -84,13 +87,40 @@ def _line_with_timeout(stream, seconds: int) -> str:
 
 def _stop_worker():
     global _worker
-    if _worker is not None:
-        if _worker.poll() is None:
-            try:
-                _worker.terminate()
-            except OSError:
-                pass
-        _worker = None
+    process, _worker = _worker, None
+    if process is None:
+        return
+    # Windows venv launchers can spawn a second Python process that owns the
+    # GPU model. Stopping only the launcher leaves that expensive child alive.
+    import psutil
+
+    try:
+        descendants = psutil.Process(process.pid).children(recursive=True)
+    except psutil.Error:
+        descendants = []
+    for child in reversed(descendants):
+        try:
+            child.terminate()
+        except psutil.Error:
+            pass
+    if process.poll() is None:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+    _, alive = psutil.wait_procs(descendants, timeout=3)
+    for child in alive:
+        try:
+            child.kill()
+        except psutil.Error:
+            pass
+
+
+def _release_after_idle(generation: int) -> None:
+    """Free voice-model memory only if no newer speech has begun."""
+    with _lock:
+        if generation == _generation:
+            _stop_worker()
 
 
 atexit.register(_stop_worker)
@@ -98,10 +128,13 @@ atexit.register(_stop_worker)
 
 def speak(text: str, output_path: str | Path, play: bool = True) -> dict:
     """Send a short line to one persistent local GPU worker, then play it."""
-    global _worker
+    global _worker, _idle_timer, _generation
     if not ready():
         raise RuntimeError("Cale's voice is still installing.")
     with _lock:
+        _generation += 1
+        if _idle_timer is not None:
+            _idle_timer.cancel()
         try:
             if _worker is None or _worker.poll() is not None:
                 env = dict(os.environ, HF_HUB_OFFLINE="1")
@@ -122,6 +155,9 @@ def speak(text: str, output_path: str | Path, play: bool = True) -> dict:
         except (OSError, ValueError, queue.Empty, RuntimeError) as exc:
             _stop_worker()
             raise RuntimeError("Cale's voice worker could not finish this update.") from exc
+        _idle_timer = threading.Timer(IDLE_SECONDS, _release_after_idle, args=(_generation,))
+        _idle_timer.daemon = True
+        _idle_timer.start()
     if play:
         import winsound
 
