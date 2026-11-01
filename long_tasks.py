@@ -846,6 +846,17 @@ def sync_user_requests(p):
     return rows
 
 
+def refresh_project_index(p):
+    """Index existing code before a worker starts and again after verified edits."""
+    try:
+        project_memory.index(p["folder"], include_code=True)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        # An index can be rebuilt later; it must not strand a real task.
+        STATE.mkdir(parents=True, exist_ok=True)
+        with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
+            log.write(time.ctime() + f"\nProject memory refresh {p['id']}: {exc}\n")
+
+
 def create_card(p, extra=""):
     """Create a board card once per generation so restarts cannot duplicate work."""
     # Stable key makes a crash between native create and our DB update recoverable.
@@ -856,6 +867,7 @@ def create_card(p, extra=""):
     saved = recovery_snapshot(p["folder"])
     followups = sync_user_requests(p)
     save_original_request(p["folder"], p["id"], p["brief"])
+    refresh_project_index(p)
     recent = "\n".join(
         f"Request {row['id']}: {row['note'][:1200]}"
         for row in followups[-3:]
@@ -1286,14 +1298,8 @@ def handle_handoff(p, task, snapshot=None):
         p = next(x for x in projects() if x["id"] == p["id"])
         create_card(p, note)
         return
-    # A verified milestone is a safe point to refresh the project's local
-    # code/document index. The next worker can recall changed files even when
-    # the previous worker forgot to request an explicit memory scan.
-    try:
-        project_memory.index(p["folder"], include_code=True)
-    except (OSError, ValueError, sqlite3.Error) as exc:
-        with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
-            log.write(time.ctime() + f"\nProject memory refresh {p['id']}: {exc}\n")
+    # A verified milestone is a safe point to refresh the index for the next worker.
+    refresh_project_index(p)
     if p["phase"] == "build":
         # Fresh worker/context reviews the finished work against the original request.
         # Archive the implementation card after its worker has handed off. The

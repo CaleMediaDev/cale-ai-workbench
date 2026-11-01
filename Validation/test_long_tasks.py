@@ -516,6 +516,9 @@ class LongTaskTests(unittest.TestCase):
 
     def test_new_worker_receives_saved_plan_and_latest_progress(self):
         notes = Path(self.item()["folder"]) / ".local-ai"
+        (self.base / "project/existing.py").write_text(
+            "def existing_beach_planner(): return 1", encoding="utf-8"
+        )
         (notes / "PLAN.md").write_text("Milestone: build search", encoding="utf-8")
         (notes / "PROGRESS.md").write_text(
             "x" * 6500 + "\nNext concrete step: test search", encoding="utf-8"
@@ -527,6 +530,9 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("Milestone: build search", body)
         self.assertIn("Next concrete step: test search", body)
         self.assertNotIn("x" * 6500, body)
+        self.assertTrue(task_module.project_memory.search(
+            self.base / "project", "existing_beach_planner", kind="file"
+        ))
 
     def test_recovery_keeps_early_acceptance_checks_and_latest_progress(self):
         notes = Path(self.item()["folder"]) / ".local-ai"
