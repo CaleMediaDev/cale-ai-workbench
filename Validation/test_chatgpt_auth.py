@@ -1,6 +1,7 @@
 """Offline checks for the ChatGPT OAuth route's request contract and privacy."""
 
 import sys
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,34 @@ import chatgpt_auth as c
 
 
 class ChatGPTAuthTests(unittest.TestCase):
+    def test_streamed_output_survives_empty_completed_output(self):
+        class Stream:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def __iter__(self):
+                events = [
+                    {"type": "response.output_item.done", "output_index": 0,
+                     "item": {"type": "message", "content": [
+                         {"type": "output_text", "text": "Cale connected"}]}},
+                    {"type": "response.completed", "response": {
+                        "id": "resp_1", "model": "gpt-test", "output": [],
+                        "usage": {"input_tokens": 2, "output_tokens": 3,
+                                  "total_tokens": 5}}},
+                ]
+                return iter(("data: " + json.dumps(event) + "\n").encode()
+                            for event in events)
+
+        with (patch.object(c, "access_token", return_value="opaque"),
+              patch.object(c, "available_models", return_value=["gpt-test"]),
+              patch.object(c, "urlopen", return_value=Stream())):
+            result = c.complete({"messages": [{"role": "user", "content": "Hi"}]})
+        self.assertEqual(result["choices"][0]["message"]["content"], "Cale connected")
+        self.assertEqual(result["usage"]["total_tokens"], 5)
+
     def test_response_payload_has_only_supported_core_fields(self):
         payload = c.response_payload(
             {

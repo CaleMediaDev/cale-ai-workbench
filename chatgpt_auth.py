@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import secrets
+import ssl
 import threading
 import time
 import uuid
@@ -22,6 +23,7 @@ from urllib.request import Request, urlopen
 
 import jwt
 import win32crypt
+import certifi
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "Cloud"
@@ -29,6 +31,16 @@ AUTH = "https://auth.openai.com"
 RESOURCE = "https://api.openai.com/v1"
 SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 LOCK = threading.RLock()
+
+
+def tls_context():
+    """Use the bundled, current CA roots for Python's HTTPS requests.
+
+    Some Windows machines retain expired intermediate certificates in the OS
+    store. Explicitly using certifi avoids choosing that stale trust path while
+    keeping full certificate and hostname verification enabled.
+    """
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def atomic(path, data):
@@ -98,7 +110,7 @@ def form_post(url, data, timeout=30):
             "Accept": "application/json",
         },
     )
-    with urlopen(request, timeout=timeout) as response:
+    with urlopen(request, timeout=timeout, context=tls_context()) as response:
         return json.load(response)
 
 
@@ -107,7 +119,7 @@ def verify_identity(id_token, client_id, nonce):
     if header.get("alg") not in ("RS256", "PS256", "ES256"):
         raise ValueError("Unsupported ChatGPT identity signature.")
     key = jwt.PyJWKClient(
-        AUTH + "/.well-known/jwks.json", timeout=10
+        AUTH + "/.well-known/jwks.json", timeout=10, ssl_context=tls_context()
     ).get_signing_key_from_jwt(id_token)
     claims = jwt.decode(
         id_token,
@@ -258,7 +270,9 @@ def disconnect():
         if token:
             try:
                 with urlopen(
-                    Request(AUTH + "/.well-known/openid-configuration"), timeout=10
+                    Request(AUTH + "/.well-known/openid-configuration"),
+                    timeout=10,
+                    context=tls_context(),
                 ) as response:
                     endpoint = json.load(response)["revocation_endpoint"]
                 request = Request(
@@ -272,7 +286,7 @@ def disconnect():
                     ).encode(),
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
-                with urlopen(request, timeout=10) as response:
+                with urlopen(request, timeout=10, context=tls_context()) as response:
                     if response.status != 200:
                         raise RuntimeError("Revocation failed.")
             except Exception:
@@ -318,7 +332,7 @@ def available_models(token):
     request = Request(
         RESOURCE + "/models", headers={"Authorization": "Bearer " + token}
     )
-    with urlopen(request, timeout=15) as response:
+    with urlopen(request, timeout=15, context=tls_context()) as response:
         catalog = json.load(response)
     models = [
         item.get("slug")
@@ -453,7 +467,8 @@ def complete(completion):
         },
     )
     final = None
-    with urlopen(request, timeout=180) as response:
+    streamed_output = {}
+    with urlopen(request, timeout=180, context=tls_context()) as response:
         for raw in response:
             if not raw.startswith(b"data: "):
                 continue
@@ -463,6 +478,12 @@ def complete(completion):
             event = json.loads(body)
             if event.get("type") == "response.completed":
                 final = event.get("response")
+            elif event.get("type") == "response.output_item.done":
+                # ChatGPT plan streaming can leave response.completed.output empty.
+                # Completed items carry both answer text and tool calls.
+                item = event.get("item")
+                if item is not None:
+                    streamed_output[event.get("output_index", len(streamed_output))] = item
             elif event.get("type") in (
                 "response.failed",
                 "response.incomplete",
@@ -476,4 +497,6 @@ def complete(completion):
                 )
     if not final:
         raise RuntimeError("ChatGPT stream ended before completion.")
+    if not final.get("output") and streamed_output:
+        final["output"] = [streamed_output[index] for index in sorted(streamed_output)]
     return response_to_completion(final)
