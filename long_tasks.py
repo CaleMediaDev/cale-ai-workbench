@@ -1041,6 +1041,7 @@ def monitor():
     for item in projects():
         try:
             project_memory.initialize(item["folder"])
+            sync_user_requests(item)
         except (OSError, ValueError, sqlite3.Error):
             pass  # Existing project may have moved; task supervision continues.
     installed_marker = (
