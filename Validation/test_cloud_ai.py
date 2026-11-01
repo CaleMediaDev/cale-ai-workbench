@@ -149,6 +149,8 @@ class CloudTests(unittest.TestCase):
                           "Meta-Llama-3.3-70B-Instruct"),
             "bigmodel": ("https://open.bigmodel.cn/api/paas/v4/chat/completions",
                          "glm-4.7-flash"),
+            "modelscope": ("https://api-inference.modelscope.cn/v1/chat/completions",
+                           "Qwen/Qwen3.5-35B-A3B"),
         }
         for provider, (url, model) in expected.items():
             with self.subTest(provider=provider):

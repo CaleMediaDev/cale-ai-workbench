@@ -24,6 +24,10 @@ PROVIDERS = {
     "sambanova": {"name": "SambaNova Cloud", "url": "https://api.sambanova.ai/v1/chat/completions", "model": "Meta-Llama-3.3-70B-Instruct", "context": 32000, "rpm": 10, "daily": 18, "speed": 400, "signup": "https://cloud.sambanova.ai/apis"},
     # BigModel lists this exact Flash model as free; FlashX is paid.
     "bigmodel": {"name": "Zhipu AI (BigModel)", "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions", "model": "glm-4.7-flash", "context": 200000, "rpm": 5, "daily": 30, "speed": 150, "signup": "https://bigmodel.cn/usercenter/proj-mgmt/apikeys"},
+    # A registered ModelScope account receives 200 free Magicubes each day.
+    # This model's card lists one Magicube per API-Inference request; reserve
+    # room for the user's other ModelScope activity.
+    "modelscope": {"name": "ModelScope", "url": "https://api-inference.modelscope.cn/v1/chat/completions", "model": "Qwen/Qwen3.5-35B-A3B", "context": 131072, "rpm": 5, "daily": 150, "speed": 120, "signup": "https://modelscope.cn/my/myaccesstoken"},
     "cohere": {"name": "Cohere", "url": "https://api.cohere.com/v2/chat", "model": "command-r-08-2024", "context": 128000, "rpm": 5, "daily": 30, "speed": 80, "signup": "https://dashboard.cohere.com/api-keys"},
     "huggingface": {"name": "Hugging Face", "url": "https://router.huggingface.co/v1/chat/completions", "model": "openai/gpt-oss-120b:fastest", "context": 8192, "rpm": 2, "daily": 2, "monthly": 2, "speed": 150, "max_tokens": 1024, "signup": "https://huggingface.co/settings/tokens"},
     "cloudflare": {"name": "Cloudflare Workers AI", "url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions", "model": "@cf/openai/gpt-oss-20b", "context": 128000, "rpm": 5, "daily": 12, "speed": 160, "max_tokens": 2048, "daily_neurons": 8500, "input_neurons_per_m": 18182, "output_neurons_per_m": 27273, "signup": "https://dash.cloudflare.com/?to=/:account/ai/workers-ai"},
