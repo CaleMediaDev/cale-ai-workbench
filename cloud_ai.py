@@ -1,7 +1,7 @@
 """Local loopback model router for Hermes task requests.
 
-Routing order is an explicitly enabled ChatGPT plan, free OpenRouter, then
-local Ollama. ChatGPT plan use shares the person's existing allowance; this
+Routing order is an explicitly enabled ChatGPT plan, local Ollama, then free
+OpenRouter. ChatGPT plan use shares the person's existing allowance; this
 module does not buy credits or expose account tokens to Hermes. Credentials
 are DPAPI encrypted and the loopback API has its own random bearer token.
 """
@@ -27,6 +27,8 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 import win32crypt
+from jsonschema.exceptions import SchemaError
+from jsonschema.validators import validator_for
 
 import pc_offline
 from auto_route import model_order, task_size
@@ -315,7 +317,7 @@ def valid_completion(result, request=None):
             and result["choices"][0].get("finish_reason") != "content_filter"):
         raise ValueError("Empty inference response")
     offered = {
-        tool.get("function", {}).get("name")
+        tool["function"].get("name"): tool["function"].get("parameters")
         for tool in (request or {}).get("tools", [])
         if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
     }
@@ -331,9 +333,26 @@ def valid_completion(result, request=None):
             raise ValueError("Model called a tool that was not offered")
         arguments = function.get("arguments")
         if isinstance(arguments, dict):
+            parsed = arguments
             function["arguments"] = json.dumps(arguments, ensure_ascii=False)
-        elif not isinstance(arguments, str) or not isinstance(json.loads(arguments), dict):
+        elif isinstance(arguments, str):
+            parsed = json.loads(arguments)
+        else:
+            parsed = None
+        if not isinstance(parsed, dict):
             raise ValueError("Invalid tool arguments")
+        schema = offered.get(name)
+        if isinstance(schema, dict):
+            validator = validator_for(schema)
+            try:
+                validator.check_schema(schema)
+            except SchemaError:
+                # A broken offered schema is an integration issue, not a
+                # reason to reject every model's otherwise usable call.
+                continue
+            error = next(validator(schema).iter_errors(parsed), None)
+            if error:
+                raise ValueError(f"Invalid arguments for tool {name}: {error.message}")
     choice = (request or {}).get("tool_choice")
     named_choice = choice.get("function") if isinstance(choice, dict) else None
     required_name = (

@@ -73,6 +73,36 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(json.loads(result["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]),
                          {"a": 7, "b": 13})
 
+    def test_bad_tool_arguments_retry_another_local_model(self):
+        request = dict(REQUEST, tools=[{"type": "function", "function": {
+            "name": "read_file", "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        }}], tool_choice="required")
+
+        def response(arguments):
+            return {"choices": [{"message": {"tool_calls": [{
+                "id": "call-1", "type": "function", "function": {
+                    "name": "read_file", "arguments": arguments,
+                },
+            }]}}]}
+
+        with self.assertRaisesRegex(ValueError, "path"):
+            cloud.valid_completion(response("{}"), request)
+        with self.assertRaisesRegex(ValueError, "string"):
+            cloud.valid_completion(response('{"path": 7}'), request)
+        with (
+            patch.object(cloud.Router, "local_candidates", return_value=["small", "strong"]),
+            patch.object(cloud, "post", side_effect=[response("{}"),
+                                                    response('{"path":"C:/file.txt"}')]) as post,
+        ):
+            cloud.Router().complete(request)
+        self.assertEqual([call.args[1]["model"] for call in post.call_args_list],
+                         ["small", "strong"])
+
     def test_named_tool_choice_requires_the_selected_tool(self):
         request = dict(REQUEST, tools=[
             {"type": "function", "function": {"name": "multiply"}},
