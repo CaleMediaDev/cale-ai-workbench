@@ -116,33 +116,43 @@ def video_job_status(job_id: str) -> dict:
 
 
 @contextmanager
-def _installation_lock():
-    """Serialize model installation across separate agent worker processes."""
+def _process_lock(name: str, timeout_seconds: float | None = None):
+    """Serialize a resource across independent agent worker processes."""
     if os.name != "nt":
         raise RuntimeError("Automatic video setup currently requires Windows.")
     import msvcrt
     BASE.mkdir(parents=True, exist_ok=True)
-    lock_file = BASE / "runtime-install.lock"
+    lock_file = BASE / name
     with lock_file.open("a+b") as stream:
         stream.seek(0, os.SEEK_END)
         if stream.tell() == 0:
             stream.write(b"0")
             stream.flush()
-        deadline = time.monotonic() + 14400
+        deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
         while True:
             stream.seek(0)
             try:
                 msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
                 break
             except OSError:
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("Another video runtime installation is still active.")
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError(f"Timed out waiting for video resource {name}.")
                 time.sleep(2)
         try:
             yield
         finally:
             stream.seek(0)
             msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def _installation_lock():
+    """Keep concurrent jobs from installing the runtime at the same time."""
+    return _process_lock("runtime-install.lock", 18000)
+
+
+def _render_lock():
+    """Only one Wan render may hold the GPU on this PC at a time."""
+    return _process_lock("gpu-render.lock")
 
 
 def _model_fingerprints() -> dict | None:
@@ -295,6 +305,12 @@ def _workflow(prompt: str, seconds: float, layout: str, seed: int) -> dict:
 def _run_job(job_id: str) -> None:
     data = json.loads(_job_path(job_id).read_text(encoding="utf-8"))
     _ensure_runtime(job_id)
+    _write(job_id, state="waiting_for_gpu", detail="Waiting for another local video render to finish")
+    with _render_lock():
+        _render_job(job_id, data)
+
+
+def _render_job(job_id: str, data: dict) -> None:
     port = _free_port()
     python = RUNTIME / "ComfyUI" / ".venv" / "Scripts" / "python.exe"
     main = RUNTIME / "ComfyUI" / "main.py"

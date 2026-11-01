@@ -88,20 +88,21 @@ def test_windows_installer_patch_is_exact_and_idempotent(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows file locking")
-def test_runtime_install_lock_waits_for_another_worker(tmp_path):
+@pytest.mark.parametrize("lock_name", ["_installation_lock", "_render_lock"])
+def test_video_resource_lock_waits_for_another_worker(tmp_path, lock_name):
     script = (
         "import sys,time\nfrom pathlib import Path\nimport video_generation\n"
         "video_generation.BASE=Path(sys.argv[1])\n"
-        "with video_generation._installation_lock():\n"
+        "with getattr(video_generation,sys.argv[3])():\n"
         " print('acquired', flush=True)\n time.sleep(float(sys.argv[2]))\n"
     )
-    first = subprocess.Popen([sys.executable, "-c", script, str(tmp_path), "2"],
+    first = subprocess.Popen([sys.executable, "-c", script, str(tmp_path), "2", lock_name],
                              cwd=str(video_generation.ROOT), stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, text=True)
     try:
         assert first.stdout.readline().strip() == "acquired"
         started = time.monotonic()
-        second = subprocess.run([sys.executable, "-c", script, str(tmp_path), "0"],
+        second = subprocess.run([sys.executable, "-c", script, str(tmp_path), "0", lock_name],
                                 cwd=str(video_generation.ROOT), capture_output=True,
                                 text=True, timeout=10, check=True)
         assert second.stdout.strip() == "acquired"
