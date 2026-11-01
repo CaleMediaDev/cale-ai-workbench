@@ -1,9 +1,12 @@
 """Visitor greeting and local camera configuration checks without a real webcam."""
 
+import os
 import unittest
 
+import psutil
+
 from camera_network import _local_stream
-from camera_presence import VisitorState
+from camera_presence import VisitorState, owner_alive
 from visitor_memory import name_from_intro
 
 
@@ -32,6 +35,12 @@ class CameraPresenceTests(unittest.TestCase):
                          "rtsp://192.168.1.20/live")
         with self.assertRaises(ValueError):
             _local_stream("rtsp://8.8.8.8/live")
+
+    def test_camera_worker_tracks_exact_window_process(self):
+        current = psutil.Process(os.getpid())
+        self.assertTrue(owner_alive(current.pid, current.create_time()))
+        self.assertFalse(owner_alive(current.pid, current.create_time() - 30))
+        self.assertFalse(owner_alive(99999999, current.create_time()))
 
 
 if __name__ == "__main__":

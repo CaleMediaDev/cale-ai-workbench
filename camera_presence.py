@@ -1,9 +1,14 @@
 """Opt-in, local webcam visitor greetings. Frames are never saved or uploaded."""
 
+import argparse
 import json
+import os
 import sys
+import threading
 import time
 from pathlib import Path
+
+import psutil
 
 ROOT = Path(__file__).resolve().parent
 CONSENT = ROOT / "Media/camera-consent.json"
@@ -16,6 +21,24 @@ def allowed(now=None):
         return until > (time.time() if now is None else now)
     except (OSError, ValueError, KeyError, TypeError):
         return False
+
+
+def owner_alive(pid=None, started=None):
+    """Stop watching if the desktop window that enabled the camera disappears."""
+    if pid is None:
+        return True  # Direct bounded tool and smoke-test invocations.
+    try:
+        owner = psutil.Process(int(pid))
+        return owner.is_running() and abs(owner.create_time() - float(started)) < 1
+    except (OSError, ValueError, TypeError, psutil.Error):
+        return False
+
+
+def watch_owner(pid, started):
+    """Exit promptly even if a network camera's frame read is blocking."""
+    while owner_alive(pid, started):
+        time.sleep(0.5)
+    os._exit(0)
 
 
 class VisitorState:
@@ -49,11 +72,14 @@ def emit(kind, message=""):
     print(json.dumps({"event": kind, "message": message}), flush=True)
 
 
-def watch(device=0):
+def watch(device=0, parent_pid=None, parent_started=None):
     """Detect faces on-device; release the webcam immediately when permission ends."""
-    if not allowed():
+    if not allowed() or not owner_alive(parent_pid, parent_started):
         emit("error", "Camera greeting is off. Turn it on in the app first.")
         return 1
+    if parent_pid is not None:
+        threading.Thread(target=watch_owner,
+                         args=(parent_pid, parent_started), daemon=True).start()
     import cv2
 
     from camera_network import camera_source, greeting_camera
@@ -81,10 +107,14 @@ def watch(device=0):
     enrolling_name = None
     enrolling_features = []
     enrolling_started = 0.0
+    if not owner_alive(parent_pid, parent_started):
+        camera.release()
+        emit("stopped", "Camera greeting stopped because the app closed.")
+        return 0
     emit("ready", "Camera greeting is on. Faces are checked locally; no video is saved.")
     try:
         failed_reads = 0
-        while allowed():
+        while allowed() and owner_alive(parent_pid, parent_started):
             ok, frame = camera.read()
             if not ok:
                 failed_reads += 1
@@ -141,4 +171,9 @@ def watch(device=0):
 
 
 if __name__ == "__main__":
-    sys.exit(watch())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--parent-pid", type=int)
+    parser.add_argument("--parent-started", type=float)
+    options = parser.parse_args()
+    sys.exit(watch(parent_pid=options.parent_pid,
+                   parent_started=options.parent_started))

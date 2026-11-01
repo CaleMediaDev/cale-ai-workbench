@@ -3334,8 +3334,12 @@ def gui():
 
         def monitor():
             try:
+                import psutil
+
                 process = subprocess.Popen(
-                    [str(media_python), "-u", str(ROOT / "camera_presence.py")],
+                    [str(media_python), "-u", str(ROOT / "camera_presence.py"),
+                     "--parent-pid", str(os.getpid()), "--parent-started",
+                     str(psutil.Process(os.getpid()).create_time())],
                     cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, encoding="utf-8", errors="replace",
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
