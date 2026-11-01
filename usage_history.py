@@ -71,6 +71,19 @@ def record_completion(result: dict, source: str, elapsed_seconds: float | None =
         return False  # A usage display failure must not discard a model answer.
 
 
+def recent_local_speed(default: float = 35.0) -> float:
+    """Use actual recent Ollama output speed to decide if cloud is worthwhile."""
+    try:
+        with closing(_connection()) as conn:
+            rows = conn.execute(
+                "SELECT tokens_per_second FROM usage_events WHERE source='ollama' "
+                "AND tokens_per_second > 0 ORDER BY id DESC LIMIT 12"
+            ).fetchall()
+        return sum(row[0] for row in rows) / len(rows) if rows else default
+    except (OSError, sqlite3.Error):
+        return default
+
+
 def history(period: str = "day") -> dict:
     """Return lifetime total and zero-filled local-day or local-month history."""
     if period not in ("day", "month"):

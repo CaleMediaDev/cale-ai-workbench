@@ -1907,6 +1907,7 @@ def gui():
     import avatar_video
     import chat_assistant
     import chatgpt_auth
+    import cloud_providers
     import file_chat
     import github_account
     import ollama_runtime
@@ -1917,7 +1918,9 @@ def gui():
     from cloud_ai import (
         connect_account,
         disconnect,
+        disconnect_provider,
         ensure_router,
+        save_provider_key,
     )
     from cloud_ai import (
         status as cloud_status,
@@ -2351,6 +2354,56 @@ def gui():
         wraplength=680,
     )
     router_note.pack(anchor="w", pady=(4, 15))
+    ttk.Label(
+        super_page, text="More free-plan accounts", font=("Segoe UI", 18, "bold")
+    ).pack(anchor="w", pady=(0, 5))
+    ttk.Label(
+        super_page,
+        text=("Optional: connect your own provider account. Cale may send task text and tool results "
+              "there when it is faster. Confirm your account is on its free plan first; "
+              "a paid account key can still incur charges. Hugging Face includes only a tiny monthly "
+              "credit, so Cale allows at most two calls there each month. Go offline to keep all work on this PC."),
+        style="Muted.TLabel", wraplength=720,
+    ).pack(anchor="w", pady=(0, 7))
+    provider_names = {spec["name"]: code for code, spec in cloud_providers.PROVIDERS.items()}
+    provider_name = tk.StringVar(value="Groq")
+    provider_row = ttk.Frame(super_page)
+    provider_row.pack(anchor="w", fill="x")
+    ttk.Combobox(provider_row, textvariable=provider_name, state="readonly", width=25,
+                 values=list(provider_names)).pack(side="left", padx=(0, 8))
+    ttk.Button(provider_row, text="Get my free key ↗",
+               command=lambda: webbrowser.open(cloud_providers.PROVIDERS[
+                   provider_names[provider_name.get()]]["signup"])).pack(side="left")
+    provider_key = tk.StringVar()
+    ttk.Entry(super_page, textvariable=provider_key, show="•", width=54).pack(
+        anchor="w", pady=(6, 3))
+    free_plan = tk.BooleanVar(value=False)
+    ttk.Checkbutton(super_page, text="I checked that this account uses the provider's free plan or credits",
+                    variable=free_plan).pack(anchor="w")
+    provider_status = tk.StringVar(value="No other provider connected yet.")
+
+    def save_cloud_provider():
+        try:
+            code = provider_names[provider_name.get()]
+            save_provider_key(code, provider_key.get(), free_plan.get())
+            provider_key.set("")
+            free_plan.set(False)
+            provider_status.set(f"{provider_name.get()} connected for faster tasks.")
+        except Exception as exc:
+            provider_status.set(str(exc))
+
+    def remove_cloud_provider():
+        code = provider_names[provider_name.get()]
+        disconnect_provider(code)
+        provider_status.set(f"{provider_name.get()} disconnected.")
+
+    provider_buttons = ttk.Frame(super_page)
+    provider_buttons.pack(anchor="w", pady=(5, 0))
+    ttk.Button(provider_buttons, text="Connect account", command=save_cloud_provider,
+               style="Accent.TButton").pack(side="left", padx=(0, 7))
+    ttk.Button(provider_buttons, text="Disconnect", command=remove_cloud_provider).pack(side="left")
+    ttk.Label(super_page, textvariable=provider_status, style="Muted.TLabel",
+              wraplength=720).pack(anchor="w", pady=(4, 13))
     ttk.Label(
         super_page, text="Or use your ChatGPT account", font=("Segoe UI", 18, "bold")
     ).pack(anchor="w")

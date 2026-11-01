@@ -15,6 +15,7 @@ from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cloud_ai as cloud
+import cloud_providers
 
 ANSWER = {
     "id": "test",
@@ -40,6 +41,100 @@ REQUEST = {
 
 
 class CloudTests(unittest.TestCase):
+    def test_provider_key_requires_free_plan_and_is_encrypted(self):
+        with self.assertRaisesRegex(ValueError, "free plan"):
+            cloud.save_provider_key("groq", "gsk_test_secret_value")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        self.assertEqual(cloud.credentials()["provider_keys"]["groq"], "gsk_test_secret_value")
+        self.assertNotIn(b"gsk_test_secret_value", (cloud.STATE / "credentials.dpapi").read_bytes())
+        cloud.disconnect_provider("groq")
+        self.assertNotIn("groq", cloud.credentials()["provider_keys"])
+
+    def test_connected_fast_provider_handles_balanced_task_before_local(self):
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        request = dict(REQUEST, messages=[{"role": "user", "content": "Build a working website"}])
+        with (patch.object(cloud, "task_size", return_value="balanced"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("usage_history.recent_local_speed", return_value=25),
+              patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as remote,
+              patch.object(cloud, "post") as local):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        remote.assert_called_once()
+        local.assert_not_called()
+
+    def test_offline_switch_keeps_connected_provider_local(self):
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (patch.object(cloud.pc_offline, "offline", return_value=True),
+              patch.object(cloud_providers, "complete") as remote,
+              patch.object(cloud, "post", return_value=ANSWER)):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        remote.assert_not_called()
+
+    def test_quick_work_stays_local_if_cloud_latency_would_dominate(self):
+        cloud.save_provider_key("google", "test_secret_value_123", True)
+        with (patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("usage_history.recent_local_speed", return_value=80),
+              patch.object(cloud_providers, "complete") as remote,
+              patch.object(cloud, "post", return_value=ANSWER)):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        remote.assert_not_called()
+
+    def test_provider_failure_falls_back_to_local(self):
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        request = dict(REQUEST, messages=[{"role": "user", "content": "Build a working website"}])
+        with (patch.object(cloud, "task_size", return_value="balanced"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("usage_history.recent_local_speed", return_value=25),
+              patch.object(cloud_providers, "complete", side_effect=OSError("unavailable")) as remote,
+              patch.object(cloud, "post", return_value=ANSWER) as local):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        remote.assert_called_once()
+        local.assert_called_once()
+
+    def test_provider_payload_cannot_forward_untrusted_model_or_paid_plugins(self):
+        request = dict(REQUEST, model="paid/model", models=["paid/model"],
+                       plugins=[{"id": "web"}], provider={"max_price": 100})
+        body = cloud_providers.request_body("groq", request)
+        self.assertEqual(body["model"], cloud_providers.PROVIDERS["groq"]["model"])
+        self.assertNotIn("plugins", body)
+        self.assertNotIn("models", body)
+        self.assertNotIn("provider", body)
+
+    def test_hugging_face_has_small_monthly_budget_and_short_output(self):
+        request = dict(REQUEST, max_tokens=8192)
+        body = cloud_providers.request_body("huggingface", request)
+        self.assertEqual(body["max_tokens"], 1024)
+        router = cloud.Router()
+        self.assertTrue(router.reserve_provider_request("huggingface"))
+        router.provider_last_attempts.clear()
+        self.assertTrue(router.reserve_provider_request("huggingface"))
+        router.provider_last_attempts.clear()
+        self.assertFalse(router.reserve_provider_request("huggingface"))
+
+    def test_provider_adapter_uses_fixed_endpoint_and_normalizes_cohere(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                pass
+
+            def read(self, *_):
+                return json.dumps({"id": "co-test", "model": "command-r-08-2024",
+                    "message": {"content": [{"type": "text", "text": "hello"}]},
+                    "usage": {"billed_units": {"input_tokens": 3,
+                                               "output_tokens": 1}}}).encode()
+
+        with patch.object(cloud_providers, "urlopen", return_value=Response()) as fetch:
+            result, elapsed = cloud_providers.complete("cohere", "private-test-key", REQUEST)
+        self.assertEqual(result["choices"][0]["message"]["content"], "hello")
+        self.assertEqual(result["usage"]["prompt_tokens"], 3)
+        self.assertEqual(fetch.call_args.args[0].full_url,
+                         "https://api.cohere.com/v2/chat")
+        self.assertEqual(fetch.call_args.args[0].get_header("Authorization"),
+                         "Bearer private-test-key")
+        self.assertGreaterEqual(elapsed, 0)
+
     def test_missing_required_tool_call_falls_back_to_next_local_model(self):
         request = dict(
             REQUEST,

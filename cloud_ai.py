@@ -1,7 +1,7 @@
 """Local loopback model router for Hermes task requests.
 
-Routing order is an explicitly enabled ChatGPT plan, local Ollama, then free
-OpenRouter. ChatGPT plan use shares the person's existing allowance; this
+Routing chooses an explicitly enabled ChatGPT plan, connected free-plan cloud,
+or local Ollama according to task size, speed, and availability. ChatGPT plan use shares the person's existing allowance; this
 module does not buy credits or expose account tokens to Hermes. Credentials
 are DPAPI encrypted and the loopback API has its own random bearer token.
 """
@@ -31,6 +31,7 @@ from jsonschema.exceptions import SchemaError
 from jsonschema.validators import validator_for
 
 import pc_offline
+import cloud_providers
 from auto_route import model_order, task_size
 from model_identity import configured_main_alias, configured_permissive_alias
 from model_library import CATALOG, candidate_approved, refresh_catalog
@@ -114,6 +115,31 @@ def save_openrouter_key(key):
     value["cloud_key"] = key
     save_credentials(value)
     record("connected", "OpenRouter key saved. Only zero-price routes are enabled.")
+
+
+def save_provider_key(provider, key, confirmed_free=False):
+    """Connect a person's own free-plan key; never package it with the app."""
+    if provider not in cloud_providers.PROVIDERS:
+        raise ValueError("Unknown provider")
+    if not confirmed_free:
+        raise ValueError("Confirm this account is on the provider's free plan first.")
+    if not isinstance(key, str) or not 12 <= len(key.strip()) <= 500:
+        raise ValueError("Paste a valid API key from your own account.")
+    data = credentials()
+    data.setdefault("provider_keys", {})[provider] = key.strip()
+    data.setdefault("free_confirmed", {})[provider] = True
+    save_credentials(data)
+    record("connected", f"{cloud_providers.PROVIDERS[provider]['name']} free-plan account connected.")
+
+
+def disconnect_provider(provider):
+    if provider not in cloud_providers.PROVIDERS:
+        raise ValueError("Unknown provider")
+    data = credentials()
+    data.setdefault("provider_keys", {}).pop(provider, None)
+    data.setdefault("free_confirmed", {}).pop(provider, None)
+    save_credentials(data)
+    record("local", f"{cloud_providers.PROVIDERS[provider]['name']} disconnected.")
 
 
 def record(backend, reason, model=""):
@@ -461,6 +487,42 @@ class Router:
         self.model_cache = {}
         self.model_contexts = {}
         self.model_cache_until = 0
+        self.provider_cooldowns = {}
+        self.provider_last_attempts = {}
+
+    def reserve_provider_request(self, provider):
+        """Keep a conservative daily and per-minute budget per connected account."""
+        spec = cloud_providers.PROVIDERS[provider]
+        with self.lock:
+            now = time.time()
+            if now < self.provider_cooldowns.get(provider, 0):
+                return False
+            if now - self.provider_last_attempts.get(provider, 0) < 60 / spec["rpm"]:
+                return False
+            today = time.strftime("%Y-%m-%d", time.gmtime())
+            path = STATE / "provider-quota.json"
+            try:
+                usage = json.loads(path.read_text())
+            except (OSError, ValueError):
+                usage = {}
+            if usage.get("day") != today:
+                usage = {"day": today, "attempts": {}, "monthly": usage.get("monthly", {})}
+            attempts = usage.setdefault("attempts", {})
+            if attempts.get(provider, 0) >= spec["daily"]:
+                return False
+            if spec.get("monthly"):
+                month = today[:7]
+                monthly = usage.setdefault("monthly", {})
+                if monthly.get("month") != month:
+                    monthly.clear()
+                    monthly.update(month=month, attempts={})
+                if monthly["attempts"].get(provider, 0) >= spec["monthly"]:
+                    return False
+                monthly["attempts"][provider] = monthly["attempts"].get(provider, 0) + 1
+            attempts[provider] = attempts.get(provider, 0) + 1
+            atomic(path, json.dumps(usage).encode())
+            self.provider_last_attempts[provider] = now
+            return True
 
     def local_candidates(self, size, required_context=65536):
         """Rank installed models that can hold this request, not the global maximum."""
@@ -591,6 +653,58 @@ class Router:
                 self.chatgpt_cooldown = time.time() + 120
                 reason = "ChatGPT plan unavailable; trying free cloud or local AI."
         required_context = estimated_context(payload)
+        openrouter_attempted = False
+        if key and size == "deep" and self.reserve_free_request():
+            openrouter_attempted = True
+            try:
+                result = valid_completion(post(
+                    API + "/chat/completions", cloud_payload(payload), key, timeout=120,
+                ), payload)
+                record("free cloud", "Free route accelerated demanding work.",
+                       result.get("model", "openrouter/free"))
+                return retry_derestricted(payload, result, result.get("model", ""))
+            except HTTPError as exc:
+                self.cooldown = time.time() + (3600 if exc.code in (401, 402, 403, 429) else 120)
+            except Exception:
+                self.cooldown = time.time() + 120
+        # Free-plan connections are optional. A fast connected provider gets
+        # the first shot when it can hold the whole request. Errors, quotas,
+        # and offline mode leave the local route intact.
+        if profile == "main" and not offline_mode:
+            account = credentials()
+            keys = account.get("provider_keys") or {}
+            confirmed = account.get("free_confirmed") or {}
+            import usage_history
+            local_speed = usage_history.recent_local_speed(
+                70 if size == "quick" else 35 if size == "balanced" else 15)
+            expected_output = min(8192, int(payload.get("max_tokens") or
+                                            payload.get("max_completion_tokens") or 4096))
+            prompt_estimate = max(1, len(json.dumps({
+                "messages": payload.get("messages", []),
+                "tools": payload.get("tools", []),
+            }, ensure_ascii=True).encode("utf-8")) // 3)
+            for provider, spec in sorted(cloud_providers.PROVIDERS.items(),
+                                         key=lambda pair: pair[1]["speed"], reverse=True):
+                provider_key = keys.get(provider)
+                provider_context = prompt_estimate + min(expected_output, spec.get("max_tokens", 8192)) + 1024
+                if (not provider_key or not confirmed.get(provider)
+                        or provider_context > spec["context"]
+                        or not cloud_providers.likely_faster(size, spec["speed"], local_speed)
+                        or not self.reserve_provider_request(provider)):
+                    continue
+                try:
+                    result, elapsed = cloud_providers.complete(provider, provider_key, payload)
+                    result = valid_completion(result, payload)
+                    import usage_history
+                    usage_history.record_completion(result, provider, elapsed)
+                    record(provider, "Connected free-plan cloud response received.",
+                           result.get("model", spec["model"]))
+                    return retry_derestricted(payload, result, result.get("model", ""))
+                except HTTPError as exc:
+                    self.provider_cooldowns[provider] = time.time() + (
+                        3600 if exc.code in (401, 402, 403, 429) else 120)
+                except Exception:
+                    self.provider_cooldowns[provider] = time.time() + 120
         selected = (
             self.local_candidates(size, required_context)
             if profile == "main"
@@ -630,7 +744,7 @@ class Router:
                 last_error = exc
         # Free cloud is a fallback after installed local models fail. It never
         # uses paid OpenRouter models and has a persisted daily request cap.
-        if key and self.reserve_free_request():
+        if key and not openrouter_attempted and self.reserve_free_request():
             try:
                 result = valid_completion(
                     post(
