@@ -447,6 +447,23 @@ async def make_music(
 
 
 @server.tool()
+async def cover_music(
+    source_path: str, prompt: str, output_path: str,
+    duration_seconds: int = 30,
+) -> dict:
+    """Create a local style cover of an existing WAV, MP3 or FLAC file with ACE-Step."""
+    import music_backend
+
+    return await asyncio.wait_for(
+        asyncio.to_thread(
+            music_backend.generate_music, prompt, output_path, "",
+            duration_seconds, False, source_path,
+        ),
+        timeout=7500,
+    )
+
+
+@server.tool()
 async def hear_audio(path: str) -> dict:
     """Transcribe a local audio or video file offline with Whisper. Returns timestamped text."""
     return await media_run("transcribe_audio", 900, path=path)

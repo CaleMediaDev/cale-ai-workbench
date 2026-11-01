@@ -115,9 +115,9 @@ def start_server() -> None:
 
 def generate_music(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
-    instrumental: bool = False,
+    instrumental: bool = False, source_path: str = "",
 ) -> dict:
-    """Generate a song or instrumental and save it to a new WAV/MP3 file."""
+    """Generate or cover music and save it to a new WAV/MP3/FLAC file."""
     if not prompt.strip():
         raise ValueError("Describe the music to create.")
     if not 10 <= duration_seconds <= 600:
@@ -127,12 +127,18 @@ def generate_music(
         raise ValueError("Music output must be a WAV, MP3 or FLAC file.")
     if target.exists():
         raise ValueError("Output already exists. Choose a new filename.")
+    source = Path(source_path).resolve() if source_path else None
+    if source and (not source.is_file() or source.suffix.lower() not in (".wav", ".mp3", ".flac")):
+        raise ValueError("The cover source must be an existing WAV, MP3 or FLAC file.")
     start_server()
-    submitted = _request("/release_task", {
+    request = {
         "prompt": prompt.strip(), "lyrics": "[Instrumental]" if instrumental else lyrics,
         "audio_format": target.suffix.lower()[1:], "audio_duration": duration_seconds,
         "thinking": False, "inference_steps": 8,
-    })
+    }
+    if source:
+        request.update({"task_type": "cover", "src_audio_path": str(source)})
+    submitted = _request("/release_task", request)
     task_id = submitted.get("data", {}).get("task_id")
     if submitted.get("code") != 200 or not task_id:
         raise RuntimeError(f"Music generation was not accepted: {submitted.get('error')}")
@@ -168,5 +174,9 @@ def generate_music(
             os.replace(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
-        return {"path": str(target), "model": "ACE-Step 1.5", "duration_seconds": duration_seconds}
+        return {
+            "path": str(target), "model": "ACE-Step 1.5",
+            "duration_seconds": duration_seconds,
+            "source_path": str(source) if source else None,
+        }
     raise TimeoutError("Music generation exceeded two hours.")

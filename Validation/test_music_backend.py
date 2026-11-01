@@ -50,3 +50,23 @@ def test_rejects_remote_audio_url(tmp_path):
     ), patch.object(music_backend.time, "sleep"):
         with pytest.raises(RuntimeError, match="unexpected audio URL"):
             music_backend.generate_music("jazz", str(tmp_path / "song.mp3"))
+
+
+def test_cover_uses_local_source_path(tmp_path):
+    source = tmp_path / "original.wav"
+    source.write_bytes(b"source audio")
+    responses = iter([
+        {"code": 200, "data": {"task_id": "task-2"}},
+        {"code": 200, "data": [{"status": 1, "result": '[{"file":"/v1/audio?path=cover"}]'}]},
+    ])
+    with patch.object(music_backend, "start_server"), patch.object(
+        music_backend, "_request", side_effect=lambda *_args, **_kwargs: next(responses)
+    ) as request, patch.object(
+        music_backend, "urlopen", return_value=io.BytesIO(b"cover audio")
+    ), patch.object(music_backend.time, "sleep"):
+        result = music_backend.generate_music(
+            "jazzy cover", str(tmp_path / "cover.mp3"), source_path=str(source)
+        )
+    assert result["source_path"] == str(source)
+    assert request.call_args_list[0].args[1]["task_type"] == "cover"
+    assert request.call_args_list[0].args[1]["src_audio_path"] == str(source)
