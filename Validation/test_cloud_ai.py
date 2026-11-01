@@ -7,6 +7,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -227,6 +228,28 @@ class CloudTests(unittest.TestCase):
         self.assertTrue(router.reserve_provider_request("huggingface"))
         router.provider_last_attempts.clear()
         self.assertFalse(router.reserve_provider_request("huggingface"))
+
+    def test_provider_availability_check_does_not_spend_a_free_request(self):
+        router = cloud.Router()
+        quota = cloud.STATE / "provider-quota.json"
+        self.assertTrue(router.provider_request_available("groq"))
+        self.assertFalse(quota.exists())
+        self.assertTrue(router.reserve_provider_request("groq"))
+        saved = quota.read_bytes()
+        router.provider_last_attempts.clear()
+        self.assertTrue(router.provider_request_available("groq"))
+        self.assertEqual(quota.read_bytes(), saved)
+
+    def test_openrouter_availability_check_preserves_daily_allowance(self):
+        router = cloud.Router()
+        quota = cloud.STATE / "quota.json"
+        self.assertTrue(router.free_request_available())
+        self.assertFalse(quota.exists())
+        self.assertTrue(router.reserve_free_request())
+        saved = quota.read_bytes()
+        router.last_attempt = 0
+        self.assertTrue(router.free_request_available())
+        self.assertEqual(quota.read_bytes(), saved)
 
     def test_provider_adapter_uses_fixed_endpoint_and_normalizes_cohere(self):
         class Response:
@@ -715,6 +738,56 @@ class CloudTests(unittest.TestCase):
             self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
         local.assert_called_once()
         paid.assert_not_called()
+
+    def test_floor_it_ignores_exhausted_free_account_in_speed_ranking(self):
+        cloud.routing_mode.save(cloud.STATE, "floor_it")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        (cloud.STATE / "provider-quota.json").write_text(json.dumps({
+            "day": time.strftime("%Y-%m-%d", time.gmtime()),
+            "attempts": {"groq": cloud_providers.PROVIDERS["groq"]["daily"]},
+        }))
+        router = cloud.Router()
+        with (
+            patch.object(cloud, "task_size", return_value="deep"),
+            patch("usage_history.recent_local_speed", return_value=10),
+            patch("usage_history.recent_provider_speed",
+                  side_effect=lambda name, default: {"groq": 900, "chatgpt": 200}.get(name, default)),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
+            patch.object(cloud_providers, "complete") as free,
+            patch.object(router, "reserve_provider_request",
+                  wraps=router.reserve_provider_request) as reserve,
+        ):
+            self.assertEqual(router.complete(REQUEST), ANSWER)
+        paid.assert_called_once()
+        free.assert_not_called()
+        reserve.assert_not_called()
+
+    def test_floor_it_ignores_exhausted_openrouter_in_speed_ranking(self):
+        cloud.routing_mode.save(cloud.STATE, "floor_it")
+        account = cloud.credentials()
+        account["cloud_key"] = "sk-or-test-secret"
+        cloud.save_credentials(account)
+        (cloud.STATE / "quota.json").write_text(json.dumps({
+            "day": time.strftime("%Y-%m-%d", time.gmtime()),
+            "attempts": 50,
+        }))
+        router = cloud.Router()
+        with (
+            patch.object(cloud, "task_size", return_value="deep"),
+            patch("usage_history.recent_local_speed", return_value=10),
+            patch("usage_history.recent_provider_speed",
+                  side_effect=lambda name, default: {
+                      "openrouter": 900, "chatgpt": 200,
+                  }.get(name, default)),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
+            patch.object(router, "reserve_free_request",
+                  wraps=router.reserve_free_request) as reserve,
+        ):
+            self.assertEqual(router.complete(REQUEST), ANSWER)
+        paid.assert_called_once()
+        reserve.assert_not_called()
 
     def test_paid_quota_error_is_learned_and_falls_back_to_free(self):
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)

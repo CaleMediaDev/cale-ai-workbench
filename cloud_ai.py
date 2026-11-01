@@ -551,6 +551,13 @@ class Router:
 
     def reserve_provider_request(self, provider, estimated_cost=0, estimated_tokens=0):
         """Keep a conservative daily and per-minute budget per connected account."""
+        return self.provider_request_available(
+            provider, estimated_cost, estimated_tokens, reserve=True
+        )
+
+    def provider_request_available(self, provider, estimated_cost=0,
+                                   estimated_tokens=0, reserve=False):
+        """Check account limits without spending them during route ranking."""
         spec = cloud_providers.PROVIDERS[provider]
         with self.lock:
             now = time.time()
@@ -568,20 +575,25 @@ class Router:
                 usage = {"day": today, "attempts": {}, "monthly": usage.get("monthly", {})}
             attempts = usage.setdefault("attempts", {})
             if attempts.get(provider, 0) >= spec["daily"]:
-                routing_memory.record_budget_limit(provider)
+                if reserve:
+                    routing_memory.record_budget_limit(provider)
                 return False
             if spec.get("daily_neurons"):
                 spent = usage.setdefault("neurons", {}).get(provider, 0)
                 if estimated_cost <= 0 or spent + estimated_cost > spec["daily_neurons"]:
-                    routing_memory.record_budget_limit(provider)
+                    if reserve:
+                        routing_memory.record_budget_limit(provider)
                     return False
-                usage["neurons"][provider] = spent + estimated_cost
+                if reserve:
+                    usage["neurons"][provider] = spent + estimated_cost
             if spec.get("daily_tokens"):
                 spent = usage.setdefault("tokens", {}).get(provider, 0)
                 if estimated_tokens <= 0 or spent + estimated_tokens > spec["daily_tokens"]:
-                    routing_memory.record_budget_limit(provider)
+                    if reserve:
+                        routing_memory.record_budget_limit(provider)
                     return False
-                usage["tokens"][provider] = spent + estimated_tokens
+                if reserve:
+                    usage["tokens"][provider] = spent + estimated_tokens
             if spec.get("monthly"):
                 month = today[:7]
                 monthly = usage.setdefault("monthly", {})
@@ -589,12 +601,15 @@ class Router:
                     monthly.clear()
                     monthly.update(month=month, attempts={})
                 if monthly["attempts"].get(provider, 0) >= spec["monthly"]:
-                    routing_memory.record_budget_limit(provider)
+                    if reserve:
+                        routing_memory.record_budget_limit(provider)
                     return False
-                monthly["attempts"][provider] = monthly["attempts"].get(provider, 0) + 1
-            attempts[provider] = attempts.get(provider, 0) + 1
-            atomic(path, json.dumps(usage).encode())
-            self.provider_last_attempts[provider] = now
+                if reserve:
+                    monthly["attempts"][provider] = monthly["attempts"].get(provider, 0) + 1
+            if reserve:
+                attempts[provider] = attempts.get(provider, 0) + 1
+                atomic(path, json.dumps(usage).encode())
+                self.provider_last_attempts[provider] = now
             return True
 
     def local_candidates(self, size, required_context=65536):
@@ -681,6 +696,10 @@ class Router:
         ]
 
     def reserve_free_request(self):
+        return self.free_request_available(reserve=True)
+
+    def free_request_available(self, reserve=False):
+        """Check OpenRouter's shared cap without consuming it for ranking."""
         with self.lock:
             now = time.time()
             if now < self.cooldown or now - self.last_attempt < 3.1:
@@ -692,13 +711,15 @@ class Router:
                 usage = {}
             count = usage.get("attempts", 0) if usage.get("day") == today else 0
             if count >= 50:
-                routing_memory.record_budget_limit("openrouter")
+                if reserve:
+                    routing_memory.record_budget_limit("openrouter")
                 return False
-            atomic(
-                STATE / "quota.json",
-                json.dumps({"day": today, "attempts": count + 1}).encode(),
-            )
-            self.last_attempt = now
+            if reserve:
+                atomic(
+                    STATE / "quota.json",
+                    json.dumps({"day": today, "attempts": count + 1}).encode(),
+                )
+                self.last_attempt = now
             return True
 
     def complete(self, payload, task_id=""):
@@ -756,14 +777,18 @@ class Router:
         )
         openrouter_speed = (
             usage_history.recent_provider_speed("openrouter", 120)
-            if key and time.time() >= self.cooldown else 0
+            if key and self.free_request_available() else 0
         )
         eligible_free_speeds = [
             measured_speeds[provider] for provider, spec in connected
             if (prompt_estimate + min(expected_output, spec.get("max_tokens", 8192)) + 1024
                 <= spec["context"]
                 and time.time() >= self.provider_cooldowns.get(provider, 0)
-                and time.time() - routing_memory.pressure(provider)["last_limit"] >= 3600)
+                and time.time() - routing_memory.pressure(provider)["last_limit"] >= 3600
+                and self.provider_request_available(
+                    provider,
+                    cloud_providers.estimated_neurons(provider, payload),
+                    cloud_providers.estimated_tokens(provider, payload)))
         ]
         fastest_free_speed = max([openrouter_speed, *eligible_free_speeds], default=0)
         paid_attempted = False
