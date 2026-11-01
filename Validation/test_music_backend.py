@@ -2,10 +2,15 @@
 
 import io
 import json
+import math
 import os
+import struct
+import subprocess
+import wave
 from contextlib import nullcontext
 from unittest.mock import patch
 
+import imageio_ffmpeg
 import pytest
 
 import music_backend
@@ -202,20 +207,29 @@ def test_stop_music_job_marks_only_the_selected_job_and_skips_later_worker(tmp_p
         assert music_backend.music_job_status(other)["status"] == "queued"
 
 
-def test_audio_validation_requires_a_decodable_frame(tmp_path):
-    python = tmp_path / "Media" / "python" / "Scripts" / "python.exe"
-    python.parent.mkdir(parents=True)
-    python.write_bytes(b"launcher")
-    audio = tmp_path / "song.mp3"
-    audio.write_bytes(b"A" * 8192)
-    with patch.object(music_backend, "ROOT", tmp_path), patch.object(
-        music_backend.subprocess, "run", return_value=type("Done", (), {"returncode": 0})()
-    ) as run:
-        assert music_backend.audio_file_ok(audio)
-        assert "container.decode" in run.call_args.args[0][2]
-    audio.write_bytes(b"bad")
-    with patch.object(music_backend, "ROOT", tmp_path):
-        assert not music_backend.audio_file_ok(audio)
+def test_audio_validation_decodes_song_and_rejects_silence_or_damage(tmp_path):
+    audio = tmp_path / "song.wav"
+    with wave.open(str(audio), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16000)
+        output.writeframes(b"".join(
+            struct.pack("<h", round(5000 * math.sin(2 * math.pi * 440 * n / 16000)))
+            for n in range(16000)
+        ))
+    assert music_backend.audio_file_ok(audio)
+    mp3 = tmp_path / "song.mp3"
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(audio), str(mp3)],
+                   capture_output=True, check=True)
+    assert music_backend.audio_file_ok(mp3)
+    with wave.open(str(audio), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16000)
+        output.writeframes(b"\0\0" * 16000)
+    assert not music_backend.audio_file_ok(audio)
+    audio.write_bytes(b"bad" * 4096)
+    assert not music_backend.audio_file_ok(audio)
 
 
 def test_paused_music_job_resumes_same_server_task(tmp_path):

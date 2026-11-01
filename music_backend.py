@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -415,23 +416,23 @@ def resume_music_job(job_id: str) -> dict:
 
 
 def audio_file_ok(path: str | Path) -> bool:
-    """Confirm a rendered file has a decodable audio frame, not just bytes."""
+    """Decode the whole recording and reject files with no audible signal."""
+    import imageio_ffmpeg
+
     source = Path(path)
-    python = ROOT / "Media" / "python" / "Scripts" / "python.exe"
-    if not source.is_file() or source.stat().st_size < 4096 or not python.is_file():
+    if not source.is_file() or source.stat().st_size == 0:
         return False
-    check = (
-        "import av,sys; container=av.open(sys.argv[1]); "
-        "stream=next((s for s in container.streams if s.type=='audio'),None); "
-        "assert stream is not None; "
-        "assert next(container.decode(stream),None) is not None"
-    )
     try:
         result = subprocess.run(
-            [str(python), "-c", check, str(source)], capture_output=True,
-            timeout=30, creationflags=HIDE,
+            [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-xerror",
+             "-i", str(source), "-map", "0:a:0", "-af", "volumedetect",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=90, creationflags=HIDE,
         )
-        return result.returncode == 0
+        if result.returncode:
+            return False
+        volume = re.search(r"max_volume:\s*(-?(?:inf|\d+(?:\.\d+)?))\s+dB", result.stderr)
+        return bool(volume and float(volume.group(1)) >= -60)
     except (OSError, subprocess.TimeoutExpired):
         return False
 
