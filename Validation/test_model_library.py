@@ -1,5 +1,6 @@
 """Check automatic model selection without downloading any model weights."""
 
+import io
 import json
 import sys
 import tempfile
@@ -44,6 +45,155 @@ class AutoModelTests(unittest.TestCase):
             }},
         }
         self.assertNotIn("permissive_small", library.validated_recommendations(document))
+
+    def test_recommendation_cannot_reuse_a_working_alias(self):
+        document = {
+            "schema": 1,
+            "models": {
+                "first_new": {
+                    "label": "New model", "alias": "cale-qwen35",
+                    "source": "qwen3.6:35b", "origin": "https://ollama.com/library/qwen3.6",
+                    "license": "Apache-2.0", "download_gb": 23, "ram_gb": 48,
+                    "context": 65536, "auto": True,
+                },
+                "second_new": {
+                    "label": "Another model", "alias": "cale-shared-new",
+                    "source": "qwen3.6:35b", "origin": "https://ollama.com/library/qwen3.6",
+                    "license": "Apache-2.0", "download_gb": 23, "ram_gb": 48,
+                    "context": 65536, "auto": True,
+                },
+                "third_new": {
+                    "label": "Duplicate alias", "alias": "cale-shared-new",
+                    "source": "qwen3.5:35b", "origin": "https://ollama.com/library/qwen3.5",
+                    "license": "Apache-2.0", "download_gb": 22, "ram_gb": 48,
+                    "context": 65536, "auto": True,
+                },
+            },
+        }
+        accepted = library.validated_recommendations(document)
+        self.assertEqual(list(accepted), ["second_new"])
+
+    def test_existing_feed_profile_can_refresh_metadata_without_restarting(self):
+        old = {"alias": "cale-feed-model", "source": "qwen3.5:35b"}
+        document = {"schema": 1, "models": {"feed_model": {
+            "label": "Updated description", "alias": "cale-feed-model",
+            "source": "qwen3.5:35b", "origin": "https://ollama.com/library/qwen3.5",
+            "license": "Apache-2.0", "download_gb": 22, "ram_gb": 48,
+            "context": 65536, "auto": True,
+        }}}
+        with patch.object(library, "CATALOG", {"main": {"alias": "base"}, "feed_model": old}):
+            accepted = library.validated_recommendations(document)
+            library.apply_recommendations(accepted)
+            self.assertEqual(library.CATALOG["feed_model"]["label"], "Updated description")
+            self.assertEqual(library.CATALOG["main"]["alias"], "base")
+
+    def test_new_weights_cannot_replace_an_approved_profile_in_place(self):
+        old = {"alias": "cale-feed-model", "source": "qwen3.5:35b"}
+        document = {"schema": 1, "models": {"feed_model": {
+            "label": "Newer weights", "alias": "cale-feed-model",
+            "source": "qwen3.6:35b", "origin": "https://ollama.com/library/qwen3.6",
+            "license": "Apache-2.0", "download_gb": 23, "ram_gb": 48,
+            "context": 65536, "auto": True,
+        }}}
+        with patch.object(library, "CATALOG", {"main": {"alias": "base"}, "feed_model": old}):
+            with self.assertRaisesRegex(ValueError, "changed incompatibly"):
+                library.validated_recommendations(document)
+            self.assertEqual(library.CATALOG["feed_model"]["source"], "qwen3.5:35b")
+
+    def test_explicitly_empty_feed_retires_old_recommendations(self):
+        document = {"schema": 1, "models": {}}
+        catalog = {
+            "main": {"alias": "base"},
+            "feed_model": {"alias": "cale-feed-model", "source": "qwen3.5:35b"},
+        }
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(library, "ROOT", Path(folder)),
+            patch.object(library, "CATALOG", catalog),
+            patch.object(library, "urlopen", return_value=io.BytesIO(json.dumps(document).encode())),
+        ):
+            self.assertEqual(library.refresh_catalog(), {})
+            self.assertNotIn("feed_model", catalog)
+            self.assertIn("main", catalog)
+
+    def test_bad_feed_update_keeps_last_cached_working_profile(self):
+        old_model = {"alias": "cale-feed-model", "source": "qwen3.5:35b"}
+        old_feed = {"schema": 1, "models": {"feed_model": {
+            "label": "Working", "alias": "cale-feed-model",
+            "source": "qwen3.5:35b", "origin": "https://ollama.com/library/qwen3.5",
+            "license": "Apache-2.0", "download_gb": 22, "ram_gb": 48,
+            "context": 65536, "auto": True,
+        }}}
+        bad_feed = json.loads(json.dumps(old_feed))
+        bad_feed["models"]["feed_model"]["source"] = "qwen3.6:35b"
+        bad_feed["models"]["feed_model"]["origin"] = "https://ollama.com/library/qwen3.6"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cache = root / "LongTasks/model-recommendations.json"
+            cache.parent.mkdir()
+            cache.write_text(json.dumps(old_feed))
+            catalog = {"main": {"alias": "base"}, "feed_model": old_model}
+            with (
+                patch.object(library, "ROOT", root),
+                patch.object(library, "CATALOG", catalog),
+                patch.object(library, "urlopen", return_value=io.BytesIO(json.dumps(bad_feed).encode())),
+            ):
+                library.refresh_catalog()
+            self.assertEqual(catalog["feed_model"]["source"], "qwen3.5:35b")
+            self.assertEqual(json.loads(cache.read_text()), old_feed)
+
+    def test_failed_source_probe_preserves_existing_alias(self):
+        model = {
+            "label": "New", "alias": "cale-existing", "source": "qwen3.6:35b",
+            "download_gb": 23, "ram_gb": 24, "context": 65536,
+            "candidate": True, "tool_reasoning_effort": "none",
+        }
+        with (
+            patch.object(library, "CATALOG", {"new": model}),
+            patch.object(library, "total_ram_gb", return_value=64),
+            patch.object(library, "urlopen", return_value=io.BytesIO(b'{"status":"success"}\n')),
+            patch.object(library, "post", return_value={"capabilities": ["tools"]}) as post,
+            patch.object(library, "probe_tool_use", side_effect=RuntimeError("bad tool call")) as probe,
+            patch.object(library, "approve_candidate") as approve,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "bad tool call"):
+                library.install("new", lambda _message: None)
+        probe.assert_called_once_with("qwen3.6:35b", "none")
+        self.assertEqual(post.call_args.args[0], "/api/show")
+        self.assertEqual(post.call_args.args[1], {"model": "qwen3.6:35b"})
+        approve.assert_not_called()
+
+    def test_successful_candidate_probes_source_before_alias_creation(self):
+        model = {
+            "label": "New", "alias": "cale-new-model", "source": "qwen3.6:35b",
+            "download_gb": 23, "ram_gb": 24, "context": 65536,
+            "candidate": True,
+        }
+        calls = []
+
+        def fake_post(path, payload, **_kwargs):
+            calls.append((path, payload["model"]))
+            return {"capabilities": ["tools"]}
+
+        def fake_probe(model_name, _reasoning):
+            calls.append(("probe", model_name))
+
+        with (
+            patch.object(library, "CATALOG", {"new": model}),
+            patch.object(library, "total_ram_gb", return_value=64),
+            patch.object(library, "urlopen", return_value=io.BytesIO(b'{"status":"success"}\n')),
+            patch.object(library, "post", side_effect=fake_post),
+            patch.object(library, "probe_tool_use", side_effect=fake_probe),
+            patch.object(library, "approve_candidate") as approve,
+        ):
+            self.assertEqual(library.install("new", lambda _message: None), "cale-new-model")
+        self.assertEqual(calls, [
+            ("/api/show", "qwen3.6:35b"),
+            ("probe", "qwen3.6:35b"),
+            ("/api/create", "cale-new-model"),
+            ("/api/show", "cale-new-model"),
+        ])
+        approve.assert_called_once_with(model)
 
     def test_thinking_model_probe_reaches_the_tool_call(self):
         response = {

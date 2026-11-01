@@ -115,6 +115,15 @@ CATALOG = {
         "auto": False,
     },
 }
+BUILTIN_PROFILES = frozenset(CATALOG)
+
+
+def apply_recommendations(accepted):
+    """Replace only feed-owned profiles; bundled choices remain untouched."""
+    for profile in tuple(CATALOG):
+        if profile not in BUILTIN_PROFILES and profile not in accepted:
+            del CATALOG[profile]
+    CATALOG.update(accepted)
 
 
 def validated_recommendations(document):
@@ -125,16 +134,20 @@ def validated_recommendations(document):
     if not isinstance(entries, dict) or len(entries) > 12:
         raise ValueError("Model recommendation count is invalid.")
     accepted = {}
+    known_aliases = {item["alias"]: profile for profile, item in CATALOG.items()}
     for profile, item in entries.items():
         if not re.fullmatch(r"[a-z][a-z0-9_]{2,24}", profile) or (
-            profile in CATALOG
+            profile in BUILTIN_PROFILES
         ):
             continue
         if not isinstance(item, dict):
+            if profile in CATALOG and profile not in BUILTIN_PROFILES:
+                raise ValueError("An existing model recommendation is invalid.")
             continue
         alias = item.get("alias", "")
         source = item.get("source", "")
         origin = item.get("origin", "")
+        previous = CATALOG.get(profile)
         if not (
             re.fullmatch(r"cale-[a-z0-9-]{3,40}", alias)
             and re.fullmatch(
@@ -143,15 +156,26 @@ def validated_recommendations(document):
             and origin == "https://ollama.com/library/" + source.split(":", 1)[0]
             and item.get("license")
             and item.get("auto") is True
+            and known_aliases.get(alias, profile) == profile
+            # Replacing weights under a live profile would revoke its old
+            # approval before the replacement passes. Publish a new profile
+            # and alias for a new model instead.
+            and (previous is None or previous.get("source") == source)
         ):
+            if previous is not None and profile not in BUILTIN_PROFILES:
+                raise ValueError("An existing model recommendation changed incompatibly.")
             continue
         try:
             size = int(item["download_gb"])
             ram = int(item["ram_gb"])
             context = int(item["context"])
         except (KeyError, TypeError, ValueError):
+            if previous is not None and profile not in BUILTIN_PROFILES:
+                raise ValueError("An existing model recommendation has invalid sizing.") from None
             continue
         if not (1 <= size <= 80 and 16 <= ram <= 256 and 64000 <= context <= 65536):
+            if previous is not None and profile not in BUILTIN_PROFILES:
+                raise ValueError("An existing model recommendation has invalid sizing.")
             continue
         accepted[profile] = {
             "label": str(item.get("label", profile))[:80],
@@ -168,6 +192,7 @@ def validated_recommendations(document):
             if item.get("tool_reasoning_effort") in ("none", "low", "medium", "high")
             else None,
         }
+        known_aliases[alias] = profile
     return accepted
 
 
@@ -261,12 +286,12 @@ def refresh_catalog(online=True):
                 raw = response.read(256_000)
             document = json.loads(raw)
             accepted = validated_recommendations(document)
-            if accepted:
+            if accepted or not document.get("models"):
                 cache.parent.mkdir(parents=True, exist_ok=True)
                 temporary = cache.with_suffix(f".{os.getpid()}.tmp")
                 temporary.write_bytes(raw)
                 os.replace(temporary, cache)
-                CATALOG.update(accepted)
+                apply_recommendations(accepted)
                 return accepted
         except (OSError, ValueError, json.JSONDecodeError):
             pass
@@ -275,7 +300,7 @@ def refresh_catalog(online=True):
             accepted = validated_recommendations(
                 json.loads(path.read_text(encoding="utf-8"))
             )
-            CATALOG.update(accepted)
+            apply_recommendations(accepted)
             return accepted
         except (OSError, ValueError, json.JSONDecodeError):
             continue
@@ -389,6 +414,16 @@ def install(profile, progress=print):
                     else data.get("status", "Working")
                 )
                 last = time.monotonic()
+    # Probe pulled weights before touching an alias that may already serve
+    # work. Failed candidates remain in the store but cannot replace it.
+    source_info = post("/api/show", {"model": item["source"]})
+    if (source_info.get("remote_host") or source_info.get("remote_model")
+            or "tools" not in source_info.get("capabilities", [])):
+        raise RuntimeError(
+            "Weights downloaded, but the source is not a local tool-capable model. The existing alias was kept."
+        )
+    if item.get("candidate"):
+        probe_tool_use(item["source"], item.get("tool_reasoning_effort"))
     result = post(
         "/api/create",
         {
@@ -411,7 +446,6 @@ def install(profile, progress=print):
             "Weights installed, but Ollama did not advertise tool support. This model is not ready for agent tasks."
         )
     if item.get("candidate"):
-        probe_tool_use(item["alias"], item.get("tool_reasoning_effort"))
         approve_candidate(item)
     progress(
         "Installed. Tool capability is advertised; reliability still needs task-specific testing."
