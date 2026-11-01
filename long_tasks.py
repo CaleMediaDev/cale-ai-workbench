@@ -367,6 +367,10 @@ def task_progress(p):
             state,
             "Reviewing the work" if p["phase"] == "review" else "Planning and building",
         )
+    if state == "waiting_for_setup":
+        setup = read_task_status(STATE / "install-progress.json")
+        if setup.get("status") == "failed":
+            step = "AI setup needs attention: " + str(setup.get("current", "Unknown error"))
     return percent, step[:180]
 
 
@@ -3916,7 +3920,9 @@ def gui():
                 setup_card,
                 setup.get("percent", 0),
                 "Current step: " + str(setup.get("current", "Preparing")),
-                "Ready" if setup.get("status") == "complete" else "Setting up",
+                "Ready" if setup.get("status") == "complete" else (
+                    "Needs attention" if setup.get("status") == "failed" else "Setting up"
+                ),
             )
         elif setup_card is not None:
             setup_card["panel"].destroy()

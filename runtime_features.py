@@ -91,6 +91,15 @@ def install() -> None:
 def start_background() -> bool:
     """Keep the desktop responsive while dependencies install or repair."""
     if ready():
+        # A previous installer can leave a failed progress file after another
+        # process has already installed and verified every required tool.
+        # Tasks must not wait indefinitely on that stale status.
+        try:
+            previous = json.loads(PROGRESS.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = {}
+        if previous.get("status") == "failed":
+            progress(100, "Your local tools are ready", "complete")
         return False
     current = {}
     try:

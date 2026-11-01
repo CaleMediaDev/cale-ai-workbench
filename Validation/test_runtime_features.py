@@ -30,3 +30,12 @@ def test_background_update_is_not_started_twice(tmp_path, monkeypatch):
     assert json.loads(progress.read_text(encoding="utf-8"))["status"] == "working"
     assert not runtime_features.start_background()
     assert len(launches) == 1
+
+
+def test_verified_tools_clear_stale_failed_setup(tmp_path, monkeypatch):
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({"status": "failed", "current": "pip missing"}), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ready", lambda: True)
+    assert not runtime_features.start_background()
+    assert json.loads(progress.read_text(encoding="utf-8"))["status"] == "complete"
