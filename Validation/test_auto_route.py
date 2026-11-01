@@ -137,6 +137,24 @@ class AutoRouteTests(unittest.TestCase):
         })
         self.assertEqual(task_size(messages), "balanced")
 
+    def test_large_followup_escalates_small_persistent_project(self):
+        prompt = project_prompt(
+            {"title": "Help", "folder": "C:/Tasks/help", "brief": "How do I create a folder?"},
+            "\nRecent user follow-ups (read the full file):\n"
+            "Request 8: Build a production-ready multi-page file manager app.\n"
+            "Previous supervisor result:\nWaiting",
+        )
+        self.assertEqual(task_size([{"role": "user", "content": prompt}]), "deep")
+
+    def test_new_direct_user_instruction_escalates_saved_project(self):
+        prompt = project_prompt({
+            "title": "Help", "folder": "C:/Tasks/help", "brief": "How do I create a folder?",
+        })
+        self.assertEqual(task_size([
+            {"role": "user", "content": prompt},
+            {"role": "user", "content": "Build a production-ready multi-page file manager app."},
+        ]), "deep")
+
     def test_short_tool_work_stays_on_middle_model_without_project_marker(self):
         messages = [{"role": "user", "content": "Analyze the attached data."}]
         for _ in range(4):

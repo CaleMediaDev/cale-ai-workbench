@@ -21,6 +21,11 @@ PROJECT_REQUEST = re.compile(
     r"REQUEST AND ACCEPTANCE CRITERIA:\s*\n(.*?)\n(?:END OF ORIGINAL REQUEST|\s*This is a persistent local project\.)",
     re.IGNORECASE | re.DOTALL,
 )
+RECENT_FOLLOWUPS = re.compile(
+    r"Recent user follow-ups \(read the full file\):\s*\n"
+    r"(.*?)(?=\n(?:Relevant local memory|Previous supervisor result):|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
 QUESTION_START = re.compile(
     r"^(what|why|how|when|where|who|which|is|are|does|do|tell me|explain)\b",
     re.IGNORECASE,
@@ -102,7 +107,17 @@ def task_size(messages):
     ]
     request = "\n".join(users)[-16000:]
     project = PROJECT_REQUEST.search(request)
-    intent = project.group(1).strip() if project else request
+    if project:
+        original = project.group(1).strip()
+        # The latest saved user follow-ups can turn a small original task into
+        # substantial new work. They are part of the worker prompt but live
+        # after END OF ORIGINAL REQUEST, outside PROJECT_REQUEST's capture.
+        followups = RECENT_FOLLOWUPS.search(request)
+        intent = original + ("\n" + followups.group(1).strip() if followups else "")
+        if len(users) > 1:
+            intent += "\n" + users[-1].strip()
+    else:
+        intent = request
     tool_calls = sum(
         len(msg.get("tool_calls") or [])
         for msg in messages
