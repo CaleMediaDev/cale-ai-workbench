@@ -1286,6 +1286,14 @@ def handle_handoff(p, task, snapshot=None):
         p = next(x for x in projects() if x["id"] == p["id"])
         create_card(p, note)
         return
+    # A verified milestone is a safe point to refresh the project's local
+    # code/document index. The next worker can recall changed files even when
+    # the previous worker forgot to request an explicit memory scan.
+    try:
+        project_memory.index(p["folder"], include_code=True)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
+            log.write(time.ctime() + f"\nProject memory refresh {p['id']}: {exc}\n")
     if p["phase"] == "build":
         # Fresh worker/context reviews the finished work against the original request.
         # Archive the implementation card after its worker has handed off. The

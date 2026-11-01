@@ -710,8 +710,14 @@ class LongTaskTests(unittest.TestCase):
     def test_review_requires_fresh_passing_checks(self):
         self.verify_script('Write-Output "assertions passed"; exit 0')
         task_module.update(self.pid, phase="review", card="test")
+        (self.base / "project/code.py").write_text(
+            "def beach_invoice_total(): return 42", encoding="utf-8"
+        )
         task_module.handle_handoff(self.item(), {"id": "test", "status": "review"})
         self.assertEqual(self.item()["status"], "ready_for_review")
+        self.assertTrue(task_module.project_memory.search(
+            self.base / "project", "beach_invoice_total", kind="file"
+        ))
         (self.base / "project/code.py").write_text("changed", encoding="utf-8")
         with patch.object(task_module, "board"):
             task_module.tick()
