@@ -2484,16 +2484,21 @@ def gui():
         if voice_busy.is_set() or voice_speaking.is_set():
             return
         voice_busy.set()
-        voice_events.put(("state", "Listening… speak now."))
+        if not repeat:
+            voice_events.put(("state", "Listening… speak now."))
 
         def worker():
             try:
-                phrase = voice_assistant.listen(8)
+                heard = voice_assistant.listen_result(8)
+                phrase = heard["text"]
                 if phrase:
                     voice_events.put(("heard_handsfree" if repeat else "heard", phrase))
+                elif heard["quiet"]:
+                    device = heard["input_device"] or "the selected microphone"
+                    voice_events.put(("mic_quiet", f"{device} captured almost no sound. Check its mute and Windows input level."))
                 elif not repeat:
                     voice_events.put(
-                        ("state", "I didn't hear anything. Try Talk again.")
+                        ("state", "The mic heard sound, but I couldn't make out words. Try again.")
                     )
                 else:
                     voice_events.put(("state", "Mic on. Waiting for Hey Cale."))
@@ -3766,6 +3771,8 @@ def gui():
                 elif event == "mic_error":
                     voice_label.set("Microphone unavailable: " + value[:140])
                     mic_button.configure(text="🎤  Mic Off")
+                elif event == "mic_quiet":
+                    voice_label.set("Mic on, but " + value[:140])
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
                 elif event in ("speaking", "spoken"):

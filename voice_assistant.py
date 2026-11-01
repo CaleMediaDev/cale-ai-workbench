@@ -334,8 +334,18 @@ def media_call(action, **arguments):
 
 def listen(seconds=8):
     """Record a short local clip, then transcribe it offline."""
+    return listen_result(seconds)["text"]
+
+
+def listen_result(seconds=8):
+    """Return local transcript plus input level for clear mic diagnostics."""
     answer = media_call("record_audio", seconds=seconds)
-    return answer.get("text", "").strip()
+    return {
+        "text": str(answer.get("text", "")).strip(),
+        "quiet": bool(answer.get("quiet", False)),
+        "input_device": str(answer.get("input_device", "")),
+        "input_peak": float(answer.get("input_peak", 0.0)),
+    }
 
 
 def say(message, rate=0):

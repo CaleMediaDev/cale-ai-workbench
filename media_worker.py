@@ -416,10 +416,19 @@ def record_audio(seconds=10):
         seconds * rate, samplerate=rate, channels=1, dtype="float32", device=chosen
     )
     sd.wait()
+    peak = float(abs(audio).max())
+    microphone = str(devices[chosen]["name"])
+    if peak < 0.003:
+        # Muted or disconnected inputs otherwise look exactly like a missed
+        # wake phrase. Skip Whisper and tell the UI what the device captured.
+        return {"text": "", "segments": [], "language": "",
+                "input_device": microphone, "input_peak": round(peak, 4),
+                "quiet": True}
     with tempfile.TemporaryDirectory(dir=ROOT / "Temp") as temp:
         path = Path(temp) / "dictation.wav"
         sf.write(path, audio, rate)
-        return transcribe_audio(path)
+        return {**transcribe_audio(path), "input_device": microphone,
+                "input_peak": round(peak, 4), "quiet": False}
 
 
 def download_natural_voice(item=None):
