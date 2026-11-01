@@ -117,7 +117,7 @@ def save_openrouter_key(key):
     record("connected", "OpenRouter key saved. Only zero-price routes are enabled.")
 
 
-def save_provider_key(provider, key, confirmed_free=False):
+def save_provider_key(provider, key, confirmed_free=False, account_id=""):
     """Connect a person's own free-plan key; never package it with the app."""
     if provider not in cloud_providers.PROVIDERS:
         raise ValueError("Unknown provider")
@@ -125,9 +125,13 @@ def save_provider_key(provider, key, confirmed_free=False):
         raise ValueError("Confirm this account is on the provider's free plan first.")
     if not isinstance(key, str) or not 12 <= len(key.strip()) <= 500:
         raise ValueError("Paste a valid API key from your own account.")
+    if provider == "cloudflare" and not re.fullmatch(r"[a-fA-F0-9]{32}", account_id):
+        raise ValueError("Paste your 32-character Cloudflare account ID.")
     data = credentials()
     data.setdefault("provider_keys", {})[provider] = key.strip()
     data.setdefault("free_confirmed", {})[provider] = True
+    if provider == "cloudflare":
+        data.setdefault("provider_accounts", {})[provider] = account_id.lower()
     save_credentials(data)
     record("connected", f"{cloud_providers.PROVIDERS[provider]['name']} free-plan account connected.")
 
@@ -138,6 +142,7 @@ def disconnect_provider(provider):
     data = credentials()
     data.setdefault("provider_keys", {}).pop(provider, None)
     data.setdefault("free_confirmed", {}).pop(provider, None)
+    data.setdefault("provider_accounts", {}).pop(provider, None)
     save_credentials(data)
     record("local", f"{cloud_providers.PROVIDERS[provider]['name']} disconnected.")
 
@@ -490,7 +495,7 @@ class Router:
         self.provider_cooldowns = {}
         self.provider_last_attempts = {}
 
-    def reserve_provider_request(self, provider):
+    def reserve_provider_request(self, provider, estimated_cost=0):
         """Keep a conservative daily and per-minute budget per connected account."""
         spec = cloud_providers.PROVIDERS[provider]
         with self.lock:
@@ -510,6 +515,11 @@ class Router:
             attempts = usage.setdefault("attempts", {})
             if attempts.get(provider, 0) >= spec["daily"]:
                 return False
+            if spec.get("daily_neurons"):
+                spent = usage.setdefault("neurons", {}).get(provider, 0)
+                if estimated_cost <= 0 or spent + estimated_cost > spec["daily_neurons"]:
+                    return False
+                usage["neurons"][provider] = spent + estimated_cost
             if spec.get("monthly"):
                 month = today[:7]
                 monthly = usage.setdefault("monthly", {})
@@ -615,7 +625,17 @@ class Router:
             self.last_attempt = now
             return True
 
-    def complete(self, payload):
+    def complete(self, payload, task_id=""):
+        """Attribute this router request before any provider records its usage."""
+        import usage_history
+
+        token = usage_history.CURRENT_TASK.set(task_id)
+        try:
+            return self._complete(payload)
+        finally:
+            usage_history.CURRENT_TASK.reset(token)
+
+    def _complete(self, payload):
         """Return a validated completion from ChatGPT, free cloud, or Ollama."""
         if payload.get("model") not in (LOCAL_MODEL, LOCAL_MODEL + ":latest"):
             raise ValueError(
@@ -687,13 +707,16 @@ class Router:
                                          key=lambda pair: pair[1]["speed"], reverse=True):
                 provider_key = keys.get(provider)
                 provider_context = prompt_estimate + min(expected_output, spec.get("max_tokens", 8192)) + 1024
+                estimated_cost = cloud_providers.estimated_neurons(provider, payload)
                 if (not provider_key or not confirmed.get(provider)
                         or provider_context > spec["context"]
                         or not cloud_providers.likely_faster(size, spec["speed"], local_speed)
-                        or not self.reserve_provider_request(provider)):
+                        or not self.reserve_provider_request(provider, estimated_cost)):
                     continue
                 try:
-                    result, elapsed = cloud_providers.complete(provider, provider_key, payload)
+                    result, elapsed = cloud_providers.complete(
+                        provider, provider_key, payload,
+                        account_id=(account.get("provider_accounts") or {}).get(provider, ""))
                     result = valid_completion(result, payload)
                     import usage_history
                     usage_history.record_completion(result, provider, elapsed)
@@ -801,6 +824,38 @@ def stream_chunks(result):
         yield {**common, "choices": [], "usage": result["usage"]}
 
 
+def task_for_client(client_port):
+    """Attribute a loopback caller only when it is a managed task worker.
+
+    The socket's owning PID identifies the worker without trusting a request
+    body or caller-supplied task header. Ordinary chat remains unattributed.
+    """
+    import psutil
+
+    project_root = (ROOT / "Projects").resolve()
+    try:
+        connections = psutil.net_connections(kind="tcp")
+    except (OSError, psutil.Error):
+        return ""
+    for connection in connections:
+        try:
+            if (not connection.pid or not connection.raddr
+                    or connection.laddr.port != client_port
+                    or connection.raddr.port != PORT):
+                continue
+            process = psutil.Process(connection.pid)
+            for ancestor in (process, *process.parents()):
+                if "agent.managed_worker" not in ancestor.cmdline():
+                    continue
+                folder = Path(ancestor.cwd()).resolve()
+                if (folder.parent == project_root
+                        and re.fullmatch(r"[a-f0-9]{12}", folder.name)):
+                    return folder.name
+        except (OSError, psutil.Error, AttributeError):
+            continue
+    return ""
+
+
 def serve():
     """Serve the loopback chat-completion API used by the Hermes configuration."""
     router = Router()
@@ -864,7 +919,8 @@ def serve():
             except (ValueError, AttributeError):
                 self.send_json({"error": "Invalid request or unsupported model"}, 400)
                 return
-            future = POOL.submit(router.complete, payload)
+            future = POOL.submit(router.complete, payload,
+                                 task_for_client(self.client_address[1]))
             if not payload.get("stream"):
                 try:
                     self.send_json(future.result())

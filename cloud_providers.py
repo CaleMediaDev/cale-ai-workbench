@@ -7,6 +7,7 @@ and never accept a model or URL supplied by an untrusted task prompt.
 from __future__ import annotations
 
 import json
+import re
 import time
 from urllib.request import Request, urlopen
 
@@ -21,6 +22,7 @@ PROVIDERS = {
     "mistral": {"name": "Mistral AI", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest", "context": 32000, "rpm": 5, "daily": 100, "speed": 100, "signup": "https://console.mistral.ai/"},
     "cohere": {"name": "Cohere", "url": "https://api.cohere.com/v2/chat", "model": "command-r-08-2024", "context": 128000, "rpm": 5, "daily": 30, "speed": 80, "signup": "https://dashboard.cohere.com/api-keys"},
     "huggingface": {"name": "Hugging Face", "url": "https://router.huggingface.co/v1/chat/completions", "model": "openai/gpt-oss-120b:fastest", "context": 8192, "rpm": 2, "daily": 2, "monthly": 2, "speed": 150, "max_tokens": 1024, "signup": "https://huggingface.co/settings/tokens"},
+    "cloudflare": {"name": "Cloudflare Workers AI", "url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions", "model": "@cf/openai/gpt-oss-20b", "context": 128000, "rpm": 5, "daily": 12, "speed": 160, "max_tokens": 2048, "daily_neurons": 8500, "input_neurons_per_m": 18182, "output_neurons_per_m": 27273, "signup": "https://dash.cloudflare.com/?to=/:account/ai/workers-ai"},
 }
 
 
@@ -28,6 +30,22 @@ def likely_faster(size: str, speed: float, local_speed: float) -> bool:
     """Account for cloud round-trip latency before diverting a local request."""
     expected_output = {"quick": 100, "balanced": 1000, "deep": 3000}.get(size, 1000)
     return 2.0 + expected_output / speed < expected_output / max(local_speed, 1)
+
+
+def estimated_neurons(provider: str, payload: dict) -> int:
+    """Reserve an upper-bound request cost before using a metered free tier."""
+    spec = PROVIDERS[provider]
+    if not spec.get("daily_neurons"):
+        return 0
+    body = request_body(provider, payload)
+    input_bytes = len(json.dumps({"messages": body.get("messages", []),
+                                  "tools": body.get("tools", [])},
+                                 ensure_ascii=True).encode("utf-8"))
+    # BPE tokens normally cover more than one byte. Counting every serialized
+    # byte as a token, then adding 25%, guards against chat framing overhead.
+    raw = (input_bytes * spec["input_neurons_per_m"] +
+           body["max_tokens"] * spec["output_neurons_per_m"]) / 1_000_000
+    return max(1, int(raw * 1.25) + 1)
 
 
 def request_body(provider: str, payload: dict) -> dict:
@@ -63,13 +81,19 @@ def _cohere_completion(data: dict) -> dict:
                       "completion_tokens": billed.get("output_tokens", 0)}}
 
 
-def complete(provider: str, key: str, payload: dict, timeout: int = 90) -> tuple[dict, float]:
+def complete(provider: str, key: str, payload: dict, timeout: int = 90,
+             account_id: str = "") -> tuple[dict, float]:
     """Call one fixed provider endpoint and return its answer and elapsed time."""
     spec = PROVIDERS[provider]
     headers = {"Content-Type": "application/json", "Authorization": "Bearer " + key}
     if provider == "google":
         headers["x-goog-api-client"] = "cale-ai-workbench/0.5"
-    request = Request(spec["url"], data=json.dumps(request_body(provider, payload)).encode(), headers=headers)
+    url = spec["url"]
+    if provider == "cloudflare":
+        if not re.fullmatch(r"[a-fA-F0-9]{32}", account_id):
+            raise ValueError("Cloudflare account ID must be 32 hexadecimal characters.")
+        url = url.format(account_id=account_id)
+    request = Request(url, data=json.dumps(request_body(provider, payload)).encode(), headers=headers)
     started = time.monotonic()
     with urlopen(request, timeout=timeout) as response:
         result = json.load(response)

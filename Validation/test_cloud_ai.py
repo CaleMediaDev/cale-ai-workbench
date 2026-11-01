@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
@@ -49,6 +50,48 @@ class CloudTests(unittest.TestCase):
         self.assertNotIn(b"gsk_test_secret_value", (cloud.STATE / "credentials.dpapi").read_bytes())
         cloud.disconnect_provider("groq")
         self.assertNotIn("groq", cloud.credentials()["provider_keys"])
+
+    def test_cloudflare_requires_account_id_and_caps_neuron_budget(self):
+        with self.assertRaisesRegex(ValueError, "account ID"):
+            cloud.save_provider_key("cloudflare", "cloudflare-test-secret", True)
+        account_id = "a" * 32
+        cloud.save_provider_key("cloudflare", "cloudflare-test-secret", True,
+                                account_id=account_id)
+        self.assertEqual(cloud.credentials()["provider_accounts"]["cloudflare"], account_id)
+        cost = cloud_providers.estimated_neurons("cloudflare", REQUEST)
+        self.assertGreater(cost, 0)
+        router = cloud.Router()
+        self.assertFalse(router.reserve_provider_request("cloudflare", 8501))
+        self.assertTrue(router.reserve_provider_request("cloudflare", cost))
+        self.assertEqual(json.loads((cloud.STATE / "provider-quota.json").read_text())
+                         ["neurons"]["cloudflare"], cost)
+        cloud.disconnect_provider("cloudflare")
+        self.assertNotIn("cloudflare", cloud.credentials()["provider_accounts"])
+
+    def test_cloudflare_endpoint_uses_validated_account_id(self):
+        with self.assertRaisesRegex(ValueError, "account ID"):
+            cloud_providers.complete("cloudflare", "secret", REQUEST,
+                                     account_id="../another-account")
+        with patch.object(cloud_providers, "urlopen", side_effect=OSError("stop")) as fetch:
+            with self.assertRaises(OSError):
+                cloud_providers.complete("cloudflare", "secret", REQUEST,
+                                         account_id="b" * 32)
+        self.assertEqual(fetch.call_args.args[0].full_url,
+                         "https://api.cloudflare.com/client/v4/accounts/" + "b" * 32 +
+                         "/ai/v1/chat/completions")
+
+    def test_task_attribution_requires_managed_worker_socket(self):
+        project_id = "a" * 12
+        folder = cloud.ROOT / "Projects" / project_id
+        folder.mkdir(parents=True)
+        socket = SimpleNamespace(pid=123, laddr=SimpleNamespace(port=45678),
+                                 raddr=SimpleNamespace(port=cloud.PORT))
+        process = SimpleNamespace(cmdline=lambda: ["python", "-m", "agent.managed_worker"],
+                                  cwd=lambda: str(folder), parents=lambda: [])
+        with (patch("psutil.net_connections", return_value=[socket]),
+              patch("psutil.Process", return_value=process)):
+            self.assertEqual(cloud.task_for_client(45678), project_id)
+            self.assertEqual(cloud.task_for_client(99999), "")
 
     def test_connected_fast_provider_handles_balanced_task_before_local(self):
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)

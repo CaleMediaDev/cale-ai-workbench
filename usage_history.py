@@ -2,12 +2,15 @@
 
 import sqlite3
 import time
+import re
 from contextlib import closing
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DATABASE = ROOT / "LongTasks/usage.db"
+CURRENT_TASK = ContextVar("cale_usage_task", default="")
 
 
 def _connection():
@@ -23,6 +26,9 @@ def _connection():
     columns = {row[1] for row in conn.execute("PRAGMA table_info(usage_events)")}
     if "tokens_per_second" not in columns:
         conn.execute("ALTER TABLE usage_events ADD COLUMN tokens_per_second REAL")
+    if "task_id" not in columns:
+        conn.execute("ALTER TABLE usage_events ADD COLUMN task_id TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS usage_task ON usage_events(task_id)")
     return conn
 
 
@@ -46,6 +52,9 @@ def record_completion(result: dict, source: str, elapsed_seconds: float | None =
     if total <= 0:
         return False
     model = str(result.get("model") or "")[:150]
+    task_id = CURRENT_TASK.get()
+    if not isinstance(task_id, str) or not re.fullmatch(r"[a-f0-9]{12}", task_id):
+        task_id = ""
     # Ollama's own nanosecond duration is the most accurate local generation
     # speed. Other providers expose usage but usually no generation duration,
     # so use the measured end-to-end request time when available.
@@ -63,12 +72,25 @@ def record_completion(result: dict, source: str, elapsed_seconds: float | None =
     try:
         with closing(_connection()) as conn, conn:
             conn.execute(
-                "INSERT INTO usage_events(timestamp,source,model,prompt_tokens,completion_tokens,total_tokens,tokens_per_second) VALUES (?,?,?,?,?,?,?)",
-                (time.time(), source[:40], model, prompt, completion, total, speed),
+                "INSERT INTO usage_events(timestamp,source,model,prompt_tokens,completion_tokens,total_tokens,tokens_per_second,task_id) VALUES (?,?,?,?,?,?,?,?)",
+                (time.time(), source[:40], model, prompt, completion, total, speed, task_id),
             )
         return True
     except (OSError, sqlite3.Error):
         return False  # A usage display failure must not discard a model answer.
+
+
+def task_totals() -> dict[str, int]:
+    """Return reported token totals for each task since attribution began."""
+    try:
+        with closing(_connection()) as conn:
+            rows = conn.execute(
+                "SELECT task_id, SUM(total_tokens) FROM usage_events "
+                "WHERE task_id <> '' GROUP BY task_id"
+            ).fetchall()
+        return {task_id: total for task_id, total in rows}
+    except (OSError, sqlite3.Error):
+        return {}
 
 
 def recent_local_speed(default: float = 35.0) -> float:

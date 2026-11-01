@@ -74,3 +74,18 @@ def test_model_totals_include_unreported_model_names(tmp_path, monkeypatch):
         {"model": "alpha", "tokens": 25},
         {"model": "[ollama] unnamed model", "tokens": 3},
     ]
+
+
+def test_task_totals_attribute_only_valid_worker_context(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    one = "a" * 12
+    two = "b" * 12
+    for task, tokens in ((one, 25), (two, 15), (one, 5), ("spoofed", 100)):
+        marker = usage_history.CURRENT_TASK.set(task)
+        try:
+            assert usage_history.record_completion(
+                {"model": "m", "usage": {"total_tokens": tokens}}, "ollama")
+        finally:
+            usage_history.CURRENT_TASK.reset(marker)
+    assert usage_history.task_totals() == {one: 30, two: 15}
+    assert usage_history.history()["total"] == 145

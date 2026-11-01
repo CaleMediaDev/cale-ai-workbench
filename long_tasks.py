@@ -2376,6 +2376,18 @@ def gui():
     ttk.Button(provider_row, text="Get my free key ↗",
                command=lambda: webbrowser.open(cloud_providers.PROVIDERS[
                    provider_names[provider_name.get()]]["signup"])).pack(side="left")
+    cloudflare_account = tk.StringVar()
+    account_row = ttk.Frame(super_page)
+    ttk.Label(account_row, text="Cloudflare account ID:").pack(side="left", padx=(0, 7))
+    ttk.Entry(account_row, textvariable=cloudflare_account, width=35).pack(side="left")
+
+    def update_account_field(*_):
+        if provider_names[provider_name.get()] == "cloudflare":
+            account_row.pack(anchor="w", pady=(6, 0))
+        else:
+            account_row.pack_forget()
+
+    provider_name.trace_add("write", update_account_field)
     provider_key = tk.StringVar()
     ttk.Entry(super_page, textvariable=provider_key, show="•", width=54).pack(
         anchor="w", pady=(6, 3))
@@ -2392,8 +2404,10 @@ def gui():
     def save_cloud_provider():
         try:
             code = provider_names[provider_name.get()]
-            save_provider_key(code, provider_key.get(), free_plan.get())
+            save_provider_key(code, provider_key.get(), free_plan.get(),
+                              account_id=cloudflare_account.get())
             provider_key.set("")
+            cloudflare_account.set("")
             free_plan.set(False)
             provider_status.set(f"{provider_name.get()} connected for faster tasks.")
         except Exception as exc:
@@ -3883,6 +3897,7 @@ def gui():
             ollama_card = None
 
         all_tasks = list(reversed(projects()))
+        tokens_by_task = usage_history.task_totals()
         live_ids = {item["id"] for item in all_tasks}
         for pid in list(task_cards):
             if pid not in live_ids:
@@ -3924,9 +3939,15 @@ def gui():
                 controls = ttk.Frame(card_info["panel"], style="Card.TFrame")
                 controls.pack(fill="x", pady=(9, 0))
                 card_info["controls"] = controls
+                token_var = tk.StringVar(value="Tokens: 0")
+                ttk.Label(card_info["panel"], textvariable=token_var,
+                          style="CardMuted.TLabel").pack(anchor="w", before=controls,
+                                                          pady=(3, 0))
+                card_info["tokens"] = token_var
                 task_cards[pid] = card_info
             card_info = task_cards[pid]
             set_text(card_info["title"], item["title"])
+            set_text(card_info["tokens"], f"Tokens: {tokens_by_task.get(pid, 0):,}")
             percent, current = task_progress(item)
             state = item["status"].replace("_", " ").capitalize()
             update_progress_card(card_info, percent, "Current step: " + current, state)
