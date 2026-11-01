@@ -1,6 +1,7 @@
 """Behavior checks for the companion (no model or native board writes)."""
 
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
@@ -227,6 +228,52 @@ class LongTaskTests(unittest.TestCase):
             self.assertEqual(
                 db.execute("SELECT status FROM requests").fetchone()[0], "error"
             )
+
+    def test_same_size_edit_with_restored_timestamp_invalidates_review(self):
+        source = self.base / "project/source.txt"
+        source.write_text("first", encoding="utf-8")
+        original = source.stat()
+        checked = task_module.fingerprint(self.base / "project")
+        source.write_text("other", encoding="utf-8")
+        os.utime(source, ns=(original.st_atime_ns, original.st_mtime_ns))
+        self.assertNotEqual(task_module.fingerprint(self.base / "project"), checked)
+        task_module.update(self.pid, status="ready_for_review", fingerprint=checked)
+        task_module.request(self.pid, "accept")
+        task_module.process_requests()
+        self.assertNotEqual(self.item()["status"], "accepted")
+
+    def test_check_that_edits_project_cannot_pass_as_final(self):
+        source = self.base / "project/source.txt"
+        source.write_text("before", encoding="utf-8")
+        self.verify_script(
+            f'Set-Content -LiteralPath "{source}" -Value "after"\nexit 0\n'
+        )
+        passed, evidence = task_module.verify_project(self.item())
+        self.assertFalse(passed)
+        self.assertIn("changed during verification", evidence)
+
+    def test_old_review_checksum_gets_fresh_check_before_migration(self):
+        self.verify_script('Write-Output "real check passed"; exit 0')
+        old = task_module.legacy_fingerprint(self.base / "project")
+        task_module.update(self.pid, status="ready_for_review", fingerprint=old)
+        with patch.object(task_module, "board") as board:
+            task_module.tick()
+        board.assert_not_called()
+        self.assertEqual(self.item()["status"], "ready_for_review")
+        self.assertTrue(self.item()["fingerprint"].startswith("content-v2:"))
+
+    def test_stop_during_review_migration_is_not_overwritten(self):
+        self.verify_script('Write-Output "real check passed"; exit 0')
+        old = task_module.legacy_fingerprint(self.base / "project")
+        task_module.update(self.pid, status="ready_for_review", fingerprint=old)
+
+        def interrupted(_project):
+            task_module.request(self.pid, "stop")
+            return False, "Stopped by user"
+
+        with patch.object(task_module, "verify_project", side_effect=interrupted):
+            task_module.tick()
+        self.assertEqual(self.item()["status"], "stopped")
 
     def test_timeout_fails_instead_of_hanging(self):
         self.verify_script("Start-Sleep -Seconds 60; exit 0")

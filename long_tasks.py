@@ -411,11 +411,14 @@ SKIP = {
     "build",
     "coverage",
     ".pytest_cache",
+    ".ruff_cache",
+    "playwright-report",
+    "test-results",
 }
 
 
 def fingerprint(folder):
-    """Fingerprint project files and verification script before acceptance."""
+    """Hash project contents and the check script, not mutable timestamps."""
     digest = hashlib.sha256()
     count = 0
     for base, dirs, files in os.walk(folder, followlinks=False):
@@ -426,15 +429,44 @@ def fingerprint(folder):
             path = Path(base) / name
             if path.is_symlink():
                 continue
-            stat = path.stat()
-            digest.update(str(path.relative_to(folder)).encode())
-            digest.update(f"{stat.st_size}:{stat.st_mtime_ns}".encode())
+            relative = str(path.relative_to(folder)).encode("utf-8")
+            digest.update(len(relative).to_bytes(4, "big"))
+            digest.update(relative)
+            digest.update(path.stat().st_size.to_bytes(8, "big"))
+            with path.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
             count += 1
             if count > 100000:
                 raise RuntimeError(
                     "Project too large for the completion freshness check."
                 )
     # The actual verification entry point is always included.
+    verify = Path(folder) / ".local-ai/verify.ps1"
+    if verify.exists():
+        digest.update(verify.read_bytes())
+    return "content-v2:" + digest.hexdigest()
+
+
+def legacy_fingerprint(folder):
+    """Read the old metadata checksum only to migrate pending reviews safely."""
+    old_skip = SKIP - {".ruff_cache", "playwright-report", "test-results"}
+    digest = hashlib.sha256()
+    count = 0
+    for base, dirs, files in os.walk(folder, followlinks=False):
+        dirs[:] = sorted(
+            d for d in dirs if d not in old_skip and not (Path(base) / d).is_symlink()
+        )
+        for name in sorted(files):
+            path = Path(base) / name
+            if path.is_symlink():
+                continue
+            stat = path.stat()
+            digest.update(str(path.relative_to(folder)).encode())
+            digest.update(f"{stat.st_size}:{stat.st_mtime_ns}".encode())
+            count += 1
+            if count > 100000:
+                raise RuntimeError("Project too large for the completion freshness check.")
     verify = Path(folder) / ".local-ai/verify.ps1"
     if verify.exists():
         digest.update(verify.read_bytes())
@@ -450,6 +482,10 @@ def verify_project(p, timeout=1200):
             False,
             "Missing .local-ai/verify.ps1. Create and run real acceptance tests.",
         )
+    try:
+        before = fingerprint(folder)
+    except OSError as exc:
+        return False, f"Could not read project files before verification: {exc}"
     log = STATE / f"{p['id']}-verification.log"
     with log.open("w", encoding="utf-8") as out:
         out.write(f"Independent verification: {time.ctime()}\nProject: {folder}\n")
@@ -534,7 +570,18 @@ def verify_project(p, timeout=1200):
         finally:
             job.Close()
         out.write(f"\nVerification exit code: {code}\n")
-    return code == 0, log.read_text(encoding="utf-8", errors="replace")[-12000:]
+    evidence = log.read_text(encoding="utf-8", errors="replace")[-12000:]
+    if code == 0:
+        try:
+            after = fingerprint(folder)
+        except OSError as exc:
+            return False, evidence + f"\nCould not read project files after verification: {exc}"
+        if before != after:
+            return (
+                False,
+                evidence + "\nProject files changed during verification. Run the checks again after those changes finish.",
+            )
+    return code == 0, evidence
 
 
 def handle_handoff(p, task):
@@ -742,6 +789,33 @@ def tick():
         if p["status"] in ("accepted", "paused", "stopped", "needs_input"):
             continue
         if p["status"] == "ready_for_review":
+            if not str(p["fingerprint"]).startswith("content-v2:"):
+                folder = Path(p["folder"])
+                if legacy_fingerprint(folder) != p["fingerprint"]:
+                    update(
+                        p["id"], status="needs_input",
+                        detail="Files changed since the previous review. Resume to check them again.",
+                    )
+                    continue
+                update(p["id"], status="checking", detail="Rechecking completed work after the verification upgrade.")
+                passed, evidence = verify_project(p)
+                with database() as conn:
+                    pending = conn.execute(
+                        "SELECT 1 FROM requests WHERE project=? AND status='pending' LIMIT 1",
+                        (p["id"],),
+                    ).fetchone()
+                if pending:
+                    process_requests()
+                    current = next((x for x in projects() if x["id"] == p["id"]), None)
+                    if not current or current["status"] != "checking":
+                        continue
+                update(
+                    p["id"],
+                    status="ready_for_review" if passed else "needs_input",
+                    detail=evidence,
+                    fingerprint=fingerprint(folder) if passed else "",
+                )
+                continue
             if fingerprint(Path(p["folder"])) != p["fingerprint"]:
                 update(
                     p["id"],

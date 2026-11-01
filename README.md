@@ -56,7 +56,7 @@ The image model uses LCM Dreamshaper v7; speech recognition uses Faster-Whisper 
 
 ## Long tasks
 
-The project queue and native Hermes task board use SQLite. The worker maintains `.local-ai/PLAN.md` and `PROGRESS.md`. The supervisor runs the project's verification script independently, starts a separate review pass, and checks again before acceptance. Repeated verification failures stop for input rather than retrying forever.
+The project queue and native Hermes task board use SQLite. The worker maintains `.local-ai/PLAN.md` and `PROGRESS.md`. The supervisor runs the project's verification script independently, starts a separate review pass, and checks again before acceptance. It hashes project file contents before and after verification, so a check that edits the project cannot certify its own new output. It also compares file contents before acceptance, including same-size edits with unchanged timestamps. Existing tasks waiting for review get a fresh independent check when upgraded to this stronger record. Repeated verification failures stop for input rather than retrying forever.
 
 Your PC must be on and awake. The optional sign-in task restarts the supervisor when you sign back in. This is resumable work across days, not a promise that any request will complete unattended. One demanding local worker runs at a time.
 
