@@ -431,6 +431,35 @@ def request(pid, action, note=""):
         )
 
 
+def original_request_path(folder, pid):
+    """Give each task its own brief file even in a pre-existing project folder."""
+    return Path(folder) / ".local-ai" / f"ORIGINAL-REQUEST-{pid}.md"
+
+
+def save_original_request(folder, pid, brief):
+    """Keep the authoritative brief intact outside the bounded worker prompt."""
+    path = original_request_path(folder, pid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file() and path.read_text(encoding="utf-8") == brief:
+        return path
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(brief, encoding="utf-8")
+    temporary.replace(path)
+    return path
+
+
+def original_request_preview(brief):
+    """Show the opening and latest criteria while preserving the full file."""
+    if len(brief) <= 6000:
+        return brief
+    omitted = len(brief) - 6000
+    return (
+        brief[:3000]
+        + f"\n...[{omitted} characters omitted; read the full original request file in sections]...\n"
+        + brief[-3000:]
+    )
+
+
 def add_project(title, folder, brief, waiting_for_setup=False):
     """Create a task without overlapping another task's project folder."""
     title, brief = title.strip(), brief.strip()
@@ -462,6 +491,7 @@ def add_project(title, folder, brief, waiting_for_setup=False):
     folder.mkdir(parents=True, exist_ok=True)
     notes = folder / ".local-ai"
     notes.mkdir(exist_ok=True)
+    save_original_request(folder, pid, brief)
     # New workers are asked to read these files before acting. Seed them so a
     # first run can distinguish a fresh project from a failed file read.
     plan = notes / "PLAN.md"
@@ -542,8 +572,13 @@ def project_prompt(p, extra=""):
     return f"""USER PROJECT: {p["title"]}
 PROJECT FOLDER: {p["folder"]}
 REQUEST AND ACCEPTANCE CRITERIA:
-{p["brief"]}
+{original_request_preview(p["brief"])}
 END OF ORIGINAL REQUEST
+
+The complete original request is saved in
+.local-ai/ORIGINAL-REQUEST-{p.get("id", "<task-id>")}.md. Read the full file in
+manageable sections before planning or resuming; the preview above may omit
+requirements from the middle.
 
 Later user instructions are saved in .local-ai/USER-REQUESTS.md. Read that
 file in full before planning or resuming work. Its numbered entries are
@@ -725,12 +760,15 @@ def create_card(p, extra=""):
         extra += "\nREVIEW PASS: Independently inspect EVERY requirement, test the app, fix omissions and add regression tests. Do not trust prior claims. Then request review."
     saved = recovery_snapshot(p["folder"])
     followups = sync_user_requests(p)
+    save_original_request(p["folder"], p["id"], p["brief"])
     recent = "\n".join(
         f"Request {row['id']}: {row['note'][:1200]}"
         for row in followups[-3:]
     )
     try:
-        remembered = project_memory.search(p["folder"], p["brief"], limit=5)
+        remembered = project_memory.search(
+            p["folder"], original_request_preview(p["brief"]), limit=5
+        )
     except (OSError, sqlite3.Error, ValueError):
         remembered = []  # A damaged index must not prevent a worker from starting.
     memory_note = "\n".join(

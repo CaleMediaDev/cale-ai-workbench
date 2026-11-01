@@ -650,6 +650,28 @@ class LongTaskTests(unittest.TestCase):
         self.assertNotIn("Requirement 0:", prompt)
         self.assertLess(len(prompt), 15_000)
 
+    def test_large_original_request_is_saved_verbatim_without_filling_context(self):
+        brief = "Start with a desktop app.\n" + ("middle requirement: preserve data\n" * 9000)
+        brief += "Finish with offline voice control."
+        project = self.base / "large"
+        (project / ".local-ai").mkdir(parents=True)
+        existing = project / ".local-ai/ORIGINAL-REQUEST.md"
+        existing.write_text("Existing project note", encoding="utf-8")
+        pid = task_module.add_project("large brief", str(project), brief)
+        item = next(project for project in task_module.projects() if project["id"] == pid)
+        original = task_module.original_request_path(item["folder"], pid)
+        self.assertEqual(original.read_text(encoding="utf-8"), brief)
+        with patch.object(task_module, "board", return_value={"id": "large-card"}) as board:
+            task_module.create_card(item)
+        args = board.call_args.args
+        prompt = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+        self.assertLess(len(prompt), 18_000)
+        self.assertIn("Read the full file in\nmanageable sections", prompt)
+        self.assertIn("Start with a desktop app", prompt)
+        self.assertIn("Finish with offline voice control", prompt)
+        self.assertEqual(original.read_text(encoding="utf-8"), brief)
+        self.assertEqual(existing.read_text(encoding="utf-8"), "Existing project note")
+
     def test_legacy_followups_compact_only_when_queue_matches(self):
         legacy = "Build and test a working fixture\n\nUSER FOLLOW-UP:\nAdd search"
         task_module.update(self.pid, brief=legacy)

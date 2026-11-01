@@ -146,12 +146,13 @@ class AutoRouteTests(unittest.TestCase):
         self.assertGreater(len(prompt), 16000)
         self.assertEqual(task_size([{"role": "user", "content": prompt}]), "quick")
 
-    def test_oversized_original_project_stays_deep_after_tail_truncation(self):
+    def test_oversized_original_project_stays_deep_with_bounded_preview(self):
         prompt = project_prompt(
             {"title": "Large build", "folder": "C:/Tasks/large",
              "brief": "Build an app with these requirements:\n" + "feature detail\n" * 1600},
         )
-        self.assertGreater(len(prompt), 16000)
+        self.assertLess(len(prompt), 16000)
+        self.assertIn("characters omitted", prompt)
         self.assertEqual(task_size([{"role": "user", "content": prompt}]), "deep")
 
     def test_late_followup_can_escalate_a_short_original_project(self):
