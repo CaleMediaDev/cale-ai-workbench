@@ -1613,9 +1613,18 @@ def gui():
         def restore_selection():
             attachments[:] = selected_paths
             show_attachments()
+        # The pending question belongs only once in the model conversation.
+        # Keep machine-readable paths in the task brief, while the chat shows
+        # a short, readable reminder of what the person selected.
         context = chat_history(12)
-        save_chat("user", value)
-        show_chat("user", value)
+        displayed = raw_value
+        if selected_paths:
+            names = ", ".join(Path(path).name for path in selected_paths[:3])
+            if len(selected_paths) > 3:
+                names += f" and {len(selected_paths) - 3} more"
+            displayed += "\nFiles: " + names
+        save_chat("user", displayed)
+        show_chat("user", displayed)
         active = [p for p in projects() if p["status"] in (
             "queued", "waiting_for_setup", "working", "checking", "paused", "needs_input")]
         if pending_followup:
@@ -1664,11 +1673,11 @@ def gui():
                     )
                     assistant_reply("Which task should I change? Reply with its number. " + options)
             elif action == "status":
-                if active:
-                    selected = max(active, key=lambda p: p["updated"] or 0)
-                    assistant_reply(selected["title"] + ": " + task_progress(selected)[1])
-                else:
-                    assistant_reply("Nothing is running right now. Tell me what you'd like me to do.")
+                assistant_reply(
+                    chat_assistant.status_reply(
+                        raw_value, projects()[-5:], lambda task: task_progress(task)[1]
+                    )
+                )
             else:
                 show_chat("assistant", "Let me check that locally…")
                 answer_requests.put((value, context))

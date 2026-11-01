@@ -20,12 +20,12 @@ def route(text: str, active_tasks: list[dict]) -> str:
     value = text.strip().lower()
     if not value:
         return "empty"
-    if re.search(r"\b(?:what(?:'s| is) the status|how(?:'s| is) (?:it|the task) going|what are you working on)\b", value):
+    if re.search(r"\b(?:what(?:'s| is) the status|status (?:of|for)|how(?:'s| is) (?:it|the task) going|what are you working on)\b", value):
         return "status"
     if active_tasks and re.match(r"^(?:also|actually|change it|add to (?:it|that)|tell (?:it|the ai) to|instead)\b", value):
         return "note"
     command = re.sub(
-        r"^(?:(?:please|can you|could you|i want you to|i need you to|help me)\s+)+",
+        r"^(?:(?:please|can you|could you|i want you to|i need you to|i want to|i need to|help me(?: to)?)\s+)+",
         "", value,
     )
     if active_tasks and command.startswith(("add ", "change ")):
@@ -35,6 +35,16 @@ def route(text: str, active_tasks: list[dict]) -> str:
     if any(re.match(r"^" + re.escape(verb) + r"\b", command) for verb in TASK_VERBS):
         return "task"
     return "answer"
+
+
+def status_reply(question: str, tasks: list[dict], progress) -> str:
+    """Report every active task unless the question names one unambiguously."""
+    if not tasks:
+        return "Nothing is running right now. Tell me what you'd like me to do."
+    selected = choose_task(question, tasks, allow_single=False)
+    shown = [selected] if selected else tasks
+    lines = [f"{task['title']}: {progress(task)}" for task in shown]
+    return "\n".join(lines)
 
 
 def choose_task(text: str, tasks: list[dict], *, allow_single=True) -> dict | None:

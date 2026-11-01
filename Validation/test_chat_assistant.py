@@ -16,6 +16,10 @@ def test_explicit_work_creates_task():
     assert chat_assistant.route("Can you fix my app?", []) == "task"
     assert chat_assistant.route("Please help me build a website", []) == "task"
     assert chat_assistant.route("Could you work on my app?", []) == "task"
+    assert chat_assistant.route("I want to build an app", []) == "task"
+    assert chat_assistant.route("I need to fix my website", []) == "task"
+    assert chat_assistant.route("Help me to create a logo", []) == "task"
+    assert chat_assistant.route("I want to know how to build an app", []) == "answer"
 
 
 def test_followup_attaches_to_active_task():
@@ -31,6 +35,21 @@ def test_multiple_tasks_require_a_clear_followup_target():
     assert chat_assistant.choose_task("For Build bakery site, add a contact page", tasks)["id"] == "a"
     assert chat_assistant.choose_task("3", tasks) is None
     assert chat_assistant.choose_task("start something else", tasks[:1], allow_single=False) is None
+
+
+def test_status_covers_all_active_tasks_or_one_named_task():
+    tasks = [
+        {"id": "a", "title": "Build bakery site"},
+        {"id": "b", "title": "Research suppliers"},
+    ]
+    def progress(task):
+        return "Ready for review" if task["id"] == "a" else "Checking sources"
+    assert chat_assistant.route("What's the status of Research suppliers?", tasks) == "status"
+    all_status = chat_assistant.status_reply("What's the status?", tasks, progress)
+    assert "Build bakery site: Ready for review" in all_status
+    assert "Research suppliers: Checking sources" in all_status
+    one_status = chat_assistant.status_reply("Status of Research suppliers", tasks, progress)
+    assert one_status == "Research suppliers: Checking sources"
 
 
 def test_selected_file_paths_are_preserved_as_data_in_task_brief():
