@@ -185,6 +185,21 @@ class UserFileMemoryTests(unittest.TestCase):
         self.assertEqual(user_file_memory.search(self.state, "information")[0]["path"],
                          str(later))
 
+    def test_matching_search_does_not_rescan_entire_selected_folder(self):
+        folder = self.root / "selected"
+        folder.mkdir()
+        note = folder / "note.txt"
+        note.write_text("orchid planning note", encoding="utf-8")
+        user_file_memory.remember_roots(self.state, [str(folder)])
+        user_file_memory.ingest(self.state, [str(folder)])
+        with patch.object(user_file_memory, "_files", side_effect=AssertionError("full scan")):
+            self.assertEqual(user_file_memory.search(self.state, "orchid")[0]["path"],
+                             str(note))
+        later = folder / "later.txt"
+        later.write_text("sunflower new file", encoding="utf-8")
+        self.assertEqual(user_file_memory.search(self.state, "sunflower")[0]["path"],
+                         str(later))
+
     def test_search_does_not_discover_new_file_outside_selected_folder(self):
         selected = self.root / "selected"
         selected.mkdir()

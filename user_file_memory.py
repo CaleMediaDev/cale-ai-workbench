@@ -261,50 +261,73 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
 
 
 def search(state: str | Path, query: str, limit: int = 8) -> list[dict]:
-    """Search selected files locally, refreshing changes before returning snippets."""
-    with _connection(state) as conn:
-        paths = [row[0] for row in conn.execute("SELECT path FROM files")]
-        roots = [row[0] for row in conn.execute("SELECT path FROM selected_roots")]
-    # A disappeared file must not remain available as apparent current evidence.
-    def available(raw: str) -> bool:
-        path = Path(raw)
-        try:
-            return (not path.is_symlink() and _safe_file_path(path) and path.is_file()
-                    and path.suffix.casefold() in SUPPORTED
-                    and path.stat().st_size <= _file_limit(path))
-        except OSError:
-            return False
+    """Search SQLite first; verify hits and scan selected roots on a miss."""
+    count = max(1, min(limit, 20))
+    words = project_memory.WORD.findall(query)[:12]
 
-    existing = [path for path in paths if available(path)]
-    # Search must discover files added to a selected folder even when its UI
-    # background worker is not running. Each remembered root is explicitly
-    # user-selected; ingest still skips links, secrets and unsupported files.
-    for start in range(0, len(roots), MAX_ROOTS):
-        ingest(state, roots[start:start + MAX_ROOTS])
-    covered_files = {Path(root) for root in roots if Path(root).is_file()}
-    covered_dirs = [Path(root) for root in roots if Path(root).is_dir()
-                    and not Path(root).is_symlink()]
-    # Older records may have been indexed directly without a saved root. Keep
-    # refreshing them as well, in bounded batches, rather than losing them.
-    outside_roots = [path for path in existing if Path(path) not in covered_files
-                     and not any(Path(path).is_relative_to(root) for root in covered_dirs)]
-    for start in range(0, len(outside_roots), MAX_ROOTS):
-        ingest(state, outside_roots[start:start + MAX_ROOTS])
-    with _connection(state) as conn:
-        for path in set(paths) - set(existing):
-            conn.execute("DELETE FROM files WHERE path=?", (path,))
-            conn.execute("DELETE FROM file_fts WHERE path=?", (path,))
-        words = project_memory.WORD.findall(query)[:12]
-        if not words:
-            rows = conn.execute("SELECT path,substr(content,1,700) AS excerpt FROM files WHERE content<>'' ORDER BY indexed_at DESC LIMIT ?",
-                                (max(1, min(limit, 20)),)).fetchall()
-        else:
-            expression = " OR ".join('"' + word + '"' for word in words)
-            rows = conn.execute("""SELECT path,snippet(file_fts,2,'[',']',' … ',30) AS excerpt
-                FROM file_fts WHERE file_fts MATCH ? ORDER BY bm25(file_fts,0.0,4.0,1.0)
-                LIMIT ?""", (expression, max(1, min(limit, 20)))).fetchall()
-        conn.commit()
-    return [dict(row) for row in rows]
+    def candidates() -> list[dict]:
+        with _connection(state) as conn:
+            if not words:
+                rows = conn.execute("""SELECT path,substr(content,1,700) AS excerpt
+                    FROM files WHERE content<>'' ORDER BY indexed_at DESC LIMIT ?""",
+                    (count * 3,)).fetchall()
+            else:
+                expression = " OR ".join('"' + word + '"' for word in words)
+                rows = conn.execute("""SELECT path,snippet(file_fts,2,'[',']',' … ',30) AS excerpt
+                    FROM file_fts WHERE file_fts MATCH ? ORDER BY bm25(file_fts,0.0,4.0,1.0)
+                    LIMIT ?""", (expression, count * 3)).fetchall()
+        return [dict(row) for row in rows]
+
+    def refresh(raw: str) -> bool:
+        path = Path(raw)
+        with _connection(state) as conn:
+            current = conn.execute("SELECT version FROM files WHERE path=?", (raw,)).fetchone()
+        if current is None:
+            return True
+        try:
+            available = (not path.is_symlink() and _safe_file_path(path) and path.is_file()
+                         and path.suffix.casefold() in SUPPORTED
+                         and path.stat().st_size <= _file_limit(path))
+            version = _file_version(path) if available else ""
+        except (OSError, ValueError, RuntimeError):
+            available, version = False, ""
+        if not available:
+            with _connection(state) as conn:
+                conn.execute("DELETE FROM files WHERE path=?", (raw,))
+                conn.execute("DELETE FROM file_fts WHERE path=?", (raw,))
+            return True
+        if version != current["version"]:
+            ingest(state, [raw])
+            return True
+        return False
+
+    scanned = False
+    for _ in range(4):
+        rows = candidates()
+        changed = any([refresh(row["path"]) for row in rows])
+        if changed:
+            continue
+        if (rows and words) or scanned:
+            return rows[:count]
+        # An unmatched query may refer to a new file or a changed file whose
+        # old text did not contain the search words. A full scan on this path
+        # preserves discovery even when the UI's background indexer is closed.
+        with _connection(state) as conn:
+            roots = [row[0] for row in conn.execute("SELECT path FROM selected_roots")]
+            paths = [row[0] for row in conn.execute("SELECT path FROM files")]
+        for start in range(0, len(roots), MAX_ROOTS):
+            ingest(state, roots[start:start + MAX_ROOTS])
+        covered_files = {Path(root) for root in roots if Path(root).is_file()}
+        covered_dirs = [Path(root) for root in roots if Path(root).is_dir()
+                        and not Path(root).is_symlink()]
+        outside = [raw for raw in paths if Path(raw) not in covered_files
+                   and not any(Path(raw).is_relative_to(root) for root in covered_dirs)]
+        for start in range(0, len(outside), MAX_ROOTS):
+            ingest(state, outside[start:start + MAX_ROOTS])
+        scanned = True
+    # A concurrently edited file may keep changing during validation. Do not
+    # return a snippet whose source was not stable across the final refresh.
+    return [row for row in candidates() if not refresh(row["path"])][:count]
 
 
 def get(state: str | Path, path: str) -> dict:
@@ -327,8 +350,8 @@ def get(state: str | Path, path: str) -> dict:
             conn.execute("DELETE FROM files WHERE path=?", (path,))
             conn.execute("DELETE FROM file_fts WHERE path=?", (path,))
         raise ValueError("That file is no longer in memory. Select it again.")
-    # Refresh only the requested source. Searching can still refresh the full
-    # selected library, but opening one record should stay fast as it grows.
+    # Refresh only the requested source. Search verifies candidate matches and
+    # scans the selected library only when it needs to discover missing text.
     ingest(state, [path])
     with _connection(state) as conn:
         row = conn.execute("SELECT path,content,indexed_at FROM files WHERE path=?", (path,)).fetchone()
