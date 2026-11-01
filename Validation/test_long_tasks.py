@@ -137,7 +137,8 @@ class LongTaskTests(unittest.TestCase):
         output = Path(task["folder"]) / "song.mp3"
         output.write_bytes(b"A" * 8192)
         with patch("music_backend.music_job_status", return_value={
-            "status": "complete", "result": {"path": str(output)},
+            "status": "complete", "instrumental": True,
+            "result": {"path": str(output)},
         }), patch("music_backend.audio_file_ok", return_value=True), patch.object(task_module, "board") as board:
             task_module.advance_project(task)
             board.assert_not_called()
@@ -156,7 +157,30 @@ class LongTaskTests(unittest.TestCase):
                 request, chat_assistant.music_request(request), str(self.base / "music-lyrics"),
             )
         self.assertEqual(start.call_args.kwargs["lyrics"], words)
+        self.assertRegex(start.call_args.kwargs["task_id"], r"^[a-f0-9]{12}$")
         self.assertEqual(start.call_args.args[0], "Make a 90-second soul song")
+
+    def test_direct_vocal_music_cannot_finish_without_verified_vocals(self):
+        job_id = "f" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make a 60-second rap song", {"prompt": "rap song", "duration_seconds": 60,
+                                               "instrumental": False},
+                str(self.base / "music-vocals"),
+            )
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        output = Path(task["folder"]) / "song.mp3"
+        output.write_bytes(b"A" * 8192)
+        with patch("music_backend.music_job_status", return_value={
+            "status": "complete", "instrumental": False, "duration_seconds": 60,
+            "result": {"path": str(output)},
+        }), patch("music_backend.audio_file_ok", return_value=True), patch(
+            "music_backend.vocal_evidence", return_value={"passed": False}
+        ):
+            task_module.advance_project(task)
+        current = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(current["status"], "needs_input")
+        self.assertIn("too few clear vocals", current["detail"])
 
     def test_direct_music_stop_uses_exact_job_and_preserves_project_files(self):
         job_id = "b" * 32

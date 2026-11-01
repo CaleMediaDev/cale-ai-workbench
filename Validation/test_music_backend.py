@@ -72,6 +72,87 @@ def test_sends_user_lyrics_to_local_music_engine_unchanged(tmp_path):
     assert request.call_args_list[0].args[1]["lyrics"] == lyrics
 
 
+def test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio(tmp_path):
+    jobs = tmp_path / "jobs"
+    output = tmp_path / "song.mp3"
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_launch_job"
+    ):
+        started = music_backend.start_music_job(
+            "rap about Michigan", str(output), duration_seconds=60,
+            task_id="a" * 12,
+        )
+        lyrics = "[Verse]\n" + "Michigan rhythm and lakeside light " * 10
+        with patch.object(music_backend, "compose_lyrics", return_value=lyrics) as compose, patch.object(
+            music_backend, "generate_music", return_value={"path": str(output)}
+        ) as generate, patch.object(
+            music_backend, "vocal_evidence", return_value={"passed": True,
+                "recognized_words": 50, "last_vocal_second": 58}
+        ) as check:
+            music_backend._run_job(started["job_id"])
+        job = music_backend.music_job_status(started["job_id"])
+    compose.assert_called_once_with("rap about Michigan", 60)
+    assert generate.call_args.args[2] == lyrics
+    check.assert_called_once_with(str(output), 60)
+    assert (tmp_path / "song.lyrics.txt").read_text(encoding="utf-8").strip() == lyrics.strip()
+    assert job["status"] == "complete"
+    assert job["vocal_check"]["recognized_words"] == 50
+
+
+def test_vocal_song_with_no_sustained_words_is_not_marked_complete(tmp_path):
+    jobs = tmp_path / "jobs"
+    output = tmp_path / "song.mp3"
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_launch_job"
+    ):
+        started = music_backend.start_music_job(
+            "rap about Michigan", str(output), lyrics="[Verse] Michigan rap " * 10,
+            duration_seconds=60,
+        )
+        with patch.object(music_backend, "generate_music", return_value={"path": str(output)}), patch.object(
+            music_backend, "vocal_evidence", return_value={"passed": False,
+                "recognized_words": 4, "last_vocal_second": 5}
+        ):
+            music_backend._run_job(started["job_id"])
+        job = music_backend.music_job_status(started["job_id"])
+    assert job["status"] == "error"
+    assert "sustained vocals" in job["current"]
+
+
+def test_compose_lyrics_uses_small_local_model_and_rejects_truncation():
+    from cloud_ai import FAST_MODEL
+
+    good = {"choices": [{"finish_reason": "stop", "message": {
+        "content": "[Verse]\n" + "Michigan lights and water rolling " * 10}}]}
+    with patch("cloud_ai.post", return_value=good) as post:
+        lyrics = music_backend.compose_lyrics("Michigan rap", 60)
+    assert "Michigan lights" in lyrics
+    assert post.call_args.args[1]["model"] == FAST_MODEL
+    bad = {"choices": [{"finish_reason": "length", "message": {
+        "content": good["choices"][0]["message"]["content"]}}]}
+    with patch("cloud_ai.post", return_value=bad):
+        with pytest.raises(RuntimeError, match="did not finish"):
+            music_backend.compose_lyrics("Michigan rap", 60)
+
+
+def test_vocal_evidence_requires_words_through_most_of_the_song(tmp_path):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"runtime")
+    audio = tmp_path / "song.mp3"
+    audio.write_bytes(b"audio")
+    sparse = {"text": "yeah yeah", "segments": [{"end": 10.0}]}
+    sustained = {"text": "Michigan " * 40, "segments": [{"end": 55.0}]}
+    with patch.object(music_backend, "ROOT", tmp_path), patch.object(
+        music_backend.subprocess, "run", side_effect=[
+            type("Result", (), {"returncode": 0, "stdout": json.dumps(sparse)})(),
+            type("Result", (), {"returncode": 0, "stdout": json.dumps(sustained)})(),
+        ],
+    ):
+        assert not music_backend.vocal_evidence(audio, 60)["passed"]
+        assert music_backend.vocal_evidence(audio, 60)["passed"]
+
+
 def test_rejects_remote_audio_url(tmp_path):
     responses = iter([
         {"code": 200, "data": {"task_id": "task-1"}},
@@ -167,7 +248,7 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
     with patch.object(music_backend, "ROOT", tmp_path), patch.object(
         music_backend, "JOBS", jobs
     ), patch.object(music_backend.subprocess, "Popen") as process:
-        started = music_backend.start_music_job("upbeat piano", str(output))
+        started = music_backend.start_music_job("upbeat piano", str(output), instrumental=True)
         assert started["status"] == "queued"
         assert music_backend.music_job_status(started["job_id"])["status"] == "queued"
         process.assert_called_once()

@@ -94,6 +94,12 @@ def music_request(text: str) -> dict | None:
     if not 10 <= duration <= 600:
         raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
     instrumental = bool(re.search(r"\b(?:instrumental|no vocals|without vocals|no singing)\b", prompt, re.IGNORECASE))
+    # A beat or background soundtrack normally has no singer. Preserve an
+    # explicit vocal request instead of silently changing it to instrumental.
+    if (not instrumental and not lyrics
+            and re.search(r"\b(?:beat|soundtrack|background music)\b", prompt, re.IGNORECASE)
+            and not re.search(r"\b(?:vocals?|sing(?:ing|er)?|rap(?:ped|per)?)\b", prompt, re.IGNORECASE)):
+        instrumental = True
     if instrumental and lyrics:
         return None  # The agent can resolve contradictory instructions.
     return {"prompt": prompt.strip(" .?!"), "lyrics": lyrics,

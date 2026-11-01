@@ -437,6 +437,60 @@ def audio_file_ok(path: str | Path) -> bool:
         return False
 
 
+def compose_lyrics(prompt: str, duration_seconds: int) -> str:
+    """Write lyrics with the small local model before starting a vocal render.
+
+    ACE-Step can produce a mostly instrumental track when its lyrics field is
+    empty. This bounded call runs in the durable music worker, not the UI.
+    """
+    from cloud_ai import FAST_MODEL, post
+
+    target_words = max(20, min(450, round(duration_seconds * 1.6)))
+    result = post(
+        "http://127.0.0.1:11434/v1/chat/completions",
+        {"model": FAST_MODEL, "stream": False, "temperature": 0.7,
+         "max_tokens": 768, "reasoning_effort": "none",
+         "messages": [
+             {"role": "system", "content": (
+                 "Write original English song lyrics for a local music generator. "
+                 f"Aim for about {target_words} words. Include [Verse] and [Chorus] "
+                 "labels. Begin with a sung or rapped line and keep words going "
+                 "through most of the track. Return lyrics only, no explanation."
+             )},
+             {"role": "user", "content": prompt[:3000]},
+         ]}, timeout=120,
+    )
+    choice = result["choices"][0]
+    lyrics = str(choice["message"].get("content") or "").strip()
+    lyrics = re.sub(r"^```[^\n]*\n|\n```$", "", lyrics).strip()
+    if choice.get("finish_reason") == "length" or not 20 <= len(lyrics.split()) <= 650:
+        raise RuntimeError("The local lyric writer did not finish usable lyrics. Retry the song or supply lyrics.")
+    return lyrics
+
+
+def vocal_evidence(path: str | Path, duration_seconds: int) -> dict:
+    """Transcribe locally and require words across most of a requested song."""
+    python = ROOT / "Media/python/Scripts/python.exe"
+    if not python.is_file():
+        raise RuntimeError("The offline speech runtime is missing; vocal music cannot be verified.")
+    request = json.dumps({"action": "transcribe_audio", "path": str(Path(path).resolve())})
+    result = subprocess.run(
+        [str(python), str(ROOT / "media_worker.py")], input=request,
+        capture_output=True, text=True, timeout=180, creationflags=HIDE,
+    )
+    if result.returncode:
+        raise RuntimeError("The offline vocal check failed: " + result.stdout[-300:])
+    transcript = json.loads(result.stdout)
+    if transcript.get("error"):
+        raise RuntimeError("The offline vocal check failed: " + str(transcript["error"])[:200])
+    segments = transcript.get("segments") or []
+    words = len(str(transcript.get("text") or "").split())
+    final_second = max((float(row.get("end", 0)) for row in segments), default=0)
+    required_words = max(5, round(duration_seconds * 0.35))
+    return {"recognized_words": words, "last_vocal_second": round(final_second, 1),
+            "passed": words >= required_words and final_second >= duration_seconds * 0.6}
+
+
 def _launch_job(job_id: str) -> None:
     python = ROOT / "Toolbox" / "python" / "Scripts" / "python.exe"
     if not python.is_file():
@@ -486,9 +540,29 @@ def recover_music_jobs() -> None:
             output = Path(info["output_path"])
             if output.is_file():
                 if audio_file_ok(output):
+                    vocal_check = None
+                    if (info.get("duration_seconds") and not info.get("instrumental")
+                            and not info.get("source_path")):
+                        try:
+                            vocal_check = vocal_evidence(output, info["duration_seconds"])
+                        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                            _write_job(job_id, {
+                                **info, "status": "error",
+                                "current": "Could not verify the saved vocals: " + str(exc)[:200],
+                                "finished": time.time(),
+                            })
+                            continue
+                        if not vocal_check["passed"]:
+                            _write_job(job_id, {
+                                **info, "status": "error",
+                                "current": "The saved song has too few clear vocals. Try again or supply lyrics.",
+                                "vocal_check": vocal_check, "finished": time.time(),
+                            })
+                            continue
                     _write_job(job_id, {
                         **info, "status": "complete", "current": "Music is ready",
                         "result": {"path": str(output), "model": "ACE-Step 1.5"},
+                        "vocal_check": vocal_check,
                         "finished": time.time(),
                     })
                 else:
@@ -520,7 +594,7 @@ def recover_music_jobs() -> None:
 
 def start_music_job(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
-    instrumental: bool = False, source_path: str = "",
+    instrumental: bool = False, source_path: str = "", task_id: str = "",
 ) -> dict:
     """Launch a persistent local job; the agent can continue while it runs."""
     if not prompt.strip() or not 10 <= duration_seconds <= 600:
@@ -535,7 +609,7 @@ def start_music_job(
         "job_id": job_id, "status": "queued", "current": "Starting local music",
         "prompt": prompt, "output_path": str(target), "lyrics": lyrics,
         "duration_seconds": duration_seconds, "instrumental": bool(instrumental),
-        "source_path": source_path, "created": time.time(),
+        "source_path": source_path, "task_id": task_id, "created": time.time(),
     }
     _write_job(job_id, info)
     try:
@@ -551,7 +625,7 @@ def _run_job(job_id: str) -> None:
     if info.get("status") not in ("queued", "working"):
         return
     working = {
-        **info, "status": "working", "current": "Generating music locally",
+        **info, "status": "working", "current": "Preparing music locally",
         "worker_pid": os.getpid(),
     }
     _write_job(job_id, working)
@@ -559,21 +633,50 @@ def _run_job(job_id: str) -> None:
     def remember_task(task_id: str) -> None:
         _write_job(job_id, {**working, "server_task_id": task_id})
 
+    import usage_history
+
+    attribution = usage_history.CURRENT_TASK.set(info.get("task_id", ""))
     try:
+        lyrics = info["lyrics"]
+        needs_vocals = not info["instrumental"] and not info["source_path"]
+        if needs_vocals and not lyrics.strip():
+            working["current"] = "Writing lyrics locally"
+            _write_job(job_id, working)
+            lyrics = compose_lyrics(info["prompt"], info["duration_seconds"])
+            working["lyrics"] = lyrics
+            _write_job(job_id, working)
+            lyric_file = Path(info["output_path"]).with_suffix(".lyrics.txt")
+            if not lyric_file.exists():
+                lyric_file.parent.mkdir(parents=True, exist_ok=True)
+                lyric_file.write_text(lyrics + "\n", encoding="utf-8")
+        working["current"] = "Generating music locally"
+        _write_job(job_id, working)
         result = generate_music(
-            info["prompt"], info["output_path"], info["lyrics"],
+            info["prompt"], info["output_path"], lyrics,
             info["duration_seconds"], info["instrumental"], info["source_path"],
             info.get("server_task_id", ""), remember_task,
         )
+        check = None
+        if needs_vocals:
+            working["current"] = "Checking the vocals"
+            _write_job(job_id, working)
+            check = vocal_evidence(result["path"], info["duration_seconds"])
+            if not check["passed"]:
+                raise RuntimeError(
+                    "The song played, but sustained vocals were not detected. "
+                    "The audio is saved; retry or provide your own lyrics."
+                )
         _write_job(job_id, {
-            **info, "status": "complete", "current": "Music is ready",
-            "result": result, "finished": time.time(),
+            **working, "status": "complete", "current": "Music is ready",
+            "result": result, "vocal_check": check, "finished": time.time(),
         })
     except Exception as exc:
         _write_job(job_id, {
-            **info, "status": "error", "current": str(exc)[:300],
+            **working, "status": "error", "current": str(exc)[:300],
             "finished": time.time(),
         })
+    finally:
+        usage_history.CURRENT_TASK.reset(attribution)
 
 
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--run-job":

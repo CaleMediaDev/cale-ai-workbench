@@ -542,6 +542,7 @@ def add_music_project(request_text: str, spec: dict, folder: str = "") -> str:
             lyrics=spec.get("lyrics", ""),
             duration_seconds=spec["duration_seconds"],
             instrumental=spec["instrumental"],
+            task_id=pid,
         )
     except Exception as exc:
         update(pid, status="needs_input", detail=f"Local music could not start: {exc}")
@@ -1516,9 +1517,23 @@ def advance_project(p):
                 update(p["id"], status="needs_input",
                        detail="The music engine returned a file that could not be decoded as audio.")
                 return
+            if not job.get("instrumental") and not job.get("source_path"):
+                try:
+                    check = job.get("vocal_check") or music_backend.vocal_evidence(
+                        output, job["duration_seconds"]
+                    )
+                except (OSError, RuntimeError, ValueError, KeyError) as exc:
+                    update(p["id"], status="needs_input",
+                           detail="Could not check this song's vocals: " + str(exc)[:150])
+                    return
+                if not check["passed"]:
+                    update(p["id"], status="needs_input",
+                           detail="The song plays, but it has too few clear vocals. Try again or add lyrics.")
+                    return
             notes = Path(p["folder"]) / ".local-ai"
             (notes / "PLAN.md").write_text(
-                "# Plan\n\n- [x] Render the requested song locally.\n- [x] Check that the audio file exists and opens.\n",
+                "# Plan\n\n- [x] Render the requested song locally.\n"
+                "- [x] Check that the audio opens and requested vocals are present.\n",
                 encoding="utf-8",
             )
             (notes / "PROGRESS.md").write_text(
