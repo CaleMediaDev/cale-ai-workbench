@@ -398,6 +398,51 @@ class LongTaskTests(unittest.TestCase):
             self.assertEqual(create.call_args.args[0]["id"], pid)
             self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "queued")
 
+    def test_music_saved_during_setup_keeps_direct_music_route(self):
+        task_module.update(self.pid, status="paused")
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text('{"status":"working"}', encoding="utf-8")
+        spec = {"prompt": "Michigan rap", "lyrics": "", "duration_seconds": 180,
+                "instrumental": False}
+        pid = task_module.add_project(
+            "", str(self.base / "song"), "Make a 3 minute rap song",
+            waiting_for_setup=True, pending_media={"kind": "music", "spec": spec},
+        )
+        import music_backend
+        with (patch.object(task_module, "create_card") as create,
+              patch.object(music_backend, "start_music_job", return_value={"job_id": "song-1"}) as start):
+            task_module.tick()
+            start.assert_not_called()
+            progress.write_text('{"status":"complete"}', encoding="utf-8")
+            task_module.tick()
+            start.assert_called_once()
+            create.assert_not_called()
+        item = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(item["card"], "music-job:song-1")
+        self.assertEqual(item["status"], "working")
+        self.assertFalse((Path(item["folder"]) / ".local-ai/pending-media.json").exists())
+
+    def test_image_saved_during_setup_keeps_direct_image_route(self):
+        task_module.update(self.pid, status="paused")
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text('{"status":"working"}', encoding="utf-8")
+        pid = task_module.add_project(
+            "", str(self.base / "image"), "Make an image of a dog",
+            waiting_for_setup=True, pending_media={"kind": "image", "prompt": "a dog"},
+        )
+        import quick_image
+        with (patch.object(task_module, "create_card") as create,
+              patch.object(quick_image, "start_image_job", return_value={"job_id": "image-1"}) as start):
+            task_module.tick()
+            start.assert_not_called()
+            progress.write_text('{"status":"complete"}', encoding="utf-8")
+            task_module.tick()
+            start.assert_called_once()
+            create.assert_not_called()
+        item = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(item["card"], "image-job:image-1")
+        self.assertEqual(item["status"], "working")
+
     def test_waiting_task_shows_setup_failure(self):
         progress = task_module.STATE / "install-progress.json"
         progress.write_text(

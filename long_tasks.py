@@ -468,7 +468,7 @@ def original_request_preview(brief):
     )
 
 
-def add_project(title, folder, brief, waiting_for_setup=False):
+def add_project(title, folder, brief, waiting_for_setup=False, pending_media=None):
     """Create a task without overlapping another task's project folder."""
     title, brief = title.strip(), brief.strip()
     if not brief:
@@ -499,6 +499,10 @@ def add_project(title, folder, brief, waiting_for_setup=False):
     folder.mkdir(parents=True, exist_ok=True)
     notes = folder / ".local-ai"
     notes.mkdir(exist_ok=True)
+    if pending_media is not None:
+        (notes / "pending-media.json").write_text(
+            json.dumps(pending_media), encoding="utf-8"
+        )
     save_original_request(folder, pid, brief)
     # New workers are asked to read these files before acting. Seed them so a
     # first run can distinguish a fresh project from a failed file read.
@@ -535,6 +539,15 @@ def add_music_project(request_text: str, spec: dict, folder: str = "") -> str:
 
     pid = add_project("", folder, request_text, waiting_for_setup=True)
     p = next(item for item in projects() if item["id"] == pid)
+    _start_music_project(p, spec)
+    return pid
+
+
+def _start_music_project(p: dict, spec: dict) -> None:
+    """Start a saved song request without creating a second project."""
+    import music_backend
+
+    pid = p["id"]
     folder = Path(p["folder"])
     (folder / ".local-ai" / "PLAN.md").write_text(
         "# Plan\n\n- [ ] Render the requested song locally.\n- [ ] Check that the audio file exists and opens.\n",
@@ -553,7 +566,6 @@ def add_music_project(request_text: str, spec: dict, folder: str = "") -> str:
         raise
     update(pid, card="music-job:" + job["job_id"], status="working",
            detail="Starting local music render")
-    return pid
 
 
 def add_image_project(request_text: str, prompt: str, folder: str = "") -> str:
@@ -562,6 +574,15 @@ def add_image_project(request_text: str, prompt: str, folder: str = "") -> str:
 
     pid = add_project("", folder, request_text, waiting_for_setup=True)
     p = next(item for item in projects() if item["id"] == pid)
+    _start_image_project(p, prompt)
+    return pid
+
+
+def _start_image_project(p: dict, prompt: str) -> None:
+    """Start a saved image request without creating a second project."""
+    import quick_image
+
+    pid = p["id"]
     target = Path(p["folder"]) / "image.png"
     (target.parent / ".local-ai" / "PLAN.md").write_text(
         "# Plan\n\n- [ ] Generate the requested image locally.\n- [ ] Check that the PNG has decodable pixels.\n",
@@ -574,7 +595,6 @@ def add_image_project(request_text: str, prompt: str, folder: str = "") -> str:
         raise
     update(pid, card="image-job:" + job["job_id"], status="working",
            detail="Starting local image render")
-    return pid
 
 
 def project_prompt(p, extra=""):
@@ -1619,6 +1639,17 @@ def advance_project(p):
     if p["status"] == "waiting_for_setup":
         setup = read_task_status(STATE / "install-progress.json")
         if setup and setup.get("status") != "complete":
+            return
+        pending = Path(p["folder"]) / ".local-ai" / "pending-media.json"
+        if pending.is_file():
+            media = json.loads(pending.read_text(encoding="utf-8"))
+            if media["kind"] == "music":
+                _start_music_project(p, media["spec"])
+            elif media["kind"] == "image":
+                _start_image_project(p, media["prompt"])
+            else:
+                raise ValueError("Unknown saved media task type")
+            pending.unlink()
             return
         update(p["id"], status="queued", detail="Setup finished. Getting ready.")
         p["status"] = "queued"
@@ -3305,7 +3336,8 @@ def gui():
             if action == "image":
                 setup = read_task_status(STATE / "install-progress.json")
                 if setup and setup.get("status") != "complete":
-                    add_project("", "", value, waiting_for_setup=True)
+                    add_project("", "", value, waiting_for_setup=True,
+                                pending_media={"kind": "image", "prompt": chat_assistant.image_prompt(raw_value)})
                     assistant_reply("I saved your image task. I'll start it after setup finishes.")
                 else:
                     add_image_project(value, chat_assistant.image_prompt(raw_value))
@@ -3314,7 +3346,8 @@ def gui():
             elif action == "music":
                 setup = read_task_status(STATE / "install-progress.json")
                 if setup and setup.get("status") != "complete":
-                    pid = add_project("", "", value, waiting_for_setup=True)
+                    pid = add_project("", "", value, waiting_for_setup=True,
+                                      pending_media={"kind": "music", "spec": chat_assistant.music_request(raw_value)})
                     assistant_reply("I saved your music task. I'll start it after setup finishes.")
                 else:
                     pid = add_music_project(value, chat_assistant.music_request(raw_value))
