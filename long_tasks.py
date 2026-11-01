@@ -3102,8 +3102,9 @@ def gui():
         speak_update(
             "Hi, I'm Cale. I can research, build websites and apps, work with files, "
             "and keep going on long projects. Your tasks and progress are right here. "
-            "Type what you want in the chat. I'll answer or start a task for you. My mic is off until you turn it on. "
-            "With the mic on, I only respond when you say Hey Cale before an instruction. "
+            "Type what you want in the chat. I'll answer or start a task for you. "
+            "My mic starts on, and I only respond when you say Hey Cale before an instruction. "
+            "You can turn the mic off with the button at the top. "
             "You can also press Control Alt Space to speak once without a wake phrase. I'll tell you what I'm "
             "doing, and a side window will show website, app, and Chrome work. "
             "If you want stronger online AI, use Supercharge my AI at the top. "
@@ -3165,7 +3166,7 @@ def gui():
 
     wake_sequence = voice_assistant.WakeSequence()
 
-    def toggle_listening():
+    def toggle_listening(interrupt_speech=True):
         mic_check_generation[0] += 1
         generation = mic_check_generation[0]
         if listening.is_set():
@@ -3178,7 +3179,8 @@ def gui():
         else:
             listening.set()
             mic_preflight_pending.set()
-            mic_turn_requested.set()
+            if interrupt_speech:
+                mic_turn_requested.set()
             mic_button.configure(text="🎤  Mic starting…")
             voice_label.set("Checking the selected microphone…")
 
@@ -4463,6 +4465,7 @@ def gui():
                     if generation == mic_check_generation[0] and listening.is_set():
                         mic_preflight_pending.clear()
                         selected_mic_device[0] = device
+                        mic_button.configure(text="🎤  Mic On")
                         voice_label.set("Using " + device[:85] + ". Say Hey Cale before an instruction.")
                         maybe_listen()
                 elif event == "mic_preflight_error":
@@ -4738,6 +4741,9 @@ def gui():
             window.after(900, connect)
         window.after(5000, poll)
 
+    # Arm the microphone on launch without cutting off Cale's introduction.
+    # Recording begins only after the device check and any speech finish.
+    toggle_listening(interrupt_speech=False)
     voice_poll()
     poll()
     window.mainloop()
