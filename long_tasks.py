@@ -679,6 +679,29 @@ def handle_handoff(p, task):
         )
 
 
+REVIEW_CARD_CHECKED = set()
+
+
+def retire_review_card(p):
+    """Keep an already verified task from being dispatched a second time.
+
+    A normal review handoff leaves its card in review. A recovered or manually
+    verified project may still have a ready board card; archive that card once.
+    Running workers are blocked first and archived on the next supervisor tick.
+    """
+    card = p["card"]
+    if not card or card in REVIEW_CARD_CHECKED:
+        return
+    snapshot = board("show", card, "--json", parse=True)
+    state = snapshot["task"]["status"]
+    if state == "running":
+        board("block", card, "Task is independently verified and ready for user review", "--kind", "needs_input")
+        return
+    if state in ("ready", "scheduled", "blocked", "triage"):
+        board("archive", card)
+    REVIEW_CARD_CHECKED.add(card)
+
+
 def process_requests():
     """Apply queued UI actions to SQLite and the native Hermes board."""
     with database() as conn:
@@ -845,6 +868,7 @@ def advance_project(p):
                 fingerprint=fingerprint(folder) if passed else "",
             )
             return
+        retire_review_card(p)
         if fingerprint(Path(p["folder"])) != p["fingerprint"]:
             update(
                 p["id"],

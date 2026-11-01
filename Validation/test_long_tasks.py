@@ -198,6 +198,45 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(create.call_count, 2)
         board.assert_not_called()
 
+    def test_verified_task_archives_a_ready_board_card_once(self):
+        folder = self.base / "project"
+        task_module.update(
+            self.pid, card="ready-card", phase="review",
+            status="ready_for_review", fingerprint=task_module.fingerprint(folder),
+        )
+        with (
+            patch.object(task_module, "REVIEW_CARD_CHECKED", set()),
+            patch.object(task_module, "board", return_value={"task": {"status": "ready"}}) as board,
+        ):
+            task_module.tick()
+            task_module.tick()
+        self.assertEqual(self.item()["status"], "ready_for_review")
+        self.assertEqual([call.args[0] for call in board.call_args_list], ["show", "archive"])
+
+    def test_verified_task_blocks_running_worker_before_archiving(self):
+        folder = self.base / "project"
+        task_module.update(
+            self.pid, card="running-card", phase="review",
+            status="ready_for_review", fingerprint=task_module.fingerprint(folder),
+        )
+        states = iter(("running", "triage"))
+
+        def board_call(command, *args, **kwargs):
+            if command == "show":
+                return {"task": {"status": next(states)}}
+            return "ok"
+
+        with (
+            patch.object(task_module, "REVIEW_CARD_CHECKED", set()),
+            patch.object(task_module, "board", side_effect=board_call) as board,
+        ):
+            task_module.tick()
+            task_module.tick()
+        self.assertEqual(
+            [call.args[0] for call in board.call_args_list],
+            ["show", "block", "show", "archive"],
+        )
+
     def test_review_feedback_starts_a_new_saved_generation(self):
         task_module.update(self.pid, card="review-card", phase="review", status="ready_for_review")
         task_module.request(self.pid, "note", "Add a larger search box")
