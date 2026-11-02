@@ -192,34 +192,68 @@ def music_lm_ready() -> bool:
         return False
 
 
+def _runtime_healthy(python: Path, uv: str) -> bool:
+    """Check the installed music environment, not just its marker file."""
+    if not python.is_file() or not (ENGINE / ".venv/Scripts/acestep-api.exe").is_file():
+        return False
+    probe = (
+        "import importlib.util,sys; "
+        "names=('acestep','torch','diffusers','fastapi','soundfile','gradio','uvicorn'); "
+        "missing=[name for name in names if importlib.util.find_spec(name) is None]; "
+        "print(', '.join(missing)); sys.exit(bool(missing))"
+    )
+    try:
+        imports = subprocess.run(
+            [str(python), "-c", probe], capture_output=True, text=True,
+            timeout=30, creationflags=HIDE,
+        )
+        if imports.returncode:
+            return False
+        dependencies = subprocess.run(
+            [uv, "pip", "check", "--python", str(python)],
+            capture_output=True, text=True, timeout=60, creationflags=HIDE,
+        )
+        return dependencies.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def install() -> Path:
     """Install a pinned upstream revision into the workbench's local data."""
     marker = ENGINE / ".cale-installed"
-    if marker.is_file() and (ENGINE / ".venv" / "Scripts" / "python.exe").is_file():
-        return ENGINE
-    if shutil.disk_usage(ROOT).free < 18 * 1024**3:
-        raise RuntimeError("Local music needs at least 18 GB of free disk space.")
-    git = _tool("git")
+    python = ENGINE / ".venv" / "Scripts" / "python.exe"
     uv = _tool("uv")
+    if marker.is_file() and marker.read_text(encoding="ascii").strip() == REVISION and _runtime_healthy(python, uv):
+        return ENGINE
+    fresh_checkout = (not marker.is_file()
+                      or marker.read_text(encoding="ascii").strip() != REVISION
+                      or not (ENGINE / ".git").is_dir()
+                      or not (ENGINE / "pyproject.toml").is_file())
+    if fresh_checkout and shutil.disk_usage(ROOT).free < 18 * 1024**3:
+        raise RuntimeError("Local music needs at least 18 GB of free disk space.")
+    git = _tool("git") if fresh_checkout else ""
     ENGINE.mkdir(parents=True, exist_ok=True)
-    if not (ENGINE / ".git").is_dir():
-        subprocess.run([git, "init", str(ENGINE)], check=True, timeout=60, creationflags=HIDE)
-    subprocess.run(
-        [git, "-C", str(ENGINE), "fetch", "--depth", "1",
-         "https://github.com/ace-step/ACE-Step-1.5.git", REVISION],
-        check=True, timeout=900, creationflags=HIDE,
-    )
-    subprocess.run(
-        [git, "-C", str(ENGINE), "checkout", "--force", "FETCH_HEAD"],
-        check=True, timeout=120, creationflags=HIDE,
-    )
+    if fresh_checkout:
+        if not (ENGINE / ".git").is_dir():
+            subprocess.run([git, "init", str(ENGINE)], check=True, timeout=60, creationflags=HIDE)
+        subprocess.run(
+            [git, "-C", str(ENGINE), "fetch", "--depth", "1",
+             "https://github.com/ace-step/ACE-Step-1.5.git", REVISION],
+            check=True, timeout=900, creationflags=HIDE,
+        )
+        subprocess.run(
+            [git, "-C", str(ENGINE), "checkout", "--force", "FETCH_HEAD"],
+            check=True, timeout=120, creationflags=HIDE,
+        )
     env = os.environ.copy()
     env["UV_PYTHON_INSTALL_DIR"] = str(ROOT / "Media" / "runtime")
     env["UV_CACHE_DIR"] = str(ROOT / "Media" / "uv-cache")
     subprocess.run(
-        [uv, "sync", "--no-dev", "--python", "3.11"],
+        [uv, "sync", "--no-dev", "--python", str(python) if python.is_file() else "3.11"],
         cwd=ENGINE, env=env, check=True, timeout=3600, creationflags=HIDE,
     )
+    if not _runtime_healthy(python, uv):
+        raise RuntimeError("Local music dependencies are incomplete after repair; see Media/music/server.log.")
     marker.write_text(REVISION, encoding="ascii")
     return ENGINE
 

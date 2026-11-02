@@ -153,6 +153,20 @@ def test_genre_first_bpm_song_brief_starts_local_render():
     assert chat_assistant.route(brief, []) == "music"
 
 
+def test_detailed_genre_brief_without_bpm_starts_local_render():
+    brief = (
+        "Dark industrial techno with distorted bass and eerie synthesizers. "
+        "Use a sparse intro with metallic drums and rising noise.\n\n"
+        "Deep male vocals move between whispered lines and rhythmic rap. "
+        "The first verse grows into a repeated chorus with layered voices. "
+        "Pull the beat back before a heavy drop, then end on a low drone. "
+        "Keep the melody tense and the mix clear enough to hear every word."
+    )
+    assert chat_assistant.route(brief, []) == "music"
+    assert chat_assistant.music_request(brief)["instrumental"] is False
+    assert chat_assistant.route("How would you arrange a dark techno chorus?", []) == "answer"
+
+
 def test_detailed_create_track_or_banger_skips_general_agent_planning():
     track = (
         "Create an insanely catchy, high-energy melodic dubstep and heavy bass "
@@ -281,6 +295,21 @@ def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():
     assert chat_assistant.music_request("make a 1 minute 30 second song")["duration_seconds"] == 90
     assert chat_assistant.music_request("make a 1 minute and 30 second song")["duration_seconds"] == 90
     assert chat_assistant.music_request("make a 1:30 song")["duration_seconds"] == 90
+    assert chat_assistant.music_request(
+        "Make a German techno song in the style of the 1990s and early 2000s"
+    )["duration_seconds"] == 180
+    actual_style = (
+        "145 BPM, quirky old-school German techno, late 1990s and early 2000s "
+        "European rave music, bouncy Eurodance, hypnotic repetitive nonsense vocals, "
+        "hard four-on-the-floor kick drums, rubbery analog synth bass, "
+        "goofy robotic vocal effects, playful German-accented male vocals, "
+        "high-pitched female vocal responses. Build with synth riffs and dance drops."
+    )
+    assert chat_assistant.route(actual_style, []) == "music"
+    assert chat_assistant.music_request(actual_style)["duration_seconds"] == 180
+    assert chat_assistant.music_request(
+        "Make a 1990s techno song with a 45s intro"
+    )["duration_seconds"] == 45
     with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
         chat_assistant.music_request("make an 11 minute song")
 

@@ -29,6 +29,21 @@ def test_browser_runtime_failure_is_visible_even_when_node_runs(tmp_path, monkey
     assert core_tool_health.missing(tmp_path, fresh=True) == ["Local browser runtime"]
 
 
+def test_agent_sdk_probe_uses_managed_install_facts(tmp_path, monkeypatch):
+    facts = tmp_path / "data/installs/current/facts.json"
+    facts.parent.mkdir(parents=True)
+    agent_env = tmp_path / "data/agent-venv"
+    facts.write_text(json.dumps({"packages": {"venv": {"environment": str(agent_env)}}}))
+    assert core_tool_health._agent_python(tmp_path) == agent_env / "Scripts/python.exe"
+    monkeypatch.setattr(core_tool_health, "_runnable",
+                        lambda path, *args: "ResponseFormatJSONObject" not in " ".join(args))
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+    ghidra.parent.mkdir(parents=True)
+    ghidra.touch()
+    assert "Agent model SDK" in core_tool_health.missing(tmp_path, fresh=True)
+
+
 def test_background_repair_waits_for_first_install(tmp_path, monkeypatch):
     monkeypatch.setattr(core_tool_health, "_last_repair", None)
     monkeypatch.setattr(core_tool_health, "_repair_thread", None)

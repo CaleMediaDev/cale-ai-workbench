@@ -82,6 +82,15 @@ try {
         }
         Write-Output 'Local browser and JavaScript tools repaired.'
     }
+    $agentPython=Find-CaleHermesPython (Join-Path $Destination 'data')
+    $sdkProbe='from openai.types.shared_params.response_format_json_object import ResponseFormatJSONObject'
+    if ($agentPython -and -not (Test-CaleRunnable $agentPython @('-c',$sdkProbe))) {
+        & $agentPython -m pip install --disable-pip-version-check --no-deps --force-reinstall 'openai==2.24.0'
+        if ($LASTEXITCODE -ne 0 -or -not (Test-CaleRunnable $agentPython @('-c',$sdkProbe))) {
+            throw 'The agent model SDK is incomplete after repair.'
+        }
+        Write-Output 'Agent model SDK repaired.'
+    }
     Write-Output 'Managed core tools passed their checks.'
 } finally {
     $lock.ReleaseMutex()

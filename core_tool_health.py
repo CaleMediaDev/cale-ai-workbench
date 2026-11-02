@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CHECK_INTERVAL = 300
+AGENT_SDK_PROBE = "from openai.types.shared_params.response_format_json_object import ResponseFormatJSONObject"
 _last_check = 0.0
 _cached_root: Path | None = None
 _cached_missing: list[str] = []
@@ -45,6 +46,20 @@ def _browser_works(root: Path, node: Path) -> bool:
         return False
 
 
+def _agent_python(root: Path) -> Path | None:
+    """Read the agent's managed environment from its own install facts."""
+    try:
+        facts = sorted((root / "data/installs").glob("*/facts.json"),
+                       key=lambda path: path.stat().st_mtime, reverse=True)
+        if not facts:
+            return None
+        info = json.loads(facts[0].read_text(encoding="utf-8"))
+        environment = info["packages"]["venv"]["environment"]
+        return Path(environment) / "Scripts/python.exe"
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     """Probe actual executables, cached briefly to keep the desktop responsive."""
     global _cached_root, _cached_missing, _last_check
@@ -65,6 +80,9 @@ def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
         unavailable.append("Java")
     if not (box / "ghidra_12.1.4_PUBLIC/ghidraRun.bat").is_file():
         unavailable.append("Ghidra")
+    agent_python = _agent_python(root)
+    if agent_python is not None and not _runnable(agent_python, "-c", AGENT_SDK_PROBE):
+        unavailable.append("Agent model SDK")
     _cached_root, _cached_missing, _last_check = root, unavailable, time.monotonic()
     return list(unavailable)
 

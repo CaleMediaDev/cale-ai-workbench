@@ -94,6 +94,16 @@ try {
    $runtime=Find-CaleHermesPython $env:HERMES_HOME
  }
  if (-not $runtime -or -not (Test-CaleRunnable $runtime @('-V'))) { throw 'The agent Python runtime did not start after repair.' }
+ # A Python environment can launch while its OpenAI SDK is incomplete. The
+ # agent then fails only when a task reaches structured model output.
+ $sdkProbe='from openai.types.shared_params.response_format_json_object import ResponseFormatJSONObject'
+ if (-not (Test-CaleRunnable $runtime @('-c',$sdkProbe))) {
+   Write-SetupStatus 18 'Repairing the agent model SDK'
+   & $runtime -m pip install --disable-pip-version-check --no-deps --force-reinstall 'openai==2.24.0'
+   if ($LASTEXITCODE -ne 0 -or -not (Test-CaleRunnable $runtime @('-c',$sdkProbe))) {
+     throw 'The agent model SDK is incomplete after repair.'
+   }
+ }
  $box=Join-Path $Destination 'Toolbox'
  Write-SetupStatus 25 'Installing tools and browser support'
  New-Item -ItemType Directory -Path $box -Force | Out-Null
@@ -252,7 +262,7 @@ try {
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
-[IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.339')
+[IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.340')
  Write-SetupStatus 100 'Your AI is ready' 'complete'
  # Optional local models continue in a separate process after the installer closes.
  Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden

@@ -98,6 +98,26 @@ def test_music_planner_status_falls_back_when_unavailable():
         assert music_backend.music_lm_ready() is False
 
 
+def test_music_install_repairs_broken_environment_without_refetching_source(tmp_path):
+    engine = tmp_path / "ACE-Step-1.5"
+    python = engine / ".venv/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (engine / ".git").mkdir()
+    (engine / "pyproject.toml").touch()
+    (engine / ".cale-installed").write_text(music_backend.REVISION)
+    with (patch.object(music_backend, "ROOT", tmp_path),
+          patch.object(music_backend, "ENGINE", engine),
+          patch.object(music_backend, "_tool", return_value="uv") as tool,
+          patch.object(music_backend, "_runtime_healthy", side_effect=[False, True]) as health,
+          patch.object(music_backend.subprocess, "run") as run):
+        assert music_backend.install() == engine
+    tool.assert_called_once_with("uv")
+    assert health.call_count == 2
+    assert len(run.call_args_list) == 1
+    assert run.call_args.args[0] == ["uv", "sync", "--no-dev", "--python", str(python)]
+
+
 def test_music_server_allows_gpu_tier_to_load_planner(tmp_path):
     engine = tmp_path / "ACE-Step-1.5"
     executable = engine / ".venv" / "Scripts" / "acestep-api.exe"

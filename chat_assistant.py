@@ -112,9 +112,16 @@ def music_request(text: str) -> dict | None:
         r"\b(\d+)\s*(?:minutes?|mins?|min)\s*(?:and\s*)?"
         r"(\d+)\s*(?:seconds?|secs?|sec|s)\b", prompt, re.IGNORECASE,
     )
-    single = re.search(
+    single_candidates = re.finditer(
         r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|minutes?|mins?|min|s)\b",
         prompt, re.IGNORECASE,
+    )
+    # In a style brief, "1990s" and "2000s" are decades, not seconds.
+    single = next(
+        (match for match in single_candidates
+         if not (match.group(2).lower() == "s"
+                 and re.fullmatch(r"(?:1[89]|20)\d{2}", match.group(1)))),
+        None,
     )
     if clock:
         duration = int(clock.group(1)) * 60 + int(clock.group(2))
@@ -175,14 +182,6 @@ def bare_song_brief(text: str) -> bool:
     ):
         return False
     opening = value[:120]
-    spec_opening = bool(re.search(r"\b\d{2,3}\s*BPM\b", opening, re.I) or re.match(
-        r"^(?:genre|style|vocals?|song brief|music brief)\s*:", opening, re.I,
-    ) or re.match(
-        r"^(?:(?:make|create|generate|compose|produce)\s+)?(?:an?\s+)?"
-        r"[^.!?\n]{0,100}\b(?:song|track|banger)\b", opening, re.I,
-    ))
-    if not spec_opening:
-        return False
     signals = sum(bool(re.search(pattern, value, re.I)) for pattern in (
         r"\b(?:song|track|music|rap)\b",
         r"\b(?:BPM|tempo)\b",
@@ -190,7 +189,23 @@ def bare_song_brief(text: str) -> bool:
         r"\b(?:chorus|verse|bridge|melod(?:y|ic))\b",
         r"\b(?:drop|bass|synth|drums|genre)\b",
     ))
-    return signals >= 3
+    spec_opening = bool(re.search(r"\b\d{2,3}\s*BPM\b", opening, re.I) or re.match(
+        r"^(?:genre|style|vocals?|song brief|music brief)\s*:", opening, re.I,
+    ) or re.match(
+        r"^(?:(?:make|create|generate|compose|produce)\s+)?(?:an?\s+)?"
+        r"[^.!?\n]{0,100}\b(?:song|track|banger)\b", opening, re.I,
+    ))
+    # People also paste production briefs that begin with a genre and omit
+    # numeric tempo. Require several independent musical details so a casual
+    # mention of a genre does not accidentally launch a render.
+    genre_brief = bool(
+        len(value) >= 250 and signals >= 4 and re.search(
+            r"\b(?:dubstep|riddim|techno|house|trance|hip-hop|trap|metal|"
+            r"rock|punk|pop|country|jazz|ambient|drum and bass)\b",
+            opening, re.I,
+        )
+    )
+    return (spec_opening and signals >= 3) or genre_brief
 
 
 def verified_chat_answer(answer: str) -> str:
