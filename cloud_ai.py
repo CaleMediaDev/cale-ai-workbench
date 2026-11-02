@@ -614,6 +614,7 @@ class Router:
         self.model_cache = {}
         self.model_contexts = {}
         self.model_vision = set()
+        self.model_speeds = {}
         self.model_cache_until = 0
         self.provider_cooldowns = {}
         self.provider_last_attempts = {}
@@ -741,6 +742,9 @@ class Router:
             self.model_cache = available
             self.model_contexts = contexts
             self.model_vision = vision
+            self.model_speeds = {
+                name: model_fitness.measured_speed(name) for name in available
+            }
             self.model_cache_until = time.monotonic() + 60
         balanced_preferred = BALANCED_MODEL
         if size == "balanced":
@@ -767,13 +771,10 @@ class Router:
              and (include_fallback or not any(
                  item.get("fallback_only") and item["alias"] == name
                  for item in CATALOG.values()))},
-            LOCAL_MODEL, FAST_MODEL, balanced_preferred
+            LOCAL_MODEL, FAST_MODEL, balanced_preferred,
+            speeds=self.model_speeds,
         )
-        if (size == "deep" and required_context <= 65536 and
-                STANDARD_MAIN_ALIAS in ordered):
-            ordered.remove(STANDARD_MAIN_ALIAS)
-            ordered.insert(0, STANDARD_MAIN_ALIAS)
-        elif size in ("quick", "balanced"):
+        if size in ("quick", "balanced"):
             for loaded in loaded_local_models():
                 parameters = self.model_cache.get(loaded, 0)
                 same_tier = (

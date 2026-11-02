@@ -410,6 +410,18 @@ class AutoRouteTests(unittest.TestCase):
         self.assertEqual(model_order("balanced", models, "main", "fast", "new")[0], "new")
         self.assertEqual(model_order("balanced", models, "main", "fast", "fast")[0], "old")
 
+    def test_deep_task_avoids_measured_slow_giant_when_fast_large_model_exists(self):
+        models = {"giant": 79, "newer": 35.5, "fast": 9}
+        speeds = {"giant": 6.0, "newer": 18.5, "fast": 35.0}
+        self.assertEqual(
+            model_order("deep", models, "giant", "fast", "newer", speeds)[0],
+            "newer",
+        )
+        self.assertEqual(
+            model_order("deep", models, "giant", "fast", "newer")[0],
+            "giant",  # Unknown performance still gets a chance to be measured.
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

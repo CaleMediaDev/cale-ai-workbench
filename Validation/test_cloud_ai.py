@@ -598,7 +598,7 @@ class CloudTests(unittest.TestCase):
               patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
               patch.object(cloud, "candidate_approved", return_value=True),
               patch("model_fitness.suitable", return_value=True),
-              patch.object(cloud, "model_order", side_effect=lambda _size, available, *_: list(available)),
+              patch.object(cloud, "model_order", side_effect=lambda _size, available, *_, **__: list(available)),
               patch.object(cloud, "refresh_catalog"),
               patch.object(cloud, "loaded_local_models", return_value=[])):
             router = cloud.Router()
@@ -1149,6 +1149,18 @@ class CloudTests(unittest.TestCase):
                 router.local_candidates("quick", required_context=131072),
                 [],
             )
+
+    def test_deep_route_uses_newer_or_measured_faster_large_model(self):
+        self.candidates.stop()
+        router = cloud.Router()
+        router.model_cache_until = time.monotonic() + 60
+        router.model_cache = {cloud.STANDARD_MAIN_ALIAS: 34.7, "cale-qwen36": 35.5}
+        router.model_contexts = {name: 65536 for name in router.model_cache}
+        router.model_speeds = {cloud.STANDARD_MAIN_ALIAS: None, "cale-qwen36": 18.5}
+        self.assertEqual(router.local_candidates("deep")[0], "cale-qwen36")
+        router.model_cache[cloud.STANDARD_MAIN_ALIAS] = 79
+        router.model_speeds[cloud.STANDARD_MAIN_ALIAS] = 6.0
+        self.assertEqual(router.local_candidates("deep")[0], "cale-qwen36")
 
     def test_approved_recommended_35b_model_becomes_balanced_preference(self):
         self.candidates.stop()

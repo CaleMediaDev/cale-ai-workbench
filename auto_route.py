@@ -271,13 +271,24 @@ def task_size(messages):
     return "balanced"
 
 
-def model_order(size, available, main, fast, balanced):
+def model_order(size, available, main, fast, balanced, speeds=None):
     """Rank every installed tool-capable alias; the main model is a fallback."""
     ready = {name: parameters for name, parameters in available.items() if parameters}
+    speeds = speeds or {}
     if size == "quick":
         preference = sorted(ready, key=lambda name: (ready[name], name != fast))
     elif size == "deep":
-        preference = sorted(ready, key=lambda name: ready[name], reverse=True)
+        # A measured slow giant should not win merely by having more weights
+        # when a substantial, faster model is already available.
+        faster_large_model = any(
+            parameters >= 20 and (speeds.get(name) or 0) >= 10
+            for name, parameters in ready.items()
+        )
+        preference = sorted(ready, key=lambda name: (
+            bool(faster_large_model and speeds.get(name) is not None
+                 and speeds[name] < 10),
+            -ready[name],
+        ))
     else:
         preference = sorted(
             ready,
