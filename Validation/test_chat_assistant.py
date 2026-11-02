@@ -51,6 +51,46 @@ def test_remembered_file_excerpt_stays_local_even_with_cloud_scope(tmp_path):
     assert "Amount: $42" in local.call_args.args[1]["messages"][1]["content"]
 
 
+def test_private_file_followup_keeps_its_history_on_local_model(tmp_path):
+    import cloud_ai
+    import routing_mode
+
+    routing_mode.save_scope(tmp_path, "free_cloud_only")
+    history = [
+        {"role": "user", "content": "What did my invoice say?", "private": True},
+        {"role": "assistant", "content": "The total is $42.", "private": True},
+    ]
+    response = {"choices": [{"message": {"content": "It was $42."}}]}
+    with (patch.object(cloud_ai, "STATE", tmp_path),
+          patch.object(cloud_ai.Router, "complete") as cloud,
+          patch.object(cloud_ai, "post", return_value=response) as local):
+        answer = chat_assistant.local_answer("What was the total?", history)
+    assert answer == "It was $42."
+    cloud.assert_not_called()
+    assert "The total is $42." in str(local.call_args.args[1]["messages"])
+
+
+def test_unrelated_chat_omits_private_history_before_cloud(tmp_path):
+    import cloud_ai
+    import routing_mode
+
+    routing_mode.save_scope(tmp_path, "free_cloud_only")
+    history = [
+        {"role": "user", "content": "What did my invoice say?", "private": True},
+        {"role": "assistant", "content": "The total is $42.", "private": True},
+    ]
+    response = {"choices": [{"message": {"content": "Jupiter is a gas giant."},
+                             "finish_reason": "stop"}]}
+    with (patch.object(cloud_ai, "STATE", tmp_path),
+          patch.object(cloud_ai.Router, "complete", return_value=response) as cloud,
+          patch.object(cloud_ai, "post") as local):
+        answer = chat_assistant.local_answer("Tell me about Jupiter", history)
+    assert answer == "Jupiter is a gas giant."
+    assert "$42" not in str(cloud.call_args.args[0]["messages"])
+    assert "invoice" not in str(cloud.call_args.args[0]["messages"])
+    local.assert_not_called()
+
+
 def test_free_cloud_scope_keeps_local_calculator_tool(tmp_path):
     import cloud_ai
     import routing_mode

@@ -850,6 +850,25 @@ class LongTaskTests(unittest.TestCase):
         later = task_module.chat_context("What is my favorite color?", recent=2)
         self.assertIn("teal", later[0]["content"])
 
+    def test_legacy_chat_is_private_and_new_turns_keep_their_marker(self):
+        with contextlib.closing(sqlite3.connect(task_module.STATE / "projects.db")) as conn:
+            conn.execute("DROP TABLE chat_messages")
+            conn.execute("""CREATE TABLE chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL,
+                content TEXT NOT NULL, created REAL NOT NULL)""")
+            conn.execute("INSERT INTO chat_messages(role,content,created) VALUES(?,?,?)",
+                         ("assistant", "Private amount $42.", 1))
+            conn.commit()
+        old = task_module.chat_context("amount", recent=10, recall=0)
+        self.assertTrue(old[0]["private"])
+        task_module.save_chat("user", "What was the amount?", private=True)
+        task_module.save_chat("assistant", "It was $42.")
+        task_module.save_chat("user", "Tell me about Jupiter", private=False)
+        task_module.save_chat("assistant", "Jupiter is a gas giant.")
+        recent = task_module.chat_context("Jupiter", recent=10, recall=0)
+        self.assertEqual([item["private"] for item in recent],
+                         [True, True, True, False, False])
+
     def test_task_saved_during_setup_starts_after_setup_finishes(self):
         task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"

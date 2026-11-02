@@ -190,7 +190,16 @@ def database():
       status TEXT DEFAULT 'pending', result TEXT DEFAULT '')""")
     conn.execute("""CREATE TABLE IF NOT EXISTS chat_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL,
-      content TEXT NOT NULL, created REAL NOT NULL)""")
+      content TEXT NOT NULL, created REAL NOT NULL,
+      private INTEGER NOT NULL DEFAULT 0)""")
+    if "private" not in {row[1] for row in conn.execute("PRAGMA table_info(chat_messages)")}:
+        try:
+            # Old turns lack provenance. Keep them out of future cloud context
+            # rather than guessing which contained private file answers.
+            conn.execute("ALTER TABLE chat_messages ADD COLUMN private INTEGER NOT NULL DEFAULT 1")
+        except sqlite3.OperationalError as exc:
+            if "private" not in {row[1] for row in conn.execute("PRAGMA table_info(chat_messages)")}:
+                raise exc
     conn.execute("""CREATE TABLE IF NOT EXISTS task_retry_state (
       task_id TEXT PRIMARY KEY, status TEXT NOT NULL, card TEXT NOT NULL,
       attempts INTEGER NOT NULL, retry_at REAL NOT NULL)""")
@@ -272,7 +281,7 @@ def chat_history(limit=50):
     """Read the most recent messages in conversation order."""
     with database() as conn:
         rows = conn.execute(
-            "SELECT role, content FROM chat_messages ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT role, content, private FROM chat_messages ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(row) for row in reversed(rows)]
 
@@ -294,11 +303,12 @@ def chat_context(question, recent=10, recall=2):
     """
     with database() as conn:
         latest = conn.execute(
-            "SELECT id,role,content FROM chat_messages ORDER BY id DESC LIMIT ?",
+            "SELECT id,role,content,private FROM chat_messages ORDER BY id DESC LIMIT ?",
             (recent,),
         ).fetchall()
         history = [
-            {"role": row["role"], "content": row["content"][:1800]}
+            {"role": row["role"], "content": row["content"][:1800],
+             "private": bool(row["private"])}
             for row in reversed(latest)
         ]
         words = list(dict.fromkeys(
@@ -325,7 +335,7 @@ def chat_context(question, recent=10, recall=2):
             conn.commit()
             query = " OR ".join(f'"{word}"' for word in words)
             older = conn.execute(
-                """SELECT m.id,m.content FROM chat_user_fts
+                """SELECT m.id,m.content,m.private FROM chat_user_fts
                    JOIN chat_messages m ON m.id=chat_user_fts.rowid
                    WHERE chat_user_fts MATCH ? AND m.id<?
                    ORDER BY bm25(chat_user_fts),m.id DESC LIMIT ?""",
@@ -334,19 +344,25 @@ def chat_context(question, recent=10, recall=2):
         except sqlite3.OperationalError:
             return history  # Recent chat still works if the search index is unavailable.
     recalled = [
-        {"role": "user", "content": "Earlier user message from saved chat (may be outdated): " + row["content"][:900]}
+        {"role": "user", "content": "Earlier user message from saved chat (may be outdated): " + row["content"][:900],
+         "private": bool(row["private"])}
         for row in sorted(older, key=lambda item: item["id"])
     ]
     return recalled + history
 
 
-def save_chat(role, content):
+def save_chat(role, content, private=None):
     if role not in ("user", "assistant"):
         raise ValueError("Invalid chat role")
     with database() as conn:
+        if private is None:
+            previous = conn.execute(
+                "SELECT private FROM chat_messages ORDER BY id DESC LIMIT 1"
+            ).fetchone() if role == "assistant" else None
+            private = bool(previous and previous["private"])
         conn.execute(
-            "INSERT INTO chat_messages(role,content,created) VALUES(?,?,?)",
-            (role, content, time.time()),
+            "INSERT INTO chat_messages(role,content,created,private) VALUES(?,?,?,?)",
+            (role, content, time.time(), int(bool(private))),
         )
 
 
@@ -4762,8 +4778,8 @@ def gui():
         if role == "assistant" and speak:
             speak_update(content)
 
-    def assistant_reply(content):
-        save_chat("assistant", content)
+    def assistant_reply(content, private=None):
+        save_chat("assistant", content, private=private)
         show_chat("assistant", content)
 
     def report_runtime_issue(kind, detail):
@@ -4779,7 +4795,7 @@ def gui():
                     f"I found a repeating problem with {label}: {detail[:180]}. "
                     "I saved the failure details for diagnosis."
                 )
-                save_chat("assistant", notice)
+                save_chat("assistant", notice, private=True)
                 show_chat("assistant", notice, speak=False)
         except (OSError, sqlite3.Error):
             pass  # Diagnostics must never disable the chat or device controls.
@@ -4861,6 +4877,12 @@ def gui():
         """Keep local model calls in order and avoid competing for the same GPU."""
         while True:
             question, context, paths, kind = answer_requests.get()
+            private_answer = bool(
+                paths or kind == "visitor"
+                or chat_assistant.FILE_MEMORY_REFERENCE.search(question)
+                or chat_assistant.PERSONAL_CONTACT.search(question)
+                or chat_assistant.private_history_for(question, context)
+            )
             try:
                 if kind == "visitor":
                     import tone_adaptation
@@ -4878,10 +4900,11 @@ def gui():
                     runtime_diagnostics.resolve(STATE, "chat")
                 except (OSError, sqlite3.Error):
                     pass
-                conversation_events.put(answer)
+                conversation_events.put({"answer": answer, "private": private_answer})
             except Exception as exc:
                 conversation_events.put({"diagnostic": "chat", "detail": str(exc)})
-                conversation_events.put("I couldn't answer that yet: " + str(exc))
+                conversation_events.put({"answer": "I couldn't answer that yet: " + str(exc),
+                                         "private": private_answer})
 
     threading.Thread(target=answer_worker, daemon=True).start()
 
@@ -4924,7 +4947,12 @@ def gui():
             if len(selected_paths) > 3:
                 names += f" and {len(selected_paths) - 3} more"
             displayed += "\nFiles: " + names
-        save_chat("user", displayed)
+        private_question = bool(
+            selected_paths or chat_assistant.FILE_MEMORY_REFERENCE.search(raw_value)
+            or chat_assistant.PERSONAL_CONTACT.search(raw_value)
+            or chat_assistant.private_history_for(raw_value, context)
+        )
+        save_chat("user", displayed, private=private_question)
         show_chat("user", displayed)
         replay = chat_assistant.spoken_replay_target(raw_value, chat_history(100))
         if replay is not None:
@@ -5063,6 +5091,8 @@ def gui():
                         os.startfile(result["image"])
                     except OSError:
                         assistant_reply("I saved it, but Windows could not open the image viewer.")
+                elif isinstance(result, dict) and "answer" in result:
+                    assistant_reply(result["answer"], private=result.get("private", False))
                 else:
                     assistant_reply(result)
         except queue.Empty:
