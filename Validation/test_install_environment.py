@@ -12,6 +12,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == "nt", "Windows installer only")
 class InstallEnvironmentTests(unittest.TestCase):
+    def test_auto_profile_needs_gpu_headroom_for_nine_billion_parameters(self):
+        env = os.environ.copy()
+        env["CALE_INSTALL_HELPER"] = str(ROOT / "Install-Environment.ps1")
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+             ". $env:CALE_INSTALL_HELPER; @((Select-CaleModelProfile 16 0),"
+             "(Select-CaleModelProfile 32 0),"
+             "(Select-CaleModelProfile 32 6),"
+             "(Select-CaleModelProfile 32 10),"
+             "(Select-CaleModelProfile 32 12),"
+             "(Select-CaleModelProfile 128 0),"
+             "(Select-CaleModelProfile 128 48)) | ConvertTo-Json -Compress"],
+            env=env, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout),
+                         ["light", "light", "light", "light", "compact", "light", "large"])
+
     def test_crashed_installer_lock_can_be_reacquired(self):
         with tempfile.TemporaryDirectory() as folder:
             base = Path(folder)

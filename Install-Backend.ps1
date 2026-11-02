@@ -51,7 +51,7 @@ try {
    if ($LASTEXITCODE -eq 0) { foreach ($line in $gpuLines) { if ($line -match '^\s*(\d+)\s*$') { $vram += [int]$Matches[1] } } }
  } catch { }
  $vramGB=$vram/1024
- if ($Profile -eq 'auto') { if ($ram -ge 96 -and $vramGB -ge 32) {$Profile='large'} elseif ($ram -ge 24) {$Profile='compact'} else {$Profile='light'} }
+ if ($Profile -eq 'auto') { $Profile=Select-CaleModelProfile $ram $vramGB }
  $model=$profiles.$Profile
  if ($ram -lt $model.ram_gb) { throw "This model needs about $($model.ram_gb) GB RAM. This PC has $ram GB. Choose a smaller model." }
  $drive=Get-PSDrive -Name ([IO.Path]::GetPathRoot($Destination).Substring(0,1))
@@ -252,7 +252,7 @@ try {
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.278')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.279')
  Write-SetupStatus 100 'Your AI is ready' 'complete'
  # Optional local models continue in a separate process after the installer closes.
  Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden

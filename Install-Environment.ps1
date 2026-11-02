@@ -65,6 +65,14 @@ function Enter-CaleInstallLock([string]$Destination) {
     }
 }
 
+# On CPU-only PCs, 9B fits in RAM but can be painfully slow. Prefer the
+# smaller tool-capable model until a suitable NVIDIA GPU is available.
+function Select-CaleModelProfile([int]$RamGb, [double]$VramGb) {
+    if ($RamGb -ge 96 -and $VramGb -ge 32) { return 'large' }
+    if ($RamGb -ge 24 -and $VramGb -ge 12) { return 'compact' }
+    return 'light'
+}
+
 function Get-CaleInstallDestination([string]$Requested = '') {
     $local = [IO.Path]::GetFullPath($env:LOCALAPPDATA)
     $ordinary = Join-Path $local 'CaleMedia\AIWorkbench'
