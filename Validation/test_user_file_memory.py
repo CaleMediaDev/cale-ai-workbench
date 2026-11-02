@@ -156,6 +156,24 @@ class UserFileMemoryTests(unittest.TestCase):
             after = user_file_memory._file_version(path)
         self.assertNotEqual(before, after)
 
+    def test_document_version_detects_edit_between_old_sample_points(self):
+        from types import SimpleNamespace
+
+        stable = SimpleNamespace(
+            st_dev=1, st_ino=2, st_size=32_768, st_mtime_ns=3, st_ctime_ns=4
+        )
+        for name in ("report.pdf", "photo.png"):
+            with self.subTest(name=name):
+                path = self.root / name
+                path.write_bytes(b"a" * 32_768)
+                with patch.object(user_file_memory.os, "fstat", return_value=stable):
+                    before = user_file_memory._file_version(path)
+                    with path.open("r+b") as stream:
+                        stream.seek(8192)
+                        stream.write(b"changed")
+                    after = user_file_memory._file_version(path)
+                self.assertNotEqual(before, after)
+
     def test_changed_image_replaces_stale_search_description(self):
         path = self.root / "receipt.png"
         path.write_bytes(b"a" * 12_288)

@@ -140,14 +140,19 @@ def _text(path: Path) -> str:
 def _file_version(path: Path) -> str:
     """Identify the bytes behind a selected file, including timestamp-preserved edits.
 
-    Hash the indexed prefix of plain text. For media and documents, sample
-    three small regions so an in-place edit with restored timestamps can still
-    invalidate a stale description without reading the entire file on search.
+    Hash the indexed prefix of plain text and all bytes of documents and
+    images. Large audio and video files use three samples plus file metadata
+    to keep ordinary chat searches responsive.
     """
     with path.open("rb") as stream:
         before = os.fstat(stream.fileno())
         if path.suffix.casefold() in file_chat.PLAIN_TEXT:
             digest = hashlib.sha256(stream.read(MAX_TEXT)).hexdigest()
+        elif path.suffix.casefold() in file_chat.DOCUMENTS | IMAGES:
+            full = hashlib.sha256()
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                full.update(chunk)
+            digest = full.hexdigest()
         else:
             sample = hashlib.sha256()
             for offset in (0, max(0, before.st_size // 2 - 2048), max(0, before.st_size - 4096)):
