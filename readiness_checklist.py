@@ -150,9 +150,10 @@ def _probe_local_ai(model: str) -> dict:
 
 def run_optional_checks(root: Path = ROOT, *, force: bool = False,
                         test_local: bool = False) -> dict:
-    """Test speech generation, speech recognition, microphone access and Chrome.
+    """Test local speech, image recognition, microphone access and Chrome.
 
     This makes a short temporary WAV without playing it or recording the mic.
+    The vision check reads only the app's bundled logo while Ollama is idle.
     Browser status is read from the local broker; no tab is opened or changed.
     """
     root = Path(root)
@@ -199,6 +200,22 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
                        " · speaking " + ("✓" if speech_ok else "failed") +
                        " · recognition " + ("✓" if recognition_ok else "failed")),
         }
+    if previous.get("version") == result["version"] and previous.get("vision", {}).get("ok") and not force:
+        result["vision"] = previous["vision"]
+    elif test_local:
+        sample = root / "assets/cale-logo.png"
+        vision = (_media_probe(root, "recognize_image", path=str(sample),
+                               question="Describe the main visible shape or colors briefly.")
+                  if sample.is_file() else {"ok": False, "detail": "Vision test image is missing"})
+        description = str(vision.get("data", {}).get("description", "")).strip()
+        result["vision"] = {
+            "ok": bool(vision["ok"] and description),
+            "detail": ("Bundled image was described offline" if vision["ok"] and description else
+                       "Image reader did not describe the test image: " +
+                       str(vision.get("detail", "empty answer"))[:120]),
+        }
+    elif previous.get("version") == result["version"] and previous.get("vision"):
+        result["vision"] = previous["vision"]
     plugin_parent = root / "data/plugins/hermes-connector"
     if plugin_parent.is_dir():
         code = ("import json,sys;sys.path.insert(0,sys.argv[1]);"
@@ -243,9 +260,11 @@ def snapshot(root: Path = ROOT) -> dict:
     rows.append(_item("Core setup", "ready" if base_ready else "working",
                       str(setup.get("current") or "Preparing Cale"), True))
 
+    tag_names = []
     try:
         with urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as response:
             tags = json.load(response).get("models", [])
+        tag_names = [str(model.get("name", "")) for model in tags]
         local_models = [str(model.get("name", "")) for model in tags
                         if str(model.get("name", "")).startswith("cale-")]
         completed_model = _recent_local_completion(root, local_models)
@@ -292,6 +311,16 @@ def snapshot(root: Path = ROOT) -> dict:
                       "Rendered an image successfully on this PC" if image_verified else
                       "Model ready; Cale verifies it automatically on the first image"
                       if image_ready else "Installing local image model"))
+
+    vision_alias = str(_json(media / "settings.json").get("vision_model") or "cale-vision")
+    vision_installed = media_python and any(
+        name.split(":", 1)[0] == vision_alias for name in tag_names
+    )
+    vision_probe = probes.get("vision", {})
+    rows.append(_item("Image recognition", "ready" if vision_probe.get("ok") else
+                      "attention" if vision_probe else "installed" if vision_installed else "working",
+                      vision_probe.get("detail", "Model installed; Cale will test it while idle"
+                                       if vision_installed else "Preparing the local image reader")))
 
     music_ready = ((media / "music/ACE-Step-1.5/.cale-model-ready").is_file()
                    and (media / "music/ACE-Step-1.5/.venv/Scripts/python.exe").is_file())

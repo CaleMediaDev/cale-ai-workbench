@@ -167,6 +167,33 @@ def test_background_checks_do_not_probe_a_model_with_real_usage(tmp_path):
     probe.assert_not_called()
 
 
+def test_image_recognition_check_uses_bundled_image_and_requires_answer(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    image = tmp_path / "assets/cale-logo.png"
+    image.parent.mkdir()
+    image.write_bytes(b"bundled image")
+    runtime = tmp_path / "Media/python/Scripts/python.exe"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_bytes(b"runtime")
+
+    def media_probe(_root, action, **kwargs):
+        if action == "recognize_image":
+            assert kwargs["path"] == str(image)
+            return {"ok": True, "data": {"description": "A colorful C logo"}}
+        return {"ok": False}
+
+    tags = b'{"models":[{"name":"cale-vision:latest"}]}'
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(tags)), \
+         patch.object(readiness_checklist, "_media_probe", side_effect=media_probe):
+        probes = readiness_checklist.run_optional_checks(tmp_path, test_local=True)
+    assert probes["vision"]["ok"]
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(tags)):
+        rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
+    assert rows["Image recognition"]["state"] == "ready"
+
+
 def test_safe_repair_is_queued_automatically_once_without_browser_pairing(tmp_path):
     rows = {"rows": [
         {"label": "Fast file search", "state": "attention"},
