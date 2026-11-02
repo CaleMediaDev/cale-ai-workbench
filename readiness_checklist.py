@@ -298,9 +298,11 @@ def snapshot(root: Path = ROOT) -> dict:
                       ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin"))
     voice_ready = media_python and whisper and voice_files
     voice_probe = probes.get("voice", {})
-    voice_state = ("ready" if voice_probe.get("ok") else "attention" if voice_probe
+    voice_state = ("ready" if voice_ready and voice_probe.get("ok") else "attention" if voice_probe
                    else "installed" if voice_ready else "working")
     rows.append(_item("Voice and listening", voice_state,
+                      "Offline speech files are missing; Cale needs to repair them"
+                      if not voice_ready and voice_probe else
                       voice_probe.get("detail", "Models installed; choose Run checks to test mic and speech"
                                       if voice_ready else "Installing offline speech models")))
 
@@ -317,8 +319,10 @@ def snapshot(root: Path = ROOT) -> dict:
         name.split(":", 1)[0] == vision_alias for name in tag_names
     )
     vision_probe = probes.get("vision", {})
-    rows.append(_item("Image recognition", "ready" if vision_probe.get("ok") else
+    rows.append(_item("Image recognition", "ready" if vision_installed and vision_probe.get("ok") else
                       "attention" if vision_probe else "installed" if vision_installed else "working",
+                      "Local image reader is missing; Cale needs to repair it"
+                      if not vision_installed and vision_probe else
                       vision_probe.get("detail", "Model installed; Cale will test it while idle"
                                        if vision_installed else "Preparing the local image reader")))
 

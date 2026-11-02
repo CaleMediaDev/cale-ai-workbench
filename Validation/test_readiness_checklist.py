@@ -101,6 +101,23 @@ def test_optional_checks_only_count_for_the_current_install(tmp_path):
     assert rows["Browser tools"]["state"] == "installed"
 
 
+def test_removed_voice_or_vision_model_cannot_keep_a_cached_ready_status(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    (state / "readiness-probes.json").write_text(json.dumps({
+        "version": "Cale AI Workbench 1",
+        "voice": {"ok": True, "detail": "Voice test passed"},
+        "vision": {"ok": True, "detail": "Image test passed"},
+    }))
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(b'{"models":[]}')):
+        rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
+    assert rows["Voice and listening"]["state"] == "attention"
+    assert "missing" in rows["Voice and listening"]["detail"]
+    assert rows["Image recognition"]["state"] == "attention"
+    assert "missing" in rows["Image recognition"]["detail"]
+
+
 def test_local_browser_is_ready_without_optional_chrome_pairing(tmp_path):
     state = tmp_path / "LongTasks"
     state.mkdir()
