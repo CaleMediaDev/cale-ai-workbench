@@ -659,8 +659,18 @@ def lyric_match(transcript: str, lyrics: str) -> tuple[int, int]:
     return len(authored & terms(transcript)), required
 
 
-def vocal_evidence(path: str | Path, duration_seconds: int, lyrics: str = "") -> dict:
-    """Require sustained singing and, when supplied, recognizable lyric words."""
+def sparse_vocal_style(prompt: str) -> bool:
+    """Detect dance tracks asking for short, repeated hooks rather than verses."""
+    return bool(re.search(
+        r"\b(?:minimal lyrics|nonsense vocals|repetitive (?:nonsense|vocal|hook)|"
+        r"short (?:repetitive )?(?:vocal )?(?:hook|chant)|vocal chops?)\b",
+        prompt, re.IGNORECASE,
+    ))
+
+
+def vocal_evidence(path: str | Path, duration_seconds: int, lyrics: str = "",
+                   *, sparse_vocals: bool = False) -> dict:
+    """Check vocals against the requested style and recognizable lyric words."""
     python = ROOT / "Media/python/Scripts/python.exe"
     if not python.is_file():
         raise RuntimeError("The offline speech runtime is missing; vocal music cannot be verified.")
@@ -684,7 +694,7 @@ def vocal_evidence(path: str | Path, duration_seconds: int, lyrics: str = "") ->
     # 118 recognized words that the listener found mostly instrumental.
     # Require enough words for verses and choruses across the song, while
     # allowing instrumental breaks and bass drops between them.
-    required_words = max(5, round(duration_seconds * 0.85))
+    required_words = max(5, round(duration_seconds * (0.3 if sparse_vocals else 0.85)))
     matched_terms, required_terms = lyric_match(str(transcript.get("text") or ""), lyrics)
     return {"recognized_words": words, "last_vocal_second": round(final_second, 1),
             "required_words": required_words,
@@ -885,7 +895,11 @@ def _run_job(job_id: str) -> None:
                 working["current"] = "Checking the vocals"
                 working["progress"] = 75
                 _write_job(job_id, working)
-                check = vocal_evidence(result["path"], info["duration_seconds"], lyrics)
+                if sparse_vocal_style(info["prompt"]):
+                    check = vocal_evidence(result["path"], info["duration_seconds"], lyrics,
+                                           sparse_vocals=True)
+                else:
+                    check = vocal_evidence(result["path"], info["duration_seconds"], lyrics)
             if not check["passed"]:
                 raise RuntimeError(
                     "The song played, but sustained vocals were not detected. "

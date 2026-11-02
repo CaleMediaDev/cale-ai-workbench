@@ -389,6 +389,29 @@ def test_vocal_evidence_rejects_sparsely_sung_full_song(tmp_path):
     assert revised["passed"]
 
 
+def test_repetitive_techno_hook_accepts_sparse_but_real_vocals(tmp_path):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    audio = tmp_path / "song.mp3"
+    audio.touch()
+    brief = "1990s German techno, minimal lyrics, repetitive nonsense vocals and short vocal chants"
+    assert music_backend.sparse_vocal_style(brief)
+    lyrics = "[Chorus] Tanz mit mir die ganze nacht, bist du bereit fur diesen beat"
+    transcript = {"text": ("Tanz mit mir die ganze nacht bist du bereit fur diesen beat " * 6),
+                  "segments": [{"end": 165.0}]}
+    with patch.object(music_backend, "ROOT", tmp_path), patch.object(
+        music_backend.subprocess, "run", return_value=type(
+            "Result", (), {"returncode": 0, "stdout": json.dumps(transcript)}
+        )(),
+    ):
+        default = music_backend.vocal_evidence(audio, 180, lyrics)
+        sparse = music_backend.vocal_evidence(audio, 180, lyrics, sparse_vocals=True)
+    assert not default["passed"]
+    assert sparse["passed"]
+    assert sparse["required_words"] == 54
+
+
 def test_vocal_evidence_rejects_unrelated_words_even_when_sustained(tmp_path):
     python = tmp_path / "Media/python/Scripts/python.exe"
     python.parent.mkdir(parents=True)
