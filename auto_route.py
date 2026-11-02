@@ -193,11 +193,11 @@ def task_size(messages):
         return "deep"
     if review_worker and SIMPLE_MUSIC.search(intent):
         return "balanced"
-    # An agent can spend several tool calls discovering the music engine. That
-    # is routine media work, not evidence that it needs a 70B+ planning model.
+    # A detailed song brief describes the output, not a software project.
+    # Keep the local worker on the middle model for rendering and verification;
+    # the largest model can take minutes just to answer a routine tool turn.
     if (
-        len(intent) <= 280
-        and SIMPLE_MUSIC.search(intent)
+        SIMPLE_MUSIC.search(intent)
         and not PROJECT_BUILD.search(intent)
         and not COMPLEX_PROJECT.search(intent)
         and not MUSIC_VIDEO.search(intent)
@@ -206,6 +206,8 @@ def task_size(messages):
         # model can render a fresh simple jingle, but it repeatedly fumbles
         # Windows file paths and verification commands in this phase.
         if project and "Existing project files (inspect and verify before regenerating):" in all_user_text:
+            return "balanced"
+        if len(intent) > 280:
             return "balanced"
         return "quick" if tool_calls <= 3 else "balanced"
     if len(intent) > 800 or COMPLEX_PROJECT.search(intent):

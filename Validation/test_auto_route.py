@@ -287,6 +287,26 @@ class AutoRouteTests(unittest.TestCase):
            "- michigan_song_final.wav (12,000,000 bytes)")
         self.assertEqual(task_size([{"role": "user", "content": prompt}]), "balanced")
 
+    def test_detailed_song_brief_does_not_use_largest_local_model(self):
+        brief = (
+            "Create a new song for Cale and Tiny's anniversary with female vocals. "
+            "It should have a 150 BPM dubstep groove, deep wobble bass, a melodic "
+            "intro, clear verses, a big chorus, a breakdown, and a final drop. "
+            "Keep the lyrics personal and the mix clean for the whole three-minute "
+            "track. Describe the arrangement, vocal delivery, dynamics, and sound "
+            "design precisely enough for the local music renderer. "
+        ) * 3
+        prompt = project_prompt({
+            "title": "Anniversary song", "folder": "C:/Tasks/song", "brief": brief,
+        })
+        messages = [{"role": "user", "content": prompt}]
+        self.assertEqual(task_size(messages), "balanced")
+        messages.append({
+            "role": "assistant",
+            "tool_calls": [{"function": {"name": "mcp__toolbox__toolbox_call"}}] * 5,
+        })
+        self.assertEqual(task_size(messages), "balanced")
+
     def test_music_shortcut_does_not_downgrade_app_or_video_work(self):
         self.assertEqual(
             task_size([{"role": "user", "content": "Create a music app."}]),
