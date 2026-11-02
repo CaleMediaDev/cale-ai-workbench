@@ -570,6 +570,8 @@ class CloudTests(unittest.TestCase):
         with (patch.object(cloud, "post", side_effect=show),
               patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
               patch.object(cloud, "candidate_approved", return_value=True),
+              patch("model_fitness.suitable", return_value=True),
+              patch.object(cloud, "model_order", side_effect=lambda _size, available, *_: list(available)),
               patch.object(cloud, "refresh_catalog"),
               patch.object(cloud, "loaded_local_models", return_value=[])):
             router = cloud.Router()
