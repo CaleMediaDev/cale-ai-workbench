@@ -2,6 +2,7 @@
 
 import io
 import json
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import readiness_checklist
+import file_catalog
 
 
 def test_checklist_distinguishes_installed_optional_tools_from_checked_core(tmp_path):
@@ -18,6 +20,11 @@ def test_checklist_distinguishes_installed_optional_tools_from_checked_core(tmp_
     (state / "install-progress.json").write_text(json.dumps({"status": "complete"}))
     (state / "heartbeat.txt").write_text("alive")
     (state / "computer-files-first-scan.done").write_text("complete")
+    known = tmp_path / "known.txt"
+    known.write_text("local file")
+    with file_catalog.database(state) as connection:
+        connection.execute("INSERT INTO entries(path,name,parent,kind,scan_id) VALUES (?,?,?,?,?)",
+                           (str(known), known.name, str(tmp_path), "file", "check"))
     (state / "self-check.json").write_text(json.dumps({
         "version": "Cale AI Workbench 0.5.258", "status": "passed"}))
     (tmp_path / "Media/python/Scripts").mkdir(parents=True)
@@ -27,12 +34,13 @@ def test_checklist_distinguishes_installed_optional_tools_from_checked_core(tmp_
     response = io.BytesIO(b'{"models":[{"name":"cale-fast:latest"}]}')
     with patch.object(readiness_checklist, "urlopen", return_value=response):
         result = readiness_checklist.snapshot(tmp_path)
-    assert result["core_ready"]
-    assert result["verified"] == 5
+    assert not result["core_ready"]
+    assert result["verified"] == 4
     rows = {row["label"]: row for row in result["rows"]}
     assert rows["Image maker"]["state"] == "on_demand"
     assert rows["Music maker"]["state"] == "on_demand"
-    assert rows["Local AI"]["state"] == "ready"
+    assert rows["Local AI"]["state"] == "working"
+    assert rows["Fast file search"]["state"] == "ready"
 
     (state / "self-check.json").write_text(json.dumps({
         "version": "Cale AI Workbench 0.5.258", "status": "failed"}))
@@ -91,3 +99,53 @@ def test_optional_checks_only_count_for_the_current_install(tmp_path):
         rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
     assert rows["Voice and listening"]["state"] == "installed"
     assert rows["Browser tools"]["state"] == "installed"
+
+
+def test_real_local_completion_verifies_a_currently_installed_model(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    with sqlite3.connect(state / "usage.db") as connection:
+        connection.execute("CREATE TABLE usage_events (timestamp REAL,source TEXT,model TEXT,completion_tokens INTEGER)")
+        connection.execute("INSERT INTO usage_events VALUES (?,?,?,?)",
+                           (time.time(), "ollama", "cale-fast", 5))
+    assert readiness_checklist._recent_local_completion(tmp_path, ["cale-fast:latest"]) == "cale-fast"
+    assert readiness_checklist._recent_local_completion(tmp_path, ["cale-other:latest"]) == ""
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
+            b'{"models":[{"name":"cale-fast:latest"}]}')):
+        rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
+    assert rows["Local AI"]["state"] == "ready"
+
+
+def test_completed_scan_marker_does_not_hide_a_missing_search_database(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (state / "computer-files-first-scan.done").write_text("complete")
+    assert not readiness_checklist._file_index_responds(state)
+    with patch.object(readiness_checklist, "urlopen", side_effect=OSError):
+        rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
+    assert rows["Fast file search"]["state"] == "attention"
+
+
+def test_local_ai_probe_requires_a_completed_generated_token():
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
+            b'{"done":true,"eval_count":0}')):
+        assert not readiness_checklist._probe_local_ai("cale-fast:latest")["ok"]
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
+            b'{"done":true,"eval_count":1}')):
+        assert readiness_checklist._probe_local_ai("cale-fast:latest")["ok"]
+
+
+def test_background_checks_do_not_probe_a_model_with_real_usage(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    with sqlite3.connect(state / "usage.db") as connection:
+        connection.execute("CREATE TABLE usage_events (timestamp REAL,source TEXT,model TEXT,completion_tokens INTEGER)")
+        connection.execute("INSERT INTO usage_events VALUES (?,?,?,?)",
+                           (time.time(), "ollama", "cale-fast", 3))
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    response = io.BytesIO(b'{"models":[{"name":"cale-fast:latest","size":1}]}')
+    with patch.object(readiness_checklist, "urlopen", return_value=response), \
+         patch.object(readiness_checklist, "_media_probe", return_value={"ok": False}), \
+         patch.object(readiness_checklist, "_probe_local_ai") as probe:
+        readiness_checklist.run_optional_checks(tmp_path, test_local=True)
+    probe.assert_not_called()

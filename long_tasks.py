@@ -2694,6 +2694,10 @@ def monitor():
     next_catalog_refresh = time.monotonic() + file_catalog.refresh_delay(
         file_catalog.status(STATE), catalog_refresh_seconds
     )
+    import readiness_checklist
+    if ((STATE / file_catalog.FIRST_SCAN_NAME).is_file()
+            and not readiness_checklist._file_index_responds(STATE)):
+        next_catalog_refresh = time.monotonic() + 60
     while True:
         if (ROOT / ".cale-ai-install").exists() and (
             ROOT / ".cale-ai-install"
@@ -2725,9 +2729,14 @@ def monitor():
                     and latest_catalog.get("status") in ("error", "not_started", "working")
                     else 300 if not (STATE / file_catalog.FIRST_SCAN_NAME).is_file()
                     and latest_catalog.get("status") == "waiting_for_space"
+                    else 300 if not readiness_checklist._file_index_responds(STATE)
                     else catalog_refresh_seconds
                 )
                 next_catalog_refresh = time.monotonic() + retry_seconds
+            refresh_request = STATE / "computer-files-recheck.request"
+            if refresh_request.is_file() and catalog_thread is None:
+                refresh_request.unlink(missing_ok=True)
+                next_catalog_refresh = time.monotonic()
             if catalog_thread is None and time.monotonic() >= next_catalog_refresh:
                 catalog_thread = threading.Thread(
                     target=file_catalog.scan_computer,
@@ -4174,11 +4183,12 @@ def gui():
                 return
             check_running[0] = True
             test_button.configure(state="disabled")
-            summary.set("Testing mic, speech, listening and Chrome connection…")
+            summary.set("Testing local AI, voice and Chrome where idle…")
 
             def worker():
                 try:
-                    readiness_checklist.run_optional_checks(ROOT, force=True)
+                    readiness_checklist.run_optional_checks(
+                        ROOT, force=True, test_local=not self_update.active_tasks())
                 except (OSError, RuntimeError, ValueError):
                     pass
                 finally:
@@ -4202,6 +4212,11 @@ def gui():
             current = readiness_checklist.snapshot(ROOT)
             browser_row = next((row for row in current["rows"]
                                 if row["label"] == "Browser tools"), {})
+            file_row = next((row for row in current["rows"]
+                             if row["label"] == "Fast file search"), {})
+            if file_row.get("state") == "attention":
+                (STATE / "computer-files-recheck.request").write_text(
+                    str(time.time()), encoding="ascii")
             if browser_row.get("state") == "attention":
                 connect_chrome()
             run_checks()
@@ -4225,7 +4240,7 @@ def gui():
             -1 if event.delta > 0 else 1, "units"))
         ttk.Label(content, text=(
             "Installed means files are here but the feature has not passed a real check. "
-            "Run checks tests voice, speech recognition and Chrome without recording or opening tabs. "
+            "Run checks tests local AI while idle, plus voice and Chrome without recording or opening tabs. "
             "Image, music and video verify themselves when their first output is saved."
         ), style="Muted.TLabel", wraplength=620).pack(anchor="w", pady=(12, 0))
         rendered = []
@@ -6321,7 +6336,8 @@ def gui():
         """Replace installed-only labels with real local results after launch."""
         def worker():
             try:
-                readiness_checklist.run_optional_checks(ROOT)
+                readiness_checklist.run_optional_checks(
+                    ROOT, test_local=not self_update.active_tasks())
             except (OSError, RuntimeError, ValueError):
                 pass  # The checklist keeps an honest installed/attention state.
 

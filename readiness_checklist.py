@@ -7,12 +7,14 @@ sends telemetry, opens a person's deliverables, or downloads models.
 from __future__ import annotations
 
 import json
+import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 
@@ -75,7 +77,76 @@ def _media_probe(root: Path, action: str, **arguments) -> dict:
         return {"ok": False, "detail": type(exc).__name__}
 
 
-def run_optional_checks(root: Path = ROOT, *, force: bool = False) -> dict:
+def _recent_local_completion(root: Path, available: list[str]) -> str:
+    """A recorded, completed local call proves more than Ollama's model list."""
+    database = root / "LongTasks/usage.db"
+    if not database.is_file() or not available:
+        return ""
+    aliases = {name.split(":", 1)[0] for name in available}
+    try:
+        with sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True,
+                             timeout=2) as connection:
+            rows = connection.execute(
+                "SELECT model FROM usage_events WHERE source='ollama' "
+                "AND completion_tokens > 0 AND timestamp > ? "
+                "ORDER BY timestamp DESC LIMIT 100", (time.time() - 7 * 86400,)
+            ).fetchall()
+        return next((name for (name,) in rows if str(name).split(":", 1)[0] in aliases), "")
+    except (OSError, sqlite3.Error):
+        return ""
+
+
+def _file_index_responds(state: Path) -> bool:
+    """Query the actual filename FTS index without opening file contents."""
+    database = state / "computer-files.sqlite3"
+    if not database.is_file():
+        return False
+    try:
+        with sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True,
+                             timeout=2) as connection:
+            rows = connection.execute(
+                "SELECT name,path FROM entries WHERE kind='file' LIMIT 100"
+            ).fetchall()
+            if not rows:
+                # A completed scan of an empty drive is still a valid index.
+                connection.execute("SELECT rowid FROM entry_fts LIMIT 1").fetchone()
+                return True
+            for name, path in rows:
+                words = re.findall(r"[^\W_]+", name, re.UNICODE)
+                if not words or not Path(path).is_file():
+                    continue
+                match = connection.execute(
+                    "SELECT rowid FROM entry_fts WHERE entry_fts MATCH ? LIMIT 1",
+                    (f'"{words[0]}"',),
+                ).fetchone()
+                if match:
+                    return True
+        return False
+    except (OSError, sqlite3.Error):
+        return False
+
+
+def _probe_local_ai(model: str) -> dict:
+    """Generate one token only when the task supervisor says Ollama is idle."""
+    payload = json.dumps({"model": model, "prompt": "Say OK.", "stream": False,
+                          "think": False, "options": {"num_predict": 1},
+                          "keep_alive": "1m"}).encode("utf-8")
+    request = Request("http://127.0.0.1:11434/api/generate", data=payload,
+                      headers={"Content-Type": "application/json"})
+    try:
+        with urlopen(request, timeout=45) as response:
+            answer = json.load(response)
+        good = bool(answer.get("done") and int(answer.get("eval_count") or 0) > 0)
+        return {"ok": good, "model": model,
+                "detail": f"{model} answered a local test" if good
+                          else f"{model} did not complete the local test"}
+    except (OSError, ValueError, TypeError, TimeoutError) as exc:
+        return {"ok": False, "model": model,
+                "detail": f"{model} did not answer within 45 seconds ({type(exc).__name__})"}
+
+
+def run_optional_checks(root: Path = ROOT, *, force: bool = False,
+                        test_local: bool = False) -> dict:
     """Test speech generation, speech recognition, microphone access and Chrome.
 
     This makes a short temporary WAV without playing it or recording the mic.
@@ -85,6 +156,21 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False) -> dict:
     result = {"version": (root / ".cale-ai-install").read_text(encoding="utf-8").strip()
               if (root / ".cale-ai-install").is_file() else "", "checked_at": time.time()}
     previous = _json(root / "LongTasks/readiness-probes.json")
+    if previous.get("version") == result["version"] and previous.get("local_ai", {}).get("ok"):
+        result["local_ai"] = previous["local_ai"]
+    elif test_local:
+        try:
+            with urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as response:
+                models = json.load(response).get("models", [])
+            candidates = [model for model in models if str(model.get("name", "")).startswith("cale-")]
+            candidates.sort(key=lambda model: int(model.get("size") or 0))
+            preferred = next((model for model in candidates if model.get("name") == "cale-fast:latest"),
+                             candidates[0] if candidates else None)
+            if preferred and not _recent_local_completion(
+                    root, [str(model["name"]) for model in candidates]):
+                result["local_ai"] = _probe_local_ai(str(preferred["name"]))
+        except (OSError, ValueError, TypeError):
+            pass
     if (not force and previous.get("version") == result["version"]
             and previous.get("voice", {}).get("ok")):
         result["voice"] = previous["voice"]
@@ -159,9 +245,13 @@ def snapshot(root: Path = ROOT) -> dict:
             tags = json.load(response).get("models", [])
         local_models = [str(model.get("name", "")) for model in tags
                         if str(model.get("name", "")).startswith("cale-")]
-        local_state = "ready" if local_models else "working"
-        local_detail = (f"Ollama responding; {len(local_models)} Cale model(s) installed"
-                        if local_models else "Ollama responding; downloading a local model")
+        completed_model = _recent_local_completion(root, local_models)
+        local_probe = probes.get("local_ai", {})
+        local_state = ("ready" if local_models and (completed_model or local_probe.get("ok")) else
+                       "attention" if local_probe else "working")
+        local_detail = (f"{completed_model} has answered a real task locally"
+                        if completed_model else local_probe.get("detail", "Local model installed; testing when idle"
+                                                                if local_models else "Downloading a local model"))
     except (OSError, ValueError, KeyError, TypeError):
         local_state, local_detail = "attention", "Ollama is not responding yet"
     rows.append(_item("Local AI", local_state, local_detail, True))
@@ -173,8 +263,12 @@ def snapshot(root: Path = ROOT) -> dict:
 
     scan = _json(state / "computer-files-status.json")
     indexed = (state / "computer-files-first-scan.done").is_file() or scan.get("status") == "complete"
-    rows.append(_item("Fast file search", "ready" if indexed else "working",
-                      "First local index complete" if indexed else "Indexing files on this PC", True))
+    index_responds = indexed and _file_index_responds(state)
+    rows.append(_item("Fast file search", "ready" if index_responds else
+                      "attention" if indexed else "working",
+                      "Filename search answered a local index query" if index_responds else
+                      "Index is present but search did not answer; Cale will retry the scan"
+                      if indexed else "Indexing files on this PC", True))
 
     media_python = (media / "python/Scripts/python.exe").is_file()
     whisper = (media / "models/whisper/config.json").is_file()
