@@ -228,15 +228,18 @@ def local_profile():
 
 
 def select_profile(profile):
-    """Select a downloaded local model only after Ollama confirms tool support."""
+    """Select a downloaded local model only when this PC can run it well."""
     if profile not in CATALOG:
         raise ValueError("Unknown model profile")
+    if profile == "main":
+        atomic(STATE / "model-choice.json", json.dumps({"profile": profile}).encode())
+        record("local", "Automatic model selection applies to the next request.", LOCAL_MODEL)
+        return
     model = CATALOG[profile]["alias"]
-    info = post("http://127.0.0.1:11434/api/show", {"model": model}, timeout=10)
-    if info.get("remote_host") or info.get("remote_model"):
-        raise ValueError("This profile requires local model files.")
-    if "tools" not in info.get("capabilities", []):
-        raise ValueError("This model does not advertise tool support.")
+    if model not in Router().local_candidates("manual", include_fallback=True):
+        raise ValueError(
+            "This model is unavailable, lacks tools or enough context, or is too slow for this PC."
+        )
     atomic(STATE / "model-choice.json", json.dumps({"profile": profile}).encode())
     record("local", "Model selection applies to the next request.", model)
 
@@ -676,7 +679,8 @@ class Router:
                 self.provider_last_attempts[provider] = now
             return True
 
-    def local_candidates(self, size, required_context=65536, require_vision=False):
+    def local_candidates(self, size, required_context=65536, require_vision=False,
+                         include_fallback=False):
         """Rank installed models with enough context and required capabilities."""
         if time.monotonic() >= self.model_cache_until:
             refresh_catalog(online=False)
@@ -703,7 +707,7 @@ class Router:
                 item = next(
                     (item for item in CATALOG.values() if item["alias"] == name), None
                 )
-                if item and (item.get("fallback_only") or not candidate_approved(item)):
+                if item and not candidate_approved(item):
                     continue
                 weight = weights.get(name, weights.get(name + ":latest"))
                 if weight is None or not model_fitness.suitable(name, weight, ram, vram):
@@ -757,7 +761,10 @@ class Router:
             size,
             {name: size_gb for name, size_gb in self.model_cache.items()
              if self.model_contexts.get(name, 0) >= required_context
-             and (not require_vision or name in self.model_vision)},
+             and (not require_vision or name in self.model_vision)
+             and (include_fallback or not any(
+                 item.get("fallback_only") and item["alias"] == name
+                 for item in CATALOG.values()))},
             LOCAL_MODEL, FAST_MODEL, balanced_preferred
         )
         if (size == "deep" and required_context <= 65536 and
@@ -1006,12 +1013,21 @@ class Router:
             paid_result = try_paid()
             if paid_result is not None:
                 return paid_result
-        selected = (
-            [] if cloud_only else
-            self.local_candidates(size, required_context, needs_vision)
-            if profile == "main" or needs_vision else
-            [CATALOG[profile]["alias"]]
-        )
+        if cloud_only:
+            selected = []
+        elif profile == "main":
+            selected = self.local_candidates(size, required_context, needs_vision)
+        else:
+            chosen = CATALOG[profile]["alias"]
+            verified = self.local_candidates(
+                "manual", required_context, needs_vision, include_fallback=True,
+            )
+            selected = ([chosen] if chosen in verified else
+                        self.local_candidates(task_size(messages), required_context,
+                                              needs_vision))
+            if chosen not in verified:
+                record("local", "Saved model is no longer suitable; using an eligible local model.",
+                       chosen)
         last_error = None
         for selected_model in selected:
             local = dict(payload)

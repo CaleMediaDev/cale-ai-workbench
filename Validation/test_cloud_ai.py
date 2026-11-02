@@ -579,6 +579,23 @@ class CloudTests(unittest.TestCase):
             self.assertEqual(router.local_candidates("quick", require_vision=True),
                              [cloud.FAST_MODEL])
 
+    def test_fallback_only_model_can_be_chosen_manually_but_not_auto_routed(self):
+        self.candidates.stop()
+        alias = cloud.CATALOG["permissive_small"]["alias"]
+        tags = {"models": [{"name": alias + ":latest", "size": 6 * 2**30}]}
+        info = {"capabilities": ["completion", "tools"],
+                "parameters": "num_ctx 65536\n",
+                "details": {"parameter_size": "9B"}}
+        with (patch.object(cloud, "post", return_value=info),
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+              patch.object(cloud, "candidate_approved", return_value=True),
+              patch("model_fitness.suitable", return_value=True),
+              patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "loaded_local_models", return_value=[])):
+            router = cloud.Router()
+            self.assertNotIn(alias, router.local_candidates("quick"))
+            self.assertIn(alias, router.local_candidates("manual", include_fallback=True))
+
     def connected(self):
         data = cloud.credentials()
         data["cloud_key"] = "sk-or-test-secret"
@@ -1267,11 +1284,33 @@ class CloudTests(unittest.TestCase):
     def test_permissive_profile_stays_local_even_when_cloud_connected(self):
         self.connected()
         (cloud.STATE / "model-choice.json").write_text('{"profile":"permissive"}')
-        with patch.object(cloud, "post", return_value=ANSWER) as post:
+        with (patch.object(cloud.Router, "local_candidates",
+                           return_value=[cloud.PERMISSIVE_MODEL]),
+              patch.object(cloud, "post", return_value=ANSWER) as post):
             cloud.Router().complete(REQUEST)
         self.assertEqual(post.call_count, 1)
         self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
         self.assertEqual(post.call_args.args[1]["model"], cloud.PERMISSIVE_MODEL)
+
+    def test_unsuitable_saved_manual_model_falls_back_to_eligible_local_model(self):
+        self.connected()
+        (cloud.STATE / "model-choice.json").write_text('{"profile":"permissive"}')
+        with (patch.object(cloud.Router, "local_candidates",
+                           return_value=[cloud.FAST_MODEL]) as candidates,
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(post.call_args.args[1]["model"], cloud.FAST_MODEL)
+        self.assertEqual(candidates.call_count, 2)
+
+    def test_manual_profile_rejects_model_without_hardware_and_tool_eligibility(self):
+        with (patch.object(cloud.Router, "local_candidates", return_value=[]) as candidates,
+              patch.object(cloud, "post") as post):
+            with self.assertRaisesRegex(ValueError, "too slow for this PC"):
+                cloud.select_profile("permissive")
+        candidates.assert_called_once()
+        post.assert_not_called()
+        self.assertFalse((cloud.STATE / "model-choice.json").exists())
 
     def test_daily_budget_persists_across_router_restart(self):
         self.connected()
