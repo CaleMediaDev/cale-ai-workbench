@@ -1389,11 +1389,7 @@ def recover_blocked_audio_review(p, snapshot=None):
     if not ("review handoff was rejected" in summary.lower()
             and re.search(r"\blisten(?:ing)?\b", summary, re.I)):
         return False
-    runs = snapshot.get("runs", [])
-    if any(run.get("started_at") and not run.get("ended_at") for run in runs):
-        return False
-    ended = max((run.get("ended_at") or 0 for run in runs), default=0)
-    if not ended or time.time() - ended < 150:
+    if not worker_handoff_settled(snapshot):
         return False
     audio_passed, audio_evidence = verify_audio_handoff(p) or (False, "This is not an audio task.")
     if not audio_passed:
@@ -2109,6 +2105,50 @@ def goal_budget_exhausted(snapshot):
     return False
 
 
+def worker_handoff_settled(snapshot, now=None):
+    """Check the last board worker before reading its files or starting another.
+
+    Hermes clears ``worker_pid`` on a terminal run, but its spawned and bound
+    process IDs remain in board events. Match each PID to the run's start time
+    so a recycled Windows PID cannot hold up a later handoff. Old boards with
+    no process events retain the conservative timeout.
+    """
+    import psutil
+
+    runs = snapshot.get("runs", [])
+    if not runs or any(run.get("started_at") and not run.get("ended_at") for run in runs):
+        return False
+    latest = max(runs, key=lambda run: float(run.get("ended_at") or 0))
+    ended = float(latest.get("ended_at") or 0)
+    if not ended:
+        return False
+    age = (time.time() if now is None else now) - ended
+    if age < 5:
+        return False
+    run_id = latest.get("id")
+    events = [
+        event for event in snapshot.get("events", [])
+        if event.get("run_id") == run_id
+        and event.get("kind") in ("spawned", "worker_bound")
+        and isinstance(event.get("payload"), dict)
+        and event["payload"].get("pid")
+    ] if run_id is not None else []
+    if not events:
+        return age >= 150
+    started = float(latest.get("started_at") or 0)
+    for event in events:
+        try:
+            process = psutil.Process(int(event["payload"]["pid"]))
+            created = process.create_time()
+        except psutil.NoSuchProcess:
+            continue
+        except (OSError, ValueError, TypeError, psutil.Error):
+            return False
+        if not started or abs(created - started) < 30:
+            return False
+    return True
+
+
 def resumed_board_work(p):
     """Clear a stale help state only after a newer board run really starts.
 
@@ -2337,14 +2377,11 @@ def advance_project(p):
     snapshot = board("show", p["card"], "--json", parse=True)
     task = snapshot["task"]
     if task["status"] in ("review", "done"):
-        ended = max(
-            (r.get("ended_at") or 0 for r in snapshot.get("runs", [])), default=0
-        )
-        if ended and time.time() - ended < 150:
+        if not worker_handoff_settled(snapshot):
             update(
                 p["id"],
                 status="working",
-                detail="Worker handed off. Letting it finish and release files before independent checks.",
+                detail="Worker handed off. Checking that it exited before independent checks.",
             )
             return
         handle_handoff(p, task, snapshot)
@@ -2352,13 +2389,8 @@ def advance_project(p):
         # Hermes' goal loop deliberately blocks after its turn budget. That is
         # a worker boundary, not a request for human judgment. Start another
         # generation from the plan, progress, and user follow-ups on disk.
-        runs = snapshot.get("runs", [])
-        if any(run.get("started_at") and not run.get("ended_at") for run in runs):
+        if not worker_handoff_settled(snapshot):
             update(p["id"], status="working", detail="Worker budget reached. Waiting for the old run to exit.")
-            return
-        ended = max((run.get("ended_at") or 0 for run in runs), default=0)
-        if ended and time.time() - ended < 150:
-            update(p["id"], status="working", detail="Worker budget reached. Waiting for files to settle.")
             return
         board("archive", p["card"])
         update(p["id"], card="", generation=p["generation"] + 1,

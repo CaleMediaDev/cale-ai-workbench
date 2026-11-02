@@ -23,6 +23,32 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_worker_handoff_starts_after_process_exit_and_file_settle(self):
+        import psutil
+
+        started = time.time() - 20
+        snapshot = {
+            "runs": [{"id": 7, "started_at": started, "ended_at": started + 10}],
+            "events": [
+                {"run_id": 7, "kind": "spawned", "payload": {"pid": 1234}},
+                {"run_id": 7, "kind": "worker_bound", "payload": {"pid": 5678}},
+            ],
+        }
+        with patch("psutil.Process", side_effect=psutil.NoSuchProcess(1234)):
+            self.assertFalse(task_module.worker_handoff_settled(snapshot, started + 12))
+            self.assertTrue(task_module.worker_handoff_settled(snapshot, started + 15))
+        with patch("psutil.Process") as process:
+            process.return_value.create_time.return_value = started + 1
+            self.assertFalse(task_module.worker_handoff_settled(snapshot, started + 15))
+            process.return_value.create_time.return_value = started - 1000
+            self.assertTrue(task_module.worker_handoff_settled(snapshot, started + 15))
+
+    def test_old_board_without_worker_events_keeps_conservative_handoff(self):
+        started = time.time() - 200
+        snapshot = {"runs": [{"started_at": started, "ended_at": started + 20}]}
+        self.assertFalse(task_module.worker_handoff_settled(snapshot, started + 30))
+        self.assertTrue(task_module.worker_handoff_settled(snapshot, started + 170))
+
     def test_song_versions_keep_takes_and_hide_short_checks(self):
         with tempfile.TemporaryDirectory() as folder:
             audio = Path(folder) / "audio"

@@ -1,5 +1,5 @@
 # Package the exact manifest-defined source, then embed it in the Windows EXE.
-param([string]$Version='0.5.238')
+param([string]$Version='0.5.239')
 $ErrorActionPreference='Stop'
 $project=$PSScriptRoot
 $out=Split-Path $project -Parent
