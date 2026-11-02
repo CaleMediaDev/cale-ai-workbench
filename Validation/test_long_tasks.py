@@ -465,6 +465,33 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(task["card"], "")
         self.assertEqual(task["status"], "working")
 
+    def test_techno_instrument_feedback_starts_new_render_and_preserves_original(self):
+        job_id = "d" * 32
+        revised_id = "e" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make a techno song", {"prompt": "techno song", "duration_seconds": 30,
+                                        "instrumental": True}, str(self.base / "techno-revision"),
+            )
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        original = Path(task["folder"]) / "song.mp3"
+        original.write_bytes(b"original music")
+        with patch("music_backend.stop_music_job"), patch(
+            "music_backend.music_job_status", return_value={
+                "output_path": str(original), "prompt": "techno song", "lyrics": "",
+                "duration_seconds": 30, "instrumental": True,
+            }
+        ), patch("music_backend.start_music_job", return_value={"job_id": revised_id}) as start:
+            task_module.request(pid, "note", "There are guitars in the techno")
+            task_module.process_requests()
+        self.assertIn("synth bass", start.call_args.args[0])
+        self.assertNotIn("guitar", start.call_args.args[0])
+        self.assertEqual(Path(start.call_args.args[1]).name, "song-revision-2.mp3")
+        self.assertEqual(original.read_bytes(), b"original music")
+        revised = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(revised["status"], "working")
+        self.assertEqual(task_module.music_job_id(revised), revised_id)
+
     def test_direct_image_task_reaches_review_without_a_board_card(self):
         from PIL import Image
 
@@ -1073,6 +1100,37 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(updated["brief"], "Build and test a working fixture")
         self.assertIn("Add a larger search box", (Path(updated["folder"]) / ".local-ai/USER-REQUESTS.md").read_text())
         self.assertFalse(any(call.args[0] == "reopen-review" for call in board.call_args_list))
+
+    def test_thumbs_down_revises_task_and_teaches_future_similar_work(self):
+        import feedback_learning
+
+        task_module.update(self.pid, title="Techno app design",
+                           brief="Build a techno music design app", card="review-card",
+                           phase="review", status="ready_for_review")
+        task_module.request(self.pid, "feedback_down", "Use cleaner controls and no guitar imagery")
+        with patch.object(task_module, "board", return_value={"task": {"status": "review"}}):
+            task_module.process_requests()
+        revised = self.item()
+        self.assertEqual(revised["status"], "working")
+        self.assertEqual(revised["generation"], 1)
+        self.assertIn("no guitar imagery", (Path(revised["folder"]) /
+                      ".local-ai/USER-REQUESTS.md").read_text())
+        learned = feedback_learning.for_task(task_module.STATE, self.pid)
+        self.assertEqual(learned[0]["rating"], -1)
+        self.assertIn("cleaner controls", learned[0]["note"])
+
+    def test_thumbs_up_accepts_and_records_local_success_example(self):
+        import feedback_learning
+
+        folder = Path(self.item()["folder"])
+        task_module.update(self.pid, status="ready_for_review",
+                           fingerprint=task_module.fingerprint(folder))
+        task_module.request(self.pid, "accept")
+        task_module.process_requests()
+        self.assertEqual(self.item()["status"], "accepted")
+        reviews = feedback_learning.for_task(task_module.STATE, self.pid)
+        self.assertEqual(len(reviews), 1)
+        self.assertEqual(reviews[0]["rating"], 1)
 
     def test_failed_review_repair_card_carries_failure_evidence(self):
         self.verify_script('Write-Output "missing behavior"; exit 3')

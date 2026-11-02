@@ -26,6 +26,7 @@ from pathlib import Path
 
 import cale_voice
 import chrome_connector
+import feedback_learning
 import project_memory
 import routing_mode
 import runtime_diagnostics
@@ -582,6 +583,7 @@ def add_music_project(request_text: str, spec: dict, folder: str = "") -> str:
 def _start_music_project(p: dict, spec: dict) -> None:
     """Start a saved song request without creating a second project."""
     import music_backend
+    import music_style
 
     pid = p["id"]
     folder = Path(p["folder"])
@@ -590,8 +592,13 @@ def _start_music_project(p: dict, spec: dict) -> None:
         encoding="utf-8",
     )
     try:
+        learned = feedback_learning.guidance(
+            STATE, "music", p["brief"], exclude_task_id=pid
+        )
+        direction = music_style.learned_directions(learned, spec["prompt"])
+        prompt = spec["prompt"] + (". " + direction if direction else "")
         job = music_backend.start_music_job(
-            spec["prompt"], str(folder / "song.mp3"),
+            prompt, str(folder / "song.mp3"),
             lyrics=spec.get("lyrics", ""),
             duration_seconds=spec["duration_seconds"],
             instrumental=spec["instrumental"],
@@ -685,7 +692,11 @@ def _start_image_project(p: dict, prompt: str) -> None:
         encoding="utf-8",
     )
     try:
-        job = quick_image.start_image_job(ROOT, prompt, str(target))
+        learned = feedback_learning.guidance(
+            STATE, "image", p["brief"], exclude_task_id=pid
+        )
+        visual_prompt = prompt + (". " + learned.replace("\n- ", "; ") if learned else "")
+        job = quick_image.start_image_job(ROOT, visual_prompt, str(target))
     except Exception as exc:
         update(pid, status="needs_input", detail=f"Local image could not start: {exc}")
         raise
@@ -907,7 +918,7 @@ def sync_user_requests(p):
     """
     with database() as conn:
         rows = conn.execute(
-            "SELECT id, note FROM requests WHERE project=? AND action IN ('note','resume') "
+            "SELECT id, note FROM requests WHERE project=? AND action IN ('note','resume','feedback_down') "
             "AND status='done' AND note!='' ORDER BY id",
             (p["id"],),
         ).fetchall()
@@ -967,6 +978,10 @@ def create_card(p, extra=""):
         f"{item['kind']}: {item['title']} — {item['excerpt'][:500]}"
         for item in remembered
     )
+    learned = feedback_learning.guidance(
+        STATE, feedback_learning.kind_for(p), p["brief"],
+        exclude_task_id=p["id"],
+    )
     body.write_text(
         project_prompt(
             p,
@@ -974,6 +989,7 @@ def create_card(p, extra=""):
             + ("\nSaved recovery snapshot:\n" + saved if saved else "")
             + ("\nRecent user follow-ups (read the full file):\n" + recent if recent else "")
             + ("\nRelevant local memory (verify against files):\n" + memory_note if memory_note else "")
+            + ("\n" + learned if learned else "")
             + "\nPrevious supervisor result:\n"
             + p.get("detail", ""),
         ),
@@ -1532,6 +1548,30 @@ def process_music_request(p, action, note):
         if action == "stop":
             update(p["id"], status="stopped", detail="Music stopped. Files already made are preserved.")
             return "Music stopped"
+        import music_style
+        direction = music_style.feedback_direction(note, p["brief"])
+        if direction:
+            previous = music_backend.music_job_status(job_id)
+            original = Path(previous["output_path"])
+            output = next(
+                original.with_name(f"{original.stem}-revision-{number}{original.suffix}")
+                for number in range(2, 1000)
+                if not original.with_name(
+                    f"{original.stem}-revision-{number}{original.suffix}"
+                ).exists()
+            )
+            started = music_backend.start_music_job(
+                previous["prompt"] + ". " + direction, str(output),
+                lyrics=previous.get("lyrics", ""),
+                duration_seconds=previous["duration_seconds"],
+                instrumental=previous["instrumental"], task_id=p["id"],
+            )
+            prepare_media_revision(p, "song")
+            update(p["id"], card="music-job:" + started["job_id"],
+                   phase="build", generation=p["generation"] + 1,
+                   status="working", fingerprint="",
+                   detail="Rendering a revised song; the previous version is preserved")
+            return "Creating a revised song; previous version preserved"
         if simple_vocal_revision(note):
             previous = music_backend.music_job_status(job_id)
             original = Path(previous["output_path"])
@@ -1633,6 +1673,20 @@ def retire_review_cards(p):
         REVIEW_PROJECTS_CHECKED[p["id"]] = review
 
 
+def remember_task_review(p, action, note=""):
+    """Learn only from a completed explicit review, without blocking task work."""
+    if action not in ("accept", "feedback_down"):
+        return
+    try:
+        feedback_learning.record(
+            STATE, p, 1 if action == "accept" else -1, note
+        )
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        STATE.mkdir(parents=True, exist_ok=True)
+        with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
+            log.write(time.ctime() + f"\nCould not save task review {p['id']}: {exc}\n")
+
+
 def process_requests():
     """Apply queued UI actions to SQLite and the native Hermes board."""
     with database() as conn:
@@ -1647,7 +1701,11 @@ def process_requests():
             p = next((x for x in projects() if x["id"] == req["project"]), None)
             if not p:
                 raise ValueError("This task has already been removed.")
-            action, note = req["action"], req["note"]
+            original_action, note = req["action"], req["note"]
+            if original_action == "feedback_down":
+                if p["status"] not in ("ready_for_review", "accepted") or not note.strip():
+                    raise ValueError("Give feedback on a finished task.")
+            action = "note" if original_action == "feedback_down" else original_action
             if image_job_id(p):
                 result = process_image_request(p, action, note)
                 with database() as conn:
@@ -1657,6 +1715,7 @@ def process_requests():
                     )
                 if action == "note":
                     sync_user_requests(p)
+                remember_task_review(p, original_action, note)
                 continue
             if music_job_id(p):
                 result = process_music_request(p, action, note)
@@ -1667,6 +1726,7 @@ def process_requests():
                     )
                 if action == "note":
                     sync_user_requests(p)
+                remember_task_review(p, original_action, note)
                 continue
             snapshot = (
                 board("show", p["card"], "--json", parse=True) if p["card"] else {}
@@ -1781,6 +1841,8 @@ def process_requests():
                 # creation rebuilds this file from the committed queue.
                 with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
                     log.write(time.ctime() + "\nFollow-up file: " + traceback.format_exc() + "\n")
+        if status == "done":
+            remember_task_review(p, original_action, note)
 
 
 def tick():
@@ -3391,7 +3453,8 @@ def gui():
     def introduce_if_ready(setup):
         """Explain the app once, after the installer and natural voice are ready."""
         nonlocal introduction_queued
-        if introduction_queued or (setup and setup.get("status") != "complete"):
+        if (introduction_queued or voice_muted.is_set()
+                or (setup and setup.get("status") != "complete")):
             return
         voice_ready = (
             ROOT / "Media/models/natural_voice/kokoro-v1.0.int8.onnx"
@@ -4424,10 +4487,11 @@ def gui():
             ):
                 return
         note = ""
-        if kind == "note":
+        if kind in ("note", "feedback_down"):
             note = simpledialog.askstring(
-                "Task instructions",
-                "What should your assistant do next?",
+                "Help Cale improve" if kind == "feedback_down" else "Task instructions",
+                "What was wrong, and what should Cale change?"
+                if kind == "feedback_down" else "What should your assistant do next?",
                 parent=window,
             )
             if not note:
@@ -4467,6 +4531,21 @@ def gui():
             )
         detail.insert("1.0", content)
         detail.configure(state="disabled")
+        reviews = feedback_learning.for_task(STATE, item["id"])
+        if reviews:
+            ttk.Label(pane, text="What Cale learned from your ratings",
+                      font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(10, 4))
+            for review in reviews[:3]:
+                row = ttk.Frame(pane)
+                row.pack(fill="x", pady=2)
+                label = ("👍  Liked this result" if review["rating"] > 0
+                         else "👎  " + review["note"][:130])
+                ttk.Label(row, text=label, wraplength=480).pack(side="left", anchor="w")
+                def forget_review(feedback_id=review["id"], widget=row):
+                    feedback_learning.forget(STATE, feedback_id)
+                    widget.destroy()
+                    status.set("Cale forgot that rating.")
+                ttk.Button(row, text="Forget", command=forget_review).pack(side="right")
 
     auto_models_started = False
     auto_voice_started = False
@@ -4714,13 +4793,14 @@ def gui():
             )
         if state == "ready_for_review":
             return (
-                ("Looks good", "accept"),
-                ("Request changes", "note"),
+                ("👍  Good", "accept"),
+                ("👎  Improve", "feedback_down"),
                 ("Reuse prompt", "reuse"),
                 ("Delete", "delete"),
             )
         if state == "accepted":
-            return (("Reuse prompt", "reuse"), ("Delete", "delete"))
+            return (("👎  Improve", "feedback_down"),
+                    ("Reuse prompt", "reuse"), ("Delete", "delete"))
         return (("Delete", "delete"),)
 
     def update_task_controls(card_info, item):
@@ -5176,6 +5256,7 @@ def gui():
         voice_folder = ROOT / "Media/models/natural_voice"
         if (
             not voice_upgrade_queued
+            and not voice_muted.is_set()
             and (voice_folder / "kokoro-v1.0.int8.onnx").is_file()
             and (voice_folder / "voices-v1.0.bin").is_file()
         ):

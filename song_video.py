@@ -8,7 +8,10 @@ are unavailable; instrumentals show a title without inventing sung words.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
+
+import imageio_ffmpeg
 
 import music_video
 
@@ -53,7 +56,7 @@ def render(source_path: str, *, segments: list[dict] | None = None,
     source = Path(source_path).resolve(strict=True)
     captions = source.with_name(source.stem + ".captions.srt")
     video = source.with_name(source.stem + "-video.mp4")
-    if video.is_file() and video.stat().st_size > 1000 and captions.is_file():
+    if video.is_file() and captions.is_file() and _video_playable(video):
         return {"path": str(video), "captions_path": str(captions),
                 "caption_source": "existing"}
     rows, caption_source = caption_rows(
@@ -75,3 +78,20 @@ def render(source_path: str, *, segments: list[dict] | None = None,
         str(source), str(video), captions_path=str(captions)
     )
     return {**result, "caption_source": caption_source}
+
+
+def _video_playable(path: Path) -> bool:
+    """Reject a partial MP4 left behind if an FFmpeg worker was interrupted."""
+    if path.stat().st_size <= 1000:
+        return False
+    try:
+        probe = subprocess.run(
+            [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel",
+             "error", "-i", str(path), "-map", "0:v:0", "-map", "0:a:0",
+             "-t", "0.25", "-f", "null", "-"],
+            capture_output=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return probe.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False

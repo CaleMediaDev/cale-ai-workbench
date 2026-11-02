@@ -44,7 +44,7 @@ def test_generates_instrumental_from_loopback_only(tmp_path):
     with patch.object(music_backend, "start_server"), patch.object(
         music_backend, "_request", side_effect=lambda *_args, **_kwargs: next(responses)
     ) as request, patch.object(
-        music_backend, "urlopen", return_value=io.BytesIO(b"audio")
+        music_backend, "urlopen", side_effect=lambda *_args, **_kwargs: io.BytesIO(b"audio")
     ) as download, patch.object(music_backend.time, "sleep"):
         result = music_backend.generate_music(
             "warm piano", str(destination), instrumental=True
@@ -70,6 +70,28 @@ def test_sends_user_lyrics_to_local_music_engine_unchanged(tmp_path):
     ), patch.object(music_backend.time, "sleep"):
         music_backend.generate_music("soul song", str(tmp_path / "song.mp3"), lyrics=lyrics)
     assert request.call_args_list[0].args[1]["lyrics"] == lyrics
+
+
+def test_music_engine_receives_female_pop_and_electronic_techno_cues(tmp_path):
+    responses = iter([
+        {"code": 200, "data": {"task_id": "one"}},
+        {"code": 200, "data": [{"status": 1, "result": '[{"file":"/v1/audio?path=one"}]'}]},
+        {"code": 200, "data": {"task_id": "two"}},
+        {"code": 200, "data": [{"status": 1, "result": '[{"file":"/v1/audio?path=two"}]'}]},
+    ])
+    with patch.object(music_backend, "start_server"), patch.object(
+        music_backend, "_request", side_effect=lambda *_args, **_kwargs: next(responses)
+    ) as request, patch.object(
+        music_backend, "urlopen", side_effect=lambda *_args, **_kwargs: io.BytesIO(b"audio")
+    ), patch.object(music_backend.time, "sleep"):
+        music_backend.generate_music("Make a song like Katy Perry", str(tmp_path / "pop.mp3"))
+        music_backend.generate_music("Make a techno song", str(tmp_path / "techno.mp3"),
+                                     instrumental=True)
+    submissions = [call.args[1] for call in request.call_args_list
+                   if call.args[0] == "/release_task"]
+    assert "female lead vocals" in submissions[0]["prompt"]
+    assert "drum machine" in submissions[1]["prompt"]
+    assert submissions[1]["lyrics"] == "[Instrumental]"
 
 
 def test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio(tmp_path):
@@ -414,3 +436,67 @@ def test_recovery_only_marks_playable_saved_song_complete(tmp_path):
         music_backend.recover_music_jobs()
         assert music_backend.music_job_status(job_id)["status"] == "complete"
         launch.assert_not_called()
+
+
+def test_failed_video_retries_saved_audio_without_generating_song_again(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    output = tmp_path / "song.mp3"
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_launch_job"
+    ):
+        started = music_backend.start_music_job(
+            "instrumental beach guitar", str(output), instrumental=True
+        )
+        def generate(*_args):
+            output.write_bytes(b"preserved audio")
+            return {"path": str(output), "model": "ACE-Step 1.5"}
+
+        with patch.object(music_backend, "generate_music", side_effect=generate) as engine, patch(
+            "song_video.render", side_effect=[RuntimeError("encoder busy"),
+                                               RuntimeError("encoder busy"),
+                                               {"path": "song-video.mp4",
+                                                "captions_path": "song.captions.srt"}]
+        ) as render, patch.object(music_backend, "audio_file_ok", return_value=True):
+            music_backend._run_job(started["job_id"])
+            first = music_backend.music_job_status(started["job_id"])
+            assert first["status"] == "queued"
+            assert first["video_retries"] == 1
+            for expected in (2, 2):
+                music_backend._write_job(started["job_id"], {**music_backend.music_job_status(
+                    started["job_id"]), "created": 0})
+                music_backend.recover_music_jobs()
+                assert music_backend.music_job_status(started["job_id"])["video_retries"] == expected
+        finished = music_backend.music_job_status(started["job_id"])
+    assert finished["status"] == "complete"
+    assert finished["result"]["video"]["path"] == "song-video.mp4"
+    assert output.read_bytes() == b"preserved audio"
+    engine.assert_called_once()
+    assert render.call_count == 3
+
+
+def test_video_retry_stops_after_three_failures_without_losing_audio(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    output = tmp_path / "song.mp3"
+    output.write_bytes(b"preserved audio")
+    job_id = "e" * 32
+    (jobs / (job_id + ".json")).write_text(json.dumps({
+        "job_id": job_id, "status": "working", "created": 0,
+        "output_path": str(output), "instrumental": True,
+        "duration_seconds": 30, "prompt": "beach music", "lyrics": "",
+    }))
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_worker_running", return_value=False
+    ), patch.object(music_backend, "audio_file_ok", return_value=True), patch(
+        "song_video.render", side_effect=RuntimeError("encoder unavailable")
+    ) as render:
+        for attempt in range(1, 4):
+            music_backend.recover_music_jobs()
+            record = music_backend.music_job_status(job_id)
+            assert record["video_retries"] == attempt
+            assert record["status"] == ("error" if attempt == 3 else "queued")
+            if attempt < 3:
+                music_backend._write_job(job_id, {**record, "created": 0})
+        music_backend.recover_music_jobs()
+    assert render.call_count == 3
+    assert output.read_bytes() == b"preserved audio"

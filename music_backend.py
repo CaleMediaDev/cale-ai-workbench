@@ -260,8 +260,11 @@ def _generate_music(
     if source and (not source.is_file() or source.suffix.lower() not in (".wav", ".mp3", ".flac")):
         raise ValueError("The cover source must be an existing WAV, MP3 or FLAC file.")
     start_server()
+    import music_style
+
     request = {
-        "prompt": prompt.strip(), "lyrics": "[Instrumental]" if instrumental else lyrics,
+        "prompt": music_style.enhance(prompt.strip(), instrumental),
+        "lyrics": "[Instrumental]" if instrumental else lyrics,
         "audio_format": target.suffix.lower()[1:], "audio_duration": duration_seconds,
         "thinking": False, "inference_steps": 8, "batch_size": 1,
     }
@@ -537,6 +540,21 @@ def _worker_running(job_id: str, info: dict) -> bool:
         return True  # Never launch a duplicate when ownership is uncertain.
 
 
+def _retry_captioned_video(job_id: str, info: dict, error: Exception) -> None:
+    """Keep the saved audio and retry only the video after a transient failure."""
+    attempts = int(info.get("video_retries", 0)) + 1
+    retrying = attempts < 3
+    _write_job(job_id, {
+        **info, "status": "queued" if retrying else "error",
+        "current": ("Retrying the captioned video" if retrying
+                    else "The audio is saved, but its video failed after three tries: "
+                    + str(error)[:180]),
+        "video_retries": attempts, "video_error": str(error)[:300],
+        "worker_pid": None, "created": time.time(),
+        **({} if retrying else {"finished": time.time()}),
+    })
+
+
 def recover_music_jobs() -> None:
     """Resume queued or working jobs whose worker died during a reboot."""
     if not JOBS.is_dir():
@@ -586,13 +604,12 @@ def recover_music_jobs() -> None:
                             duration=int(info.get("duration_seconds") or 30),
                         )
                     except Exception as exc:
-                        _write_job(job_id, {**info, "status": "error",
-                                            "current": "The audio is saved, but the video failed: " + str(exc)[:200],
-                                            "finished": time.time()})
+                        _retry_captioned_video(job_id, {**info, "vocal_check": vocal_check}, exc)
                         continue
                     _write_job(job_id, {
                         **info, "status": "complete", "current": "Music and captioned video are ready",
-                        "result": {"path": str(output), "model": "ACE-Step 1.5", "video": video},
+                        "result": {**(info.get("result") or {"path": str(output),
+                                       "model": "ACE-Step 1.5"}), "video": video},
                         "vocal_check": vocal_check, "finished": time.time(),
                     })
                 else:
@@ -710,12 +727,16 @@ def _run_job(job_id: str) -> None:
 
         working["current"] = "Making a video with captions"
         _write_job(job_id, working)
-        video = song_video.render(
-            result["path"], segments=(check or {}).get("segments", []),
-            lyrics=lyrics, title=info["prompt"],
-            instrumental=bool(info["instrumental"]),
-            duration=info["duration_seconds"],
-        )
+        try:
+            video = song_video.render(
+                result["path"], segments=(check or {}).get("segments", []),
+                lyrics=lyrics, title=info["prompt"],
+                instrumental=bool(info["instrumental"]),
+                duration=info["duration_seconds"],
+            )
+        except Exception as exc:
+            _retry_captioned_video(job_id, working, exc)
+            return
         _write_job(job_id, {
             **working, "status": "complete", "current": "Music and captioned video are ready",
             "result": {**result, "video": video}, "vocal_check": check,

@@ -40,3 +40,21 @@ def test_song_render_creates_mp4_and_editable_srt_without_changing_audio(tmp_pat
         result["captions_path"]
     ).read_text(encoding="utf-8")
     assert song.read_bytes() == original
+
+
+def test_interrupted_video_is_not_claimed_ready_or_overwritten(tmp_path):
+    song = tmp_path / "song.wav"
+    with wave.open(str(song), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b"\0\0" * 16000)
+    partial = tmp_path / "song-video.mp4"
+    partial.write_bytes(b"not an MP4" * 200)
+    (tmp_path / "song.captions.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nSong\n", encoding="utf-8"
+    )
+    result = song_video.render(str(song), title="Song", instrumental=True, duration=1)
+    assert Path(result["path"]).name == "song-video-2.mp4"
+    assert song_video._video_playable(Path(result["path"]))
+    assert partial.read_bytes() == b"not an MP4" * 200
