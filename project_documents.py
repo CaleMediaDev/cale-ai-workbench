@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sqlite3
 from pathlib import Path
 
 import file_chat
+import project_memory
 
 MAX_SOURCE_BYTES = 50 * 1024 * 1024
 MAX_EXTRACTED_CHARS = 5_000_000
@@ -73,6 +75,22 @@ def inspect(folder: str | Path, path: str, question: str = "",
         temporary = cache.with_suffix(".tmp")
         temporary.write_text(text, encoding="utf-8")
         os.replace(temporary, cache)
+    if len(text) > MAX_EXTRACTED_CHARS:
+        raise ValueError("The extracted text is too large for this task reader")
+    indexed = False
+    try:
+        if source.suffix.casefold() in file_chat.DOCUMENTS:
+            project_memory.index_document_text(
+                root, source, text, digest, f"{CACHE_VERSION}-vision{int(vision)}",
+            )
+            indexed = True
+        elif source.stat().st_size <= 256_000:
+            project_memory.index_file(root, source)
+            indexed = True
+    except (OSError, sqlite3.Error, ValueError):
+        # A locked index or sensitive filename must not prevent an explicitly
+        # requested document read. A later inspect can rebuild the FTS entry.
+        pass
     if question.strip():
         excerpt = file_chat.select_excerpt(text, question, limit=limit,
                                             subject="document")
@@ -83,4 +101,4 @@ def inspect(folder: str | Path, path: str, question: str = "",
         next_char = start + len(excerpt) if start + len(excerpt) < len(text) else None
     return {"source": relative, "text": excerpt, "kind": "document",
             "total_characters": len(text), "next_start_char": next_char,
-            "cached": cached}
+            "cached": cached, "indexed": indexed}

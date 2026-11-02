@@ -10,8 +10,11 @@ from __future__ import annotations
 import atexit
 import json
 import re
+import sqlite3
 from pathlib import Path
 from urllib.parse import urlparse
+
+import project_memory
 
 _PLAYWRIGHT = None
 _CONTEXTS = {}
@@ -132,6 +135,11 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
             raise ValueError("Browser download exceeds 512 MB; use a project command for large files")
         target = _download_target(folder, download.suggested_filename)
         download.save_as(str(target))
+        try:
+            project_memory.index_file(folder, target)
+        except (OSError, ValueError, sqlite3.Error):
+            # Images, archives, and large files still download normally.
+            pass
         return json.dumps({"saved": target.relative_to(folder).as_posix(),
                            "bytes": size, "url": download.url}, ensure_ascii=False)
     elif action == "scroll":

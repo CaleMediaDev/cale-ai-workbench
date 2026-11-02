@@ -1,11 +1,13 @@
 """Project documents stay local, scoped, and fresh after source edits."""
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
 import file_chat
 import native_agent
 import project_documents
+import project_memory
 
 
 def test_inspector_reads_real_pdf_and_reuses_the_extraction(tmp_path):
@@ -41,7 +43,24 @@ def test_inspector_reads_real_pdf_and_reuses_the_extraction(tmp_path):
     assert "November second" in first["text"]
     assert "November second" in second["text"]
     assert not first["cached"] and second["cached"]
+    assert first["indexed"] and second["indexed"]
     assert extract.call_count == 1
+    found = project_memory.search(tmp_path, "November second", kind="document")
+    assert len(found) == 1 and found[0]["source_path"] == "research.pdf"
+    identifier = found[0]["id"]
+    before = source.stat()
+    source.write_bytes(source.read_bytes().replace(b"November", b"December"))
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    try:
+        project_memory.get(tmp_path, identifier)
+    except ValueError as exc:
+        assert "source file was removed" in str(exc)
+    else:
+        raise AssertionError("Edited PDF returned stale indexed text")
+    assert not project_memory.search(tmp_path, "November second", kind="document")
+    refreshed = project_documents.inspect(tmp_path, "research.pdf")
+    assert "December second" in refreshed["text"] and refreshed["indexed"]
+    assert project_memory.search(tmp_path, "December second", kind="document")
 
 
 def test_inspector_paginates_and_invalidates_changed_source(tmp_path):

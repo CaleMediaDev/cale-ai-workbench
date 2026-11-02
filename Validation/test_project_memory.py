@@ -1,5 +1,6 @@
 """Persistent, project-scoped memory and full-text indexing behavior."""
 
+import hashlib
 import os
 import sqlite3
 import tempfile
@@ -76,6 +77,29 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertFalse(memory.search(self.folder, "recipe"))
         source.unlink()
         self.assertFalse(memory.search(self.folder, "budget"))
+
+    def test_document_chunks_are_searchable_and_source_checked(self):
+        source = self.folder / "manual.pdf"
+        source.write_bytes(b"first document bytes")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        text = "alpha " * 3000 + "distinctive zebra passage " + "omega " * 3000
+        result = memory.index_document_text(self.folder, source, text, digest)
+        self.assertGreater(result["parts"], 1)
+        self.assertFalse(memory.index_document_text(
+            self.folder, source, text, digest)["updated"])
+        found = memory.search(self.folder, "distinctive zebra", kind="document")
+        self.assertEqual(found[0]["source_path"], "manual.pdf")
+        self.assertIn("distinctive zebra", memory.get(self.folder, found[0]["id"])["body"])
+        self.assertTrue(memory.index_document_text(
+            self.folder, source, "revised extractor text", digest, revision="v2"
+        )["updated"])
+        self.assertFalse(memory.search(self.folder, "distinctive zebra", kind="document"))
+        revised = memory.search(self.folder, "revised extractor", kind="document")
+        self.assertEqual(revised[0]["source_path"], "manual.pdf")
+        source.unlink()
+        with self.assertRaisesRegex(ValueError, "source file was removed"):
+            memory.get(self.folder, revised[0]["id"])
+        self.assertFalse(memory.search(self.folder, "revised extractor", kind="document"))
 
     def test_code_scan_is_bounded_and_excludes_secrets(self):
         (self.folder / "app.py").write_text("def make_invoice(): return 42", encoding="utf-8")

@@ -16,8 +16,11 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-KINDS = frozenset({"requirement", "decision", "lesson", "skill", "component", "app", "note", "file"})
+KINDS = frozenset({"requirement", "decision", "lesson", "skill", "component", "app", "note", "file", "document"})
 TEXT_SUFFIXES = frozenset({".md", ".txt", ".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".html", ".css", ".yaml", ".yml", ".toml", ".ps1", ".sql"})
+DOCUMENT_SUFFIXES = frozenset({".pdf", ".docx", ".xlsx", ".pptx"})
+MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+DOCUMENT_CHUNK_CHARS = 16_000
 SKIP_DIRS = frozenset({".git", ".local-ai", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".next", ".cache"})
 DEFAULT_FILES = (
     "AGENTS.md", "README.md", "pyproject.toml", "package.json",
@@ -95,7 +98,7 @@ def save(folder: str | Path, kind: str, title: str, body: str,
          tags: str = "", source_path: str = "", memory_id: str = "") -> dict:
     """Save or update an explicit, typed memory linked to its source file."""
     root = Path(folder).resolve(strict=True)
-    if kind not in KINDS - {"file"}:
+    if kind not in KINDS - {"file", "document"}:
         raise ValueError("Choose requirement, decision, lesson, skill, component, app, or note.")
     title, body = title.strip(), body.strip()
     if not title or not body or len(title) > 200 or len(body) > 16000:
@@ -141,6 +144,49 @@ def index_file(folder: str | Path, path: str | Path) -> dict:
         _put(conn, identifier, "file", relative, data.decode("utf-8-sig", "replace"),
              source_path=relative, source_hash=hashlib.sha256(data).hexdigest())
     return {"id": identifier, "source_path": relative}
+
+
+def _document_source(root: Path, path: str | Path) -> Path:
+    source = Path(path).resolve(strict=True)
+    if (not source.is_file() or not source.is_relative_to(root)
+            or source.suffix.lower() not in DOCUMENT_SUFFIXES
+            or source.stat().st_size > MAX_DOCUMENT_BYTES
+            or any(SECRET_NAME.search(part) for part in source.relative_to(root).parts)):
+        raise ValueError("Choose a supported document inside this project")
+    return source
+
+
+def index_document_text(folder: str | Path, path: str | Path, text: str,
+                        source_hash: str, revision: str = "v1") -> dict:
+    """Index inspected document text in small source-checked FTS records."""
+    root = Path(folder).resolve(strict=True)
+    source = _document_source(root, path)
+    relative = source.relative_to(root).as_posix()
+    if not isinstance(text, str) or len(text) > 5_000_000:
+        raise ValueError("Document text is too large to index")
+    if not re.fullmatch(r"[a-f0-9]{64}", source_hash):
+        raise ValueError("A verified source hash is required")
+    chunks = [text[start:start + DOCUMENT_CHUNK_CHARS]
+              for start in range(0, len(text), DOCUMENT_CHUNK_CHARS)]
+    with connection(root) as conn:
+        existing = conn.execute(
+            "SELECT COUNT(*),MIN(source_hash),MAX(source_hash),MIN(tags),MAX(tags) FROM memories "
+            "WHERE kind='document' AND source_path=?", (relative,),
+        ).fetchone()
+        if (existing[0] == len(chunks) and existing[1] == existing[2] == source_hash
+                and existing[3] == existing[4] == "extractor:" + revision):
+            return {"source_path": relative, "parts": len(chunks), "updated": False}
+        old = [row[0] for row in conn.execute(
+            "SELECT id FROM memories WHERE kind='document' AND source_path=?", (relative,)
+        )]
+        for identifier in old:
+            conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
+            conn.execute("DELETE FROM memory_fts WHERE id=?", (identifier,))
+        for number, body in enumerate(chunks, 1):
+            identifier = f"document:{relative}:{number}"
+            _put(conn, identifier, "document", f"{relative} (part {number}/{len(chunks)})",
+                 body, "extractor:" + revision, relative, source_hash)
+    return {"source_path": relative, "parts": len(chunks), "updated": True}
 
 
 def index(folder: str | Path, include_code: bool = False, max_files: int = 800) -> dict:
@@ -211,13 +257,40 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
             "removed": len(stale), "truncated": truncated}
 
 
-def _refresh_file_record(root: Path, row) -> bool:
+def _refresh_file_record(root: Path, row, checked_documents: dict | None = None) -> bool:
     """Recheck a recalled file before using indexed text as evidence.
 
     Code scans are explicit and bounded, but a search hit may outlive a later
     edit or deletion. Refresh only the touched hit rather than walking the
     whole project on every memory lookup.
     """
+    if row["kind"] == "document":
+        relative = row["source_path"]
+        if checked_documents is not None and relative in checked_documents:
+            return checked_documents[relative]
+        try:
+            source = _document_source(root, root / relative)
+            digest = hashlib.sha256()
+            with source.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            changed = digest.hexdigest() != row["source_hash"]
+        except (OSError, ValueError):
+            changed = True
+        if changed:
+            # Extracted text belongs to exact source bytes. Never serve it
+            # after an edit; the next inspect_project_file call re-extracts.
+            with connection(root) as conn:
+                ids = [item[0] for item in conn.execute(
+                    "SELECT id FROM memories WHERE kind='document' AND source_path=?",
+                    (relative,),
+                )]
+                for identifier in ids:
+                    conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
+                    conn.execute("DELETE FROM memory_fts WHERE id=?", (identifier,))
+        if checked_documents is not None:
+            checked_documents[relative] = changed
+        return changed
     if row["kind"] != "file":
         return False
     path = root / row["source_path"]
@@ -291,14 +364,16 @@ def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> li
                 WHERE (?='' OR kind=?) ORDER BY updated DESC LIMIT ?""",
                 (kind, kind, limit * 5)).fetchall()
 
+    checked_documents = {}
     for _ in range(3):
         rows = query_rows()
-        changed = [_refresh_file_record(root, row) for row in rows]
+        changed = [_refresh_file_record(root, row, checked_documents) for row in rows]
         if not any(changed):
             break
     else:
         # A large number of stale hits or rapid edits must not surface old text.
-        rows = [row for row in query_rows() if not _refresh_file_record(root, row)]
+        rows = [row for row in query_rows()
+                if not _refresh_file_record(root, row, checked_documents)]
     return [{key: row[key] for key in ("id", "kind", "title", "tags", "source_path", "updated", "excerpt")}
             for row in rows[:limit]]
 

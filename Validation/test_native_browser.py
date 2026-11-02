@@ -71,6 +71,8 @@ def test_native_browser_can_fill_click_read_and_preview():
             saved = json.loads(native_agent.execute_tool(folder, "browser_download", {"ref": fields["Download"]}))
             assert saved["saved"] == "Downloads/example.txt"
             assert (folder / saved["saved"]).read_bytes() == b"private project download"
+            import project_memory
+            assert project_memory.search(folder, "private project download", kind="file")
             inspected = json.loads(native_agent.execute_tool(
                 folder, "inspect_project_file", {"path": saved["saved"]}))
             assert inspected["text"] == "private project download"
