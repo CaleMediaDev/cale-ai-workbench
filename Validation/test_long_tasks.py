@@ -44,6 +44,37 @@ class LongTaskTests(unittest.TestCase):
         repair.assert_called_once()
         self.assertEqual(calls.count("http://127.0.0.1:11434/api/show"), 2)
 
+    def test_existing_main_without_tools_is_repaired_before_task_dispatch(self):
+        calls = []
+
+        def response(request, timeout=0):
+            url = request.full_url if hasattr(request, "full_url") else request
+            calls.append(url)
+            if url.endswith("/api/show"):
+                capabilities = [] if calls.count(url) == 1 else ["tools"]
+                return io.BytesIO(json.dumps({
+                    "parameters": "num_ctx 65536\n", "capabilities": capabilities,
+                }).encode())
+            return io.BytesIO(b'{"models":[]}')
+
+        with (patch("urllib.request.urlopen", side_effect=response),
+              patch("model_library.repair_main_alias", return_value=True) as repair):
+            task_module.ensure_ollama("cale-local")
+        repair.assert_called_once()
+        self.assertEqual(calls.count("http://127.0.0.1:11434/api/show"), 2)
+
+    def test_existing_main_without_tools_reports_missing_replacement(self):
+        def response(request, timeout=0):
+            url = request.full_url if hasattr(request, "full_url") else request
+            if url.endswith("/api/show"):
+                return io.BytesIO(b'{"parameters":"num_ctx 65536\\n","capabilities":[]}')
+            return io.BytesIO(b'{"models":[]}')
+
+        with (patch("urllib.request.urlopen", side_effect=response),
+              patch("model_library.repair_main_alias", return_value=False)):
+            with self.assertRaisesRegex(RuntimeError, "cannot use tools"):
+                task_module.ensure_ollama("cale-local")
+
     def test_hidden_model_activity_window_does_not_block_automatic_update(self):
         class Window:
             def __init__(self, visible, kind="Toplevel"):
@@ -337,7 +368,8 @@ class LongTaskTests(unittest.TestCase):
             url = request.full_url if hasattr(request, "full_url") else request
             requests.append(url)
             if url.endswith("/api/show"):
-                return io.BytesIO(json.dumps({"parameters": "num_ctx 32768\n"}).encode())
+                return io.BytesIO(json.dumps({"parameters": "num_ctx 32768\n",
+                                                "capabilities": ["tools"]}).encode())
             return io.BytesIO(b'{"status":"success"}')
 
         with patch("urllib.request.urlopen", side_effect=response):

@@ -133,6 +133,33 @@ class AutoModelTests(unittest.TestCase):
         self.assertEqual(created["from"], "cale-balanced")
         sync.assert_called_once_with(library.ROOT, "cale-local")
 
+    def test_existing_main_without_tools_is_replaced_by_tool_capable_model(self):
+        catalog = {"main": {"alias": "cale-local"},
+                   "fast": {"alias": "cale-fast", "auto": True}}
+        tags = {"models": [
+            {"name": "cale-local:latest", "size": 7 * 2**30},
+            {"name": "cale-fast:latest", "size": 6 * 2**30},
+        ]}
+        created = []
+
+        def post(path, body, **_kwargs):
+            if path == "/api/create":
+                created.append(body)
+                return {"status": "success"}
+            return {"capabilities": ([] if body["model"] == "cale-local" and not created
+                                     else ["tools"]), "parameters": "num_ctx 65536\n"}
+
+        with (patch.object(library, "CATALOG", catalog),
+              patch.object(library, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+              patch.object(library, "model_ready", return_value=True),
+              patch.object(library, "alias_update_waits_for_tasks", return_value=False),
+              patch("model_fitness.suitable", return_value=True),
+              patch.object(library, "post", side_effect=post),
+              patch("context_window.sync", return_value=65536)):
+            self.assertTrue(library.repair_main_alias(32, 12))
+        self.assertEqual(created[0]["model"], "cale-local")
+        self.assertEqual(created[0]["from"], "cale-fast")
+
     def test_slow_main_is_kept_when_no_verified_replacement_exists(self):
         catalog = {"main": {"alias": "cale-local"},
                    "fast": {"alias": "cale-fast", "auto": True}}

@@ -729,7 +729,14 @@ def repair_main_alias(ram=None, vram=None):
     main = CATALOG["main"]["alias"]
     current_size = sizes.get(main, sizes.get(main + ":latest", 0))
     if current_size and model_fitness.suitable(main, current_size, ram, vram):
-        return False
+        try:
+            current_info = post("/api/show", {"model": main}, timeout=10)
+            if (not current_info.get("remote_host")
+                    and not current_info.get("remote_model")
+                    and "tools" in current_info.get("capabilities", [])):
+                return False
+        except (OSError, ValueError):
+            pass  # A listed alias still needs a verified tool-capable replacement.
     if current_size and alias_update_waits_for_tasks(CATALOG["main"]):
         return False
     candidates = []

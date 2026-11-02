@@ -2887,6 +2887,18 @@ def ensure_ollama(model):
         raise RuntimeError(
             "Long tasks require local weights, not a remote Ollama model."
         )
+    if model is not None and "tools" not in info.get("capabilities", []):
+        import model_library
+
+        if not model_library.repair_main_alias():
+            raise RuntimeError(
+                f"Configured local model {model} cannot use tools and no verified replacement is ready."
+            )
+        with urlopen(request, timeout=15) as response:
+            info = json.load(response)
+        if (info.get("remote_host") or info.get("remote_model")
+                or "tools" not in info.get("capabilities", [])):
+            raise RuntimeError("Replacement main model did not pass the local tool check.")
     context = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", info.get("parameters", ""))
     if context is None or int(context.group(1)) < 64000:
         # Ollama copies the existing alias before replacing it. This changes
