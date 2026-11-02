@@ -13,10 +13,13 @@ import chatgpt_auth as c
 
 class ChatGPTAuthTests(unittest.TestCase):
     def test_task_size_selects_available_plan_model(self):
-        models = ["gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra"]
-        self.assertEqual(c.choose_model(models, "balanced"), "gpt-6-luna")
+        models = ["gpt-6.1-sol", "gpt-6-luna", "gpt-6.1-terra", "gpt-6-astra"]
+        self.assertEqual(c.choose_model(models, "quick"), "gpt-6-luna")
+        self.assertEqual(c.choose_model(models, "balanced"), "gpt-6.1-terra")
         self.assertEqual(c.choose_model(models, "deep"), "gpt-6.1-sol")
         self.assertEqual(c.choose_model(["gpt-6-astra"], "balanced"), "gpt-6-astra")
+        self.assertEqual(c.choose_model(["gpt-6.1-terra", "gpt-6.1-sol"], "quick"),
+                         "gpt-6.1-terra")
 
     def test_streamed_output_survives_empty_completed_output(self):
         class Stream:

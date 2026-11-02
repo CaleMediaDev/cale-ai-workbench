@@ -345,12 +345,15 @@ def available_models(token):
 
 
 def choose_model(models, size):
-    """Prefer the lighter plan model for routine work and Sol for deep work."""
-    preferences = (
-        ("gpt-6-luna", "gpt-5.6-luna", "gpt-6.1-sol")
-        if size == "balanced"
-        else ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra")
-    )
+    """Scale plan requests from Luna through Terra to Sol by task size."""
+    preferences = {
+        "quick": ("gpt-6-luna", "gpt-5.6-luna", "gpt-6.1-terra", "gpt-5.6-terra",
+                  "gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"),
+        "balanced": ("gpt-6.1-terra", "gpt-5.6-terra", "gpt-6-luna", "gpt-5.6-luna",
+                     "gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"),
+        "deep": ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra", "gpt-6.1-terra",
+                 "gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-luna", "gpt-5.6-luna"),
+    }.get(size, ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"))
     return next((name for name in preferences if name in models), models[0])
 
 
