@@ -87,6 +87,140 @@ def test_native_worker_continues_when_model_claims_done_without_verifier():
         assert (Path(item["folder"]) / ".local-ai/verify.ps1").is_file()
 
 
+def test_completion_gate_catches_requested_file_in_duplicate_project_folder():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "project")
+        item["brief"] = "Create hello.txt containing exactly Hello from Cale."
+        folder = Path(item["folder"])
+        (folder / "project").mkdir()
+        (folder / "project/hello.txt").write_text("Hello from Cale")
+        (folder / ".local-ai/verify.ps1").write_text("exit 0")
+        issue = native_agent.completion_issue(folder, item)
+        assert "hello.txt" in issue and "project root" in issue
+        (folder / "hello.txt").write_text("Hello from Cale")
+        assert native_agent.completion_issue(folder, item) == ""
+        assert native_agent.requested_root_files("Create index.html in src/ folder") == []
+
+
+def test_completion_gate_requires_checked_plan_milestones():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / ".local-ai/verify.ps1").write_text("exit 0")
+        plan = folder / ".local-ai/PLAN.md"
+        plan.write_text("- [ ] Check the page")
+        assert "unchecked milestones" in native_agent.completion_issue(folder, item)
+        plan.write_text("- [x] Check the page")
+        assert native_agent.completion_issue(folder, item) == ""
+
+
+def test_empty_final_reply_gets_one_summary_retry():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        (Path(item["folder"]) / ".local-ai/verify.ps1").write_text("exit 0")
+        seen = []
+        responses = iter([
+            {"choices": [{"message": {"role": "assistant", "content": ""}}]},
+            {"choices": [{"message": {"role": "assistant", "content": "Page created and checked."}}]},
+        ])
+
+        def complete(payload):
+            seen.append(copy.deepcopy(payload))
+            return next(responses)
+
+        state = native_agent.run_slice(item, complete=complete)
+        assert state["answer"] == "Page created and checked."
+        assert len(seen) == 2
+        assert "final reply was empty" in str(seen[1]["messages"])
+
+
+def test_passing_verifier_and_complete_plan_hands_off_without_extra_model_calls():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        notes = folder / ".local-ai"
+        (notes / "verify.ps1").write_text("exit 0")
+        (notes / "PLAN.md").write_text("- [x] Create and test the page\n")
+        (notes / "PROGRESS.md").write_text("Page created; the saved verifier passed its checks.\n")
+        calls = []
+
+        def complete(_payload):
+            calls.append(1)
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "verify-1", "function": {"name": "run_command",
+                    "arguments": '{"command":"powershell -File .local-ai/verify.ps1"}'}}]}}]}
+
+        with patch.object(native_agent, "execute_tool", return_value="Exit code: 0\nPASS"):
+            state = native_agent.run_slice(item, complete=complete)
+        assert state["status"] == "done"
+        assert state["answer"]
+        assert len(calls) == 1
+
+
+def test_passing_verifier_prompts_plan_closeout_and_then_hands_off():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        notes = folder / ".local-ai"
+        (notes / "verify.ps1").write_text("exit 0")
+        (notes / "PLAN.md").write_text("- [ ] Create and test the page\n")
+        (notes / "PROGRESS.md").write_text("No work has been completed yet.\n")
+        responses = iter([
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "verify-1", "function": {"name": "run_command",
+                    "arguments": '{"command":"powershell -File .local-ai/verify.ps1"}'}}]}}]},
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [
+                {"id": "plan-1", "function": {"name": "write_file", "arguments":
+                    '{"path":".local-ai/PLAN.md","content":"- [x] Create and test the page"}'}},
+                {"id": "progress-1", "function": {"name": "write_file", "arguments":
+                    '{"path":".local-ai/PROGRESS.md","content":"Page created and saved verifier passed its checks."}'}}
+            ]}}]},
+        ])
+        seen = []
+        original = native_agent.execute_tool
+
+        def complete(payload):
+            seen.append(copy.deepcopy(payload))
+            return next(responses)
+
+        def tool(root, name, args):
+            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args)
+
+        with patch.object(native_agent, "execute_tool", side_effect=tool):
+            state = native_agent.run_slice(item, complete=complete)
+        assert state["status"] == "done"
+        assert len(seen) == 2
+        assert "rerun unchanged checks" in str(seen[1]["messages"])
+
+
+def test_source_write_after_verification_invalidates_automatic_handoff():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        notes = folder / ".local-ai"
+        (notes / "verify.ps1").write_text("exit 0")
+        (notes / "PLAN.md").write_text("- [ ] Create and test the page\n")
+        (notes / "PROGRESS.md").write_text("Working on the page and its saved checks.\n")
+        responses = iter([
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "verify-1", "function": {"name": "run_command",
+                    "arguments": '{"command":"powershell -File .local-ai/verify.ps1"}'}}]}}]},
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "write-1", "function": {"name": "write_file",
+                    "arguments": '{"path":"index.html","content":"new work"}'}}]}}]},
+        ])
+        original = native_agent.execute_tool
+
+        def tool(root, name, args):
+            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args)
+
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2), \
+                patch.object(native_agent, "execute_tool", side_effect=tool):
+            state = native_agent.run_slice(item, complete=lambda _: next(responses))
+        assert state["status"] == "continue"
+        assert state["verify_passed"] is False
+
+
 def test_valid_model_turn_resets_consecutive_worker_failures():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
@@ -121,6 +255,20 @@ def test_native_file_tools_cannot_escape_project_folder():
         })
         assert result.startswith("Tool error:")
         assert not (Path(temporary) / "outside.txt").exists()
+
+
+def test_powershell_file_tool_uses_utf8_bom_and_reads_without_marker():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        script = "Write-Output '✓ check passed'\n"
+        result = native_agent.execute_tool(folder, "write_file", {
+            "path": ".local-ai/verify.ps1", "content": script})
+        assert result.startswith("Saved ")
+        assert (folder / ".local-ai/verify.ps1").read_bytes().startswith(b"\xef\xbb\xbf")
+        read = native_agent.execute_tool(folder, "read_file", {"path": ".local-ai/verify.ps1"})
+        assert read.startswith("1: Write-Output")
+        assert "✓ check passed" in read
 
 
 def test_native_worker_indexes_existing_code_and_recalls_typed_memory():
