@@ -23,6 +23,17 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_song_versions_keep_takes_and_hide_short_checks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            audio = Path(folder) / "audio"
+            audio.mkdir()
+            first = audio / "take-1.wav"
+            second = audio / "take-2.mp3"
+            check = audio / "final-chorus-check.wav"
+            for path in (first, second, check):
+                path.write_bytes(b"draft")
+            self.assertEqual(set(task_module.song_versions(folder)), {first, second})
+
     def test_missing_vocals_retry_uses_saved_lyrics_and_stops_after_two(self):
         import music_backend
 

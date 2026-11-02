@@ -105,6 +105,8 @@ The background supervisor records task milestones even when the window is closed
 
 Each task card shows the upstream AI providers and their reported token totals. The loopback address used by a worker is Cale's router, so a local address alone does not mean Ollama answered. Open a task's details and choose **Use local AI only** to keep that task on installed Ollama models; this takes effect on the next model request, even while the task is running. **Use connected AI** restores the normal speed and usage routing. Audio rendering remains local in either mode.
 
+Song task details include **Listen to saved versions** so all playable takes remain available without searching through diagnostic clips. Cale's worker instructions count existing full-song drafts across restarts and limit each user-requested batch to three new versions; after that, Cale should present the best saved drafts and ask for direction rather than silently making more.
+
 The desktop rechecks GitHub releases while long tasks are running. If a newer release appears before a task finishes, Cale stages the newest version and applies it when the task is idle. The first-run AI install holds tasks until the core runtime is ready; later updates to optional browser tools run in the background without stopping existing or newly submitted tasks. Setup repair checks which installer owns the progress record, so a quiet optional-tool download cannot trigger a second base install.
 
 Automatic model sizing ignores Hermes's own board-finish reminders. A simple task therefore stays on the appropriate fast or middle model after a reminder, while a real new user request can still scale it up.

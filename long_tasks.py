@@ -571,13 +571,13 @@ def save_original_request(folder, pid, brief):
 
 def original_request_preview(brief):
     """Show the opening and latest criteria while preserving the full file."""
-    if len(brief) <= 6000:
+    if len(brief) <= 5700:
         return brief
-    omitted = len(brief) - 6000
+    omitted = len(brief) - 5700
     return (
-        brief[:3000]
+        brief[:2850]
         + f"\n...[{omitted} characters omitted; read the full original request file in sections]...\n"
-        + brief[-3000:]
+        + brief[-2850:]
     )
 
 
@@ -915,6 +915,11 @@ supervisor will independently execute verify.ps1 again after handoff.
 Keep source backups/checkpoints before risky edits. Do not delete project files on completion.
 If stuck after three distinct repair attempts, call kanban_block(kind='needs_input')
 with the exact blocker and question. Save progress before blocking.
+For a song, count existing full-song drafts from every prior worker run. Make at
+most three new full-song versions per user request; a restart does not reset
+that batch. Preserve every take. If the requested vocal or style still fails,
+show the best playable drafts and ask for direction instead of generating more.
+Only a new user instruction can start another batch of versions.
 When ALL requested milestones and checks pass, call kanban_request_review with
 the result and evidence. Do not call kanban_complete: the desktop supervisor checks it.
 {extra}
@@ -1345,6 +1350,26 @@ def verify_audio_handoff(p):
     except (OSError, ValueError, RuntimeError, EOFError, KeyError, subprocess.TimeoutExpired) as exc:
         return False, f"Could not independently verify the song: {exc}"
     return True, f"Built-in audio verification passed: {selected.name}, {duration:.1f}s{vocal_note}."
+
+
+def song_versions(folder):
+    """List saved playable takes without treating short diagnostics as songs."""
+    project = Path(folder).resolve()
+    versions = []
+    for location in (project / "audio", project / "Audio", project):
+        if not location.is_dir():
+            continue
+        for path in location.iterdir():
+            if (not path.is_file() or path.suffix.lower() not in
+                    (".wav", ".mp3", ".flac", ".ogg", ".m4a")
+                    or re.search(r"(?:check|diagnostic|sample|preview)", path.stem, re.I)):
+                continue
+            try:
+                if path.resolve().is_relative_to(project):
+                    versions.append(path)
+            except OSError:
+                continue
+    return sorted(set(versions), key=lambda path: path.stat().st_mtime, reverse=True)[:100]
 
 
 def recover_blocked_audio_review(p, snapshot=None):
@@ -4829,6 +4854,39 @@ def gui():
         ttk.Label(
             pane, text=item["title"], font=("Segoe UI", 17, "bold"), wraplength=620
         ).pack(anchor="w")
+        if re.search(r"\b(song|music|rap|audio track|dubstep)\b", item["brief"], re.I):
+            def show_song_versions():
+                versions = song_versions(item["folder"])
+                if not versions:
+                    messagebox.showinfo("Song versions", "No saved songs yet.", parent=dialog)
+                    return
+                chooser = tk.Toplevel(dialog)
+                chooser.title("Saved song versions")
+                chooser.geometry("680x430")
+                chooser.configure(background=bg)
+                shell = ttk.Frame(chooser, padding=16)
+                shell.pack(fill="both", expand=True)
+                ttk.Label(shell, text="Saved song versions",
+                          font=("Segoe UI", 15, "bold")).pack(anchor="w")
+                ttk.Label(shell, text="Cale kept these takes so you can hear and compare them. "
+                          "A draft may still miss part of your request.",
+                          wraplength=630).pack(anchor="w", pady=(4, 12))
+                listing = tk.Listbox(shell, background=card, foreground=text,
+                                     selectbackground="#545dba", borderwidth=0,
+                                     font=("Segoe UI", 11))
+                listing.pack(fill="both", expand=True)
+                for path in versions:
+                    listing.insert("end", path.name)
+                listing.selection_set(0)
+                def open_selected(_event=None):
+                    chosen = listing.curselection()
+                    if chosen:
+                        os.startfile(versions[chosen[0]])
+                listing.bind("<Double-Button-1>", open_selected)
+                ttk.Button(shell, text="Play selected version", command=open_selected).pack(
+                    anchor="e", pady=(10, 0))
+            ttk.Button(pane, text="Listen to saved versions",
+                       command=show_song_versions).pack(anchor="w", pady=(8, 0))
         if item["status"] not in ("accepted", "stopped", "ready_for_review"):
             local = item.get("ai_route") == "local_only"
             route_button = ttk.Button(
