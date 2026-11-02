@@ -304,18 +304,24 @@ def snapshot(root: Path = ROOT) -> dict:
     browser_ready = ((root / "Updates/features-0.5.16.done").is_file()
                      and (root / "data/plugins/hermes-connector/plugin.yaml").is_file())
     browser_probe = probes.get("browser", {})
-    browser_state = ("ready" if browser_probe.get("ok") else "attention" if browser_probe
-                     else "installed" if browser_ready else "working")
-    rows.append(_item("Browser tools", browser_state,
+    missing_tools = core_tool_health.missing(root)
+    local_browser_ready = not {"Node.js", "Local browser runtime"}.intersection(missing_tools)
+    browser_state = ("ready" if browser_probe.get("ok") or local_browser_ready else
+                     "attention" if browser_probe else "installed" if browser_ready else "working")
+    browser_detail = ("Chrome extension connected; local browser is ready"
+                      if browser_probe.get("ok") and local_browser_ready else
+                      "Chrome extension connected" if browser_probe.get("ok") else
+                      "Local browser tested; signed-in Chrome tabs need your approval"
+                      if local_browser_ready else
                       browser_probe.get("detail", "Companion installed; choose Run checks to test Chrome pairing"
-                                        if browser_ready else "Preparing local browser tools")))
+                                        if browser_ready else "Preparing local browser tools"))
+    rows.append(_item("Browser tools", browser_state, browser_detail))
 
     ffmpeg_ok = ffmpeg_runtime.working(root)
     rows.append(_item("FFmpeg media tools", "ready" if ffmpeg_ok else "attention",
                       "FFmpeg answered a local version check" if ffmpeg_ok else
                       "FFmpeg is missing or broken; Cale is repairing it"))
 
-    missing_tools = core_tool_health.missing(root)
     rows.append(_item("Core work tools", "ready" if not missing_tools else
                       "attention" if base_ready else "working",
                       "CLI and local browser tools answered checks" if not missing_tools else

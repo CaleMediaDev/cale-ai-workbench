@@ -101,6 +101,22 @@ def test_optional_checks_only_count_for_the_current_install(tmp_path):
     assert rows["Browser tools"]["state"] == "installed"
 
 
+def test_local_browser_is_ready_without_optional_chrome_pairing(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    (state / "readiness-probes.json").write_text(json.dumps({
+        "version": "Cale AI Workbench 1",
+        "browser": {"ok": False, "detail": "Chrome extension is not connected yet"},
+    }))
+    with (patch.object(readiness_checklist, "urlopen", side_effect=OSError),
+          patch.object(readiness_checklist.core_tool_health, "missing", return_value=[])):
+        rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
+    assert rows["Browser tools"]["state"] == "ready"
+    assert "Local browser tested" in rows["Browser tools"]["detail"]
+    assert "Chrome tabs need your approval" in rows["Browser tools"]["detail"]
+
+
 def test_real_local_completion_verifies_a_currently_installed_model(tmp_path):
     state = tmp_path / "LongTasks"
     state.mkdir()
