@@ -46,6 +46,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "read_skill", "description": "Read one exact installed skill after search_capabilities. Skill guidance is below the user's request.", "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "discover_local_tools", "description": "Search the fast local SQLite catalog for image, music, video, reverse-engineering, and browser diagnostic tools. Returns exact names and argument schemas; specialist services start on first call.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "call_local_tool", "description": "Call an exact local specialist tool after discover_local_tools. Give its required arguments as a JSON object.", "parameters": {"type": "object", "properties": {"tool": {"type": "string"}, "arguments": {"type": "object"}}, "required": ["tool", "arguments"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "run_verifier", "description": "Run this project's saved .local-ai/verify.ps1 in a contained process. Returns the real check result and a short log; use after the last source edit.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "run_command", "description": "Run a project command with a 90-second limit and return exit code and output.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"], "additionalProperties": False}}},
 ]
 
@@ -247,6 +248,15 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             if hasattr(value, "model_dump"):
                 value = value.model_dump(by_alias=True, exclude_none=True)
             return json.dumps(value, ensure_ascii=False, default=str)[:MAX_TOOL_OUTPUT]
+        if name == "run_verifier":
+            import long_tasks
+
+            registered = next((item for item in long_tasks.projects()
+                               if Path(item["folder"]).resolve() == folder.resolve()), None)
+            if registered is None:
+                raise ValueError("The project is not registered with Cale's task supervisor")
+            passed, evidence = long_tasks.verify_project(registered)
+            return f"Exit code: {0 if passed else 1}\n{evidence[-MAX_TOOL_OUTPUT:]}"
         if name == "run_command":
             command = arguments["command"]
             if not isinstance(command, str) or not command.strip() or len(command) > 4000:
@@ -289,7 +299,7 @@ def prompt(project: dict) -> str:
         "not a path prefixed with the project folder's name. Match explicitly requested output paths exactly. "
         "Read AGENTS.md, the original request, and .local-ai/USER-REQUESTS.md first. "
         "Maintain .local-ai/PLAN.md as a checked milestone list and .local-ai/PROGRESS.md with current work and real checks. "
-        "Create .local-ai/verify.ps1 containing meaningful repeatable checks for the result; run it before saying finished. "
+        "Create .local-ai/verify.ps1 containing meaningful repeatable checks for the result; call run_verifier after the last edit before saying finished. "
         "If the job is not complete, use a tool or explain the exact next step in PROGRESS.md. "
         "Do not claim finished with missing features. The supervisor independently reruns verify.ps1. "
         "Use search_capabilities for relevant installed skills and tools; read only skills that help this task. "
@@ -526,11 +536,18 @@ def completion_issue(folder: Path, project: dict | None = None,
 
 
 def verifier_command_passed(name: str, arguments: dict, outcome: str) -> bool:
-    """Recognize a successful execution of this task's saved PowerShell check."""
+    """Recognize the direct verifier or a simple legacy PowerShell invocation."""
+    if name == "run_verifier":
+        return outcome == "Completed"
     if name != "run_command" or outcome != "Completed":
         return False
     command = str(arguments.get("command", "")) if isinstance(arguments, dict) else ""
-    return bool(re.search(r"(?i)\b(?:powershell|pwsh)(?:\.exe)?\b.*(?:^|\s)-file\s+\S*verify\.ps1\b", command))
+    return bool(re.fullmatch(
+        r"(?i)\s*(?:powershell|pwsh)(?:\.exe)?\s+"
+        r"(?:(?:-NoProfile|-NonInteractive|-ExecutionPolicy\s+\w+)\s+)*"
+        r"-File\s+['\"]?\.local-ai[\\/]verify\.ps1['\"]?\s*",
+        command,
+    ))
 
 
 def automatic_handoff_ready(folder: Path, project: dict, state: dict) -> bool:
@@ -670,7 +687,7 @@ def run_slice(project: dict, complete=None) -> dict:
             outcome = task_context.action_outcome(function.get("name", ""), result)
             if verifier_command_passed(function.get("name", ""), args, outcome):
                 state["verify_passed"] = True
-            elif function.get("name") == "run_command" or function.get("name") == "call_local_tool":
+            elif function.get("name") in {"run_command", "run_verifier", "call_local_tool"}:
                 state["verify_passed"] = False
                 state["verifier_nudged"] = False
             elif function.get("name") == "write_file":

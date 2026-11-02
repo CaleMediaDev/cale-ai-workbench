@@ -167,6 +167,18 @@ def test_detailed_genre_brief_without_bpm_starts_local_render():
     assert chat_assistant.route("How would you arrange a dark techno chorus?", []) == "answer"
 
 
+def test_instrumental_breakdown_does_not_remove_requested_rap_vocals():
+    brief = (
+        "94 BPM, hard-hitting West Coast gangsta rap with 808 bass and G-funk synths. "
+        "Deep gritty male rapper with two detailed rap verses and a layered male vocal hook. "
+        "Start with a spoken intro, then add a short instrumental breakdown before the final hook."
+    )
+    spec = chat_assistant.music_request(brief)
+    assert spec is not None
+    assert spec["instrumental"] is False
+    assert chat_assistant.music_request("Make an instrumental rap beat")["instrumental"] is True
+
+
 def test_detailed_create_track_or_banger_skips_general_agent_planning():
     track = (
         "Create an insanely catchy, high-energy melodic dubstep and heavy bass "

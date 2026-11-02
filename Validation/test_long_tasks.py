@@ -25,6 +25,17 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_music_card_explains_local_audio_has_no_token_meter(self):
+        item = {"card": "music-job:" + "a" * 32}
+        self.assertEqual(task_module.task_usage_labels(item, 0, []), (
+            "Text tokens: 0 · Audio: no token count",
+            "AI used: ACE-Step 1.5 local audio",
+        ))
+        self.assertEqual(task_module.task_usage_labels(item, 1091, [("Local", 1091)]), (
+            "Text tokens: 1,091 · Audio: no token count",
+            "AI used: ACE-Step 1.5 local audio · Local 1,091 tokens",
+        ))
+
     def test_missing_configured_main_model_recovers_before_task_dispatch(self):
         calls = []
 

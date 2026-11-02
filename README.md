@@ -4,7 +4,7 @@
 
 Created by [Cale Media](https://calemedia.com/). New general tasks use Cale's native worker with Ollama and the existing model router; older tasks can still finish through Hermes Agent.
 
-The native worker saves each model/tool step, resumes after a crash, keeps a project plan and progress file, and independently reruns the project's verification script before marking work finished. It can search public webpages, edit project files, run commands, and discover Cale's installed local image, audio, video, camera, memory, and training tools. Existing Hermes tasks retain their board history during this migration. The supervisor stores worker process identity separately from the step checkpoint, so a worker that saves an early result cannot have it overwritten during startup. The installer still includes Hermes for that recovery path and for capabilities that have not moved to the native worker yet; signed-in Chrome/DevTools sessions remain one such gap. No OpenClaw runtime or source code is bundled.
+The native worker saves each model/tool step, resumes after a crash, keeps a project plan and progress file, and can run the project's verification script through a direct contained tool before handoff. The supervisor independently reruns that script before marking work finished. It can search public webpages, edit project files, run commands, and discover Cale's installed local image, audio, video, camera, memory, and training tools. Existing Hermes tasks retain their board history during this migration. The supervisor stores worker process identity separately from the step checkpoint, so a worker that saves an early result cannot have it overwritten during startup. The installer still includes Hermes for that recovery path and for capabilities that have not moved to the native worker yet; signed-in Chrome/DevTools sessions remain one such gap. No OpenClaw runtime or source code is bundled.
 
 Skills and tool descriptions are also indexed in a local SQLite FTS5 database (`LongTasks/capabilities.sqlite3`). Setup builds it before opening the desktop; launch and the supervisor refresh it automatically, including locally edited skills. The native worker can search that catalog and load a relevant skill without scanning every Markdown file on each task. The index is rebuildable from the installed files and tool registrations; it contains no account keys or project documents. The readiness checklist queries the database and offers automatic repair if it fails. Large optional model weights still download according to the PC's available resources, so a capability appears as ready only after its runtime or model has actually passed its check.
 
@@ -20,7 +20,7 @@ Skills and tool descriptions are also indexed in a local SQLite FTS5 database (`
 
 If a previously blocked Hermes task starts a new worker run, its card returns to **Working** automatically. A genuine unresolved block remains visible until a later run actually starts.
 
-For local music, ACE-Step now loads its optional music-planning model on GPUs its own hardware check supports. When that model is ready, generated songs use its enhanced planning path; on smaller PCs or if model loading fails, the existing direct generation path remains available. The app still verifies audible vocals before claiming that a vocal song is finished.
+For local music, ACE-Step now loads its optional music-planning model on GPUs its own hardware check supports. When that model is ready, generated songs use its enhanced planning path; on smaller PCs or if model loading fails, the existing direct generation path remains available. The app still verifies audible vocals before claiming that a vocal song is finished; an instrumental breakdown inside a vocal brief no longer turns the entire song instrumental.
 
 The installer downloads the runtime, tools, browser, image/voice models, and model files. It creates a desktop shortcut with the Cale Media logo, which also appears on the app window and taskbar. No Python, Git, Node, terminal commands, or API keys need to be installed manually. The ZIP alternative contains `Install.cmd` with the same setup screen.
 
@@ -151,7 +151,7 @@ Keys you add yourself are encrypted with Windows DPAPI; they are not written int
 
 No account keys are included in the repository or installer. Local models work without a cloud service.
 
-Each task card shows the tokens reported by models used for that task. Counts begin when this feature is installed and exclude providers that omit usage data. The lifetime graph retains its separate all-task total.
+Each task card shows the tokens reported by text models used for that task. Music cards identify local ACE-Step audio separately because its generation does not report a token count. Counts begin when this feature is installed and exclude providers that omit usage data. The lifetime graph retains its separate all-task total.
 
 See [OpenRouter's free model information](https://openrouter.ai/collections/free-models/) and [account connection documentation](https://openrouter.ai/docs/guides/overview/auth/oauth).
 

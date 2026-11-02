@@ -257,6 +257,19 @@ def music_job_id(p):
     return card.split(":", 1)[1] if card.startswith("music-job:") else ""
 
 
+def task_usage_labels(p, tokens, source_totals):
+    """Distinguish text tokens from local audio generation on music cards."""
+    sources = " · ".join(
+        f"{source} {count:,} tokens" for source, count in source_totals
+    )
+    if music_job_id(p):
+        return (
+            f"Text tokens: {tokens:,} · Audio: no token count",
+            "AI used: ACE-Step 1.5 local audio" + (" · " + sources if sources else ""),
+        )
+    return f"Tokens: {tokens:,}", "AI used: " + (sources or "waiting for first response")
+
+
 def media_job_restarted(p, job):
     """Distinguish a later worker recovery from an unchanged failed result."""
     if p["status"] != "needs_input":
@@ -6196,16 +6209,15 @@ def gui():
                 task_cards[pid] = card_info
             card_info = task_cards[pid]
             set_text(card_info["title"], item["title"])
+            source_totals = sources_by_task.get(pid, [])
+            token_label, source_label = task_usage_labels(
+                item, tokens_by_task.get(pid, 0), source_totals)
             set_text(
                 card_info["tokens"],
-                f"Tokens: {tokens_by_task.get(pid, 0):,}    "
-                f"Total time: {task_eta.total_time(item['created'], item['updated'], item['status'], finished=item['finished'])}",
+                token_label + "    Total time: " + task_eta.total_time(
+                    item['created'], item['updated'], item['status'], finished=item['finished']),
             )
-            source_totals = sources_by_task.get(pid, [])
-            set_text(card_info["sources"],
-                     "AI used: " + (" · ".join(
-                         f"{source} {tokens:,} tokens" for source, tokens in source_totals)
-                         if source_totals else "waiting for first response"))
+            set_text(card_info["sources"], source_label)
             percent, current = task_progress(item)
             finished = item["status"] in ("ready_for_review", "accepted")
             state = "Finished" if finished else item["status"].replace("_", " ").capitalize()

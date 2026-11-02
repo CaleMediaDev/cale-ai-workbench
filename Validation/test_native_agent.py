@@ -210,6 +210,56 @@ def test_passing_verifier_and_complete_plan_hands_off_without_extra_model_calls(
         assert len(calls) == 1
 
 
+def test_direct_verifier_tool_runs_registered_project_and_hands_off():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        notes = folder / ".local-ai"
+        (notes / "verify.ps1").write_text("exit 0", encoding="utf-8")
+        (notes / "PLAN.md").write_text("- [x] Build and check the page", encoding="utf-8")
+        (notes / "PROGRESS.md").write_text(
+            "Page created and the saved project checks passed successfully.", encoding="utf-8")
+        calls = []
+
+        def complete(_payload):
+            calls.append(1)
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "verify-1", "function": {"name": "run_verifier", "arguments": "{}"}}]}}]}
+
+        with (patch.object(long_tasks, "projects", return_value=[item]),
+              patch.object(long_tasks, "verify_project", return_value=(True, "real checks passed")) as verify):
+            state = native_agent.run_slice(item, complete=complete)
+        verify.assert_called_once_with(item)
+        assert state["status"] == "done"
+        assert len(calls) == 1
+        assert "Exit code: 0" in str(state["messages"])
+
+
+def test_failed_direct_verifier_cannot_certify_a_task():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / ".local-ai/verify.ps1").write_text("exit 1", encoding="utf-8")
+        reply = {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+            "id": "verify-1", "function": {"name": "run_verifier", "arguments": "{}"}}]}}]}
+        with (patch.object(long_tasks, "projects", return_value=[item]),
+              patch.object(long_tasks, "verify_project", return_value=(False, "check failed")),
+              patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1)):
+            state = native_agent.run_slice(item, complete=lambda _payload: reply)
+        assert state["status"] == "continue"
+        assert state["verify_passed"] is False
+        assert "Exit code: 1" in str(state["messages"])
+
+
+def test_echoed_verifier_command_does_not_count_as_a_check():
+    assert not native_agent.verifier_command_passed(
+        "run_command", {"command": "echo powershell -File .local-ai/verify.ps1"},
+        "Completed")
+    assert native_agent.verifier_command_passed(
+        "run_command", {"command": "powershell -NoProfile -File .local-ai/verify.ps1"},
+        "Completed")
+
+
 def test_passing_verifier_prompts_plan_closeout_and_then_hands_off():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

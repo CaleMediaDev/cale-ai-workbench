@@ -152,7 +152,17 @@ def music_request(text: str) -> dict | None:
             duration = 180 if re.search(r"\b(?:rap|music)\b", prompt, re.IGNORECASE) else 30
     if not 10 <= duration <= 600:
         raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
-    instrumental = bool(re.search(r"\b(?:instrumental|no vocals|without vocals|no singing)\b", prompt, re.IGNORECASE))
+    # A short instrumental breakdown is an arrangement instruction, not a
+    # request to strip the rapper or singer from the entire song.
+    instrumental_mentions = list(re.finditer(r"\binstrumental\b", prompt, re.IGNORECASE))
+    section_only = bool(instrumental_mentions) and all(
+        re.match(r"\s+(?:breakdown|bridge|interlude|intro|outro|section|passage|drop)\b",
+                 prompt[match.end():], re.IGNORECASE)
+        for match in instrumental_mentions
+    )
+    instrumental = bool(re.search(r"\b(?:no vocals|without vocals|no singing)\b",
+                                  prompt, re.IGNORECASE)) or bool(
+                                      instrumental_mentions and not section_only)
     # A beat or background soundtrack normally has no singer. Preserve an
     # explicit vocal request instead of silently changing it to instrumental.
     if (not instrumental and not lyrics
