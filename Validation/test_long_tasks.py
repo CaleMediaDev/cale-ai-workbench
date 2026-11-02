@@ -760,7 +760,8 @@ class LongTaskTests(unittest.TestCase):
         self.assertNotIn("Wrong", str(context))
         self.assertEqual(context[-1]["content"], "Reply 11")
         import chat_assistant
-        with patch("cloud_ai.post", return_value={"choices": [{"message": {"content": "Rufus"}}]}) as model:
+        with (patch("cloud_ai.STATE", self.base / "state"),
+              patch("cloud_ai.post", return_value={"choices": [{"message": {"content": "Rufus"}}]}) as model):
             self.assertEqual(chat_assistant.local_answer("What is my dog's name?", context), "Rufus")
         self.assertTrue(any("Rufus" in item["content"] for item in model.call_args.args[1]["messages"]))
 
