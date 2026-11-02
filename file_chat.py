@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -40,12 +41,14 @@ def select_excerpt(text: str, question: str, limit: int = 12000, subject: str = 
     # Smaller web-answer budgets still need room for several distant passages.
     chunk_size = min(2200, max(350, (limit - 250) // 5))
     words = {
-        word for word in re.findall(r"[\w-]{3,}", question.casefold())
+        word for word in re.findall(r"\w{3,}", question.casefold())
         if word not in STOP_WORDS
     }
     chunks = [text[pos:pos + chunk_size] for pos in range(0, len(text), chunk_size)]
-    lower_chunks = [chunk.casefold() for chunk in chunks]
-    scores = [sum(chunk.count(word) for word in words) for chunk in lower_chunks]
+    scores = []
+    for chunk in chunks:
+        tokens = Counter(re.findall(r"\w{3,}", chunk.casefold()))
+        scores.append(sum(tokens[word] for word in words))
     summary = bool(re.search(r"\b(summarize|summary|overview|main points)\b", question, re.I))
     hints = []
     if re.search(r"\b(end|ending|final|conclusion|last)\b", question, re.I):

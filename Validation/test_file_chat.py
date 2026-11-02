@@ -95,6 +95,17 @@ def test_tight_excerpt_budget_keeps_best_match_near_end():
     assert len(excerpt) <= 900
 
 
+def test_excerpt_ranks_complete_words_over_repeated_substrings():
+    blocks = [f"Section {index}. ".ljust(350, "x") for index in range(30)]
+    blocks[3] = ("start " * 45).ljust(350, "x")
+    blocks[27] = "The art collection is in Gallery B. ".ljust(350, "x")
+    excerpt = file_chat.select_excerpt(
+        "".join(blocks), "Where is the art collection?", limit=500,
+    )
+    assert "Gallery B" in excerpt
+    assert len(excerpt) <= 500
+
+
 def test_long_file_answer_discloses_omitted_sections(tmp_path):
     path = tmp_path / "long.txt"
     path.write_text("Opening.\n" + "Filler.\n" * 2000 + "Answer: 42.\n", encoding="utf-8")
