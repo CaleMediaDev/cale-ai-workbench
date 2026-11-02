@@ -4205,10 +4205,11 @@ def gui():
             else:
                 assistant_reply("I can't find an earlier reply to read aloud yet.")
             return
-        active = chat_assistant.followup_tasks(projects())
+        active = chat_assistant.followup_tasks(projects(), raw_value)
         if pending_followup:
             note, ids = pending_followup
-            candidates = [p for p in active if p["id"] in ids]
+            saved_tasks = {p["id"]: p for p in projects()}
+            candidates = [saved_tasks[pid] for pid in ids if pid in saved_tasks]
             target = chat_assistant.choose_task(raw_value, candidates, allow_single=False)
             if target:
                 pending_followup = None

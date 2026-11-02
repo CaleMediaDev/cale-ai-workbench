@@ -1219,6 +1219,21 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("Add a larger search box", (Path(updated["folder"]) / ".local-ai/USER-REQUESTS.md").read_text())
         self.assertFalse(any(call.args[0] == "reopen-review" for call in board.call_args_list))
 
+    def test_chat_revision_reopens_an_accepted_project(self):
+        task_module.update(self.pid, card="archived-card", phase="review", status="accepted")
+        task_module.request(self.pid, "note", "Make the finished app easier to use")
+        with patch.object(
+            task_module, "board", return_value={"task": {"status": "archived"}}
+        ):
+            task_module.process_requests()
+        updated = self.item()
+        self.assertEqual(updated["status"], "working")
+        self.assertEqual(updated["phase"], "build")
+        self.assertEqual(updated["generation"], 1)
+        self.assertEqual(updated["finished"], 0)
+        self.assertIn("easier to use", (Path(updated["folder"]) /
+                      ".local-ai/USER-REQUESTS.md").read_text())
+
     def test_thumbs_down_revises_task_and_teaches_future_similar_work(self):
         import feedback_learning
 

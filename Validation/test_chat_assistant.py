@@ -151,6 +151,30 @@ def test_reviewed_task_can_receive_chat_feedback():
     assert chat_assistant.route("Make a new recipe app", candidates) == "task"
 
 
+def test_finished_task_can_receive_named_revision_in_chat():
+    tasks = [
+        {"id": "live", "title": "Build bakery site", "status": "working", "updated": 20},
+        {"id": "song", "title": "Techno song", "status": "accepted", "updated": 10},
+    ]
+    candidates = chat_assistant.followup_tasks(tasks, "Improve Techno song with no guitars")
+    assert [task["id"] for task in candidates] == ["live", "song"]
+    assert chat_assistant.route("Improve Techno song with no guitars", candidates) == "note"
+    assert chat_assistant.choose_task("Improve Techno song with no guitars", candidates)["id"] == "song"
+
+
+def test_vague_revision_offers_recent_finished_tasks_without_guessing():
+    tasks = [
+        {"id": str(index), "title": f"Finished {index}", "status": "accepted", "updated": index}
+        for index in range(8)
+    ]
+    candidates = chat_assistant.followup_tasks(tasks, "Make it louder")
+    assert [task["id"] for task in candidates] == ["7", "6", "5", "4", "3"]
+    assert chat_assistant.route("Make it louder", candidates) == "note"
+    assert chat_assistant.choose_task("Make it louder", candidates) is None
+    assert chat_assistant.choose_task("2", candidates)["id"] == "6"
+    assert chat_assistant.followup_tasks(tasks, "Make a new app") == []
+
+
 def test_multiple_tasks_require_a_clear_followup_target():
     tasks = [{"id": "a", "title": "Build bakery site"}, {"id": "b", "title": "Research suppliers"}]
     assert chat_assistant.choose_task("also add a contact page", tasks) is None

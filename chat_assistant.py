@@ -27,9 +27,29 @@ FOLLOWUP_STATUSES = frozenset({
 })
 
 
-def followup_tasks(tasks: list[dict]) -> list[dict]:
-    """Include work awaiting review so chat feedback can reopen it."""
-    return [task for task in tasks if task["status"] in FOLLOWUP_STATUSES]
+def followup_tasks(tasks: list[dict], text: str = "") -> list[dict]:
+    """Offer finished work for revisions without flooding ordinary chat.
+
+    Named finished tasks remain available even if other work is active. When
+    the person says only "change it" and nothing is active, offer a short list
+    of recent finished tasks so they can choose instead of guessing a target.
+    """
+    active = [task for task in tasks if task["status"] in FOLLOWUP_STATUSES]
+    if not text:
+        return active
+    value = text.casefold()
+    named = [task for task in tasks if task["status"] == "accepted"
+             and task["title"].strip() and task["title"].casefold() in value]
+    if named:
+        return active + named
+    if active or not re.match(
+        r"^(?:also|actually|instead|change it|add to (?:it|that)|tell (?:it|the ai) to|"
+        r"(?:make|fix|update|improve|revise|redo|adjust)\s+(?:it|that|this)\b)",
+        value,
+    ):
+        return active
+    finished = [task for task in tasks if task["status"] == "accepted"]
+    return sorted(finished, key=lambda task: task.get("updated", 0), reverse=True)[:5]
 
 
 def image_prompt(text: str) -> str | None:
@@ -145,6 +165,11 @@ def route(text: str, active_tasks: list[dict]) -> str:
         command.startswith(("add ", "change "))
         or re.match(r"^(?:make|fix|update|improve|revise|redo|adjust)\s+(?:it|that|this)\b", command)
     ):
+        return "note"
+    if active_tasks and re.match(
+        r"^(?:make|fix|update|improve|revise|redo|adjust)\b", command
+    ) and any(task["title"].strip() and task["title"].casefold() in command
+              for task in active_tasks):
         return "note"
     if music_request(text):
         return "music"
