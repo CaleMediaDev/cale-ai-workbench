@@ -871,6 +871,7 @@ class Router:
             measured_speeds[provider] for provider, spec in connected
             if (prompt_estimate + min(expected_output, spec.get("max_tokens", 8192)) + 1024
                 <= spec["context"]
+                and (not needs_vision or spec.get("vision", False))
                 and time.time() >= self.provider_cooldowns.get(provider, 0)
                 and time.time() - routing_memory.pressure(provider)["last_limit"] >= 3600
                 and self.provider_request_available(
@@ -932,6 +933,7 @@ class Router:
                 provider_pressure = routing_memory.pressure(provider)
                 if (not provider_key or not confirmed.get(provider)
                         or provider_context > spec["context"]
+                        or (needs_vision and not spec.get("vision", False))
                         or (time.time() - provider_pressure["last_limit"] < 3600)
                         or not (cloud_only or routing_mode.free_first(
                             mode,

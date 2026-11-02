@@ -600,6 +600,34 @@ class CloudTests(unittest.TestCase):
         reserve.assert_not_called()
         post.assert_not_called()
 
+    def test_image_request_skips_faster_text_only_free_provider(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        cloud.save_provider_key("google", "google-test-secret-value", True)
+        request = dict(REQUEST, messages=[{"role": "user", "content": [
+            {"type": "text", "text": "Describe this image."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]}])
+        with (patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as direct,
+              patch.object(cloud, "post") as local,
+              patch("usage_history.recent_provider_speed",
+                    side_effect=lambda provider, _default: {"groq": 900, "google": 100}[provider])):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        self.assertEqual(direct.call_args.args[0], "google")
+        local.assert_not_called()
+
+    def test_image_request_does_not_use_text_only_free_provider(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        request = dict(REQUEST, messages=[{"role": "user", "content": [
+            {"type": "text", "text": "Describe this image."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]}])
+        with patch.object(cloud_providers, "complete") as direct:
+            with self.assertRaisesRegex(RuntimeError, "Free cloud only is selected"):
+                cloud.Router().complete(request)
+        direct.assert_not_called()
+
     def test_slow_long_balanced_task_tries_connected_free_route(self):
         self.connected()
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
