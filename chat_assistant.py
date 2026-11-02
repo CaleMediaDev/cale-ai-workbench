@@ -558,9 +558,11 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
 
         state = Path(__file__).resolve().parent / "LongTasks"
         terms = memory_search_terms(question)
-        matches = user_file_memory.search(state, terms, 4, match_all=True) if terms else []
+        matches = user_file_memory.search(
+            state, terms, 4, match_all=True, scan_on_miss=False
+        ) if terms else []
         if not matches and file_reference and not terms:
-            recent = user_file_memory.search(state, "", 2)
+            recent = user_file_memory.search(state, "", 2, scan_on_miss=False)
             if len(recent) > 1:
                 return "Which file do you mean? Please name it or attach it again."
             matches = recent
@@ -571,7 +573,9 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
             )
             return local_answer(question, history, file_evidence=evidence)
         if file_reference:
-            return "I couldn't find that in the files you've given me. Please attach the file or name it more specifically."
+            return ("I couldn't find that in the files you've given me yet. "
+                    "If you selected a folder, its index is refreshing in the background. "
+                    "Try again shortly or attach the file directly.")
     if PERSONAL_CONTACT.search(question):
         return local_answer(question, history)
     name = business_contact_query(question)

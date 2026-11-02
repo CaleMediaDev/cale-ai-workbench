@@ -4829,10 +4829,19 @@ def gui():
 
     def index_worker():
         """Index selected folders off the UI thread and discover later additions."""
+        next_periodic = time.monotonic() + 600
         while True:
             try:
-                paths = index_requests.get(timeout=600)
+                paths = index_requests.get(timeout=5)
             except queue.Empty:
+                marker = STATE / user_file_memory.REFRESH_REQUEST
+                if not marker.is_file() and time.monotonic() < next_periodic:
+                    continue
+                try:
+                    marker.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                next_periodic = time.monotonic() + 600
                 try:
                     remembered = user_file_memory.remembered_roots(STATE)
                     for start in range(0, len(remembered), user_file_memory.MAX_ROOTS):

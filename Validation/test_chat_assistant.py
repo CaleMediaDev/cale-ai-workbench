@@ -386,6 +386,7 @@ def test_selected_file_memory_answers_only_explicit_file_questions():
         assert chat_assistant.answer_with_tools("What does my Acme invoice say?", []) == "The total is $42."
         search.assert_called_once()
         assert search.call_args.kwargs["match_all"] is True
+        assert search.call_args.kwargs["scan_on_miss"] is False
         assert "acme" in search.call_args.args[1]
         assert row["path"] in answer.call_args.kwargs["file_evidence"]
         search.reset_mock()

@@ -26,6 +26,7 @@ MAX_ROOTS = 20
 MAX_BYTES = 15 * 1024 * 1024
 MAX_MEDIA_BYTES = 100 * 1024 * 1024
 MAX_TEXT = 256_000
+REFRESH_REQUEST = "user-files-recheck.request"
 
 
 def _file_limit(path: Path) -> int:
@@ -260,9 +261,19 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
     return {"indexed": indexed, "unchanged": unchanged, "skipped": skipped}
 
 
+def request_refresh(state: str | Path) -> None:
+    """Ask the desktop's file indexer to revisit selected roots promptly."""
+    try:
+        path = Path(state) / REFRESH_REQUEST
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("refresh", encoding="ascii")
+    except OSError:
+        pass  # A failed hint must not turn a quick answer into an error.
+
+
 def search(state: str | Path, query: str, limit: int = 8,
-           *, match_all: bool = False) -> list[dict]:
-    """Search SQLite first; verify hits and scan selected roots on a miss."""
+           *, match_all: bool = False, scan_on_miss: bool = True) -> list[dict]:
+    """Search SQLite; let chat defer expensive miss scans to the background."""
     count = max(1, min(limit, 20))
     words = project_memory.WORD.findall(query)[:12]
 
@@ -299,7 +310,17 @@ def search(state: str | Path, query: str, limit: int = 8,
                 conn.execute("DELETE FROM file_fts WHERE path=?", (raw,))
             return True
         if version != current["version"]:
-            ingest(state, [raw])
+            if scan_on_miss or path.suffix.casefold() in file_chat.PLAIN_TEXT:
+                ingest(state, [raw])
+            else:
+                # A changed image, audio clip, or video needs model work.
+                # Never answer from its stale description while chat waits.
+                with _connection(state) as conn:
+                    latest = conn.execute("SELECT version FROM files WHERE path=?", (raw,)).fetchone()
+                    if latest and latest["version"] == current["version"]:
+                        conn.execute("UPDATE files SET version='',content='' WHERE path=?", (raw,))
+                        conn.execute("DELETE FROM file_fts WHERE path=?", (raw,))
+                request_refresh(state)
             return True
         return False
 
@@ -310,6 +331,9 @@ def search(state: str | Path, query: str, limit: int = 8,
         if changed:
             continue
         if (rows and words) or scanned:
+            return rows[:count]
+        if not scan_on_miss:
+            request_refresh(state)
             return rows[:count]
         # An unmatched query may refer to a new file or a changed file whose
         # old text did not contain the search words. A full scan on this path

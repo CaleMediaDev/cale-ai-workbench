@@ -209,6 +209,39 @@ class UserFileMemoryTests(unittest.TestCase):
         self.assertEqual(user_file_memory.search(self.state, "sunflower")[0]["path"],
                          str(later))
 
+    def test_quick_search_defers_new_video_analysis_to_background(self):
+        folder = self.root / "selected"
+        folder.mkdir()
+        video = folder / "long-recording.mp4"
+        video.write_bytes(b"video")
+        user_file_memory.remember_roots(self.state, [str(folder)])
+        with patch.object(user_file_memory, "_media_call",
+                          side_effect=AssertionError("video analysis blocked chat")):
+            self.assertEqual(user_file_memory.search(
+                self.state, "meeting notes", scan_on_miss=False), [])
+        self.assertTrue((self.state / user_file_memory.REFRESH_REQUEST).is_file())
+        with patch.object(user_file_memory, "_media_call", return_value={
+            "sampled_frames": [{"timestamp_seconds": 0,
+                                "description": "Meeting notes on a whiteboard"}],
+            "text": "",
+        }):
+            user_file_memory.ingest(self.state, [str(folder)])
+        self.assertEqual(user_file_memory.search(
+            self.state, "meeting notes", scan_on_miss=False)[0]["path"], str(video))
+
+    def test_quick_search_hides_changed_image_without_slow_reanalysis(self):
+        image = self.root / "receipt.png"
+        image.write_bytes(b"first")
+        with patch.object(user_file_memory.file_chat, "image_description",
+                          return_value="Forest receipt"):
+            user_file_memory.ingest(self.state, [str(image)])
+        image.write_bytes(b"changed")
+        with patch.object(user_file_memory.file_chat, "image_description",
+                          side_effect=AssertionError("image analysis blocked chat")):
+            self.assertEqual(user_file_memory.search(
+                self.state, "forest", scan_on_miss=False), [])
+        self.assertTrue((self.state / user_file_memory.REFRESH_REQUEST).is_file())
+
     def test_search_does_not_discover_new_file_outside_selected_folder(self):
         selected = self.root / "selected"
         selected.mkdir()
