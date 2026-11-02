@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import readiness_checklist
 import file_catalog
@@ -186,11 +188,12 @@ def test_background_checks_do_not_probe_a_model_with_real_usage(tmp_path):
     probe.assert_not_called()
 
 
-def test_background_checks_defer_gpu_model_probes_during_music(tmp_path):
+@pytest.mark.parametrize("kind", ["music", "image"])
+def test_background_checks_defer_gpu_model_probes_during_media_work(tmp_path, kind):
     state = tmp_path / "LongTasks"
     state.mkdir()
     (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
-    (state / f"music-gpu-active-{os.getpid()}.json").write_text(
+    (state / f"{kind}-gpu-active-{os.getpid()}.json").write_text(
         json.dumps({"pid": os.getpid()}))
     image = tmp_path / "assets/cale-logo.png"
     image.parent.mkdir()

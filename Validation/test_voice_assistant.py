@@ -147,8 +147,10 @@ class VoiceTests(unittest.TestCase):
             state.mkdir()
             (state / "music-gpu-active-123.json").write_text('{"pid":123}')
             with patch.object(voice_assistant, "ROOT", root), patch(
-                "psutil.pid_exists", return_value=True
-            ), patch.dict(sys.modules, {"cloud_ai": SimpleNamespace()}):
+                "psutil.Process"
+            ) as process, patch.dict(sys.modules, {"cloud_ai": SimpleNamespace()}):
+                process.return_value.is_running.return_value = True
+                process.return_value.create_time.return_value = time.time() - 5
                 self.assertEqual(
                     voice_assistant.rephrase_status("Recipe app. Checking files."),
                     "Recipe app. Checking files.",

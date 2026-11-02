@@ -135,6 +135,24 @@ def test_multiline_lake_tahoe_song_brief_keeps_its_full_style_in_fast_route():
     assert chat_assistant.route(brief, []) == "music"
 
 
+def test_genre_first_bpm_song_brief_starts_local_render():
+    # A real user phrased the request as a genre-led production brief. Sending
+    # it to ordinary Q&A made the model claim it could not render a song.
+    brief = (
+        "Dark industrial trap metal, 145 BPM, horrorcore and experimental hip-hop, "
+        "distorted bass and eerie atmospheric sound design.\n\n"
+        "Deep male vocals switch between rhythmic rap, whispers and screamed hooks. "
+        "Start with whispered vocals over detuned piano, then bring in heavy drums. "
+        "The second verse has a crushing guitar breakdown and synth bass."
+    )
+    spec = chat_assistant.music_request(brief)
+    assert spec is not None
+    assert spec["duration_seconds"] == 180
+    assert spec["instrumental"] is False
+    assert spec["prompt"] == brief.rstrip(".")
+    assert chat_assistant.route(brief, []) == "music"
+
+
 def test_detailed_create_track_or_banger_skips_general_agent_planning():
     track = (
         "Create an insanely catchy, high-energy melodic dubstep and heavy bass "

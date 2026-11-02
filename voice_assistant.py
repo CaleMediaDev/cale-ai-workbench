@@ -160,9 +160,12 @@ def _heavy_gpu_active() -> bool:
                 pid = int(marker.stem.rsplit("-", 1)[-1])
                 import psutil
 
-                if psutil.pid_exists(pid) and time.time() - marker.stat().st_mtime < 8000:
+                saved = marker.stat().st_mtime
+                process = psutil.Process(pid)
+                if (0 <= time.time() - saved < 8000 and process.is_running()
+                        and process.create_time() <= saved + 2):
                     return True
-            except (OSError, ValueError):
+            except (OSError, ValueError, psutil.Error):
                 continue
     return False
 

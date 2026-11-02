@@ -157,23 +157,24 @@ def _probe_local_ai(model: str) -> dict:
                 "detail": f"{model} did not answer within 45 seconds ({type(exc).__name__})"}
 
 
-def _music_gpu_active(root: Path) -> bool:
-    """Defer optional LLM probes while a live song worker needs the GPU."""
+def _heavy_gpu_active(root: Path) -> bool:
+    """Defer optional LLM probes while live music or image work needs the GPU."""
     import psutil
 
-    for marker in (root / "LongTasks").glob("music-gpu-active-*.json"):
-        try:
-            saved = marker.stat().st_mtime
-            if not 0 <= time.time() - saved < 7200:
+    for kind in ("music", "image"):
+        for marker in (root / "LongTasks").glob(f"{kind}-gpu-active-*.json"):
+            try:
+                saved = marker.stat().st_mtime
+                if not 0 <= time.time() - saved < 7200:
+                    continue
+                pid = int(marker.stem.rsplit("-", 1)[-1])
+                process = psutil.Process(pid)
+                # A stale marker must not match a different process that reused
+                # its PID after the media worker exited.
+                if process.is_running() and process.create_time() <= saved + 2:
+                    return True
+            except (OSError, ValueError, psutil.Error):
                 continue
-            pid = int(marker.stem.rsplit("-", 1)[-1])
-            process = psutil.Process(pid)
-            # A stale marker must not match a different process that reused
-            # its PID after the song worker exited.
-            if process.is_running() and process.create_time() <= saved + 2:
-                return True
-        except (OSError, ValueError, psutil.Error):
-            continue
     return False
 
 
@@ -191,7 +192,7 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
     previous = _json(root / "LongTasks/readiness-probes.json")
     if previous.get("version") == result["version"] and previous.get("local_ai", {}).get("ok"):
         result["local_ai"] = previous["local_ai"]
-    elif test_local and not _music_gpu_active(root):
+    elif test_local and not _heavy_gpu_active(root):
         try:
             with urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as response:
                 models = json.load(response).get("models", [])
@@ -234,7 +235,7 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
             and previous.get("vision", {}).get("ok") and not force
             and _media_probe_current(previous, root / "LongTasks/vision-repair.json")):
         result["vision"] = previous["vision"]
-    elif test_local and not _music_gpu_active(root):
+    elif test_local and not _heavy_gpu_active(root):
         sample = root / "assets/cale-logo.png"
         vision = (_media_probe(root, "recognize_image", path=str(sample),
                                question="Describe the main visible shape or colors briefly.")
