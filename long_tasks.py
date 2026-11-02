@@ -149,7 +149,20 @@ def database():
       id TEXT PRIMARY KEY, title TEXT, folder TEXT UNIQUE, brief TEXT,
       card TEXT DEFAULT '', phase TEXT DEFAULT 'build', status TEXT DEFAULT 'queued',
       detail TEXT DEFAULT '', failures INTEGER DEFAULT 0, generation INTEGER DEFAULT 0,
-      fingerprint TEXT DEFAULT '', updated REAL, created REAL)""")
+      fingerprint TEXT DEFAULT '', updated REAL, created REAL,
+      finished REAL DEFAULT 0)""")
+    if "finished" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN finished REAL DEFAULT 0")
+        except sqlite3.OperationalError as exc:
+            # The GUI and monitor may both open the upgraded database at once.
+            if "finished" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
+                raise exc
+        else:
+            # Older finished tasks have no separate completion event. Their
+            # last update is the closest durable time available at migration.
+            conn.execute("""UPDATE projects SET finished=updated
+                WHERE status IN ('ready_for_review','accepted','stopped')""")
     conn.execute("""CREATE TABLE IF NOT EXISTS requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT, action TEXT, note TEXT,
       status TEXT DEFAULT 'pending', result TEXT DEFAULT '')""")
@@ -165,8 +178,22 @@ def database():
 
 
 def update(pid, **values):
-    values["updated"] = time.time()
+    now = time.time()
     with database() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if "status" in values:
+            prior = conn.execute(
+                "SELECT status,finished,updated FROM projects WHERE id=?", (pid,)
+            ).fetchone()
+            terminal = {"ready_for_review", "accepted", "stopped"}
+            if values["status"] in terminal:
+                if prior and prior["status"] in terminal:
+                    values["finished"] = prior["finished"] or prior["updated"] or now
+                else:
+                    values["finished"] = now
+            else:
+                values["finished"] = 0
+        values["updated"] = now
         conn.execute(
             "UPDATE projects SET " + ",".join(f"{k}=?" for k in values) + " WHERE id=?",
             [*values.values(), pid],
@@ -5019,7 +5046,7 @@ def gui():
             set_text(
                 card_info["tokens"],
                 f"Tokens: {tokens_by_task.get(pid, 0):,}    "
-                f"Total time: {task_eta.total_time(item['created'], item['updated'], item['status'])}",
+                f"Total time: {task_eta.total_time(item['created'], item['updated'], item['status'], finished=item['finished'])}",
             )
             percent, current = task_progress(item)
             finished = item["status"] in ("ready_for_review", "accepted")

@@ -278,6 +278,36 @@ class LongTaskTests(unittest.TestCase):
     def item(self):
         return task_module.projects()[0]
 
+    def test_finished_time_survives_later_acceptance_and_resets_for_revision(self):
+        created = self.item()["created"]
+        with patch.object(task_module.time, "time", return_value=created + 60):
+            task_module.update(self.pid, status="ready_for_review")
+        first_finish = self.item()["finished"]
+        with patch.object(task_module.time, "time", return_value=created + 3600):
+            task_module.update(self.pid, status="accepted", detail="Approved later")
+        self.assertEqual(self.item()["finished"], first_finish)
+        self.assertEqual(self.item()["updated"], created + 3600)
+        with patch.object(task_module.time, "time", return_value=created + 3700):
+            task_module.update(self.pid, status="working", detail="Revising")
+        self.assertEqual(self.item()["finished"], 0)
+        with patch.object(task_module.time, "time", return_value=created + 4000):
+            task_module.update(self.pid, status="ready_for_review")
+        self.assertEqual(self.item()["finished"], created + 4000)
+
+    def test_existing_database_gains_finished_time_for_completed_tasks(self):
+        db = self.base / "state/projects.db"
+        with contextlib.closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute("ALTER TABLE projects RENAME TO prior_projects")
+            conn.execute("""CREATE TABLE projects AS SELECT id,title,folder,brief,card,phase,
+                status,detail,failures,generation,fingerprint,updated,created
+                FROM prior_projects""")
+            conn.execute("DROP TABLE prior_projects")
+            conn.execute("UPDATE projects SET status='ready_for_review',updated=created+25")
+        with task_module.database() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
+        self.assertIn("finished", columns)
+        self.assertEqual(self.item()["finished"], self.item()["updated"])
+
     def test_new_project_has_recovery_notes_without_replacing_existing_notes(self):
         notes = self.base / "project" / ".local-ai"
         self.assertIn("not written milestones", (notes / "PLAN.md").read_text())

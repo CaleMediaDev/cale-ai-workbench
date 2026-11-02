@@ -8,6 +8,7 @@ def test_total_time_shows_wall_clock_and_freezes_on_acceptance():
     assert task_eta.total_time(1000, 1090, "paused", now=1200) == "3m 20s"
     assert task_eta.total_time(1000, 1125, "ready_for_review", now=1200) == "2m 05s"
     assert task_eta.total_time(1000, 1125, "accepted", now=9999) == "2m 05s"
+    assert task_eta.total_time(1000, 1500, "accepted", now=9999, finished=1125) == "2m 05s"
     assert task_eta.total_time(0, 0, "working", now=1000) == "—"
 
 

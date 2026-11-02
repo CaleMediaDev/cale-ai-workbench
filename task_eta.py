@@ -25,7 +25,7 @@ def _duration(seconds: float) -> str:
 
 
 def total_time(created: float, updated: float, status: str,
-               now: float | None = None) -> str:
+               now: float | None = None, finished: float | None = None) -> str:
     """Show a task's wall-clock lifetime, frozen when finished or stopped.
 
     This is elapsed time since the request was created, including setup and
@@ -39,7 +39,12 @@ def total_time(created: float, updated: float, status: str,
         return "—"
     if start <= 0:
         return "—"
-    end = last_change if status in ("ready_for_review", "accepted", "stopped") and last_change >= start else now
+    if status in ("ready_for_review", "accepted", "stopped"):
+        end = float(finished or 0) or last_change
+        if end < start:
+            end = last_change
+    else:
+        end = now
     return _duration(max(0, end - start))
 
 
