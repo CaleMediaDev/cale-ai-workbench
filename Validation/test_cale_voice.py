@@ -52,3 +52,15 @@ def test_stopping_launcher_also_stops_gpu_child():
     child.terminate.assert_called_once()
     launcher.terminate.assert_called_once()
     assert cale_voice._worker is None
+
+
+def test_music_releases_only_this_installations_voice_worker(tmp_path):
+    own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
+    other = Mock(pid=101, info={"cmdline": ["python.exe", str(tmp_path / "other.py")]})
+    with patch.object(cale_voice, "ROOT", tmp_path), patch(
+        "psutil.process_iter", return_value=[own, other]
+    ), patch("os.getpid", return_value=500):
+        cale_voice.release_for_gpu_task()
+    own.terminate.assert_called_once()
+    own.wait.assert_called_once_with(timeout=5)
+    other.terminate.assert_not_called()

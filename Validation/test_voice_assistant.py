@@ -192,6 +192,15 @@ class VoiceTests(unittest.TestCase):
         self.assertFalse(fallback.call_args.kwargs["play"])
         play.assert_called_once_with("fallback.wav", None)
 
+    def test_music_render_keeps_voice_clone_from_reloading_gpu(self):
+        with patch("cale_voice.ready", return_value=True), patch.object(
+            voice_assistant, "_heavy_gpu_active", return_value=True
+        ), patch("cale_voice.speak") as clone, patch.object(
+            voice_assistant, "media_call", return_value={"path": "fallback.wav"}
+        ), patch.object(voice_assistant, "_play_file"):
+            voice_assistant.say("Song progress")
+        clone.assert_not_called()
+
     def test_fallback_synthesis_stops_for_microphone_turn(self):
         from subprocess import TimeoutExpired
         from unittest.mock import Mock

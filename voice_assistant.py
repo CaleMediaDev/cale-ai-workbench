@@ -152,6 +152,21 @@ def _quick_status_variation(original: str, previous: list[str], facts: list[str]
                  and all(fact.casefold() in candidate.casefold() for fact in facts)), original)
 
 
+def _heavy_gpu_active() -> bool:
+    """Ignore stale GPU lease files after their worker has exited."""
+    for kind in ("music", "image"):
+        for marker in (ROOT / "LongTasks").glob(f"{kind}-gpu-active-*.json"):
+            try:
+                pid = int(marker.stem.rsplit("-", 1)[-1])
+                import psutil
+
+                if psutil.pid_exists(pid) and time.time() - marker.stat().st_mtime < 8000:
+                    return True
+            except (OSError, ValueError):
+                continue
+    return False
+
+
 def rephrase_status(line, recent=(), required=()):
     """Vary scripted speech promptly, using the local model only while warm.
 
@@ -166,16 +181,8 @@ def rephrase_status(line, recent=(), required=()):
     fallback = _quick_status_variation(original, previous, facts)
     # A music render needs the GPU. Avoid silently reloading a multi-GB LLM
     # just to decorate a spoken status line while ACE-Step is working.
-    lease_dir = ROOT / "LongTasks"
-    for marker in lease_dir.glob("music-gpu-active-*.json"):
-        try:
-            pid = int(marker.stem.rsplit("-", 1)[-1])
-            import psutil
-
-            if psutil.pid_exists(pid) and time.time() - marker.stat().st_mtime < 8000:
-                return fallback
-        except (OSError, ValueError):
-            continue
+    if _heavy_gpu_active():
+        return fallback
     from cloud_ai import FAST_MODEL, post
     if not _fast_model_loaded(FAST_MODEL):
         return fallback
@@ -573,7 +580,7 @@ def say(message, rate=0, cancel=None):
     with tempfile.TemporaryDirectory(dir=temp) as folder:
         import cale_voice
 
-        if cale_voice.ready():
+        if cale_voice.ready() and not _heavy_gpu_active():
             try:
                 # The short wake reply is repeated frequently. Keep its exact
                 # cloned audio so waking Cale never reloads a large voice model.

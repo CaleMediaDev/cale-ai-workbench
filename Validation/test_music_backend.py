@@ -679,12 +679,13 @@ def test_paused_music_job_resumes_same_server_task(tmp_path):
 def test_music_lease_unloads_cale_models_and_cleans_marker(tmp_path):
     with patch.object(music_backend, "ROOT", tmp_path), patch(
         "media_worker.unload_local_models"
-    ) as unload:
+    ) as unload, patch("cale_voice.release_for_gpu_task") as release_voice:
         with REAL_GPU_LEASE():
             marker = tmp_path / "LongTasks" / f"music-gpu-active-{os.getpid()}.json"
             assert marker.is_file()
         assert not marker.exists()
     unload.assert_called_once()
+    release_voice.assert_called_once()
 
 
 def test_interrupted_music_job_recovers_without_restarting_live_worker(tmp_path):

@@ -24,7 +24,7 @@ _worker = None
 _lock = threading.Lock()
 _idle_timer = None
 _generation = 0
-IDLE_SECONDS = 60
+IDLE_SECONDS = 300
 VOICE_PACKAGES = {
     "transformers": "4.57.3",
     "accelerate": "1.12.0",
@@ -140,6 +140,32 @@ def _stop_worker():
             child.kill()
         except psutil.Error:
             pass
+
+
+def release_for_gpu_task() -> None:
+    """Free voice-model VRAM before a separate music or image worker starts.
+
+    Those jobs run in other processes, so they cannot access this module's
+    ``_worker`` handle. Match only this installation's voice worker script.
+    The next spoken line starts a fresh worker when GPU work has ended.
+    """
+    import psutil
+
+    script = str((ROOT / "cale_voice_worker.py").resolve()).casefold()
+    for process in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            command = process.info.get("cmdline") or []
+            if process.pid == os.getpid() or not any(
+                str(Path(part).resolve()).casefold() == script for part in command
+            ):
+                continue
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except psutil.TimeoutExpired:
+                process.kill()
+        except (OSError, psutil.Error, ValueError):
+            continue
 
 
 def _release_after_idle(generation: int) -> None:

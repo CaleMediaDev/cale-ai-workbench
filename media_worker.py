@@ -8,6 +8,7 @@ import shutil
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -56,7 +57,27 @@ def unload_local_models():
             )
 
 
+@contextmanager
+def _image_gpu_lease():
+    """Keep cloned speech from reclaiming VRAM during image generation."""
+    marker = ROOT / "LongTasks" / f"image-gpu-active-{os.getpid()}.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+    try:
+        import cale_voice
+
+        cale_voice.release_for_gpu_task()
+        yield
+    finally:
+        marker.unlink(missing_ok=True)
+
+
 def generate_image(prompt, output_path, width=512, height=512, seed=0):
+    with _image_gpu_lease():
+        return _generate_image(prompt, output_path, width, height, seed)
+
+
+def _generate_image(prompt, output_path, width=512, height=512, seed=0):
     """Use the stronger local model when installed, otherwise keep LCM available."""
     import torch
     from diffusers import DiffusionPipeline

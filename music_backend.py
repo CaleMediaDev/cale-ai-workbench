@@ -93,6 +93,12 @@ def _music_gpu_lease():
     marker.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
     try:
         try:
+            import cale_voice
+
+            cale_voice.release_for_gpu_task()
+        except (OSError, RuntimeError):
+            pass  # Music can continue if the optional cloned voice is absent.
+        try:
             from media_worker import unload_local_models
 
             unload_local_models()
