@@ -1320,7 +1320,7 @@ def verify_audio_handoff(p):
     brief = str(p.get("brief", ""))
     folder = Path(p["folder"])
     audio = sorted(
-        (path for location in (folder, folder / "Audio") if location.is_dir()
+        (path for location in (folder, folder / "Audio", folder / "takes") if location.is_dir()
          for path in location.iterdir()
          if path.is_file() and path.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg", ".m4a")),
         key=lambda path: ("final" not in path.stem.lower(), -path.stat().st_mtime),

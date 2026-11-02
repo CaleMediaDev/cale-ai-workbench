@@ -1186,6 +1186,25 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(task_module.task_progress(finished), (100, "Finished"))
         self.assertGreater(finished["finished"], 0)
 
+    def test_audio_handoff_finds_saved_takes(self):
+        task_module.update(self.pid, brief="Make a song with clear female singing")
+        project = self.base / "project"
+        takes = project / "takes"
+        takes.mkdir()
+        with wave.open(str(takes / "final.wav"), "wb") as recording:
+            recording.setnchannels(1)
+            recording.setsampwidth(2)
+            recording.setframerate(8000)
+            recording.writeframes(b"\x01\x00" * (8000 * 6))
+        (project / "lyrics.txt").write_text("sing " * 25, encoding="utf-8")
+        with (patch("music_backend.audio_file_ok", return_value=True),
+              patch("music_backend.vocal_evidence", return_value={
+                  "passed": True, "recognized_words": 22,
+              })):
+            passed, evidence = task_module.verify_audio_handoff(self.item())
+        self.assertTrue(passed)
+        self.assertIn("final.wav", evidence)
+
     def test_review_requires_fresh_passing_checks(self):
         self.verify_script('Write-Output "assertions passed"; exit 0')
         task_module.update(self.pid, phase="review", card="test")
