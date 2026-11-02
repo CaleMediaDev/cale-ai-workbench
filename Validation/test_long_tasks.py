@@ -596,6 +596,10 @@ class LongTaskTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name)
+        # This fixture exercises legacy board recovery. New native workers
+        # have their own focused behavioral tests.
+        self.engine = patch.object(task_module, "DEFAULT_ENGINE", "hermes")
+        self.engine.start()
         self.state = patch.object(task_module, "STATE", self.base / "state")
         self.state.start()
         self.pid = task_module.add_project(
@@ -604,6 +608,7 @@ class LongTaskTests(unittest.TestCase):
 
     def tearDown(self):
         self.state.stop()
+        self.engine.stop()
         self.temp.cleanup()
 
     def item(self):

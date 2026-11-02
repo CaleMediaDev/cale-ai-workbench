@@ -2,7 +2,9 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
-Created by [Cale Media](https://calemedia.com/). Built on Hermes Agent, Ollama, and open-source developer tools.
+Created by [Cale Media](https://calemedia.com/). New general tasks use Cale's native worker with Ollama and the existing model router; older tasks can still finish through Hermes Agent.
+
+The native worker saves each model/tool step, resumes after a crash, keeps a project plan and progress file, and independently reruns the project's verification script before marking work finished. It can search public webpages, edit project files, run commands, and discover Cale's installed local image, audio, video, camera, memory, and training tools. Existing Hermes tasks retain their board history during this migration. The installer still includes Hermes for that recovery path and for capabilities that have not moved to the native worker yet; signed-in Chrome/DevTools sessions remain one such gap. No OpenClaw runtime or source code is bundled.
 
 ## Install
 

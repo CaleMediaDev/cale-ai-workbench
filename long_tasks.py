@@ -1,7 +1,7 @@
-"""Local desktop companion. Hermes owns task claims, workers and crash recovery.
+"""Local task supervisor with a native worker and legacy Hermes task recovery.
 
-This process owns the human queue and independently runs project verification.
-It never calls an LLM API. All board mutations go through the installed Hermes CLI.
+New general projects use Cale's checkpointed worker. Existing Hermes projects
+retain their board history until they finish, so upgrades do not discard work.
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ import user_file_memory
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "LongTasks"
 BOARD = "long-tasks"
+DEFAULT_ENGINE = "native"
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
@@ -184,6 +185,12 @@ def database():
             conn.execute("ALTER TABLE projects ADD COLUMN ai_route TEXT DEFAULT 'automatic'")
         except sqlite3.OperationalError as exc:
             if "ai_route" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
+                raise exc
+    if "engine" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN engine TEXT DEFAULT 'hermes'")
+        except sqlite3.OperationalError as exc:
+            if "engine" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
                 raise exc
     conn.execute("""CREATE TABLE IF NOT EXISTS requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT, action TEXT, note TEXT,
@@ -723,11 +730,11 @@ def add_project(title, folder, brief, waiting_for_setup=False, pending_media=Non
         # the person explicitly switches this task to connected AI.
         ai_route = "local_only" if standalone_audio_project({"brief": brief}) else "automatic"
         conn.execute(
-            "INSERT INTO projects(id,title,folder,brief,status,created,updated,ai_route) VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO projects(id,title,folder,brief,status,created,updated,ai_route,engine) VALUES(?,?,?,?,?,?,?,?,?)",
             (
                 pid, title, str(folder), brief,
                 "waiting_for_setup" if waiting_for_setup else "queued",
-                time.time(), time.time(), ai_route,
+                time.time(), time.time(), ai_route, DEFAULT_ENGINE,
             ),
         )
     return pid
@@ -2209,6 +2216,19 @@ def process_requests():
                     sync_user_requests(p)
                 remember_task_review(p, original_action, note)
                 continue
+            if p.get("engine") == "native":
+                import native_agent
+
+                result = native_agent.apply_request(p, action, note)
+                with database() as conn:
+                    conn.execute(
+                        "UPDATE requests SET status='done',result=? WHERE id=?",
+                        (result, req["id"]),
+                    )
+                if action == "note":
+                    sync_user_requests(p)
+                remember_task_review(p, original_action, note)
+                continue
             snapshot = (
                 board("show", p["card"], "--json", parse=True) if p["card"] else {}
             )
@@ -2691,6 +2711,43 @@ def advance_project(p):
             return
         update(p["id"], status="queued", detail="Setup finished. Getting ready.")
         p["status"] = "queued"
+    if p.get("engine") == "native" and not image_job_id(p) and not music_job_id(p):
+        import native_agent
+
+        if p["status"] == "ready_for_review":
+            if fingerprint(Path(p["folder"])) != p["fingerprint"]:
+                worker = native_agent.read_state(p)
+                worker["status"] = "continue"
+                worker.setdefault("messages", []).append({
+                    "role": "user", "content": "Project files changed after verification. Check the changes and rerun the saved tests.",
+                })
+                native_agent.save_state(p, worker)
+                update(p["id"], status="working", detail="Checking changed project files.")
+            return
+        if p["status"] == "checking":
+            passed, evidence = verify_project(p)
+            if passed:
+                update(p["id"], status="ready_for_review", detail=evidence,
+                       fingerprint=fingerprint(Path(p["folder"])))
+            else:
+                worker = native_agent.read_state(p)
+                failures = int(worker.get("verification_failures", 0)) + 1
+                worker["verification_failures"] = failures
+                if failures < 3:
+                    worker["status"] = "continue"
+                    worker.setdefault("messages", []).append({
+                        "role": "user", "content": "Independent verification failed. Fix the work and rerun checks: " + evidence[:3000],
+                    })
+                    native_agent.save_state(p, worker)
+                    update(p["id"], status="working", detail="Fixing failed checks: " + evidence[:300])
+                else:
+                    update(p["id"], status="needs_input",
+                           detail="Three verification attempts failed. " + evidence[:500])
+            return
+        change = native_agent.advance(p)
+        if change:
+            update(p["id"], status=change[0], detail=change[1])
+        return
     if p["status"] == "needs_input" and resumed_board_work(p):
         return
     if p["status"] == "needs_input" and recover_blocked_music_project(p):
@@ -2962,7 +3019,9 @@ def prepare_active_services():
     from cloud_ai import ensure_router
 
     ensure_router()
-    ensure_gateway_current()
+    if any(p.get("engine") != "native" and p["status"] in ("queued", "working", "checking")
+           for p in projects()):
+        ensure_gateway_current()
 
 
 def ensure_idle_services():
@@ -2974,8 +3033,10 @@ def ensure_idle_services():
     from cloud_ai import ensure_router
 
     failures = []
-    checks = [("AI router", ensure_router),
-              ("Hermes gateway", ensure_gateway_current)]
+    checks = [("AI router", ensure_router)]
+    if any(p.get("engine") != "native" and p["status"] in ("queued", "working", "checking")
+           for p in projects()):
+        checks.append(("Hermes gateway", ensure_gateway_current))
     if local_model_required():
         checks.insert(0, ("Ollama", lambda: ensure_ollama(None)))
     for name, check in checks:
@@ -2991,6 +3052,7 @@ def dispatch_ready_fallback():
     """Kick an idle board when the embedded dispatcher misses a ready task."""
     if any(
         p["status"] in ("queued", "working", "checking")
+        and p.get("engine") != "native"
         and not music_job_id(p) and not image_job_id(p)
         for p in projects()
     ):
