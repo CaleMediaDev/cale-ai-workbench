@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -37,6 +38,35 @@ def _write(path: Path, data: dict) -> None:
     temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
     os.replace(temporary, path)
+
+
+@contextmanager
+def _report_lock(state: Path, *, blocking: bool):
+    """Serialize launches and final reports across GUI and supervisor processes."""
+    if os.name != "nt":
+        yield True
+        return
+    import msvcrt
+
+    state.mkdir(parents=True, exist_ok=True)
+    with (state / "self-check.lock").open("a+b") as handle:
+        if handle.seek(0, 2) == 0:
+            handle.write(b"1")
+            handle.flush()
+        handle.seek(0)
+        acquired = False
+        try:
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK, 1)
+                acquired = True
+            except OSError:
+                if blocking:
+                    raise
+            yield acquired
+        finally:
+            if acquired:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def version(root: Path = ROOT) -> str:
@@ -67,6 +97,14 @@ def _running(report: dict) -> bool:
 
 def schedule(root: Path = ROOT, state: Path = STATE, now: float | None = None) -> bool:
     """Start at most one idle check per release or week; never wait in the UI."""
+    with _report_lock(state, blocking=False) as acquired:
+        if not acquired:
+            return False
+        return _schedule_locked(root, state, now)
+
+
+def _schedule_locked(root: Path, state: Path, now: float | None) -> bool:
+    """Read, launch, and record under one cross-process lock."""
     now = time.time() if now is None else now
     report_path = state / "self-check.json"
     report = _read(report_path)
@@ -110,7 +148,7 @@ def schedule(root: Path = ROOT, state: Path = STATE, now: float | None = None) -
 def run(root: Path = ROOT, state: Path = STATE) -> dict:
     """Execute real packaged tests; persist their output even on failure."""
     started = time.time()
-    previous = _read(state / "self-check.json")
+    started_version = version(root)
     python = root / "Toolbox/python/Scripts/python.exe"
     try:
         result = subprocess.run(
@@ -128,24 +166,27 @@ def run(root: Path = ROOT, state: Path = STATE) -> dict:
     except (OSError, subprocess.TimeoutExpired) as exc:
         output = f"Self-check could not finish: {type(exc).__name__}: {exc}\n"
         passed = False
-    state.mkdir(parents=True, exist_ok=True)
-    log = state / "self-check.log"
-    log.write_text(output, encoding="utf-8")
-    current = version(root)
-    failures = 0
-    if not passed:
-        failures = int(previous.get("failures", 0)) + 1 if previous.get("version") == current else 1
-    report = {
-        "version": current,
-        "status": "passed" if passed else "failed",
-        "failures": failures,
-        "checked_at": time.time(),
-        "duration_seconds": round(time.time() - started, 1),
-        "summary": "\n".join(output.strip().splitlines()[-8:]),
-        "log": str(log),
-    }
-    _write(state / "self-check.json", report)
-    return report
+    with _report_lock(state, blocking=True):
+        if version(root) != started_version:
+            return {"status": "superseded", "version": started_version}
+        previous = _read(state / "self-check.json")
+        log = state / "self-check.log"
+        log.write_text(output, encoding="utf-8")
+        failures = 0
+        if not passed:
+            failures = (int(previous.get("failures", 0)) + 1
+                        if previous.get("version") == started_version else 1)
+        report = {
+            "version": started_version,
+            "status": "passed" if passed else "failed",
+            "failures": failures,
+            "checked_at": time.time(),
+            "duration_seconds": round(time.time() - started, 1),
+            "summary": "\n".join(output.strip().splitlines()[-8:]),
+            "log": str(log),
+        }
+        _write(state / "self-check.json", report)
+        return report
 
 
 if __name__ == "__main__" and sys.argv[1:] == ["--run"]:

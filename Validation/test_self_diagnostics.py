@@ -3,6 +3,7 @@
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -52,6 +53,32 @@ class SelfDiagnosticsTests(unittest.TestCase):
         self.assertFalse(diagnostics.schedule(
             self.root, self.state, now=200 + diagnostics.FAILURE_RETRY))
 
+    def test_two_simultaneous_schedulers_launch_one_check(self):
+        entered = threading.Event()
+        release = threading.Event()
+        results = []
+        launches = []
+
+        def launch(*args, **kwargs):
+            launches.append(args)
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return SimpleNamespace(pid=123)
+
+        with (patch.object(diagnostics.subprocess, "Popen", side_effect=launch),
+              patch("psutil.Process") as process):
+            process.return_value.create_time.return_value = 100
+            thread = threading.Thread(target=lambda: results.append(
+                diagnostics.schedule(self.root, self.state, now=100)))
+            thread.start()
+            self.assertTrue(entered.wait(5))
+            self.assertFalse(diagnostics.schedule(self.root, self.state, now=100))
+            release.set()
+            thread.join(timeout=5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results, [True])
+        self.assertEqual(len(launches), 1)
+
     def test_real_test_exit_is_saved_with_log(self):
         result = SimpleNamespace(returncode=1, stdout="1 failed\n", stderr="details\n")
         with patch.object(diagnostics.subprocess, "run", return_value=result) as run:
@@ -71,6 +98,19 @@ class SelfDiagnosticsTests(unittest.TestCase):
             report = diagnostics.run(self.root, self.state)
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["failures"], 0)
+
+    def test_old_check_cannot_overwrite_a_newer_release_report(self):
+        new_report = {"version": "Cale AI Workbench 2", "status": "passed"}
+
+        def finish_after_update(*args, **kwargs):
+            (self.root / ".cale-ai-install").write_text(new_report["version"])
+            (self.state / "self-check.json").write_text(json.dumps(new_report))
+            return SimpleNamespace(returncode=1, stdout="old failure", stderr="")
+
+        with patch.object(diagnostics.subprocess, "run", side_effect=finish_after_update):
+            result = diagnostics.run(self.root, self.state)
+        self.assertEqual(result["status"], "superseded")
+        self.assertEqual(json.loads((self.state / "self-check.json").read_text()), new_report)
 
     def test_only_repeated_failure_on_current_version_notifies(self):
         current = diagnostics.version(self.root)
