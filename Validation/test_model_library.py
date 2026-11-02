@@ -191,7 +191,8 @@ class AutoModelTests(unittest.TestCase):
             return {"status": "success"}
 
         with (patch.object(library, "CATALOG", catalog),
-              patch.object(library, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+              patch.object(library, "urlopen", side_effect=lambda *_args, **_kwargs:
+                           io.BytesIO(json.dumps(tags).encode())),
               patch.object(library, "model_ready", return_value=True),
               patch("model_fitness.suitable", return_value=True),
               patch("model_fitness.measured_speed", side_effect=lambda alias: 30 if alias == "cale-fast" else None),
@@ -202,6 +203,54 @@ class AutoModelTests(unittest.TestCase):
         self.assertEqual(created["model"], "cale-local")
         self.assertEqual(created["from"], "cale-balanced")
         sync.assert_called_once_with(library.ROOT, "cale-local")
+
+    def test_existing_main_upgrades_only_to_distinct_measured_faster_weights(self):
+        old_blob, new_blob = "a" * 64, "b" * 64
+        catalog = {
+            "main": {"alias": "cale-local"},
+            "old": {"alias": "cale-qwen35", "source": "qwen3.5:35b", "auto": True},
+            "new": {"alias": "cale-qwen36", "source": "qwen3.6:35b", "auto": True},
+        }
+        tags = {"models": [
+            {"name": "cale-local:latest", "size": 21 * 2**30},
+            {"name": "cale-qwen35:latest", "size": 21 * 2**30},
+            {"name": "cale-qwen36:latest", "size": 22 * 2**30},
+        ]}
+        created = []
+
+        def post(path, body, **_kwargs):
+            if path == "/api/create":
+                created.append(body)
+                return {}
+            alias = body["model"]
+            blob = new_blob if alias == "cale-qwen36" or alias == "cale-local" and created else old_blob
+            return {"capabilities": ["completion", "tools"],
+                    "parameters": "num_ctx 262144\n",
+                    "model_info": {"qwen.context_length": 262144},
+                    "modelfile": "FROM C:\\models\\sha256-" + blob + "\n"}
+
+        with (patch.object(library, "CATALOG", catalog),
+              patch.object(library, "urlopen", side_effect=lambda *_args, **_kwargs:
+                           io.BytesIO(json.dumps(tags).encode())),
+              patch.object(library, "model_ready", return_value=True),
+              patch.object(library, "alias_update_waits_for_tasks", return_value=False),
+              patch("model_fitness.suitable", return_value=True),
+              patch("model_fitness.measured_speed", side_effect=lambda alias: {
+                  "cale-qwen35": 9.1, "cale-qwen36": 18.5,
+              }.get(alias)),
+              patch.object(library, "post", side_effect=post),
+              patch.object(library, "main_source_record", return_value={}),
+              patch.object(library, "owned_sources", return_value=set()),
+              patch.object(library, "record_main_source"),
+              patch("context_window.sync", return_value=262144) as sync,
+              patch.object(library, "ensure_main_standard", return_value=True) as routine):
+            self.assertTrue(library.repair_main_alias(128, 12))
+            self.assertFalse(library.repair_main_alias(128, 12))
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0]["from"], "cale-qwen36")
+        self.assertEqual(created[0]["parameters"]["num_ctx"], 262144)
+        sync.assert_called_once_with(library.ROOT, "cale-local")
+        routine.assert_called_once()
 
     def test_main_repair_uses_fresh_configured_alias_after_catalog_was_imported(self):
         catalog = {"main": {"alias": "cale-local"},

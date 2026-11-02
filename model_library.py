@@ -745,8 +745,17 @@ def retire_slow_model(item):
     return True
 
 
+def weight_blob(info):
+    """Identify the actual Ollama weights behind an alias, if reported."""
+    match = re.search(
+        r"(?im)^FROM\s+.*?sha256[-:]([0-9a-f]{64})(?:\s|$)",
+        str(info.get("modelfile", "")),
+    )
+    return match.group(1).lower() if match else ""
+
+
 def repair_main_alias(ram=None, vram=None, *, alias=None):
-    """Replace a missing or painfully slow main alias with verified local weights.
+    """Replace a missing, unusable or measurably slower main alias.
 
     The router and Hermes configuration both address this stable alias. Deleting
     it while leaving the configuration unchanged makes every worker hit a 404.
@@ -765,17 +774,23 @@ def repair_main_alias(ram=None, vram=None, *, alias=None):
     # alias when repairing the model the worker will actually call.
     main = alias or CATALOG["main"]["alias"]
     current_size = sizes.get(main, sizes.get(main + ":latest", 0))
+    current_info = {}
+    current_usable = False
     if current_size and model_fitness.suitable(main, current_size, ram, vram):
         try:
             current_info = post("/api/show", {"model": main}, timeout=10)
-            if (not current_info.get("remote_host")
-                    and not current_info.get("remote_model")
-                    and "tools" in current_info.get("capabilities", [])):
-                return False
+            current_usable = (not current_info.get("remote_host")
+                              and not current_info.get("remote_model")
+                              and "tools" in current_info.get("capabilities", []))
         except (OSError, ValueError):
             pass  # A listed alias still needs a verified tool-capable replacement.
     if current_size and alias_update_waits_for_tasks({**CATALOG["main"], "alias": main}):
         return False
+    current_blob = weight_blob(current_info) if current_usable else ""
+    configured = re.search(
+        r"(?m)^\s*num_ctx\s+(\d+)\s*$", current_info.get("parameters", "")
+    ) if current_usable else None
+    current_context = int(configured.group(1)) if configured else 65536
     candidates = []
     for profile, item in CATALOG.items():
         if profile == "main" or item.get("fallback_only") or item.get("auto") is False:
@@ -791,16 +806,40 @@ def repair_main_alias(ram=None, vram=None, *, alias=None):
                 # work even before it has accumulated three timed task calls.
                 # The router still uses the small alias for quick requests.
                 speed = model_fitness.measured_speed(alias)
-                candidates.append((weight, speed or 0, alias))
+                info = post("/api/show", {"model": alias}, timeout=10) if current_usable else {}
+                candidates.append((weight, speed or 0, alias, item.get("source", ""),
+                                   weight_blob(info), info))
         except (OSError, RuntimeError, ValueError):
             continue
     if not candidates:
         return False  # Keep an existing alias if no verified replacement exists.
-    _, _, replacement = max(candidates)
+    if current_usable:
+        # A stable alias may have no direct timing history. Match its weight
+        # blob to a timed catalog alias rather than guessing from model names.
+        current_speeds = [speed for _, speed, _, _, blob, _ in candidates
+                          if current_blob and blob == current_blob and speed > 0]
+        direct_speed = model_fitness.measured_speed(main)
+        # The stable alias can retain timing samples from its old weights.
+        # A matching current-weight alias gives a better lower bound.
+        current_speed = max([direct_speed or 0, *current_speeds])
+        if not current_blob or not current_speed:
+            return False
+        import context_window
+
+        faster = [candidate for candidate in candidates
+                  if candidate[4] and candidate[4] != current_blob
+                  and current_size * 0.8 <= candidate[0] <= current_size * 1.4
+                  and candidate[1] >= current_speed * 1.5
+                  and context_window.native_context(candidate[5]) >= current_context]
+        if not faster:
+            return False
+        _, _, replacement, _, _, _ = max(faster, key=lambda candidate: (candidate[1], candidate[0]))
+    else:
+        _, _, replacement, _, _, _ = max(candidates)
     previous_source = main_source_record() if main == CATALOG["main"]["alias"] else {}
     result = post("/api/create", {
         "model": main, "from": replacement, "stream": False,
-        "parameters": {"num_ctx": 65536, "num_predict": 8192},
+        "parameters": {"num_ctx": max(65536, current_context), "num_predict": 8192},
     }, timeout=180)
     if result.get("error"):
         raise RuntimeError(result["error"])
@@ -813,6 +852,8 @@ def repair_main_alias(ram=None, vram=None, *, alias=None):
     import context_window
 
     context_window.sync(ROOT, main)
+    if current_usable:
+        ensure_main_standard()  # Refresh the routine alias from the new weights.
     replacement_source = next(
         (item.get("source", "") for item in CATALOG.values()
          if item.get("alias") == replacement), ""
