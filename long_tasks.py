@@ -2835,6 +2835,7 @@ def monitor():
 def ensure_ollama(model):
     """Start Ollama and repair an older main alias with too little context."""
     from urllib.request import Request, urlopen
+    from urllib.error import HTTPError
 
     try:
         with urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as response:
@@ -2866,8 +2867,20 @@ def ensure_ollama(model):
         data=json.dumps({"model": model}).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urlopen(request, timeout=15) as response:
-        info = json.load(response)
+    try:
+        with urlopen(request, timeout=15) as response:
+            info = json.load(response)
+    except HTTPError as exc:
+        if exc.code != 404:
+            raise
+        import model_library
+
+        if not model_library.repair_main_alias():
+            raise RuntimeError(
+                f"Configured local model {model} is missing and no verified replacement is ready."
+            ) from exc
+        with urlopen(request, timeout=15) as response:
+            info = json.load(response)
     if info.get("remote_host") or info.get("remote_model"):
         raise RuntimeError(
             "Long tasks require local weights, not a remote Ollama model."

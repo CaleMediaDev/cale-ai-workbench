@@ -15,6 +15,53 @@ import model_library as library
 
 
 class AutoModelTests(unittest.TestCase):
+    def test_missing_main_alias_is_recreated_from_a_verified_suitable_model(self):
+        catalog = {
+            "main": {"alias": "cale-local"},
+            "fast": {"alias": "cale-fast", "auto": True},
+            "balanced": {"alias": "cale-balanced", "auto": True},
+            "fallback": {"alias": "cale-fallback", "fallback_only": True},
+        }
+        tags = {"models": [
+            {"name": "cale-fast:latest", "size": 6 * 2**30},
+            {"name": "cale-balanced:latest", "size": 21 * 2**30},
+            {"name": "cale-fallback:latest", "size": 7 * 2**30},
+        ]}
+        calls = []
+
+        def post(path, body, **_kwargs):
+            calls.append((path, body))
+            if path == "/api/show":
+                return {"capabilities": ["tools"], "parameters": "num_ctx 65536\n"}
+            return {"status": "success"}
+
+        with (patch.object(library, "CATALOG", catalog),
+              patch.object(library, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+              patch.object(library, "model_ready", return_value=True),
+              patch("model_fitness.suitable", return_value=True),
+              patch("model_fitness.measured_speed", return_value=9),
+              patch.object(library, "post", side_effect=post),
+              patch("context_window.sync", return_value=65536) as sync):
+            self.assertTrue(library.repair_main_alias(128, 12))
+        created = next(body for path, body in calls if path == "/api/create")
+        self.assertEqual(created["model"], "cale-local")
+        self.assertEqual(created["from"], "cale-balanced")
+        sync.assert_called_once_with(library.ROOT, "cale-local")
+
+    def test_slow_main_is_kept_when_no_verified_replacement_exists(self):
+        catalog = {"main": {"alias": "cale-local"},
+                   "fast": {"alias": "cale-fast", "auto": True}}
+        tags = {"models": [{"name": "cale-local:latest", "size": 50 * 2**30},
+                            {"name": "cale-fast:latest", "size": 6 * 2**30}]}
+        with (patch.object(library, "CATALOG", catalog),
+              patch.object(library, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+              patch("model_fitness.suitable", side_effect=lambda alias, *_: alias != "cale-local"),
+              patch.object(library, "model_ready", return_value=False),
+              patch.object(library, "alias_update_waits_for_tasks", return_value=False),
+              patch.object(library, "post") as post):
+            self.assertFalse(library.repair_main_alias(128, 12))
+        post.assert_not_called()
+
     def test_main_standard_alias_shares_weights_without_shortening_full_alias(self):
         calls = []
 

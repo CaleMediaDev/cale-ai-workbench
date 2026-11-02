@@ -489,6 +489,11 @@ class CloudTests(unittest.TestCase):
         self.candidates.stop()
         sizes = {cloud.FAST_MODEL: "9B", cloud.BALANCED_MODEL: "35B",
                  cloud.LOCAL_MODEL: "79B", cloud.STANDARD_MAIN_ALIAS: "79B"}
+        tags = {"models": [
+            {"name": alias + ":latest", "size": weight * 2**30}
+            for alias, weight in ((cloud.FAST_MODEL, 6), (cloud.BALANCED_MODEL, 22),
+                                  (cloud.LOCAL_MODEL, 52), (cloud.STANDARD_MAIN_ALIAS, 52))
+        ]}
 
         def show(_url, payload, **_kwargs):
             return {"capabilities": ["tools"], "parameters":
@@ -497,6 +502,7 @@ class CloudTests(unittest.TestCase):
                     "details": {"parameter_size": sizes[payload["model"]]}}
 
         with (patch.object(cloud, "post", side_effect=show),
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
               patch.object(cloud, "candidate_approved", return_value=True),
               patch.object(cloud, "refresh_catalog"),
               patch.object(cloud, "loaded_local_models", return_value=[cloud.BALANCED_MODEL])):
@@ -1024,6 +1030,11 @@ class CloudTests(unittest.TestCase):
             cloud.BALANCED_MODEL: "35B",
             cloud.LOCAL_MODEL: "79B",
         }
+        tags = {"models": [
+            {"name": alias + ":latest", "size": weight * 2**30}
+            for alias, weight in ((cloud.FAST_MODEL, 6), (cloud.BALANCED_MODEL, 22),
+                                  (cloud.LOCAL_MODEL, 52))
+        ]}
 
         def show(_url, payload, **_kwargs):
             return {"capabilities": ["completion", "tools"],
@@ -1031,6 +1042,7 @@ class CloudTests(unittest.TestCase):
                     "details": {"parameter_size": sizes[payload["model"]]}}
 
         with (patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
               patch.object(cloud, "candidate_approved", return_value=True),
               patch.object(cloud, "post", side_effect=show),
               patch.object(cloud, "loaded_local_models", return_value=[cloud.LOCAL_MODEL])):

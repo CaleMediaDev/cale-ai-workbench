@@ -3,6 +3,7 @@
 import contextlib
 import importlib.util
 import io
+from urllib.error import HTTPError
 import json
 import os
 import sqlite3
@@ -24,6 +25,25 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_missing_configured_main_model_recovers_before_task_dispatch(self):
+        calls = []
+
+        def response(request, timeout=0):
+            url = request.full_url if hasattr(request, "full_url") else request
+            calls.append(url)
+            if url.endswith("/api/show") and calls.count(url) == 1:
+                raise HTTPError(url, 404, "missing", {}, None)
+            if url.endswith("/api/show"):
+                return io.BytesIO(json.dumps({"parameters": "num_ctx 65536\n",
+                                              "capabilities": ["tools"]}).encode())
+            return io.BytesIO(b'{"models":[]}')
+
+        with (patch("urllib.request.urlopen", side_effect=response),
+              patch("model_library.repair_main_alias", return_value=True) as repair):
+            task_module.ensure_ollama("cale-local")
+        repair.assert_called_once()
+        self.assertEqual(calls.count("http://127.0.0.1:11434/api/show"), 2)
+
     def test_hidden_model_activity_window_does_not_block_automatic_update(self):
         class Window:
             def __init__(self, visible, kind="Toplevel"):

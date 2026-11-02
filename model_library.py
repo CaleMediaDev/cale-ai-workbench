@@ -615,32 +615,62 @@ def retire_slow_model(item):
     return True
 
 
-def retire_unsuitable_main(ram, vram):
-    """Drop a large app main alias only after another tool model is ready."""
+def repair_main_alias(ram=None, vram=None):
+    """Replace a missing or painfully slow main alias with verified local weights.
+
+    The router and Hermes configuration both address this stable alias. Deleting
+    it while leaving the configuration unchanged makes every worker hit a 404.
+    A replacement must already be installed, tool-ready and suitable for this
+    PC; an active worker may keep using an existing alias until it finishes.
+    """
     import model_fitness
 
-    try:
-        with urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
-            tags = json.load(response)
-        sizes = {entry["name"]: entry["size"] / 2**30
-                 for entry in tags.get("models", [])}
-        main = CATALOG["main"]["alias"]
-        weight = sizes.get(main, sizes.get(main + ":latest", 0))
-        if not weight or model_fitness.suitable(main, weight, ram, vram):
-            return False
-        if not any(model_ready(profile) and model_fitness.suitable(
-                item["alias"], sizes.get(item["alias"],
-                                          sizes.get(item["alias"] + ":latest", 0)), ram, vram)
-                   for profile, item in CATALOG.items() if profile != "main"
-                   and not item.get("fallback_only")):
-            return False
-        if alias_update_waits_for_tasks(CATALOG["main"]):
-            return False
-        if STANDARD_MAIN_ALIAS in sizes or STANDARD_MAIN_ALIAS + ":latest" in sizes:
-            delete_model(STANDARD_MAIN_ALIAS)
-        return retire_slow_model(CATALOG["main"])
-    except Exception:
+    ram = total_ram_gb() if ram is None else ram
+    vram = model_fitness.gpu_vram_gb() if vram is None else vram
+    with urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
+        tags = json.load(response)
+    sizes = {entry["name"]: entry["size"] / 2**30 for entry in tags.get("models", [])}
+    main = CATALOG["main"]["alias"]
+    current_size = sizes.get(main, sizes.get(main + ":latest", 0))
+    if current_size and model_fitness.suitable(main, current_size, ram, vram):
         return False
+    if current_size and alias_update_waits_for_tasks(CATALOG["main"]):
+        return False
+    candidates = []
+    for profile, item in CATALOG.items():
+        if profile == "main" or item.get("fallback_only") or item.get("auto") is False:
+            continue
+        alias = item.get("alias", "")
+        weight = sizes.get(alias, sizes.get(alias + ":latest", 0))
+        if not weight or not model_fitness.suitable(alias, weight, ram, vram):
+            continue
+        try:
+            if model_ready(profile):
+                # Prefer a larger proven worker over an unmeasured model of
+                # similar size; the small model remains the fast router tier.
+                speed = model_fitness.measured_speed(alias)
+                candidates.append((speed is not None, weight, alias))
+        except (OSError, RuntimeError, ValueError):
+            continue
+    if not candidates:
+        return False  # Keep an existing alias if no verified replacement exists.
+    _, _, replacement = max(candidates)
+    result = post("/api/create", {
+        "model": main, "from": replacement, "stream": False,
+        "parameters": {"num_ctx": 65536, "num_predict": 8192},
+    }, timeout=180)
+    if result.get("error"):
+        raise RuntimeError(result["error"])
+    info = post("/api/show", {"model": main}, timeout=15)
+    configured = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", info.get("parameters", ""))
+    if (info.get("remote_host") or info.get("remote_model") or
+            "tools" not in info.get("capabilities", []) or
+            configured is None or int(configured.group(1)) < 64000):
+        raise RuntimeError("The replacement main model did not pass its tool and context checks.")
+    import context_window
+
+    context_window.sync(ROOT, main)
+    return True
 
 
 def save_download_status(path, state, current, percent=0, metadata=None):
@@ -796,9 +826,9 @@ def auto_install(status_dir, refresh=True):
                 except Exception as exc:
                     save_download_status(path, "error", str(exc), 0)
                     # One unavailable model must not block smaller or different models.
-            if retire_unsuitable_main(ram, vram):
-                save_download_status(standard_status, "retired",
-                                     "Oversized main model removed; faster model is ready", 100)
+            if repair_main_alias(ram, vram):
+                save_download_status(standard_status, "complete",
+                                     "Main AI switched to verified weights this PC can run", 100)
             save_download_status(
                 worker_status,
                 "complete",
