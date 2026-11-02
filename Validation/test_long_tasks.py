@@ -1162,6 +1162,17 @@ class LongTaskTests(unittest.TestCase):
         self.assertTrue(ready)
         self.assertEqual(message, "")
 
+    def test_routine_file_index_waits_until_tasks_are_idle(self):
+        import file_catalog
+
+        state = task_module.STATE
+        active = [{"status": "working"}]
+        assert task_module.catalog_refresh_allowed(state, active)
+        (state / file_catalog.FIRST_SCAN_NAME).write_text("complete")
+        assert not task_module.catalog_refresh_allowed(state, active)
+        assert task_module.catalog_refresh_allowed(state, active, requested=True)
+        assert task_module.catalog_refresh_allowed(state, [{"status": "ready_for_review"}])
+
     def test_optional_tool_failure_releases_previously_waiting_task(self):
         task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"

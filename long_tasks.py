@@ -600,6 +600,14 @@ def first_launch_readiness(state=None):
     return True, ""
 
 
+def catalog_refresh_allowed(state, tasks, *, requested=False):
+    """Keep routine whole-PC scans off the critical path of active tasks."""
+    if requested or not (Path(state) / file_catalog.FIRST_SCAN_NAME).is_file():
+        return True
+    return not any(task["status"] in ("queued", "working", "checking")
+                   for task in tasks)
+
+
 def token_legend_layout(models, width):
     """Fit every full model name and total beneath the graph without scrolling."""
     width = max(int(width), 400)
@@ -3177,10 +3185,13 @@ def monitor():
                 )
                 next_catalog_refresh = time.monotonic() + retry_seconds
             refresh_request = STATE / "computer-files-recheck.request"
-            if refresh_request.is_file() and catalog_thread is None:
+            requested_refresh = refresh_request.is_file() and catalog_thread is None
+            if requested_refresh:
                 refresh_request.unlink(missing_ok=True)
                 next_catalog_refresh = time.monotonic()
-            if catalog_thread is None and time.monotonic() >= next_catalog_refresh:
+            if (catalog_thread is None and time.monotonic() >= next_catalog_refresh
+                    and catalog_refresh_allowed(
+                        STATE, projects(), requested=requested_refresh)):
                 catalog_thread = threading.Thread(
                     target=file_catalog.scan_computer,
                     args=(STATE,),
