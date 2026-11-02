@@ -275,6 +275,25 @@ def test_compose_lyrics_uses_small_local_model_and_rejects_truncation():
             music_backend.compose_lyrics("Michigan rap", 60)
 
 
+def test_cloud_only_music_writes_lyrics_in_cloud_then_falls_back_locally():
+    from cloud_ai import FAST_MODEL, LOCAL_MODEL
+
+    answer = {"choices": [{"finish_reason": "stop", "message": {
+        "content": "[Verse]\n" + "Michigan lights and water rolling " * 10}}]}
+    with (patch("routing_mode.load_scope", return_value="cloud_only"),
+          patch("cloud_ai.Router.complete", return_value=answer) as cloud,
+          patch("cloud_ai.post") as local):
+        assert music_backend.compose_lyrics("Michigan rap", 60).startswith("[Verse]")
+    assert cloud.call_args.args[0]["model"] == LOCAL_MODEL
+    local.assert_not_called()
+
+    with (patch("routing_mode.load_scope", return_value="cloud_only"),
+          patch("cloud_ai.Router.complete", side_effect=RuntimeError("quota exhausted")),
+          patch("cloud_ai.post", return_value=answer) as local):
+        assert music_backend.compose_lyrics("Michigan rap", 60).startswith("[Verse]")
+    assert local.call_args.args[1]["model"] == FAST_MODEL
+
+
 def test_vocal_evidence_requires_words_through_most_of_the_song(tmp_path):
     python = tmp_path / "Media/python/Scripts/python.exe"
     python.parent.mkdir(parents=True)

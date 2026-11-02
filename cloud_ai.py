@@ -788,6 +788,7 @@ class Router:
         if repaired is not messages:
             payload = {**payload, "messages": repaired}
         scope = routing_mode.load_scope(STATE) if profile == "main" else "both"
+        cloud_only = profile == "main" and scope == "cloud_only"
         offline_mode = (pc_offline.offline() or scope == "local_only" or
                         (scope == "both" and task_route(
                             usage_history.CURRENT_TASK.get()) == "local_only"))
@@ -889,11 +890,11 @@ class Router:
                 if (not provider_key or not confirmed.get(provider)
                         or provider_context > spec["context"]
                         or (time.time() - provider_pressure["last_limit"] < 3600)
-                        or not routing_mode.free_first(
+                        or not (cloud_only or routing_mode.free_first(
                             mode,
                             routing_memory.use_free(size, local_speed, provider_pressure),
                             cloud_providers.likely_faster(size, measured_speeds[provider], local_speed),
-                        )
+                        ))
                         or not self.reserve_provider_request(provider, estimated_cost, estimated_tokens)):
                     continue
                 try:
@@ -923,13 +924,13 @@ class Router:
         ) if profile == "main" and not offline_mode else False
         # Prefer an eligible direct free-plan account before spending the
         # smaller shared OpenRouter free allowance on demanding work.
-        if (key and routing_mode.free_first(
+        if (key and (cloud_only or routing_mode.free_first(
                     mode,
                     routing_memory.use_free(
                         size, local_speed, routing_memory.pressure("openrouter")),
                     (size == "deep" or slow_long_context) if mode == "medium" else
                     cloud_providers.likely_faster(size, openrouter_speed, local_speed),
-                )
+                ))
                 and self.reserve_free_request()):
             openrouter_attempted = True
             try:
@@ -1020,7 +1021,7 @@ class Router:
                 reason = "Free cloud unavailable or incompatible."
         elif key:
             reason = "Free quota, rate limit or cooldown reached."
-        if mode in ("paid_saver", "floor_it") and profile == "main" and not offline_mode:
+        if (mode in ("paid_saver", "floor_it") or cloud_only) and profile == "main" and not offline_mode:
             paid_result = try_paid()
             if paid_result is not None:
                 return paid_result

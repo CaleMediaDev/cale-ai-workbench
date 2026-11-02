@@ -459,16 +459,16 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
     ACE-Step can produce a mostly instrumental track when its lyrics field is
     empty. This bounded call runs in the durable music worker, not the UI.
     """
-    from cloud_ai import FAST_MODEL, post
+    import cloud_ai
+    import routing_mode
+    import usage_history
 
     target_words = max(20, min(450, round(duration_seconds * 1.6)))
     minimum_words = max(20, round(duration_seconds * 0.7))
     failures = []
     for attempt in range(2):
         try:
-            result = post(
-                "http://127.0.0.1:11434/v1/chat/completions",
-                {"model": FAST_MODEL, "stream": False, "temperature": 0.7,
+            payload = {"model": cloud_ai.FAST_MODEL, "stream": False, "temperature": 0.7,
                  "max_tokens": min(2048, max(1024, target_words * (4 + attempt))),
                  "reasoning_effort": "none",
                  "messages": [
@@ -481,8 +481,25 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
                             if attempt else "")
                      )},
                      {"role": "user", "content": prompt[:3000]},
-                 ]}, timeout=120,
-            )
+                 ]}
+            if routing_mode.load_scope(cloud_ai.STATE) == "cloud_only":
+                try:
+                    result = cloud_ai.Router().complete(
+                        {**payload, "model": cloud_ai.LOCAL_MODEL},
+                        task_id=usage_history.CURRENT_TASK.get(),
+                    )
+                except Exception:
+                    # Local lyrics are part of the offline music tool. Cloud
+                    # quota or connectivity must not prevent a song render.
+                    result = cloud_ai.post(
+                        "http://127.0.0.1:11434/v1/chat/completions",
+                        payload, timeout=120,
+                    )
+            else:
+                result = cloud_ai.post(
+                    "http://127.0.0.1:11434/v1/chat/completions",
+                    payload, timeout=120,
+                )
             choice = result["choices"][0]
             lyrics = str(choice["message"].get("content") or "").strip()
         except (OSError, RuntimeError, KeyError, IndexError, ValueError, TypeError) as exc:

@@ -11,6 +11,8 @@ from urllib.request import Request, urlopen
 
 from ruamel.yaml import YAML
 
+HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 def setup_progress(root, percent, current):
     """Publish model setup progress to the desktop task card."""
@@ -199,6 +201,7 @@ def configure(root, profile):
                 str(patch),
             ],
             capture_output=True,
+            creationflags=HIDE,
         ).returncode
         == 0
     ):
@@ -212,6 +215,7 @@ def configure(root, profile):
                 str(patch),
             ],
             check=True,
+            creationflags=HIDE,
         )
     elif subprocess.run(
         [
@@ -225,6 +229,7 @@ def configure(root, profile):
             str(patch),
         ],
         capture_output=True,
+        creationflags=HIDE,
     ).returncode:
         # Later read-consistency patches extend the same functions, so a
         # reverse-apply check can fail on an already-patched live install.
@@ -243,10 +248,12 @@ def configure(root, profile):
     command = [git, "-C", str(root / "app"), "apply", "--ignore-space-change"]
     for name in ("hermes-read-consistency.patch", "hermes-host-read-consistency.patch"):
         patch = root / name
-        if subprocess.run([*command, "--check", str(patch)], capture_output=True).returncode == 0:
-            subprocess.run([*command, str(patch)], check=True)
+        if subprocess.run([*command, "--check", str(patch)], capture_output=True,
+                          creationflags=HIDE).returncode == 0:
+            subprocess.run([*command, str(patch)], check=True, creationflags=HIDE)
         elif subprocess.run(
-            [*command, "--reverse", "--check", str(patch)], capture_output=True
+            [*command, "--reverse", "--check", str(patch)], capture_output=True,
+            creationflags=HIDE,
         ).returncode:
             raise RuntimeError(f"The Hermes source patch {name} did not match this version.")
     skill = root / "Toolbox/node_modules/rea-agents/skills/reverse-engineer-anything"
@@ -261,10 +268,12 @@ def configure(root, profile):
         env=env,
         capture_output=True,
         text=True,
+        creationflags=HIDE,
     )
     if "long-tasks" not in boards.stdout:
         subprocess.run(
-            [engine, "kanban", "boards", "create", "long-tasks"], env=env, check=True
+            [engine, "kanban", "boards", "create", "long-tasks"], env=env, check=True,
+            creationflags=HIDE,
         )
     print("Local model and persistent task board configured.", flush=True)
 

@@ -1,6 +1,7 @@
 """Design checks for project files; no account or online inference is needed."""
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -61,6 +62,7 @@ def scan_frontend_design(path: str) -> dict:
         [str(NODE), str(SCANNER), "--json", str(target)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=90, cwd=target if target.is_dir() else target.parent,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if result.returncode not in (0, 2):
         raise RuntimeError(result.stderr[-2000:] or "Design scan failed.")

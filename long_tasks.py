@@ -77,13 +77,15 @@ def sync_hermes_source_patch():
         if not patch.is_file():
             raise RuntimeError(f"Hermes source patch {name} is missing.")
         if subprocess.run(
-            [*command, "--reverse", "--check", str(patch)], capture_output=True
+            [*command, "--reverse", "--check", str(patch)],
+            capture_output=True, creationflags=HIDE,
         ).returncode == 0:
             continue
-        check = subprocess.run([*command, "--check", str(patch)], capture_output=True)
+        check = subprocess.run([*command, "--check", str(patch)],
+                               capture_output=True, creationflags=HIDE)
         if check.returncode:
             raise RuntimeError(f"Hermes source patch {name} does not match this checkout.")
-        subprocess.run([*command, str(patch)], check=True)
+        subprocess.run([*command, str(patch)], check=True, creationflags=HIDE)
 
 
 def environment():

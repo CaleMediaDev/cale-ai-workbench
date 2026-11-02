@@ -1,6 +1,7 @@
 """Keep local agent models within hardware and observed speed limits."""
 
 import re
+import os
 import subprocess
 from functools import lru_cache
 
@@ -12,6 +13,7 @@ def gpu_vram_gb():
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=8, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         values = [int(line.strip()) for line in result.stdout.splitlines()
                   if re.fullmatch(r"\s*\d+\s*", line)]

@@ -58,6 +58,28 @@ class CloudTests(unittest.TestCase):
             self.assertFalse(any(call.args[0].startswith("http://127.0.0.1:11434")
                                  for call in post.call_args_list))
 
+    def test_cloud_only_uses_connected_free_provider_even_when_local_is_faster(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "cloud_only")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (patch("usage_history.recent_local_speed", return_value=500),
+              patch("usage_history.recent_provider_speed", return_value=10),
+              patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
+              patch.object(cloud, "post") as local):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        free.assert_called_once()
+        local.assert_not_called()
+
+    def test_cloud_only_medium_uses_enabled_plan_when_no_free_route_exists(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "cloud_only")
+        cloud.routing_mode.save(cloud.STATE, "medium")
+        with (patch("usage_history.recent_local_speed", return_value=500),
+              patch("chatgpt_auth.status", return_value={"enabled": True}),
+              patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
+              patch.object(cloud, "post") as local):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        paid.assert_called_once()
+        local.assert_not_called()
+
     def test_task_route_reads_live_project_choice(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
