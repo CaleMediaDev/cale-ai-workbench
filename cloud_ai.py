@@ -775,6 +775,7 @@ class Router:
             speeds=self.model_speeds,
         )
         if size in ("quick", "balanced"):
+            preferred_speed = self.model_speeds.get(ordered[0]) if ordered else None
             for loaded in loaded_local_models():
                 parameters = self.model_cache.get(loaded, 0)
                 same_tier = (
@@ -784,7 +785,13 @@ class Router:
                 # Reusing loaded weights saves startup time only when the
                 # model stays within the fast or middle-size range. A loaded
                 # 79B model can make every quick or balanced turn crawl.
-                if loaded in ordered and same_tier:
+                # A warm model saves startup time, but repeatedly generating
+                # at half the measured speed is worse for balanced work.
+                loaded_speed = self.model_speeds.get(loaded)
+                speed_close = (not preferred_speed or
+                               loaded_speed is not None and
+                               loaded_speed >= preferred_speed * 0.75)
+                if loaded in ordered and same_tier and speed_close:
                     ordered.remove(loaded)
                     ordered.insert(0, loaded)
                     break

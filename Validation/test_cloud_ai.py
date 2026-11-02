@@ -1187,6 +1187,24 @@ class CloudTests(unittest.TestCase):
               patch.object(cloud, "post", side_effect=show)):
             self.assertEqual(cloud.Router().local_candidates("balanced")[0], cloud.BALANCED_MODEL)
 
+    def test_loaded_balanced_model_cannot_override_much_faster_measured_model(self):
+        self.candidates.stop()
+        newer = "cale-qwen36"
+        catalog = dict(cloud.CATALOG, newer={
+            "alias": newer, "source": "qwen3.6:35b", "candidate": True,
+        })
+        router = cloud.Router()
+        router.model_cache_until = time.monotonic() + 60
+        router.model_cache = {cloud.BALANCED_MODEL: 35, newer: 35}
+        router.model_contexts = {name: 65536 for name in router.model_cache}
+        router.model_speeds = {cloud.BALANCED_MODEL: 9.1, newer: 18.5}
+        with (patch.object(cloud, "CATALOG", catalog),
+              patch.object(cloud, "candidate_approved", return_value=True),
+              patch.object(cloud, "loaded_local_models", return_value=[cloud.BALANCED_MODEL])):
+            self.assertEqual(router.local_candidates("balanced")[0], newer)
+            router.model_speeds[cloud.BALANCED_MODEL] = 15.0
+            self.assertEqual(router.local_candidates("balanced")[0], cloud.BALANCED_MODEL)
+
     def test_loaded_largest_model_does_not_hijack_quick_or_balanced_route(self):
         self.candidates.stop()
         sizes = {
