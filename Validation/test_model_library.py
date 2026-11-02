@@ -12,9 +12,45 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import model_library as library
+import configure_install
 
 
 class AutoModelTests(unittest.TestCase):
+    def test_installer_claims_a_source_only_when_ollama_did_not_have_its_tag(self):
+        tags = {"models": [{"name": "qwen3.5:9b"}]}
+        with patch.object(configure_install, "urlopen", side_effect=lambda *_args, **_kwargs: io.BytesIO(json.dumps(tags).encode())):
+            self.assertTrue(configure_install.source_already_installed("qwen3.5:9b"))
+            self.assertFalse(configure_install.source_already_installed("qwen3.5:35b"))
+
+    def test_retired_main_source_cleanup_requires_owned_source_and_ready_replacement(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with (patch.object(library, "ROOT", root),
+                  patch.object(library, "CATALOG", {"main": {"alias": "cale-local"}}),
+                  patch("long_tasks.projects", return_value=[]),
+                  patch.object(library, "post", return_value={
+                      "capabilities": ["tools"], "parameters": "num_ctx 131072\n"}),
+                  patch.object(library, "ensure_main_standard", return_value=True) as standard,
+                  patch.object(library, "owned_sources", return_value={"old:large"}),
+                  patch.object(library, "delete_model") as delete):
+                library.record_main_source("new:balanced", False)
+                library.queue_retired_main_source("old:large")
+                library.queue_retired_main_source("user:personal")
+                self.assertEqual(library.cleanup_retired_main_sources(), 1)
+                self.assertEqual(json.loads((root / "LongTasks/retired-main-sources.json").read_text()), [])
+            standard.assert_called_once()
+            delete.assert_called_once_with("old:large")
+
+    def test_retired_main_source_waits_for_active_tasks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with (patch.object(library, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[{"status": "working"}]),
+                  patch.object(library, "delete_model") as delete):
+                library.queue_retired_main_source("old:large")
+                self.assertEqual(library.cleanup_retired_main_sources(), 0)
+            delete.assert_not_called()
+
     def test_missing_main_alias_is_recreated_from_a_verified_suitable_model(self):
         catalog = {
             "main": {"alias": "cale-local"},

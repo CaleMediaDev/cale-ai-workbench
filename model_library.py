@@ -597,6 +597,94 @@ def record_owned_source(source):
     os.replace(temporary, path)
 
 
+def main_source_record():
+    """Read the source tag Cale selected for its stable main alias."""
+    try:
+        value = json.loads((ROOT / "LongTasks/main-model-source.json").read_text())
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def record_main_source(source, owned):
+    """Persist provenance separately from aliases, which Ollama may recreate."""
+    path = ROOT / "LongTasks/main-model-source.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps({"source": source, "owned": bool(owned)}), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def queue_retired_main_source(source):
+    """Defer deletion until all workers finish and the routine alias is rebuilt."""
+    path = ROOT / "LongTasks/retired-main-sources.json"
+    try:
+        pending = json.loads(path.read_text())
+        pending = pending if isinstance(pending, list) else []
+    except (OSError, ValueError):
+        pending = []
+    if source not in pending:
+        pending.append(source)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(pending), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def cleanup_retired_main_sources():
+    """Remove only Cale-owned source tags after their replacement is ready."""
+    path = ROOT / "LongTasks/retired-main-sources.json"
+    try:
+        pending = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(pending, list) or not pending:
+        return 0
+    try:
+        from long_tasks import projects
+
+        if any(task["status"] in ("queued", "working", "checking") for task in projects()):
+            return 0
+    except Exception:
+        return 0
+    try:
+        main = CATALOG["main"]["alias"]
+        info = post("/api/show", {"model": main}, timeout=10)
+        context = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", info.get("parameters", ""))
+        if (info.get("remote_host") or info.get("remote_model") or
+                "tools" not in info.get("capabilities", []) or
+                context is None or int(context.group(1)) < 64000):
+            return 0
+        if int(context.group(1)) > 65536:
+            if not ensure_main_standard():
+                return 0  # Rebuild the routine alias before removing its old source.
+        else:
+            try:
+                post("/api/show", {"model": STANDARD_MAIN_ALIAS}, timeout=10)
+            except (OSError, ValueError):
+                pass
+            else:
+                delete_model(STANDARD_MAIN_ALIAS)  # No separate routine alias is needed.
+    except (OSError, RuntimeError, ValueError):
+        return 0
+    current = main_source_record().get("source")
+    owned = owned_sources()
+    remaining = []
+    removed = 0
+    for source in pending:
+        if not isinstance(source, str) or source == current or source not in owned:
+            continue
+        try:
+            delete_model(source)
+            removed += 1
+        except Exception:
+            remaining.append(source)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(remaining), encoding="utf-8")
+    os.replace(temporary, path)
+    return removed
+
+
 def retire_slow_model(item):
     """Remove an app alias only while idle; remove weights only if app-owned."""
     if alias_update_waits_for_tasks(item):
@@ -657,6 +745,7 @@ def repair_main_alias(ram=None, vram=None):
     if not candidates:
         return False  # Keep an existing alias if no verified replacement exists.
     _, _, replacement = max(candidates)
+    previous_source = main_source_record()
     result = post("/api/create", {
         "model": main, "from": replacement, "stream": False,
         "parameters": {"num_ctx": 65536, "num_predict": 8192},
@@ -672,6 +761,15 @@ def repair_main_alias(ram=None, vram=None):
     import context_window
 
     context_window.sync(ROOT, main)
+    replacement_source = next(
+        (item.get("source", "") for item in CATALOG.values()
+         if item.get("alias") == replacement), ""
+    )
+    if replacement_source:
+        record_main_source(replacement_source, replacement_source in owned_sources())
+    if (previous_source.get("owned") and previous_source.get("source")
+            and previous_source["source"] != replacement_source):
+        queue_retired_main_source(previous_source["source"])
     return True
 
 
@@ -831,6 +929,7 @@ def auto_install(status_dir, refresh=True):
             if repair_main_alias(ram, vram):
                 save_download_status(standard_status, "complete",
                                      "Main AI switched to verified weights this PC can run", 100)
+            cleanup_retired_main_sources()
             save_download_status(
                 worker_status,
                 "complete",

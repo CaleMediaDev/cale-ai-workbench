@@ -33,6 +33,13 @@ def setup_progress(root, percent, current):
     os.replace(temporary, path)
 
 
+def source_already_installed(source):
+    """Check Ollama before pulling so user-owned weights are never claimed."""
+    with urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
+        models = json.load(response).get("models", [])
+    return any(item.get("name") in (source, source + ":latest") for item in models)
+
+
 def configure(root, profile):
     """Install the selected main and vision models, then configure Hermes."""
     root = Path(root).resolve()
@@ -46,6 +53,7 @@ def configure(root, profile):
     ):
         (root / folder).mkdir(exist_ok=True)
     selection = json.loads((root / "models/manifest.json").read_text())[profile]
+    source_was_present = source_already_installed(selection["source"])
     with urlopen(
         Request(
             "http://127.0.0.1:11434/api/pull",
@@ -99,6 +107,11 @@ def configure(root, profile):
         data = json.load(response)
         if data.get("error"):
             raise RuntimeError(data["error"])
+    if not source_was_present:
+        model_library.record_owned_source(selection["source"])
+    model_library.record_main_source(
+        selection["source"], selection["source"] in model_library.owned_sources()
+    )
     # Keep the full main window, and also prepare a weight-sharing routine
     # alias so shorter work need not reserve the largest KV cache.
     model_library.ensure_main_standard()
