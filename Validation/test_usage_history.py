@@ -134,4 +134,7 @@ def test_task_totals_attribute_only_valid_worker_context(tmp_path, monkeypatch):
         finally:
             usage_history.CURRENT_TASK.reset(marker)
     assert usage_history.task_totals() == {one: 30, two: 15}
+    assert usage_history.task_sources() == {
+        one: [("Local", 30)], two: [("Local", 15)],
+    }
     assert usage_history.history()["total"] == 145

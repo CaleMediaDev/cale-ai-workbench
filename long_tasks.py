@@ -164,6 +164,12 @@ def database():
             # last update is the closest durable time available at migration.
             conn.execute("""UPDATE projects SET finished=updated
                 WHERE status IN ('ready_for_review','accepted','stopped')""")
+    if "ai_route" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN ai_route TEXT DEFAULT 'automatic'")
+        except sqlite3.OperationalError as exc:
+            if "ai_route" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
+                raise exc
     conn.execute("""CREATE TABLE IF NOT EXISTS requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT, action TEXT, note TEXT,
       status TEXT DEFAULT 'pending', result TEXT DEFAULT '')""")
@@ -625,7 +631,7 @@ def add_project(title, folder, brief, waiting_for_setup=False, pending_media=Non
         rules.write_text(
             "# Local project\n\nPreserve existing data and tests. Keep .local-ai/PLAN.md and PROGRESS.md current. "
             "Work toward the user's full request in verified milestones. Run real behavior tests after the last edit. "
-            "Use the configured AI route only: local Ollama or user-connected free cloud. Do not configure paid AI or invoke Codex. A connected GitHub account may store this code in a private repository; never publish it publicly or send external messages without the user's request.\n",
+            "Use Cale's configured AI route: local Ollama, user-connected free cloud, or the user's enabled ChatGPT plan. Obey this task's local-only setting when selected. Do not configure new paid AI, invoke Codex, or delegate. A connected GitHub account may store this code in a private repository; never publish it publicly or send external messages without the user's request.\n",
             encoding="utf-8",
         )
     with database() as conn:
@@ -4738,6 +4744,14 @@ def gui():
         item = next((p for p in projects() if p["id"] == pid), None)
         if not item:
             return
+        if kind in ("route_local", "route_auto"):
+            route = "local_only" if kind == "route_local" else "automatic"
+            update(pid, ai_route=route)
+            status.set("This task will use your PC's local AI only."
+                       if route == "local_only" else
+                       "This task can use your connected AI providers again.")
+            render_cards()
+            return
         if kind in ("camera_on", "camera_off"):
             consent = ROOT / "Media/camera-consent.json"
             consent.parent.mkdir(exist_ok=True)
@@ -4815,6 +4829,20 @@ def gui():
         ttk.Label(
             pane, text=item["title"], font=("Segoe UI", 17, "bold"), wraplength=620
         ).pack(anchor="w")
+        if item["status"] not in ("accepted", "stopped", "ready_for_review"):
+            local = item.get("ai_route") == "local_only"
+            route_button = ttk.Button(
+                pane, text="Use connected AI" if local else "Use local AI only"
+            )
+            def switch_route():
+                current = next((p for p in projects() if p["id"] == item["id"]), item)
+                task_action(item["id"], "route_auto" if current.get("ai_route") == "local_only"
+                            else "route_local")
+                changed = next((p for p in projects() if p["id"] == item["id"]), current)
+                route_button.configure(text="Use connected AI" if changed.get("ai_route") ==
+                                       "local_only" else "Use local AI only")
+            route_button.configure(command=switch_route)
+            route_button.pack(anchor="w", pady=(8, 0))
         detail = tk.Text(
             pane,
             wrap="word",
@@ -5257,6 +5285,7 @@ def gui():
 
         all_tasks = list(reversed(projects()))
         tokens_by_task = usage_history.task_totals()
+        sources_by_task = usage_history.task_sources()
         live_ids = {item["id"] for item in all_tasks}
         for pid in list(task_cards):
             if pid not in live_ids:
@@ -5303,6 +5332,11 @@ def gui():
                           style="CardMuted.TLabel").pack(anchor="w", before=controls,
                                                           pady=(3, 0))
                 card_info["tokens"] = token_var
+                source_var = tk.StringVar(value="AI used: waiting for first response")
+                ttk.Label(card_info["panel"], textvariable=source_var,
+                          style="CardMuted.TLabel", wraplength=900).pack(
+                              anchor="w", before=controls, pady=(2, 0))
+                card_info["sources"] = source_var
                 task_cards[pid] = card_info
             card_info = task_cards[pid]
             set_text(card_info["title"], item["title"])
@@ -5311,6 +5345,11 @@ def gui():
                 f"Tokens: {tokens_by_task.get(pid, 0):,}    "
                 f"Total time: {task_eta.total_time(item['created'], item['updated'], item['status'], finished=item['finished'])}",
             )
+            source_totals = sources_by_task.get(pid, [])
+            set_text(card_info["sources"],
+                     "AI used: " + (" · ".join(
+                         f"{source} {tokens:,} tokens" for source, tokens in source_totals)
+                         if source_totals else "waiting for first response"))
             percent, current = task_progress(item)
             finished = item["status"] in ("ready_for_review", "accepted")
             state = "Finished" if finished else item["status"].replace("_", " ").capitalize()

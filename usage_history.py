@@ -100,6 +100,27 @@ def task_totals() -> dict[str, int]:
         return {}
 
 
+def task_sources() -> dict[str, list[tuple[str, int]]]:
+    """Show the real upstream providers used by each task's router calls."""
+    try:
+        with closing(_connection()) as conn:
+            rows = conn.execute(
+                "SELECT task_id, source, SUM(total_tokens) FROM usage_events "
+                "WHERE task_id <> '' GROUP BY task_id, source "
+                "ORDER BY task_id, SUM(total_tokens) DESC"
+            ).fetchall()
+        result = {}
+        for task_id, source, tokens in rows:
+            result.setdefault(task_id, []).append((
+                "Local" if source == "ollama" else
+                "ChatGPT" if source == "chatgpt" else source.title(),
+                tokens,
+            ))
+        return result
+    except (OSError, sqlite3.Error):
+        return {}
+
+
 def recent_local_speed(default: float = 35.0, models=None) -> float:
     """Measure recent local speed for comparable models only.
 

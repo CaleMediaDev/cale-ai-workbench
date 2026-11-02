@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -45,6 +46,19 @@ REQUEST = {
 
 
 class CloudTests(unittest.TestCase):
+    def test_task_route_reads_live_project_choice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "LongTasks").mkdir()
+            with sqlite3.connect(root / "LongTasks/projects.db") as conn:
+                conn.execute("CREATE TABLE projects(id TEXT, ai_route TEXT)")
+                conn.execute("INSERT INTO projects VALUES (?,?)", ("a" * 12, "local_only"))
+            conn.close()
+            with patch.object(cloud, "ROOT", root):
+                self.assertEqual(cloud.task_route("a" * 12), "local_only")
+                self.assertEqual(cloud.task_route("b" * 12), "automatic")
+                self.assertEqual(cloud.task_route("invalid"), "automatic")
+
     def test_speed_estimate_uses_the_expected_local_model_tier(self):
         self.assertEqual(cloud.local_speed_models("quick"), (cloud.FAST_MODEL,))
         balanced = cloud.local_speed_models("balanced")
@@ -692,6 +706,17 @@ class CloudTests(unittest.TestCase):
         ):
             self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
         paid.assert_called_once()
+
+    def test_local_only_task_never_uses_enabled_chatgpt(self):
+        with (
+            patch.object(cloud, "task_route", return_value="local_only"),
+            patch("chatgpt_auth.status", return_value={"enabled": True}),
+            patch("chatgpt_auth.complete") as paid,
+            patch.object(cloud, "post", return_value=ANSWER) as local,
+        ):
+            self.assertEqual(cloud.Router().complete(REQUEST, task_id="a" * 12), ANSWER)
+        paid.assert_not_called()
+        local.assert_called()
 
     def test_floor_it_chooses_fastest_eligible_connected_route(self):
         cloud.routing_mode.save(cloud.STATE, "floor_it")

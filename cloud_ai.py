@@ -16,10 +16,12 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import subprocess
 import threading
 import time
 import webbrowser
+from contextlib import closing
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -54,6 +56,21 @@ BALANCED_MODEL = "cale-qwen35"
 API = "https://openrouter.ai/api/v1"
 LOCK = threading.RLock()
 POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
+
+def task_route(task_id: str) -> str:
+    """Read a task's provider choice at request time, so a running task can switch."""
+    if not re.fullmatch(r"[a-f0-9]{12}", task_id or ""):
+        return "automatic"
+    try:
+        with closing(sqlite3.connect(f"file:{ROOT / 'LongTasks/projects.db'}?mode=ro",
+                                     uri=True, timeout=2)) as conn:
+            row = conn.execute("SELECT ai_route FROM projects WHERE id=?", (task_id,)).fetchone()
+        return "local_only" if row and row[0] == "local_only" else "automatic"
+    except sqlite3.Error:
+        # An attributed task with an unreadable policy must never unexpectedly
+        # spend a connected account's allowance.
+        return "local_only"
 
 
 def local_speed_models(size):
@@ -746,7 +763,8 @@ class Router:
         repaired = repair_messages(messages)
         if repaired is not messages:
             payload = {**payload, "messages": repaired}
-        offline_mode = pc_offline.offline()
+        offline_mode = pc_offline.offline() or task_route(
+            usage_history.CURRENT_TASK.get()) == "local_only"
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         mode = routing_mode.load(STATE) if profile == "main" else routing_mode.DEFAULT
         reason = "Cloud is not connected."
