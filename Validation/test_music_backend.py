@@ -488,10 +488,13 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
         started = music_backend.start_music_job("upbeat piano", str(output), instrumental=True)
         assert started["status"] == "queued"
         assert music_backend.music_job_status(started["job_id"])["status"] == "queued"
+        assert music_backend.music_job_status(started["job_id"])["progress"] == 5
         process.assert_called_once()
         def finish(*args):
             args[7]("server-task-1")
-            assert music_backend.music_job_status(started["job_id"])["server_task_id"] == "server-task-1"
+            current = music_backend.music_job_status(started["job_id"])
+            assert current["server_task_id"] == "server-task-1"
+            assert current["progress"] == 35
             return {"path": str(output)}
 
         with patch.object(music_backend, "generate_music", side_effect=finish), patch(
@@ -502,6 +505,7 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
             music_backend._run_job(started["job_id"])
         completed = music_backend.music_job_status(started["job_id"])
     assert completed["status"] == "complete"
+    assert completed["progress"] == 100
     assert completed["result"]["path"] == str(output)
 
 

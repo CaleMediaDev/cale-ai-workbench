@@ -908,6 +908,24 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(item["status"], "working")
         self.assertFalse((Path(item["folder"]) / ".local-ai/pending-media.json").exists())
 
+    def test_direct_music_card_uses_worker_stage_progress(self):
+        import music_backend
+
+        task_module.update(self.pid, card="music-job:abc123", status="working")
+        for percent, stage in ((5, "Starting local music"),
+                               (35, "Generating music locally"),
+                               (75, "Checking the vocals"),
+                               (88, "Making a video with captions")):
+            with patch.object(music_backend, "music_job_status", return_value={
+                "status": "working", "progress": percent, "current": stage,
+            }):
+                self.assertEqual(task_module.task_progress(self.item()), (percent, stage))
+        # A stale worker record cannot make an unfinished task look finished.
+        with patch.object(music_backend, "music_job_status", return_value={
+            "status": "working", "progress": 100, "current": "Writing the video",
+        }):
+            self.assertEqual(task_module.task_progress(self.item())[0], 99)
+
     def test_image_saved_during_setup_keeps_direct_image_route(self):
         task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"

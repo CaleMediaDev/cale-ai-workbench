@@ -378,7 +378,10 @@ def task_progress(p):
             import music_backend
 
             job = music_backend.music_job_status(job_id)
-            return (10 if job["status"] == "queued" else 45), str(job.get("current", "Rendering music"))[:180]
+            progress = job.get("progress")
+            percent = (max(0, min(99, int(progress))) if progress is not None
+                       else 10 if job["status"] == "queued" else 45)
+            return percent, str(job.get("current", "Rendering music"))[:180]
         except (OSError, ValueError, KeyError):
             return 10, "Checking local music job"
     if state == "accepted":

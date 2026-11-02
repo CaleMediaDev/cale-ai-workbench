@@ -719,7 +719,7 @@ def recover_music_jobs() -> None:
                     import song_video
 
                     _write_job(job_id, {**info, "status": "working",
-                                        "current": "Finishing the captioned video"})
+                                        "current": "Finishing the captioned video", "progress": 88})
                     try:
                         video = song_video.render(
                             str(output), segments=(vocal_check or {}).get("segments", []),
@@ -732,6 +732,7 @@ def recover_music_jobs() -> None:
                         continue
                     _write_job(job_id, {
                         **info, "status": "complete", "current": "Music and captioned video are ready",
+                        "progress": 100,
                         "result": {**(info.get("result") or {"path": str(output),
                                        "model": "ACE-Step 1.5"}), "video": video},
                         "vocal_check": vocal_check, "finished": time.time(),
@@ -755,7 +756,8 @@ def recover_music_jobs() -> None:
                 continue
             resumed = {
                 **info, "status": "queued", "current": "Resuming local music",
-                "recoveries": attempts, "worker_pid": None, "created": time.time(),
+                "progress": 10, "recoveries": attempts,
+                "worker_pid": None, "created": time.time(),
             }
             _write_job(job_id, resumed)
             _launch_job(job_id)
@@ -778,7 +780,7 @@ def start_music_job(
         raise ValueError("The cover source file does not exist.")
     job_id = uuid.uuid4().hex
     info = {
-        "job_id": job_id, "status": "queued", "current": "Starting local music",
+        "job_id": job_id, "status": "queued", "current": "Starting local music", "progress": 5,
         "prompt": prompt, "output_path": str(target), "lyrics": lyrics,
         "duration_seconds": duration_seconds, "instrumental": bool(instrumental),
         "source_path": source_path, "task_id": task_id, "created": time.time(),
@@ -798,7 +800,7 @@ def _run_job(job_id: str) -> None:
     if info.get("status") not in ("queued", "working"):
         return
     working = {
-        **info, "status": "working", "current": "Preparing music locally",
+        **info, "status": "working", "current": "Preparing music locally", "progress": 12,
         "worker_pid": os.getpid(),
     }
     _write_job(job_id, working)
@@ -816,6 +818,7 @@ def _run_job(job_id: str) -> None:
         )
         if needs_vocals and not lyrics.strip():
             working["current"] = "Writing lyrics locally"
+            working["progress"] = 20
             _write_job(job_id, working)
             lyrics = compose_lyrics(info["prompt"], info["duration_seconds"])
             working["lyrics"] = lyrics
@@ -829,6 +832,7 @@ def _run_job(job_id: str) -> None:
             result = info.get("result") or {"path": str(saved_audio), "model": "ACE-Step 1.5"}
         else:
             working["current"] = "Generating music locally"
+            working["progress"] = 35
             _write_job(job_id, working)
             result = generate_music(
                 info["prompt"], info["output_path"], lyrics,
@@ -841,6 +845,7 @@ def _run_job(job_id: str) -> None:
         if needs_vocals:
             if not check or not check.get("passed"):
                 working["current"] = "Checking the vocals"
+                working["progress"] = 75
                 _write_job(job_id, working)
                 check = vocal_evidence(result["path"], info["duration_seconds"], lyrics)
             if not check["passed"]:
@@ -852,6 +857,7 @@ def _run_job(job_id: str) -> None:
         import song_video
 
         working["current"] = "Making a video with captions"
+        working["progress"] = 88
         _write_job(job_id, working)
         try:
             video = song_video.render(
@@ -865,6 +871,7 @@ def _run_job(job_id: str) -> None:
             return
         _write_job(job_id, {
             **working, "status": "complete", "current": "Music and captioned video are ready",
+            "progress": 100,
             "result": {**result, "video": video}, "vocal_check": check,
             "finished": time.time(),
         })
