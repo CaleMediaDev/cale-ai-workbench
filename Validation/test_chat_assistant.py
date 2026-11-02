@@ -150,6 +150,25 @@ def test_explicit_work_creates_task():
     assert chat_assistant.route("I want to know how to build an app", []) == "answer"
 
 
+def test_natural_deliverable_requests_start_work_without_hijacking_advice():
+    for request in (
+        "I want a modern bakery website",
+        "I need a budget spreadsheet",
+        "I'd like a mobile game",
+        "I would like an inventory database",
+        "I want a Python script to rename files",
+        "I need a short video for my shop",
+    ):
+        assert chat_assistant.route(request, []) == "task", request
+    for question in (
+        "I want an idea for a bakery website",
+        "I need advice on a database",
+        "I want a recommendation for a video editor",
+        "I want to know how to build an app",
+    ):
+        assert chat_assistant.route(question, []) == "answer", question
+
+
 def test_simple_image_uses_local_media_without_a_long_agent_task():
     request = "can you make a image of a dog"
     assert chat_assistant.image_prompt(request) == "a dog"
@@ -157,6 +176,8 @@ def test_simple_image_uses_local_media_without_a_long_agent_task():
     assert chat_assistant.route(request, [{"id": "other-task"}]) == "image"
     assert chat_assistant.route_with_files(request, [], [r"C:\photo.png"]) == "task"
     assert chat_assistant.image_prompt("edit this image of a dog") is None
+    assert chat_assistant.image_prompt("I want an image of a red apple") == "a red apple"
+    assert chat_assistant.route("I want an image of a red apple", []) == "image"
 
 
 def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():

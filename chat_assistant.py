@@ -56,7 +56,8 @@ def image_prompt(text: str) -> str | None:
     """Recognize a straightforward new image, leaving edits to a full task."""
     match = re.match(
         r"^(?:(?:please|can you|could you|i want you to)\s+)?"
-        r"(?:make|create|generate|draw)\s+(?:me\s+)?(?:an?\s+)?"
+        r"(?:(?:make|create|generate|draw)\s+(?:me\s+)?|"
+        r"(?:i (?:want|need|would like)|i'd like)\s+)(?:an?\s+)?"
         r"(?:image|picture|photo|illustration)\s+(?:of|showing|with)\s+(.+?)\s*\??$",
         text.strip(), re.IGNORECASE,
     )
@@ -233,8 +234,19 @@ def route(text: str, active_tasks: list[dict]) -> str:
         return "music"
     if bare_song_brief(text):
         return "task"
-    if re.match(r"^i (?:want|need) (?:a|an|some) (?:website|app|program|logo|design|image|report|plan|tool)\b", value):
-        return "task"
+    desired = re.match(r"^(?:i (?:want|need|would like)|i'd like)\s+(?:a|an|some)\s+(.+)$", value)
+    if desired:
+        deliverable = re.search(
+            r"\b(?:website|site|app|application|program|software|logo|design|"
+            r"image|picture|report|plan|tool|game|database|spreadsheet|script|"
+            r"dashboard|extension|plugin|document|video|presentation)\b",
+            desired.group(1),
+        )
+        if deliverable and not re.search(
+            r"\b(?:idea|advice|recommendation|explanation|tutorial|example|"
+            r"instructions|help|list)\b", desired.group(1)[:deliverable.start()],
+        ):
+            return "task"
     if any(re.match(r"^" + re.escape(verb) + r"\b", command) for verb in TASK_VERBS):
         return "task"
     return "answer"
