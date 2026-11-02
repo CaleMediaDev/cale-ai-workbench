@@ -65,6 +65,23 @@ try {
         if (-not (Test-Path -LiteralPath $ghidra -PathType Leaf)) { throw 'Ghidra is still missing after repair.' }
         Write-Output 'Ghidra repaired.'
     }
+    $browserProbe=Join-Path $PSScriptRoot 'browser_probe.js'
+    if (-not (Test-CaleRunnable $node @($browserProbe,$Destination,$toolbox))) {
+        $env:PATH=(Split-Path $node)+';'+$env:PATH
+        Copy-Item -LiteralPath (Join-Path $Destination 'package.json') -Destination $toolbox -Force
+        Copy-Item -LiteralPath (Join-Path $Destination 'package-lock.json') -Destination $toolbox -Force
+        Push-Location $toolbox
+        try {
+            & (Join-Path (Split-Path $node) 'npm.cmd') ci --ignore-scripts --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) { throw 'JavaScript package repair failed.' }
+            & $node (Join-Path $toolbox 'node_modules/playwright/cli.js') install chromium
+            if ($LASTEXITCODE -ne 0) { throw 'Local browser download failed.' }
+        } finally { Pop-Location }
+        if (-not (Test-CaleRunnable $node @($browserProbe,$Destination,$toolbox))) {
+            throw 'Local browser or JavaScript tools still do not work after repair.'
+        }
+        Write-Output 'Local browser and JavaScript tools repaired.'
+    }
     Write-Output 'Managed core tools passed their checks.'
 } finally {
     $lock.ReleaseMutex()

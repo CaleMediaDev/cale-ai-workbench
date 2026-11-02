@@ -14,9 +14,19 @@ def test_missing_checks_executables_and_ghidra(tmp_path, monkeypatch):
     ghidra.write_text("present")
     monkeypatch.setattr(core_tool_health, "_runnable",
                         lambda path, *args: path.name != "gh.exe")
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
     assert core_tool_health.missing(tmp_path, fresh=True) == ["GitHub CLI"]
     ghidra.unlink()
     assert core_tool_health.missing(tmp_path, fresh=True) == ["GitHub CLI", "Ghidra"]
+
+
+def test_browser_runtime_failure_is_visible_even_when_node_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(core_tool_health, "_runnable", lambda path, *args: True)
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: False)
+    ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+    ghidra.parent.mkdir(parents=True)
+    ghidra.write_text("present")
+    assert core_tool_health.missing(tmp_path, fresh=True) == ["Local browser runtime"]
 
 
 def test_background_repair_waits_for_first_install(tmp_path, monkeypatch):

@@ -1,4 +1,4 @@
-"""Detect and quietly repair the managed Node, GitHub, Java and Ghidra tools."""
+"""Detect and quietly repair managed CLI and local browser tools."""
 
 from __future__ import annotations
 
@@ -30,6 +30,21 @@ def _runnable(path: Path, *args: str) -> bool:
         return False
 
 
+def _browser_works(root: Path, node: Path) -> bool:
+    """Run the packaged probe against installed npm packages and Chromium."""
+    probe = root / "browser_probe.js"
+    if not probe.is_file() or not node.is_file():
+        return False
+    try:
+        result = subprocess.run(
+            [str(node), str(probe), str(root), str(root / "Toolbox")],
+            cwd=root, capture_output=True, timeout=30, creationflags=HIDE,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     """Probe actual executables, cached briefly to keep the desktop responsive."""
     global _cached_root, _cached_missing, _last_check
@@ -38,8 +53,12 @@ def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
         return list(_cached_missing)
     box = root / "Toolbox"
     unavailable = []
-    if not _runnable(box / "node-v26.13.0-win-x64/node.exe", "--version"):
+    node = box / "node-v26.13.0-win-x64/node.exe"
+    node_ok = _runnable(node, "--version")
+    if not node_ok:
         unavailable.append("Node.js")
+    elif not _browser_works(root, node):
+        unavailable.append("Local browser runtime")
     if not _runnable(box / "gh_2.103.3_windows_amd64/bin/gh.exe", "--version"):
         unavailable.append("GitHub CLI")
     if not _runnable(box / "jdk-21.0.13+9/bin/java.exe", "-version"):

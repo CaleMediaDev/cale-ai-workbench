@@ -318,7 +318,7 @@ def snapshot(root: Path = ROOT) -> dict:
     missing_tools = core_tool_health.missing(root)
     rows.append(_item("Core work tools", "ready" if not missing_tools else
                       "attention" if base_ready else "working",
-                      "Node.js, GitHub CLI, Java and Ghidra are available" if not missing_tools else
+                      "CLI and local browser tools answered checks" if not missing_tools else
                       "Repairing: " + ", ".join(missing_tools), True))
 
     video_ready = (media / "video/runtime/cale-video-ready.json").is_file()
