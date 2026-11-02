@@ -1322,7 +1322,8 @@ def verify_audio_handoff(p):
     audio = sorted(
         (path for location in (folder, folder / "Audio", folder / "takes") if location.is_dir()
          for path in location.iterdir()
-         if path.is_file() and path.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg", ".m4a")),
+         if path.is_file() and path.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg", ".m4a")
+         and not re.search(r"(?:check|diagnostic|sample|preview|test)", path.stem, re.I)),
         key=lambda path: ("final" not in path.stem.lower(), -path.stat().st_mtime),
     )
     if not audio:
@@ -1381,13 +1382,13 @@ def song_versions(folder):
     """List saved playable takes without treating short diagnostics as songs."""
     project = Path(folder).resolve()
     versions = []
-    for location in (project / "audio", project / "Audio", project):
+    for location in (project / "audio", project / "Audio", project / "takes", project):
         if not location.is_dir():
             continue
         for path in location.iterdir():
             if (not path.is_file() or path.suffix.lower() not in
                     (".wav", ".mp3", ".flac", ".ogg", ".m4a")
-                    or re.search(r"(?:check|diagnostic|sample|preview)", path.stem, re.I)):
+                    or re.search(r"(?:check|diagnostic|sample|preview|test)", path.stem, re.I)):
                 continue
             try:
                 if path.resolve().is_relative_to(project):

@@ -108,8 +108,8 @@ def generate_image(prompt, output_path, width=512, height=512, seed=0):
     }
 
 
-def transcribe_audio(path, fast=False):
-    """Transcribe a local audio file with the installed offline speech model."""
+def transcribe_audio(path, fast=False, music=False):
+    """Transcribe offline; keep sung words that a speech VAD would discard."""
     from faster_whisper import WhisperModel
 
     source = Path(path).resolve()
@@ -125,7 +125,9 @@ def transcribe_audio(path, fast=False):
         model = _whisper_model
     # Live microphone turns favor a fast first answer; longer file analysis
     # retains its wider beam for accuracy.
-    segments, info = model.transcribe(str(source), beam_size=1 if fast else 3, vad_filter=True)
+    segments, info = model.transcribe(
+        str(source), beam_size=1 if fast else 3, vad_filter=not music,
+    )
     rows = [
         {
             "start": round(segment.start, 2),

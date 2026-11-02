@@ -503,7 +503,9 @@ def vocal_evidence(path: str | Path, duration_seconds: int) -> dict:
     python = ROOT / "Media/python/Scripts/python.exe"
     if not python.is_file():
         raise RuntimeError("The offline speech runtime is missing; vocal music cannot be verified.")
-    request = json.dumps({"action": "transcribe_audio", "path": str(Path(path).resolve())})
+    request = json.dumps({
+        "action": "transcribe_audio", "path": str(Path(path).resolve()), "music": True,
+    })
     result = subprocess.run(
         [str(python), str(ROOT / "media_worker.py")], input=request,
         capture_output=True, text=True, timeout=180, creationflags=HIDE,

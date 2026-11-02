@@ -54,12 +54,16 @@ class LongTaskTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             audio = Path(folder) / "audio"
             audio.mkdir()
+            takes = Path(folder) / "takes"
+            takes.mkdir()
             first = audio / "take-1.wav"
             second = audio / "take-2.mp3"
             check = audio / "final-chorus-check.wav"
-            for path in (first, second, check):
+            third = takes / "03-full-song.wav"
+            short_test = takes / "04-vocal-test.wav"
+            for path in (first, second, check, third, short_test):
                 path.write_bytes(b"draft")
-            self.assertEqual(set(task_module.song_versions(folder)), {first, second})
+            self.assertEqual(set(task_module.song_versions(folder)), {first, second, third})
 
     def test_missing_vocals_retry_uses_saved_lyrics_and_stops_after_two(self):
         import music_backend
@@ -1204,6 +1208,27 @@ class LongTaskTests(unittest.TestCase):
             passed, evidence = task_module.verify_audio_handoff(self.item())
         self.assertTrue(passed)
         self.assertIn("final.wav", evidence)
+
+    def test_audio_handoff_skips_newer_vocal_test(self):
+        task_module.update(self.pid, brief="Make a song with clear female singing")
+        project = self.base / "project"
+        takes = project / "takes"
+        takes.mkdir()
+        for name in ("01-full-song.wav", "02-vocal-test.wav"):
+            with wave.open(str(takes / name), "wb") as recording:
+                recording.setnchannels(1)
+                recording.setsampwidth(2)
+                recording.setframerate(8000)
+                recording.writeframes(b"\x01\x00" * (8000 * 6))
+        (project / "lyrics.txt").write_text("sing " * 25, encoding="utf-8")
+        with (patch("music_backend.audio_file_ok", return_value=True),
+              patch("music_backend.vocal_evidence", return_value={
+                  "passed": True, "recognized_words": 22,
+              }) as vocals):
+            passed, evidence = task_module.verify_audio_handoff(self.item())
+        self.assertTrue(passed)
+        self.assertIn("01-full-song.wav", evidence)
+        self.assertEqual(vocals.call_args.args[0].name, "01-full-song.wav")
 
     def test_review_requires_fresh_passing_checks(self):
         self.verify_script('Write-Output "assertions passed"; exit 0')

@@ -205,5 +205,8 @@ def test_whisper_model_is_loaded_once_for_repeated_clips(tmp_path):
     ):
         media_worker.transcribe_audio(audio, fast=True)
         media_worker.transcribe_audio(audio, fast=True)
+        media_worker.transcribe_audio(audio, music=True)
     fake.WhisperModel.assert_called_once()
-    assert model.transcribe.call_count == 2
+    assert model.transcribe.call_count == 3
+    assert model.transcribe.call_args_list[0].kwargs["vad_filter"] is True
+    assert model.transcribe.call_args_list[2].kwargs["vad_filter"] is False

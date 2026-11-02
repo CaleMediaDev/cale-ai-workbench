@@ -288,9 +288,10 @@ def test_vocal_evidence_requires_words_through_most_of_the_song(tmp_path):
             type("Result", (), {"returncode": 0, "stdout": json.dumps(sparse)})(),
             type("Result", (), {"returncode": 0, "stdout": json.dumps(sustained)})(),
         ],
-    ):
+    ) as transcribe:
         assert not music_backend.vocal_evidence(audio, 60)["passed"]
         assert music_backend.vocal_evidence(audio, 60)["passed"]
+    assert json.loads(transcribe.call_args_list[0].kwargs["input"])["music"] is True
 
 
 def test_rejects_remote_audio_url(tmp_path):
