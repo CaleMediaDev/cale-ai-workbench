@@ -57,6 +57,20 @@ def test_generates_instrumental_from_loopback_only(tmp_path):
     assert download.call_args.args[0].startswith(music_backend.BASE + "/v1/audio")
 
 
+def test_sends_explicit_tempo_as_numeric_music_setting(tmp_path):
+    responses = iter([
+        {"code": 200, "data": {"task_id": "tempo"}},
+        {"code": 200, "data": [{"status": 1, "result": '[{"file":"/v1/audio?path=tempo"}]'}]},
+    ])
+    with (patch.object(music_backend, "start_server"),
+          patch.object(music_backend, "_request",
+                       side_effect=lambda *_args, **_kwargs: next(responses)) as request,
+          patch.object(music_backend, "urlopen", return_value=io.BytesIO(b"audio")),
+          patch.object(music_backend.time, "sleep")):
+        music_backend.generate_music("Techno at 150 BPM", str(tmp_path / "tempo.mp3"))
+    assert request.call_args_list[0].args[1]["bpm"] == 150
+
+
 def test_sends_user_lyrics_to_local_music_engine_unchanged(tmp_path):
     lyrics = "[Verse]\nWe made it home\n[Chorus]\nSing it again"
     responses = iter([

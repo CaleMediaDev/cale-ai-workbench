@@ -70,3 +70,10 @@ def test_vocal_chops_are_texture_not_full_length_singing():
     assert music_style.requires_sustained_vocals("Rap song with vocal chops")
     assert music_style.requires_sustained_vocals(request, lyrics="[Verse] Sing this")
     assert music_style.requires_sustained_vocals("Make a pop song with lead vocals")
+
+
+def test_explicit_bpm_is_parsed_for_music_engine():
+    assert music_style.requested_bpm("Heavy dubstep at 150 BPM") == 150
+    assert music_style.requested_bpm("80-bpm synth groove") == 80
+    assert music_style.requested_bpm("a fast electronic track") is None
+    assert music_style.requested_bpm("10 bpm drone") is None

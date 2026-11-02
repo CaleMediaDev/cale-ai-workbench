@@ -42,6 +42,12 @@ def _count(value) -> int:
         return 0
 
 
+def _usage_label(source: str, model: str) -> str:
+    """Keep equal model names from different providers distinct in the graph."""
+    provider = "Local" if source == "ollama" else "ChatGPT" if source == "chatgpt" else source.title()
+    return f"{provider} · {model.strip() or 'unnamed model'}"
+
+
 def record_completion(result: dict, source: str, elapsed_seconds: float | None = None) -> bool:
     """Record one completed call only when the provider reports usage."""
     usage = result.get("usage") if isinstance(result, dict) else None
@@ -163,23 +169,27 @@ def history(period: str = "day") -> dict:
             f"SELECT {expression}, SUM(total_tokens) FROM usage_events GROUP BY 1"
         ).fetchall()
         model_rows = conn.execute(
-            f"SELECT {expression}, "
-            "COALESCE(NULLIF(TRIM(model),''), '[' || source || '] unnamed model'), "
-            "SUM(total_tokens) FROM usage_events GROUP BY 1, 2"
+            f"SELECT {expression}, source, model, SUM(total_tokens) "
+            "FROM usage_events GROUP BY 1, 2, 3"
         ).fetchall()
         models = conn.execute(
-            "SELECT COALESCE(NULLIF(TRIM(model),''), '[' || source || '] unnamed model'), "
-            "SUM(total_tokens) FROM usage_events GROUP BY 1 ORDER BY 2 DESC, 1"
+            "SELECT source, model, SUM(total_tokens) FROM usage_events "
+            "GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2"
         ).fetchall()
+        sources = dict(conn.execute(
+            "SELECT source, SUM(total_tokens) FROM usage_events GROUP BY source"
+        ).fetchall())
     counts = dict(rows)
     model_counts = {}
-    for date, model, tokens in model_rows:
-        model_counts.setdefault(date, {})[model] = tokens
+    for date, source, model, tokens in model_rows:
+        model_counts.setdefault(date, {})[_usage_label(source, model)] = tokens
     return {"period": period, "total": total,
             "current_speed": latest[0] if latest else None,
             "top_speed": top_speed,
             "speed_source": latest[1] if latest else None,
             "speed_model": latest[2] if latest else None,
-            "models": [{"model": name, "tokens": tokens} for name, tokens in models],
+            "sources": sources,
+            "models": [{"model": _usage_label(source, model), "tokens": tokens}
+                       for source, model, tokens in models],
             "points": [{"date": key, "tokens": counts.get(key, 0),
                         "models": model_counts.get(key, {})} for key in keys]}

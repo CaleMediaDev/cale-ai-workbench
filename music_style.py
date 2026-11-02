@@ -33,6 +33,19 @@ LEAD_VOCALS = re.compile(
 )
 
 
+def requested_bpm(prompt: str) -> int | None:
+    """Extract a plausible explicit tempo for ACE-Step's numeric BPM field.
+
+    A caption alone is a weaker hint. The model can still miss the beat, so
+    this metadata never substitutes for checking the rendered audio.
+    """
+    match = re.search(r"\b(\d{2,3})\s*-?\s*bpm\b", prompt, re.I)
+    if not match:
+        return None
+    value = int(match.group(1))
+    return value if 40 <= value <= 240 else None
+
+
 def requires_sustained_vocals(prompt: str, lyrics: str = "",
                               instrumental: bool = False) -> bool:
     """Distinguish a lyric-driven song from sparse vocal sound design.

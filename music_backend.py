@@ -268,6 +268,9 @@ def _generate_music(
         "audio_format": target.suffix.lower()[1:], "audio_duration": duration_seconds,
         "thinking": False, "inference_steps": 8, "batch_size": 1,
     }
+    tempo = music_style.requested_bpm(prompt)
+    if tempo is not None:
+        request["bpm"] = tempo
     if source:
         request.update({"task_type": "cover", "audio_cover_strength": 0.2})
     def submit() -> str:

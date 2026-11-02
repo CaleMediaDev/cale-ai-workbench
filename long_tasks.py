@@ -4406,7 +4406,28 @@ def gui():
         window.after(350, poll_chat)
 
     window.after(350, poll_chat)
-    ttk.Label(main_page, text="My tasks", font=("Segoe UI", 17, "bold")).pack(anchor="w", pady=(0, 5))
+    task_heading = ttk.Frame(main_page)
+    task_heading.pack(fill="x", pady=(0, 5))
+    ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 17, "bold")).pack(side="left")
+    chatgpt_usage = ttk.Label(task_heading, text="", style="Muted.TLabel")
+    chatgpt_usage.pack(side="right", padx=(0, 12))
+    usage_window = tk.Toplevel(window)
+    usage_window.title("Cale AI · Model activity")
+    usage_window.geometry("1200x780")
+    usage_window.minsize(900, 500)
+    usage_window.configure(background=bg)
+    if icon_path.is_file():
+        usage_window.iconbitmap(default=str(icon_path))
+    usage_window.withdraw()
+
+    def open_usage():
+        usage_window.deiconify()
+        usage_window.lift()
+        usage_window.focus_force()
+        usage_window.after_idle(draw_usage)
+
+    usage_window.protocol("WM_DELETE_WINDOW", usage_window.withdraw)
+    ttk.Button(task_heading, text="✦  Model activity", command=open_usage).pack(side="right")
     list_wrap = ttk.Frame(main_page)
     canvas = tk.Canvas(list_wrap, background=bg, borderwidth=0, highlightthickness=0)
     scrollbar = ttk.Scrollbar(list_wrap, orient="vertical", command=canvas.yview)
@@ -4422,9 +4443,10 @@ def gui():
         "<Configure>",
         lambda event: canvas.itemconfigure(cards_window, width=event.width),
     )
-    # Keep tasks first in the shared scroll area. A growing per-model graph
-    # must never consume the viewport and hide the task cards on launch.
-    usage_panel = ttk.Frame(cards, style="Card.TFrame", padding=(14, 8))
+    # A separate, resizable window keeps the full graph one click from tasks.
+    # It never gets buried beneath a long list of active or completed cards.
+    usage_panel = ttk.Frame(usage_window, style="Card.TFrame", padding=(18, 14))
+    usage_panel.pack(fill="both", expand=True)
     list_wrap.pack(fill="both", expand=True)
     usage_header = ttk.Frame(usage_panel, style="Card.TFrame")
     usage_header.pack(fill="x")
@@ -4457,6 +4479,10 @@ def gui():
             usage_total.configure(text="Usage history is unavailable")
             return
         usage_total.configure(text=f"{summary['total']:,} total tokens")
+        chatgpt_tokens = summary.get("sources", {}).get("chatgpt", 0)
+        chatgpt_usage.configure(
+            text=f"ChatGPT in Cale: {chatgpt_tokens:,} tokens" if chatgpt_tokens else ""
+        )
         speed = summary.get("current_speed")
         usage_speed.configure(
             text=f"Latest {speed:.1f} tokens/s" if speed is not None else "Speed appears after the next response"
@@ -4857,7 +4883,6 @@ def gui():
     # details on the main screen. The separate model worker owns downloads.
     models_section = ttk.Frame(cards)
     models_section.pack(fill="x")
-    usage_panel.pack(fill="x", pady=(9, 0))
 
     def set_text(variable, value):
         if variable.get() != value:

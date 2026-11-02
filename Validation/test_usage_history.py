@@ -20,15 +20,16 @@ def test_daily_monthly_and_lifetime_totals(tmp_path, monkeypatch):
     monthly = usage_history.history("month")
     assert daily["total"] == monthly["total"] == 200
     assert daily["points"][-1]["tokens"] == 200
-    assert daily["points"][-1]["models"] == {"m": 150, "cloud": 50}
+    assert daily["points"][-1]["models"] == {"Local · m": 150, "ChatGPT · cloud": 50}
     assert monthly["points"][-1]["tokens"] == 200
-    assert monthly["points"][-1]["models"] == {"m": 150, "cloud": 50}
+    assert monthly["points"][-1]["models"] == {"Local · m": 150, "ChatGPT · cloud": 50}
     assert daily["current_speed"] == 5
     assert daily["top_speed"] == 5
     assert daily["models"] == [
-        {"model": "m", "tokens": 150},
-        {"model": "cloud", "tokens": 50},
+        {"model": "Local · m", "tokens": 150},
+        {"model": "ChatGPT · cloud", "tokens": 50},
     ]
+    assert daily["sources"] == {"ollama": 150, "chatgpt": 50}
     with sqlite3.connect(usage_history.DATABASE) as conn:
         assert conn.execute("SELECT COUNT(*) FROM usage_events").fetchone()[0] == 2
 
@@ -99,10 +100,26 @@ def test_model_totals_include_unreported_model_names(tmp_path, monkeypatch):
             {"model": model, "usage": {"total_tokens": tokens}}, "ollama"
         )
     assert usage_history.history()["models"] == [
-        {"model": "beta", "tokens": 30},
-        {"model": "alpha", "tokens": 25},
-        {"model": "[ollama] unnamed model", "tokens": 3},
+        {"model": "Local · beta", "tokens": 30},
+        {"model": "Local · alpha", "tokens": 25},
+        {"model": "Local · unnamed model", "tokens": 3},
     ]
+
+
+def test_same_model_name_from_two_providers_stays_separate(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for provider, tokens in (("ollama", 12), ("chatgpt", 25)):
+        assert usage_history.record_completion(
+            {"model": "shared", "usage": {"total_tokens": tokens}}, provider
+        )
+    summary = usage_history.history()
+    assert summary["models"] == [
+        {"model": "ChatGPT · shared", "tokens": 25},
+        {"model": "Local · shared", "tokens": 12},
+    ]
+    assert summary["points"][-1]["models"] == {
+        "Local · shared": 12, "ChatGPT · shared": 25,
+    }
 
 
 def test_task_totals_attribute_only_valid_worker_context(tmp_path, monkeypatch):
