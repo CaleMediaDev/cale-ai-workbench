@@ -31,7 +31,12 @@ def _write(path: Path, value: dict) -> None:
 
 
 def _installer_running(progress: dict) -> bool:
-    """Check the exact installer command, including older setup records without a PID."""
+    """Recognize the live installer even when its script is in an extracted ZIP.
+
+    The status PID is written by that installer itself. Validate its process
+    creation time as well as the script name so a reused PID cannot suppress
+    repair. Older records without a PID require the installed script path.
+    """
     import psutil
 
     script = (ROOT / "Install-Backend.ps1").resolve()
@@ -43,11 +48,25 @@ def _installer_running(progress: dict) -> bool:
             try:
                 command = process.cmdline()
                 for index, argument in enumerate(command[:-1]):
-                    if argument.lower() == "-file" and Path(command[index + 1]).resolve() == script:
-                        return True
-            except (OSError, ValueError, psutil.Error):
+                    if argument.lower() != "-file":
+                        continue
+                    actual = Path(command[index + 1].strip('"')).resolve()
+                    if actual.name.lower() != script.name.lower():
+                        continue
+                    if not installer_pid and actual != script:
+                        continue
+                    if installer_pid:
+                        created = process.create_time()
+                        started = float(progress.get("installer_started") or 0)
+                        updated = float(progress.get("updated") or 0)
+                        if started and abs(created - started) > 15:
+                            continue
+                        if not started and (not updated or created > updated + 10):
+                            continue
+                    return True
+            except (OSError, TypeError, ValueError, psutil.Error):
                 continue
-    except (OSError, ValueError, psutil.Error):
+    except (OSError, TypeError, ValueError, psutil.Error):
         return False
     return False
 

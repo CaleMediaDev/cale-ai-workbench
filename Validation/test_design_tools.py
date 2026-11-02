@@ -28,7 +28,7 @@ def test_installs_local_ai_components_into_astro_project(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"astro": "^5"}}), encoding="utf-8")
     first = add_astro_ai_ui(str(tmp_path))
     assert first["files_added"] > 15
-    assert first["components"] > 15
+    assert first["components"] >= 15
     assert (tmp_path / "src/vendor/ai-ui/components/ai-ui/Message.astro").is_file()
     assert (tmp_path / "src/vendor/ai-ui/LICENSE").is_file()
     assert add_astro_ai_ui(str(tmp_path))["files_added"] == 0

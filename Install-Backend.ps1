@@ -2,16 +2,18 @@
 # progress JSON lets the desktop window show setup as a task while this runs.
 [CmdletBinding()]
 param(
- [string]$Destination=(Join-Path $env:LOCALAPPDATA 'CaleMedia\AIWorkbench'),
+ [string]$Destination='',
  [ValidateSet('auto','large','compact','light')][string]$Profile='auto',
  [string]$ExtraModels='', [switch]$NoStartup, [switch]$NoLaunch,
  [string]$DownloadCache=''
 )
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
+. (Join-Path $PSScriptRoot 'Install-Environment.ps1')
+Initialize-CalePowerShellEnvironment
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { throw 'This release requires 64-bit x86 Windows.' }
-$Destination=[IO.Path]::GetFullPath($Destination)
+$Destination=Get-CaleInstallDestination $Destination
 if (Test-Path -LiteralPath $Destination) {
  if ((Get-ChildItem -LiteralPath $Destination -Force | Select-Object -First 1) -and -not (Test-Path -LiteralPath (Join-Path $Destination '.cale-ai-install'))) { throw 'Choose an empty folder or an existing Cale AI Workbench installation.' }
 }
@@ -19,11 +21,20 @@ New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
 if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
 try {
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.198')
+ $script:installerStarted=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+ # Keep recovery metadata beside the install from its first step. The source
+ # updater also copies this file separately; the manifest cannot list itself.
+ $sourceManifest=Join-Path $PSScriptRoot 'install-files.json'
+ $targetManifest=Join-Path $Destination 'install-files.json'
+ if ([IO.Path]::GetFullPath($sourceManifest) -ne [IO.Path]::GetFullPath($targetManifest)) {
+   Copy-Item -LiteralPath $sourceManifest -Destination $targetManifest -Force
+ }
+ # The version becomes official only after setup and its checks succeed.
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench setup pending')
  $setupState=Join-Path $Destination 'LongTasks/install-progress.json'
  function Write-SetupStatus([int]$percent,[string]$current,[string]$status='working') {
    New-Item -ItemType Directory -Path (Split-Path $setupState) -Force | Out-Null
-   $payload=@{percent=$percent;current=$current;status=$status;updated=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds();pid=$PID} | ConvertTo-Json -Compress
+   $payload=@{percent=$percent;current=$current;status=$status;updated=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds();pid=$PID;installer_started=$script:installerStarted} | ConvertTo-Json -Compress
    $temporary=$setupState+'.'+$PID+'.tmp'
    [IO.File]::WriteAllText($temporary,$payload)
    Move-Item -LiteralPath $temporary -Destination $setupState -Force
@@ -210,6 +221,7 @@ try {
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.240')
  Write-SetupStatus 100 'Your AI is ready' 'complete'
  # Optional local models continue in a separate process after the installer closes.
  Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden

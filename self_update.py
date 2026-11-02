@@ -263,6 +263,21 @@ def active_tasks():
     retired its worker. Check the actual process too, or an update could swap
     the source underneath that still-running worker.
     """
+    # A fresh install may have no user projects yet. Updating its source while
+    # the installer is importing it would leave a mixed runtime on disk.
+    try:
+        marker = (ROOT / ".cale-ai-install").read_text(encoding="utf-8")
+    except OSError:
+        marker = ""
+    if "setup pending" in marker:
+        return True
+    try:
+        setup = json.loads((ROOT / "LongTasks/install-progress.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        setup = {}
+    if setup.get("status") == "working":
+        return True
+
     from long_tasks import projects
 
     if any(

@@ -2,8 +2,42 @@
 
 import json
 import time
+from unittest.mock import MagicMock, patch
+
+import psutil
 
 import setup_recovery
+
+
+def test_extracted_installer_pid_is_recognized_without_duplicate_repair(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# installed copy")
+    extracted = tmp_path / "extracted" / "Install-Backend.ps1"
+    extracted.parent.mkdir()
+    extracted.write_text("# running copy")
+    now = time.time()
+    progress = {
+        "status": "working", "current": "Installing tools", "updated": now - 3600,
+        "pid": 4321, "installer_started": now - 3700,
+    }
+    (state / "install-progress.json").write_text(json.dumps(progress))
+    worker = MagicMock()
+    worker.cmdline.return_value = ["powershell.exe", "-NoProfile", "-File", str(extracted),
+                                   "-Destination", str(tmp_path)]
+    worker.create_time.return_value = progress["installer_started"] - 1
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    with patch("psutil.Process", return_value=worker), patch.object(
+        setup_recovery.subprocess, "Popen", side_effect=AssertionError("duplicate repair")
+    ):
+        assert setup_recovery._installer_running(progress)
+        assert not setup_recovery.recover()
+    worker.create_time.return_value = now + 10
+    with patch("psutil.Process", return_value=worker):
+        assert not setup_recovery._installer_running(progress)
+    with patch("psutil.Process", side_effect=psutil.NoSuchProcess(4321)):
+        assert not setup_recovery._installer_running(progress)
 
 
 def test_base_setup_retries_with_backoff_and_limit(tmp_path, monkeypatch):

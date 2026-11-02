@@ -17,6 +17,18 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_unfinished_setup_prevents_source_swap(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / ".cale-ai-install").write_text("Cale AI Workbench setup pending")
+            with patch.object(self_update, "ROOT", root):
+                self.assertTrue(self_update.active_tasks())
+            (root / ".cale-ai-install").write_text("Cale AI Workbench 0.5.240")
+            (root / "LongTasks").mkdir()
+            (root / "LongTasks/install-progress.json").write_text('{"status":"working"}')
+            with patch.object(self_update, "ROOT", root):
+                self.assertTrue(self_update.active_tasks())
+
     def test_release_check_bypasses_stale_feed_cache(self):
         with patch.object(self_update, "urlopen", return_value=io.BytesIO(b"[]")) as open_url:
             self.assertEqual(self_update.fetch_json(self_update.RELEASES), [])

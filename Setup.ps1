@@ -1,5 +1,7 @@
 # Small, automatic first-run installer UI. Install-Backend.ps1 owns the actual
 # downloads; this window only starts it and shows a readable progress log.
+. (Join-Path $PSScriptRoot 'Install-Environment.ps1')
+Initialize-CalePowerShellEnvironment
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -37,7 +39,7 @@ $info.Text = "Your AI, your PC. One install for models, tools, browser, voice, a
 $info.ForeColor=$muted
 $info.SetBounds(26,96,760,50); $form.Controls.Add($info)
 $path = New-Object Windows.Forms.TextBox
-$path.Text = Join-Path $env:LOCALAPPDATA 'CaleMedia\AIWorkbench'
+$path.Text = Get-CaleInstallDestination
 $path.ReadOnly=$true
 $path.BackColor=$card; $path.ForeColor=$ink; $path.BorderStyle='FixedSingle'
 $path.SetBounds(26,157,758,30); $form.Controls.Add($path)
