@@ -267,13 +267,6 @@ def search(state: str | Path, query: str, limit: int = 10) -> list[dict]:
                     conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
             return found
 
-        exact = matches(" AND ".join(f'"{word}"' for word in terms), count * 3)
-        if exact:
-            return exact[:count]
-        # Natural requests often contain a word absent from the real filename.
-        # Use the most distinctive remaining words, then rank by term coverage.
-        loose = matches(" OR ".join(f'"{word}"' for word in terms), count * 20)
-
         def score(row: dict) -> tuple[int, int]:
             name = row["name"].casefold()
             path = row["path"].casefold()
@@ -283,5 +276,22 @@ def search(state: str | Path, query: str, limit: int = 10) -> list[dict]:
             )
 
         minimum_coverage = 2 if len(terms) >= 3 else 1
+        # Parent-folder terms occur in millions of rows on a whole-PC index.
+        # Search names first so a broad request such as "documents" does not
+        # rank every file under Documents before returning the folder itself.
+        exact_name = matches(" AND ".join(f'name:"{word}"' for word in terms), count * 3)
+        if exact_name:
+            return exact_name[:count]
+        # A name in one folder plus a term in its parent is still an exact
+        # request; do this before accepting partial filename matches.
+        exact = matches(" AND ".join(f'"{word}"' for word in terms), count * 3)
+        if exact:
+            return exact[:count]
+        loose_name = matches(" OR ".join(f'name:"{word}"' for word in terms), count * 20)
+        relevant_name = [row for row in loose_name if score(row)[0] >= minimum_coverage]
+        if relevant_name:
+            return sorted(relevant_name, key=score, reverse=True)[:count]
+        # A path-only request still falls back to the full filename/parent index.
+        loose = matches(" OR ".join(f'"{word}"' for word in terms), count * 20)
         relevant = [row for row in loose if score(row)[0] >= minimum_coverage]
         return sorted(relevant, key=score, reverse=True)[:count]

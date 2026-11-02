@@ -76,6 +76,7 @@ class FileCatalogTests(unittest.TestCase):
             self.assertEqual(result["files"], 1)
             self.assertEqual(file_catalog.search(state, "beach trip")[0]["path"], str(picture))
             self.assertEqual(file_catalog.search(state, "Family Photos")[0]["kind"], "folder")
+            self.assertEqual(file_catalog.search(state, "Family beach")[0]["path"], str(picture))
             self.assertEqual(file_catalog.search(state, "private photo bytes"), [])
             picture.unlink()
             self.assertEqual(file_catalog.search(state, "beach trip"), [])
