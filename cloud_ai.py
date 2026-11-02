@@ -724,7 +724,7 @@ class Router:
             for loaded in loaded_local_models():
                 parameters = self.model_cache.get(loaded, 0)
                 same_tier = (
-                    0 < parameters <= 40 if size == "quick"
+                    0 < parameters <= 12 if size == "quick"
                     else 20 <= parameters <= 40
                 )
                 # Reusing loaded weights saves startup time only when the

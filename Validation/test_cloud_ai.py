@@ -444,7 +444,7 @@ class CloudTests(unittest.TestCase):
               patch.object(cloud, "refresh_catalog"),
               patch.object(cloud, "loaded_local_models", return_value=[cloud.BALANCED_MODEL])):
             router = cloud.Router()
-            self.assertEqual(router.local_candidates("quick")[0], cloud.BALANCED_MODEL)
+            self.assertEqual(router.local_candidates("quick")[0], cloud.FAST_MODEL)
             self.assertEqual(router.local_candidates("balanced")[0], cloud.BALANCED_MODEL)
             self.assertNotIn(cloud.STANDARD_MAIN_ALIAS, router.local_candidates("deep"))
             self.assertEqual(router.local_candidates("deep", required_context=100000), [])
