@@ -85,7 +85,7 @@ class LongTaskTests(unittest.TestCase):
                 path.write_bytes(b"draft")
             self.assertEqual(set(task_module.song_versions(folder)), {first, second, third})
 
-    def test_missing_vocals_retry_uses_saved_lyrics_and_stops_after_two(self):
+    def test_missing_vocals_retry_uses_saved_lyrics_and_stops_after_one(self):
         import music_backend
 
         with tempfile.TemporaryDirectory() as folder:
@@ -106,7 +106,7 @@ class LongTaskTests(unittest.TestCase):
             self.assertEqual(start.call_args.kwargs["lyrics"], job["lyrics"].strip())
             self.assertEqual(start.call_args.kwargs["vocal_retry"], 1)
             self.assertEqual(update.call_args.kwargs["card"], "music-job:retry-1")
-            job["vocal_retry"] = 2
+            job["vocal_retry"] = 1
             self.assertFalse(task_module.retry_song_without_vocals(task, job))
 
     def test_blocked_rap_without_music_tool_recovers_to_direct_renderer(self):

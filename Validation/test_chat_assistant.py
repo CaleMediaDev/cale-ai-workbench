@@ -41,17 +41,31 @@ def test_questions_stay_in_chat():
     assert chat_assistant.route("How do I build a website?", []) == "answer"
 
 
-def test_bare_detailed_song_brief_creates_a_task_without_command_words():
+def test_bare_detailed_song_brief_uses_one_direct_music_render():
     brief = (
         "150 BPM, extremely wobbly melodic dubstep, heavy old-school wobble bass, "
         "deep oscillating basslines, rhythmic synth sweeps and huge drops. "
         "Super cute high-pitched female singing voice with beautiful harmonies. "
         "The song tells a funny and heartfelt love story with an emotional chorus."
     )
-    assert chat_assistant.music_request(brief) is None
-    assert chat_assistant.route(brief, []) == "task"
-    assert chat_assistant.route(brief, [{"id": "older-song", "title": "Older song"}]) == "task"
+    assert chat_assistant.music_request(brief)["duration_seconds"] == 180
+    assert chat_assistant.route(brief, []) == "music"
+    assert chat_assistant.route(brief, [{"id": "older-song", "title": "Older song"}]) == "music"
     assert chat_assistant.route("What does 150 BPM mean for a dubstep song?", []) == "answer"
+
+
+def test_multiline_lake_tahoe_song_brief_keeps_its_full_style_in_fast_route():
+    brief = (
+        "150 BPM, extremely wobbly melodic dubstep, old-school UK dubstep wobble bass.\n\n"
+        "Super sweet high-pitched female singing voice with harmonies and playful giggles.\n\n"
+        "Create a Lake Tahoe summer anthem about Emerald Bay and Sand Harbor.\n\n"
+        "Three bass drops, a euphoric chorus, and a fake drop before the ending."
+    )
+    spec = chat_assistant.music_request(brief)
+    assert spec["duration_seconds"] == 180
+    assert "Emerald Bay" in spec["prompt"]
+    assert "Three bass drops" in spec["prompt"]
+    assert chat_assistant.route(brief, []) == "music"
 
 
 def test_question_answer_cannot_claim_it_started_a_task():

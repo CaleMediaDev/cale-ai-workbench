@@ -64,15 +64,16 @@ def image_prompt(text: str) -> str | None:
 
 
 def music_request(text: str) -> dict | None:
-    """Recognize a new audio render, leaving covers and edits to the agent."""
+    """Recognize a new audio render, including detailed standalone briefs."""
+    detailed_brief = bare_song_brief(text)
     value = re.sub(
         r"^(?:(?:please|can you|could you|i want you to)\s+)+",
         "", text.strip(), flags=re.IGNORECASE,
     )
-    if not re.match(r"^(?:make|create|generate)\s+", value, re.IGNORECASE):
+    if not detailed_brief and not re.match(r"^(?:make|create|generate)\s+", value, re.IGNORECASE):
         return None
     lyrics_marker = re.search(r"\blyrics\s*:", value, re.IGNORECASE)
-    if "\n" in value and lyrics_marker is None:
+    if "\n" in value and lyrics_marker is None and not detailed_brief:
         # An unlabelled multi-line request may contain instructions or song
         # words. Let the agent interpret it instead of flattening everything
         # into one style prompt and losing the intended lyrics.
@@ -86,7 +87,7 @@ def music_request(text: str) -> dict | None:
             r"\b(?:with|using)(?:\s+(?:these|the following|my))?$",
             "", prompt, flags=re.IGNORECASE,
         ).strip()
-    if not re.search(r"\b(?:song|music|instrumental|jingle|beat|soundtrack|rap)\b", prompt, re.IGNORECASE):
+    if not detailed_brief and not re.search(r"\b(?:song|music|instrumental|jingle|beat|soundtrack|rap)\b", prompt, re.IGNORECASE):
         return None
     if re.search(
         r"\b(?:cover|remix|edit|change|extend|from this|using this file|"
@@ -111,7 +112,7 @@ def music_request(text: str) -> dict | None:
     elif single:
         duration = int(single.group(1)) * (60 if single.group(2).lower().startswith("min") else 1)
     else:
-        duration = 30
+        duration = 180 if detailed_brief else 30
     if not 10 <= duration <= 600:
         raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
     instrumental = bool(re.search(r"\b(?:instrumental|no vocals|without vocals|no singing)\b", prompt, re.IGNORECASE))
@@ -146,8 +147,8 @@ def music_edit_request(command: str) -> bool:
 def bare_song_brief(text: str) -> bool:
     """Treat a detailed music specification as work even without 'make a song'.
 
-    The full agent handles these briefs: a direct 30-second render would lose
-    requested story, lyric, and arrangement details when no duration is given.
+    The direct renderer uses the full style brief and defaults to a three-minute
+    song, so a detailed request does not spend hours in agent planning.
     """
     value = text.strip()
     if len(value) < 120 or value.endswith("?") or re.match(

@@ -746,7 +746,7 @@ def retry_song_without_vocals(p: dict, job: dict) -> bool:
     reason = str(job.get("current", ""))
     attempt = int(job.get("vocal_retry", 0))
     lyrics = str(job.get("lyrics", "")).strip()
-    if (job.get("status") != "error" or attempt >= 2
+    if (job.get("status") != "error" or attempt >= 1
             or "sustained vocals were not detected" not in reason
             or job.get("instrumental") or job.get("source_path")
             or len(lyrics.split()) < 20):
@@ -773,7 +773,7 @@ def retry_song_without_vocals(p: dict, job: dict) -> bool:
         task_id=p["id"], vocal_retry=attempt + 1,
     )
     update(p["id"], card="music-job:" + started["job_id"], status="working",
-           detail=f"Trying the song again with clearer vocals ({attempt + 1}/2)")
+           detail=f"Trying the song once more with clearer vocals ({attempt + 1}/1)")
     return True
 
 
