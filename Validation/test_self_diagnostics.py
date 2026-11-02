@@ -100,8 +100,12 @@ class SelfDiagnosticsTests(unittest.TestCase):
         self.assertEqual(len(launches), 1)
 
     def test_real_test_exit_is_saved_with_log(self):
-        result = SimpleNamespace(returncode=1, stdout="1 failed\n", stderr="details\n")
-        with patch.object(diagnostics.subprocess, "run", return_value=result) as run:
+        def launch(*_args, **kwargs):
+            kwargs["stdout"].write(b"1 failed\ndetails\n")
+            kwargs["stdout"].flush()
+            return SimpleNamespace(poll=lambda: 1)
+
+        with patch.object(diagnostics.subprocess, "Popen", side_effect=launch) as run:
             report = diagnostics.run(self.root, self.state)
         self.assertEqual(report["status"], "failed")
         self.assertEqual(report["failures"], 1)
@@ -115,8 +119,12 @@ class SelfDiagnosticsTests(unittest.TestCase):
         (self.state / "self-check.json").write_text(json.dumps({
             "version": diagnostics.version(self.root), "status": "running", "failures": 2,
         }))
-        success = SimpleNamespace(returncode=0, stdout="527 passed\n", stderr="")
-        with patch.object(diagnostics.subprocess, "run", return_value=success):
+        def launch(*_args, **kwargs):
+            kwargs["stdout"].write(b"527 passed\n")
+            kwargs["stdout"].flush()
+            return SimpleNamespace(poll=lambda: 0)
+
+        with patch.object(diagnostics.subprocess, "Popen", side_effect=launch):
             report = diagnostics.run(self.root, self.state)
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["failures"], 0)
@@ -127,12 +135,32 @@ class SelfDiagnosticsTests(unittest.TestCase):
         def finish_after_update(*args, **kwargs):
             (self.root / ".cale-ai-install").write_text(new_report["version"])
             (self.state / "self-check.json").write_text(json.dumps(new_report))
-            return SimpleNamespace(returncode=1, stdout="old failure", stderr="")
+            kwargs["stdout"].write(b"old failure")
+            kwargs["stdout"].flush()
+            return SimpleNamespace(poll=lambda: 1)
 
-        with patch.object(diagnostics.subprocess, "run", side_effect=finish_after_update):
+        with patch.object(diagnostics.subprocess, "Popen", side_effect=finish_after_update):
             result = diagnostics.run(self.root, self.state)
         self.assertEqual(result["status"], "superseded")
         self.assertEqual(json.loads((self.state / "self-check.json").read_text()), new_report)
+
+    def test_running_check_yields_when_a_user_task_starts(self):
+        process = SimpleNamespace(pid=123, poll=lambda: None)
+        with (patch.object(diagnostics, "active_projects", side_effect=[False, True]),
+              patch.object(diagnostics.subprocess, "Popen", return_value=process) as launch,
+              patch.object(diagnostics, "_stop_check") as stop,
+              patch.object(diagnostics.time, "sleep") as sleep):
+            report = diagnostics.run(self.root, self.state)
+        self.assertEqual(report["status"], "deferred")
+        self.assertEqual(report["failures"], 0)
+        launch.assert_called_once()
+        stop.assert_called_once_with(process)
+        sleep.assert_not_called()
+        with (patch.object(diagnostics, "active_projects", return_value=False),
+              patch.object(diagnostics.subprocess, "Popen", return_value=process),
+              patch("psutil.Process") as running):
+            running.return_value.create_time.return_value = 100
+            self.assertTrue(diagnostics.schedule(self.root, self.state, now=100))
 
     def test_only_repeated_failure_on_current_version_notifies(self):
         current = diagnostics.version(self.root)

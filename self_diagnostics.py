@@ -112,6 +112,28 @@ def _running(report: dict) -> bool:
         return False
 
 
+def _stop_check(process: subprocess.Popen) -> None:
+    """Stop only the self-check process tree when user work needs the PC."""
+    import psutil
+
+    if process.poll() is not None:
+        return
+    try:
+        parent = psutil.Process(process.pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            child.terminate()
+        process.terminate()
+        _, alive = psutil.wait_procs(children, timeout=5)
+        for child in alive:
+            child.kill()
+        process.wait(timeout=5)
+    except (OSError, psutil.Error, subprocess.TimeoutExpired):
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+
 def schedule(root: Path = ROOT, state: Path = STATE, now: float | None = None) -> bool:
     """Start at most one idle check per release or week; never wait in the UI."""
     with _report_lock(state, blocking=False) as acquired:
@@ -167,21 +189,38 @@ def _schedule_locked(root: Path, state: Path, now: float | None) -> bool:
 def run(root: Path = ROOT, state: Path = STATE) -> dict:
     """Execute real packaged tests; persist their output even on failure."""
     started = time.time()
+    started_monotonic = time.monotonic()
     started_version = version(root)
     python = root / "Toolbox/python/Scripts/python.exe"
+    state.mkdir(parents=True, exist_ok=True)
+    log = state / "self-check.log"
+    deferred = active_projects(state)
+    timed_out = False
+    returncode = None
     try:
-        result = subprocess.run(
-            [str(python), "-m", "pytest", "-q", "Validation"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=MAX_SECONDS,
-            creationflags=HIDE | LOW_PRIORITY,
-        )
-        output = result.stdout + result.stderr
-        passed = result.returncode == 0
+        with log.open("wb") as stream:
+            if not deferred:
+                process = subprocess.Popen(
+                    [str(python), "-m", "pytest", "-q", "Validation"],
+                    cwd=root, stdin=subprocess.DEVNULL, stdout=stream,
+                    stderr=subprocess.STDOUT, creationflags=HIDE | LOW_PRIORITY,
+                )
+                while (returncode := process.poll()) is None:
+                    if active_projects(state):
+                        _stop_check(process)
+                        deferred = True
+                        break
+                    if time.monotonic() - started_monotonic > MAX_SECONDS:
+                        _stop_check(process)
+                        timed_out = True
+                        break
+                    time.sleep(2)
+        output = log.read_text(encoding="utf-8", errors="replace")
+        if deferred:
+            output += "\nSelf-check yielded to an active task.\n"
+        if timed_out:
+            output += "\nSelf-check exceeded its time limit.\n"
+        passed = returncode == 0 and not deferred and not timed_out
     except (OSError, subprocess.TimeoutExpired) as exc:
         output = f"Self-check could not finish: {type(exc).__name__}: {exc}\n"
         passed = False
@@ -189,8 +228,14 @@ def run(root: Path = ROOT, state: Path = STATE) -> dict:
         if version(root) != started_version:
             return {"status": "superseded", "version": started_version}
         previous = _read(state / "self-check.json")
-        log = state / "self-check.log"
         log.write_text(output, encoding="utf-8")
+        if deferred:
+            report = {"version": started_version, "status": "deferred",
+                      "failures": int(previous.get("failures", 0)),
+                      "checked_at": time.time(),
+                      "summary": "Self-check paused while a task is active"}
+            _write(state / "self-check.json", report)
+            return report
         failures = 0
         if not passed:
             failures = (int(previous.get("failures", 0)) + 1
