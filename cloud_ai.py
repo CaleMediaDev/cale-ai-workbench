@@ -510,6 +510,8 @@ def retry_derestricted(payload, result, original_model="", deadline=None):
                 continue
             if payload.get("tools") and "tools" not in info.get("capabilities", []):
                 continue
+            if request_needs_vision(payload) and "vision" not in info.get("capabilities", []):
+                continue
             local = dict(payload, model=model, stream=False)
             local.pop("stream_options", None)
             if item.get("tool_reasoning_effort"):
@@ -565,6 +567,20 @@ def estimated_context(payload):
     return max(8192, estimated_input_tokens(payload) + 8192)
 
 
+def request_needs_vision(payload):
+    """Find image parts in a chat request before selecting a local model."""
+    def has_image(value):
+        if isinstance(value, dict):
+            if "image_url" in value or "input_image" in value:
+                return True
+            return any(has_image(item) for item in value.values())
+        if isinstance(value, list):
+            return any(has_image(item) for item in value)
+        return isinstance(value, str) and value.startswith("data:image/")
+
+    return has_image(payload.get("messages", []))
+
+
 def loaded_local_models():
     """Return active Ollama aliases, excluding models already unloading."""
     try:
@@ -592,6 +608,7 @@ class Router:
         self.lock = threading.Lock()
         self.model_cache = {}
         self.model_contexts = {}
+        self.model_vision = set()
         self.model_cache_until = 0
         self.provider_cooldowns = {}
         self.provider_last_attempts = {}
@@ -659,8 +676,8 @@ class Router:
                 self.provider_last_attempts[provider] = now
             return True
 
-    def local_candidates(self, size, required_context=65536):
-        """Rank installed models that can hold this request, not the global maximum."""
+    def local_candidates(self, size, required_context=65536, require_vision=False):
+        """Rank installed models with enough context and required capabilities."""
         if time.monotonic() >= self.model_cache_until:
             refresh_catalog(online=False)
             import model_fitness
@@ -677,6 +694,7 @@ class Router:
                 weights = {}
             available = {}
             contexts = {}
+            vision = set()
             aliases = dict.fromkeys(
                 [FAST_MODEL, STANDARD_MAIN_ALIAS,
                  *(item["alias"] for item in CATALOG.values())]
@@ -710,10 +728,13 @@ class Router:
                     match = re.search(r"(\d+(?:\.\d+)?)B", label, re.IGNORECASE)
                     available[name] = float(match.group(1)) if match else 1.0
                     contexts[name] = int(configured.group(1))
+                    if "vision" in info.get("capabilities", []):
+                        vision.add(name)
                 except Exception:
                     continue
             self.model_cache = available
             self.model_contexts = contexts
+            self.model_vision = vision
             self.model_cache_until = time.monotonic() + 60
         balanced_preferred = BALANCED_MODEL
         if size == "balanced":
@@ -728,13 +749,15 @@ class Router:
                     and candidate_approved(item)
                     and 30 <= parameters <= 40
                     and self.model_contexts.get(alias, 0) >= required_context
+                    and (not require_vision or alias in self.model_vision)
                 ):
                     balanced_preferred = alias
                     break
         ordered = model_order(
             size,
             {name: size_gb for name, size_gb in self.model_cache.items()
-             if self.model_contexts.get(name, 0) >= required_context},
+             if self.model_contexts.get(name, 0) >= required_context
+             and (not require_vision or name in self.model_vision)},
             LOCAL_MODEL, FAST_MODEL, balanced_preferred
         )
         if (size == "deep" and required_context <= 65536 and
@@ -832,6 +855,7 @@ class Router:
             for provider, spec in connected
         }
         required_context = estimated_context(payload)
+        needs_vision = request_needs_vision(payload)
         expected_output = min(8192, int(payload.get("max_tokens") or
                                         payload.get("max_completion_tokens") or 4096))
         prompt_estimate = estimated_input_tokens(payload)
@@ -982,7 +1006,8 @@ class Router:
                 return paid_result
         selected = (
             [] if cloud_only else
-            self.local_candidates(size, required_context) if profile == "main" else
+            self.local_candidates(size, required_context, needs_vision)
+            if profile == "main" or needs_vision else
             [CATALOG[profile]["alias"]]
         )
         last_error = None

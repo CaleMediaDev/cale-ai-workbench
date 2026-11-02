@@ -470,6 +470,17 @@ class CloudTests(unittest.TestCase):
         ]}], "tools": []}
         self.assertGreater(cloud.estimated_context(request), 65536)
 
+    def test_image_request_is_detected_without_scanning_tools(self):
+        image = {"messages": [{"role": "user", "content": [
+            {"type": "text", "text": "What is this?"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]}]}
+        self.assertTrue(cloud.request_needs_vision(image))
+        self.assertFalse(cloud.request_needs_vision({"messages": [
+            {"role": "user", "content": "Describe an image"}],
+            "tools": [{"description": "Accepts an image_url parameter"}],
+        }))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.state = patch.object(cloud, "STATE", Path(self.temp.name))
@@ -538,6 +549,33 @@ class CloudTests(unittest.TestCase):
         self.loaded.stop()
         with patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(response).encode())):
             self.assertEqual(cloud.loaded_local_models(), ["cale-qwen35"])
+
+    def test_image_routing_only_uses_models_advertising_vision(self):
+        self.candidates.stop()
+        text_only = cloud.CATALOG["gptoss_official"]["alias"]
+        tags = {"models": [
+            {"name": cloud.FAST_MODEL + ":latest", "size": 6 * 2**30},
+            {"name": text_only + ":latest", "size": 13 * 2**30},
+        ]}
+
+        def show(_url, payload, **_kwargs):
+            name = payload["model"]
+            if name not in (cloud.FAST_MODEL, text_only):
+                raise OSError("not installed")
+            return {"capabilities": (["completion", "tools", "vision"]
+                                     if name == cloud.FAST_MODEL else ["completion", "tools"]),
+                    "parameters": "num_ctx 65536\n",
+                    "details": {"parameter_size": "9B" if name == cloud.FAST_MODEL else "20B"}}
+
+        with (patch.object(cloud, "post", side_effect=show),
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+              patch.object(cloud, "candidate_approved", return_value=True),
+              patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "loaded_local_models", return_value=[])):
+            router = cloud.Router()
+            self.assertIn(text_only, router.local_candidates("quick"))
+            self.assertEqual(router.local_candidates("quick", require_vision=True),
+                             [cloud.FAST_MODEL])
 
     def connected(self):
         data = cloud.credentials()
@@ -721,6 +759,29 @@ class CloudTests(unittest.TestCase):
         ):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
         self.assertEqual(seen, [cloud.LOCAL_MODEL, cloud.CATALOG["permissive_small"]["alias"]])
+
+    def test_image_refusal_skips_derestricted_model_without_vision(self):
+        request = dict(REQUEST, messages=[{"role": "user", "content": [
+            {"type": "text", "text": "Describe this."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]}])
+        seen = []
+
+        def response(url, payload, **kwargs):
+            if url.endswith("/api/show"):
+                return {"capabilities": (["completion", "tools"]
+                        if payload["model"] == cloud.CATALOG["llama"]["alias"]
+                        else ["completion", "tools", "vision"])}
+            seen.append(payload["model"])
+            return ANSWER
+
+        with (
+            patch.object(cloud, "DERESTRICTED_PROFILES", ("llama", "permissive_small")),
+            patch.object(cloud, "candidate_approved", return_value=True),
+            patch.object(cloud, "post", side_effect=response),
+        ):
+            self.assertEqual(cloud.retry_derestricted(request, REFUSAL, cloud.LOCAL_MODEL), ANSWER)
+        self.assertEqual(seen, [cloud.CATALOG["permissive_small"]["alias"]])
 
     def test_refusal_detection_accepts_policy_field_without_reinterpreting_tools(self):
         self.assertTrue(cloud.is_refusal(REFUSAL))
