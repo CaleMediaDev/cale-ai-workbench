@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 import io
+from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import model_fitness
@@ -46,3 +47,23 @@ def test_ollama_model_removal_uses_delete_verb():
         model_library.delete_model("cale-slow")
     request = open_url.call_args.args[0]
     assert request.get_method() == "DELETE"
+
+
+def test_retirement_succeeds_if_alias_was_already_deleted():
+    item = {"alias": "cale-slow", "source": "someone/slow:latest"}
+    missing = HTTPError("http://127.0.0.1:11434/api/delete", 404,
+                        "model not found", {}, None)
+    with (patch.object(model_library, "alias_update_waits_for_tasks", return_value=False),
+          patch.object(model_library, "owned_sources", return_value=set()),
+          patch.object(model_library, "delete_model", side_effect=missing) as delete):
+        assert model_library.retire_slow_model(item)
+        delete.assert_called_once_with("cale-slow")
+
+
+def test_retirement_does_not_hide_ollama_failures():
+    item = {"alias": "cale-slow", "source": "someone/slow:latest"}
+    unavailable = HTTPError("http://127.0.0.1:11434/api/delete", 503,
+                            "unavailable", {}, None)
+    with (patch.object(model_library, "alias_update_waits_for_tasks", return_value=False),
+          patch.object(model_library, "delete_model", side_effect=unavailable)):
+        assert not model_library.retire_slow_model(item)

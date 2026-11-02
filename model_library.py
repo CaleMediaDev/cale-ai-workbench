@@ -11,6 +11,7 @@ import re
 import shutil
 import time
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from model_identity import configured_main_alias, configured_permissive_alias
@@ -694,6 +695,11 @@ def retire_slow_model(item):
     alias = item["alias"]
     try:
         delete_model(alias)
+    except HTTPError as error:
+        # A previous pass may already have removed the alias. Ollama returns
+        # 404 for that case, which is a successful final state for retirement.
+        if error.code != 404:
+            return False
     except Exception:
         return False
     source = item.get("source")
@@ -862,8 +868,13 @@ def auto_install(status_dir, refresh=True):
                 speed = model_fitness.measured_speed(model.get("alias", profile))
                 if speed is not None and speed < 5:
                     retired = retire_slow_model(model)
-                    save_download_status(path, "retired" if retired else "waiting_tasks",
-                                         f"Measured {speed:.1f} tokens/s; removing when idle", 0)
+                    waiting = not retired and alias_update_waits_for_tasks(model)
+                    status = "retired" if retired else ("waiting_tasks" if waiting else "error")
+                    detail = (f"Measured {speed:.1f} tokens/s; removed slow model"
+                              if retired else f"Measured {speed:.1f} tokens/s; "
+                              + ("removing when idle" if waiting
+                                 else "could not remove slow model; will retry"))
+                    save_download_status(path, status, detail, 0)
                     continue
                 try:
                     if model_ready(profile):
