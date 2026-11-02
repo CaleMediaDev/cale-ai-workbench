@@ -914,6 +914,7 @@ def retry_song_without_vocals(p: dict, job: dict) -> bool:
             or len(lyrics.split()) < 20):
         return False
     import music_backend
+    import music_style
 
     previous = Path(job["output_path"])
     output = previous.with_name(f"{previous.stem}-vocal-retry-{attempt + 1}{previous.suffix}")
@@ -925,10 +926,14 @@ def retry_song_without_vocals(p: dict, job: dict) -> bool:
                 f"{previous.stem}-vocal-retry-{attempt + 1}-{number}{previous.suffix}"
             ).exists()
         )
-    prompt = str(job["prompt"]).rstrip(" .") + (
+    direction = (
+        ". Audible short sung hooks, following the supplied phrases between "
+        "instrumental drops."
+        if music_style.sparse_vocal_style(p.get("brief") or str(job.get("prompt", ""))) else
         ". Prominent clear lead singing vocals throughout, following the supplied "
         "lyrics; do not render an instrumental track."
     )
+    prompt = str(job["prompt"]).rstrip(" .") + direction
     started = music_backend.start_music_job(
         prompt, str(output), lyrics=lyrics,
         duration_seconds=int(job["duration_seconds"]), instrumental=False,
@@ -970,10 +975,13 @@ def repair_instrumental_misroute(p: dict, job: dict) -> bool:
                 f"{original.stem}-with-vocals-{number}{original.suffix}"
             ).exists()
         )
-    prompt = str(job["prompt"]).rstrip(" .") + (
-        ". Prominent clear lead vocals with verses and a chorus throughout; "
-        "the instrumental section is only a short break."
-    )
+    if music_style.sparse_vocal_style(p["brief"]):
+        direction = (". Audible short vocal hooks and chopped phrases as requested; "
+                     "keep the long bass drops instrumental.")
+    else:
+        direction = (". Prominent clear lead vocals with verses and a chorus throughout; "
+                     "the instrumental section is only a short break.")
+    prompt = str(job["prompt"]).rstrip(" .") + direction
     started = music_backend.start_music_job(
         prompt, str(output), lyrics=str(job.get("lyrics", "")),
         duration_seconds=int(job["duration_seconds"]), instrumental=False,
@@ -2619,6 +2627,9 @@ def retire_paused_board_card(p):
         board("archive", p["card"])
 
 
+_reviewed_music_routes: set[tuple[str, str]] = set()
+
+
 def advance_project(p):
     """Advance one task; failures are isolated by the supervisor's tick."""
     setup = read_task_status(STATE / "install-progress.json")
@@ -2683,6 +2694,19 @@ def advance_project(p):
         if p["status"] in ("accepted", "stopped", "paused"):
             return
         if p["status"] == "ready_for_review":
+            # Old releases could mark a clearly vocal brief complete after an
+            # instrumental render. Check each saved card once per launch; an
+            # accepted task is left as the owner approved it.
+            route_key = (p["id"], p["card"])
+            if route_key not in _reviewed_music_routes:
+                import music_backend
+                import music_style
+
+                if music_style.unambiguous_vocal_song(p["brief"]):
+                    job = music_backend.music_job_status(job_id)
+                    if repair_instrumental_misroute(p, job):
+                        return
+                _reviewed_music_routes.add(route_key)
             return
         import music_backend
         import music_style

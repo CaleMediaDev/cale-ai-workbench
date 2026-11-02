@@ -306,6 +306,22 @@ def test_compose_lyrics_uses_small_local_model_and_rejects_truncation():
     ]
 
 
+def test_sparse_vocal_hooks_get_short_lyrics_with_room_for_drops():
+    brief = ("Female singing voice, main vocal hook: waapy waaap. "
+             "Very little conventional singing, with massive instrumental drops.")
+    answer = {"choices": [{"finish_reason": "stop", "message": {
+        "content": "[Hook]\n" + "Waapy waaap, dance through the night " * 10}}]}
+    with patch("routing_mode.load_scope", return_value="local_only"), patch(
+        "cloud_ai.post", return_value=answer
+    ) as post:
+        lyrics = music_backend.compose_lyrics(brief, 180)
+    assert lyrics.startswith("[Hook]")
+    instruction = post.call_args.args[1]["messages"][0]["content"]
+    assert "[Instrumental Drop]" in instruction
+    assert "long verses" in instruction
+    assert "Aim for about 81 words" in instruction
+
+
 def test_local_only_song_writes_lyrics_locally_when_global_scope_is_cloud_only():
     import usage_history
     import cloud_ai

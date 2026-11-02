@@ -71,6 +71,25 @@ class LongTaskTests(unittest.TestCase):
             self.assertFalse(start.call_args.kwargs["instrumental"])
             self.assertEqual(update.call_args.kwargs["card"], "music-job:take-2")
 
+    def test_sparse_vocal_repair_preserves_short_hooks_and_instrumental_drops(self):
+        import music_backend
+
+        with tempfile.TemporaryDirectory() as temp:
+            original = Path(temp) / "song.mp3"
+            original.write_bytes(b"instrumental")
+            item = {"id": "1" * 12, "folder": temp,
+                    "brief": "Female singing voice with short vocal hooks and massive instrumental drops"}
+            job = {"status": "complete", "instrumental": True, "source_path": "",
+                   "prompt": item["brief"], "output_path": str(original),
+                   "duration_seconds": 180, "lyrics": ""}
+            with (patch.object(music_backend, "start_music_job", return_value={"job_id": "take-2"}) as start,
+                  patch.object(task_module, "update")):
+                assert task_module.repair_instrumental_misroute(item, job)
+            prompt = start.call_args.args[0]
+            self.assertIn("short vocal hooks", prompt)
+            self.assertIn("keep the long bass drops instrumental", prompt)
+            self.assertNotIn("verses and a chorus throughout", prompt)
+
     def test_music_completion_checks_for_misroute_before_marking_finished(self):
         import music_backend
 
@@ -86,6 +105,38 @@ class LongTaskTests(unittest.TestCase):
             task_module.advance_project(item)
         repair.assert_called_once_with(item, job)
         update.assert_not_called()
+
+    def test_saved_reviewed_instrumental_is_rechecked_for_requested_vocals(self):
+        import music_backend
+
+        item = {"id": "f" * 12, "folder": str(self.base / "old-song"),
+                "status": "ready_for_review", "card": "music-job:" + "e" * 32,
+                "brief": "Female singing voice and vocal hook with an instrumental break"}
+        job = {"status": "complete", "instrumental": True}
+        task_module._reviewed_music_routes.discard((item["id"], item["card"]))
+        with (patch.object(task_module, "recheck_changed_media", return_value=False),
+              patch.object(music_backend, "music_job_status", return_value=job) as status,
+              patch.object(task_module, "repair_instrumental_misroute", return_value=True) as repair):
+            task_module.advance_project(item)
+        status.assert_called_once_with("e" * 32)
+        repair.assert_called_once_with(item, job)
+
+    def test_reviewed_music_route_is_checked_once_and_accepted_is_untouched(self):
+        import music_backend
+
+        item = {"id": "9" * 12, "folder": str(self.base / "old-song"),
+                "status": "ready_for_review", "card": "music-job:" + "8" * 32,
+                "brief": "Female singing voice and vocal hook with an instrumental break"}
+        task_module._reviewed_music_routes.discard((item["id"], item["card"]))
+        with (patch.object(task_module, "recheck_changed_media", return_value=False),
+              patch.object(music_backend, "music_job_status", return_value={"instrumental": False}) as status,
+              patch.object(task_module, "repair_instrumental_misroute", return_value=False) as repair):
+            task_module.advance_project(item)
+            task_module.advance_project(item)
+            item["status"] = "accepted"
+            task_module.advance_project(item)
+        status.assert_called_once()
+        repair.assert_called_once()
 
     def test_music_misroute_reuses_vocal_job_after_interrupted_card_update(self):
         import music_backend

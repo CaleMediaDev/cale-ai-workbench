@@ -84,6 +84,15 @@ def test_vocal_chops_are_texture_not_full_length_singing():
     assert music_style.requires_sustained_vocals("Make a pop song with lead vocals")
 
 
+def test_sparse_female_hook_does_not_get_full_verse_direction():
+    request = ("Female singing voice, main vocal hook: waapy waaap. "
+               "Very little conventional singing, with massive instrumental drops.")
+    assert music_style.sparse_vocal_style(request)
+    caption = music_style.enhance(request)
+    assert "short female vocal hooks" in caption
+    assert "clear sung verses and chorus" not in caption
+
+
 def test_clear_vocal_request_is_distinct_from_negated_or_instrumental_brief():
     assert music_style.unambiguous_vocal_song(
         "Male rapper with two verses and a vocal hook, then an instrumental break")

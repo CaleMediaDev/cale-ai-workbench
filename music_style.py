@@ -28,6 +28,11 @@ VOCAL_TEXTURE = re.compile(
     r"\b(?:vocal chops?|chopped vocals?|wordless vocals?|"
     r"(?:minimal|sparse|occasional) vocals?)\b", re.I,
 )
+SPARSE_VOCAL_STYLE = re.compile(
+    r"\b(?:minimal lyrics|nonsense vocals|repetitive (?:nonsense|vocal|hook)|"
+    r"short (?:repetitive )?(?:vocal )?(?:hooks?|chants?)|vocal chops?|"
+    r"vocal hooks?|very little (?:conventional )?singing)\b", re.I,
+)
 LEAD_VOCALS = re.compile(
     r"\b(?:lead vocals?|sung verses?|singing|singer|rap|rapped)\b", re.I,
 )
@@ -71,6 +76,11 @@ def requested_bpm(prompt: str) -> int | None:
         return None
     value = int(match.group(1))
     return value if 40 <= value <= 240 else None
+
+
+def sparse_vocal_style(prompt: str) -> bool:
+    """Identify songs whose voices are short hooks rather than full verses."""
+    return bool(SPARSE_VOCAL_STYLE.search(prompt))
 
 
 def requires_sustained_vocals(prompt: str, lyrics: str = "",
@@ -131,13 +141,18 @@ def enhance(prompt: str, instrumental: bool = False) -> str:
     cleaned, _, _ = _clean_negations(prompt)
     cues = []
     sustained = requires_sustained_vocals(cleaned, instrumental=instrumental)
+    sparse = sparse_vocal_style(cleaned)
     if sustained and intent == "female":
-        cue = "Prominent expressive female lead vocals throughout, clear sung verses and chorus"
+        cue = ("Distinct short female vocal hooks and chopped phrases between instrumental drops"
+               if sparse else
+               "Prominent expressive female lead vocals throughout, clear sung verses and chorus")
         if any(name in cleaned.lower() for name in ("katy perry", "katy pary")):
             cue += ", bright polished dance-pop production and a catchy anthemic hook"
         cues.append(cue)
     elif sustained and intent == "male":
-        cues.append("Prominent expressive male lead vocals throughout, clear sung verses and chorus")
+        cues.append("Distinct short male vocal hooks and chopped phrases between instrumental drops"
+                    if sparse else
+                    "Prominent expressive male lead vocals throughout, clear sung verses and chorus")
     if not instrumental and not sustained:
         cues.append("Sparse chopped vocal syllables as rhythmic accents between instrumental sections")
     request = cleaned.split("Past user feedback", 1)[0].lower()

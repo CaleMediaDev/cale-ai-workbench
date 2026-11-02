@@ -604,8 +604,11 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
     import routing_mode
     import usage_history
 
-    target_words = max(20, min(450, round(duration_seconds * 1.6)))
-    minimum_words = max(20, round(duration_seconds * 0.7))
+    sparse = music_style.sparse_vocal_style(prompt)
+    target_words = (max(20, min(160, round(duration_seconds * 0.45))) if sparse
+                    else max(20, min(450, round(duration_seconds * 1.6))))
+    minimum_words = (max(12, round(duration_seconds * 0.25)) if sparse
+                     else max(20, round(duration_seconds * 0.7)))
     failures = []
     for attempt in range(3):
         try:
@@ -618,9 +621,14 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
                  "messages": [
                      {"role": "system", "content": (
                          "Write original English song lyrics for a local music generator. "
-                         f"Aim for about {target_words} words. Include [Verse] and [Chorus] "
-                         "labels. Begin with a sung or rapped line and keep words going "
-                         "through most of the track. Return lyrics only, no explanation. "
+                         f"Aim for about {target_words} words. "
+                         + ("Use [Hook] and [Instrumental Drop] labels. Write short, "
+                            "repeatable vocal phrases instead of long verses. Use any "
+                            "requested hook words. Leave room for instrumental drops. "
+                            if sparse else
+                            "Include [Verse] and [Chorus] labels. Begin with a sung or "
+                            "rapped line and keep words going through most of the track. ")
+                         + "Return lyrics only, no explanation. "
                          + (f"Use short lines, write at least {minimum_words} words, "
                             "and finish the whole song before your response ends."
                             if attempt else "")
@@ -683,11 +691,7 @@ def lyric_match(transcript: str, lyrics: str) -> tuple[int, int]:
 
 def sparse_vocal_style(prompt: str) -> bool:
     """Detect dance tracks asking for short, repeated hooks rather than verses."""
-    return bool(re.search(
-        r"\b(?:minimal lyrics|nonsense vocals|repetitive (?:nonsense|vocal|hook)|"
-        r"short (?:repetitive )?(?:vocal )?(?:hook|chant)|vocal chops?)\b",
-        prompt, re.IGNORECASE,
-    ))
+    return music_style.sparse_vocal_style(prompt)
 
 
 def vocal_evidence(path: str | Path, duration_seconds: int, lyrics: str = "",
