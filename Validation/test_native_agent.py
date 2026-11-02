@@ -155,11 +155,54 @@ def test_native_context_rebuilds_from_durable_plan():
         notes = Path(item["folder"]) / ".local-ai"
         (notes / "PLAN.md").write_text("- [x] Build page\n- [ ] Check page")
         messages = [{"role": "system", "content": "Original request"}]
-        messages.extend({"role": "user", "content": str(number)} for number in range(40))
-        compacted = native_agent.compact_messages(messages, Path(item["folder"]))
+        messages.extend({"role": "user", "content": str(number) + " note " * 100}
+                        for number in range(40))
+        compacted = native_agent.compact_messages(messages, Path(item["folder"]), context_limit=6000)
         assert len(compacted) < len(messages)
         assert "Check page" in compacted[1]["content"]
-        assert compacted[-1]["content"] == "39"
+        assert compacted[-1]["content"].startswith("39")
+
+
+def test_context_compaction_uses_configured_window_and_keeps_tool_batches():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        config = root / "data/config.yaml"
+        config.parent.mkdir()
+        config.write_text("model:\n  context_length: 262144\nfallback_providers: []\n")
+        assert native_agent.configured_context(root) == 262144
+        folder = root / "task"
+        folder.mkdir()
+        messages = [{"role": "system", "content": "Original task"}]
+        messages.extend({"role": "user", "content": str(i)} for i in range(40))
+        assert native_agent.compact_messages(messages, folder, 262144) is messages
+        messages.insert(1, {"role": "user", "content": "old context " * 5000})
+        messages.extend([
+            {"role": "assistant", "tool_calls": [{"id": "call-1", "function": {
+                "name": "read_file", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "call-1", "content": "recent result"},
+            {"role": "user", "content": "Use the recent result."},
+        ])
+        compacted = native_agent.compact_messages(messages, folder, 6000)
+        assert all("old context" not in str(item.get("content", "")) for item in compacted)
+        assert [item["role"] for item in compacted[-3:]] == ["assistant", "tool", "user"]
+
+
+def test_interrupted_tool_reply_precedes_later_user_steering():
+    messages = [
+        {"role": "system", "content": "Work on the task."},
+        {"role": "assistant", "tool_calls": [
+            {"id": "a", "function": {"name": "write_file"}},
+            {"id": "b", "function": {"name": "run_command"}},
+        ]},
+        {"role": "tool", "tool_call_id": "a", "content": "Saved file"},
+        {"role": "user", "content": "Also make it blue."},
+    ]
+    repaired = native_agent.repair_interrupted_tools(messages)
+    assert [item["role"] for item in repaired] == ["system", "assistant", "tool", "tool", "user"]
+    assert repaired[2]["tool_call_id"] == "a"
+    assert repaired[3]["tool_call_id"] == "b"
+    assert "Inspect the project state" in repaired[3]["content"]
+    assert repaired[4]["content"] == "Also make it blue."
 
 
 def test_new_task_uses_native_worker_and_completes_independent_check():

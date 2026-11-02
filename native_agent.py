@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -234,21 +235,60 @@ def prompt(project: dict) -> str:
     )
 
 
-def compact_messages(messages: list, folder: Path) -> list:
-    """Keep tool history bounded and rebuild durable context from project files."""
-    if len(messages) <= 32 and len(json.dumps(messages, ensure_ascii=False)) <= 120_000:
+def configured_context(root: Path = ROOT) -> int:
+    """Read the context actually configured for this installation's main model."""
+    try:
+        config = (root / "data/config.yaml").read_text(encoding="utf-8")
+        model = config.split("fallback_providers:", 1)[0]
+        match = re.search(r"(?m)^\s*context_length:\s*(\d+)\s*$", model)
+        if match and int(match.group(1)) >= 8192:
+            return int(match.group(1))
+    except OSError:
+        pass
+    return 65536
+
+
+def compact_messages(messages: list, folder: Path, context_limit: int | None = None) -> list:
+    """Compact only near the configured window; keep complete tool-call batches."""
+    from cloud_ai import estimated_input_tokens
+
+    limit = context_limit or configured_context()
+    reserve = min(8192, max(1024, limit // 4))
+    budget = max(1024, limit - reserve)
+    estimate = lambda items, tools: estimated_input_tokens({"messages": items, "tools": tools})
+    if estimate(messages, TOOLS) <= budget:
         return messages
     notes = []
     for name in ("PLAN.md", "PROGRESS.md", "USER-REQUESTS.md"):
         path = folder / ".local-ai" / name
         if path.is_file():
             notes.append(name + ":\n" + path.read_text(encoding="utf-8", errors="replace")[-6000:])
-    tail = messages[-16:]
-    while tail and tail[0].get("role") == "tool":
-        tail = tail[1:]
-    return [messages[0], {"role": "system", "content":
+    base = [messages[0], {"role": "system", "content":
             "Recovered project state (search_project_memory for older decisions and files):\n"
-            + "\n".join(notes)}, *tail]
+            + "\n".join(notes)}]
+    groups = []
+    current = []
+    for item in messages[1:]:
+        if (item.get("role") == "system" and str(item.get("content", "")).startswith("Recovered project state")):
+            continue
+        if item.get("role") == "tool":
+            if current and current[0].get("role") == "assistant" and current[0].get("tool_calls"):
+                current.append(item)
+            continue  # An orphan tool reply cannot be sent to the model.
+        if current:
+            groups.append(current)
+        current = [item]
+    if current:
+        groups.append(current)
+    total = estimate(base, TOOLS)
+    chosen = []
+    for group in reversed(groups):
+        cost = estimate(group, [])
+        if total + cost > budget:
+            break
+        chosen[:0] = group
+        total += cost
+    return [*base, *chosen]
 
 
 def repair_interrupted_tools(messages: list) -> list:
@@ -259,15 +299,25 @@ def repair_interrupted_tools(messages: list) -> list:
                            if messages[index].get("role") == "assistant"), -1)
     if last_assistant < 0 or not messages[last_assistant].get("tool_calls"):
         return messages
-    completed = {item.get("tool_call_id") for item in messages[last_assistant + 1:]
-                 if item.get("role") == "tool"}
-    for item in messages[last_assistant]["tool_calls"]:
-        if item.get("id") in completed:
-            continue
-        messages.append({"role": "tool", "tool_call_id": item.get("id", ""),
-                         "name": (item.get("function") or {}).get("name", ""),
-                         "content": "The worker stopped before this tool result was recorded. Inspect the project state before retrying any action."})
-    return messages
+    calls = messages[last_assistant]["tool_calls"]
+    expected = {item.get("id") for item in calls}
+    tail = messages[last_assistant + 1:]
+    completed = {item.get("tool_call_id"): item for item in tail
+                 if item.get("role") == "tool" and item.get("tool_call_id") in expected}
+    ordered = []
+    for item in calls:
+        result = completed.get(item.get("id"))
+        ordered.append(result or {
+            "role": "tool", "tool_call_id": item.get("id", ""),
+            "name": (item.get("function") or {}).get("name", ""),
+            "content": "The worker stopped before this tool result was recorded. Inspect the project state before retrying any action.",
+        })
+    # Tool replies must immediately follow their assistant call. User steering
+    # may have arrived during the interruption, so keep it after the repaired
+    # tool batch rather than appending a tool reply after a user message.
+    rest = [item for item in tail if item.get("role") != "tool"
+            or item.get("tool_call_id") not in expected]
+    return [*messages[:last_assistant + 1], *ordered, *rest]
 
 
 def completion_issue(folder: Path) -> str:
@@ -301,13 +351,14 @@ def run_slice(project: dict, complete=None) -> dict:
     # and forgets short-term routing decisions during one task.
     router = Router() if complete is None else None
     call = complete or (lambda payload: router.complete(payload, project["id"]))
+    context_limit = configured_context(ROOT)
     state.update(status="running", started=state.get("started") or time.time())
     save_state(project, state)
     for _ in range(MAX_TURNS_PER_SLICE):
         latest = read_state(project)
         if latest.get("status") in ("paused", "stopped"):
             return latest
-        messages = compact_messages(messages, folder)
+        messages = compact_messages(messages, folder, context_limit)
         response = call({"model": LOCAL_MODEL, "messages": messages, "tools": TOOLS,
                          "tool_choice": "auto", "stream": False, "temperature": 0.2})
         latest = read_state(project)
