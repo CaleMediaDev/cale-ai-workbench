@@ -2213,6 +2213,23 @@ def resumed_board_work(p):
     return True
 
 
+def retire_paused_board_card(p):
+    """Keep Hermes from redispatching a card while its project is paused."""
+    if not p.get("card"):
+        return
+    snapshot = board("show", p["card"], "--json", parse=True)
+    status = snapshot.get("task", {}).get("status")
+    if status in ("running", "ready", "scheduled"):
+        board("block", p["card"], "Project paused", "--kind", "needs_input")
+        snapshot = board("show", p["card"], "--json", parse=True)
+        status = snapshot.get("task", {}).get("status")
+    if status in ("blocked", "triage") and not any(
+        run.get("started_at") and not run.get("ended_at")
+        for run in snapshot.get("runs", [])
+    ):
+        board("archive", p["card"])
+
+
 def advance_project(p):
     """Advance one task; failures are isolated by the supervisor's tick."""
     setup = read_task_status(STATE / "install-progress.json")
@@ -2378,7 +2395,10 @@ def advance_project(p):
     ):
         restart_changed_project_review(p)
         return
-    if p["status"] in ("accepted", "paused", "stopped", "needs_input"):
+    if p["status"] == "paused":
+        retire_paused_board_card(p)
+        return
+    if p["status"] in ("accepted", "stopped", "needs_input"):
         return
     if p["status"] == "ready_for_review":
         if not str(p["fingerprint"]).startswith("content-v2:"):

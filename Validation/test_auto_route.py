@@ -307,6 +307,17 @@ class AutoRouteTests(unittest.TestCase):
         })
         self.assertEqual(task_size(messages), "balanced")
 
+    def test_resumed_condensed_board_song_stays_balanced(self):
+        prompt = (
+            "# Kanban task t_123: Create Cale and Tiny anniversary dubstep song\n\n"
+            "## Body\nWork in the project folder C:/Tasks/song. Read the saved "
+            "request and follow-ups. Generate the song: 150 BPM melodic "
+            "dubstep with female vocals, three drops, and a romantic chorus. "
+            "Verify the saved audio and finish the task.\n\n"
+            "## Prior attempts on this task\nAttempt 1 was paused.\n"
+        )
+        self.assertEqual(task_size([{"role": "user", "content": prompt}]), "balanced")
+
     def test_music_shortcut_does_not_downgrade_app_or_video_work(self):
         self.assertEqual(
             task_size([{"role": "user", "content": "Create a music app."}]),

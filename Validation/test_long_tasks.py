@@ -1878,6 +1878,25 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(self.item()["status"], "ready_for_review")
         self.assertTrue(self.item()["fingerprint"].startswith("content-v2:"))
 
+    def test_paused_card_is_archived_after_its_run_ends(self):
+        task_module.update(self.pid, status="paused", card="paused-card")
+        ended = {"task": {"status": "triage"}, "runs": [
+            {"started_at": 100, "ended_at": 200},
+        ]}
+        with patch.object(task_module, "board", return_value=ended) as board:
+            task_module.tick()
+        self.assertEqual(self.item()["status"], "paused")
+        board.assert_any_call("archive", "paused-card")
+
+    def test_paused_card_waits_for_active_run_before_archiving(self):
+        task_module.update(self.pid, status="paused", card="paused-card")
+        running = {"task": {"status": "triage"}, "runs": [
+            {"started_at": 100, "ended_at": None},
+        ]}
+        with patch.object(task_module, "board", return_value=running) as board:
+            task_module.tick()
+        self.assertFalse(any(call.args[0] == "archive" for call in board.call_args_list))
+
     def test_resume_waits_for_active_paused_worker_to_retire(self):
         task_module.update(self.pid, card="active-card", status="working")
         running = {"task": {"status": "running"}, "runs": [

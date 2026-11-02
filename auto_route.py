@@ -184,8 +184,6 @@ def task_size(messages):
     )
     if repeated_tool_failures(messages):
         return "deep"
-    if (PROJECT_MARKER.search(beginning) or PROJECT_MARKER.search(request)) and not project:
-        return "deep"
     # The first independent review turn must reason about the saved result,
     # even when the original request looked like a quick media generation.
     review_worker = bool(REVIEW_WORKER.search(beginning))
@@ -210,6 +208,11 @@ def task_size(messages):
         if len(intent) > 280:
             return "balanced"
         return "quick" if tool_calls <= 3 else "balanced"
+    # Hermes may resume a board card with a condensed task body instead of
+    # the original PROJECT_REQUEST block. Keep recognizable standalone song
+    # work on its media tier; be conservative for other unparsed projects.
+    if (PROJECT_MARKER.search(beginning) or PROJECT_MARKER.search(request)) and not project:
+        return "deep"
     if len(intent) > 800 or COMPLEX_PROJECT.search(intent):
         return "deep"
     if PROJECT_BUILD.search(intent):
