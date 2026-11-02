@@ -35,6 +35,19 @@ function Reset-CaleManagedDirectory([string]$Destination, [string]$Directory) {
     }
 }
 
+# Read only the agent's managed-install facts. A missing or interrupted facts
+# file means the bootstrap must run again before dependent tools start.
+function Find-CaleHermesPython([string]$HermesHome) {
+    $factsFile = Get-ChildItem (Join-Path $HermesHome 'installs/*/facts.json') -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $factsFile) { return '' }
+    try {
+        $facts = Get-Content -LiteralPath $factsFile.FullName -Raw | ConvertFrom-Json
+        if (-not $facts.packages.venv.environment) { return '' }
+        return Join-Path $facts.packages.venv.environment 'Scripts/python.exe'
+    } catch { return '' }
+}
+
 function Get-CaleInstallDestination([string]$Requested = '') {
     $local = [IO.Path]::GetFullPath($env:LOCALAPPDATA)
     $ordinary = Join-Path $local 'CaleMedia\AIWorkbench'

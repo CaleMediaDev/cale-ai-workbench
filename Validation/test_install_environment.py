@@ -12,6 +12,32 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == "nt", "Windows installer only")
 class InstallEnvironmentTests(unittest.TestCase):
+    def test_interrupted_agent_facts_trigger_bootstrap_again(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            home = base / "data"
+            facts = home / "installs" / "current" / "facts.json"
+            facts.parent.mkdir(parents=True)
+            env = os.environ.copy()
+            env.update(CALE_INSTALL_HELPER=str(ROOT / "Install-Environment.ps1"),
+                       CALE_HERMES_HOME=str(home))
+            command = (". $env:CALE_INSTALL_HELPER; "
+                       "Find-CaleHermesPython $env:CALE_HERMES_HOME")
+
+            def probe():
+                return subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                     "-Command", command], env=env, capture_output=True, text=True, timeout=30,
+                )
+
+            self.assertEqual(probe().stdout.strip(), "")
+            facts.write_text("{broken", encoding="utf-8")
+            self.assertEqual(probe().stdout.strip(), "")
+            facts.write_text(json.dumps({"packages": {"venv": {
+                "environment": str(base / "managed-python")}}}), encoding="utf-8")
+            self.assertEqual(Path(probe().stdout.strip()),
+                             base / "managed-python" / "Scripts" / "python.exe")
+
     def test_managed_runtime_probe_and_reset_reject_outside_paths(self):
         with tempfile.TemporaryDirectory() as folder:
             base = Path(folder)

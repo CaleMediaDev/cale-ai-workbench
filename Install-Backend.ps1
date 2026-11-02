@@ -84,18 +84,17 @@ try {
  $env:PYTHONUTF8='1'
  New-Item -ItemType Directory -Path (Join-Path $Destination 'Temp') -Force | Out-Null
  $env:TEMP=Join-Path $Destination 'Temp'; $env:TMP=$env:TEMP
- if (-not (Test-CaleRunnable (Join-Path $env:HERMES_HOME 'bin/hermes.exe'))) {
+ $runtime=Find-CaleHermesPython $env:HERMES_HOME
+ if (-not (Test-CaleRunnable (Join-Path $env:HERMES_HOME 'bin/hermes.exe')) -or
+     -not $runtime -or -not (Test-CaleRunnable $runtime @('-V'))) {
    Write-SetupStatus 10 'Installing the agent and Python runtime'
    $bootstrap=Download-Verified "https://raw.githubusercontent.com/NousResearch/hermes-agent/$($pins.hermes_commit)/scripts/install.ps1" $pins.hermes_installer_sha256 'hermes-install.ps1'
-   Write-Output 'Installing the agent and its managed Python runtime...'
+   Write-Output 'Installing or repairing the agent and its managed Python runtime...'
    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrap -HermesHome $env:HERMES_HOME -InstallDir (Join-Path $Destination 'app') -Commit $pins.hermes_commit -NonInteractive -SkipComputerUse -SkipBrowser
    if ($LASTEXITCODE -ne 0) { throw 'Hermes installation failed. Re-run to resume.' }
+   $runtime=Find-CaleHermesPython $env:HERMES_HOME
  }
- $factsFile=Get-ChildItem (Join-Path $env:HERMES_HOME 'installs/*/facts.json') | Sort-Object LastWriteTime -Descending | Select-Object -First 1
- if (-not $factsFile) { throw 'The managed Python runtime was not created.' }
- $facts=Get-Content -LiteralPath $factsFile.FullName -Raw | ConvertFrom-Json
- $runtime=Join-Path $facts.packages.venv.environment 'Scripts/python.exe'
- if (-not (Test-CaleRunnable $runtime @('-V'))) { throw 'The agent Python runtime is incomplete. Re-run setup to repair it.' }
+ if (-not $runtime -or -not (Test-CaleRunnable $runtime @('-V'))) { throw 'The agent Python runtime did not start after repair.' }
  $box=Join-Path $Destination 'Toolbox'
  Write-SetupStatus 25 'Installing tools and browser support'
  New-Item -ItemType Directory -Path $box -Force | Out-Null
@@ -143,9 +142,11 @@ try {
      Write-SetupStatus 32 'Installing browser and design tools'
      & (Join-Path (Split-Path $node) 'npm.cmd') ci --ignore-scripts --no-audit --no-fund
      if ($LASTEXITCODE -ne 0) { throw 'JavaScript tool installation failed.' }
-     & $node (Join-Path $box 'node_modules/playwright/cli.js') install chromium
-     if ($LASTEXITCODE -ne 0) { throw 'Browser download failed.' }
    }
+   # npm's package files can survive an interrupted browser download. The
+   # Playwright command is idempotent and restores the binary on every retry.
+   & $node (Join-Path $box 'node_modules/playwright/cli.js') install chromium
+   if ($LASTEXITCODE -ne 0) { throw 'Browser download failed.' }
  } finally { Pop-Location }
  foreach ($entry in @(@{Name='java';Folder='jdk-21.0.13+9';Archive='jdk.zip';Probe='bin/java.exe'},@{Name='ghidra';Folder='ghidra_12.1.4_PUBLIC';Archive='ghidra-12.1.4.zip';Probe='ghidraRun.bat'})) {
    $toolFolder=Join-Path $box $entry.Folder
@@ -252,7 +253,7 @@ try {
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.274')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.275')
  Write-SetupStatus 100 'Your AI is ready' 'complete'
  # Optional local models continue in a separate process after the installer closes.
  Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden
