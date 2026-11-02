@@ -82,33 +82,35 @@ def snapshot(folder: str | Path) -> str:
         for name in DOCUMENTS:
             path = root / ".local-ai" / name
             stamp = _document_state(path)
-            row = conn.execute("""SELECT body,mtime_ns,size,next_step,updated FROM task_documents
-                WHERE name=?""", (name,)).fetchone()
-            if (row is not None and (row["mtime_ns"], row["size"]) == stamp
-                    and time.time() - row["updated"] < CACHE_RECHECK_SECONDS):
-                documents[name] = row["body"]
-                steps[name] = row["next_step"]
-                stamps[name] = stamp
-                refreshed[name] = row["updated"]
-                continue
-            # An editor can replace a file while it is being read. Retry once
-            # so the cached text and its stat describe the same version.
-            body = ""
+            raw = b""
             stable = False
             for _ in range(2):
                 try:
-                    body = path.read_text(encoding="utf-8", errors="replace") if stamp != (-1, -1) else ""
+                    raw = path.read_bytes() if stamp != (-1, -1) else b""
                 except FileNotFoundError:
-                    body = ""
+                    raw = b""
                     stamp = (-1, -1)
                 after = _document_state(path)
                 if after == stamp:
                     stable = True
                     break
                 stamp = after
+            digest = hashlib.sha256(raw).hexdigest()
+            row = conn.execute("""SELECT body,digest,mtime_ns,size,next_step,updated FROM task_documents
+                WHERE name=?""", (name,)).fetchone()
+            if (stable and row is not None and (row["mtime_ns"], row["size"]) == stamp
+                    and row["digest"] == digest
+                    and time.time() - row["updated"] < CACHE_RECHECK_SECONDS):
+                documents[name] = row["body"]
+                steps[name] = row["next_step"]
+                stamps[name] = stamp
+                refreshed[name] = row["updated"]
+                continue
+            # Source bytes are checked every turn; parsed excerpts and next
+            # steps still come from SQLite when the exact bytes are unchanged.
+            body = raw.decode("utf-8", errors="replace")
             if not stable:
                 stamp = (-2, -2)  # Force a refresh after rapid concurrent edits.
-            digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
             excerpt = _brief(body, LIMITS[name])
             next_step = _next_step(body if name == "PLAN.md" else "",
                                    body if name == "PROGRESS.md" else "")

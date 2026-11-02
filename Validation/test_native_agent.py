@@ -469,6 +469,21 @@ def test_unchanged_task_checkpoint_reads_cached_sqlite_document():
             assert "Build the page" in task_context.snapshot(folder)
 
 
+def test_checkpoint_reads_same_size_user_instruction_edit_with_preserved_timestamp():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        notes = folder / ".local-ai/USER-REQUESTS.md"
+        notes.write_text("Use blue text", encoding="utf-8")
+        assert "Use blue text" in task_context.snapshot(folder)
+        before = notes.stat()
+        notes.write_text("Use gold text", encoding="utf-8")
+        os.utime(notes, ns=(before.st_atime_ns, before.st_mtime_ns))
+        updated = task_context.snapshot(folder)
+        assert "Use gold text" in updated
+        assert "Use blue text" not in updated
+
+
 def test_next_step_survives_when_large_plan_excerpt_omits_it():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
@@ -512,10 +527,6 @@ def test_task_checkpoint_periodically_detects_same_stamp_edit():
         before = plan.stat()
         plan.write_text("- [ ] Step two")
         os.utime(plan, ns=(before.st_atime_ns, before.st_mtime_ns))
-        import project_memory
-
-        with project_memory.connection(folder) as conn:
-            conn.execute("UPDATE task_documents SET updated=0 WHERE name='PLAN.md'")
         assert "Next step: Step two" in task_context.snapshot(folder)
 
 
