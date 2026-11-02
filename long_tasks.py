@@ -3129,7 +3129,7 @@ def ensure_ollama(model):
             raise
         import model_library
 
-        if not model_library.repair_main_alias():
+        if not model_library.repair_main_alias(alias=model):
             raise RuntimeError(
                 f"Configured local model {model} is missing and no verified replacement is ready."
             ) from exc
@@ -3142,7 +3142,7 @@ def ensure_ollama(model):
     if model is not None and "tools" not in info.get("capabilities", []):
         import model_library
 
-        if not model_library.repair_main_alias():
+        if not model_library.repair_main_alias(alias=model):
             raise RuntimeError(
                 f"Configured local model {model} cannot use tools and no verified replacement is ready."
             )

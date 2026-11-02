@@ -119,6 +119,15 @@ try {
  Write-Output 'Installing document, database, testing and model-connection tools...'
  & $python -m pip install --disable-pip-version-check -r (Join-Path $PSScriptRoot 'requirements-windows.txt')
  if ($LASTEXITCODE -ne 0) { throw 'Python tool installation failed.' }
+ # The Toolbox also imports OpenAI through its tool dependencies. Check the
+ # actual import because pip can consider a partially copied package installed.
+ if (-not (Test-CaleRunnable $python @('-c',$sdkProbe))) {
+   Write-SetupStatus 28 'Repairing the Toolbox model SDK'
+   & $python -m pip install --disable-pip-version-check --no-deps --force-reinstall 'openai==3.42.0'
+   if ($LASTEXITCODE -ne 0 -or -not (Test-CaleRunnable $python @('-c',$sdkProbe))) {
+     throw 'The Toolbox model SDK is incomplete after repair.'
+   }
+ }
  # Crawl4AI uses Python Playwright, separate from the JavaScript MCP browser.
  Write-SetupStatus 29 'Downloading the local browser tools'
  & $python -m playwright install chromium --only-shell
@@ -262,7 +271,7 @@ try {
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
-[IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.343')
+[IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.344')
  Write-SetupStatus 100 'Your AI is ready' 'complete'
  # Optional local models continue in a separate process after the installer closes.
  Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden

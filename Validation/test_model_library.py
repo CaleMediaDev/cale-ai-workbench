@@ -203,6 +203,31 @@ class AutoModelTests(unittest.TestCase):
         self.assertEqual(created["from"], "cale-balanced")
         sync.assert_called_once_with(library.ROOT, "cale-local")
 
+    def test_main_repair_uses_fresh_configured_alias_after_catalog_was_imported(self):
+        catalog = {"main": {"alias": "cale-local"},
+                   "fast": {"alias": "cale-fast", "auto": True}}
+        tags = {"models": [{"name": "cale-fast:latest", "size": 6 * 2**30}]}
+        calls = []
+
+        def post(path, body, **_kwargs):
+            calls.append((path, body))
+            return ({"capabilities": ["tools"], "parameters": "num_ctx 65536\n"}
+                    if path == "/api/show" else {"status": "success"})
+
+        with (patch.object(library, "CATALOG", catalog),
+              patch.object(library, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+              patch.object(library, "model_ready", return_value=True),
+              patch("model_fitness.suitable", return_value=True),
+              patch("model_fitness.measured_speed", return_value=20),
+              patch.object(library, "post", side_effect=post),
+              patch.object(library, "record_main_source"),
+              patch.object(library, "owned_sources", return_value=set()),
+              patch("context_window.sync", return_value=65536)):
+            self.assertTrue(library.repair_main_alias(32, 12, alias="qwen3-coder-local"))
+        created = next(body for path, body in calls if path == "/api/create")
+        self.assertEqual(created["model"], "qwen3-coder-local")
+        self.assertEqual(catalog["main"]["alias"], "qwen3-coder-local")
+
     def test_existing_main_without_tools_is_replaced_by_tool_capable_model(self):
         catalog = {"main": {"alias": "cale-local"},
                    "fast": {"alias": "cale-fast", "auto": True}}

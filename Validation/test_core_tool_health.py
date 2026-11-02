@@ -44,6 +44,23 @@ def test_agent_sdk_probe_uses_managed_install_facts(tmp_path, monkeypatch):
     assert "Agent model SDK" in core_tool_health.missing(tmp_path, fresh=True)
 
 
+def test_toolbox_sdk_probe_catches_broken_music_runtime(tmp_path, monkeypatch):
+    ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+    ghidra.parent.mkdir(parents=True)
+    ghidra.touch()
+    toolbox = tmp_path / "Toolbox/python/Scripts/python.exe"
+    checked = []
+
+    def runnable(path, *args):
+        checked.append((path, args))
+        return path != toolbox
+
+    monkeypatch.setattr(core_tool_health, "_runnable", runnable)
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    assert core_tool_health.missing(tmp_path, fresh=True) == ["Toolbox model SDK"]
+    assert (toolbox, ("-c", core_tool_health.TOOLBOX_SDK_PROBE)) in checked
+
+
 def test_background_repair_waits_for_first_install(tmp_path, monkeypatch):
     monkeypatch.setattr(core_tool_health, "_last_repair", None)
     monkeypatch.setattr(core_tool_health, "_repair_thread", None)

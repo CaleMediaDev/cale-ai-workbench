@@ -745,7 +745,7 @@ def retire_slow_model(item):
     return True
 
 
-def repair_main_alias(ram=None, vram=None):
+def repair_main_alias(ram=None, vram=None, *, alias=None):
     """Replace a missing or painfully slow main alias with verified local weights.
 
     The router and Hermes configuration both address this stable alias. Deleting
@@ -760,7 +760,10 @@ def repair_main_alias(ram=None, vram=None):
     with urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
         tags = json.load(response)
     sizes = {entry["name"]: entry["size"] / 2**30 for entry in tags.get("models", [])}
-    main = CATALOG["main"]["alias"]
+    # The supervisor reads Hermes' current config for each run. This module
+    # may have been imported before that config changed, so use its requested
+    # alias when repairing the model the worker will actually call.
+    main = alias or CATALOG["main"]["alias"]
     current_size = sizes.get(main, sizes.get(main + ":latest", 0))
     if current_size and model_fitness.suitable(main, current_size, ram, vram):
         try:
@@ -771,7 +774,7 @@ def repair_main_alias(ram=None, vram=None):
                 return False
         except (OSError, ValueError):
             pass  # A listed alias still needs a verified tool-capable replacement.
-    if current_size and alias_update_waits_for_tasks(CATALOG["main"]):
+    if current_size and alias_update_waits_for_tasks({**CATALOG["main"], "alias": main}):
         return False
     candidates = []
     for profile, item in CATALOG.items():
@@ -794,7 +797,7 @@ def repair_main_alias(ram=None, vram=None):
     if not candidates:
         return False  # Keep an existing alias if no verified replacement exists.
     _, _, replacement = max(candidates)
-    previous_source = main_source_record()
+    previous_source = main_source_record() if main == CATALOG["main"]["alias"] else {}
     result = post("/api/create", {
         "model": main, "from": replacement, "stream": False,
         "parameters": {"num_ctx": 65536, "num_predict": 8192},
@@ -819,6 +822,7 @@ def repair_main_alias(ram=None, vram=None):
     if (previous_source.get("owned") and previous_source.get("source")
             and previous_source["source"] != replacement_source):
         queue_retired_main_source(previous_source["source"])
+    CATALOG["main"]["alias"] = main
     return True
 
 

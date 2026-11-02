@@ -91,6 +91,19 @@ try {
         }
         Write-Output 'Agent model SDK repaired.'
     }
+    # Music and other app tools run from Toolbox Python, not the agent venv.
+    # A partial SDK there can survive an ordinary pip install as "satisfied".
+    $toolPython=Join-Path $toolbox 'python/Scripts/python.exe'
+    if (-not (Test-CaleRunnable $toolPython @('-c',$sdkProbe))) {
+        if (-not (Test-CaleRunnable $toolPython @('-V'))) {
+            throw 'The Toolbox Python runtime is missing; resume the main installer.'
+        }
+        & $toolPython -m pip install --disable-pip-version-check --no-deps --force-reinstall 'openai==3.42.0'
+        if ($LASTEXITCODE -ne 0 -or -not (Test-CaleRunnable $toolPython @('-c',$sdkProbe))) {
+            throw 'The Toolbox model SDK is incomplete after repair.'
+        }
+        Write-Output 'Toolbox model SDK repaired.'
+    }
     Write-Output 'Managed core tools passed their checks.'
 } finally {
     $lock.ReleaseMutex()

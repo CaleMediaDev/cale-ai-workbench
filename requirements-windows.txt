@@ -37,6 +37,7 @@ opentelemetry-api==1.45.2
 psutil==7.2.2
 packaging==26.3
 pandas==3.1.0
+openai==3.42.0
 pdfminer.six==20260107
 pdfplumber==0.11.10
 pefile==2024.8.26

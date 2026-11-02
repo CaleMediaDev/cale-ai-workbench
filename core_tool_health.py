@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CHECK_INTERVAL = 300
 AGENT_SDK_PROBE = "from openai.types.shared_params.response_format_json_object import ResponseFormatJSONObject"
+TOOLBOX_SDK_PROBE = AGENT_SDK_PROBE
 _last_check = 0.0
 _cached_root: Path | None = None
 _cached_missing: list[str] = []
@@ -83,6 +84,9 @@ def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     agent_python = _agent_python(root)
     if agent_python is not None and not _runnable(agent_python, "-c", AGENT_SDK_PROBE):
         unavailable.append("Agent model SDK")
+    toolbox_python = box / "python/Scripts/python.exe"
+    if not _runnable(toolbox_python, "-c", TOOLBOX_SDK_PROBE):
+        unavailable.append("Toolbox model SDK")
     _cached_root, _cached_missing, _last_check = root, unavailable, time.monotonic()
     return list(unavailable)
 

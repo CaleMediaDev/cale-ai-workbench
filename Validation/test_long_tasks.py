@@ -41,7 +41,7 @@ class LongTaskTests(unittest.TestCase):
         with (patch("urllib.request.urlopen", side_effect=response),
               patch("model_library.repair_main_alias", return_value=True) as repair):
             task_module.ensure_ollama("cale-local")
-        repair.assert_called_once()
+        repair.assert_called_once_with(alias="cale-local")
         self.assertEqual(calls.count("http://127.0.0.1:11434/api/show"), 2)
 
     def test_existing_main_without_tools_is_repaired_before_task_dispatch(self):
