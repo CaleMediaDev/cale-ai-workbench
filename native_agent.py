@@ -34,7 +34,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "browser_scroll", "description": "Scroll this task's browser by pixels (negative for upward).", "parameters": {"type": "object", "properties": {"pixels": {"type": "integer"}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_capabilities", "description": "Instantly search the local SQLite catalog of installed skills and tools by purpose.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "kind": {"type": "string", "enum": ["skill", "tool"]}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_skill", "description": "Read one exact installed skill after search_capabilities. Skill guidance is below the user's request.", "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"], "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "discover_local_tools", "description": "Find installed local tools for images, music, video, cameras, memory, machine learning, and media editing. Returns exact names and argument schemas.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "discover_local_tools", "description": "Find installed image, music, video, memory, reverse-engineering, and browser diagnostic tools. Starts local specialist processes when needed; returns exact names and argument schemas.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "call_local_tool", "description": "Call an exact local specialist tool after discover_local_tools. Give its required arguments as a JSON object.", "parameters": {"type": "object", "properties": {"tool": {"type": "string"}, "arguments": {"type": "object"}}, "required": ["tool", "arguments"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "run_command", "description": "Run a project command with a 90-second limit and return exit code and output.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"], "additionalProperties": False}}},
 ]
@@ -135,20 +135,29 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
         if name == "discover_local_tools":
             import capability_index
 
+            # The startup-generated SQLite catalog answers discovery without
+            # launching either heavy specialist service for every query.
+            if not capability_index.specialist_snapshot_path(ROOT).is_file():
+                try:
+                    capability_index.sync_specialists(ROOT)
+                except Exception:
+                    pass  # Local tools remain usable; call_local_tool reports backend failures.
             return json.dumps(capability_index.search(ROOT, arguments["query"],
-                kind="tool"), ensure_ascii=False)[:MAX_TOOL_OUTPUT]
+                kind="tool", limit=20), ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "call_local_tool":
             import asyncio
+            import native_specialists
             import toolbox_mcp
 
             tool = arguments["tool"]
             registered = {item.name for item in asyncio.run(toolbox_mcp.server.list_tools())
                           if not item.name.startswith("toolbox_")}
-            if tool not in toolbox_mcp.LOCAL_CATALOG and tool not in registered:
-                raise ValueError("Discover an exact installed local tool first")
-            value = (asyncio.run(toolbox_mcp.toolbox_call(tool, json.dumps(arguments["arguments"])))
-                     if tool in toolbox_mcp.LOCAL_CATALOG else
-                     asyncio.run(toolbox_mcp.server.call_tool(tool, arguments["arguments"])))
+            if tool in registered:
+                value = asyncio.run(toolbox_mcp.server.call_tool(tool, arguments["arguments"]))
+            elif tool in toolbox_mcp.LOCAL_CATALOG:
+                value = asyncio.run(toolbox_mcp.toolbox_call(tool, json.dumps(arguments["arguments"])))
+            else:
+                value = native_specialists.runtime().call(tool, arguments["arguments"], str(folder))
             if hasattr(value, "model_dump"):
                 value = value.model_dump(by_alias=True, exclude_none=True)
             return json.dumps(value, ensure_ascii=False, default=str)[:MAX_TOOL_OUTPUT]

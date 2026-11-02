@@ -91,7 +91,11 @@ def _skill_files(root: Path):
             yield path
 
 
-def _registered_tools() -> list[dict]:
+def specialist_snapshot_path(root: str | Path) -> Path:
+    return Path(root).resolve() / "LongTasks" / "specialists.json"
+
+
+def _registered_tools(root: Path) -> list[dict]:
     """Discover direct local tools without launching specialist backends."""
     import native_agent
     import toolbox_mcp
@@ -110,6 +114,15 @@ def _registered_tools() -> list[dict]:
     for name, spec in toolbox_mcp.LOCAL_CATALOG.items():
         rows.append({"name": name, "description": spec["description"],
                      "schema": spec["inputSchema"]})
+    try:
+        snapshot = json.loads(specialist_snapshot_path(root).read_text(encoding="utf-8"))
+        for spec in snapshot.get("tools", []):
+            if (isinstance(spec, dict) and isinstance(spec.get("name"), str)
+                    and spec["name"].startswith(("rea.", "devtools."))
+                    and isinstance(spec.get("schema"), dict)):
+                rows.append(spec)
+    except (OSError, ValueError, TypeError):
+        pass
     return rows
 
 
@@ -148,7 +161,7 @@ def _sync_once(root: str | Path) -> dict:
             updated += _upsert(conn, {"id": identifier, "kind": "skill", "name": name,
                 "description": _description(body, name), "path": path.relative_to(root).as_posix(),
                 "schema": "{}", "body": body, "hash": hashlib.sha256(data).hexdigest()})
-        for tool in _registered_tools():
+        for tool in _registered_tools(root):
             identifier = "tool:" + tool["name"]
             current.add(identifier)
             tools += 1
@@ -182,6 +195,22 @@ def sync(root: str | Path) -> dict:
             if companion.exists():
                 os.replace(companion, Path(str(backup) + suffix))
         return _sync_once(root)
+
+
+def sync_specialists(root: str | Path) -> dict:
+    """Refresh the specialist schema cache once installed runtimes are ready."""
+    import native_specialists
+
+    root = Path(root).resolve()
+    catalog = native_specialists.runtime().catalog()
+    if not catalog["tools"]:
+        raise RuntimeError("No local specialist tools started: " + str(catalog["errors"]))
+    target = specialist_snapshot_path(root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".tmp")
+    temporary.write_text(json.dumps(catalog, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary, target)
+    return sync(root)
 
 
 def health(root: str | Path) -> dict:
@@ -245,4 +274,7 @@ def read_skill(root: str | Path, identifier: str) -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(sync(Path(__file__).resolve().parent)))
+    import sys
+
+    root = Path(__file__).resolve().parent
+    print(json.dumps(sync_specialists(root) if "--with-specialists" in sys.argv else sync(root)))

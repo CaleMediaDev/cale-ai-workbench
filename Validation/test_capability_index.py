@@ -1,5 +1,6 @@
 """The local skill and tool database stays searchable and rebuildable."""
 
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -46,3 +47,18 @@ def test_damaged_index_is_preserved_and_rebuilt():
         assert result["skills"] == 1 and result["tools"] == 1
         assert capability_index.health(root)["ok"]
         assert list(path.parent.glob("capabilities.sqlite3.corrupt-*"))
+
+
+def test_specialist_snapshot_joins_fast_tool_index():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        fixture(root)
+        snapshot = capability_index.specialist_snapshot_path(root)
+        snapshot.parent.mkdir(parents=True)
+        snapshot.write_text(json.dumps({"tools": [{"name": "devtools.list_pages",
+            "description": "List browser pages", "schema": {"type": "object"}},
+            {"name": "rea.list_strings", "description": "Inspect binary strings",
+             "schema": {"type": "object"}}]}), encoding="utf-8")
+        capability_index.sync(root)
+        assert capability_index.search(root, "browser pages", kind="tool")[0]["name"] == "devtools.list_pages"
+        assert capability_index.search(root, "binary strings", kind="tool")[0]["name"] == "rea.list_strings"
