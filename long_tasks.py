@@ -1282,17 +1282,24 @@ def legacy_fingerprint(folder):
     return digest.hexdigest()
 
 
+def standalone_audio_project(p):
+    """Identify a music deliverable without mistaking an app with audio for a song."""
+    brief = str(p.get("brief", ""))
+    return bool(
+        re.search(r"\b(song|music|rap|audio track|banger|dubstep|riddim|brostep|tearout)\b", brief, re.I)
+        and not re.search(r"\b(app|website|software|program|plugin)\b", brief, re.I)
+    )
+
+
 def verify_audio_handoff(p):
     """Independently check a standalone song when its worker omitted verify.ps1.
 
     This narrow fallback keeps an otherwise finished media task moving. Software
     projects still need their own behavioral test script.
     """
+    if not standalone_audio_project(p):
+        return None
     brief = str(p.get("brief", ""))
-    if not re.search(r"\b(song|music|rap|audio track|banger|dubstep|riddim|brostep|tearout)\b", brief, re.I):
-        return None
-    if re.search(r"\b(app|website|software|program|plugin)\b", brief, re.I):
-        return None
     folder = Path(p["folder"])
     audio = sorted(
         (path for location in (folder, folder / "Audio") if location.is_dir()
@@ -1386,14 +1393,27 @@ def recover_blocked_audio_review(p, snapshot=None):
     if snapshot.get("task", {}).get("status") != "blocked":
         return False
     summary = str(snapshot.get("latest_summary") or "")
-    if not ("review handoff was rejected" in summary.lower()
-            and re.search(r"\blisten(?:ing)?\b", summary, re.I)):
+    subjective_review = (
+        p.get("phase") == "review"
+        and re.search(r"\blisten(?:ing)?\b", summary, re.I)
+        and re.search(r"\b(favou?rite|prefer|judg\w*|taste|like best|which saved version)\b", summary, re.I)
+    )
+    rejected_listening_review = (
+        "review handoff was rejected" in summary.lower()
+        and re.search(r"\blisten(?:ing)?\b", summary, re.I)
+    )
+    if not (subjective_review or rejected_listening_review):
         return False
     if not worker_handoff_settled(snapshot):
         return False
-    audio_passed, audio_evidence = verify_audio_handoff(p) or (False, "This is not an audio task.")
-    if not audio_passed:
+    if not standalone_audio_project(p) or not song_versions(p["folder"]):
         return False
+    if (Path(p["folder"]) / ".local-ai/verify.ps1").is_file():
+        audio_evidence = "Playable song files are saved in the project folder."
+    else:
+        audio_passed, audio_evidence = verify_audio_handoff(p) or (False, "This is not an audio task.")
+        if not audio_passed:
+            return False
     passed, evidence = verify_project(p)
     if not passed:
         return False
@@ -1644,6 +1664,22 @@ def handle_handoff(p, task, snapshot=None):
     # A verified milestone is a safe point to refresh the index for the next worker.
     refresh_project_index(p)
     if p["phase"] == "build":
+        # A song is the deliverable itself. A second open-ended agent review can
+        # spend far longer than rendering the track, then ask the listener to
+        # choose a favorite while the task timer keeps running. The independent
+        # project check above is the completion gate; taste remains optional
+        # feedback on a finished task.
+        if standalone_audio_project(p) and song_versions(p["folder"]):
+            if p["card"]:
+                board("archive", p["card"])
+            update(
+                p["id"], card="", phase="review", status="ready_for_review",
+                failures=0, fingerprint=fingerprint(Path(p["folder"])),
+                detail=("Finished. The song and saved takes are ready to hear. "
+                        "Independent project checks passed. Listening feedback is optional; "
+                        "the checks do not establish subjective sound quality.\n" + evidence[-2000:]),
+            )
+            return
         # Fresh worker/context reviews the finished work against the original request.
         # Archive the implementation card after its worker has handed off. The
         # board retains its history, but cannot dispatch that old generation

@@ -1149,6 +1149,29 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(create.call_count, 1)
         self.assertEqual(board.call_args.args, ("archive", "build-card"))
 
+    def test_verified_song_finishes_without_an_open_ended_review_worker(self):
+        self.verify_script('Write-Output "song checks passed"; exit 0')
+        task_module.update(self.pid, brief="Make a 150 BPM dubstep song", card="song-card")
+        audio = self.base / "project/audio"
+        audio.mkdir()
+        with wave.open(str(audio / "finished.wav"), "wb") as recording:
+            recording.setnchannels(1)
+            recording.setsampwidth(2)
+            recording.setframerate(8000)
+            recording.writeframes(b"\x01\x00" * 8000)
+        with (
+            patch.object(task_module, "board") as board,
+            patch.object(task_module, "create_card") as create,
+        ):
+            task_module.handle_handoff(self.item(), {"id": "song-card", "status": "review"})
+        finished = self.item()
+        self.assertEqual(board.call_args.args, ("archive", "song-card"))
+        create.assert_not_called()
+        self.assertEqual(finished["status"], "ready_for_review")
+        self.assertEqual(finished["card"], "")
+        self.assertEqual(task_module.task_progress(finished), (100, "Finished"))
+        self.assertGreater(finished["finished"], 0)
+
     def test_review_requires_fresh_passing_checks(self):
         self.verify_script('Write-Output "assertions passed"; exit 0')
         task_module.update(self.pid, phase="review", card="test")
@@ -1206,6 +1229,50 @@ class LongTaskTests(unittest.TestCase):
         self.assertGreater(finished["finished"], 0)
         self.assertIn("not independently confirmed", finished["detail"])
         self.assertFalse(task_module.recover_blocked_audio_review(finished, snapshot))
+
+    def test_subjective_song_review_blocker_finishes_from_saved_master(self):
+        self.verify_script('Write-Output "audio checks passed"; exit 0')
+        task_module.update(
+            self.pid, brief="Make a dubstep song with female vocals",
+            phase="review", card="review-card", status="needs_input",
+        )
+        audio = self.base / "project/audio"
+        audio.mkdir()
+        with wave.open(str(audio / "master.wav"), "wb") as recording:
+            recording.setnchannels(1)
+            recording.setsampwidth(2)
+            recording.setframerate(8000)
+            recording.writeframes(b"\x01\x00" * 8000)
+        snapshot = {
+            "task": {"status": "blocked"},
+            "latest_summary": "Please listen to saved versions and identify which saved version you like best.",
+            "runs": [{"started_at": time.time() - 300, "ended_at": time.time() - 200}],
+        }
+        with (patch.object(task_module, "board") as board,
+              patch.object(task_module, "verify_project", return_value=(True, "checks passed"))):
+            self.assertTrue(task_module.recover_blocked_audio_review(self.item(), snapshot))
+        board.assert_called_once_with("archive", "review-card")
+        self.assertEqual(self.item()["status"], "ready_for_review")
+
+    def test_subjective_song_review_stays_open_when_checks_fail(self):
+        self.verify_script('exit 1')
+        task_module.update(
+            self.pid, brief="Make a dubstep song", phase="review",
+            card="review-card", status="needs_input",
+        )
+        audio = self.base / "project/audio"
+        audio.mkdir()
+        (audio / "master.mp3").write_bytes(b"saved but unverified")
+        snapshot = {
+            "task": {"status": "blocked"},
+            "latest_summary": "Please listen and choose your favorite take.",
+            "runs": [{"started_at": time.time() - 300, "ended_at": time.time() - 200}],
+        }
+        with (patch.object(task_module, "board") as board,
+              patch.object(task_module, "verify_project", return_value=(False, "failed"))):
+            self.assertFalse(task_module.recover_blocked_audio_review(self.item(), snapshot))
+        board.assert_not_called()
+        self.assertEqual(self.item()["status"], "needs_input")
 
     def test_concurrent_audio_completion_does_not_report_archive_failure(self):
         task_module.update(
