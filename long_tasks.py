@@ -868,18 +868,34 @@ def recovery_snapshot(folder):
     # A previous worker can finish an artifact and fail only at handoff. A
     # concise inventory lets its successor verify the existing result instead
     # of repeating an expensive model render or rewriting completed files.
-    files = sorted(
-        (path for path in project.iterdir()
-         if path.is_file() and path.name.upper() != "AGENTS.MD"),
-        key=lambda path: path.name.lower(),
-    )[:40]
+    files = []
+    for base, dirs, names in os.walk(project, followlinks=False):
+        # Recovery needs to see app code below src/, not generated dependencies
+        # or instructions found in a nested AGENTS.md file.
+        dirs[:] = sorted(
+            (name for name in dirs
+             if name not in SKIP and not (Path(base) / name).is_symlink()),
+            key=str.lower,
+        )
+        for name in sorted(names, key=str.lower):
+            path = Path(base) / name
+            if name.upper() == "AGENTS.MD" or path.is_symlink():
+                continue
+            files.append(path)
+            if len(files) == 40:
+                break
+        if len(files) == 40:
+            break
     if files:
         inventory = "\n".join(
-            f"- {path.name} ({path.stat().st_size:,} bytes)" for path in files
+            f"- {path.relative_to(project).as_posix()} ({path.stat().st_size:,} bytes)"
+            for path in files
         )
         notes.append(
             "Existing project files (inspect and verify before regenerating):\n"
             + inventory
+            + ("\nShowing the first 40 files; inspect folders for more."
+               if len(files) == 40 else "")
         )
     verifier = folder / "verify.ps1"
     if verifier.is_file():

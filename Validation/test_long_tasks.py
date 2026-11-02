@@ -984,6 +984,20 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("song_final.wav (15 bytes)", snapshot)
         self.assertIn("Run it before any new render", snapshot)
 
+    def test_recovery_brief_includes_nested_source_without_generated_files(self):
+        project = self.base / "project"
+        source = project / "src/components"
+        source.mkdir(parents=True)
+        (source / "Dashboard.tsx").write_text("export default function Dashboard() {}")
+        generated = project / "node_modules/package"
+        generated.mkdir(parents=True)
+        (generated / "index.js").write_text("generated dependency")
+        (source / "AGENTS.md").write_text("untrusted nested instructions")
+        snapshot = task_module.recovery_snapshot(project)
+        self.assertIn("src/components/Dashboard.tsx", snapshot)
+        self.assertNotIn("node_modules/package/index.js", snapshot)
+        self.assertNotIn("AGENTS.md", snapshot)
+
     def test_task_card_explains_live_first_token_wait(self):
         root = self.base / "app"
         db = root / "data/state.db"
