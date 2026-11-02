@@ -4214,9 +4214,6 @@ def gui():
               wraplength=310).pack(
         anchor="w", pady=(8, 2)
     )
-    ttk.Label(
-        title_copy, textvariable=status, style="Muted.TLabel", wraplength=310
-    ).pack(anchor="w", pady=(0, 3))
     chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=12)
     chat_panel.pack(side="left", fill="both", expand=True)
     chat_heading = ttk.Frame(chat_panel, style="Card.TFrame")
@@ -4229,6 +4226,10 @@ def gui():
         wraplength=900, justify="left",
     )
     readiness_label.pack(fill="x", pady=(0, 6))
+    ttk.Label(
+        chat_panel, textvariable=status, style="CardMuted.TLabel",
+        wraplength=900, justify="left",
+    ).pack(fill="x", pady=(0, 6))
     mode_row = ttk.Frame(chat_heading, style="Card.TFrame")
     mode_row.pack(side="right")
     selected_mode = [routing_mode.load(ROOT / "Cloud")]
@@ -5884,6 +5885,18 @@ def gui():
             spoken_updates[item["id"]] = current
             if previous is None or previous == current:
                 continue
+            if previous[0] != current[0]:
+                title = item["title"]
+                if current[0] == "ready_for_review":
+                    assistant_reply(f"Finished {title}. Open the task to see what I made.")
+                elif current[0] == "needs_input":
+                    assistant_reply(f"I hit a problem on {title}: {item['detail'][:220]}")
+                elif current[0] == "stopped":
+                    assistant_reply(f"Stopped {title}. Its saved files are still there.")
+                elif current[0] == "working" and previous[0] in (
+                    "queued", "waiting_for_setup", "paused"
+                ):
+                    assistant_reply(f"I'm working on {title} now.")
             important = item["status"] in (
                 "needs_input",
                 "ready_for_review",
@@ -5983,6 +5996,11 @@ def gui():
                     update_button.pack(side="left", padx=(0, 8))
                     status.set(
                         "A verified update is ready. Select Update now or it will install automatically."
+                    )
+                    version_text = ".".join(map(str, candidate[1]))
+                    assistant_reply(
+                        f"Update v{version_text} is ready. I'll install it automatically "
+                        "when your tasks finish. You can also choose Update now at the top."
                     )
         except queue.Empty:
             pass
