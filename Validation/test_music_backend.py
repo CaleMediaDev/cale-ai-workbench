@@ -477,6 +477,25 @@ def test_running_music_task_is_not_resubmitted_during_long_generation(tmp_path):
     assert submissions == 1
 
 
+def test_music_engine_progress_reaches_the_job_callback(tmp_path):
+    responses = iter([
+        {"code": 200, "data": {"task_id": "working"}},
+        {"data": [{"status": 0,
+                   "result": '[{"stage":"generating","progress":0.8}]'}]},
+        {"data": [{"status": 1,
+                   "result": '[{"file":"/v1/audio?path=working"}]'}]},
+    ])
+    progress = []
+    with (patch.object(music_backend, "start_server"),
+          patch.object(music_backend, "_request", side_effect=lambda *_a, **_k: next(responses)),
+          patch.object(music_backend, "urlopen", return_value=io.BytesIO(b"song")),
+          patch.object(music_backend.time, "sleep")):
+        music_backend.generate_music(
+            "jazz", str(tmp_path / "song.mp3"), on_progress=progress.append,
+        )
+    assert progress == [0.8]
+
+
 def test_repeatedly_lost_music_task_reports_error_without_two_hour_wait(tmp_path):
     submissions = 0
 
@@ -567,9 +586,11 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
         process.assert_called_once()
         def finish(*args):
             args[7]("server-task-1")
+            args[8](0.8)
             current = music_backend.music_job_status(started["job_id"])
             assert current["server_task_id"] == "server-task-1"
-            assert current["progress"] == 35
+            assert current["progress"] == 63
+            assert "audio 80%" in current["current"]
             return {"path": str(output)}
 
         with patch.object(music_backend, "generate_music", side_effect=finish), patch(

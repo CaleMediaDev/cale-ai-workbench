@@ -257,7 +257,7 @@ def start_server() -> bool:
 def _generate_music(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
     instrumental: bool = False, source_path: str = "",
-    existing_task_id: str = "", on_task_submitted=None,
+    existing_task_id: str = "", on_task_submitted=None, on_progress=None,
 ) -> dict:
     """Generate or cover music and save it to a new WAV/MP3/FLAC file."""
     if not prompt.strip():
@@ -329,6 +329,15 @@ def _generate_music(
         if row.get("status") == 2:
             raise RuntimeError("The local music engine could not finish this song.")
         if row.get("status") != 1:
+            if on_progress:
+                try:
+                    state = row.get("result") or "[]"
+                    details = json.loads(state) if isinstance(state, str) else state
+                    fraction = float(details[0]["progress"])
+                    if 0 <= fraction <= 1:
+                        on_progress(fraction)
+                except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+                    pass  # An older engine may not expose numerical progress.
             continue
         details = row.get("result") or "[]"
         files = json.loads(details) if isinstance(details, str) else details
@@ -363,13 +372,13 @@ def _generate_music(
 def generate_music(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
     instrumental: bool = False, source_path: str = "",
-    existing_task_id: str = "", on_task_submitted=None,
+    existing_task_id: str = "", on_task_submitted=None, on_progress=None,
 ) -> dict:
     """Reserve GPU space, then generate or resume a local music request."""
     with _music_gpu_lease():
         return _generate_music(
             prompt, output_path, lyrics, duration_seconds, instrumental,
-            source_path, existing_task_id, on_task_submitted,
+            source_path, existing_task_id, on_task_submitted, on_progress,
         )
 
 
@@ -828,7 +837,17 @@ def _run_job(job_id: str) -> None:
     _write_job(job_id, working)
 
     def remember_task(task_id: str) -> None:
-        _write_job(job_id, {**working, "server_task_id": task_id})
+        working["server_task_id"] = task_id
+        _write_job(job_id, working)
+
+    def remember_progress(fraction: float) -> None:
+        # The engine's 0..1 fraction covers audio generation only. Leave room
+        # for the separate vocal check and captioned-video render afterward.
+        percent = min(70, max(35, 35 + round(fraction * 35)))
+        if percent > working["progress"]:
+            working["progress"] = percent
+            working["current"] = f"Generating music locally · audio {round(fraction * 100)}%"
+            _write_job(job_id, working)
 
     import usage_history
 
@@ -859,7 +878,7 @@ def _run_job(job_id: str) -> None:
             result = generate_music(
                 info["prompt"], info["output_path"], lyrics,
                 info["duration_seconds"], info["instrumental"], info["source_path"],
-                info.get("server_task_id", ""), remember_task,
+                info.get("server_task_id", ""), remember_task, remember_progress,
             )
         working["result"] = result
         _write_job(job_id, working)

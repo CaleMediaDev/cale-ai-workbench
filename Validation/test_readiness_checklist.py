@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import sqlite3
 import sys
 import time
@@ -183,6 +184,24 @@ def test_background_checks_do_not_probe_a_model_with_real_usage(tmp_path):
          patch.object(readiness_checklist, "_probe_local_ai") as probe:
         readiness_checklist.run_optional_checks(tmp_path, test_local=True)
     probe.assert_not_called()
+
+
+def test_background_checks_defer_gpu_model_probes_during_music(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    (state / f"music-gpu-active-{os.getpid()}.json").write_text(
+        json.dumps({"pid": os.getpid()}))
+    image = tmp_path / "assets/cale-logo.png"
+    image.parent.mkdir()
+    image.write_bytes(b"bundled image")
+    with (patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
+            b'{"models":[{"name":"cale-fast:latest","size":1}]}')),
+          patch.object(readiness_checklist, "_media_probe", return_value={"ok": False}) as media,
+          patch.object(readiness_checklist, "_probe_local_ai") as local):
+        readiness_checklist.run_optional_checks(tmp_path, test_local=True)
+    local.assert_not_called()
+    assert all(call.args[1] != "recognize_image" for call in media.call_args_list)
 
 
 def test_image_recognition_check_uses_bundled_image_and_requires_answer(tmp_path):
