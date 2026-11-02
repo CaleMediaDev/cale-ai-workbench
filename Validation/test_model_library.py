@@ -16,6 +16,15 @@ import configure_install
 
 
 class AutoModelTests(unittest.TestCase):
+    def setUp(self):
+        # The installed self-check runs beside real user tasks. Most model
+        # fixtures describe an idle PC; keep them independent of whichever
+        # project happens to start while pytest is running. Tests of active
+        # task behavior override this patch with their own project list.
+        self.projects_patch = patch("long_tasks.projects", return_value=[])
+        self.projects_patch.start()
+        self.addCleanup(self.projects_patch.stop)
+
     def test_missing_vision_alias_is_rebuilt_only_from_local_vision_weights(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
