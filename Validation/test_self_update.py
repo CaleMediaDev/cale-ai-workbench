@@ -209,7 +209,7 @@ class SelfUpdateTests(unittest.TestCase):
             reopen.assert_called_once()
             self.assertIn("disk full", (root / "Updates/last-error.txt").read_text())
 
-    def test_second_updater_skips_release_already_applied(self):
+    def test_second_updater_reopens_desktop_after_release_already_applied(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             (root / ".cale-ai-install").write_text("Cale AI Workbench 0.5.0")
@@ -220,7 +220,7 @@ class SelfUpdateTests(unittest.TestCase):
                   patch.object(self_update, "reopen_desktop") as reopen):
                 self_update.run_update(root / "release.zip", (0, 5, 0), 123)
             apply.assert_not_called()
-            reopen.assert_not_called()
+            reopen.assert_called_once()
 
     def test_paused_task_waits_for_its_real_worker_before_update(self):
         with tempfile.TemporaryDirectory() as folder:

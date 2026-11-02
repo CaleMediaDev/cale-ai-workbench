@@ -646,7 +646,12 @@ def run_update(archive: Path, version: tuple[int, int, int], parent_pid: int) ->
     wait_for_exit(parent_pid)
     with update_lock():
         if current_version() >= version:
-            return  # Another window already installed this release and reopened.
+            # A second updater can reach here after the first installed the
+            # release but while the old GUI still held its single-instance
+            # lock. Its relaunch then exits, and this updater must supply the
+            # replacement window after its own parent has closed.
+            reopen_desktop()
+            return
         try:
             apply(archive, version)
             restart_router_after_update()
