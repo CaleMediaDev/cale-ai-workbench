@@ -183,19 +183,23 @@ class LongTaskTests(unittest.TestCase):
         with (tempfile.TemporaryDirectory() as folder,
               patch.object(task_module, "STATE", Path(folder)),
               patch.object(task_module, "gui") as gui,
+              patch.object(task_module, "prepare_desktop") as prepare,
               patch.object(task_module, "focus_existing_window") as focus,
               patch.object(msvcrt, "locking", side_effect=OSError("busy"))):
             task_module.gui_single_instance()
         gui.assert_not_called()
+        prepare.assert_not_called()
         focus.assert_called_once()
 
     def test_desktop_lock_releases_after_window_closes(self):
         with (tempfile.TemporaryDirectory() as folder,
               patch.object(task_module, "STATE", Path(folder)),
-              patch.object(task_module, "gui") as gui):
+              patch.object(task_module, "gui") as gui,
+              patch.object(task_module, "prepare_desktop") as prepare):
             task_module.gui_single_instance()
             task_module.gui_single_instance()
         self.assertEqual(gui.call_count, 2)
+        self.assertEqual(prepare.call_count, 2)
 
     def test_spoken_replay_outcome_is_saved_for_chat_after_playback(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(

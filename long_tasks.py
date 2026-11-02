@@ -6569,9 +6569,24 @@ def focus_existing_window():
     return bool(user32.SetForegroundWindow(window))
 
 
+def prepare_desktop():
+    """Run startup maintenance only for the process owning the GUI lock."""
+    try:
+        sync_hermes_source_patch()
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+        (ROOT / "Updates").mkdir(exist_ok=True)
+        (ROOT / "Updates/hermes-source-error.txt").write_text(str(exc), encoding="utf-8")
+    try:
+        skill_catalog.sync(ROOT)
+    except (OSError, ValueError) as exc:
+        (ROOT / "Updates").mkdir(exist_ok=True)
+        (ROOT / "Updates/skills-error.txt").write_text(str(exc), encoding="utf-8")
+
+
 def gui_single_instance():
     """Keep one visible desktop shell; release the lock when its window closes."""
     if os.name != "nt":
+        prepare_desktop()
         return gui()
     import msvcrt
 
@@ -6588,6 +6603,7 @@ def gui_single_instance():
             focus_existing_window()
             return
         try:
+            prepare_desktop()
             gui()
         finally:
             lock.seek(0)
@@ -6598,15 +6614,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--monitor", action="store_true")
     args = parser.parse_args()
-    if not args.monitor:
-        try:
-            sync_hermes_source_patch()
-        except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
-            (ROOT / "Updates").mkdir(exist_ok=True)
-            (ROOT / "Updates/hermes-source-error.txt").write_text(str(exc), encoding="utf-8")
-        try:
-            skill_catalog.sync(ROOT)
-        except (OSError, ValueError) as exc:
-            (ROOT / "Updates").mkdir(exist_ok=True)
-            (ROOT / "Updates/skills-error.txt").write_text(str(exc), encoding="utf-8")
     monitor() if args.monitor else gui_single_instance()
