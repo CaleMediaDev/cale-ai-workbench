@@ -70,6 +70,9 @@ def configure(root, profile):
                         "Downloading your main AI model",
                     )
                 last = time.monotonic()
+    import model_library
+
+    model_library.probe_tool_use(selection["source"])
     body = {
         "model": "cale-local",
         "from": selection["source"],
@@ -96,9 +99,6 @@ def configure(root, profile):
             raise RuntimeError(data["error"])
     # Keep the full main window, and also prepare a weight-sharing routine
     # alias so shorter work need not reserve the largest KV cache.
-    import model_library
-
-    model_library.probe_tool_use(selection["source"])
     model_library.ensure_main_standard()
     vision_source = "qwen3.5:9b"
     setup_progress(root, 75, "Downloading the vision model")

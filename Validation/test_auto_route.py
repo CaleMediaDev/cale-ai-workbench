@@ -244,6 +244,18 @@ class AutoRouteTests(unittest.TestCase):
         )})
         self.assertEqual(task_size(messages), "deep")
 
+    def test_song_render_followup_uses_fast_tool_model(self):
+        prompt = project_prompt({
+            "title": "Tahoe anthem", "folder": "C:/Tasks/music",
+            "brief": "150 BPM wobbly dubstep anthem with female singing and three drops.",
+        })
+        messages = [{"role": "user", "content": prompt},
+                    {"role": "assistant", "tool_calls": [{
+                        "function": {"name": "mcp__toolbox__start_music_job"}}]},
+                    {"role": "tool", "tool_name": "mcp__toolbox__start_music_job",
+                     "content": "Job started"}]
+        self.assertEqual(task_size(messages), "quick")
+
     def test_short_tool_work_stays_on_middle_model_without_project_marker(self):
         messages = [{"role": "user", "content": "Analyze the attached data."}]
         for _ in range(4):

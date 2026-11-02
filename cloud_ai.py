@@ -480,6 +480,13 @@ def retry_derestricted(payload, result, original_model="", deadline=None):
     """
     if not is_refusal(result):
         return result
+    if routing_mode.load_scope(STATE) == "cloud_only":
+        return result
+    import model_fitness
+    import model_library
+
+    ram = model_library.total_ram_gb()
+    vram = model_fitness.gpu_vram_gb()
     profiles = (
         ("permissive", "llama", "glm", "permissive_small", "gptoss")
         if task_size(payload.get("messages", [])) == "deep"
@@ -492,6 +499,8 @@ def retry_derestricted(payload, result, original_model="", deadline=None):
         if not item or not candidate_approved(item):
             continue
         model = item["alias"]
+        if not model_fitness.suitable(model, item.get("download_gb", 0), ram, vram):
+            continue
         if model == original_model:
             continue
         try:

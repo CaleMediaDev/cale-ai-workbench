@@ -543,7 +543,7 @@ class CloudTests(unittest.TestCase):
         self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
 
     def test_any_refusal_tries_installed_derestricted_model(self):
-        alias = cloud.CATALOG["permissive"]["alias"]
+        alias = cloud.CATALOG["permissive_small"]["alias"]
 
         def response(url, payload, **kwargs):
             if url.endswith("/api/show"):
@@ -551,7 +551,8 @@ class CloudTests(unittest.TestCase):
                 return {"capabilities": ["completion", "tools"]}
             return REFUSAL if payload["model"] == cloud.LOCAL_MODEL else ANSWER
 
-        with patch.object(cloud, "post", side_effect=response) as post:
+        with (patch.object(cloud, "candidate_approved", return_value=True),
+              patch.object(cloud, "post", side_effect=response) as post):
             result = cloud.Router().complete(REQUEST)
         self.assertEqual(result, ANSWER)
         self.assertEqual(post.call_args.args[1]["model"], alias)
@@ -600,7 +601,7 @@ class CloudTests(unittest.TestCase):
             cloud.Router().complete(dict(
                 REQUEST, messages=[{"role": "user", "content": "Build a working website"}]
             ))
-            self.assertEqual(post.call_args.args[1]["model"], large)
+            self.assertEqual(post.call_args.args[1]["model"], small)
 
     def test_small_derestricted_stays_reserved_for_refusals(self):
         self.candidates.stop()
@@ -634,11 +635,12 @@ class CloudTests(unittest.TestCase):
             return REFUSAL if payload["model"] == cloud.LOCAL_MODEL else ANSWER
 
         with (
-            patch.object(cloud, "DERESTRICTED_PROFILES", ("gptoss", "permissive")),
+            patch.object(cloud, "DERESTRICTED_PROFILES", ("gptoss", "permissive_small")),
+            patch.object(cloud, "candidate_approved", return_value=True),
             patch.object(cloud, "post", side_effect=response),
         ):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
-        self.assertEqual(seen, [cloud.LOCAL_MODEL, cloud.PERMISSIVE_MODEL])
+        self.assertEqual(seen, [cloud.LOCAL_MODEL, cloud.CATALOG["permissive_small"]["alias"]])
 
     def test_refusal_detection_accepts_policy_field_without_reinterpreting_tools(self):
         self.assertTrue(cloud.is_refusal(REFUSAL))
@@ -663,7 +665,7 @@ class CloudTests(unittest.TestCase):
         ):
             result = cloud.Router().complete(REQUEST)
         self.assertEqual(result, ANSWER)
-        self.assertEqual(post.call_args.args[1]["model"], cloud.PERMISSIVE_MODEL)
+        self.assertEqual(post.call_args.args[1]["model"], cloud.CATALOG["gptoss"]["alias"])
 
     def test_slow_balanced_task_uses_lighter_chatgpt_model(self):
         with (

@@ -202,6 +202,14 @@ def task_size(messages):
         and not COMPLEX_PROJECT.search(intent)
         and not MUSIC_VIDEO.search(intent)
     ):
+        started_render = any(
+            str(msg.get("tool_name") or "").endswith("start_music_job") or
+            any(str(call.get("function", {}).get("name", "")).endswith("start_music_job")
+                for call in (msg.get("tool_calls") or []))
+            for msg in messages if isinstance(msg, dict)
+        )
+        if started_render and not review_worker:
+            return "quick"
         # A resumed song with saved artifacts is review/repair work. The fast
         # model can render a fresh simple jingle, but it repeatedly fumbles
         # Windows file paths and verification commands in this phase.
