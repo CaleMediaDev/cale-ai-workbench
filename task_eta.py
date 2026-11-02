@@ -51,13 +51,16 @@ def total_time(created: float, updated: float, status: str,
 
 
 def music_estimate_seconds(jobs_dir: Path, duration_seconds: int,
-                           instrumental: bool) -> int | None:
+                           instrumental: bool, source_path: str = "") -> int | None:
     """Estimate a local song from recent completed renders on this PC.
 
     The median resists first-use downloads and other unusually slow renders.
-    Song length scales the measured render time while preserving startup time.
+    Prefer comparable song lengths. Scaling many long renders down to a short
+    request can make its countdown implausibly optimistic, especially when
+    transcription and captioned video have a nearly fixed setup cost.
     """
     samples = []
+    comparable = []
     try:
         paths = sorted(jobs_dir.glob("*.json"), key=lambda path: path.stat().st_mtime,
                        reverse=True)[:80]
@@ -69,14 +72,21 @@ def music_estimate_seconds(jobs_dir: Path, duration_seconds: int,
             length = float(job.get("duration_seconds") or 0)
             elapsed = float(job.get("finished") or 0) - float(job.get("requested_at") or job.get("created") or 0)
             if (job.get("status") != "complete" or not length or
-                    bool(job.get("instrumental")) != instrumental or not 2 <= elapsed <= 3600):
+                    bool(job.get("instrumental")) != instrumental or
+                    bool(job.get("source_path")) != bool(source_path) or
+                    int(job.get("vocal_retry") or 0) > 0 or
+                    not 2 <= elapsed <= 3600):
                 continue
             ratio = max(0.25, min(4.0, duration_seconds / length))
             samples.append(15 + max(0, elapsed - 15) * ratio)
+            if abs(length - duration_seconds) <= max(15, duration_seconds * 0.25):
+                comparable.append(elapsed)
             if len(samples) == 20:
                 break
         except (OSError, ValueError, TypeError, OverflowError):
             continue
+    if len(comparable) >= 2:
+        return round(statistics.median(comparable))
     return round(statistics.median(samples)) if len(samples) >= 3 else None
 
 

@@ -807,7 +807,9 @@ def start_music_job(
     job_id = uuid.uuid4().hex
     import task_eta
 
-    estimate = task_eta.music_estimate_seconds(JOBS, duration_seconds, bool(instrumental))
+    estimate = task_eta.music_estimate_seconds(
+        JOBS, duration_seconds, bool(instrumental), source_path,
+    )
     started = time.time()
     info = {
         "job_id": job_id, "status": "queued", "current": "Starting local music", "progress": 5,

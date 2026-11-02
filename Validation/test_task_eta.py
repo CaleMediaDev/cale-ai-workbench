@@ -65,3 +65,25 @@ def test_music_eta_uses_completed_local_songs_and_explains_overrun(tmp_path):
         "Taking longer than recent songs · still working"
     )
     assert task_eta.music_countdown({**current, "status": "complete"}, now=2100) == ""
+
+
+def test_short_vocal_eta_prefers_similar_songs_over_scaled_long_renders(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    for index in range(6):
+        (jobs / f"long-{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 180, "created": 1000,
+            "finished": 1060,
+        }), encoding="utf-8")
+    for index, elapsed in enumerate((54, 155)):
+        (jobs / f"short-{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 60, "created": 1000,
+            "finished": 1000 + elapsed,
+        }), encoding="utf-8")
+    (jobs / "retry.json").write_text(json.dumps({
+        "status": "complete", "instrumental": False, "vocal_retry": 1,
+        "duration_seconds": 60, "created": 1000, "finished": 1010,
+    }), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(jobs, 60, False) == 104
