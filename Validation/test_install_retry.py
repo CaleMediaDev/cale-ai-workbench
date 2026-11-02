@@ -39,9 +39,17 @@ class InstallRetryTests(unittest.TestCase):
 
     def test_permanent_preflight_error_does_not_repeat(self):
         result, attempts = self.run_fixture(
+            "param([string]$Destination,[string]$Profile)\n"
             "$counter=Join-Path $PSScriptRoot 'attempts.txt'\n"
             "Add-Content $counter 'attempt'\n"
-            "Write-Error 'Not enough free disk space for the models'; exit 6\n"
+            "$statusDir=Join-Path $Destination 'LongTasks'\n"
+            "New-Item -ItemType Directory -Path $statusDir -Force | Out-Null\n"
+            "$started=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()\n"
+            "$status=@{status='error';current='Setup needs attention: Not enough free disk space for the models';installer_started=$started} | ConvertTo-Json -Compress\n"
+            "[IO.File]::WriteAllText((Join-Path $statusDir 'install-progress.json'),$status)\n"
+            "Write-Error 'Not enough free disk space for the models'\n"
+            "1..40 | ForEach-Object { Write-Output 'Other setup details' }\n"
+            "exit 6\n"
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(attempts.count("attempt"), 1)

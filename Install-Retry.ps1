@@ -17,6 +17,7 @@ for ($attempt=1; $attempt -le $MaxAttempts; $attempt++) {
  # Windows PowerShell turns redirected native stderr into ErrorRecords. Keep
  # streaming those lines rather than terminating the retry runner itself.
  $ErrorActionPreference='Continue'
+ $attemptStarted=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $backend -Destination $Destination -Profile $Profile 2>&1 | ForEach-Object {
    $line=[string]$_
    Write-Output $line
@@ -27,6 +28,19 @@ for ($attempt=1; $attempt -le $MaxAttempts; $attempt++) {
  $ErrorActionPreference='Stop'
  if ($code -eq 0) { Write-Output 'Setup finished successfully.'; exit 0 }
  $lastError=$recent -join "`n"
+ # The backend records its actual failure beside the installation. Prefer
+ # that structured result to native stderr, whose formatting can vary under
+ # Windows PowerShell and may lose the decisive line in a long error trace.
+ $statusPath=Join-Path $Destination 'LongTasks/install-progress.json'
+ if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+   try {
+     $status=Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+     if ($status.status -eq 'error' -and
+         [double]$status.installer_started -ge ($attemptStarted-1)) {
+       $lastError=[string]$status.current+"`n"+$lastError
+     }
+   } catch { }
+ }
  # These errors cannot be fixed by repeating the same install automatically.
  if ($lastError -match '(?i)requires 64-bit x86 Windows|needs about \d+ GB RAM|not enough free disk space|choose an empty folder|checksum failed') {
    Write-Error "Setup stopped because the PC or download needs attention (exit $code)."
