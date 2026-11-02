@@ -3885,17 +3885,20 @@ def gui():
         text=("Optional: connect your own provider account. Cale may send task text and tool results "
               "there when it is faster. Confirm your account is on its free plan first; "
               "a paid account key can still incur charges. Hugging Face includes only a tiny monthly "
-              "credit, so Cale allows at most two calls there each month. NVIDIA's free hosted "
+              "credit, so Cale allows at most two calls there each month. Cerebras now offers only "
+              "one-time trial credit, so Cale no longer uses it automatically. NVIDIA's free hosted "
               "endpoints are for prototyping. Go offline to keep all work on this PC."),
         style="Muted.TLabel", wraplength=720,
     ).pack(anchor="w", pady=(0, 7))
-    provider_names = {spec["name"]: code for code, spec in cloud_providers.PROVIDERS.items()}
+    saved_provider_keys = credentials().get("provider_keys") or {}
+    provider_names = {spec["name"]: code for code, spec in cloud_providers.PROVIDERS.items()
+                      if spec.get("free_eligible", True) or code in saved_provider_keys}
     provider_name = tk.StringVar(value="Groq")
     provider_row = ttk.Frame(super_page)
     provider_row.pack(anchor="w", fill="x")
     ttk.Combobox(provider_row, textvariable=provider_name, state="readonly", width=25,
                  values=list(provider_names)).pack(side="left", padx=(0, 8))
-    ttk.Button(provider_row, text="Get my free key ↗",
+    ttk.Button(provider_row, text="Open provider account ↗",
                command=lambda: webbrowser.open(cloud_providers.PROVIDERS[
                    provider_names[provider_name.get()]]["signup"])).pack(side="left")
     cloudflare_account = tk.StringVar()

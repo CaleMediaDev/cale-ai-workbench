@@ -18,7 +18,9 @@ PROVIDERS = {
     "google": {"name": "Google AI Studio", "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "model": "gemini-3.8-flash", "context": 1000000, "rpm": 5, "daily": 100, "speed": 140, "vision": True, "signup": "https://aistudio.google.com/api-keys"},
     "groq": {"name": "Groq", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "openai/gpt-oss-20b", "context": 131072, "rpm": 10, "daily": 200, "speed": 900, "signup": "https://console.groq.com/keys"},
     "nvidia": {"name": "NVIDIA NIM", "url": "https://integrate.api.nvidia.com/v1/chat/completions", "model": "meta/llama-3.3-70b-instruct", "context": 65536, "rpm": 5, "daily": 100, "speed": 120, "signup": "https://build.nvidia.com/"},
-    "cerebras": {"name": "Cerebras", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "qwen-3.8-27b", "context": 8192, "rpm": 10, "daily": 200, "speed": 1200, "signup": "https://cloud.cerebras.ai/"},
+    # Cerebras now grants a one-time $5 trial, not recurring free inference.
+    # Keep the entry so existing users can disconnect a previously saved key.
+    "cerebras": {"name": "Cerebras (trial only)", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "qwen-3.8-27b", "context": 8192, "rpm": 10, "daily": 0, "speed": 1200, "free_eligible": False, "signup": "https://cloud.cerebras.ai/"},
     "mistral": {"name": "Mistral AI", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest", "context": 32000, "rpm": 5, "daily": 100, "speed": 100, "vision": True, "signup": "https://console.mistral.ai/"},
     # The no-payment-method tier allows 20 requests/day for this model.
     "sambanova": {"name": "SambaNova Cloud", "url": "https://api.sambanova.ai/v1/chat/completions", "model": "Meta-Llama-3.3-70B-Instruct", "context": 32000, "rpm": 10, "daily": 18, "speed": 400, "signup": "https://cloud.sambanova.ai/apis"},
@@ -31,6 +33,9 @@ PROVIDERS = {
     # Aion's free account has a 20K-token daily limit. Reserve at most half
     # of that here, because other use and provider-side accounting are unknown.
     "aion": {"name": "Aion Labs", "url": "https://api.aionlabs.ai/v1/chat/completions", "model": "aion-labs/aion-3.5-mini", "context": 262144, "rpm": 5, "daily": 8, "daily_tokens": 10000, "speed": 80, "max_tokens": 2048, "signup": "https://www.aionlabs.ai/"},
+    # Merkium documents permanent free API use and OpenAI-format tool calls.
+    # Its 2-second spacing is satisfied by this more conservative 5 RPM cap.
+    "merkium": {"name": "Merkium", "url": "https://chat.merkium.nl/api/v1/chat/completions", "model": "ganymede-1.1", "context": 1000000, "rpm": 5, "daily": 40, "speed": 80, "max_tokens": 4096, "signup": "https://chat.merkium.nl/"},
     # Cohere documents Command A+ as free until its trial/production limits.
     "cohere": {"name": "Cohere", "url": "https://api.cohere.com/v2/chat", "model": "command-a-plus-05-2026", "context": 128000, "rpm": 5, "daily": 30, "speed": 80, "vision": True, "signup": "https://dashboard.cohere.com/api-keys"},
     "huggingface": {"name": "Hugging Face", "url": "https://router.huggingface.co/v1/chat/completions", "model": "openai/gpt-oss-120b:fastest", "context": 8192, "rpm": 2, "daily": 2, "monthly": 2, "speed": 150, "max_tokens": 1024, "signup": "https://huggingface.co/settings/tokens"},
@@ -89,6 +94,10 @@ def request_body(provider: str, payload: dict) -> dict:
         for field in ("tool_choice", "top_p", "seed", "response_format", "parallel_tool_calls"):
             body.pop(field, None)
         body["reasoning_effort"] = "low"
+    if provider == "merkium":
+        # Only send parameters its chat-completions documentation lists.
+        for field in ("seed", "response_format", "parallel_tool_calls"):
+            body.pop(field, None)
     return body
 
 

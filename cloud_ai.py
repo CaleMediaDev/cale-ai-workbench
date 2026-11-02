@@ -168,6 +168,8 @@ def save_provider_key(provider, key, confirmed_free=False, account_id=""):
     """Connect a person's own free-plan key; never package it with the app."""
     if provider not in cloud_providers.PROVIDERS:
         raise ValueError("Unknown provider")
+    if not cloud_providers.PROVIDERS[provider].get("free_eligible", True):
+        raise ValueError("This provider no longer has a recurring free route.")
     if not confirmed_free:
         raise ValueError("Confirm this account is on the provider's free plan first.")
     if not isinstance(key, str) or not 12 <= len(key.strip()) <= 500:
@@ -863,7 +865,8 @@ class Router:
         keys = account.get("provider_keys") or {}
         confirmed = account.get("free_confirmed") or {}
         connected = [(provider, spec) for provider, spec in cloud_providers.PROVIDERS.items()
-                     if keys.get(provider) and confirmed.get(provider)]
+                     if spec.get("free_eligible", True)
+                     and keys.get(provider) and confirmed.get(provider)]
         measured_speeds = {
             provider: usage_history.recent_provider_speed(provider, spec["speed"])
             for provider, spec in connected

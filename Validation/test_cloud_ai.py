@@ -287,6 +287,8 @@ class CloudTests(unittest.TestCase):
                            "Qwen/Qwen3.5-35B-A3B"),
             "aion": ("https://api.aionlabs.ai/v1/chat/completions",
                      "aion-labs/aion-3.5-mini"),
+            "merkium": ("https://chat.merkium.nl/api/v1/chat/completions",
+                         "ganymede-1.1"),
         }
         for provider, (url, model) in expected.items():
             with self.subTest(provider=provider):
@@ -300,6 +302,31 @@ class CloudTests(unittest.TestCase):
                 sent = fetch.call_args.args[0]
                 self.assertEqual(sent.full_url, url)
                 self.assertEqual(json.loads(sent.data)["model"], model)
+
+    def test_merkium_keeps_tools_and_stays_within_its_free_model_contract(self):
+        request = {**REQUEST, "max_tokens": 9000, "seed": 42,
+                   "response_format": {"type": "json_object"},
+                   "parallel_tool_calls": True,
+                   "tools": [{"type": "function", "function": {"name": "read_file"}}]}
+        body = cloud_providers.request_body("merkium", request)
+        self.assertEqual(body["model"], "ganymede-1.1")
+        self.assertEqual(body["max_tokens"], 4096)
+        self.assertEqual(body["tools"], request["tools"])
+        for unsupported in ("seed", "response_format", "parallel_tool_calls"):
+            self.assertNotIn(unsupported, body)
+        self.assertEqual(cloud_providers.PROVIDERS["merkium"]["rpm"], 5)
+
+    def test_cerebras_trial_credit_is_not_a_recurring_free_route(self):
+        with self.assertRaisesRegex(ValueError, "no longer has a recurring free route"):
+            cloud.save_provider_key("cerebras", "trial-only-test-key", True)
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        with (patch.object(cloud, "credentials", return_value={
+                  "provider_keys": {"cerebras": "previously-saved-key"},
+                  "free_confirmed": {"cerebras": True}}),
+              patch.object(cloud_providers, "complete") as remote):
+            with self.assertRaisesRegex(RuntimeError, "Free cloud only is selected"):
+                cloud.Router().complete(REQUEST)
+        remote.assert_not_called()
 
     def test_hugging_face_has_small_monthly_budget_and_short_output(self):
         request = dict(REQUEST, max_tokens=8192)
