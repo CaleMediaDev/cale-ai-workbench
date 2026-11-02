@@ -379,6 +379,26 @@ def test_next_step_survives_when_large_plan_excerpt_omits_it():
         assert "Next step: Important middle step" in task_context.snapshot(folder)
 
 
+def test_checkpoint_uses_latest_progress_action_until_plan_is_updated():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        plan = folder / ".local-ai/PLAN.md"
+        progress = folder / ".local-ai/PROGRESS.md"
+        plan.write_text("- [ ] Old plan action", encoding="utf-8")
+        progress.write_text("Next: Check the first draft.\n"
+                            "Draft checked. Next step: Fix the navigation.\n",
+                            encoding="utf-8")
+        assert "Next step: Fix the navigation." in task_context.snapshot(folder)
+        progress.write_text(progress.read_text(encoding="utf-8") +
+                            "Navigation fixed. Up next: Run the browser verifier.\n",
+                            encoding="utf-8")
+        assert "Next step: Run the browser verifier." in task_context.snapshot(folder)
+        plan.write_text("- [x] Old plan action\n- [ ] Publish the checked page",
+                        encoding="utf-8")
+        assert "Next step: Publish the checked page" in task_context.snapshot(folder)
+
+
 def test_task_checkpoint_periodically_detects_same_stamp_edit():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
