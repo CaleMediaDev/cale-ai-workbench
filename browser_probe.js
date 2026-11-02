@@ -1,5 +1,5 @@
-// Validate the app-owned JavaScript tools and launch a disposable local browser.
-// This never connects to the user's Chrome profile or opens a web page.
+// Validate the app-owned JavaScript tools and exercise a disposable browser.
+// The test page is a data URL; no network or user's Chrome profile is used.
 const fs = require('fs');
 const path = require('path');
 
@@ -14,8 +14,19 @@ async function main() {
   }
   const {chromium} = require(path.join(toolbox, 'node_modules', 'playwright'));
   const browser = await chromium.launch({headless: true, timeout: 15000});
-  await browser.close();
-  console.log('Local browser and JavaScript tools passed their checks.');
+  try {
+    const page = await browser.newPage();
+    await page.goto('data:text/html,<button id="check" onclick="this.textContent=\'clicked\'">ready</button>');
+    await page.locator('#check').click();
+    if (await page.locator('#check').textContent() !== 'clicked') {
+      throw new Error('Local browser could not interact with a page');
+    }
+    const screenshot = await page.screenshot();
+    if (!screenshot.length) throw new Error('Local browser could not capture a page');
+  } finally {
+    await browser.close();
+  }
+  console.log('Local browser and JavaScript tools passed navigation, interaction and capture checks.');
 }
 
 main().catch(error => {
