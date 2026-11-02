@@ -908,6 +908,14 @@ class CloudTests(unittest.TestCase):
             }
 
         with (patch.object(cloud, "post", side_effect=show),
+              patch("model_fitness.measured_speed", return_value=None),
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps({
+                  "models": [{"name": name, "size": int(weight * 2**30)}
+                             for name, weight in ((cloud.LOCAL_MODEL, 48.2),
+                                                  (cloud.FAST_MODEL, 6.1),
+                                                  (cloud.BALANCED_MODEL, 20.6),
+                                                  (cloud.CATALOG["gptoss_official"]["alias"], 12.8))]
+              }).encode())),
               patch.object(cloud, "candidate_approved", return_value=True)):
             router = cloud.Router()
             self.assertEqual(router.local_candidates("quick")[0], cloud.FAST_MODEL)

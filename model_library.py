@@ -327,6 +327,7 @@ def delete_model(alias):
         "http://127.0.0.1:11434/api/delete",
         data=json.dumps({"model": alias}).encode(),
         headers={"Content-Type": "application/json"},
+        method="DELETE",
     ), timeout=30) as response:
         response.read()
 
@@ -345,7 +346,10 @@ def ensure_main_standard():
     except Exception:
         return False
     main = CATALOG["main"]["alias"]
-    info = post("/api/show", {"model": main}, timeout=10)
+    try:
+        info = post("/api/show", {"model": main}, timeout=10)
+    except (OSError, ValueError):
+        return False
     if info.get("remote_host") or info.get("remote_model") or "tools" not in info.get("capabilities", []):
         return False
     current = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", info.get("parameters", ""))
@@ -695,9 +699,11 @@ def auto_install(status_dir, refresh=True):
                     save_download_status(standard_status, "waiting_tasks",
                                          "Waiting to prepare the routine context window", 0)
                 else:
-                    ensure_main_standard()
-                    save_download_status(standard_status, "complete",
-                                         "Routine context window ready", 100)
+                    prepared = ensure_main_standard()
+                    save_download_status(standard_status,
+                                         "complete" if prepared else "skipped",
+                                         "Routine context window ready" if prepared else
+                                         "Using a faster local model instead", 100)
             except Exception as exc:
                 save_download_status(standard_status, "error", str(exc), 0)
                 # A full-context alias remains usable; other downloads continue.

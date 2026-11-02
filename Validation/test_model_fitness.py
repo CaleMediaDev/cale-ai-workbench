@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 from unittest.mock import patch
+import io
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import model_fitness
@@ -38,3 +39,10 @@ def test_retirement_waits_for_idle_and_preserves_unowned_source():
           patch.object(model_library, "delete_model") as delete):
         assert model_library.retire_slow_model(item)
         delete.assert_called_once_with("cale-slow")
+
+
+def test_ollama_model_removal_uses_delete_verb():
+    with patch.object(model_library, "urlopen", return_value=io.BytesIO(b"")) as open_url:
+        model_library.delete_model("cale-slow")
+    request = open_url.call_args.args[0]
+    assert request.get_method() == "DELETE"
