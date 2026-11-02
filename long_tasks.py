@@ -2050,6 +2050,31 @@ def goal_budget_exhausted(snapshot):
     return False
 
 
+def resumed_board_work(p):
+    """Clear a stale help state only after a newer board run really starts.
+
+    Hermes can resume a blocked card independently of the desktop supervisor.
+    Keep genuine blockers intact until the board confirms a later live run.
+    """
+    if not p.get("card") or p["card"].startswith(("music-job:", "image-job:")):
+        return False
+    snapshot = board("show", p["card"], "--json", parse=True)
+    if snapshot.get("task", {}).get("status") != "running":
+        return False
+    runs = snapshot.get("runs", [])
+    if not runs:
+        return False
+    latest = runs[-1]
+    if (latest.get("status") != "running" or latest.get("ended_at")
+            or float(latest.get("started_at") or 0) <= float(p.get("updated") or 0)):
+        return False
+    update(
+        p["id"], status="working",
+        detail=f"Hermes is working again. Card {p['card']}. Progress is saved in the project folder.",
+    )
+    return True
+
+
 def advance_project(p):
     """Advance one task; failures are isolated by the supervisor's tick."""
     setup = read_task_status(STATE / "install-progress.json")
@@ -2203,6 +2228,8 @@ def advance_project(p):
             return
         update(p["id"], status="queued", detail="Setup finished. Getting ready.")
         p["status"] = "queued"
+    if p["status"] == "needs_input" and resumed_board_work(p):
+        return
     if p["status"] == "needs_input" and recover_blocked_music_project(p):
         return
     if p["status"] == "needs_input" and recover_blocked_audio_review(p):

@@ -1197,6 +1197,40 @@ class LongTaskTests(unittest.TestCase):
         board.assert_not_called()
         self.assertEqual(self.item()["status"], "needs_input")
 
+    def test_new_live_board_run_clears_stale_help_state(self):
+        task_module.update(self.pid, card="build-card", status="needs_input",
+                           detail="Old blocker")
+        blocked = self.item()
+        snapshot = {
+            "task": {"status": "running"},
+            "runs": [{"status": "blocked", "started_at": blocked["updated"] - 5,
+                      "ended_at": blocked["updated"] - 2},
+                     {"status": "running", "started_at": blocked["updated"] + 2,
+                      "ended_at": None}],
+        }
+        with (patch.object(task_module, "board", return_value=snapshot),
+              patch.object(task_module, "recover_blocked_music_project", return_value=False),
+              patch.object(task_module, "recover_blocked_audio_review", return_value=False)):
+            task_module.advance_project(blocked)
+        resumed = self.item()
+        self.assertEqual(resumed["status"], "working")
+        self.assertIn("working again", resumed["detail"])
+
+    def test_old_board_run_does_not_clear_newer_blocker(self):
+        task_module.update(self.pid, card="build-card", status="needs_input",
+                           detail="Current blocker")
+        blocked = self.item()
+        snapshot = {
+            "task": {"status": "running"},
+            "runs": [{"status": "running", "started_at": blocked["updated"] - 10,
+                      "ended_at": None}],
+        }
+        with (patch.object(task_module, "board", return_value=snapshot),
+              patch.object(task_module, "recover_blocked_music_project", return_value=False),
+              patch.object(task_module, "recover_blocked_audio_review", return_value=False)):
+            task_module.advance_project(blocked)
+        self.assertEqual(self.item()["status"], "needs_input")
+
     def test_old_changed_project_review_recovers_without_user_action(self):
         task_module.update(
             self.pid, card="old-review", phase="review", status="needs_input",

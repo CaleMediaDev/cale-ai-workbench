@@ -14,6 +14,8 @@ Created by [Cale Media](https://calemedia.com/). Built on Hermes Agent, Ollama, 
 
 **Model activity** opens from the top of My tasks, so a long task list never hides the graph. It separates models by provider and shows the ChatGPT token total recorded by Cale beside the button. These are provider-reported tokens for calls made inside Cale, not the account-wide ChatGPT plan balance; calls whose provider omits usage cannot be counted as tokens.
 
+If a previously blocked Hermes task starts a new worker run, its card returns to **Working** automatically. A genuine unresolved block remains visible until a later run actually starts.
+
 For local music, ACE-Step now loads its optional music-planning model on GPUs its own hardware check supports. When that model is ready, generated songs use its enhanced planning path; on smaller PCs or if model loading fails, the existing direct generation path remains available. The app still verifies audible vocals before claiming that a vocal song is finished.
 
 The installer downloads the runtime, tools, browser, image/voice models, and model files. It creates a desktop shortcut with the Cale Media logo, which also appears on the app window and taskbar. No Python, Git, Node, terminal commands, or API keys need to be installed manually. The ZIP alternative contains `Install.cmd` with the same setup screen.
