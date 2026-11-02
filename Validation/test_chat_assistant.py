@@ -33,6 +33,24 @@ def test_free_cloud_chat_uses_connected_model_without_local_inference(tmp_path):
     local.assert_not_called()
 
 
+def test_remembered_file_excerpt_stays_local_even_with_cloud_scope(tmp_path):
+    import cloud_ai
+    import routing_mode
+
+    routing_mode.save_scope(tmp_path, "free_cloud_only")
+    response = {"choices": [{"message": {"content": "The amount is $42."},
+                             "finish_reason": "stop"}]}
+    with (patch.object(cloud_ai, "STATE", tmp_path),
+          patch.object(cloud_ai.Router, "complete") as cloud,
+          patch.object(cloud_ai, "post", return_value=response) as local):
+        answer = chat_assistant.local_answer(
+            "What is the amount?", [], file_evidence="[1] C:\\Selected\\invoice.txt\nAmount: $42"
+        )
+    assert answer == "The amount is $42."
+    cloud.assert_not_called()
+    assert "Amount: $42" in local.call_args.args[1]["messages"][1]["content"]
+
+
 def test_free_cloud_scope_keeps_local_calculator_tool(tmp_path):
     import cloud_ai
     import routing_mode
@@ -402,7 +420,41 @@ def test_file_memory_miss_does_not_guess_or_use_an_unrelated_recent_file():
     ):
         result = chat_assistant.answer_with_tools("What does my Acme invoice say?", [])
     assert "couldn't find" in result.lower()
-    search.assert_called_once()
+    assert search.call_count == 2
+    answer.assert_not_called()
+
+
+def test_file_memory_uses_one_named_partial_match_when_a_query_word_is_missing():
+    invoice = {"path": r"C:\Selected\Acme-invoice.txt",
+               "excerpt": "Acme invoice late fee is $12."}
+    other = {"path": r"C:\Selected\Utility-invoice.txt",
+             "excerpt": "Utility invoice fee is $5."}
+    with (
+        patch("user_file_memory.search", side_effect=[[], [other, invoice]]) as search,
+        patch.object(chat_assistant, "local_answer", return_value="The fee is $12.") as answer,
+    ):
+        result = chat_assistant.answer_with_tools(
+            "What does my Acme invoice say about the overdue fee?", []
+        )
+    assert result == "The fee is $12."
+    assert search.call_args.kwargs["match_all"] is False
+    assert invoice["path"] in answer.call_args.kwargs["file_evidence"]
+    assert other["path"] not in answer.call_args.kwargs["file_evidence"]
+
+
+def test_file_memory_asks_which_file_when_partial_names_tie():
+    rows = [
+        {"path": r"C:\Selected\Acme-invoice-2025.txt", "excerpt": "Late fee $5."},
+        {"path": r"C:\Selected\Acme-invoice-2026.txt", "excerpt": "Late fee $12."},
+    ]
+    with (
+        patch("user_file_memory.search", side_effect=[[], rows]),
+        patch.object(chat_assistant, "local_answer") as answer,
+    ):
+        result = chat_assistant.answer_with_tools(
+            "What does my Acme invoice say about the overdue fee?", []
+        )
+    assert "Several files" in result
     answer.assert_not_called()
 
 

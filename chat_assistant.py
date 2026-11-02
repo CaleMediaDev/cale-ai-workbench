@@ -392,6 +392,27 @@ def memory_search_terms(question: str) -> str:
     words = re.findall(r"[^\W_]+", question.casefold())
     return " ".join(word for word in words
                     if len(word) >= 3 and word not in MEMORY_STOPWORDS)[:200]
+
+
+def clear_named_file_match(terms: str, rows: list[dict]) -> tuple[list[dict], bool]:
+    """Use a loose content hit only when its filename identifies one file.
+
+    A missing adjective in a question should not hide a known document, but
+    an OR search alone can retrieve unrelated files. Filename overlap gives a
+    conservative tie-breaker; equal best matches require clarification.
+    """
+    query_words = set(terms.split())
+    ranked = []
+    for row in rows:
+        filename_words = set(re.findall(r"[^\W_]+", Path(row["path"]).stem.casefold()))
+        overlap = len(query_words & filename_words)
+        if overlap:
+            ranked.append((overlap, row))
+    if not ranked:
+        return [], False
+    best = max(score for score, _ in ranked)
+    winners = [row for score, row in ranked if score == best]
+    return (winners, len(winners) > 1)
 GENERIC_CONTACT_NAMES = frozenset({
     "my", "our", "your", "his", "her", "their", "me", "us", "the",
     "my business", "our business", "my company", "our company",
@@ -561,6 +582,13 @@ def answer_with_tools(question: str, history: list[dict]) -> str:
         matches = user_file_memory.search(
             state, terms, 4, match_all=True, scan_on_miss=False
         ) if terms else []
+        if not matches and file_reference and terms:
+            loose = user_file_memory.search(
+                state, terms, 20, match_all=False, scan_on_miss=False
+            )
+            matches, ambiguous = clear_named_file_match(terms, loose)
+            if ambiguous:
+                return "Several files match that description. Please name or attach the one you mean."
         if not matches and file_reference and not terms:
             recent = user_file_memory.search(state, "", 2, scan_on_miss=False)
             if len(recent) > 1:
@@ -818,7 +846,9 @@ def local_answer(question: str, history: list[dict], file_evidence: str = "") ->
         if item["role"] in ("user", "assistant")
     )
     messages.append({"role": "user", "content": question})
-    cloud_result = _cloud_scope_completion(messages, 2048, 0.3)
+    # Remembered file excerpts have the same local-only privacy boundary as
+    # direct file chat. A connected cloud account must not receive them.
+    cloud_result = None if file_evidence else _cloud_scope_completion(messages, 2048, 0.3)
     if cloud_result is not None:
         choice = cloud_result["choices"][0]
         answer = (choice["message"].get("content") or "").strip()
