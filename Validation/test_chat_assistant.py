@@ -153,6 +153,8 @@ def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():
     assert chat_assistant.route("write lyrics for a song", []) == "task"
     assert chat_assistant.music_request("make a 2-minute beat")["duration_seconds"] == 120
     assert chat_assistant.music_request("make a 2-minute beat")["instrumental"] is True
+    assert chat_assistant.music_request("make a rap beat")["duration_seconds"] == 30
+    assert chat_assistant.music_request("make a rap beat")["instrumental"] is True
     assert chat_assistant.music_request("make a rap beat with vocals")["instrumental"] is False
     rap = "make a 3 min rap with heavy bass about cale media"
     assert chat_assistant.route(rap, []) == "music"
@@ -176,7 +178,10 @@ def test_direct_song_preserves_explicit_lyrics_and_routes_ambiguous_text_to_agen
     assert chat_assistant.route(request, []) == "music"
     lyric_words = "Make a soul song with lyrics:\nCover the night\nMeet me at 1:30"
     assert chat_assistant.music_request(lyric_words)["lyrics"] == "Cover the night\nMeet me at 1:30"
-    assert chat_assistant.music_request(lyric_words)["duration_seconds"] == 30
+    assert chat_assistant.music_request(lyric_words)["duration_seconds"] == 180
+    assert chat_assistant.music_request("make a song about Lake Tahoe")["duration_seconds"] == 180
+    assert chat_assistant.music_request("make a rap about Lake Tahoe")["duration_seconds"] == 180
+    assert chat_assistant.music_request("make a beach jingle")["duration_seconds"] == 30
     assert chat_assistant.route("Make a soul song with lyrics:\nWhat's the status of our love", []) == "music"
     assert chat_assistant.route("Make a song\nUse this melody\nThen change the chorus", []) == "task"
     assert chat_assistant.route("Make an instrumental song with lyrics: sing along", []) == "task"

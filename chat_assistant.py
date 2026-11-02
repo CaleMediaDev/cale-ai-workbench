@@ -112,7 +112,14 @@ def music_request(text: str) -> dict | None:
     elif single:
         duration = int(single.group(1)) * (60 if single.group(2).lower().startswith("min") else 1)
     else:
-        duration = 180 if detailed_brief else 30
+        # A plain song should be full length. A beat or jingle is a short
+        # deliverable unless the person names a duration or also asks for a song.
+        if detailed_brief or re.search(r"\bsong\b", prompt, re.IGNORECASE):
+            duration = 180
+        elif re.search(r"\b(?:jingle|beat|soundtrack)\b", prompt, re.IGNORECASE):
+            duration = 30
+        else:
+            duration = 180 if re.search(r"\b(?:rap|music)\b", prompt, re.IGNORECASE) else 30
     if not 10 <= duration <= 600:
         raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
     instrumental = bool(re.search(r"\b(?:instrumental|no vocals|without vocals|no singing)\b", prompt, re.IGNORECASE))
@@ -120,7 +127,7 @@ def music_request(text: str) -> dict | None:
     # explicit vocal request instead of silently changing it to instrumental.
     if (not instrumental and not lyrics
             and re.search(r"\b(?:beat|soundtrack|background music)\b", prompt, re.IGNORECASE)
-            and not re.search(r"\b(?:vocals?|sing(?:ing|er)?|rap(?:ped|per)?)\b", prompt, re.IGNORECASE)):
+            and not re.search(r"\b(?:vocals?|sing(?:ing|er)?|rap(?:ped|per)?(?!\s+beat\b))\b", prompt, re.IGNORECASE)):
         instrumental = True
     if instrumental and lyrics:
         return None  # The agent can resolve contradictory instructions.
