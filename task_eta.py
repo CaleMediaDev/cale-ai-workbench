@@ -26,7 +26,7 @@ def _duration(seconds: float) -> str:
 
 def total_time(created: float, updated: float, status: str,
                now: float | None = None) -> str:
-    """Show a task's wall-clock lifetime, frozen when accepted or stopped.
+    """Show a task's wall-clock lifetime, frozen when finished or stopped.
 
     This is elapsed time since the request was created, including setup and
     pauses. It is deliberately separate from the active-time ETA estimator.
@@ -39,7 +39,7 @@ def total_time(created: float, updated: float, status: str,
         return "—"
     if start <= 0:
         return "—"
-    end = last_change if status in ("accepted", "stopped") and last_change >= start else now
+    end = last_change if status in ("ready_for_review", "accepted", "stopped") and last_change >= start else now
     return _duration(max(0, end - start))
 
 
@@ -53,10 +53,8 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
     now = time.time() if now is None else now
     percent = max(0, min(100, int(percent)))
     active = status in ("working", "checking")
-    if status == "ready_for_review":
-        return "Ready for review"
-    if status == "accepted":
-        return "Complete"
+    if status in ("ready_for_review", "accepted"):
+        return ""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     # sqlite3's context manager commits but does not close the connection.
     # On Windows, an open handle can prevent task-folder cleanup or updates.

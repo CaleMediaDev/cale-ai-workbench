@@ -6,7 +6,7 @@ import task_eta
 def test_total_time_shows_wall_clock_and_freezes_on_acceptance():
     assert task_eta.total_time(1000, 1000, "working", now=1065) == "1m 05s"
     assert task_eta.total_time(1000, 1090, "paused", now=1200) == "3m 20s"
-    assert task_eta.total_time(1000, 1125, "ready_for_review", now=1200) == "3m 20s"
+    assert task_eta.total_time(1000, 1125, "ready_for_review", now=1200) == "2m 05s"
     assert task_eta.total_time(1000, 1125, "accepted", now=9999) == "2m 05s"
     assert task_eta.total_time(0, 0, "working", now=1000) == "—"
 
@@ -37,5 +37,5 @@ def test_stalled_and_completed_tasks(tmp_path):
     task_eta.countdown(db, "task", 30, "working", 1030)
     task_eta.countdown(db, "task", 50, "working", 1060)
     assert task_eta.countdown(db, "task", 50, "working", 1700) == "Estimate pending progress"
-    assert task_eta.countdown(db, "task", 95, "ready_for_review", 1701) == "Ready for review"
-    assert task_eta.countdown(db, "task", 100, "accepted", 1702) == "Complete"
+    assert task_eta.countdown(db, "task", 100, "ready_for_review", 1701) == ""
+    assert task_eta.countdown(db, "task", 100, "accepted", 1702) == ""

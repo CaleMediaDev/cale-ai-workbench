@@ -311,7 +311,7 @@ class LongTaskTests(unittest.TestCase):
             board.assert_not_called()
         complete = next(p for p in task_module.projects() if p["id"] == pid)
         self.assertEqual(complete["status"], "ready_for_review")
-        self.assertEqual(task_module.task_progress(complete)[0], 95)
+        self.assertEqual(task_module.task_progress(complete)[0], 100)
         self.assertTrue((Path(task["folder"]) / ".local-ai" / "PROGRESS.md").is_file())
 
     def test_changed_music_artifact_is_rechecked_instead_of_needing_help(self):
@@ -562,7 +562,7 @@ class LongTaskTests(unittest.TestCase):
             board.assert_not_called()
         complete = next(p for p in task_module.projects() if p["id"] == pid)
         self.assertEqual(complete["status"], "ready_for_review")
-        self.assertEqual(task_module.task_progress(complete)[0], 95)
+        self.assertEqual(task_module.task_progress(complete)[0], 100)
         self.assertTrue((Path(task["folder"]) / ".local-ai/PROGRESS.md").is_file())
 
     def test_empty_image_revision_keeps_render_running(self):
@@ -1029,9 +1029,32 @@ class LongTaskTests(unittest.TestCase):
             self.base / "project", "beach_invoice_total", kind="file"
         ))
         (self.base / "project/code.py").write_text("changed", encoding="utf-8")
-        with patch.object(task_module, "board"):
+        with patch.object(task_module, "board"), patch.object(task_module, "create_card") as create:
             task_module.tick()
-        self.assertEqual(self.item()["status"], "needs_input")
+        self.assertEqual(self.item()["status"], "working")
+        self.assertEqual(self.item()["phase"], "review")
+        self.assertEqual(self.item()["fingerprint"], "")
+        self.assertEqual(create.call_count, 1)
+        self.assertIn("Preserve user edits", create.call_args.args[1])
+
+    def test_finished_task_shows_full_progress_without_rating_controls(self):
+        task_module.update(self.pid, status="ready_for_review")
+        self.assertEqual(task_module.task_progress(self.item()), (100, "Finished"))
+        labels = [label for label, _ in task_module.task_controls_for("ready_for_review")]
+        self.assertEqual(labels, ["Reuse prompt", "Delete"])
+        self.assertEqual(task_module.task_controls_for("accepted"),
+                         task_module.task_controls_for("ready_for_review"))
+
+    def test_old_changed_project_review_recovers_without_user_action(self):
+        task_module.update(
+            self.pid, card="old-review", phase="review", status="needs_input",
+            detail="Files changed after verification. Resume to check them again.",
+        )
+        with patch.object(task_module, "board"), patch.object(task_module, "create_card") as create:
+            task_module.tick()
+        self.assertEqual(self.item()["status"], "working")
+        self.assertEqual(self.item()["generation"], 1)
+        self.assertEqual(create.call_count, 1)
 
     def test_three_failures_stop_automatic_repairs(self):
         self.verify_script("exit 3")

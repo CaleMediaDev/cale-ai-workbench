@@ -288,14 +288,14 @@ def record_replay_outcome(replay_id: int, succeeded: bool) -> str:
 
 
 def task_progress(p):
-    """Best-effort milestone progress; reserve the last part for independent review."""
+    """Show 100% once independent checks finish; edits can reopen the work."""
     state = p["status"]
     image_id = image_job_id(p)
     if image_id:
         if state == "accepted":
-            return 100, "Finished and accepted"
+            return 100, "Finished"
         if state == "ready_for_review":
-            return 95, "Image is ready. Open files to view it."
+            return 100, "Finished"
         if state in ("paused", "stopped", "needs_input"):
             return 0, p["detail"][:180] or state.replace("_", " ").capitalize()
         try:
@@ -308,9 +308,9 @@ def task_progress(p):
     job_id = music_job_id(p)
     if job_id:
         if state == "accepted":
-            return 100, "Finished and accepted"
+            return 100, "Finished"
         if state == "ready_for_review":
-            return 95, "Music is ready. Open files to listen."
+            return 100, "Finished"
         if state in ("paused", "stopped", "needs_input"):
             return 0, p["detail"][:180] or state.replace("_", " ").capitalize()
         try:
@@ -321,9 +321,9 @@ def task_progress(p):
         except (OSError, ValueError, KeyError):
             return 10, "Checking local music job"
     if state == "accepted":
-        return 100, "Finished and accepted"
+        return 100, "Finished"
     if state == "ready_for_review":
-        return 95, "Ready for you to check"
+        return 100, "Finished"
     if state == "needs_input" and p["detail"].startswith("AI setup failed after automatic retries:"):
         return 0, p["detail"][:180]
     folder = Path(p["folder"]) / ".local-ai"
@@ -382,6 +382,20 @@ def task_progress(p):
     elif state == "working":
         step = active_worker_wait(p) or step
     return percent, step[:180]
+
+
+def task_controls_for(state):
+    """Keep finished cards simple; chat can still request a revision."""
+    if state in ("queued", "waiting_for_setup", "working", "checking"):
+        return (("Stop", "stop"), ("Pause", "pause"), ("Delete", "delete"))
+    if state == "paused":
+        return (("Continue", "resume"), ("Stop", "stop"), ("Delete", "delete"))
+    if state == "needs_input":
+        return (("Add instructions", "note"), ("Continue", "resume"),
+                ("Stop", "stop"), ("Delete", "delete"))
+    if state in ("ready_for_review", "accepted"):
+        return (("Reuse prompt", "reuse"), ("Delete", "delete"))
+    return (("Delete", "delete"),)
 
 
 def active_worker_wait(p):
@@ -1137,6 +1151,28 @@ def recheck_changed_media(p, kind):
         update(p["id"], status="working", detail=f"Rechecking changed {kind.lower()} files")
         return True
     return False
+
+
+def restart_changed_project_review(p):
+    """Start a fresh review generation when verified project files change.
+
+    A project change makes the previous fingerprint and review evidence stale.
+    Retire the old card first so a late worker cannot edit alongside the new
+    reviewer. The new card checks the current files; it never auto-accepts.
+    """
+    retire_review_cards(p)
+    if REVIEW_PROJECTS_CHECKED.get(p["id"]) != (p["generation"], p["card"]):
+        return  # A worker is still retiring; try again on the next tick.
+    update(p["id"], card="", generation=p["generation"] + 1,
+           phase="review", status="working", failures=0, fingerprint="",
+           detail="Project files changed after review. Starting a fresh independent review.")
+    current = next(item for item in projects() if item["id"] == p["id"])
+    create_card(
+        current,
+        "The project changed after its previous verification. Inspect the current files "
+        "against the original request and rerun the checks. Preserve user edits; do not "
+        "revert them. Fix only demonstrated problems, then request review again.",
+    )
 
 
 def legacy_fingerprint(folder):
@@ -2040,16 +2076,19 @@ def advance_project(p):
         p["status"] = "queued"
     if p["status"] == "needs_input" and recover_blocked_music_project(p):
         return
+    if p["status"] == "needs_input" and p["detail"] in (
+        "Files changed since the previous review. Resume to check them again.",
+        "Files changed after verification. Resume to check them again.",
+    ):
+        restart_changed_project_review(p)
+        return
     if p["status"] in ("accepted", "paused", "stopped", "needs_input"):
         return
     if p["status"] == "ready_for_review":
         if not str(p["fingerprint"]).startswith("content-v2:"):
             folder = Path(p["folder"])
             if legacy_fingerprint(folder) != p["fingerprint"]:
-                update(
-                    p["id"], status="needs_input",
-                    detail="Files changed since the previous review. Resume to check them again.",
-                )
+                restart_changed_project_review(p)
                 return
             update(p["id"], status="checking", detail="Rechecking completed work after the verification upgrade.")
             passed, evidence = verify_project(p)
@@ -2070,13 +2109,10 @@ def advance_project(p):
                 fingerprint=fingerprint(folder) if passed else "",
             )
             return
-        retire_review_cards(p)
         if review_files_changed(p):
-            update(
-                p["id"],
-                status="needs_input",
-                detail="Files changed after verification. Resume to check them again.",
-            )
+            restart_changed_project_review(p)
+        else:
+            retire_review_cards(p)
         return
     if not p["card"]:
         create_card(p)
@@ -4740,7 +4776,7 @@ def gui():
                         fill = "#f3b85b"
                     elif state in ("failed", "stopped"):
                         fill = "#ef697d"
-                    elif state in ("accepted", "ready_for_review", "complete"):
+                    elif state in ("accepted", "ready_for_review", "finished", "complete"):
                         fill = "#48d9a0"
                     else:
                         blend = index / max(1, step_count - 1)
@@ -4794,30 +4830,6 @@ def gui():
             gauge.task_state = state.lower().replace(" ", "_")
             card_info["draw_gauge"]()
 
-    def choices_for(state):
-        if state in ("queued", "waiting_for_setup", "working", "checking"):
-            return (("Stop", "stop"), ("Pause", "pause"), ("Delete", "delete"))
-        if state == "paused":
-            return (("Continue", "resume"), ("Stop", "stop"), ("Delete", "delete"))
-        if state == "needs_input":
-            return (
-                ("Add instructions", "note"),
-                ("Continue", "resume"),
-                ("Stop", "stop"),
-                ("Delete", "delete"),
-            )
-        if state == "ready_for_review":
-            return (
-                ("👍  Good", "accept"),
-                ("👎  Improve", "feedback_down"),
-                ("Reuse prompt", "reuse"),
-                ("Delete", "delete"),
-            )
-        if state == "accepted":
-            return (("👎  Improve", "feedback_down"),
-                    ("Reuse prompt", "reuse"), ("Delete", "delete"))
-        return (("Delete", "delete"),)
-
     def update_task_controls(card_info, item):
         camera = "camera" in (item["brief"] + " " + item["detail"]).lower()
         consent = read_task_status(ROOT / "Media/camera-consent.json") if camera else {}
@@ -4829,7 +4841,7 @@ def gui():
         controls = card_info["controls"]
         for child in controls.winfo_children():
             child.destroy()
-        controls_to_show = choices_for(item["status"])
+        controls_to_show = task_controls_for(item["status"])
         for label, kind in controls_to_show:
             ttk.Button(
                 controls,
@@ -4994,8 +5006,11 @@ def gui():
                 f"Total time: {task_eta.total_time(item['created'], item['updated'], item['status'])}",
             )
             percent, current = task_progress(item)
-            state = item["status"].replace("_", " ").capitalize()
-            update_progress_card(card_info, percent, "Current step: " + current, state)
+            finished = item["status"] in ("ready_for_review", "accepted")
+            state = "Finished" if finished else item["status"].replace("_", " ").capitalize()
+            update_progress_card(
+                card_info, percent, "" if finished else "Current step: " + current, state
+            )
             set_text(
                 card_info["eta"],
                 "Render time varies with the music model and song length."
