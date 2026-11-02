@@ -71,12 +71,43 @@ def _installer_running(progress: dict) -> bool:
     return False
 
 
+def _retry_runner_running() -> bool:
+    """Do not race the first-run runner during its delay between attempts.
+
+    The runner may live in an extracted installer folder, so identify it by
+    script name and the destination it is actively installing into. A stale
+    progress file alone is never evidence that this process still exists.
+    """
+    import psutil
+
+    try:
+        for process in psutil.process_iter(["cmdline"]):
+            try:
+                command = process.cmdline()
+                options = {argument.lower(): index for index, argument in enumerate(command[:-1])
+                           if argument.startswith("-")}
+                script_index = options.get("-file")
+                destination_index = options.get("-destination")
+                if script_index is None or destination_index is None:
+                    continue
+                if Path(command[script_index + 1].strip('"')).name.lower() != "install-retry.ps1":
+                    continue
+                if Path(command[destination_index + 1].strip('"')).resolve() == ROOT.resolve():
+                    return True
+            except (OSError, TypeError, ValueError, psutil.Error):
+                continue
+    except (OSError, TypeError, ValueError, psutil.Error):
+        return False
+    return False
+
+
 def _stalled(progress: dict) -> bool:
     """A quiet download may take hours; only a dead installer is stalled."""
     return (progress.get("owner") != "runtime_features"
             and progress.get("status") == "working"
             and time.time() - float(progress.get("updated", 0)) >= STALE_SECONDS
-            and not _installer_running(progress))
+            and not _installer_running(progress)
+            and not _retry_runner_running())
 
 
 def repair_exhausted(progress: dict) -> bool:
@@ -87,7 +118,7 @@ def repair_exhausted(progress: dict) -> bool:
     return (progress.get("status") == "error" and
             str(progress.get("current", "")).startswith("Setup needs attention:") and
             int(_read(STATE / "base-install-repair.json").get("attempts", 0)) >= len(RETRY_DELAYS) and
-            not _installer_running(progress))
+            not _installer_running(progress) and not _retry_runner_running())
 
 
 def recover() -> bool:
@@ -104,6 +135,8 @@ def recover() -> bool:
         return False
     if not (_stalled(progress) or (progress.get("status") == "error" and
             str(progress.get("current", "")).startswith("Setup needs attention:"))):
+        return False
+    if _retry_runner_running():
         return False
     script = ROOT / "Install-Backend.ps1"
     if not script.is_file():
@@ -132,6 +165,8 @@ def recover() -> bool:
             # Another monitor or a manual retry may have changed setup state.
             progress = _read(STATE / "install-progress.json")
             if progress.get("owner") == "runtime_features":
+                return False
+            if _retry_runner_running():
                 return False
             record = _read(record_path)
             attempts = max(0, int(record.get("attempts", 0)))

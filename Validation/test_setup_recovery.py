@@ -40,6 +40,31 @@ def test_extracted_installer_pid_is_recognized_without_duplicate_repair(tmp_path
         assert not setup_recovery._installer_running(progress)
 
 
+def test_first_run_retry_process_prevents_duplicate_repair(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# installed copy")
+    progress = {
+        "status": "error", "current": "Setup needs attention: temporary download failure",
+        "updated": time.time() - 1000,
+    }
+    (state / "install-progress.json").write_text(json.dumps(progress))
+    runner = MagicMock()
+    runner.cmdline.return_value = ["powershell.exe", "-File", str(tmp_path / "extracted" / "Install-Retry.ps1"),
+                                   "-Destination", str(tmp_path), "-Profile", "auto"]
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    with patch("psutil.process_iter", return_value=[runner]), patch.object(
+        setup_recovery.subprocess, "Popen", side_effect=AssertionError("duplicate repair")
+    ):
+        assert setup_recovery._retry_runner_running()
+        assert not setup_recovery.recover()
+        assert not setup_recovery.repair_exhausted(progress)
+    runner.cmdline.return_value[-3] = str(tmp_path / "someone-else")
+    with patch("psutil.process_iter", return_value=[runner]):
+        assert not setup_recovery._retry_runner_running()
+
+
 def test_base_setup_retries_with_backoff_and_limit(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
