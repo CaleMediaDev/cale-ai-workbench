@@ -39,7 +39,7 @@ class AutoModelTests(unittest.TestCase):
               patch.object(library, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
               patch.object(library, "model_ready", return_value=True),
               patch("model_fitness.suitable", return_value=True),
-              patch("model_fitness.measured_speed", return_value=9),
+              patch("model_fitness.measured_speed", side_effect=lambda alias: 30 if alias == "cale-fast" else None),
               patch.object(library, "post", side_effect=post),
               patch("context_window.sync", return_value=65536) as sync):
             self.assertTrue(library.repair_main_alias(128, 12))

@@ -646,10 +646,12 @@ def repair_main_alias(ram=None, vram=None):
             continue
         try:
             if model_ready(profile):
-                # Prefer a larger proven worker over an unmeasured model of
-                # similar size; the small model remains the fast router tier.
+                # Hardware and speed gates have already excluded unsuitable
+                # weights. Keep the strongest qualified model for demanding
+                # work even before it has accumulated three timed task calls.
+                # The router still uses the small alias for quick requests.
                 speed = model_fitness.measured_speed(alias)
-                candidates.append((speed is not None, weight, alias))
+                candidates.append((weight, speed or 0, alias))
         except (OSError, RuntimeError, ValueError):
             continue
     if not candidates:
