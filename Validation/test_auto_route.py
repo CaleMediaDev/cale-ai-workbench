@@ -162,6 +162,11 @@ class AutoRouteTests(unittest.TestCase):
         messages.append({"role": "tool", "content": "Exit code: 0\nBuild passed"})
         self.assertEqual(task_size(messages), "balanced")
 
+    def test_missing_verifier_handoff_uses_deeper_model(self):
+        messages = [{"role": "user", "content": "Build a recipe app."},
+                    {"role": "user", "content": "[Completion gate: missing verifier] Create real checks."}]
+        self.assertEqual(task_size(messages), "deep")
+
     def test_music_review_gets_strong_first_pass_and_balanced_followups(self):
         prompt = ("# Kanban task t_123: Michigan song — review\n\n## Body\n" +
                   project_prompt({"title": "Michigan song", "folder": "C:/Tasks/song",

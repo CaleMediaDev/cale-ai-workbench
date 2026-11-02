@@ -2728,6 +2728,10 @@ def advance_project(p):
         if p["status"] == "checking":
             passed, evidence = verify_project(p)
             if passed:
+                worker = native_agent.read_state(p)
+                if worker.get("verification_failures"):
+                    worker["verification_failures"] = 0
+                    native_agent.save_state(p, worker)
                 update(p["id"], status="ready_for_review", detail=evidence,
                        fingerprint=fingerprint(Path(p["folder"])))
             else:

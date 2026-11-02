@@ -163,6 +163,9 @@ def repair_messages(messages):
 
 def task_size(messages):
     """Return quick, balanced, or deep from user intent and actual tool history."""
+    if any("[Completion gate: missing verifier]" in message_text(msg.get("content"))
+           for msg in messages[-12:] if isinstance(msg, dict)):
+        return "deep"
     users = [
         message_text(msg.get("content"))
         for msg in messages

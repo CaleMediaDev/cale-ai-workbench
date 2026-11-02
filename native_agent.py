@@ -233,6 +233,14 @@ def repair_interrupted_tools(messages: list) -> list:
     return messages
 
 
+def completion_issue(folder: Path) -> str:
+    """Catch a premature handoff before the costly independent review starts."""
+    script = folder / ".local-ai" / "verify.ps1"
+    if not script.is_file() or not script.read_text(encoding="utf-8-sig", errors="replace").strip():
+        return "Create a nonempty .local-ai/verify.ps1 with real checks for this request."
+    return ""
+
+
 def run_slice(project: dict, complete=None) -> dict:
     """Execute a bounded set of model turns, checkpointing each completed tool."""
     from cloud_ai import LOCAL_MODEL, Router
@@ -265,17 +273,39 @@ def run_slice(project: dict, complete=None) -> dict:
             raise RuntimeError(str(response["error"]))
         message = response["choices"][0]["message"]
         messages.append({key: message[key] for key in ("role", "content", "tool_calls") if key in message})
+        # Only consecutive worker failures should block a long task. A valid
+        # model response proves the previous outage has recovered.
+        state["failures"] = 0
         state["turns"] = int(state.get("turns", 0)) + 1
         state["messages"] = messages
         state["current"] = str(message.get("content") or "Working with tools")[:500]
         save_state(project, state)
         calls = message.get("tool_calls") or []
         if not calls:
+            issue = completion_issue(folder)
+            if issue:
+                state["premature_finishes"] = int(state.get("premature_finishes", 0)) + 1
+                messages.append({"role": "user", "content": (
+                    "[Completion gate: missing verifier] The task is not ready for handoff: " + issue + " Use the project tools to "
+                    "finish the work and its checks; then run the verifier before answering."
+                )})
+                state["messages"] = messages
+                state["current"] = "Finishing the project's verification before review"
+                # A model that ignores the first reminder must not consume a
+                # whole slice of paid calls saying "finished" over and over.
+                if state["premature_finishes"] >= 2:
+                    state["status"] = "continue"
+                save_state(project, state)
+                if state["premature_finishes"] >= 2:
+                    return state
+                continue
+            state["premature_finishes"] = 0
             state["status"] = "done"
             state["answer"] = str(message.get("content") or "")
             save_state(project, state)
             return state
         for item in calls:
+            state["premature_finishes"] = 0
             latest = read_state(project)
             if latest.get("status") in ("paused", "stopped"):
                 return latest
