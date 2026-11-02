@@ -4152,7 +4152,7 @@ def gui():
         dialog = tk.Toplevel(window)
         readiness_popup[0] = dialog
         dialog.title("Cale · Ready checklist")
-        dialog.geometry("680x650")
+        dialog.geometry(f"700x{max(540, min(860, dialog.winfo_screenheight() - 100))}")
         dialog.minsize(580, 540)
         dialog.configure(background=bg)
         if icon_path.is_file():
@@ -4163,8 +4163,21 @@ def gui():
         summary = tk.StringVar(value="Checking this PC…")
         ttk.Label(content, textvariable=summary, style="Muted.TLabel",
                   font=("Segoe UI", 12)).pack(anchor="w", pady=(4, 12))
-        rows_frame = ttk.Frame(content)
-        rows_frame.pack(fill="both", expand=True)
+        list_holder = ttk.Frame(content)
+        list_holder.pack(fill="both", expand=True)
+        list_canvas = tk.Canvas(list_holder, background=bg, highlightthickness=0)
+        list_scroll = ttk.Scrollbar(list_holder, orient="vertical", command=list_canvas.yview)
+        list_canvas.configure(yscrollcommand=list_scroll.set)
+        list_canvas.pack(side="left", fill="both", expand=True)
+        list_scroll.pack(side="right", fill="y")
+        rows_frame = ttk.Frame(list_canvas)
+        canvas_item = list_canvas.create_window((0, 0), window=rows_frame, anchor="nw")
+        rows_frame.bind("<Configure>", lambda _event: list_canvas.configure(
+            scrollregion=list_canvas.bbox("all")))
+        list_canvas.bind("<Configure>", lambda event: list_canvas.itemconfigure(
+            canvas_item, width=event.width))
+        dialog.bind("<MouseWheel>", lambda event: list_canvas.yview_scroll(
+            -1 if event.delta > 0 else 1, "units"))
         ttk.Label(content, text=(
             "Installed means the files are here. Cale checks a tool's actual output "
             "the first time you use it. Large video and music models may install on demand."
