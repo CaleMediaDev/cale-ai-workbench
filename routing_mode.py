@@ -8,6 +8,7 @@ from pathlib import Path
 
 MODES = ("paid_saver", "medium", "floor_it")
 DEFAULT = "medium"
+SCOPES = ("both", "local_only", "cloud_only")
 
 
 def load(state: Path) -> str:
@@ -27,6 +28,25 @@ def save(state: Path, mode: str) -> None:
     target = state / "routing-mode.json"
     temporary = state / f"routing-mode.{os.getpid()}.tmp"
     temporary.write_text(json.dumps({"mode": mode}), encoding="utf-8")
+    os.replace(temporary, target)
+
+
+def load_scope(state: Path) -> str:
+    try:
+        value = json.loads((state / "provider-scope.json").read_text(encoding="utf-8"))
+        scope = value.get("scope") if isinstance(value, dict) else None
+        return scope if scope in SCOPES else "both"
+    except (OSError, ValueError):
+        return "both"
+
+
+def save_scope(state: Path, scope: str) -> None:
+    if scope not in SCOPES:
+        raise ValueError("Choose Local only, Cloud only, or Both.")
+    state.mkdir(parents=True, exist_ok=True)
+    target = state / "provider-scope.json"
+    temporary = state / f"provider-scope.{os.getpid()}.tmp"
+    temporary.write_text(json.dumps({"scope": scope}), encoding="utf-8")
     os.replace(temporary, target)
 
 

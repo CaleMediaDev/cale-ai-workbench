@@ -307,6 +307,26 @@ class AutoRouteTests(unittest.TestCase):
         })
         self.assertEqual(task_size(messages), "balanced")
 
+    def test_bpm_first_song_brief_without_song_word_uses_middle_model(self):
+        brief = (
+            "150 BPM, extremely wobbly melodic dubstep, old-school UK wobble "
+            "bass, rhythmic synth sweeps, huge drops, and wide stereo drums. "
+            "Super sweet adult female singing voice with clear vocals and "
+            "beautiful harmonies. Create a Lake Tahoe summer anthem with an "
+            "emotional chorus, three massive drops, and a dreamy breakdown."
+        )
+        prompt = project_prompt({
+            "title": "150 BPM Lake Tahoe anthem", "folder": "C:/Tasks/song",
+            "brief": brief,
+        })
+        messages = [{"role": "user", "content": prompt}]
+        self.assertEqual(task_size(messages), "balanced")
+        messages.append({
+            "role": "assistant",
+            "tool_calls": [{"function": {"name": "mcp__toolbox__toolbox_call"}}] * 5,
+        })
+        self.assertEqual(task_size(messages), "balanced")
+
     def test_resumed_condensed_board_song_stays_balanced(self):
         prompt = (
             "# Kanban task t_123: Create Cale and Tiny anniversary dubstep song\n\n"

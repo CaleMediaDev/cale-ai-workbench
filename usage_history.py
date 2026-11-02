@@ -142,6 +142,21 @@ def recent_local_speed(default: float = 35.0, models=None) -> float:
         return default
 
 
+def recent_model_speed(model: str) -> float | None:
+    """Only retire a model after three measured local completions."""
+    try:
+        with closing(_connection()) as conn:
+            rows = conn.execute(
+                "SELECT tokens_per_second FROM usage_events WHERE source='ollama' "
+                "AND model IN (?, ?) AND tokens_per_second > 0 AND timestamp > ? "
+                "ORDER BY id DESC LIMIT 12",
+                (model, model + ":latest", time.time() - 30 * 86400),
+            ).fetchall()
+        return statistics.median(row[0] for row in rows) if len(rows) >= 3 else None
+    except (OSError, sqlite3.Error):
+        return None
+
+
 def recent_provider_speed(source: str, default: float) -> float:
     """Use a provider's measured throughput once three calls establish a sample.
 

@@ -19,6 +19,16 @@ def test_mode_is_saved_and_bad_data_returns_to_medium(tmp_path):
         routing_mode.save(tmp_path, "unlimited_paid")
 
 
+def test_local_cloud_or_both_choice_persists(tmp_path):
+    assert routing_mode.load_scope(tmp_path) == "both"
+    routing_mode.save_scope(tmp_path, "cloud_only")
+    assert routing_mode.load_scope(tmp_path) == "cloud_only"
+    routing_mode.save_scope(tmp_path, "local_only")
+    assert routing_mode.load_scope(tmp_path) == "local_only"
+    with pytest.raises(ValueError):
+        routing_mode.save_scope(tmp_path, "unknown")
+
+
 def test_paid_saver_and_floor_it_choose_different_priorities():
     assert not routing_mode.paid_first("paid_saver", "deep", 10, 200, 100, True)
     assert routing_mode.paid_first("medium", "deep", 10, 20, 100, True)

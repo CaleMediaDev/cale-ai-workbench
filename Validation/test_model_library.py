@@ -59,6 +59,7 @@ class AutoModelTests(unittest.TestCase):
             patch.object(library, "post", return_value=details),
             patch("context_window.model_bytes", return_value=7 * 2**30),
             patch("context_window.physical_ram_bytes", return_value=64 * 2**30),
+            patch.object(library, "probe_tool_use", return_value=True),
         ):
             self.assertFalse(library.model_ready("qwen35"))
             details["parameters"] = "num_ctx 98304\n"
@@ -280,6 +281,7 @@ class AutoModelTests(unittest.TestCase):
             patch.object(library, "post", side_effect=fake_post),
             patch("context_window.model_bytes", return_value=23 * 2**30),
             patch("context_window.physical_ram_bytes", return_value=64 * 2**30),
+            patch.object(library, "probe_tool_use", return_value=True),
         ):
             self.assertEqual(library.install("wide", lambda _message: None), "cale-wide")
         create = next(payload for path, payload in calls if path == "/api/create")

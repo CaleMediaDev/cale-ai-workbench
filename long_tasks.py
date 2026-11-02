@@ -1367,7 +1367,9 @@ def verify_audio_handoff(p):
             lyrics = folder / "lyrics.txt"
             if not lyrics.is_file() or len(lyrics.read_text(encoding="utf-8").split()) < 20:
                 return False, "The requested vocal song has no usable lyrics.txt."
-            evidence = music_backend.vocal_evidence(selected, round(duration))
+            evidence = music_backend.vocal_evidence(
+                selected, round(duration), lyrics.read_text(encoding="utf-8"),
+            )
             if not evidence["passed"]:
                 return False, "The song plays, but the vocal check found too few words across the track."
             vocal_note = f"; {evidence['recognized_words']} recognized vocal words"
@@ -2323,7 +2325,7 @@ def advance_project(p):
                         bool(job.get("instrumental")))):
                 try:
                     check = job.get("vocal_check") or music_backend.vocal_evidence(
-                        output, job["duration_seconds"]
+                        output, job["duration_seconds"], job.get("lyrics", ""),
                     )
                 except (OSError, RuntimeError, ValueError, KeyError) as exc:
                     update(p["id"], status="needs_input",
@@ -3226,6 +3228,28 @@ def gui():
         header, text="🚀  Supercharge my AI", command=show_super, style="Accent.TButton"
     )
     rocket.pack(side="right")
+    # Keep the cloud/local choice visible beside Supercharge during tasks.
+    provider_scope = tk.StringVar(value=routing_mode.load_scope(ROOT / "Cloud"))
+    scope_frame = ttk.Frame(header)
+    scope_frame.pack(side="right", padx=(0, 12))
+    scope_buttons = {}
+
+    def choose_scope(scope):
+        try:
+            routing_mode.save_scope(ROOT / "Cloud", scope)
+            provider_scope.set(scope)
+            for key, button in scope_buttons.items():
+                button.configure(style="SelectedMode.TButton" if key == scope else "Mode.TButton")
+        except OSError as exc:
+            status.set("Could not save model choice: " + str(exc)[:120])
+
+    for scope, label in (("local_only", "Local only"), ("cloud_only", "Cloud only"),
+                         ("both", "Both")):
+        button = ttk.Button(scope_frame, text=label,
+                            command=lambda choice=scope: choose_scope(choice),
+                            style="SelectedMode.TButton" if provider_scope.get() == scope else "Mode.TButton")
+        button.pack(side="left", padx=(4, 0))
+        scope_buttons[scope] = button
     main_page.pack(fill="both", expand=True)
 
     ttk.Button(super_page, text="←  Back to my tasks", command=show_main).pack(

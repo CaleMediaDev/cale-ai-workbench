@@ -98,6 +98,7 @@ def configure(root, profile):
     # alias so shorter work need not reserve the largest KV cache.
     import model_library
 
+    model_library.probe_tool_use(selection["source"])
     model_library.ensure_main_standard()
     vision_source = "qwen3.5:9b"
     setup_progress(root, 75, "Downloading the vision model")

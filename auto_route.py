@@ -8,6 +8,8 @@ without forcing every routine tool step through the slowest model.
 import json
 import re
 
+from chat_assistant import bare_song_brief
+
 BUILD_ACTION = re.compile(
     r"\b(build|create|develop|implement|code|refactor|debug|fix|repair|"
     r"redesign|migrate|integrate|train|automate|audit|reverse.engineer|"
@@ -195,7 +197,7 @@ def task_size(messages):
     # Keep the local worker on the middle model for rendering and verification;
     # the largest model can take minutes just to answer a routine tool turn.
     if (
-        SIMPLE_MUSIC.search(intent)
+        (SIMPLE_MUSIC.search(intent) or bare_song_brief(intent))
         and not PROJECT_BUILD.search(intent)
         and not COMPLEX_PROJECT.search(intent)
         and not MUSIC_VIDEO.search(intent)
@@ -264,7 +266,7 @@ def model_order(size, available, main, fast, balanced):
             ),
         )
     ordered = []
-    for name in [*preference, main]:
-        if name not in ordered and (name in ready or name == main):
+    for name in preference:
+        if name not in ordered and name in ready:
             ordered.append(name)
-    return ordered or [main]
+    return ordered

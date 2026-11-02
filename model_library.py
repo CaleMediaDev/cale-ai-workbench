@@ -321,6 +321,16 @@ def post(path, value, timeout=30):
         return json.load(response)
 
 
+def delete_model(alias):
+    """Ollama's delete endpoint succeeds with an empty response body."""
+    with urlopen(Request(
+        "http://127.0.0.1:11434/api/delete",
+        data=json.dumps({"model": alias}).encode(),
+        headers={"Content-Type": "application/json"},
+    ), timeout=30) as response:
+        response.read()
+
+
 def ensure_main_standard():
     """Share main-model weights with a smaller routine context window.
 
@@ -484,6 +494,13 @@ def install(profile, progress=print):
         raise ValueError(
             f"This model is intended for at least {item['ram_gb']} GB RAM. Choose a smaller option."
         )
+    import model_fitness
+
+    if not model_fitness.hardware_allows(
+        item["download_gb"], total_ram_gb(), model_fitness.gpu_vram_gb()
+    ):
+        raise ValueError("This model is likely too slow for this PC's GPU. Choose a smaller model.")
+    source_was_cached = source_cached(item)
     # The Ollama store can be moved; disk space remains checked by Ollama at download time.
     progress(
         f"Downloading {item['label']}: approximately {item['download_gb']} GB. Re-running resumes interrupted downloads."
@@ -513,14 +530,19 @@ def install(profile, progress=print):
                 last = time.monotonic()
     # Probe pulled weights before touching an alias that may already serve
     # work. Failed candidates remain in the store but cannot replace it.
-    source_info = post("/api/show", {"model": item["source"]})
-    if (source_info.get("remote_host") or source_info.get("remote_model")
-            or "tools" not in source_info.get("capabilities", [])):
-        raise RuntimeError(
-            "Weights downloaded, but the source is not a local tool-capable model. The existing alias was kept."
-        )
-    if item.get("candidate"):
+    try:
+        source_info = post("/api/show", {"model": item["source"]})
+        if (source_info.get("remote_host") or source_info.get("remote_model")
+                or "tools" not in source_info.get("capabilities", [])):
+            raise RuntimeError("Model does not advertise local tool support.")
         probe_tool_use(item["source"], item.get("tool_reasoning_effort"))
+    except Exception:
+        if not source_was_cached:
+            try:
+                delete_model(item["source"])
+            except Exception:
+                pass
+        raise
     context = preferred_context(item, source_info, item["source"])
     result = post(
         "/api/create",
@@ -545,10 +567,76 @@ def install(profile, progress=print):
         )
     if item.get("candidate"):
         approve_candidate(item)
+    if not source_was_cached:
+        record_owned_source(item["source"])
     progress(
         "Installed. Tool capability is advertised; reliability still needs task-specific testing."
     )
     return item["alias"]
+
+
+def owned_sources():
+    path = ROOT / "LongTasks/auto-owned-models.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return set(value) if isinstance(value, list) else set()
+    except (OSError, ValueError):
+        return set()
+
+
+def record_owned_source(source):
+    """Only sources downloaded by this app may be deleted automatically."""
+    path = ROOT / "LongTasks/auto-owned-models.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(sorted(owned_sources() | {source})), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def retire_slow_model(item):
+    """Remove an app alias only while idle; remove weights only if app-owned."""
+    if alias_update_waits_for_tasks(item):
+        return False
+    alias = item["alias"]
+    try:
+        delete_model(alias)
+    except Exception:
+        return False
+    source = item.get("source")
+    if source and source in owned_sources():
+        try:
+            delete_model(source)
+        except Exception:
+            pass
+    return True
+
+
+def retire_unsuitable_main(ram, vram):
+    """Drop a large app main alias only after another tool model is ready."""
+    import model_fitness
+
+    try:
+        with urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
+            tags = json.load(response)
+        sizes = {entry["name"]: entry["size"] / 2**30
+                 for entry in tags.get("models", [])}
+        main = CATALOG["main"]["alias"]
+        weight = sizes.get(main, sizes.get(main + ":latest", 0))
+        if not weight or model_fitness.suitable(main, weight, ram, vram):
+            return False
+        if not any(model_ready(profile) and model_fitness.suitable(
+                item["alias"], sizes.get(item["alias"],
+                                          sizes.get(item["alias"] + ":latest", 0)), ram, vram)
+                   for profile, item in CATALOG.items() if profile != "main"
+                   and not item.get("fallback_only")):
+            return False
+        if alias_update_waits_for_tasks(CATALOG["main"]):
+            return False
+        if STANDARD_MAIN_ALIAS in sizes or STANDARD_MAIN_ALIAS + ":latest" in sizes:
+            delete_model(STANDARD_MAIN_ALIAS)
+        return retire_slow_model(CATALOG["main"])
+    except Exception:
+        return False
 
 
 def save_download_status(path, state, current, percent=0, metadata=None):
@@ -613,7 +701,10 @@ def auto_install(status_dir, refresh=True):
             except Exception as exc:
                 save_download_status(standard_status, "error", str(exc), 0)
                 # A full-context alias remains usable; other downloads continue.
+            import model_fitness
+
             ram = total_ram_gb()
+            vram = model_fitness.gpu_vram_gb()
             candidates = sorted(
                 (
                     (profile, model)
@@ -625,6 +716,16 @@ def auto_install(status_dir, refresh=True):
             for index, (profile, model) in enumerate(candidates, 1):
                 path = status_dir / f"optional-model-{profile}.json"
                 if ram + 1 < model["ram_gb"]:
+                    continue
+                if not model_fitness.hardware_allows(model["download_gb"], ram, vram):
+                    save_download_status(path, "skipped_hardware",
+                                         "This model would be too slow on this PC", 0)
+                    continue
+                speed = model_fitness.measured_speed(model.get("alias", profile))
+                if speed is not None and speed < 5:
+                    retired = retire_slow_model(model)
+                    save_download_status(path, "retired" if retired else "waiting_tasks",
+                                         f"Measured {speed:.1f} tokens/s; removing when idle", 0)
                     continue
                 try:
                     if model_ready(profile):
@@ -689,6 +790,9 @@ def auto_install(status_dir, refresh=True):
                 except Exception as exc:
                     save_download_status(path, "error", str(exc), 0)
                     # One unavailable model must not block smaller or different models.
+            if retire_unsuitable_main(ram, vram):
+                save_download_status(standard_status, "retired",
+                                     "Oversized main model removed; faster model is ready", 100)
             save_download_status(
                 worker_status,
                 "complete",

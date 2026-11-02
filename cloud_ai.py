@@ -633,6 +633,18 @@ class Router:
         """Rank installed models that can hold this request, not the global maximum."""
         if time.monotonic() >= self.model_cache_until:
             refresh_catalog(online=False)
+            import model_fitness
+            import model_library
+
+            ram = model_library.total_ram_gb()
+            vram = model_fitness.gpu_vram_gb()
+            try:
+                with urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
+                    tags = json.load(response)
+                weights = {entry["name"]: entry["size"] / 2**30
+                           for entry in tags.get("models", [])}
+            except Exception:
+                weights = {}
             available = {}
             contexts = {}
             aliases = dict.fromkeys(
@@ -644,6 +656,9 @@ class Router:
                     (item for item in CATALOG.values() if item["alias"] == name), None
                 )
                 if item and (item.get("fallback_only") or not candidate_approved(item)):
+                    continue
+                weight = weights.get(name, weights.get(name + ":latest"))
+                if weight is None or not model_fitness.suitable(name, weight, ram, vram):
                     continue
                 try:
                     info = post(
@@ -710,14 +725,7 @@ class Router:
                     ordered.remove(loaded)
                     ordered.insert(0, loaded)
                     break
-        # Keep the main alias as a fallback when Ollama metadata is missing,
-        # but do not send a prompt to a model known to be too small for it.
-        return [
-            name for name in ordered
-            if name != LOCAL_MODEL
-            or name not in self.model_contexts
-            or self.model_contexts[name] >= required_context
-        ]
+        return ordered
 
     def reserve_free_request(self):
         return self.free_request_available(reserve=True)
@@ -770,8 +778,10 @@ class Router:
         repaired = repair_messages(messages)
         if repaired is not messages:
             payload = {**payload, "messages": repaired}
-        offline_mode = pc_offline.offline() or task_route(
-            usage_history.CURRENT_TASK.get()) == "local_only"
+        scope = routing_mode.load_scope(STATE) if profile == "main" else "both"
+        offline_mode = (pc_offline.offline() or scope == "local_only" or
+                        (scope == "both" and task_route(
+                            usage_history.CURRENT_TASK.get()) == "local_only"))
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         mode = routing_mode.load(STATE) if profile == "main" else routing_mode.DEFAULT
         reason = "Cloud is not connected."
@@ -933,9 +943,9 @@ class Router:
             if paid_result is not None:
                 return paid_result
         selected = (
-            self.local_candidates(size, required_context)
-            if profile == "main"
-            else [CATALOG[profile]["alias"]]
+            [] if profile == "main" and scope == "cloud_only" else
+            self.local_candidates(size, required_context) if profile == "main" else
+            [CATALOG[profile]["alias"]]
         )
         last_error = None
         for selected_model in selected:
@@ -1008,6 +1018,8 @@ class Router:
         record("unavailable", reason, selected[-1] if selected else "")
         if last_error:
             raise last_error
+        if not selected and scope == "cloud_only" and profile == "main":
+            raise RuntimeError("Cloud only is selected, but no connected cloud model is available. Connect one in Supercharge or select Both.")
         if not selected and profile == "main":
             raise RuntimeError(
                 f"This request needs about {required_context:,} tokens of context, "

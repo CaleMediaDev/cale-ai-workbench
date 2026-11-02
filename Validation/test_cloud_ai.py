@@ -46,6 +46,18 @@ REQUEST = {
 
 
 class CloudTests(unittest.TestCase):
+    def test_cloud_only_does_not_fall_back_to_local(self):
+        with (tempfile.TemporaryDirectory() as directory,
+              patch.object(cloud, "STATE", Path(directory)),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch("chatgpt_auth.status", return_value={"enabled": False}),
+              patch.object(cloud, "post") as post):
+            cloud.routing_mode.save_scope(Path(directory), "cloud_only")
+            with self.assertRaisesRegex(RuntimeError, "Cloud only is selected"):
+                cloud.Router().complete(REQUEST)
+            self.assertFalse(any(call.args[0].startswith("http://127.0.0.1:11434")
+                                 for call in post.call_args_list))
+
     def test_task_route_reads_live_project_choice(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -434,8 +446,8 @@ class CloudTests(unittest.TestCase):
             router = cloud.Router()
             self.assertEqual(router.local_candidates("quick")[0], cloud.BALANCED_MODEL)
             self.assertEqual(router.local_candidates("balanced")[0], cloud.BALANCED_MODEL)
-            self.assertEqual(router.local_candidates("deep")[0], cloud.STANDARD_MAIN_ALIAS)
-            self.assertEqual(router.local_candidates("deep", required_context=100000)[0], cloud.LOCAL_MODEL)
+            self.assertNotIn(cloud.STANDARD_MAIN_ALIAS, router.local_candidates("deep"))
+            self.assertEqual(router.local_candidates("deep", required_context=100000), [])
 
     def test_loaded_model_lookup_excludes_unloading_runner(self):
         now = datetime.now(timezone.utc)
@@ -900,7 +912,7 @@ class CloudTests(unittest.TestCase):
             self.assertEqual(
                 router.local_candidates("balanced")[0], cloud.BALANCED_MODEL
             )
-            self.assertEqual(router.local_candidates("deep")[0], cloud.LOCAL_MODEL)
+            self.assertNotIn(cloud.LOCAL_MODEL, router.local_candidates("deep"))
             self.assertIn(
                 cloud.CATALOG["gptoss_official"]["alias"],
                 router.local_candidates("deep"),
@@ -955,7 +967,7 @@ class CloudTests(unittest.TestCase):
             router = cloud.Router()
             self.assertEqual(router.local_candidates("quick")[0], cloud.FAST_MODEL)
             self.assertEqual(router.local_candidates("balanced")[0], cloud.BALANCED_MODEL)
-            self.assertEqual(router.local_candidates("deep")[0], cloud.LOCAL_MODEL)
+            self.assertNotIn(cloud.LOCAL_MODEL, router.local_candidates("deep"))
 
     def test_oversized_request_uses_connected_free_fallback(self):
         self.candidates.stop()
@@ -1004,7 +1016,7 @@ class CloudTests(unittest.TestCase):
                     "details": {"parameter_size": "9B"}}
 
         with patch.object(cloud, "post", side_effect=show):
-            self.assertEqual(cloud.Router().local_candidates("quick"), [cloud.LOCAL_MODEL])
+            self.assertEqual(cloud.Router().local_candidates("quick"), [])
 
     def test_paid_model_rejected_before_network(self):
         self.connected()

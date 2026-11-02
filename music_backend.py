@@ -498,8 +498,27 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
                        + "; ".join(failures) + ").")
 
 
-def vocal_evidence(path: str | Path, duration_seconds: int) -> dict:
-    """Transcribe locally and require words across most of a requested song."""
+def lyric_match(transcript: str, lyrics: str) -> tuple[int, int]:
+    """Count distinct authored words heard in the song, ignoring stage tags."""
+    def terms(value: str) -> set[str]:
+        return {
+            word for word in re.findall(r"\w+", value.casefold())
+            if len(word) >= 3 and word not in {
+                "and", "are", "but", "for", "from", "had", "has", "her",
+                "his", "our", "she", "the", "them", "then", "there",
+                "they", "this", "was", "were", "with", "you", "your",
+            }
+        }
+
+    authored = terms(re.sub(r"\[[^]]+\]|\([^)]*\)", " ", lyrics))
+    if len(authored) < 4:
+        return 0, 0  # Repeated syllables cannot distinguish a real lyric match.
+    required = min(15, max(4, round(len(authored) * 0.2)))
+    return len(authored & terms(transcript)), required
+
+
+def vocal_evidence(path: str | Path, duration_seconds: int, lyrics: str = "") -> dict:
+    """Require sustained singing and, when supplied, recognizable lyric words."""
     python = ROOT / "Media/python/Scripts/python.exe"
     if not python.is_file():
         raise RuntimeError("The offline speech runtime is missing; vocal music cannot be verified.")
@@ -519,8 +538,11 @@ def vocal_evidence(path: str | Path, duration_seconds: int) -> dict:
     words = len(str(transcript.get("text") or "").split())
     final_second = max((float(row.get("end", 0)) for row in segments), default=0)
     required_words = max(5, round(duration_seconds * 0.35))
+    matched_terms, required_terms = lyric_match(str(transcript.get("text") or ""), lyrics)
     return {"recognized_words": words, "last_vocal_second": round(final_second, 1),
-            "passed": words >= required_words and final_second >= duration_seconds * 0.6,
+            "matched_lyric_terms": matched_terms, "required_lyric_terms": required_terms,
+            "passed": (words >= required_words and final_second >= duration_seconds * 0.6
+                       and matched_terms >= required_terms),
             "segments": segments}
 
 
@@ -595,7 +617,9 @@ def recover_music_jobs() -> None:
                                 bool(info.get("instrumental")))
                             and not (vocal_check or {}).get("passed")):
                         try:
-                            vocal_check = vocal_evidence(output, info["duration_seconds"])
+                            vocal_check = vocal_evidence(
+                                output, info["duration_seconds"], info.get("lyrics", ""),
+                            )
                         except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
                             _write_job(job_id, {
                                 **info, "status": "error",
@@ -736,7 +760,7 @@ def _run_job(job_id: str) -> None:
             if not check or not check.get("passed"):
                 working["current"] = "Checking the vocals"
                 _write_job(job_id, working)
-                check = vocal_evidence(result["path"], info["duration_seconds"])
+                check = vocal_evidence(result["path"], info["duration_seconds"], lyrics)
             if not check["passed"]:
                 raise RuntimeError(
                     "The song played, but sustained vocals were not detected. "

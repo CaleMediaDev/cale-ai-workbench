@@ -174,7 +174,7 @@ def test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio(tmp_pat
         job = music_backend.music_job_status(started["job_id"])
     compose.assert_called_once_with("rap about Michigan", 60)
     assert generate.call_args.args[2] == lyrics
-    check.assert_called_once_with(str(output), 60)
+    check.assert_called_once_with(str(output), 60, lyrics)
     assert (tmp_path / "song.lyrics.txt").read_text(encoding="utf-8").strip() == lyrics.strip()
     assert job["status"] == "complete"
     assert job["vocal_check"]["recognized_words"] == 50
@@ -292,6 +292,37 @@ def test_vocal_evidence_requires_words_through_most_of_the_song(tmp_path):
         assert not music_backend.vocal_evidence(audio, 60)["passed"]
         assert music_backend.vocal_evidence(audio, 60)["passed"]
     assert json.loads(transcribe.call_args_list[0].kwargs["input"])["music"] is True
+
+
+def test_vocal_evidence_rejects_unrelated_words_even_when_sustained(tmp_path):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"runtime")
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"audio")
+    unrelated = {"text": "Sunshine dancing on the beach " * 12,
+                 "segments": [{"end": 55.0}]}
+    lyrics = ("[Verse]\nMichigan forests and winter snow, "
+              "Detroit lights across the river flow, "
+              "Traverse City orchards bloom in spring")
+    with patch.object(music_backend, "ROOT", tmp_path), patch.object(
+        music_backend.subprocess, "run", return_value=type(
+            "Result", (), {"returncode": 0, "stdout": json.dumps(unrelated)}
+        )(),
+    ):
+        evidence = music_backend.vocal_evidence(audio, 60, lyrics)
+    assert evidence["recognized_words"] >= 21
+    assert evidence["last_vocal_second"] >= 36
+    assert evidence["matched_lyric_terms"] < evidence["required_lyric_terms"]
+    assert not evidence["passed"]
+
+
+def test_lyric_match_ignores_stage_directions():
+    matched, required = music_backend.lyric_match(
+        "Michigan forests and winter snow across the river",
+        "[Verse - winter snow]\nMichigan forests and winter snow across the river",
+    )
+    assert matched >= required >= 4
 
 
 def test_rejects_remote_audio_url(tmp_path):
