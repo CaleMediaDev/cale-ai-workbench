@@ -309,6 +309,37 @@ def test_context_compaction_uses_configured_window_and_keeps_tool_batches():
         assert [item["role"] for item in compacted[-3:]] == ["assistant", "tool", "user"]
 
 
+def test_oversized_latest_tool_exchange_is_trimmed_not_dropped():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        messages = [
+            {"role": "system", "content": "Original request"},
+            {"role": "system", "content": "Current task checkpoint: next step is to verify." + " note" * 2000},
+            {"role": "assistant", "tool_calls": [{"id": "write-1", "function": {
+                "name": "write_file", "arguments": json.dumps({
+                    "path": "src/page.html", "content": "content" * 8000})}}]},
+            {"role": "tool", "tool_call_id": "write-1", "content": "long result " * 4000 + "END-RESULT"},
+            {"role": "user", "content": "Keep the blue title."},
+        ]
+        compacted = native_agent.compact_messages(messages, folder, 6000)
+        assert [entry["role"] for entry in compacted] == ["system", "system", "assistant", "tool", "user"]
+        assert compacted[2]["tool_calls"][0]["id"] == "write-1"
+        assert "src/page.html" in compacted[2]["tool_calls"][0]["function"]["arguments"]
+        assert "END-RESULT" in compacted[3]["content"]
+        assert "Keep the blue title" in compacted[4]["content"]
+        assert cloud_ai.estimated_input_tokens({"messages": compacted, "tools": native_agent.TOOLS}) <= 4500
+
+
+def test_native_prompt_keeps_large_original_request_in_file():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        item["brief"] = "Start: " + "many requirements " * 7000 + "Finish: verify everything."
+        text = native_agent.prompt(item)
+        assert len(text) < 10000
+        assert "Start:" in text and "Finish: verify everything." in text
+        assert ".local-ai/ORIGINAL-REQUEST-sample.md" in text
+
+
 def test_interrupted_tool_reply_precedes_later_user_steering():
     messages = [
         {"role": "system", "content": "Work on the task."},
