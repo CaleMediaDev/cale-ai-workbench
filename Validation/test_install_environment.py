@@ -12,6 +12,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == "nt", "Windows installer only")
 class InstallEnvironmentTests(unittest.TestCase):
+    def test_native_stderr_does_not_make_successful_tool_look_broken(self):
+        with tempfile.TemporaryDirectory() as folder:
+            success = Path(folder) / "success.py"
+            success.write_text("import sys\nsys.stderr.write('version\\n')\n", encoding="utf-8")
+            failure = Path(folder) / "failure.py"
+            failure.write_text("import sys\nsys.stderr.write('error\\n')\nsys.exit(4)\n", encoding="utf-8")
+            script = Path(folder) / "probe.ps1"
+            script.write_text(
+                "$ErrorActionPreference='Stop'\n"
+                ". $env:CALE_INSTALL_HELPER\n"
+                "$yes=Test-CaleRunnable $env:CALE_TEST_PYTHON @($env:CALE_TEST_SCRIPT)\n"
+                "$no=Test-CaleRunnable $env:CALE_TEST_PYTHON @($env:CALE_TEST_FAIL_SCRIPT)\n"
+                "@($yes,$no) | ConvertTo-Json -Compress\n", encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update(CALE_INSTALL_HELPER=str(ROOT / "Install-Environment.ps1"),
+                       CALE_TEST_PYTHON=__import__("sys").executable,
+                       CALE_TEST_SCRIPT=str(success), CALE_TEST_FAIL_SCRIPT=str(failure))
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                env=env, capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), [True, False])
+
     def test_auto_profile_needs_gpu_headroom_for_nine_billion_parameters(self):
         env = os.environ.copy()
         env["CALE_INSTALL_HELPER"] = str(ROOT / "Install-Environment.ps1")

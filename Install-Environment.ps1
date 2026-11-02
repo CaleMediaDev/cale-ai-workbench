@@ -18,6 +18,10 @@ function Initialize-CalePowerShellEnvironment {
 function Test-CaleRunnable([string]$File, [string[]]$Arguments = @('--version')) {
     if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { return $false }
     try {
+        # Java prints a successful -version response on stderr. Windows
+        # PowerShell 5 turns that redirected native stream into ErrorRecords;
+        # under the installer's Stop preference it can look like a failed tool.
+        $ErrorActionPreference='Continue'
         $null = & $File @Arguments 2>$null
         return $LASTEXITCODE -eq 0
     } catch { return $false }

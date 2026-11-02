@@ -26,6 +26,7 @@ from pathlib import Path
 
 import cale_voice
 import chrome_connector
+import core_tool_health
 import feedback_learning
 import ffmpeg_runtime
 import file_catalog
@@ -2720,6 +2721,7 @@ def monitor():
                 last_setup_recovery = time.monotonic()
                 runtime_features.start_background()
                 ffmpeg_runtime.start_background()
+                core_tool_health.start_background()
                 # The recovery helper checks the actual installer process and
                 # retry backoff. A stale "working" task must not suppress it:
                 # setup can freeze that task before its status is updated.

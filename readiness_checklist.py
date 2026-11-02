@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent
 
 import ffmpeg_runtime
+import core_tool_health
 
 
 def _json(path: Path) -> dict:
@@ -314,6 +315,12 @@ def snapshot(root: Path = ROOT) -> dict:
                       "FFmpeg answered a local version check" if ffmpeg_ok else
                       "FFmpeg is missing or broken; Cale is repairing it"))
 
+    missing_tools = core_tool_health.missing(root)
+    rows.append(_item("Core work tools", "ready" if not missing_tools else
+                      "attention" if base_ready else "working",
+                      "Node.js, GitHub CLI, Java and Ghidra are available" if not missing_tools else
+                      "Repairing: " + ", ".join(missing_tools), True))
+
     video_ready = (media / "video/runtime/cale-video-ready.json").is_file()
     video_verified = video_ready and _successful_job(media / "video/jobs", "state", min_bytes=1000)
     rows.append(_item("Video maker", "ready" if video_verified else "on_demand",
@@ -351,6 +358,9 @@ def request_safe_repairs(root: Path = ROOT, result: dict | None = None) -> list[
     if rows.get("FFmpeg media tools", {}).get("state") == "attention":
         ffmpeg_runtime.start_background(root)
         requested.append("FFmpeg media tools")
+    if rows.get("Core work tools", {}).get("state") == "attention":
+        if core_tool_health.start_background(root):
+            requested.append("Core work tools")
     if rows.get("Fast file search", {}).get("state") == "attention":
         marker = root / "LongTasks/computer-files-recheck.request"
         try:

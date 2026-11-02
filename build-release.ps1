@@ -1,5 +1,5 @@
 # Package the exact manifest-defined source, then embed it in the Windows EXE.
-param([string]$Version='0.5.281')
+param([string]$Version='0.5.282')
 $ErrorActionPreference='Stop'
 $project=$PSScriptRoot
 $out=Split-Path $project -Parent
@@ -9,7 +9,7 @@ $csc='C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $csc)) { throw '.NET Framework C# compiler is unavailable.' }
 # The one-click EXE launches PowerShell before Python exists. Catch a broken
 # setup script here, before a release reaches a clean machine.
-foreach ($name in @('Setup.ps1','Install-Retry.ps1','Install-Backend.ps1','Install-Environment.ps1','Install Long Tasks Startup.ps1')) {
+foreach ($name in @('Setup.ps1','Install-Retry.ps1','Install-Backend.ps1','Repair-CoreTools.ps1','Install-Environment.ps1','Install Long Tasks Startup.ps1')) {
     $tokens=$null; $parseErrors=$null
     [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $project $name),[ref]$tokens,[ref]$parseErrors) | Out-Null
     if ($parseErrors) { throw "$name has a PowerShell syntax error: $($parseErrors[0].Message)" }
