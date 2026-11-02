@@ -75,7 +75,7 @@ def music_request(text: str) -> dict | None:
     desired = re.match(r"^(?:i (?:want|need|would like)|i'd like)\s+(.+)$",
                        value, re.IGNORECASE)
     if (desired
-            and re.search(r"\b(?:song|rap|beat|jingle|instrumental|soundtrack|music)\b",
+            and re.search(r"\b(?:song|track|anthem|tune|banger|rap|beat|jingle|instrumental|soundtrack|music)\b",
                           desired.group(1), re.IGNORECASE)
             and not re.search(r"\b(?:recommendations?|suggestions?|ideas?|"
                               r"explanations?|examples?|playlists?)\b",
@@ -98,7 +98,7 @@ def music_request(text: str) -> dict | None:
             r"\b(?:with|using)(?:\s+(?:these|the following|my))?$",
             "", prompt, flags=re.IGNORECASE,
         ).strip()
-    if not detailed_brief and not re.search(r"\b(?:song|music|instrumental|jingle|beat|soundtrack|rap)\b", prompt, re.IGNORECASE):
+    if not detailed_brief and not re.search(r"\b(?:song|track|anthem|tune|banger|music|instrumental|jingle|beat|soundtrack|rap)\b", prompt, re.IGNORECASE):
         return None
     if re.search(
         r"\b(?:cover|remix|edit|change|extend|from this|using this file|"
@@ -117,12 +117,24 @@ def music_request(text: str) -> dict | None:
         prompt, re.IGNORECASE,
     )
     # In a style brief, "1990s" and "2000s" are decades, not seconds.
-    single = next(
-        (match for match in single_candidates
-         if not (match.group(2).lower() == "s"
-                 and re.fullmatch(r"(?:1[89]|20)\d{2}", match.group(1)))),
-        None,
-    )
+    def decade_style(match: re.Match[str]) -> bool:
+        if match.group(2).lower() != "s":
+            return False
+        number = match.group(1)
+        if re.fullmatch(r"(?:1[89]|20)\d{2}", number):
+            return True
+        if not re.fullmatch(r"(?:[6-9]0|00)", number):
+            return False
+        before = prompt[max(0, match.start() - 12):match.start()]
+        after = prompt[match.end():match.end() + 30]
+        return bool(re.search(r"\b(?:the|late|early|mid)\s*$", before, re.I)
+                    or re.match(
+                        r"\s*(?:-\s*)?(?:style|era|vibe|music|pop|rock|techno|"
+                        r"synth|eurodance|house|rave|dance|disco|punk|metal|rap|"
+                        r"hip-hop|trance|dubstep)\b", after, re.I,
+                    ))
+
+    single = next((match for match in single_candidates if not decade_style(match)), None)
     if clock:
         duration = int(clock.group(1)) * 60 + int(clock.group(2))
     elif combined:
@@ -132,7 +144,7 @@ def music_request(text: str) -> dict | None:
     else:
         # A plain song should be full length. A beat or jingle is a short
         # deliverable unless the person names a duration or also asks for a song.
-        if detailed_brief or re.search(r"\bsong\b", prompt, re.IGNORECASE):
+        if detailed_brief or re.search(r"\b(?:song|track|anthem|tune|banger)\b", prompt, re.IGNORECASE):
             duration = 180
         elif re.search(r"\b(?:jingle|beat|soundtrack)\b", prompt, re.IGNORECASE):
             duration = 30

@@ -310,6 +310,20 @@ def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():
     assert chat_assistant.music_request(
         "Make a 1990s techno song with a 45s intro"
     )["duration_seconds"] == 45
+    assert chat_assistant.music_request(
+        "Make a 90s techno song with female vocals and a big chorus"
+    )["duration_seconds"] == 180
+    assert chat_assistant.music_request(
+        "Make an 80s synth-pop song with female vocals and a big chorus"
+    )["duration_seconds"] == 180
+    assert chat_assistant.music_request(
+        "Make a 90s techno song with a 45s intro"
+    )["duration_seconds"] == 45
+    assert chat_assistant.music_request("Make a 90s song")["duration_seconds"] == 90
+    assert chat_assistant.music_request("Make a 90-second song")["duration_seconds"] == 90
+    assert chat_assistant.music_request(
+        "Create a 2000s eurodance anthem with male and female vocals"
+    )["duration_seconds"] == 180
     with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
         chat_assistant.music_request("make an 11 minute song")
 
