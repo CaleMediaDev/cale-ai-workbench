@@ -452,11 +452,12 @@ def source_cached(item):
 
 
 def alias_update_waits_for_tasks(item):
-    """Do not rebuild an installed alias while a project may be using it."""
-    try:
-        post("/api/show", {"model": item["alias"]}, timeout=10)
-    except (OSError, ValueError, KeyError):
-        return False  # An absent alias cannot be in use by an existing worker.
+    """Reserve GPU and Ollama capacity for live tasks, even for a new alias.
+
+    Installing an absent alias still ends with a tool/speed inference probe.
+    That probe can evict a music model or make a task's first token stall, so
+    background downloads and alias changes wait until projects are idle.
+    """
     try:
         from long_tasks import projects
 
@@ -465,7 +466,7 @@ def alias_update_waits_for_tasks(item):
             for task in projects()
         )
     except Exception:
-        return True  # Preserve a working alias if task state is unavailable.
+        return True  # Preserve task capacity if task state is unavailable.
 
 
 def model_ready(profile):
@@ -1000,10 +1001,11 @@ def auto_install(status_dir, refresh=True):
                 except Exception as exc:
                     save_download_status(path, "error", str(exc), 0)
                     # One unavailable model must not block smaller or different models.
-            if repair_main_alias(ram, vram):
-                save_download_status(standard_status, "complete",
-                                     "Main AI switched to verified weights this PC can run", 100)
-            cleanup_retired_main_sources()
+            if not alias_update_waits_for_tasks(CATALOG["main"]):
+                if repair_main_alias(ram, vram):
+                    save_download_status(standard_status, "complete",
+                                         "Main AI switched to verified weights this PC can run", 100)
+                cleanup_retired_main_sources()
             save_download_status(
                 worker_status,
                 "complete",

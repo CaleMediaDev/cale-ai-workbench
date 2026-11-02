@@ -672,6 +672,26 @@ class AutoModelTests(unittest.TestCase):
         ):
             self.assertFalse(library.alias_update_waits_for_tasks(item))
 
+    def test_absent_optional_alias_waits_while_a_song_uses_the_gpu(self):
+        catalog = {
+            "main": {"alias": "cale-local"},
+            "new": {"label": "New", "alias": "cale-new", "source": "new:latest",
+                    "download_gb": 7, "ram_gb": 24},
+        }
+        with (tempfile.TemporaryDirectory() as folder,
+              patch.object(library, "CATALOG", catalog),
+              patch.object(library, "total_ram_gb", return_value=32),
+              patch("model_fitness.gpu_vram_gb", return_value=12),
+              patch.object(library, "model_ready", return_value=False),
+              patch("long_tasks.projects", return_value=[{"status": "working"}]),
+              patch.object(library, "install") as install,
+              patch.object(library, "repair_main_alias") as repair):
+            library.auto_install(folder, refresh=False)
+            state = json.loads((Path(folder) / "optional-model-new.json").read_text())
+        self.assertEqual(state["status"], "waiting_tasks")
+        install.assert_not_called()
+        repair.assert_not_called()
+
     def test_stale_complete_status_is_reinstalled(self):
         catalog = {
             "main": {"alias": "base"},
