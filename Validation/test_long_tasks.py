@@ -2133,10 +2133,17 @@ class LongTaskTests(unittest.TestCase):
         handle = None
         try:
             deadline = time.monotonic() + 15
-            while not marker.exists() and time.monotonic() < deadline:
+            child_pid = None
+            while time.monotonic() < deadline:
+                try:
+                    child_pid = int(marker.read_text(encoding="ascii").strip())
+                    break
+                except (FileNotFoundError, PermissionError, ValueError):
+                    # Windows can expose the new file before PowerShell closes
+                    # its write handle; existence alone does not mean readable.
+                    pass
                 time.sleep(0.05)
-            self.assertTrue(marker.exists(), "Child verification never started")
-            child_pid = int(marker.read_text(encoding="ascii").strip())
+            self.assertIsNotNone(child_pid, "Child verification never started")
             handle = win32api.OpenProcess(0x00100000, False, child_pid)  # SYNCHRONIZE
             process.terminate()
             process.wait(timeout=5)
@@ -2148,6 +2155,7 @@ class LongTaskTests(unittest.TestCase):
                 process.terminate()
                 process.wait(timeout=5)
             if handle:
+                win32event.WaitForSingleObject(handle, 5000)
                 handle.Close()
 
 

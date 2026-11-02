@@ -163,10 +163,13 @@ def bare_song_brief(text: str) -> bool:
         value, re.I,
     ):
         return False
-    opening = value[:100]
+    opening = value[:120]
     spec_opening = bool(re.match(r"^\d{2,3}\s*BPM\b", opening, re.I) or re.match(
         r"^(?:genre|style|vocals?|song brief|music brief)\s*:", opening, re.I,
-    ) or re.match(r"^(?:an?\s+)?[^.!?]{0,65}\b(?:song|track)\b", opening, re.I))
+    ) or re.match(
+        r"^(?:(?:make|create|generate|compose|produce)\s+)?(?:an?\s+)?"
+        r"[^.!?\n]{0,100}\b(?:song|track|banger)\b", opening, re.I,
+    ))
     if not spec_opening:
         return False
     signals = sum(bool(re.search(pattern, value, re.I)) for pattern in (

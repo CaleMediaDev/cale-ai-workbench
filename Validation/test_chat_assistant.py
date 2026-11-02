@@ -77,6 +77,28 @@ def test_multiline_lake_tahoe_song_brief_keeps_its_full_style_in_fast_route():
     assert chat_assistant.route(brief, []) == "music"
 
 
+def test_detailed_create_track_or_banger_skips_general_agent_planning():
+    track = (
+        "Create an insanely catchy, high-energy melodic dubstep and heavy bass "
+        "track at 150 BPM featuring a high-pitched female singing voice.\n\n"
+        "Build tension with rising synths, drums, and chopped vocals, then drop "
+        "into distorted bass and robotic wobbles. Give it a memorable chorus."
+    )
+    banger = (
+        "Create an absolutely insane, festival-level dubstep banger at 150 BPM "
+        "with earth-shattering bass drops and distorted FM synths.\n\n"
+        "Use punchy drums, a fake drop, a heavier second drop, and minimal "
+        "robotic vocal chops. Genre: Riddim. Vocals: Minimal."
+    )
+    for brief in (track, banger):
+        assert chat_assistant.music_request(brief)["duration_seconds"] == 180
+        assert chat_assistant.route(brief, []) == "music"
+    assert chat_assistant.route(
+        "Create a music app that generates a dubstep track at 150 BPM "
+        "with vocals, a chorus, and bass drops.", []
+    ) == "task"
+
+
 def test_question_answer_cannot_claim_it_started_a_task():
     claim = "I started a task: New song. I'll show its progress below."
     assert "haven't started" in chat_assistant.verified_chat_answer(claim)
