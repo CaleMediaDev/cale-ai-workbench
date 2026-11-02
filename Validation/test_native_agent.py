@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import long_tasks
 import native_agent
+import cloud_ai
 
 
 def project(folder):
@@ -29,6 +30,31 @@ def test_native_worker_writes_files_and_checkpoints_tool_results():
         assert (Path(item["folder"]) / "index.html").read_text() == "<h1>Ready</h1>"
         assert any(message.get("tool_call_id") == "write-1" for message in state["messages"])
         assert native_agent.read_state(item)["status"] == "done"
+
+
+def test_native_worker_reuses_router_across_model_turns():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        created = []
+
+        class Router:
+            def __init__(self):
+                created.append(self)
+                self.calls = 0
+
+            def complete(self, _payload, _task_id):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"choices": [{"message": {"role": "assistant", "content": None,
+                        "tool_calls": [{"id": "read-1", "type": "function", "function": {
+                            "name": "list_files", "arguments": "{}"}}]}}]}
+                return {"choices": [{"message": {"role": "assistant", "content": "Finished"}}]}
+
+        with patch.object(cloud_ai, "Router", Router):
+            state = native_agent.run_slice(item)
+        assert state["status"] == "done"
+        assert len(created) == 1
+        assert created[0].calls == 2
 
 
 def test_native_file_tools_cannot_escape_project_folder():

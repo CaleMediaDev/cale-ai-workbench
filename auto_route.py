@@ -117,6 +117,17 @@ def repeated_tool_failures(messages):
         if "[Tool loop warning:" in content:
             failures += 1
             continue
+        # Native worker tools use short human-readable results. Recognize
+        # their real failure forms as well as Hermes' JSON tool envelopes.
+        if content.startswith("Tool error:"):
+            failures += 1
+            continue
+        command = re.match(r"^Exit code: (-?\d+)(?:\n|$)", content)
+        if command:
+            if int(command.group(1)) != 0:
+                failures += 1
+                continue
+            break
         try:
             result, _ = json.JSONDecoder().raw_decode(content.lstrip())
         except (ValueError, TypeError):

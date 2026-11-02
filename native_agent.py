@@ -244,7 +244,11 @@ def run_slice(project: dict, complete=None) -> dict:
     messages = state.get("messages") or [{"role": "system", "content": prompt(project)},
                                          {"role": "user", "content": "Begin the task. Inspect the saved instructions and project state."}]
     messages = repair_interrupted_tools(messages)
-    call = complete or (lambda payload: Router().complete(payload, project["id"]))
+    # Keep provider cooldowns and local model discovery across the work slice.
+    # Constructing a fresh Router for each turn forces repeated model probes
+    # and forgets short-term routing decisions during one task.
+    router = Router() if complete is None else None
+    call = complete or (lambda payload: router.complete(payload, project["id"]))
     state.update(status="running", started=state.get("started") or time.time())
     save_state(project, state)
     for _ in range(MAX_TURNS_PER_SLICE):

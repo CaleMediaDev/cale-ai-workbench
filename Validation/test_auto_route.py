@@ -150,6 +150,18 @@ class AutoRouteTests(unittest.TestCase):
         messages += [{"role": "tool", "content": '{"output":"ok","exit_code":0,"error":null}'}] * 8
         self.assertEqual(task_size(messages), "quick")
 
+    def test_native_plain_text_tool_failures_escalate_then_recover(self):
+        messages = [{"role": "user", "content": "Build and test a recipe app."},
+                    {"role": "assistant", "tool_calls": [{"function": {"name": "run_command"}}]}]
+        messages += [
+            {"role": "tool", "content": "Tool error: FileNotFoundError: missing"},
+            {"role": "tool", "content": "Exit code: 1\nBuild failed"},
+            {"role": "tool", "content": "Tool error: ValueError: bad argument"},
+        ]
+        self.assertEqual(task_size(messages), "deep")
+        messages.append({"role": "tool", "content": "Exit code: 0\nBuild passed"})
+        self.assertEqual(task_size(messages), "balanced")
+
     def test_music_review_gets_strong_first_pass_and_balanced_followups(self):
         prompt = ("# Kanban task t_123: Michigan song — review\n\n## Body\n" +
                   project_prompt({"title": "Michigan song", "folder": "C:/Tasks/song",
