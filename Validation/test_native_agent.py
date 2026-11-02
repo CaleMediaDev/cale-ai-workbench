@@ -2,6 +2,7 @@
 
 import copy
 import json
+import os
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -206,6 +207,47 @@ def test_task_checkpoint_refreshes_after_restart_and_does_not_lose_new_user_mess
         assert any(entry.get("content") == "Use a larger font" for entry in fresh)
 
 
+def test_unchanged_task_checkpoint_reads_cached_sqlite_document():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        plan = folder / ".local-ai/PLAN.md"
+        plan.write_text("- [ ] Build the page")
+        assert "Build the page" in task_context.snapshot(folder)
+        with patch.object(Path, "read_text", side_effect=AssertionError("file reread")):
+            assert "Build the page" in task_context.snapshot(folder)
+
+
+def test_next_step_survives_when_large_plan_excerpt_omits_it():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        plan = folder / ".local-ai/PLAN.md"
+        plan.write_text("- [x] Past step\n" * 300 + "- [ ] Important middle step\n" +
+                        "- [x] Later step\n" * 300)
+        summary = task_context.snapshot(folder)
+        assert "Next step: Important middle step" in summary
+        assert "Important middle step" not in summary.split("PLAN.md:\n", 1)[1]
+        assert "Next step: Important middle step" in task_context.snapshot(folder)
+
+
+def test_task_checkpoint_periodically_detects_same_stamp_edit():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        plan = folder / ".local-ai/PLAN.md"
+        plan.write_text("- [ ] Step one")
+        assert "Next step: Step one" in task_context.snapshot(folder)
+        before = plan.stat()
+        plan.write_text("- [ ] Step two")
+        os.utime(plan, ns=(before.st_atime_ns, before.st_mtime_ns))
+        import project_memory
+
+        with project_memory.connection(folder) as conn:
+            conn.execute("UPDATE task_documents SET updated=0 WHERE name='PLAN.md'")
+        assert "Next step: Step two" in task_context.snapshot(folder)
+
+
 def test_inflight_user_instruction_prevents_early_completion():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
@@ -283,6 +325,27 @@ def test_existing_task_database_migrates_action_subject_column():
             conn.close()
         task_context.record_action(folder, "write_file", "Saved src/app.py", {"path": "src/app.py"})
         assert "write_file src/app.py: Completed" in task_context.snapshot(folder)
+
+
+def test_existing_task_database_migrates_cached_document_columns():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        import project_memory
+
+        project_memory.initialize(folder)
+        conn = sqlite3.connect(project_memory.database_path(folder))
+        try:
+            conn.execute("""CREATE TABLE task_documents (
+                name TEXT PRIMARY KEY, digest TEXT NOT NULL,
+                body TEXT NOT NULL, updated REAL NOT NULL)""")
+            conn.execute("INSERT INTO task_documents VALUES('PLAN.md','old','stale plan',0)")
+            conn.commit()
+        finally:
+            conn.close()
+        (folder / ".local-ai/PLAN.md").write_text("- [ ] Fresh plan")
+        assert "Next step: Fresh plan" in task_context.snapshot(folder)
+        assert "stale plan" not in task_context.snapshot(folder)
 
 
 def test_context_compaction_uses_configured_window_and_keeps_tool_batches():
