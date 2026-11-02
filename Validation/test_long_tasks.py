@@ -24,6 +24,24 @@ spec.loader.exec_module(task_module)
 
 
 class LongTaskTests(unittest.TestCase):
+    def test_hidden_model_activity_window_does_not_block_automatic_update(self):
+        class Window:
+            def __init__(self, visible, kind="Toplevel"):
+                self.visible, self.kind = visible, kind
+
+            def winfo_class(self):
+                return self.kind
+
+            def winfo_viewable(self):
+                return self.visible
+
+        hidden_usage = Window(False)
+        preview = Window(True)
+        visible_dialog = Window(True)
+        self.assertFalse(task_module.update_dialog_open([hidden_usage, preview], preview))
+        self.assertTrue(task_module.update_dialog_open(
+            [hidden_usage, preview, visible_dialog], preview))
+
     def test_worker_handoff_starts_after_process_exit_and_file_settle(self):
         import psutil
 

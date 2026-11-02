@@ -43,6 +43,16 @@ ROOT = Path(__file__).resolve().parent
 STATE = ROOT / "LongTasks"
 BOARD = "long-tasks"
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
+def update_dialog_open(children, preview_window=None):
+    """Ignore withdrawn helper windows while protecting visible user dialogs."""
+    return any(
+        child is not preview_window
+        and child.winfo_class() == "Toplevel"
+        and child.winfo_viewable()
+        for child in children
+    )
 INITIAL_PLAN = (
     "# Plan\n\nThe worker has not written milestones yet. Read the original request and "
     "user follow-ups, then replace this note with concrete acceptance checks.\n"
@@ -6088,10 +6098,7 @@ def gui():
             and not updating
             and (manual_update_requested or time.monotonic() - update_ready_at >= 30)
             and not self_update.active_tasks()
-            and not any(
-                isinstance(child, tk.Toplevel) and child is not preview_window
-                for child in window.winfo_children()
-            )
+            and not update_dialog_open(window.winfo_children(), preview_window)
         ):
             setup_state = read_task_status(STATE / "install-progress.json")
             if not setup_state or setup_state.get("status") == "complete":
