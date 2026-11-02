@@ -2527,7 +2527,9 @@ def supervisor_step(prepare_services=None, prior_error=""):
         threading.Thread(
             target=prepare_in_background, daemon=True, name="task-service-prepare"
         ).start()
-        while not finished.wait(1):
+        # Keep user controls responsive even while a model service takes a
+        # long time to start or the PC is busy rendering media.
+        while not finished.wait(0.2):
             process_requests()
             (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
         try:
