@@ -1,10 +1,12 @@
 """The installed regression runner stays local, bounded, and repeatable."""
 
 import json
+import sqlite3
 import sys
 import tempfile
 import threading
 import unittest
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -27,6 +29,24 @@ class SelfDiagnosticsTests(unittest.TestCase):
         validation = self.root / "Validation/test_long_tasks.py"
         validation.parent.mkdir()
         validation.touch()
+
+    def test_self_check_waits_for_music_and_other_active_projects(self):
+        with closing(sqlite3.connect(self.state / "projects.db")) as connection:
+            connection.execute("CREATE TABLE projects (status TEXT)")
+            connection.execute("INSERT INTO projects VALUES ('working')")
+            connection.commit()
+        with patch.object(diagnostics.subprocess, "Popen") as launch:
+            self.assertFalse(diagnostics.schedule(self.root, self.state, now=100))
+            launch.assert_not_called()
+        with closing(sqlite3.connect(self.state / "projects.db")) as connection:
+            connection.execute("UPDATE projects SET status='ready_for_review'")
+            connection.commit()
+        proc = SimpleNamespace(pid=123)
+        with (patch.object(diagnostics.subprocess, "Popen", return_value=proc) as launch,
+              patch("psutil.Process") as process):
+            process.return_value.create_time.return_value = 101
+            self.assertTrue(diagnostics.schedule(self.root, self.state, now=101))
+            launch.assert_called_once()
 
     def test_failed_check_retries_then_backs_off_for_a_week(self):
         proc = SimpleNamespace(pid=123)
@@ -88,6 +108,8 @@ class SelfDiagnosticsTests(unittest.TestCase):
         self.assertIn("1 failed", report["summary"])
         self.assertIn("details", (self.state / "self-check.log").read_text())
         self.assertEqual(run.call_args.args[0][1:], ["-m", "pytest", "-q", "Validation"])
+        self.assertEqual(run.call_args.kwargs["creationflags"],
+                         diagnostics.HIDE | diagnostics.LOW_PRIORITY)
 
     def test_failure_count_resets_after_passing_check(self):
         (self.state / "self-check.json").write_text(json.dumps({

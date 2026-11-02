@@ -3201,7 +3201,9 @@ def monitor():
                 for p in projects()
             )
             if not active:
-                if time.monotonic() - last_self_check >= 3600:
+                # A song may be rendering when the first check is due. Retry
+                # soon after it finishes; schedule() enforces the weekly run.
+                if time.monotonic() - last_self_check >= 60:
                     last_self_check = time.monotonic()
                     import self_diagnostics
 

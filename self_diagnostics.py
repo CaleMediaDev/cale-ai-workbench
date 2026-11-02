@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -23,6 +24,7 @@ FAILURE_RETRY = 60 * 60
 MAX_FAILURES = 3
 MAX_SECONDS = 20 * 60
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+LOW_PRIORITY = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
 
 
 def _read(path: Path) -> dict:
@@ -82,6 +84,21 @@ def persistent_failure(report: dict, current: str) -> bool:
             and int(report.get("failures", 0)) >= 2)
 
 
+def active_projects(state: Path) -> bool:
+    """Defer the CPU-heavy suite while any kind of user task is running."""
+    database = state / "projects.db"
+    if not database.is_file():
+        return False
+    try:
+        with closing(sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True,
+                                     timeout=1)) as connection:
+            return connection.execute(
+                "SELECT 1 FROM projects WHERE status IN ('queued','working','checking') LIMIT 1"
+            ).fetchone() is not None
+    except sqlite3.Error:
+        return True  # A busy or unhealthy database should not start another job.
+
+
 def _running(report: dict) -> bool:
     """Reject PID reuse; a stale report must not suppress the next check."""
     import psutil
@@ -109,6 +126,8 @@ def _schedule_locked(root: Path, state: Path, now: float | None) -> bool:
     report_path = state / "self-check.json"
     report = _read(report_path)
     current = version(root)
+    if active_projects(state):
+        return False
     if report.get("status") == "running" and _running(report):
         return False
     if report.get("version") == current and report.get("status") in ("passed", "failed"):
@@ -159,7 +178,7 @@ def run(root: Path = ROOT, state: Path = STATE) -> dict:
             encoding="utf-8",
             errors="replace",
             timeout=MAX_SECONDS,
-            creationflags=HIDE,
+            creationflags=HIDE | LOW_PRIORITY,
         )
         output = result.stdout + result.stderr
         passed = result.returncode == 0
