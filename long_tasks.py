@@ -911,29 +911,29 @@ def retry_music_after_sdk_repair(p: dict, job: dict) -> bool:
     if (job.get("status") != "error" or int(job.get("sdk_retries", 0)) >= 1
             or "response_format_json_object" not in str(job.get("current", ""))):
         return False
+    try:
+        repair = json.loads((STATE / "core-tool-repair.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        repair = {}
+    try:
+        repair_at = float(repair.get("updated") or 0)
+    except (ValueError, TypeError):
+        repair_at = 0
     toolbox_python = ROOT / "Toolbox/python/Scripts/python.exe"
     if not core_tool_health._runnable(toolbox_python, "-c", core_tool_health.TOOLBOX_SDK_PROBE):
-        try:
-            repair = json.loads((STATE / "core-tool-repair.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            repair = {}
-        try:
-            failed_at = float(repair.get("updated") or 0)
-        except (ValueError, TypeError):
-            failed_at = 0
         if (repair.get("status") == "failed" and "Toolbox model SDK" in repair.get("detail", "")
-                and failed_at >= float(job.get("finished") or 0)):
+                and repair_at >= float(job.get("finished") or 0)):
             with database() as conn:
                 previous = conn.execute(
                     "SELECT last_failed,attempts FROM sdk_repair_failures WHERE task_id=?", (p["id"],)
                 ).fetchone()
                 attempts = int(previous["attempts"]) if previous else 0
-                if not previous or failed_at > float(previous["last_failed"]):
+                if not previous or repair_at > float(previous["last_failed"]):
                     attempts += 1
                     conn.execute("""INSERT INTO sdk_repair_failures(task_id,last_failed,attempts)
                         VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET
                         last_failed=excluded.last_failed,attempts=excluded.attempts""",
-                        (p["id"], failed_at, attempts),
+                        (p["id"], repair_at, attempts),
                     )
             if attempts >= 3:
                 update(p["id"], status="needs_input", detail=(
@@ -948,6 +948,12 @@ def retry_music_after_sdk_repair(p: dict, job: dict) -> bool:
         if p["status"] != "working" or p["detail"] != detail:
             update(p["id"], status="working", detail=detail)
         return True
+    repaired = (p.get("detail") == "Repairing the music tool runtime automatically."
+                or repair.get("status") == "complete"
+                and "Toolbox model SDK" in repair.get("detail", "")
+                and repair_at >= float(job.get("finished") or 0))
+    if not repaired:
+        return False  # The error came from another runtime; do not make another song.
     import music_backend
 
     resumed = music_backend.resume_failed_sdk_job(music_job_id(p))

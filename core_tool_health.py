@@ -139,7 +139,7 @@ def start_background(root: Path = ROOT) -> bool:
             if result.returncode or remaining:
                 _status(root, "failed", "Still missing: " + ", ".join(remaining or unavailable))
             else:
-                _status(root, "complete", "Managed core tools answered local checks")
+                _status(root, "complete", "Repaired " + ", ".join(unavailable))
         except (OSError, subprocess.TimeoutExpired) as exc:
             _status(root, "failed", f"Repair will retry: {type(exc).__name__}")
 

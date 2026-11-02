@@ -185,6 +185,35 @@ class LongTaskTests(unittest.TestCase):
         job["sdk_retries"] = 1
         self.assertFalse(task_module.retry_music_after_sdk_repair(self.item(), job))
 
+    def test_music_sdk_error_does_not_retry_if_toolbox_was_healthy(self):
+        import core_tool_health
+        import music_backend
+
+        task_module.update(self.pid, card="music-job:" + "e" * 32, status="working")
+        job = {"status": "error", "current": (
+            "No module named 'openai.types.shared_params.response_format_json_object'"),
+            "finished": 100, "sdk_retries": 0}
+        with (patch.object(core_tool_health, "_runnable", return_value=True),
+              patch.object(music_backend, "resume_failed_sdk_job") as resume):
+            self.assertFalse(task_module.retry_music_after_sdk_repair(self.item(), job))
+            resume.assert_not_called()
+
+    def test_music_sdk_error_retries_if_background_repair_already_finished(self):
+        import core_tool_health
+        import music_backend
+
+        task_module.update(self.pid, card="music-job:" + "e" * 32, status="working")
+        job = {"status": "error", "current": (
+            "No module named 'openai.types.shared_params.response_format_json_object'"),
+            "finished": 100, "sdk_retries": 0}
+        (task_module.STATE / "core-tool-repair.json").write_text(json.dumps({
+            "status": "complete", "detail": "Repaired Toolbox model SDK", "updated": 101}))
+        with (patch.object(core_tool_health, "_runnable", return_value=True),
+              patch.object(music_backend, "resume_failed_sdk_job", return_value={
+                  "current": "Resuming music after tool repair"}) as resume):
+            self.assertTrue(task_module.retry_music_after_sdk_repair(self.item(), job))
+            resume.assert_called_once_with("e" * 32)
+
     def test_music_sdk_repair_stops_after_three_distinct_failures(self):
         import core_tool_health
 
