@@ -1,9 +1,13 @@
 """A finished song should include a local video and truthful captions."""
 
 import math
+import os
 import struct
 import wave
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 import song_video
 
@@ -58,3 +62,57 @@ def test_interrupted_video_is_not_claimed_ready_or_overwritten(tmp_path):
     assert Path(result["path"]).name == "song-video-2.mp4"
     assert song_video._video_playable(Path(result["path"]))
     assert partial.read_bytes() == b"not an MP4" * 200
+
+
+def test_changed_song_and_edited_captions_get_fresh_videos(tmp_path):
+    song = tmp_path / "song[final].wav"
+
+    def write_song(frequency):
+        with wave.open(str(song), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"".join(
+                struct.pack("<h", round(5000 * math.sin(2 * math.pi * frequency * n / 16000)))
+                for n in range(16000)
+            ))
+
+    write_song(440)
+    first = song_video.render(str(song), segments=[
+        {"start": 0.1, "end": 0.9, "text": "First version"}
+    ], duration=1)
+    first_video = Path(first["path"])
+    first_captions = Path(first["captions_path"])
+    old_video = first_video.read_bytes()
+    old_captions = first_captions.read_bytes()
+    original_time = song.stat()
+    write_song(660)
+    os.utime(song, ns=(original_time.st_atime_ns, original_time.st_mtime_ns))
+
+    with patch.object(song_video.music_video, "make_music_video",
+                      side_effect=RuntimeError("encoder busy")):
+        with pytest.raises(RuntimeError, match="encoder busy"):
+            song_video.render(str(song), segments=[
+                {"start": 0.1, "end": 0.9, "text": "Second version"}
+            ], duration=1)
+    caption_count = sum(path.name.startswith(song.stem + ".captions-")
+                        for path in tmp_path.iterdir())
+    second = song_video.render(str(song), segments=[
+        {"start": 0.1, "end": 0.9, "text": "Second version"}
+    ], duration=1)
+    assert sum(path.name.startswith(song.stem + ".captions-")
+               for path in tmp_path.iterdir()) == caption_count
+    assert second["path"] != first["path"]
+    assert second["captions_path"] != first["captions_path"]
+    assert "Second version" in Path(second["captions_path"]).read_text()
+    assert first_video.read_bytes() == old_video
+    assert first_captions.read_bytes() == old_captions
+    assert song_video.render(str(song), duration=1)["path"] == second["path"]
+
+    Path(second["captions_path"]).write_text(
+        "1\n00:00:00,100 --> 00:00:00,900\nEdited by user\n", encoding="utf-8"
+    )
+    third = song_video.render(str(song), duration=1)
+    assert third["path"] not in {first["path"], second["path"]}
+    assert third["captions_path"] == second["captions_path"]
+    assert song_video._video_playable(Path(third["path"]))
