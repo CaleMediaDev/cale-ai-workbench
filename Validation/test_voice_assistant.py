@@ -1,6 +1,7 @@
 """Voice control uses the local media worker and bounds recorded clips."""
 
 import json
+import io
 import os
 import subprocess
 import sys
@@ -11,7 +12,7 @@ import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cale_voice
@@ -81,7 +82,9 @@ class VoiceTests(unittest.TestCase):
         fake.post = answer
         with TemporaryDirectory() as folder, patch.object(
             voice_assistant, "ROOT", Path(folder)
-        ), patch.dict(sys.modules, {"cloud_ai": fake}):
+        ), patch.dict(sys.modules, {"cloud_ai": fake}), patch.object(
+            voice_assistant, "_fast_model_loaded", return_value=True
+        ):
             spoken = voice_assistant.rephrase_status(
                 "Recipe app. Checking files.", ["Still checking files"],
                 ("Recipe app", "checking files"),
@@ -99,11 +102,41 @@ class VoiceTests(unittest.TestCase):
         }
         with TemporaryDirectory() as folder, patch.object(
             voice_assistant, "ROOT", Path(folder)
-        ), patch.dict(sys.modules, {"cloud_ai": fake}):
+        ), patch.dict(sys.modules, {"cloud_ai": fake}), patch.object(
+            voice_assistant, "_fast_model_loaded", return_value=True
+        ):
             spoken = voice_assistant.rephrase_status(
                 "Recipe app. Checking files.", required=("Recipe app", "Checking files")
             )
-        self.assertEqual(spoken, "Recipe app. Checking files.")
+        self.assertEqual(spoken, "Recipe app: Checking files.")
+
+    def test_cold_local_model_does_not_delay_repeated_status_speech(self):
+        fake = ModuleType("cloud_ai")
+        fake.FAST_MODEL = "cale-fast"
+        fake.post = Mock(side_effect=AssertionError("Cold model should not load"))
+        with TemporaryDirectory() as folder, patch.object(
+            voice_assistant, "ROOT", Path(folder)
+        ), patch.dict(sys.modules, {"cloud_ai": fake}), patch.object(
+            voice_assistant, "_fast_model_loaded", return_value=False
+        ):
+            first = voice_assistant.rephrase_status(
+                "Recipe app. Checking files.", required=("Recipe app", "Checking files")
+            )
+            second = voice_assistant.rephrase_status(
+                "Recipe app. Checking files.", recent=(first,),
+                required=("Recipe app", "Checking files")
+            )
+        self.assertNotEqual(first, second)
+        self.assertIn("Recipe app", first)
+        self.assertIn("Checking files", second)
+        fake.post.assert_not_called()
+
+    def test_loaded_model_check_accepts_latest_alias_and_fails_closed(self):
+        with patch.object(voice_assistant, "urlopen", return_value=io.BytesIO(
+            b'{"models":[{"name":"cale-fast:latest"}]}')):
+            self.assertTrue(voice_assistant._fast_model_loaded("cale-fast"))
+        with patch.object(voice_assistant, "urlopen", side_effect=OSError):
+            self.assertFalse(voice_assistant._fast_model_loaded("cale-fast"))
 
     def test_music_render_keeps_status_speech_from_reloading_gpu_model(self):
         from types import SimpleNamespace

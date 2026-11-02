@@ -18,6 +18,7 @@ import threading
 import time
 import wave
 from pathlib import Path
+from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parent
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -120,15 +121,49 @@ def progress_line(title, step, sequence=0):
     return lines[int(sequence) % len(lines)].format(title=title, step=step)
 
 
-def rephrase_status(line, recent=(), required=()):
-    """Give scripted speech fresh wording with the fast *local* model.
+def _fast_model_loaded(model: str) -> bool:
+    """Do not delay speech while Ollama loads several gigabytes of weights."""
+    try:
+        with urlopen("http://127.0.0.1:11434/api/ps", timeout=0.35) as response:
+            running = json.load(response).get("models", [])
+        alias = model.split(":", 1)[0]
+        return any(str(item.get("name", "")).split(":", 1)[0] == alias
+                   for item in running)
+    except (OSError, ValueError, TypeError):
+        return False
 
-    This is only for app-authored status lines. Chat replies are spoken exactly
-    as displayed. Model failure leaves the original, factual line intact.
+
+def _quick_status_variation(original: str, previous: list[str], facts: list[str]) -> str:
+    """Vary a factual line instantly when the local model is cold or busy."""
+    # Opening greetings and stuck/idle prompts already rotate their wording.
+    # Only a title plus a measured step can be reshaped without guessing.
+    if len(facts) < 2:
+        return original
+    subject, step = facts[0], facts[1].rstrip(".!? ")
+    choices = (
+        f"{subject}: {step}.",
+        f"{subject} update: {step}.",
+        f"Here's the latest on {subject}: {step}.",
+        f"Right now on {subject}: {step}.",
+    )
+    used = {item.casefold() for item in previous}
+    return next((candidate for candidate in choices
+                 if len(candidate) <= 240 and candidate.casefold() not in used
+                 and all(fact.casefold() in candidate.casefold() for fact in facts)), original)
+
+
+def rephrase_status(line, recent=(), required=()):
+    """Vary scripted speech promptly, using the local model only while warm.
+
+    Chat replies are spoken exactly as displayed. Cold or busy model calls
+    cannot add seconds of silence before a routine spoken update.
     """
     original = str(line).strip()
     if not original:
         return original
+    previous = [str(item).strip() for item in recent if str(item).strip()][-6:]
+    facts = [str(item).strip() for item in required if str(item).strip()]
+    fallback = _quick_status_variation(original, previous, facts)
     # A music render needs the GPU. Avoid silently reloading a multi-GB LLM
     # just to decorate a spoken status line while ACE-Step is working.
     lease_dir = ROOT / "LongTasks"
@@ -138,12 +173,12 @@ def rephrase_status(line, recent=(), required=()):
             import psutil
 
             if psutil.pid_exists(pid) and time.time() - marker.stat().st_mtime < 8000:
-                return original
+                return fallback
         except (OSError, ValueError):
             continue
     from cloud_ai import FAST_MODEL, post
-    previous = [str(item).strip() for item in recent if str(item).strip()][-6:]
-    facts = [str(item).strip() for item in required if str(item).strip()]
+    if not _fast_model_loaded(FAST_MODEL):
+        return fallback
     messages = [
         {"role": "system", "content": (
             "You write one short spoken status line for Cale, a friendly, witty male "
@@ -151,7 +186,7 @@ def rephrase_status(line, recent=(), required=()):
             "different from recent lines. Keep every fact and the same intent. "
             "Include each required phrase exactly. Do not invent progress, completed "
             "work, dates, features, or user decisions. No quotation marks, labels, "
-            "markdown, profanity, or extra sentences. Stay under 35 words."
+            "markdown, profanity, or offers to help. Use one sentence under 20 words."
         )},
         {"role": "user", "content": (
             f"Line to vary: {original}\n"
@@ -168,14 +203,15 @@ def rephrase_status(line, recent=(), required=()):
         )
         candidate = str(result["choices"][0]["message"].get("content") or "").strip().strip('"')
     except (KeyError, IndexError, OSError, ValueError, TimeoutError):
-        return original
+        return fallback
     if (
-        not candidate or len(candidate) > 240 or "\n" in candidate
+        not candidate or len(candidate) > 240 or len(candidate.split()) > 24
+        or "\n" in candidate
         or candidate.casefold() == original.casefold()
         or candidate.casefold() in {item.casefold() for item in previous}
         or any(phrase.casefold() not in candidate.casefold() for phrase in facts)
     ):
-        return original
+        return fallback
     return candidate
 
 
