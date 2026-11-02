@@ -156,7 +156,7 @@ def music_request(text: str) -> dict | None:
     # request to strip the rapper or singer from the entire song.
     instrumental_mentions = list(re.finditer(r"\binstrumental\b", prompt, re.IGNORECASE))
     section_only = bool(instrumental_mentions) and all(
-        re.match(r"\s+(?:breakdown|bridge|interlude|intro|outro|section|passage|drop)\b",
+        re.match(r"\s+(?:breakdown|break|bridge|interlude|intro|outro|section|passage|drop)\b",
                  prompt[match.end():], re.IGNORECASE)
         for match in instrumental_mentions
     )

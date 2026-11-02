@@ -176,6 +176,11 @@ def test_instrumental_breakdown_does_not_remove_requested_rap_vocals():
     spec = chat_assistant.music_request(brief)
     assert spec is not None
     assert spec["instrumental"] is False
+    assert chat_assistant.music_request(
+        "94 BPM West Coast rap. Deep male rapper with two verses and a layered male chorus, "
+        "then a funky instrumental break and a massive final hook. "
+        "No pop vocals or autotune."
+    )["instrumental"] is False
     assert chat_assistant.music_request("Make an instrumental rap beat")["instrumental"] is True
 
 
