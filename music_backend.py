@@ -779,11 +779,16 @@ def start_music_job(
     if source_path and not Path(source_path).resolve().is_file():
         raise ValueError("The cover source file does not exist.")
     job_id = uuid.uuid4().hex
+    import task_eta
+
+    estimate = task_eta.music_estimate_seconds(JOBS, duration_seconds, bool(instrumental))
+    started = time.time()
     info = {
         "job_id": job_id, "status": "queued", "current": "Starting local music", "progress": 5,
         "prompt": prompt, "output_path": str(target), "lyrics": lyrics,
         "duration_seconds": duration_seconds, "instrumental": bool(instrumental),
-        "source_path": source_path, "task_id": task_id, "created": time.time(),
+        "source_path": source_path, "task_id": task_id, "created": started,
+        "requested_at": started, "estimated_seconds": estimate,
         "vocal_retry": int(vocal_retry),
     }
     _write_job(job_id, info)

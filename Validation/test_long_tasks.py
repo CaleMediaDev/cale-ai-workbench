@@ -926,6 +926,15 @@ class LongTaskTests(unittest.TestCase):
         }):
             self.assertEqual(task_module.task_progress(self.item())[0], 99)
 
+    def test_direct_music_card_shows_measured_eta(self):
+        import music_backend
+
+        with patch.object(music_backend, "music_job_status", return_value={
+            "status": "working", "requested_at": 1000, "estimated_seconds": 90,
+        }), patch.object(task_module.task_eta.time, "time", return_value=1030):
+            self.assertEqual(task_module.music_task_countdown("abc123"),
+                             "About 1m 00s left · estimate from recent songs")
+
     def test_image_saved_during_setup_keeps_direct_image_route(self):
         task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"

@@ -235,6 +235,16 @@ def music_job_id(p):
     return card.split(":", 1)[1] if card.startswith("music-job:") else ""
 
 
+def music_task_countdown(job_id):
+    """Read a durable song ETA without letting a damaged record break the UI."""
+    try:
+        import music_backend
+
+        return task_eta.music_countdown(music_backend.music_job_status(job_id))
+    except (OSError, ValueError, KeyError):
+        return "Estimating from recent songs…"
+
+
 def image_job_id(p):
     """Identify a direct image task without asking the Hermes board."""
     card = str(p.get("card") or "")
@@ -5808,7 +5818,7 @@ def gui():
             )
             set_text(
                 card_info["eta"],
-                "Render time varies with the music model and song length."
+                music_task_countdown(music_job_id(item))
                 if music_job_id(item) and item["status"] == "working"
                 else "Image generation time varies with this PC's GPU."
                 if image_job_id(item) and item["status"] == "working"

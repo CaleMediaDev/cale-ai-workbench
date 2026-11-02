@@ -1,5 +1,7 @@
 """The countdown survives restarts and excludes pauses and supervisor downtime."""
 
+import json
+
 import task_eta
 
 
@@ -40,3 +42,26 @@ def test_stalled_and_completed_tasks(tmp_path):
     assert task_eta.countdown(db, "task", 50, "working", 1700) == "Estimate pending progress"
     assert task_eta.countdown(db, "task", 100, "ready_for_review", 1701) == ""
     assert task_eta.countdown(db, "task", 100, "accepted", 1702) == ""
+
+
+def test_music_eta_uses_completed_local_songs_and_explains_overrun(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    for index, elapsed in enumerate((48, 60, 72, 800)):
+        (jobs / f"{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 180, "created": 1000,
+            "finished": 1000 + elapsed,
+        }), encoding="utf-8")
+    estimate = task_eta.music_estimate_seconds(jobs, 180, False)
+    assert estimate == 66
+    assert task_eta.music_estimate_seconds(jobs, 180, True) is None
+    current = {"status": "working", "requested_at": 2000,
+               "estimated_seconds": estimate}
+    assert task_eta.music_countdown(current, now=2030) == (
+        "About 36s left · estimate from recent songs"
+    )
+    assert task_eta.music_countdown(current, now=2100) == (
+        "Taking longer than recent songs · still working"
+    )
+    assert task_eta.music_countdown({**current, "status": "complete"}, now=2100) == ""

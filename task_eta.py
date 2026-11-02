@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import sqlite3
 import time
+import json
+import statistics
 from contextlib import closing
 from pathlib import Path
 
@@ -46,6 +48,55 @@ def total_time(created: float, updated: float, status: str,
     else:
         end = now
     return _duration(max(0, end - start))
+
+
+def music_estimate_seconds(jobs_dir: Path, duration_seconds: int,
+                           instrumental: bool) -> int | None:
+    """Estimate a local song from recent completed renders on this PC.
+
+    The median resists first-use downloads and other unusually slow renders.
+    Song length scales the measured render time while preserving startup time.
+    """
+    samples = []
+    try:
+        paths = sorted(jobs_dir.glob("*.json"), key=lambda path: path.stat().st_mtime,
+                       reverse=True)[:80]
+    except OSError:
+        return None
+    for path in paths:
+        try:
+            job = json.loads(path.read_text(encoding="utf-8"))
+            length = float(job.get("duration_seconds") or 0)
+            elapsed = float(job.get("finished") or 0) - float(job.get("requested_at") or job.get("created") or 0)
+            if (job.get("status") != "complete" or not length or
+                    bool(job.get("instrumental")) != instrumental or not 2 <= elapsed <= 3600):
+                continue
+            ratio = max(0.25, min(4.0, duration_seconds / length))
+            samples.append(15 + max(0, elapsed - 15) * ratio)
+            if len(samples) == 20:
+                break
+        except (OSError, ValueError, TypeError, OverflowError):
+            continue
+    return round(statistics.median(samples)) if len(samples) >= 3 else None
+
+
+def music_countdown(job: dict, now: float | None = None) -> str:
+    """Show a live, honest countdown or explain when a render exceeds history."""
+    if job.get("status") == "paused":
+        return "Paused"
+    if job.get("status") not in ("queued", "working"):
+        return ""
+    try:
+        expected = float(job.get("estimated_seconds") or 0)
+        started = float(job.get("requested_at") or job.get("created") or 0)
+    except (TypeError, ValueError, OverflowError):
+        return "Estimating from recent songs…"
+    if expected <= 0 or started <= 0:
+        return "Estimating from recent songs…"
+    remaining = expected - max(0, (time.time() if now is None else now) - started)
+    if remaining <= 0:
+        return "Taking longer than recent songs · still working"
+    return f"About {_duration(remaining)} left · estimate from recent songs"
 
 
 def countdown(db_path: Path, task_id: str, percent: int, status: str,
