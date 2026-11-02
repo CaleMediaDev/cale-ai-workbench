@@ -2633,43 +2633,68 @@ def advance_project(p):
         )
 
 
+SERVICE_PREPARE_WAIT_SECONDS = 45
+_service_preparation = None
+
+
+def completed_service_preparation():
+    """Harvest one finished startup attempt without launching it again."""
+    global _service_preparation
+
+    state = _service_preparation
+    if state is None or not state["finished"].is_set():
+        return None
+    _service_preparation = None
+    outcome = state["outcome"]
+    if "error" not in outcome:
+        return ""
+    exc = outcome["error"]
+    with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
+        log.write(time.ctime() + "\nService startup: " + outcome["traceback"] + "\n")
+    return f"Model service retrying: {type(exc).__name__}: {exc}"
+
+
 def supervisor_step(prepare_services=None, prior_error=""):
     """Process tasks even when optional model/gateway startup needs a retry."""
     # Handle controls before a slow model startup. Keep polling while startup
     # runs so Pause, Stop, and follow-up notes do not wait on Ollama or Hermes.
     process_requests()
-    service_error = prior_error
-    if prepare_services is not None:
+    completion = completed_service_preparation()
+    service_error = prior_error if completion is None else completion
+    if prepare_services is not None and completion is None:
         import threading
+        global _service_preparation
 
-        finished = threading.Event()
-        outcome = {}
+        if _service_preparation is None:
+            finished = threading.Event()
+            outcome = {}
 
-        def prepare_in_background():
-            try:
-                prepare_services()
-            except Exception as exc:
-                outcome["error"] = exc
-                outcome["traceback"] = traceback.format_exc()
-            finally:
-                finished.set()
+            def prepare_in_background():
+                try:
+                    prepare_services()
+                except Exception as exc:
+                    outcome["error"] = exc
+                    outcome["traceback"] = traceback.format_exc()
+                finally:
+                    finished.set()
 
-        threading.Thread(
-            target=prepare_in_background, daemon=True, name="task-service-prepare"
-        ).start()
+            _service_preparation = {"finished": finished, "outcome": outcome}
+            threading.Thread(
+                target=prepare_in_background, daemon=True, name="task-service-prepare"
+            ).start()
+        finished = _service_preparation["finished"]
         # Keep user controls responsive even while a model service takes a
-        # long time to start or the PC is busy rendering media.
+        # long time to start. Resume task supervision after a bounded wait;
+        # reuse this same preparation thread on later steps if it is still live.
+        deadline = time.monotonic() + SERVICE_PREPARE_WAIT_SECONDS
         while not finished.wait(0.2):
             process_requests()
             (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
-        try:
-            if "error" in outcome:
-                raise outcome["error"]
-            service_error = ""
-        except Exception as exc:
-            service_error = f"Model service retrying: {type(exc).__name__}: {exc}"
-            with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
-                log.write(time.ctime() + "\nService startup: " + outcome.get("traceback", traceback.format_exc()) + "\n")
+            if time.monotonic() >= deadline:
+                break
+        completion = completed_service_preparation()
+        service_error = ("Model service is still preparing; task supervision continues."
+                         if completion is None else completion)
     tick()
     # The supervisor keeps working after the window closes. Record milestone
     # observations here so the ETA does not mistake hidden-window work for a
@@ -2918,6 +2943,7 @@ def monitor():
                         env=environment(),
                         capture_output=True,
                         text=True,
+                        timeout=30,
                         creationflags=HIDE,
                     )
                     if settings.returncode:

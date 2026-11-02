@@ -2040,6 +2040,38 @@ class LongTaskTests(unittest.TestCase):
         self.assertFalse(errors)
         self.assertTrue(dispatched.is_set())
 
+    def test_slow_service_preparation_does_not_hold_task_supervision_forever(self):
+        started = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def slow_prepare():
+            calls.append("started")
+            started.set()
+            release.wait(5)
+
+        try:
+            with (patch.object(task_module, "SERVICE_PREPARE_WAIT_SECONDS", 0.1),
+                  patch.object(task_module, "_service_preparation", None),
+                  patch.object(task_module, "tick") as tick):
+                first = task_module.supervisor_step(slow_prepare)
+                self.assertTrue(started.is_set())
+                self.assertIn("still preparing", first)
+                self.assertEqual(tick.call_count, 1)
+
+                second = task_module.supervisor_step(slow_prepare, first)
+                self.assertIn("still preparing", second)
+                self.assertEqual(calls, ["started"])
+                self.assertEqual(tick.call_count, 2)
+
+                release.set()
+                self.assertTrue(task_module._service_preparation["finished"].wait(2))
+                self.assertEqual(task_module.supervisor_step(None, second), "")
+                self.assertIsNone(task_module._service_preparation)
+                self.assertEqual(tick.call_count, 3)
+        finally:
+            release.set()
+
     def test_supervisor_records_task_progress_without_ui(self):
         task_module.update(self.pid, card="fixture", status="working")
         with patch.object(task_module, "tick"), patch.object(
