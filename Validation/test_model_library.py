@@ -452,13 +452,55 @@ class AutoModelTests(unittest.TestCase):
                 "tool_calls": [
                     {"function": {"name": "multiply", "arguments": {"a": 7, "b": 13}}}
                 ]
-            }
+            }, "eval_count": 64, "eval_duration": 2_000_000_000,
         }
         with patch.object(library, "post", return_value=response) as post:
             self.assertTrue(library.probe_tool_use("cale-qwen36", "none"))
         request = post.call_args.args[1]
         self.assertIs(request["think"], False)
         self.assertEqual(request["options"]["num_predict"], 512)
+
+    def test_slow_tool_capable_model_fails_before_alias_creation(self):
+        response = {"message": {"tool_calls": [
+            {"function": {"name": "multiply", "arguments": {"a": 7, "b": 13}}}
+        ]}, "eval_count": 64, "eval_duration": 32_000_000_000}
+        with patch.object(library, "post", return_value=response) as post:
+            with self.assertRaisesRegex(library.SlowModelError, "2.0 tokens/s"):
+                library.probe_tool_use("slow-source")
+        post.assert_called_once()
+
+    def test_short_tool_call_gets_generation_speed_probe(self):
+        tool = {"message": {"tool_calls": [
+            {"function": {"name": "multiply", "arguments": {"a": 7, "b": 13}}}
+        ]}, "eval_count": 8, "eval_duration": 1_000_000_000}
+        generation = {"eval_count": 80, "eval_duration": 4_000_000_000}
+        with patch.object(library, "post", side_effect=[tool, generation]) as post:
+            self.assertTrue(library.probe_tool_use("fast-source"))
+        self.assertEqual(post.call_args_list[1].args[0], "/api/generate")
+
+    def test_slow_probe_is_not_retried_on_every_startup(self):
+        catalog = {"main": {"alias": "base"},
+                   "slow": {"alias": "cale-slow", "source": "slow:latest",
+                            "label": "Slow", "download_gb": 7, "ram_gb": 24}}
+        with (tempfile.TemporaryDirectory() as folder,
+              patch.object(library, "CATALOG", catalog),
+              patch.object(library, "total_ram_gb", return_value=32),
+              patch("model_fitness.gpu_vram_gb", return_value=12),
+              patch("model_fitness.measured_speed", return_value=None),
+              patch.object(library, "model_ready", return_value=False),
+              patch.object(library, "source_cached", return_value=True),
+              patch.object(library, "ensure_main_standard", return_value=False),
+              patch.object(library, "repair_main_alias", return_value=False),
+              patch.object(library, "cleanup_retired_main_sources"),
+              patch.object(library.shutil, "disk_usage",
+                           return_value=SimpleNamespace(free=40 * 2**30)),
+              patch.object(library, "install", side_effect=library.SlowModelError(
+                  "Model generated 2.0 tokens/s on this PC")) as install):
+            library.auto_install(folder, refresh=False)
+            library.auto_install(folder, refresh=False)
+            state = json.loads((Path(folder) / "optional-model-slow.json").read_text())
+        self.assertEqual(state["status"], "skipped_slow")
+        install.assert_called_once()
 
     def test_recommendation_can_specify_tool_reasoning(self):
         candidate = json.loads((ROOT / "models/recommendations.json").read_text())

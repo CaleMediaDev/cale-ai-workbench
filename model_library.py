@@ -223,8 +223,24 @@ def approve_candidate(item):
     os.replace(temporary, path)
 
 
+class SlowModelError(RuntimeError):
+    """A real local generation probe found this model too slow for agent work."""
+
+
+def probe_tokens_per_second(result):
+    """Use Ollama's decode duration, excluding model load and prompt prefill."""
+    try:
+        count = int(result.get("eval_count") or 0)
+        duration = int(result.get("eval_duration") or 0)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+    if count < 32 or duration <= 0:
+        return None
+    return count * 1_000_000_000 / duration
+
+
 def probe_tool_use(alias, reasoning_effort=None):
-    """Require a real local function call before auto-promoting a new model."""
+    """Require both a real tool call and useful decode speed before promotion."""
     request = {
         "model": alias,
         "stream": False,
@@ -268,6 +284,23 @@ def probe_tool_use(alias, reasoning_effort=None):
             and args.get("a") == 7
             and args.get("b") == 13
         ):
+            speed = probe_tokens_per_second(result)
+            if speed is None:
+                # Tool calls can contain too few decoded tokens for a useful
+                # speed sample. Probe the already-loaded source once more.
+                generation = post("/api/generate", {
+                    "model": alias,
+                    "prompt": "Write 80 different common English words, separated by commas. Do not explain.",
+                    "stream": False,
+                    "options": {"num_predict": 128, "temperature": 0},
+                }, timeout=180)
+                speed = probe_tokens_per_second(generation)
+            if speed is None:
+                raise RuntimeError("Model tool check passed, but generation speed could not be verified.")
+            if speed < 5:
+                raise SlowModelError(
+                    f"Model generated {speed:.1f} tokens/s on this PC; needs at least 5 tokens/s."
+                )
             return True
     raise RuntimeError(
         "Model downloaded, but it did not pass the local tool-use check."
@@ -884,6 +917,22 @@ def auto_install(status_dir, refresh=True):
                     save_download_status(path, status, detail, 0)
                     continue
                 try:
+                    previous = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    previous = {}
+                if not isinstance(previous, dict):
+                    previous = {}
+                try:
+                    last_probe = float(previous.get("updated") or 0)
+                except (TypeError, ValueError, OverflowError):
+                    last_probe = 0
+                if (previous.get("status") == "skipped_slow"
+                        and previous.get("source") == model.get("source")
+                        and previous.get("ram_gb") == round(ram)
+                        and previous.get("vram_gb") == round(vram, 1)
+                        and 0 <= time.time() - last_probe < 7 * 86400):
+                    continue  # Recheck after a week or a hardware/model change.
+                try:
                     if model_ready(profile):
                         save_download_status(
                             path, "complete", "Installed and ready to use", 100
@@ -943,6 +992,11 @@ def auto_install(status_dir, refresh=True):
                     save_download_status(
                         path, "complete", "Installed and ready to use", 100
                     )
+                except SlowModelError as exc:
+                    save_download_status(path, "skipped_slow", str(exc), 0, {
+                        "source": model.get("source"), "ram_gb": round(ram),
+                        "vram_gb": round(vram, 1),
+                    })
                 except Exception as exc:
                     save_download_status(path, "error", str(exc), 0)
                     # One unavailable model must not block smaller or different models.
