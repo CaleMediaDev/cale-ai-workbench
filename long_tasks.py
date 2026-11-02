@@ -635,12 +635,15 @@ def add_project(title, folder, brief, waiting_for_setup=False, pending_media=Non
             encoding="utf-8",
         )
     with database() as conn:
+        # The song renderer is local. Keep its planning agent local too unless
+        # the person explicitly switches this task to connected AI.
+        ai_route = "local_only" if standalone_audio_project({"brief": brief}) else "automatic"
         conn.execute(
-            "INSERT INTO projects(id,title,folder,brief,status,created,updated) VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO projects(id,title,folder,brief,status,created,updated,ai_route) VALUES(?,?,?,?,?,?,?,?)",
             (
                 pid, title, str(folder), brief,
                 "waiting_for_setup" if waiting_for_setup else "queued",
-                time.time(), time.time(),
+                time.time(), time.time(), ai_route,
             ),
         )
     return pid
@@ -2452,15 +2455,39 @@ def advance_project(p):
 
 def supervisor_step(prepare_services=None, prior_error=""):
     """Process tasks even when optional model/gateway startup needs a retry."""
+    # Handle controls before a slow model startup. Keep polling while startup
+    # runs so Pause, Stop, and follow-up notes do not wait on Ollama or Hermes.
+    process_requests()
     service_error = prior_error
     if prepare_services is not None:
+        import threading
+
+        finished = threading.Event()
+        outcome = {}
+
+        def prepare_in_background():
+            try:
+                prepare_services()
+            except Exception as exc:
+                outcome["error"] = exc
+                outcome["traceback"] = traceback.format_exc()
+            finally:
+                finished.set()
+
+        threading.Thread(
+            target=prepare_in_background, daemon=True, name="task-service-prepare"
+        ).start()
+        while not finished.wait(1):
+            process_requests()
+            (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
         try:
-            prepare_services()
+            if "error" in outcome:
+                raise outcome["error"]
             service_error = ""
         except Exception as exc:
             service_error = f"Model service retrying: {type(exc).__name__}: {exc}"
             with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
-                log.write(time.ctime() + "\nService startup: " + traceback.format_exc() + "\n")
+                log.write(time.ctime() + "\nService startup: " + outcome.get("traceback", traceback.format_exc()) + "\n")
     tick()
     # The supervisor keeps working after the window closes. Record milestone
     # observations here so the ETA does not mistake hidden-window work for a
@@ -2630,6 +2657,9 @@ def monitor():
                 setup_recovery.recover()
             setup = read_task_status(STATE / "install-progress.json")
             if setup.get("status") == "working" and setup_blocks_tasks(setup):
+                # Setup may spend minutes installing models. Controls must
+                # still work for tasks already queued behind that gate.
+                process_requests()
                 (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
                 time.sleep(5)
                 continue
@@ -4426,6 +4456,8 @@ def gui():
                         if paths
                         else chat_assistant.answer_with_tools(question, context)
                     )
+                    if isinstance(answer, str):
+                        answer = chat_assistant.verified_chat_answer(answer)
                 try:
                     runtime_diagnostics.resolve(STATE, "chat")
                 except (OSError, sqlite3.Error):

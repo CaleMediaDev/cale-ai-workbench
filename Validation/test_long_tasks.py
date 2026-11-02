@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import wave
@@ -314,6 +315,15 @@ class LongTaskTests(unittest.TestCase):
 
     def item(self):
         return task_module.projects()[0]
+
+    def test_song_projects_default_to_local_ai_for_planning_too(self):
+        song_id = task_module.add_project(
+            "anniversary song", str(self.base / "anniversary"),
+            "Create a melodic dubstep song with female vocals and a romantic chorus",
+        )
+        song = next(p for p in task_module.projects() if p["id"] == song_id)
+        self.assertEqual(song["ai_route"], "local_only")
+        self.assertEqual(self.item()["ai_route"], "automatic")
 
     def test_finished_time_survives_later_acceptance_and_resets_for_revision(self):
         created = self.item()["created"]
@@ -1753,6 +1763,41 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(self.item()["status"], "paused")
         self.assertIn("model service offline", error)
         self.assertIn("Model service retrying", (task_module.STATE / "service-status.txt").read_text())
+
+    def test_pause_is_applied_while_service_preparation_is_still_running(self):
+        started = threading.Event()
+        release = threading.Event()
+        dispatched = threading.Event()
+        errors = []
+
+        def slow_prepare():
+            started.set()
+            if not release.wait(5):
+                raise RuntimeError("test preparation timed out")
+
+        def run_supervisor():
+            try:
+                with patch.object(task_module, "tick", side_effect=dispatched.set):
+                    task_module.supervisor_step(slow_prepare)
+            except Exception as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=run_supervisor)
+        worker.start()
+        try:
+            self.assertTrue(started.wait(2))
+            task_module.request(self.pid, "pause")
+            deadline = time.monotonic() + 3
+            while self.item()["status"] != "paused" and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertEqual(self.item()["status"], "paused")
+            self.assertFalse(dispatched.is_set())
+        finally:
+            release.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(errors)
+        self.assertTrue(dispatched.is_set())
 
     def test_supervisor_records_task_progress_without_ui(self):
         task_module.update(self.pid, card="fixture", status="working")

@@ -13,6 +13,25 @@ def test_questions_stay_in_chat():
     assert chat_assistant.route("How do I build a website?", []) == "answer"
 
 
+def test_bare_detailed_song_brief_creates_a_task_without_command_words():
+    brief = (
+        "150 BPM, extremely wobbly melodic dubstep, heavy old-school wobble bass, "
+        "deep oscillating basslines, rhythmic synth sweeps and huge drops. "
+        "Super cute high-pitched female singing voice with beautiful harmonies. "
+        "The song tells a funny and heartfelt love story with an emotional chorus."
+    )
+    assert chat_assistant.music_request(brief) is None
+    assert chat_assistant.route(brief, []) == "task"
+    assert chat_assistant.route(brief, [{"id": "older-song", "title": "Older song"}]) == "task"
+    assert chat_assistant.route("What does 150 BPM mean for a dubstep song?", []) == "answer"
+
+
+def test_question_answer_cannot_claim_it_started_a_task():
+    claim = "I started a task: New song. I'll show its progress below."
+    assert "haven't started" in chat_assistant.verified_chat_answer(claim)
+    assert chat_assistant.verified_chat_answer("The song has a 150 BPM beat.") == "The song has a 150 BPM beat."
+
+
 def test_voice_replay_finds_saved_rap_without_another_model_call():
     history = [
         {"role": "assistant", "content": "Here is the rap: Great Lakes beat."},

@@ -105,6 +105,8 @@ The background supervisor records task milestones even when the window is closed
 
 Each task card shows the upstream AI providers and their reported token totals. The loopback address used by a worker is Cale's router, so a local address alone does not mean Ollama answered. Open a task's details and choose **Use local AI only** to keep that task on installed Ollama models; this takes effect on the next model request, even while the task is running. **Use connected AI** restores the normal speed and usage routing. Audio rendering remains local in either mode.
 
+Standalone song tasks now start with local-only planning as well as local rendering. Someone can opt that task into connected AI from its details. A detailed music brief beginning with tempo or style is treated as a task even without "make a song"; the chat answer path cannot claim it created a task when no task was saved.
+
 Song task details include **Listen to saved versions** so all playable takes remain available without searching through diagnostic clips. Cale's worker instructions count existing full-song drafts across restarts and limit each user-requested batch to three new versions; after that, Cale should present the best saved drafts and ask for direction rather than silently making more.
 
 After a standalone song passes its independent project checks and has a saved playable file, its task finishes without a second open-ended AI review. You can listen to the saved takes and offer feedback later. Older song reviews stalled only on which version sounds best can also finish after fresh checks; a failed check still returns to repair.

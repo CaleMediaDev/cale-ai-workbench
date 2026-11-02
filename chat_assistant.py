@@ -143,6 +143,43 @@ def music_edit_request(command: str) -> bool:
     )
 
 
+def bare_song_brief(text: str) -> bool:
+    """Treat a detailed music specification as work even without 'make a song'.
+
+    The full agent handles these briefs: a direct 30-second render would lose
+    requested story, lyric, and arrangement details when no duration is given.
+    """
+    value = text.strip()
+    if len(value) < 120 or value.endswith("?") or re.match(
+        r"^(?:what|why|how|when|where|who|can|could|should|do|does|is|are)\b",
+        value, re.I,
+    ):
+        return False
+    opening = value[:100]
+    spec_opening = bool(re.match(r"^\d{2,3}\s*BPM\b", opening, re.I) or re.match(
+        r"^(?:genre|style|vocals?|song brief|music brief)\s*:", opening, re.I,
+    ) or re.match(r"^(?:an?\s+)?[^.!?]{0,65}\b(?:song|track)\b", opening, re.I))
+    if not spec_opening:
+        return False
+    signals = sum(bool(re.search(pattern, value, re.I)) for pattern in (
+        r"\b(?:song|track|music|rap)\b",
+        r"\b(?:BPM|tempo)\b",
+        r"\b(?:vocals?|singer|singing|lyrics?)\b",
+        r"\b(?:chorus|verse|bridge|melod(?:y|ic))\b",
+        r"\b(?:drop|bass|synth|drums|genre)\b",
+    ))
+    return signals >= 3
+
+
+def verified_chat_answer(answer: str) -> str:
+    """Do not let a question-answer model impersonate task creation."""
+    if re.match(r"^(?:I|I've|I have)\s+(?:just\s+)?(?:started|created|queued)\s+(?:a\s+)?task\s*:",
+                answer.strip(), re.I):
+        return ("I haven't started a new task from that message. "
+                "Tell me what you'd like me to make or do, and I'll add it to My Tasks.")
+    return answer
+
+
 def route(text: str, active_tasks: list[dict]) -> str:
     """Keep ordinary questions in chat and send explicit work to the task queue."""
     value = text.strip().lower()
@@ -173,6 +210,8 @@ def route(text: str, active_tasks: list[dict]) -> str:
         return "note"
     if music_request(text):
         return "music"
+    if bare_song_brief(text):
+        return "task"
     if re.match(r"^i (?:want|need) (?:a|an|some) (?:website|app|program|logo|design|image|report|plan|tool)\b", value):
         return "task"
     if any(re.match(r"^" + re.escape(verb) + r"\b", command) for verb in TASK_VERBS):
