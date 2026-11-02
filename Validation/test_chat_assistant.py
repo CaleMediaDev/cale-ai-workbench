@@ -188,6 +188,21 @@ def test_new_song_uses_direct_local_music_job_but_edit_uses_agent():
         chat_assistant.music_request("make an 11 minute song")
 
 
+def test_natural_song_requests_start_a_music_job_instead_of_chat():
+    for request in (
+        "I want a techno song with female vocals",
+        "I'd like a 30-second beach jingle",
+        "I want to make a new song",
+        "Can you compose a synth-pop song?",
+        "Please produce a rap beat",
+    ):
+        assert chat_assistant.route(request, []) == "music", request
+        assert chat_assistant.music_request(request)["prompt"]
+    assert chat_assistant.route("What does it take to produce a song?", []) == "answer"
+    assert chat_assistant.route("I want song recommendations", []) == "answer"
+    assert chat_assistant.route("Produce a music app", []) == "task"
+
+
 def test_direct_song_preserves_explicit_lyrics_and_routes_ambiguous_text_to_agent():
     request = "Make a 90-second soul song with these lyrics:\n[Verse]\nWe made it home\n[Chorus]\nSing it again"
     spec = chat_assistant.music_request(request)

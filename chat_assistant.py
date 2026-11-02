@@ -13,7 +13,7 @@ TASK_VERBS = (
     "build", "make", "create", "develop", "design", "write", "research",
     "investigate", "fix", "repair", "update", "improve", "train", "analyze",
     "analyse", "generate", "implement", "set up", "install",
-    "add", "change", "work on",
+    "add", "change", "work on", "compose", "produce",
 )
 QUICK_FILE_TYPES = {
     ".txt", ".md", ".markdown", ".csv", ".tsv", ".html", ".htm",
@@ -67,10 +67,20 @@ def music_request(text: str) -> dict | None:
     """Recognize a new audio render, including detailed standalone briefs."""
     detailed_brief = bare_song_brief(text)
     value = re.sub(
-        r"^(?:(?:please|can you|could you|i want you to)\s+)+",
+        r"^(?:(?:please|can you|could you|i want you to|i want to|"
+        r"i need you to|i need to|i would like to|i'd like to)\s+)+",
         "", text.strip(), flags=re.IGNORECASE,
     )
-    if not detailed_brief and not re.match(r"^(?:make|create|generate)\s+", value, re.IGNORECASE):
+    desired = re.match(r"^(?:i (?:want|need|would like)|i'd like)\s+(.+)$",
+                       value, re.IGNORECASE)
+    if (desired
+            and re.search(r"\b(?:song|rap|beat|jingle|instrumental|soundtrack|music)\b",
+                          desired.group(1), re.IGNORECASE)
+            and not re.search(r"\b(?:recommendations?|suggestions?|ideas?|"
+                              r"explanations?|examples?|playlists?)\b",
+                              desired.group(1), re.IGNORECASE)):
+        value = "make " + desired.group(1)
+    if not detailed_brief and not re.match(r"^(?:make|create|generate|compose|produce)\s+", value, re.IGNORECASE):
         return None
     lyrics_marker = re.search(r"\blyrics\s*:", value, re.IGNORECASE)
     if "\n" in value and lyrics_marker is None and not detailed_brief:
