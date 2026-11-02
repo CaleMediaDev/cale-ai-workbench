@@ -321,7 +321,7 @@ def test_vocal_evidence_requires_words_through_most_of_the_song(tmp_path):
     audio = tmp_path / "song.mp3"
     audio.write_bytes(b"audio")
     sparse = {"text": "yeah yeah", "segments": [{"end": 10.0}]}
-    sustained = {"text": "Michigan " * 40, "segments": [{"end": 55.0}]}
+    sustained = {"text": "Michigan " * 60, "segments": [{"end": 55.0}]}
     with patch.object(music_backend, "ROOT", tmp_path), patch.object(
         music_backend.subprocess, "run", side_effect=[
             type("Result", (), {"returncode": 0, "stdout": json.dumps(sparse)})(),
@@ -331,6 +331,32 @@ def test_vocal_evidence_requires_words_through_most_of_the_song(tmp_path):
         assert not music_backend.vocal_evidence(audio, 60)["passed"]
         assert music_backend.vocal_evidence(audio, 60)["passed"]
     assert json.loads(transcribe.call_args_list[0].kwargs["input"])["music"] is True
+
+
+def test_vocal_evidence_rejects_sparsely_sung_full_song(tmp_path):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"runtime")
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"audio")
+    sparse = {"text": "Tahoe blue water summer night " * 23 + "Tahoe blue water",
+              "segments": [{"end": 154.5}]}
+    prominent = {"text": "Tahoe blue water summer night " * 40 + "Tahoe blue water",
+                 "segments": [{"end": 154.0}]}
+    lyrics = "[Verse] Tahoe blue water summer night beneath the mountains"
+    with patch.object(music_backend, "ROOT", tmp_path), patch.object(
+        music_backend.subprocess, "run", side_effect=[
+            type("Result", (), {"returncode": 0, "stdout": json.dumps(sparse)})(),
+            type("Result", (), {"returncode": 0, "stdout": json.dumps(prominent)})(),
+        ],
+    ):
+        first = music_backend.vocal_evidence(audio, 160, lyrics)
+        revised = music_backend.vocal_evidence(audio, 160, lyrics)
+    assert first["recognized_words"] == 118
+    assert first["required_words"] == 136
+    assert not first["passed"]
+    assert revised["recognized_words"] == 203
+    assert revised["passed"]
 
 
 def test_vocal_evidence_rejects_unrelated_words_even_when_sustained(tmp_path):

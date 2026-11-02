@@ -613,11 +613,17 @@ def vocal_evidence(path: str | Path, duration_seconds: int, lyrics: str = "") ->
     segments = transcript.get("segments") or []
     words = len(str(transcript.get("text") or "").split())
     final_second = max((float(row.get("end", 0)) for row in segments), default=0)
-    required_words = max(5, round(duration_seconds * 0.35))
+    # A few sung lines near the beginning and end are not a lead vocal. The
+    # previous 0.35 words/second floor accepted a 160-second song with only
+    # 118 recognized words that the listener found mostly instrumental.
+    # Require enough words for verses and choruses across the song, while
+    # allowing instrumental breaks and bass drops between them.
+    required_words = max(5, round(duration_seconds * 0.85))
     matched_terms, required_terms = lyric_match(str(transcript.get("text") or ""), lyrics)
     return {"recognized_words": words, "last_vocal_second": round(final_second, 1),
+            "required_words": required_words,
             "matched_lyric_terms": matched_terms, "required_lyric_terms": required_terms,
-            "passed": (words >= required_words and final_second >= duration_seconds * 0.6
+            "passed": (words >= required_words and final_second >= duration_seconds * 0.7
                        and matched_terms >= required_terms),
             "segments": segments}
 
