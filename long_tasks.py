@@ -4167,6 +4167,47 @@ def gui():
         summary = tk.StringVar(value="Checking this PC…")
         ttk.Label(content, textvariable=summary, style="Muted.TLabel",
                   font=("Segoe UI", 12)).pack(anchor="w", pady=(4, 12))
+        check_running = [False]
+
+        def run_checks():
+            if check_running[0]:
+                return
+            check_running[0] = True
+            test_button.configure(state="disabled")
+            summary.set("Testing mic, speech, listening and Chrome connection…")
+
+            def worker():
+                try:
+                    readiness_checklist.run_optional_checks(ROOT, force=True)
+                except (OSError, RuntimeError, ValueError):
+                    pass
+                finally:
+                    def finish():
+                        if dialog.winfo_exists():
+                            check_running[0] = False
+                            test_button.configure(state="normal")
+                            check_again()
+                    dialog.after(0, finish)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        test_button = ttk.Button(content, text="Run checks", command=run_checks,
+                                 style="Mode.TButton")
+        actions = ttk.Frame(content)
+        actions.pack(anchor="w", pady=(0, 10))
+        test_button.pack(in_=actions, side="left", padx=(0, 8))
+
+        def fix_issues():
+            """Retry safe checks and guide the only pairing step needing consent."""
+            current = readiness_checklist.snapshot(ROOT)
+            browser_row = next((row for row in current["rows"]
+                                if row["label"] == "Browser tools"), {})
+            if browser_row.get("state") == "attention":
+                connect_chrome()
+            run_checks()
+
+        ttk.Button(actions, text="Fix issues", command=fix_issues,
+                   style="Mode.TButton").pack(side="left")
         list_holder = ttk.Frame(content)
         list_holder.pack(fill="both", expand=True)
         list_canvas = tk.Canvas(list_holder, background=bg, highlightthickness=0)
@@ -4183,8 +4224,9 @@ def gui():
         dialog.bind("<MouseWheel>", lambda event: list_canvas.yview_scroll(
             -1 if event.delta > 0 else 1, "units"))
         ttk.Label(content, text=(
-            "Installed means the files are here. Cale checks a tool's actual output "
-            "the first time you use it. Large video and music models may install on demand."
+            "Installed means files are here but the feature has not passed a real check. "
+            "Run checks tests voice, speech recognition and Chrome without recording or opening tabs. "
+            "Image, music and video verify themselves when their first output is saved."
         ), style="Muted.TLabel", wraplength=620).pack(anchor="w", pady=(12, 0))
         rendered = []
 
@@ -4192,8 +4234,7 @@ def gui():
             if not dialog.winfo_exists():
                 return
             summary.set(("Core is ready" if result["core_ready"] else "Core is still getting ready")
-                        + f" · {result['verified']} working, "
-                        + f"{result['installed']}/{result['total']} installed")
+                        + f" · {result['verified']}/{result['total']} tested working")
             for index, item in enumerate(result["rows"]):
                 if index >= len(rendered):
                     line = ttk.Frame(rows_frame, style="Card.TFrame", padding=(12, 7))
@@ -4205,13 +4246,16 @@ def gui():
                     ttk.Label(line, textvariable=detail, style="CardMuted.TLabel",
                               wraplength=600).pack(anchor="w", pady=(2, 0))
                     rendered.append((title, detail))
-                icon = {"ready": "✓", "installed": "✓", "working": "…",
+                icon = {"ready": "✓", "installed": "○", "working": "…",
                         "attention": "!", "on_demand": "○"}.get(item["state"], "○")
                 rendered[index][0].set(f"{icon}  {item['label']} · {item['state'].replace('_', ' ').title()}")
                 rendered[index][1].set(item["detail"])
 
         def check_again():
             if not dialog.winfo_exists():
+                return
+            if check_running[0]:
+                dialog.after(15000, check_again)
                 return
 
             def worker():
@@ -6272,6 +6316,22 @@ def gui():
     toggle_listening(interrupt_speech=False)
     voice_poll()
     poll()
+
+    def auto_check_optional_tools():
+        """Replace installed-only labels with real local results after launch."""
+        def worker():
+            try:
+                readiness_checklist.run_optional_checks(ROOT)
+            except (OSError, RuntimeError, ValueError):
+                pass  # The checklist keeps an honest installed/attention state.
+
+        threading.Thread(target=worker, daemon=True).start()
+        # Retry transient device and browser failures without a manual click.
+        window.after(300000, auto_check_optional_tools)
+
+    # Give the microphone and task supervisor a moment to start first. The
+    # checks never record, play audio, open tabs or contact a cloud provider.
+    window.after(15000, auto_check_optional_tools)
 
     def close_window():
         """Never leave a camera greeting worker running after the UI closes."""

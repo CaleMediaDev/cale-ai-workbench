@@ -7,6 +7,9 @@ sends telemetry, opens a person's deliverables, or downloads models.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import tempfile
 import time
 from pathlib import Path
 from urllib.request import urlopen
@@ -52,6 +55,87 @@ def _successful_job(folder: Path, status_key: str, *, min_bytes: int = 100) -> b
     return False
 
 
+def _media_probe(root: Path, action: str, **arguments) -> dict:
+    """Run an actual offline media operation with a bounded timeout."""
+    python = root / "Media/python/Scripts/python.exe"
+    if not python.is_file():
+        return {"ok": False, "detail": "Media runtime is missing"}
+    try:
+        result = subprocess.run(
+            [str(python), str(root / "media_worker.py")],
+            input=json.dumps({"action": action, **arguments}), text=True,
+            capture_output=True, timeout=45, cwd=root,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        answer = json.loads(result.stdout) if result.stdout.strip() else {}
+        if result.returncode or not isinstance(answer, dict) or answer.get("error"):
+            return {"ok": False, "detail": str(answer.get("error") or "Check failed")[:180]}
+        return {"ok": True, "data": answer}
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "detail": type(exc).__name__}
+
+
+def run_optional_checks(root: Path = ROOT, *, force: bool = False) -> dict:
+    """Test speech generation, speech recognition, microphone access and Chrome.
+
+    This makes a short temporary WAV without playing it or recording the mic.
+    Browser status is read from the local broker; no tab is opened or changed.
+    """
+    root = Path(root)
+    result = {"version": (root / ".cale-ai-install").read_text(encoding="utf-8").strip()
+              if (root / ".cale-ai-install").is_file() else "", "checked_at": time.time()}
+    previous = _json(root / "LongTasks/readiness-probes.json")
+    if (not force and previous.get("version") == result["version"]
+            and previous.get("voice", {}).get("ok")):
+        result["voice"] = previous["voice"]
+    else:
+        microphone = _media_probe(root, "microphone_status")
+        sample = root / "assets/cale-wake-ack.wav"
+        recognition = (_media_probe(root, "transcribe_audio", path=str(sample), fast=True)
+                       if sample.is_file() else {"ok": False, "detail": "Speech sample is missing"})
+        recognition_ok = bool(recognition["ok"] and
+                              str(recognition.get("data", {}).get("text", "")).strip())
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "voice-check.wav"
+            speech = _media_probe(root, "speak", text="Cale is ready.",
+                                  output_path=str(output), play=False)
+            speech_ok = bool(speech["ok"] and output.is_file() and output.stat().st_size > 1000)
+        result["voice"] = {
+            "ok": bool(microphone["ok"] and speech_ok and recognition_ok),
+            "microphone": microphone["ok"], "speech": speech_ok,
+            "recognition": recognition_ok,
+            "detail": ("Microphone responds; speech rendered and recognized offline"
+                       if microphone["ok"] and speech_ok and recognition_ok else
+                       "Mic " + ("✓" if microphone["ok"] else "failed") +
+                       " · speaking " + ("✓" if speech_ok else "failed") +
+                       " · recognition " + ("✓" if recognition_ok else "failed")),
+        }
+    plugin_parent = root / "data/plugins/hermes-connector"
+    if plugin_parent.is_dir():
+        code = ("import json,sys;sys.path.insert(0,sys.argv[1]);"
+                "from plugin.bridge_client import BridgeClient;"
+                "client=BridgeClient('readiness',root=sys.argv[2],auto_start_broker=False);"
+                "client.start(wait=2);print(json.dumps(client.status()));client.stop()")
+        try:
+            check = subprocess.run(
+                [sys.executable, "-c", code, str(plugin_parent), str(root / "data")],
+                text=True, capture_output=True, timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            browser = json.loads(check.stdout) if check.returncode == 0 else {}
+            result["browser"] = {"ok": bool(browser.get("paired")),
+                                 "detail": "Chrome extension is connected" if browser.get("paired")
+                                 else "Chrome extension is not connected yet"}
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            result["browser"] = {"ok": False, "detail": "Could not reach the local browser companion"}
+    else:
+        result["browser"] = {"ok": False, "detail": "Browser companion is missing"}
+    destination = root / "LongTasks/readiness-probes.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(result), encoding="utf-8")
+    return result
+
+
 def snapshot(root: Path = ROOT) -> dict:
     """Return a bounded set of honest, read-only setup checks for the UI."""
     root = Path(root)
@@ -59,6 +143,11 @@ def snapshot(root: Path = ROOT) -> dict:
     media = root / "Media"
     setup = _json(state / "install-progress.json")
     self_check = _json(state / "self-check.json")
+    probes = _json(state / "readiness-probes.json")
+    version = (root / ".cale-ai-install").read_text(encoding="utf-8").strip() if (
+        root / ".cale-ai-install").is_file() else ""
+    if probes.get("version") != version:
+        probes = {}
     rows = []
 
     base_ready = setup.get("status") == "complete"
@@ -92,43 +181,45 @@ def snapshot(root: Path = ROOT) -> dict:
     voice_files = all((media / "models/natural_voice" / name).is_file() for name in
                       ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin"))
     voice_ready = media_python and whisper and voice_files
-    rows.append(_item("Voice and listening", "installed" if voice_ready else "working",
-                      "Models installed; microphone and speakers are checked when used"
-                      if voice_ready else "Installing offline speech models"))
+    voice_probe = probes.get("voice", {})
+    voice_state = ("ready" if voice_probe.get("ok") else "attention" if voice_probe
+                   else "installed" if voice_ready else "working")
+    rows.append(_item("Voice and listening", voice_state,
+                      voice_probe.get("detail", "Models installed; choose Run checks to test mic and speech"
+                                      if voice_ready else "Installing offline speech models")))
 
     image_ready = media_python and (media / "models/lcm/model_index.json").is_file()
     image_verified = image_ready and _successful_job(state / "image-jobs", "status")
     rows.append(_item("Image maker", "ready" if image_verified else
-                      "installed" if image_ready else "working",
+                      "on_demand" if image_ready else "working",
                       "Rendered an image successfully on this PC" if image_verified else
-                      "Local image model installed; render checked on first image"
+                      "Model ready; Cale verifies it automatically on the first image"
                       if image_ready else "Installing local image model"))
 
     music_ready = ((media / "music/ACE-Step-1.5/.cale-model-ready").is_file()
                    and (media / "music/ACE-Step-1.5/.venv/Scripts/python.exe").is_file())
     music_verified = music_ready and _successful_job(state / "music-jobs", "status", min_bytes=1000)
-    rows.append(_item("Music maker", "ready" if music_verified else
-                      "installed" if music_ready else "on_demand",
+    rows.append(_item("Music maker", "ready" if music_verified else "on_demand",
                       "Rendered a song successfully on this PC" if music_verified else
-                      "Local music model installed; render checked on first song"
+                      "Model ready; Cale verifies it automatically on the first song"
                       if music_ready else "Installs when this PC can run it or when music is requested"))
 
     browser_ready = ((root / "Updates/features-0.5.16.done").is_file()
                      and (root / "data/plugins/hermes-connector/plugin.yaml").is_file())
-    rows.append(_item("Browser tools", "installed" if browser_ready else "working",
-                      "Local companion installed; Chrome pairing is checked when used"
-                      if browser_ready else "Preparing local browser tools"))
+    browser_probe = probes.get("browser", {})
+    browser_state = ("ready" if browser_probe.get("ok") else "attention" if browser_probe
+                     else "installed" if browser_ready else "working")
+    rows.append(_item("Browser tools", browser_state,
+                      browser_probe.get("detail", "Companion installed; choose Run checks to test Chrome pairing"
+                                        if browser_ready else "Preparing local browser tools")))
 
     video_ready = (media / "video/runtime/cale-video-ready.json").is_file()
     video_verified = video_ready and _successful_job(media / "video/jobs", "state", min_bytes=1000)
-    rows.append(_item("Video maker", "ready" if video_verified else
-                      "installed" if video_ready else "on_demand",
+    rows.append(_item("Video maker", "ready" if video_verified else "on_demand",
                       "Rendered a video successfully on this PC" if video_verified else
-                      "Local video model installed; render checked on first video"
+                      "Model ready; Cale verifies it automatically on the first video"
                       if video_ready else "Large video model installs on first use if this PC qualifies"))
 
-    version = (root / ".cale-ai-install").read_text(encoding="utf-8").strip() if (
-        root / ".cale-ai-install").is_file() else ""
     checked = self_check.get("version") == version and bool(version)
     check_state = (self_check.get("status", "working") if checked else "working")
     if check_state not in ("passed", "failed", "running"):
