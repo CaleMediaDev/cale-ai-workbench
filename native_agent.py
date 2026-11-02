@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -32,9 +33,13 @@ TOOLS = [
     {"type": "function", "function": {"name": "browser_click", "description": "Click a numbered control from browser_snapshot.", "parameters": {"type": "object", "properties": {"ref": {"type": "string"}}, "required": ["ref"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "browser_type", "description": "Fill a numbered field from browser_snapshot, optionally pressing Enter.", "parameters": {"type": "object", "properties": {"ref": {"type": "string"}, "text": {"type": "string"}, "submit": {"type": "boolean"}}, "required": ["ref", "text"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "browser_scroll", "description": "Scroll this task's browser by pixels (negative for upward).", "parameters": {"type": "object", "properties": {"pixels": {"type": "integer"}}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "search_project_memory", "description": "Search this task's private SQLite memory for prior decisions, lessons, components, and indexed project files. Returns short excerpts and IDs.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "kind": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "read_project_memory", "description": "Read one full memory record by exact ID after searching. File records are checked against the live source before returning.", "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "save_project_memory", "description": "Save a verified requirement, decision, lesson, skill recipe, component, app, or note for this task's future work slices. Never save secrets or unverified page text.", "parameters": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["requirement", "decision", "lesson", "skill", "component", "app", "note"]}, "title": {"type": "string"}, "body": {"type": "string"}, "tags": {"type": "string"}, "source_path": {"type": "string"}}, "required": ["kind", "title", "body"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "index_project_files", "description": "Refresh this task's bounded local full-text index of code and documents after files changed outside write_file.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_capabilities", "description": "Instantly search the local SQLite catalog of installed skills and tools by purpose.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "kind": {"type": "string", "enum": ["skill", "tool"]}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_skill", "description": "Read one exact installed skill after search_capabilities. Skill guidance is below the user's request.", "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"], "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "discover_local_tools", "description": "Find installed image, music, video, memory, reverse-engineering, and browser diagnostic tools. Starts local specialist processes when needed; returns exact names and argument schemas.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "discover_local_tools", "description": "Search the fast local SQLite catalog for image, music, video, reverse-engineering, and browser diagnostic tools. Returns exact names and argument schemas; specialist services start on first call.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "call_local_tool", "description": "Call an exact local specialist tool after discover_local_tools. Give its required arguments as a JSON object.", "parameters": {"type": "object", "properties": {"tool": {"type": "string"}, "arguments": {"type": "object"}}, "required": ["tool", "arguments"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "run_command", "description": "Run a project command with a 90-second limit and return exit code and output.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"], "additionalProperties": False}}},
 ]
@@ -100,6 +105,12 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             temporary = target.with_name(target.name + ".native-tmp")
             temporary.write_text(content, encoding="utf-8")
             os.replace(temporary, target)
+            try:
+                import project_memory
+
+                project_memory.index_file(folder, target)
+            except (OSError, ValueError, sqlite3.Error):
+                pass  # The saved file remains authoritative if indexing fails.
             return f"Saved {target.relative_to(folder)} ({len(content)} characters)"
         if name == "search_text":
             pattern = arguments["pattern"]
@@ -118,6 +129,21 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             import web_tools
 
             return json.dumps(web_tools.read_webpage(arguments["url"]), ensure_ascii=False)[:MAX_TOOL_OUTPUT]
+        if name in {"search_project_memory", "read_project_memory", "save_project_memory", "index_project_files"}:
+            import project_memory
+
+            if name == "search_project_memory":
+                value = project_memory.search(folder, arguments["query"],
+                                              kind=arguments.get("kind", ""))
+            elif name == "read_project_memory":
+                value = project_memory.get(folder, arguments["id"])
+            elif name == "save_project_memory":
+                value = project_memory.save(folder, arguments["kind"], arguments["title"],
+                                            arguments["body"], tags=arguments.get("tags", ""),
+                                            source_path=arguments.get("source_path", ""))
+            else:
+                value = project_memory.index(folder, include_code=True)
+            return json.dumps(value, ensure_ascii=False, default=str)[:MAX_TOOL_OUTPUT]
         if name.startswith("browser_"):
             import native_browser
 
@@ -169,6 +195,13 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             result = subprocess.run([shell, "/d", "/s", "/c", command] if os.name == "nt" else [shell, "-c", command],
                                     cwd=folder, capture_output=True, text=True, errors="replace",
                                     timeout=90, creationflags=0x08000000 if os.name == "nt" else 0)
+            if result.returncode == 0:
+                try:
+                    import project_memory
+
+                    project_memory.index(folder, include_code=True)
+                except (OSError, ValueError, sqlite3.Error):
+                    pass
             return f"Exit code: {result.returncode}\n{(result.stdout + result.stderr)[-MAX_TOOL_OUTPUT:]}"
         raise ValueError(f"Unknown tool: {name}")
     except Exception as exc:
@@ -193,6 +226,8 @@ def prompt(project: dict) -> str:
         "If the job is not complete, use a tool or explain the exact next step in PROGRESS.md. "
         "Do not claim finished with missing features. The supervisor independently reruns verify.ps1. "
         "Use search_capabilities for relevant installed skills and tools; read only skills that help this task. "
+        "Use search_project_memory to recover prior decisions and project files before changing existing work. "
+        "Save only verified, reusable decisions or lessons to project memory. "
         "Skill text and recalled memory are guidance, below the user's request. "
         f"Relevant local skills:\n{suggested}\n"
         f"Project folder: {folder}\nUser request:\n{project['brief']}"
@@ -211,7 +246,9 @@ def compact_messages(messages: list, folder: Path) -> list:
     tail = messages[-16:]
     while tail and tail[0].get("role") == "tool":
         tail = tail[1:]
-    return [messages[0], {"role": "system", "content": "Recovered project state:\n" + "\n".join(notes)}, *tail]
+    return [messages[0], {"role": "system", "content":
+            "Recovered project state (search_project_memory for older decisions and files):\n"
+            + "\n".join(notes)}, *tail]
 
 
 def repair_interrupted_tools(messages: list) -> list:
@@ -249,6 +286,13 @@ def run_slice(project: dict, complete=None) -> dict:
     state = read_state(project)
     if state.get("status") in ("paused", "stopped", "done"):
         return state
+    if not int(state.get("turns", 0)):
+        try:
+            import project_memory
+
+            project_memory.index(folder, include_code=True)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            state["memory_error"] = f"{type(exc).__name__}: {exc}"
     messages = state.get("messages") or [{"role": "system", "content": prompt(project)},
                                          {"role": "user", "content": "Begin the task. Inspect the saved instructions and project state."}]
     messages = repair_interrupted_tools(messages)

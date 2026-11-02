@@ -1,6 +1,7 @@
 """Behavior checks for Cale's native, restartable project worker."""
 
 import copy
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -117,6 +118,35 @@ def test_native_file_tools_cannot_escape_project_folder():
         })
         assert result.startswith("Tool error:")
         assert not (Path(temporary) / "outside.txt").exists()
+
+
+def test_native_worker_indexes_existing_code_and_recalls_typed_memory():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / "component.py").write_text("def turquoise_widget(): return 42")
+        (folder / ".local-ai/verify.ps1").write_text("if (-not (Test-Path component.py)) { exit 1 }")
+        native_agent.run_slice(item, complete=lambda _: {
+            "choices": [{"message": {"role": "assistant", "content": "Finished."}}],
+        })
+        code = json.loads(native_agent.execute_tool(folder, "search_project_memory",
+                                                  {"query": "turquoise_widget"}))
+        assert code[0]["source_path"] == "component.py"
+        saved = json.loads(native_agent.execute_tool(folder, "save_project_memory", {
+            "kind": "decision", "title": "Widget color", "body": "Use turquoise for the main widget.",
+        }))
+        found = json.loads(native_agent.execute_tool(folder, "search_project_memory",
+                                                   {"query": "turquoise", "kind": "decision"}))
+        assert found[0]["id"] == saved["id"]
+        full = json.loads(native_agent.execute_tool(folder, "read_project_memory",
+                                                  {"id": saved["id"]}))
+        assert full["body"] == "Use turquoise for the main widget."
+        native_agent.execute_tool(folder, "write_file", {
+            "path": "new.py", "content": "def lavender_widget(): return 1",
+        })
+        new = json.loads(native_agent.execute_tool(folder, "search_project_memory",
+                                                 {"query": "lavender_widget", "kind": "file"}))
+        assert new[0]["source_path"] == "new.py"
 
 
 def test_native_context_rebuilds_from_durable_plan():
