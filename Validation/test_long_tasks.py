@@ -1119,6 +1119,48 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("not independently confirmed", finished["detail"])
         self.assertFalse(task_module.recover_blocked_audio_review(finished, snapshot))
 
+    def test_concurrent_audio_completion_does_not_report_archive_failure(self):
+        task_module.update(
+            self.pid, brief="Make a 0.1 minute dubstep banger with vocal chops",
+            card="song-card", status="needs_input",
+        )
+        folder = Path(self.item()["folder"])
+        (folder / "Audio").mkdir()
+        with wave.open(str(folder / "Audio/final.wav"), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(8000)
+            audio.writeframes(b"\0\0" * (6 * 8000))
+        snapshot = {
+            "task": {"status": "blocked"},
+            "latest_summary": "Review handoff was rejected; listen to the finished audio.",
+            "runs": [{"started_at": time.time() - 300, "ended_at": time.time() - 200}],
+        }
+
+        def archive(*args, **kwargs):
+            self.assertEqual(args, ("archive", "song-card"))
+            task_module.update(self.pid, status="ready_for_review", card="", detail="Finished")
+            raise RuntimeError("cannot archive song-card")
+
+        with (patch.object(task_module, "board", side_effect=archive),
+              patch.object(task_module, "verify_project", return_value=(True, "checks passed")),
+              patch("music_backend.audio_file_ok", return_value=True)):
+            self.assertTrue(task_module.recover_blocked_audio_review(self.item(), snapshot))
+        self.assertEqual(self.item()["status"], "ready_for_review")
+        self.assertEqual(self.item()["detail"], "Finished")
+
+    def test_stale_supervisor_error_does_not_overwrite_new_completion(self):
+        task_module.update(self.pid, card="song-card", status="working")
+
+        def concurrent_completion(_task):
+            task_module.update(self.pid, card="", status="ready_for_review", detail="Finished")
+            raise RuntimeError("old board card disappeared")
+
+        with patch.object(task_module, "advance_project", side_effect=concurrent_completion):
+            task_module.tick()
+        self.assertEqual(self.item()["status"], "ready_for_review")
+        self.assertEqual(self.item()["detail"], "Finished")
+
     def test_unverified_or_unrelated_blocker_stays_blocked(self):
         task_module.update(self.pid, card="build-card", status="needs_input")
         snapshot = {

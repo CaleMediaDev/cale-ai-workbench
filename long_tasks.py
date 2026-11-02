@@ -1344,7 +1344,34 @@ def recover_blocked_audio_review(p, snapshot=None):
         return False
     folder = Path(p["folder"])
     checked = fingerprint(folder)
-    board("archive", p["card"])
+    # A GUI-triggered pass and the background supervisor can finish at the
+    # same time. Archiving is not idempotent, so an already-finished project is
+    # success rather than a new failure that overwrites its task detail.
+    current = next((item for item in projects() if item["id"] == p["id"]), None)
+    if current and current["status"] in ("ready_for_review", "accepted"):
+        return True
+    if not current or current["card"] != p["card"] or current["status"] not in (
+        "working", "needs_input"
+    ):
+        return False
+    try:
+        board("archive", p["card"])
+    except RuntimeError:
+        current = next((item for item in projects() if item["id"] == p["id"]), None)
+        if current and current["status"] in ("ready_for_review", "accepted"):
+            return True
+        # An archive can commit before a competing pass writes the project DB.
+        # Continue only if Hermes confirms this exact card is already archived.
+        archived = board("show", p["card"], "--json", parse=True)
+        if archived.get("task", {}).get("status") != "archived":
+            raise
+    current = next((item for item in projects() if item["id"] == p["id"]), None)
+    if current and current["status"] in ("ready_for_review", "accepted"):
+        return True
+    if not current or current["card"] != p["card"] or current["status"] not in (
+        "working", "needs_input"
+    ):
+        return False
     update(
         p["id"], card="", status="ready_for_review", phase="review", failures=0,
         fingerprint=checked,
@@ -1997,6 +2024,12 @@ def tick():
         try:
             advance_project(p)
         except Exception as exc:
+            current = next((item for item in projects() if item["id"] == p["id"]), None)
+            if (not current or current["status"] != p["status"]
+                    or current["card"] != p["card"]):
+                # Another supervisor pass or a user action superseded this
+                # snapshot. Preserve its newer status and detail.
+                continue
             detail = f"Supervisor will retry this task: {type(exc).__name__}: {exc}"
             if p["detail"] != detail:
                 update(p["id"], detail=detail)
