@@ -10,6 +10,26 @@ import file_catalog
 
 
 class FileCatalogTests(unittest.TestCase):
+    def test_routine_scan_defers_after_a_task_starts_and_resumes_later(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            (root / "original.txt").write_text("", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            (root / "newa.txt").write_text("", encoding="utf-8")
+            (root / "newb.txt").write_text("", encoding="utf-8")
+            with patch.object(file_catalog, "BATCH", 2):
+                deferred = file_catalog.scan_computer(
+                    state, [root], defer_if_busy=lambda: True)
+            self.assertEqual(deferred["status"], "deferred")
+            self.assertEqual(file_catalog.search(state, "original")[0]["name"],
+                             "original.txt")
+            completed = file_catalog.scan_computer(state, [root])
+            self.assertEqual(completed["status"], "complete")
+            self.assertEqual(file_catalog.search(state, "newb")[0]["name"],
+                             "newb.txt")
+
     def test_recent_complete_catalog_is_reused_after_restart(self):
         snapshot = {"status": "complete", "updated": 1000.0}
         self.assertEqual(file_catalog.refresh_delay(snapshot, 86400, now=4600), 82800)

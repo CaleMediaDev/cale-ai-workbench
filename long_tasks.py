@@ -3178,6 +3178,7 @@ def monitor():
                 retry_seconds = (
                     60 if not (STATE / file_catalog.FIRST_SCAN_NAME).is_file()
                     and latest_catalog.get("status") in ("error", "not_started", "working")
+                    else 60 if latest_catalog.get("status") == "deferred"
                     else 300 if not (STATE / file_catalog.FIRST_SCAN_NAME).is_file()
                     and latest_catalog.get("status") == "waiting_for_space"
                     else 300 if not readiness_checklist._file_index_responds(STATE)
@@ -3192,9 +3193,13 @@ def monitor():
             if (catalog_thread is None and time.monotonic() >= next_catalog_refresh
                     and catalog_refresh_allowed(
                         STATE, projects(), requested=requested_refresh)):
+                routine_scan = (STATE / file_catalog.FIRST_SCAN_NAME).is_file() and not requested_refresh
                 catalog_thread = threading.Thread(
                     target=file_catalog.scan_computer,
                     args=(STATE,),
+                    kwargs={"defer_if_busy": (
+                        lambda: self_diagnostics.active_projects(STATE)
+                    ) if routine_scan else None},
                     daemon=True,
                     name="computer-file-index",
                 )

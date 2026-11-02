@@ -17,6 +17,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Callable
 
 DB_NAME = "computer-files.sqlite3"
 STATUS_NAME = "computer-files-status.json"
@@ -140,8 +141,9 @@ def refresh_delay(snapshot: dict, refresh_seconds: int = 24 * 60 * 60,
     return max(0.0, refresh_seconds - age)
 
 
-def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> dict:
-    """Catalog accessible names/paths without reading document contents."""
+def scan_computer(state: str | Path, roots: list[str | Path] | None = None,
+                  defer_if_busy: Callable[[], bool] | None = None) -> dict:
+    """Catalog names and paths; defer routine rescans when user work begins."""
     roots = [Path(root) for root in (local_roots() if roots is None else roots)]
     roots = [root for root in roots if root.is_dir() and not root.is_symlink()]
     scan_id = uuid.uuid4().hex
@@ -189,6 +191,17 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> d
                                     processed += 1
                                     if processed % BATCH == 0:
                                         conn.commit()
+                                        if (defer_if_busy is not None
+                                                and (Path(state) / FIRST_SCAN_NAME).is_file()
+                                                and defer_if_busy()):
+                                            result = {
+                                                "status": "deferred", "files": files,
+                                                "folders": folders, "unreadable": unreadable,
+                                                "roots": [str(r) for r in roots],
+                                                "current": "File scan paused while Cale works",
+                                            }
+                                            _status(state, **result)
+                                            return result
                                         _status(
                                             state, status="working", files=files,
                                             folders=folders, unreadable=unreadable,
