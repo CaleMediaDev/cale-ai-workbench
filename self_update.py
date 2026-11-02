@@ -511,11 +511,12 @@ def apply(archive_path, version):
     """Keep the old source recoverable and swap only files in the manifest."""
     if active_tasks():
         raise RuntimeError("Wait for current tasks to finish before updating.")
-    # Install newly pinned media packages before swapping source. Otherwise an
-    # automatic source update can expose a tool whose runtime is still missing.
+    # Install new app-owned Python dependencies before swapping source. A
+    # source update must not expose tools that the installed runtimes lack.
     with ZipFile(archive_path) as archive:
         validated_manifest(archive)
         sync_new_media_requirements(archive)
+        sync_new_toolbox_requirements(archive)
     backup = (
         ROOT
         / "Updates/backups"
@@ -553,19 +554,30 @@ def apply(archive_path, version):
 
 def sync_new_media_requirements(archive):
     """Install only added or changed media pins for an existing installation."""
-    if "media-requirements.txt" not in archive.namelist():
+    _sync_new_requirements(archive, "media-requirements.txt",
+                           ROOT / "Media/python/Scripts/python.exe", "local media")
+
+
+def sync_new_toolbox_requirements(archive):
+    """Install added Toolbox pins before a release starts using them."""
+    _sync_new_requirements(archive, "requirements-windows.txt",
+                           ROOT / "Toolbox/python/Scripts/python.exe", "Toolbox")
+
+
+def _sync_new_requirements(archive, filename, python, label):
+    """Apply changed pins to one managed runtime, leaving user Python alone."""
+    if filename not in archive.namelist():
         return
-    python = ROOT / "Media/python/Scripts/python.exe"
     if not python.is_file():
-        return  # A fresh installation prepares its media runtime separately.
+        return  # First-run setup prepares a missing managed runtime.
 
     def pins(text):
         return [line.strip() for line in text.splitlines()
                 if line.strip() and not line.lstrip().startswith("#")]
 
-    current = ROOT / "media-requirements.txt"
+    current = ROOT / filename
     old = set(pins(current.read_text(encoding="utf-8"))) if current.is_file() else set()
-    additions = [pin for pin in pins(archive.read("media-requirements.txt").decode("utf-8"))
+    additions = [pin for pin in pins(archive.read(filename).decode("utf-8"))
                  if pin not in old]
     if not additions:
         return
@@ -575,7 +587,7 @@ def sync_new_media_requirements(archive):
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if result.returncode:
-        raise RuntimeError("Could not install a new local media dependency: "
+        raise RuntimeError(f"Could not install a new {label} dependency: "
                            + result.stderr[-600:])
 
 

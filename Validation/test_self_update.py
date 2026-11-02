@@ -257,6 +257,50 @@ class SelfUpdateTests(unittest.TestCase):
                 self_update.sync_new_media_requirements(archive)
             self.assertEqual(install.call_args.args[0][-1], "pypdfium2==5.14.0")
 
+    def test_update_installs_new_toolbox_pin_before_swapping_source(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            runtime = root / "Toolbox/python/Scripts/python.exe"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(b"")
+            (root / "requirements-windows.txt").write_text("old-package==1\n")
+            archive_path = root / "release.zip"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("requirements-windows.txt",
+                                 "old-package==1\nopenai==3.42.0\n")
+            with patch.object(self_update, "ROOT", root), patch.object(
+                self_update.subprocess, "run", return_value=MagicMock(returncode=0)
+            ) as install, ZipFile(archive_path) as archive:
+                self_update.sync_new_toolbox_requirements(archive)
+            self.assertEqual(install.call_args.args[0][-1], "openai==3.42.0")
+            self.assertEqual(install.call_args.args[0][0], str(runtime))
+
+    def test_toolbox_dependency_failure_keeps_old_source_and_version(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / ".cale-ai-install").write_text("Cale AI Workbench 0.5.344")
+            (root / "long_tasks.py").write_text("old")
+            (root / "requirements-windows.txt").write_text("old-package==1\n")
+            runtime = root / "Toolbox/python/Scripts/python.exe"
+            runtime.parent.mkdir(parents=True)
+            runtime.touch()
+            archive_path = root / "release.zip"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("install-files.json", json.dumps(
+                    ["long_tasks.py", "requirements-windows.txt"]))
+                archive.writestr("long_tasks.py", "new")
+                archive.writestr("requirements-windows.txt",
+                                 "old-package==1\nopenai==3.42.0\n")
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "active_tasks", return_value=False),
+                  patch.object(self_update.subprocess, "run", return_value=MagicMock(
+                      returncode=1, stderr="package unavailable"))):
+                with self.assertRaisesRegex(RuntimeError, "package unavailable"):
+                    self_update.apply(archive_path, (0, 5, 345))
+            self.assertEqual((root / "long_tasks.py").read_text(), "old")
+            self.assertEqual((root / ".cale-ai-install").read_text(),
+                             "Cale AI Workbench 0.5.344")
+
     def test_update_restarts_only_its_own_router_process(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
