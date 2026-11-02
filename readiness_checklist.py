@@ -30,9 +30,9 @@ def _json(path: Path) -> dict:
         return {}
 
 
-def _voice_probe_current(probes: dict, root: Path) -> bool:
-    """A model repair must be followed by a fresh offline speech check."""
-    repair = _json(root / "LongTasks/natural-voice-progress.json")
+def _media_probe_current(probes: dict, repair_path: Path) -> bool:
+    """A model repair must be followed by a fresh offline capability check."""
+    repair = _json(repair_path)
     try:
         return float(probes.get("checked_at") or 0) >= float(repair.get("updated") or 0)
     except (TypeError, ValueError, OverflowError):
@@ -186,7 +186,7 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
             pass
     if (not force and previous.get("version") == result["version"]
             and previous.get("voice", {}).get("ok")
-            and _voice_probe_current(previous, root)):
+            and _media_probe_current(previous, root / "LongTasks/natural-voice-progress.json")):
         result["voice"] = previous["voice"]
     else:
         microphone = _media_probe(root, "microphone_status")
@@ -210,7 +210,9 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
                        " · speaking " + ("✓" if speech_ok else "failed") +
                        " · recognition " + ("✓" if recognition_ok else "failed")),
         }
-    if previous.get("version") == result["version"] and previous.get("vision", {}).get("ok") and not force:
+    if (previous.get("version") == result["version"]
+            and previous.get("vision", {}).get("ok") and not force
+            and _media_probe_current(previous, root / "LongTasks/vision-repair.json")):
         result["vision"] = previous["vision"]
     elif test_local:
         sample = root / "assets/cale-logo.png"
@@ -224,7 +226,8 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
                        "Image reader did not describe the test image: " +
                        str(vision.get("detail", "empty answer"))[:120]),
         }
-    elif previous.get("version") == result["version"] and previous.get("vision"):
+    elif (previous.get("version") == result["version"] and previous.get("vision")
+          and _media_probe_current(previous, root / "LongTasks/vision-repair.json")):
         result["vision"] = previous["vision"]
     plugin_parent = root / "data/plugins/hermes-connector"
     if plugin_parent.is_dir():
@@ -309,13 +312,16 @@ def snapshot(root: Path = ROOT) -> dict:
                       ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin"))
     voice_ready = media_python and whisper and voice_files
     voice_probe = probes.get("voice", {})
-    if voice_probe and not _voice_probe_current(probes, root):
+    voice_had_probe = bool(voice_probe)
+    if voice_probe and not _media_probe_current(
+            probes, root / "LongTasks/natural-voice-progress.json"):
         voice_probe = {}
-    voice_state = ("ready" if voice_ready and voice_probe.get("ok") else "attention" if voice_probe
+    voice_state = ("ready" if voice_ready and voice_probe.get("ok") else
+                   "attention" if voice_probe or (voice_had_probe and not voice_ready)
                    else "installed" if voice_ready else "working")
     rows.append(_item("Voice and listening", voice_state,
                       "Offline speech files are missing; Cale needs to repair them"
-                      if not voice_ready and voice_probe else
+                      if not voice_ready and voice_had_probe else
                       voice_probe.get("detail", "Models installed; choose Run checks to test mic and speech"
                                       if voice_ready else "Installing offline speech models")))
 
@@ -332,10 +338,14 @@ def snapshot(root: Path = ROOT) -> dict:
         name.split(":", 1)[0] == vision_alias for name in tag_names
     )
     vision_probe = probes.get("vision", {})
+    vision_had_probe = bool(vision_probe)
+    if vision_probe and not _media_probe_current(probes, state / "vision-repair.json"):
+        vision_probe = {}
     rows.append(_item("Image recognition", "ready" if vision_installed and vision_probe.get("ok") else
-                      "attention" if vision_probe else "installed" if vision_installed else "working",
+                      "attention" if vision_probe or (vision_had_probe and not vision_installed)
+                      else "installed" if vision_installed else "working",
                       "Local image reader is missing; Cale needs to repair it"
-                      if not vision_installed and vision_probe else
+                      if not vision_installed and vision_had_probe else
                       vision_probe.get("detail", "Model installed; Cale will test it while idle"
                                        if vision_installed else "Preparing the local image reader")))
 
@@ -431,6 +441,26 @@ def request_safe_repairs(root: Path = ROOT, result: dict | None = None) -> list[
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
                 requested.append("Voice and listening")
+            except OSError:
+                pass
+    vision_row = rows.get("Image recognition", {})
+    if (vision_row.get("state") == "attention"
+            and str(vision_row.get("detail", "")).startswith("Local image reader is missing")
+            and (root / "model_library.py").is_file()):
+        previous = _json(root / "LongTasks/vision-repair.json")
+        try:
+            last_attempt = float(previous.get("updated") or 0)
+        except (TypeError, ValueError, OverflowError):
+            last_attempt = 0
+        if time.time() - last_attempt >= 300:
+            try:
+                subprocess.Popen(
+                    [sys.executable, str(root / "model_library.py"), "--repair-vision"],
+                    cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                requested.append("Image recognition")
             except OSError:
                 pass
     if rows.get("FFmpeg media tools", {}).get("state") == "attention":

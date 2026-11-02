@@ -16,6 +16,67 @@ import configure_install
 
 
 class AutoModelTests(unittest.TestCase):
+    def test_missing_vision_alias_is_rebuilt_only_from_local_vision_weights(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            created = []
+
+            def post(path, body, **_kwargs):
+                model = body.get("model")
+                if path == "/api/show" and model == "cale-vision":
+                    if not created:
+                        raise OSError("alias missing")
+                    return {"capabilities": ["vision"], "parameters": "num_ctx 8192"}
+                if path == "/api/show" and model == "cale-fast":
+                    return {"capabilities": ["tools", "vision"]}
+                if path == "/api/create":
+                    created.append(body)
+                    return {"status": "success"}
+                raise OSError("model unavailable")
+
+            with (patch.object(library, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[]),
+                  patch.object(library, "main_source_record", return_value={}),
+                  patch.object(library, "post", side_effect=post)):
+                self.assertTrue(library.repair_vision_alias())
+            self.assertEqual(len(created), 1)
+            self.assertEqual(created[0]["from"], "cale-fast")
+            self.assertEqual(created[0]["model"], "cale-vision")
+            self.assertEqual(json.loads((root / "LongTasks/vision-repair.json").read_text())["status"],
+                             "complete")
+
+    def test_vision_repair_waits_while_tasks_are_active(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with (patch.object(library, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[{"status": "working"}]),
+                  patch.object(library, "post") as post):
+                self.assertFalse(library.repair_vision_alias())
+            post.assert_not_called()
+            self.assertEqual(json.loads((root / "LongTasks/vision-repair.json").read_text())["status"],
+                             "waiting_tasks")
+
+    def test_vision_repair_rejects_text_only_and_remote_sources(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+
+            def post(path, body, **_kwargs):
+                if path == "/api/create":
+                    self.fail("text-only or remote weights must not become the image reader")
+                if body["model"] == "cale-vision":
+                    raise OSError("alias missing")
+                if body["model"] == "cale-fast":
+                    return {"capabilities": ["tools"]}
+                return {"capabilities": ["vision"], "remote_host": "example.org"}
+
+            with (patch.object(library, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[]),
+                  patch.object(library, "main_source_record", return_value={}),
+                  patch.object(library, "post", side_effect=post)):
+                self.assertFalse(library.repair_vision_alias())
+            self.assertEqual(json.loads((root / "LongTasks/vision-repair.json").read_text())["status"],
+                             "waiting_models")
+
     def test_light_install_reuses_main_weights_for_vision_and_fast_route(self):
         self.assertEqual(configure_install.auxiliary_source("light", "qwen3.5:4b"),
                          "qwen3.5:4b")

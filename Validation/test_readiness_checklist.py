@@ -272,3 +272,35 @@ def test_repaired_speech_files_wait_for_a_fresh_probe(tmp_path):
     with patch.object(readiness_checklist, "urlopen", side_effect=OSError):
         rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
     assert rows["Voice and listening"]["state"] == "installed"
+
+
+def test_missing_image_reader_queues_idle_repair_and_invalidates_old_probe(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    (tmp_path / "model_library.py").touch()
+    (state / "readiness-probes.json").write_text(json.dumps({
+        "version": "Cale AI Workbench 1", "checked_at": 100,
+        "vision": {"ok": True, "detail": "Old image check"},
+    }))
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(b'{"models":[]}')):
+        result = readiness_checklist.snapshot(tmp_path)
+    row = next(item for item in result["rows"] if item["label"] == "Image recognition")
+    assert row["state"] == "attention"
+    with patch.object(readiness_checklist.subprocess, "Popen") as launch:
+        assert readiness_checklist.request_safe_repairs(
+            tmp_path, {"rows": [row]}) == ["Image recognition"]
+    assert "--repair-vision" in launch.call_args.args[0]
+    (state / "vision-repair.json").write_text(json.dumps({"status": "complete", "updated": 200}))
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(b'{"models":[]}')):
+        row = next(item for item in readiness_checklist.snapshot(tmp_path)["rows"]
+                   if item["label"] == "Image recognition")
+    assert row["state"] == "attention"
+    runtime = tmp_path / "Media/python/Scripts/python.exe"
+    runtime.parent.mkdir(parents=True)
+    runtime.touch()
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
+            b'{"models":[{"name":"cale-vision:latest"}]}')):
+        row = next(item for item in readiness_checklist.snapshot(tmp_path)["rows"]
+                   if item["label"] == "Image recognition")
+    assert row["state"] == "installed"

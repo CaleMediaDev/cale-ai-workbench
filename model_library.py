@@ -1021,6 +1021,81 @@ def auto_install(status_dir, refresh=True):
             msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
+def repair_vision_alias() -> bool:
+    """Rebuild a lost image-reader alias from verified weights already on this PC.
+
+    This does not pull another model. The next ordinary readiness probe must
+    describe an image before the UI marks image recognition ready again.
+    """
+    import msvcrt
+
+    state = ROOT / "LongTasks"
+    state.mkdir(parents=True, exist_ok=True)
+    status = state / "vision-repair.json"
+    with (state / "vision-repair.lock").open("a+b") as lock:
+        lock.seek(0, 2)
+        if lock.tell() == 0:
+            lock.write(b"1")
+            lock.flush()
+        lock.seek(0)
+        try:
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        try:
+            try:
+                from long_tasks import projects
+                if any(task["status"] in ("queued", "working", "checking")
+                       for task in projects()):
+                    save_download_status(status, "waiting_tasks", "Waiting for active tasks", 0)
+                    return False
+            except Exception:
+                save_download_status(status, "waiting_tasks", "Waiting for task status", 0)
+                return False
+            try:
+                current = post("/api/show", {"model": "cale-vision"}, timeout=10)
+                if ("vision" in current.get("capabilities", [])
+                        and not current.get("remote_host")
+                        and not current.get("remote_model")):
+                    save_download_status(status, "complete", "Local image reader ready", 100)
+                    return True
+            except (OSError, ValueError):
+                pass
+            sources = dict.fromkeys((
+                "cale-fast", "cale-local", main_source_record().get("source", ""),
+            ))
+            for source in sources:
+                if not source or source == "cale-vision":
+                    continue
+                try:
+                    info = post("/api/show", {"model": source}, timeout=10)
+                    if ("vision" not in info.get("capabilities", [])
+                            or info.get("remote_host") or info.get("remote_model")):
+                        continue
+                    save_download_status(status, "working", "Restoring local image reader", 25)
+                    created = post("/api/create", {
+                        "model": "cale-vision", "from": source, "stream": False,
+                        "parameters": {"num_ctx": 8192, "num_predict": 1200,
+                                       "temperature": 0.2},
+                    }, timeout=180)
+                    if created.get("error"):
+                        raise RuntimeError(str(created["error"]))
+                    verified = post("/api/show", {"model": "cale-vision"}, timeout=10)
+                    if ("vision" not in verified.get("capabilities", [])
+                            or verified.get("remote_host") or verified.get("remote_model")):
+                        raise RuntimeError("The restored local image reader failed verification.")
+                    save_download_status(status, "complete", "Local image reader restored", 100)
+                    return True
+                except (OSError, ValueError, RuntimeError) as exc:
+                    save_download_status(status, "error", str(exc)[:180], 0)
+            save_download_status(status, "waiting_models",
+                                 "Waiting for local vision-capable weights", 0)
+            return False
+        finally:
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -1028,12 +1103,17 @@ if __name__ == "__main__":
     parser.add_argument("profile", nargs="?", choices=list(CATALOG)[1:])
     parser.add_argument("--status-file")
     parser.add_argument("--auto", action="store_true")
+    parser.add_argument("--repair-vision", action="store_true")
     parser.add_argument("--status-dir")
     args = parser.parse_args()
     if args.auto:
         if args.profile:
             parser.error("Use --auto without a profile.")
         auto_install(args.status_dir or ROOT / "LongTasks")
+    elif args.repair_vision:
+        if args.profile:
+            parser.error("Use --repair-vision without a profile.")
+        repair_vision_alias()
     elif not args.profile:
         parser.error("Choose a profile or use --auto.")
     elif args.status_file:
