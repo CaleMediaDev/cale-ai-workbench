@@ -304,6 +304,145 @@ def active_tasks():
     return False
 
 
+def update_pause_path():
+    return ROOT / "Updates/resume-after-update.json"
+
+
+def pause_projects_for_update(version):
+    """Checkpoint active projects before a verified update takes priority.
+
+    The existing monitor applies pause requests. Only projects paused by this
+    update are recorded for automatic continuation afterward.
+    """
+    from long_tasks import projects, request
+
+    path = update_pause_path()
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    tasks = saved.get("tasks", {}) if isinstance(saved.get("tasks"), dict) else {}
+    active = [p for p in projects() if p["status"] in ("queued", "working", "checking")
+              and p["id"] not in tasks]
+    for project in active:
+        tasks[project["id"]] = str(Path(project["folder"]).resolve())
+    target_version = ".".join(map(str, version))
+    if not active and saved.get("version") == target_version:
+        return list(tasks)
+    if not tasks:
+        return []
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps({
+        "version": target_version, "tasks": tasks,
+        "created": saved.get("created", time.time()),
+    }), encoding="utf-8")
+    os.replace(temporary, path)
+    for project in active:
+        request(project["id"], "pause", "Pausing for a verified Workbench update")
+    return list(tasks)
+
+
+def retire_update_paused_workers():
+    """Stop only managed workers belonging to projects paused for an update."""
+    import psutil
+    from long_tasks import projects
+
+    try:
+        saved = json.loads(update_pause_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    project_rows = projects()
+    paused = {p["id"] for p in project_rows if p["status"] == "paused"}
+    active_folders = {Path(p["folder"]).resolve() for p in project_rows
+                      if p["status"] in ("queued", "working", "checking")}
+    folders = {Path(folder).resolve() for pid, folder in saved.get("tasks", {}).items()
+               if pid in paused} - active_folders
+    stopped = 0
+    install = ROOT.resolve()
+    for process in psutil.process_iter(["exe", "cmdline"]):
+        try:
+            command = process.info["cmdline"] or []
+            executable = process.info["exe"]
+            if (not executable or command[1:] != ["-m", "agent.managed_worker"]
+                    or not Path(executable).resolve().is_relative_to(install)
+                    or Path(process.cwd()).resolve() not in folders):
+                continue
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except psutil.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+            stopped += 1
+        except (OSError, psutil.Error):
+            continue
+    return stopped
+
+
+def resume_projects_after_update(force=False):
+    """Queue continuation after the retired board run has safely ended."""
+    from long_tasks import board, database, projects, request
+
+    path = update_pause_path()
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not force and current_version() < tuple(map(int, saved.get("version", "999.999.999").split("."))):
+        return 0
+    remaining = dict(saved.get("tasks", {}))
+    by_id = {p["id"]: p for p in projects()}
+    resumed = 0
+    for pid in tuple(remaining):
+        project = by_id.get(pid)
+        if not project or project["status"] != "paused":
+            del remaining[pid]
+            continue
+        try:
+            card = str(project.get("card") or "")
+            runs = (board("show", card, "--json", parse=True).get("runs", [])
+                    if card and not card.startswith(("music-job:", "image-job:")) else [])
+            if any(run.get("started_at") and not run.get("ended_at") for run in runs):
+                continue
+            ended = max((run.get("ended_at") or 0 for run in runs), default=0)
+            if ended and time.time() - ended < 180:
+                continue
+            with database() as conn:
+                pending = conn.execute(
+                    "SELECT 1 FROM requests WHERE project=? AND action='resume' "
+                    "AND note=? AND status='pending' LIMIT 1",
+                    (pid, "Continuing after Workbench update"),
+                ).fetchone()
+            if pending:
+                continue
+            request(pid, "resume", "Continuing after Workbench update")
+            resumed += 1
+        except (OSError, ValueError, KeyError):
+            continue
+    if remaining:
+        temporary = path.with_suffix(f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps({**saved, "tasks": remaining}), encoding="utf-8")
+        os.replace(temporary, path)
+    else:
+        path.unlink(missing_ok=True)
+    return resumed
+
+
+def allow_resume_after_failed_update():
+    """A failed swap must not strand projects behind a newer version gate."""
+    path = update_pause_path()
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps({
+        **saved, "version": ".".join(map(str, current_version())),
+    }), encoding="utf-8")
+    os.replace(temporary, path)
+
+
 def add_design_tools_to_config(root, backup):
     """Migrate only known local settings while preserving user preferences."""
     config = root / "data/config.yaml"
@@ -515,6 +654,11 @@ def run_update(archive: Path, version: tuple[int, int, int], parent_pid: int) ->
             log = ROOT / "Updates/last-error.txt"
             log.parent.mkdir(exist_ok=True)
             log.write_text(str(exc), encoding="utf-8")
+            try:
+                allow_resume_after_failed_update()
+                resume_projects_after_update(force=True)
+            except Exception:
+                pass  # Reopening the usable old desktop takes priority.
             reopen_desktop()
             raise
         (ROOT / "Updates/last-error.txt").unlink(missing_ok=True)

@@ -17,6 +17,87 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_verified_update_queues_pause_only_for_active_projects(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            active = {"id": "a" * 12, "status": "working", "folder": str(root / "Projects/a")}
+            already_paused = {"id": "b" * 12, "status": "paused", "folder": str(root / "Projects/b")}
+            with (patch.object(self_update, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[active, already_paused]),
+                  patch("long_tasks.request") as request):
+                self.assertEqual(self_update.pause_projects_for_update((0, 5, 255)), [active["id"]])
+                self.assertEqual(self_update.pause_projects_for_update((0, 5, 255)), [active["id"]])
+            request.assert_called_once_with(active["id"], "pause",
+                                            "Pausing for a verified Workbench update")
+            saved = json.loads((root / "Updates/resume-after-update.json").read_text())
+            self.assertEqual(saved["version"], "0.5.255")
+            self.assertEqual(list(saved["tasks"]), [active["id"]])
+
+    def test_update_resume_waits_for_new_version_and_retired_worker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root / "Updates/resume-after-update.json"
+            path.parent.mkdir()
+            pid = "a" * 12
+            path.write_text(json.dumps({"version": "0.5.255", "tasks": {pid: str(root / "Projects/a")}}))
+            project = {"id": pid, "status": "paused", "card": "t_abc12345"}
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "current_version", return_value=(0, 5, 254)),
+                  patch("long_tasks.projects", return_value=[project]),
+                  patch("long_tasks.request") as request):
+                self.assertEqual(self_update.resume_projects_after_update(), 0)
+                request.assert_not_called()
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "current_version", return_value=(0, 5, 255)),
+                  patch("long_tasks.STATE", root / "LongTasks"),
+                  patch("long_tasks.projects", return_value=[project]),
+                  patch("long_tasks.board", return_value={"runs": [{"started_at": 1,
+                      "ended_at": time.time() - 200}]}),
+                  patch("long_tasks.request") as request):
+                self.assertEqual(self_update.resume_projects_after_update(), 1)
+            request.assert_called_once_with(pid, "resume", "Continuing after Workbench update")
+            self.assertTrue(path.exists())
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "current_version", return_value=(0, 5, 255)),
+                  patch("long_tasks.projects", return_value=[{**project, "status": "working"}])):
+                self.assertEqual(self_update.resume_projects_after_update(), 0)
+            self.assertFalse(path.exists())
+
+    def test_update_only_stops_managed_worker_in_paused_project(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            project = root / "Projects/a"
+            project.mkdir(parents=True)
+            path = root / "Updates/resume-after-update.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps({"version": "0.5.255",
+                                        "tasks": {"a" * 12: str(project)}}))
+            executable = root / "data/tools/python.exe"
+            worker = MagicMock(info={"exe": str(executable),
+                                     "cmdline": [str(executable), "-m", "agent.managed_worker"]})
+            worker.cwd.return_value = str(project)
+            unrelated = MagicMock(info={"exe": str(executable),
+                                        "cmdline": [str(executable), "-m", "agent.managed_worker"]})
+            unrelated.cwd.return_value = str(root / "Projects/other")
+            with (patch.object(self_update, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[
+                      {"id": "a" * 12, "status": "paused", "folder": str(project)}]),
+                  patch("psutil.process_iter", return_value=[worker, unrelated])):
+                self.assertEqual(self_update.retire_update_paused_workers(), 1)
+            worker.terminate.assert_called_once()
+            unrelated.terminate.assert_not_called()
+
+    def test_failed_update_opens_resume_gate_for_old_version(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / ".cale-ai-install").write_text("Cale AI Workbench 0.5.254")
+            path = root / "Updates/resume-after-update.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps({"version": "0.5.255", "tasks": {"a" * 12: "folder"}}))
+            with patch.object(self_update, "ROOT", root):
+                self_update.allow_resume_after_failed_update()
+            self.assertEqual(json.loads(path.read_text())["version"], "0.5.254")
+
     def test_unfinished_setup_prevents_source_swap(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

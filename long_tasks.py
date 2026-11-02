@@ -3240,6 +3240,11 @@ def gui():
             provider_scope.set(scope)
             for key, button in scope_buttons.items():
                 button.configure(style="SelectedMode.TButton" if key == scope else "Mode.TButton")
+            status.set({
+                "local_only": "Chat uses local AI. Music and image generation also run locally.",
+                "cloud_only": "Chat uses connected cloud AI. Music and image generation still run locally.",
+                "both": "Cale chooses local or connected cloud AI for chat. Music and images run locally.",
+            }[scope])
         except OSError as exc:
             status.set("Could not save model choice: " + str(exc)[:120])
 
@@ -3650,6 +3655,7 @@ def gui():
     updating = False
     update_ready_at = 0.0
     manual_update_requested = False
+    update_pause_started_at = 0.0
 
     def check_updates():
         try:
@@ -6018,8 +6024,20 @@ def gui():
     first_connect = STATE / "browser-connection-offered"
 
     def poll():
-        nonlocal pending_update, updating, update_ready_at, manual_update_requested
+        nonlocal pending_update, updating, update_ready_at, manual_update_requested, update_pause_started_at
         refresh()
+        if (time.monotonic() - getattr(window, "resume_update_checked_at", 0) > 15
+                and not getattr(window, "resume_update_checking", False)):
+            window.resume_update_checked_at = time.monotonic()
+            window.resume_update_checking = True
+
+            def resume_after_update():
+                try:
+                    self_update.resume_projects_after_update()
+                finally:
+                    window.resume_update_checking = False
+
+            threading.Thread(target=resume_after_update, daemon=True).start()
         try:
             while True:
                 candidate = update_events.get_nowait()
@@ -6040,7 +6058,7 @@ def gui():
                     version_text = ".".join(map(str, candidate[1]))
                     assistant_reply(
                         f"Update v{version_text} is ready. I'll install it automatically "
-                        "when your tasks finish. You can also choose Update now at the top."
+                        "after pausing active tasks. They will continue after the update."
                     )
         except queue.Empty:
             pass
@@ -6050,6 +6068,19 @@ def gui():
         if not updating and time.monotonic() - window.update_checked_at >= update_interval:
             window.update_checked_at = time.monotonic()
             threading.Thread(target=check_updates, daemon=True).start()
+        if (pending_update and not updating
+                and (manual_update_requested or time.monotonic() - update_ready_at >= 30)
+                and self_update.active_tasks()):
+            try:
+                paused = self_update.pause_projects_for_update(pending_update[1])
+                if paused:
+                    if not update_pause_started_at:
+                        update_pause_started_at = time.monotonic()
+                    status.set("Pausing tasks so Cale can install the update…")
+                    if time.monotonic() - update_pause_started_at >= 20:
+                        self_update.retire_update_paused_workers()
+            except (OSError, ValueError) as exc:
+                status.set("Could not pause tasks for update: " + str(exc)[:120])
         if (
             pending_update
             and not updating
