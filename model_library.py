@@ -647,6 +647,9 @@ def cleanup_retired_main_sources():
             return 0
     except Exception:
         return 0
+    current = main_source_record().get("source")
+    if not isinstance(current, str) or not current:
+        return 0  # No recorded replacement means there is no deletion proof.
     try:
         main = CATALOG["main"]["alias"]
         info = post("/api/show", {"model": main}, timeout=10)
@@ -667,7 +670,6 @@ def cleanup_retired_main_sources():
                 delete_model(STANDARD_MAIN_ALIAS)  # No separate routine alias is needed.
     except (OSError, RuntimeError, ValueError):
         return 0
-    current = main_source_record().get("source")
     owned = owned_sources()
     remaining = []
     removed = 0

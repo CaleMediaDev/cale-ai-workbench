@@ -13,6 +13,28 @@ function Initialize-CalePowerShellEnvironment {
         Select-Object -Unique) -join ';'
 }
 
+# A half-extracted archive can leave its expected .exe behind. Run a cheap
+# version command before treating any managed runtime as installed.
+function Test-CaleRunnable([string]$File, [string[]]$Arguments = @('--version')) {
+    if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { return $false }
+    try {
+        $null = & $File @Arguments 2>$null
+        return $LASTEXITCODE -eq 0
+    } catch { return $false }
+}
+
+# Only the installer's own folders may be cleared when a runtime is broken.
+function Reset-CaleManagedDirectory([string]$Destination, [string]$Directory) {
+    $root = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
+    $target = [IO.Path]::GetFullPath($Directory).TrimEnd('\')
+    if (-not $target.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Refusing to reset a folder outside the Cale installation.'
+    }
+    if (Test-Path -LiteralPath $target) {
+        Remove-Item -LiteralPath $target -Recurse -Force
+    }
+}
+
 function Get-CaleInstallDestination([string]$Requested = '') {
     $local = [IO.Path]::GetFullPath($env:LOCALAPPDATA)
     $ordinary = Join-Path $local 'CaleMedia\AIWorkbench'

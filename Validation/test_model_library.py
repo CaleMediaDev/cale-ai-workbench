@@ -51,6 +51,47 @@ class AutoModelTests(unittest.TestCase):
                 self.assertEqual(library.cleanup_retired_main_sources(), 0)
             delete.assert_not_called()
 
+    def test_retired_main_source_waits_if_replacement_record_is_missing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with (patch.object(library, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[]),
+                  patch.object(library, "ensure_main_standard") as standard,
+                  patch.object(library, "delete_model") as delete):
+                library.queue_retired_main_source("old:large")
+                self.assertEqual(library.cleanup_retired_main_sources(), 0)
+                self.assertEqual(json.loads((root / "LongTasks/retired-main-sources.json").read_text()),
+                                 ["old:large"])
+            standard.assert_not_called()
+            delete.assert_not_called()
+
+    def test_main_replacement_queues_only_its_recorded_owned_predecessor(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            catalog = {"main": {"alias": "cale-local"},
+                       "balanced": {"alias": "cale-balanced", "source": "new:balanced"}}
+            tags = {"models": [{"name": "cale-balanced:latest", "size": 21 * 2**30}]}
+
+            def post(path, _body, **_kwargs):
+                return ({"capabilities": ["tools"], "parameters": "num_ctx 65536\n"}
+                        if path == "/api/show" else {"status": "success"})
+
+            with (patch.object(library, "ROOT", root),
+                  patch.object(library, "CATALOG", catalog),
+                  patch.object(library, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+                  patch.object(library, "model_ready", return_value=True),
+                  patch("model_fitness.suitable", return_value=True),
+                  patch("model_fitness.measured_speed", return_value=9),
+                  patch.object(library, "owned_sources", return_value={"old:large", "new:balanced"}),
+                  patch.object(library, "post", side_effect=post),
+                  patch("context_window.sync", return_value=65536)):
+                library.record_main_source("old:large", True)
+                self.assertTrue(library.repair_main_alias(128, 12))
+                self.assertEqual(library.main_source_record(),
+                                 {"source": "new:balanced", "owned": True})
+                self.assertEqual(json.loads((root / "LongTasks/retired-main-sources.json").read_text()),
+                                 ["old:large"])
+
     def test_missing_main_alias_is_recreated_from_a_verified_suitable_model(self):
         catalog = {
             "main": {"alias": "cale-local"},

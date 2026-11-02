@@ -68,8 +68,14 @@ try {
    Write-SetupStatus $stage ("Downloading and checking " + $name) | Out-Host
    Write-Output "Downloading $name" | Out-Host
    $partial=$target+'.partial'
-   & curl.exe --fail --location --retry 3 --output $partial $url
-   if ($LASTEXITCODE -ne 0) { throw "Download failed: $name" }
+   if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+     & curl.exe --fail --location --retry 3 --output $partial $url
+     if ($LASTEXITCODE -ne 0) { throw "Download failed: $name" }
+   } else {
+     # Some clean or locked-down Windows images omit curl.exe. PowerShell's
+     # built-in downloader still gets the same SHA-256 verification below.
+     Invoke-WebRequest -Uri $url -OutFile $partial -UseBasicParsing
+   }
    if ((Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLower() -ne $sha.ToLower()) { throw "Checksum failed: $name. Download was not executed." }
    Move-Item -LiteralPath $partial -Destination $target -Force
    return $target
@@ -78,7 +84,7 @@ try {
  $env:PYTHONUTF8='1'
  New-Item -ItemType Directory -Path (Join-Path $Destination 'Temp') -Force | Out-Null
  $env:TEMP=Join-Path $Destination 'Temp'; $env:TMP=$env:TEMP
- if (-not (Test-Path -LiteralPath (Join-Path $env:HERMES_HOME 'bin/hermes.exe'))) {
+ if (-not (Test-CaleRunnable (Join-Path $env:HERMES_HOME 'bin/hermes.exe'))) {
    Write-SetupStatus 10 'Installing the agent and Python runtime'
    $bootstrap=Download-Verified "https://raw.githubusercontent.com/NousResearch/hermes-agent/$($pins.hermes_commit)/scripts/install.ps1" $pins.hermes_installer_sha256 'hermes-install.ps1'
    Write-Output 'Installing the agent and its managed Python runtime...'
@@ -89,11 +95,18 @@ try {
  if (-not $factsFile) { throw 'The managed Python runtime was not created.' }
  $facts=Get-Content -LiteralPath $factsFile.FullName -Raw | ConvertFrom-Json
  $runtime=Join-Path $facts.packages.venv.environment 'Scripts/python.exe'
+ if (-not (Test-CaleRunnable $runtime @('-V'))) { throw 'The agent Python runtime is incomplete. Re-run setup to repair it.' }
  $box=Join-Path $Destination 'Toolbox'
  Write-SetupStatus 25 'Installing tools and browser support'
  New-Item -ItemType Directory -Path $box -Force | Out-Null
- if (-not (Test-Path -LiteralPath (Join-Path $box 'python/Scripts/python.exe'))) { & $runtime -m venv (Join-Path $box 'python'); if ($LASTEXITCODE -ne 0) { throw 'Could not create the tool runtime.' } }
+ $toolPython=Join-Path $box 'python/Scripts/python.exe'
+ if (-not (Test-CaleRunnable $toolPython @('-V'))) {
+   Reset-CaleManagedDirectory $Destination (Join-Path $box 'python')
+   & $runtime -m venv (Join-Path $box 'python')
+   if ($LASTEXITCODE -ne 0) { throw 'Could not create the tool runtime.' }
+ }
  $python=Join-Path $box 'python/Scripts/python.exe'
+ if (-not (Test-CaleRunnable $python @('-V'))) { throw 'The tool Python runtime did not start.' }
  Write-SetupStatus 26 'Installing document, database and file tools'
  Write-Output 'Installing document, database, testing and model-connection tools...'
  & $python -m pip install --disable-pip-version-check -r (Join-Path $PSScriptRoot 'requirements-windows.txt')
@@ -102,16 +115,17 @@ try {
  Write-SetupStatus 29 'Downloading the local browser tools'
  & $python -m playwright install chromium --only-shell
  if ($LASTEXITCODE -ne 0) { throw 'Local crawler browser download failed.' }
- if (-not (Test-Path -LiteralPath (Join-Path $box 'node-v26.13.0-win-x64/node.exe'))) {
+ if (-not (Test-CaleRunnable (Join-Path $box 'node-v26.13.0-win-x64/node.exe'))) {
    $archive=Download-Verified $pins.node.url $pins.node.sha256 'node-v26.13.0-win-x64.zip'
    Expand-Archive -LiteralPath $archive -DestinationPath $box -Force
  }
  $node=Join-Path $box 'node-v26.13.0-win-x64/node.exe'
+ if (-not (Test-CaleRunnable $node)) { throw 'The managed Node.js runtime did not start.' }
  $githubCli=Join-Path $box 'gh_2.103.3_windows_amd64/bin/gh.exe'
- if (-not (Test-Path -LiteralPath $githubCli)) {
+ if (-not (Test-CaleRunnable $githubCli)) {
    $archive=Download-Verified $pins.github_cli.url $pins.github_cli.sha256 'gh_2.103.3_windows_amd64.zip'
    Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $box 'gh_2.103.3_windows_amd64') -Force
-   if (-not (Test-Path -LiteralPath $githubCli)) { throw 'GitHub CLI installation failed.' }
+   if (-not (Test-CaleRunnable $githubCli)) { throw 'GitHub CLI installation failed.' }
  }
  $env:PATH=(Split-Path $node)+';'+(Join-Path $box 'python/Scripts')+';'+$env:PATH
  $installedLock=Join-Path $box 'package-lock.json'
@@ -133,11 +147,16 @@ try {
      if ($LASTEXITCODE -ne 0) { throw 'Browser download failed.' }
    }
  } finally { Pop-Location }
- foreach ($entry in @(@{Name='java';Folder='jdk-21.0.13+9';Archive='jdk.zip'},@{Name='ghidra';Folder='ghidra_12.1.4_PUBLIC';Archive='ghidra-12.1.4.zip'})) {
-   if (-not (Test-Path -LiteralPath (Join-Path $box $entry.Folder))) {
+ foreach ($entry in @(@{Name='java';Folder='jdk-21.0.13+9';Archive='jdk.zip';Probe='bin/java.exe'},@{Name='ghidra';Folder='ghidra_12.1.4_PUBLIC';Archive='ghidra-12.1.4.zip';Probe='ghidraRun.bat'})) {
+   $toolFolder=Join-Path $box $entry.Folder
+   $toolProbe=Join-Path $toolFolder $entry.Probe
+   $ready=if ($entry.Name -eq 'java') { Test-CaleRunnable $toolProbe @('-version') } else { Test-Path -LiteralPath $toolProbe -PathType Leaf }
+   if (-not $ready) {
      Write-SetupStatus 36 ("Adding " + $entry.Folder + " tools")
      $pin=$pins.($entry.Name); $archive=Download-Verified $pin.url $pin.sha256 $entry.Archive
      Expand-Archive -LiteralPath $archive -DestinationPath $box -Force
+     $ready=if ($entry.Name -eq 'java') { Test-CaleRunnable $toolProbe @('-version') } else { Test-Path -LiteralPath $toolProbe -PathType Leaf }
+     if (-not $ready) { throw "$($entry.Folder) did not install correctly." }
    }
  }
  # Copy only published source. Never touch project folders, saved tasks or account credentials.
@@ -172,7 +191,8 @@ try {
  $env:PATH=(Join-Path $box 'node_modules/.bin')+';'+$env:PATH
  $media=Join-Path $Destination 'Media'
  New-Item -ItemType Directory -Path $media -Force | Out-Null
- if (-not (Test-Path -LiteralPath (Join-Path $media 'python/Scripts/python.exe'))) {
+ if (-not (Test-CaleRunnable (Join-Path $media 'python/Scripts/python.exe') @('-V'))) {
+   Reset-CaleManagedDirectory $Destination (Join-Path $media 'python')
    $uvArchive=Download-Verified $pins.uv.url $pins.uv.sha256 'uv-win64.zip'
    $uvFolder=Join-Path $media 'uv'
    New-Item -ItemType Directory -Path $uvFolder -Force | Out-Null
@@ -186,6 +206,7 @@ try {
    if ($LASTEXITCODE -ne 0) { throw 'The media environment failed to initialize.' }
  }
  $mediaPython=Join-Path $media 'python/Scripts/python.exe'
+ if (-not (Test-CaleRunnable $mediaPython @('-V'))) { throw 'The media Python runtime did not start.' }
  Write-Output 'Installing local image, voice, vision, video and training tools...'
  & $mediaPython -m pip install --disable-pip-version-check --extra-index-url https://download.pytorch.org/whl/cu128 -r (Join-Path $Destination 'media-requirements.txt')
  if ($LASTEXITCODE -ne 0) { throw 'Media tool installation failed.' }
@@ -193,12 +214,12 @@ try {
  catch {
    Write-SetupStatus 54 'Installing and starting Ollama'
    $ollama=Join-Path $env:LOCALAPPDATA 'Programs/Ollama/ollama.exe'
-   if (-not (Test-Path -LiteralPath $ollama)) {
+   if (-not (Test-CaleRunnable $ollama)) {
      # The native Windows app handles later Ollama updates; the old CLI ZIP does not.
      $installer=Download-Verified $pins.ollama_setup.url $pins.ollama_setup.sha256 'OllamaSetup.exe'
      & $installer /VERYSILENT /NORESTART /SUPPRESSMSGBOXES
      if ($LASTEXITCODE -ne 0) { throw 'Ollama native installation failed.' }
-     if (-not (Test-Path -LiteralPath $ollama)) { throw 'The Ollama installer did not create its application.' }
+     if (-not (Test-CaleRunnable $ollama)) { throw 'The Ollama installer did not create a working application.' }
    }
    try { $null=Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 2 }
    catch { Start-Process -FilePath $ollama -ArgumentList 'serve' -WindowStyle Hidden }
@@ -231,7 +252,7 @@ try {
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.273')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.274')
  Write-SetupStatus 100 'Your AI is ready' 'complete'
  # Optional local models continue in a separate process after the installer closes.
  Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden

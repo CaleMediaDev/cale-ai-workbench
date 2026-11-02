@@ -12,6 +12,37 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == "nt", "Windows installer only")
 class InstallEnvironmentTests(unittest.TestCase):
+    def test_managed_runtime_probe_and_reset_reject_outside_paths(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            install = base / "Cale"
+            broken = install / "Toolbox" / "python"
+            broken.mkdir(parents=True)
+            (broken / "python.exe").write_bytes(b"incomplete")
+            outside = base / "user-files"
+            outside.mkdir()
+            harness = base / "probe.ps1"
+            harness.write_text(
+                ". $env:CALE_INSTALL_HELPER\n"
+                "$bad=Test-CaleRunnable (Join-Path $env:CALE_BROKEN 'python.exe')\n"
+                "Reset-CaleManagedDirectory $env:CALE_INSTALL $env:CALE_BROKEN\n"
+                "$refused=$false\n"
+                "try { Reset-CaleManagedDirectory $env:CALE_INSTALL $env:CALE_OUTSIDE } catch { $refused=$true }\n"
+                "@{bad=$bad;gone=(-not (Test-Path $env:CALE_BROKEN));refused=$refused;outside=(Test-Path $env:CALE_OUTSIDE)} | ConvertTo-Json -Compress\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update(CALE_INSTALL_HELPER=str(ROOT / "Install-Environment.ps1"),
+                       CALE_INSTALL=str(install), CALE_BROKEN=str(broken),
+                       CALE_OUTSIDE=str(outside))
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+                env=env, capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout),
+                             {"bad": False, "gone": True, "refused": True, "outside": True})
+
     def test_packaged_launcher_uses_physical_path_and_restores_module_lookup(self):
         with tempfile.TemporaryDirectory() as folder:
             local = Path(folder)
