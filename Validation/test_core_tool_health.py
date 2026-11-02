@@ -15,6 +15,7 @@ def test_missing_checks_executables_and_ghidra(tmp_path, monkeypatch):
     monkeypatch.setattr(core_tool_health, "_runnable",
                         lambda path, *args: path.name != "gh.exe")
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
     assert core_tool_health.missing(tmp_path, fresh=True) == ["GitHub CLI"]
     ghidra.unlink()
     assert core_tool_health.missing(tmp_path, fresh=True) == ["GitHub CLI", "Ghidra"]
@@ -23,6 +24,7 @@ def test_missing_checks_executables_and_ghidra(tmp_path, monkeypatch):
 def test_browser_runtime_failure_is_visible_even_when_node_runs(tmp_path, monkeypatch):
     monkeypatch.setattr(core_tool_health, "_runnable", lambda path, *args: True)
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: False)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
     ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
     ghidra.parent.mkdir(parents=True)
     ghidra.write_text("present")
@@ -38,6 +40,7 @@ def test_agent_sdk_probe_uses_managed_install_facts(tmp_path, monkeypatch):
     monkeypatch.setattr(core_tool_health, "_runnable",
                         lambda path, *args: "ResponseFormatJSONObject" not in " ".join(args))
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
     ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
     ghidra.parent.mkdir(parents=True)
     ghidra.touch()
@@ -57,8 +60,31 @@ def test_toolbox_sdk_probe_catches_broken_music_runtime(tmp_path, monkeypatch):
 
     monkeypatch.setattr(core_tool_health, "_runnable", runnable)
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
     assert core_tool_health.missing(tmp_path, fresh=True) == ["Toolbox model SDK"]
     assert (toolbox, ("-c", core_tool_health.TOOLBOX_SDK_PROBE)) in checked
+
+
+def test_agent_launcher_probe_uses_cale_home_and_reports_failure(tmp_path, monkeypatch):
+    launcher = tmp_path / "data/bin/hermes.exe"
+    launcher.parent.mkdir(parents=True)
+    launcher.touch()
+    seen = {}
+
+    def run(args, **kwargs):
+        seen.update(args=args, kwargs=kwargs)
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(core_tool_health.subprocess, "run", run)
+    assert not core_tool_health._agent_launcher_works(tmp_path)
+    assert seen["args"] == [str(launcher), "--help"]
+    assert seen["kwargs"]["env"]["HERMES_HOME"] == str(tmp_path / "data")
+    monkeypatch.setattr(core_tool_health, "_runnable", lambda path, *args: True)
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+    ghidra.parent.mkdir(parents=True)
+    ghidra.touch()
+    assert core_tool_health.missing(tmp_path, fresh=True) == ["Agent launcher"]
 
 
 def test_background_repair_waits_for_first_install(tmp_path, monkeypatch):

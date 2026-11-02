@@ -91,6 +91,10 @@ try {
         }
         Write-Output 'Agent model SDK repaired.'
     }
+    $env:HERMES_HOME=Join-Path $Destination 'data'
+    if (-not (Test-CaleRunnable (Join-Path $env:HERMES_HOME 'bin/hermes.exe') @('--help'))) {
+        throw 'The configured agent launcher still does not start. Existing Hermes source edits were preserved.'
+    }
     # Music and other app tools run from Toolbox Python, not the agent venv.
     # A partial SDK there can survive an ordinary pip install as "satisfied".
     $toolPython=Join-Path $toolbox 'python/Scripts/python.exe'

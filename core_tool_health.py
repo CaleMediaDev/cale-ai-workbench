@@ -61,6 +61,24 @@ def _agent_python(root: Path) -> Path | None:
         return None
 
 
+def _agent_launcher_works(root: Path) -> bool:
+    """Probe Hermes with this installation's home, as Cale actually runs it."""
+    launcher = root / "data/bin/hermes.exe"
+    if not launcher.is_file():
+        return False
+    env = os.environ.copy()
+    env["HERMES_HOME"] = str(root / "data")
+    try:
+        result = subprocess.run(
+            [str(launcher), "--help"], cwd=root, env=env,
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+            creationflags=HIDE,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     """Probe actual executables, cached briefly to keep the desktop responsive."""
     global _cached_root, _cached_missing, _last_check
@@ -84,6 +102,8 @@ def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     agent_python = _agent_python(root)
     if agent_python is not None and not _runnable(agent_python, "-c", AGENT_SDK_PROBE):
         unavailable.append("Agent model SDK")
+    if not _agent_launcher_works(root):
+        unavailable.append("Agent launcher")
     toolbox_python = box / "python/Scripts/python.exe"
     if not _runnable(toolbox_python, "-c", TOOLBOX_SDK_PROBE):
         unavailable.append("Toolbox model SDK")

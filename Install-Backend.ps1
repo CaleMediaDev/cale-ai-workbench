@@ -104,6 +104,9 @@ try {
      throw 'The agent model SDK is incomplete after repair.'
    }
  }
+ if (-not (Test-CaleRunnable (Join-Path $env:HERMES_HOME 'bin/hermes.exe') @('--help'))) {
+   throw 'The configured agent launcher does not start after setup.'
+ }
  $box=Join-Path $Destination 'Toolbox'
  Write-SetupStatus 25 'Installing tools and browser support'
  New-Item -ItemType Directory -Path $box -Force | Out-Null
@@ -271,7 +274,7 @@ try {
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
-[IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.348')
+[IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.349')
  Write-SetupStatus 100 'Your AI is ready' 'complete'
  # Optional local models continue in a separate process after the installer closes.
  Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden
