@@ -906,6 +906,56 @@ def retry_song_without_vocals(p: dict, job: dict) -> bool:
     return True
 
 
+def retry_music_after_sdk_repair(p: dict, job: dict) -> bool:
+    """Repair a broken Toolbox SDK, then resume the same saved render once."""
+    if (job.get("status") != "error" or int(job.get("sdk_retries", 0)) >= 1
+            or "response_format_json_object" not in str(job.get("current", ""))):
+        return False
+    toolbox_python = ROOT / "Toolbox/python/Scripts/python.exe"
+    if not core_tool_health._runnable(toolbox_python, "-c", core_tool_health.TOOLBOX_SDK_PROBE):
+        try:
+            repair = json.loads((STATE / "core-tool-repair.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            repair = {}
+        try:
+            failed_at = float(repair.get("updated") or 0)
+        except (ValueError, TypeError):
+            failed_at = 0
+        if (repair.get("status") == "failed" and "Toolbox model SDK" in repair.get("detail", "")
+                and failed_at >= float(job.get("finished") or 0)):
+            with database() as conn:
+                previous = conn.execute(
+                    "SELECT last_failed,attempts FROM sdk_repair_failures WHERE task_id=?", (p["id"],)
+                ).fetchone()
+                attempts = int(previous["attempts"]) if previous else 0
+                if not previous or failed_at > float(previous["last_failed"]):
+                    attempts += 1
+                    conn.execute("""INSERT INTO sdk_repair_failures(task_id,last_failed,attempts)
+                        VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET
+                        last_failed=excluded.last_failed,attempts=excluded.attempts""",
+                        (p["id"], failed_at, attempts),
+                    )
+            if attempts >= 3:
+                update(p["id"], status="needs_input", detail=(
+                    "Music tool repair failed after three automatic attempts. "
+                    "The task and song files are saved; see core-tool-repair.log."
+                ))
+                return True
+        detail = "Repairing the music tool runtime automatically."
+        if p["detail"] != detail:
+            core_tool_health.missing(ROOT, fresh=True)
+        core_tool_health.start_background(ROOT)
+        if p["status"] != "working" or p["detail"] != detail:
+            update(p["id"], status="working", detail=detail)
+        return True
+    import music_backend
+
+    resumed = music_backend.resume_failed_sdk_job(music_job_id(p))
+    update(p["id"], status="working",
+           detail=str(resumed.get("current", "Resuming music after tool repair")))
+    return True
+
+
 def add_image_project(request_text: str, prompt: str, folder: str = "") -> str:
     """Keep a quick local image request in My Tasks across app restarts."""
 
@@ -2611,7 +2661,7 @@ def advance_project(p):
                            else f"Music is ready: {output.name}"),
                    fingerprint=fingerprint(Path(p["folder"])))
         elif status in ("error", "stopped"):
-            if not retry_song_without_vocals(p, job):
+            if not retry_music_after_sdk_repair(p, job) and not retry_song_without_vocals(p, job):
                 update(p["id"], status="needs_input", detail=str(job.get("current", "Music stopped")))
         else:
             current = str(job.get("current", "Generating music locally"))

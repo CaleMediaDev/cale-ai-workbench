@@ -550,6 +550,27 @@ def resume_music_job(job_id: str) -> dict:
     return resumed
 
 
+def resume_failed_sdk_job(job_id: str) -> dict:
+    """Retry one saved song after its model SDK import has been repaired."""
+    info = music_job_status(job_id)
+    reason = str(info.get("current", ""))
+    if (info.get("status") != "error" or "response_format_json_object" not in reason
+            or int(info.get("sdk_retries", 0)) >= 1):
+        raise ValueError("This music job is not eligible for an SDK retry.")
+    resumed = {
+        **info, "status": "queued", "current": "Resuming music after tool repair",
+        "worker_pid": None, "created": time.time(),
+        "sdk_retries": int(info.get("sdk_retries", 0)) + 1,
+    }
+    _write_job(job_id, resumed)
+    try:
+        _launch_job(job_id)
+    except OSError as exc:
+        _write_job(job_id, {**resumed, "status": "error", "current": str(exc)[:300]})
+        raise
+    return resumed
+
+
 def audio_file_ok(path: str | Path) -> bool:
     """Decode the whole recording and reject files with no audible signal."""
     import imageio_ffmpeg

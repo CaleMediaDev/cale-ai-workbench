@@ -160,6 +160,66 @@ class LongTaskTests(unittest.TestCase):
             job["vocal_retry"] = 1
             self.assertFalse(task_module.retry_song_without_vocals(task, job))
 
+    def test_music_sdk_error_repairs_then_resumes_saved_job(self):
+        import core_tool_health
+        import music_backend
+
+        task = self.item()
+        task_module.update(self.pid, card="music-job:" + "e" * 32, status="working")
+        task = self.item()
+        error = "No module named 'openai.types.shared_params.response_format_json_object'"
+        job = {"status": "error", "current": error, "sdk_retries": 0}
+        with (patch.object(core_tool_health, "_runnable", return_value=False),
+              patch.object(core_tool_health, "missing", return_value=["Toolbox model SDK"]),
+              patch.object(core_tool_health, "start_background") as repair,
+              patch.object(music_backend, "resume_failed_sdk_job") as resume):
+            self.assertTrue(task_module.retry_music_after_sdk_repair(task, job))
+            repair.assert_called_once()
+            resume.assert_not_called()
+        self.assertEqual(self.item()["status"], "working")
+        with (patch.object(core_tool_health, "_runnable", return_value=True),
+              patch.object(music_backend, "resume_failed_sdk_job", return_value={
+                  "current": "Resuming music after tool repair"}) as resume):
+            self.assertTrue(task_module.retry_music_after_sdk_repair(self.item(), job))
+            resume.assert_called_once_with("e" * 32)
+        job["sdk_retries"] = 1
+        self.assertFalse(task_module.retry_music_after_sdk_repair(self.item(), job))
+
+    def test_music_sdk_repair_stops_after_three_distinct_failures(self):
+        import core_tool_health
+
+        task_module.update(self.pid, card="music-job:" + "e" * 32, status="working")
+        job = {"status": "error", "current": (
+            "No module named 'openai.types.shared_params.response_format_json_object'"),
+            "finished": 100, "sdk_retries": 0}
+        status = task_module.STATE / "core-tool-repair.json"
+        with (patch.object(core_tool_health, "_runnable", return_value=False),
+              patch.object(core_tool_health, "missing", return_value=["Toolbox model SDK"]),
+              patch.object(core_tool_health, "start_background") as repair):
+            for attempt in range(1, 4):
+                status.write_text(json.dumps({"status": "failed",
+                    "detail": "Still missing: Toolbox model SDK", "updated": 100 + attempt}))
+                self.assertTrue(task_module.retry_music_after_sdk_repair(self.item(), job))
+            self.assertEqual(self.item()["status"], "needs_input")
+            self.assertIn("three automatic attempts", self.item()["detail"])
+            self.assertEqual(repair.call_count, 2)
+
+    def test_failed_music_card_enters_sdk_repair_from_supervisor(self):
+        import core_tool_health
+        import music_backend
+
+        task_module.update(self.pid, card="music-job:" + "e" * 32, status="working")
+        error = "No module named 'openai.types.shared_params.response_format_json_object'"
+        with (patch.object(music_backend, "music_job_status", return_value={
+                  "status": "error", "current": error, "sdk_retries": 0}),
+              patch.object(core_tool_health, "_runnable", return_value=False),
+              patch.object(core_tool_health, "missing", return_value=["Toolbox model SDK"]),
+              patch.object(core_tool_health, "start_background") as repair):
+            task_module.advance_project(self.item())
+        repair.assert_called_once()
+        self.assertEqual(self.item()["status"], "working")
+        self.assertIn("Repairing the music tool runtime", self.item()["detail"])
+
     def test_blocked_rap_without_music_tool_recovers_to_direct_renderer(self):
         task = {
             "id": "rap-task", "status": "needs_input", "card": "t-rap",

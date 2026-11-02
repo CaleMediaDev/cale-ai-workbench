@@ -756,6 +756,30 @@ def test_interrupted_music_job_recovers_without_restarting_live_worker(tmp_path)
     assert resumed["recoveries"] == 1
 
 
+def test_sdk_failure_retries_same_saved_music_job_once(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    job_id = "e" * 32
+    record = {
+        "job_id": job_id, "status": "error",
+        "current": "No module named 'openai.types.shared_params.response_format_json_object'",
+        "output_path": str(tmp_path / "song.mp3"), "server_task_id": "saved-server-task",
+    }
+    (jobs / (job_id + ".json")).write_text(json.dumps(record))
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_launch_job"
+    ) as launch:
+        resumed = music_backend.resume_failed_sdk_job(job_id)
+        launch.assert_called_once_with(job_id)
+        assert resumed["status"] == "queued"
+        assert resumed["server_task_id"] == "saved-server-task"
+        assert resumed["sdk_retries"] == 1
+        music_backend._write_job(job_id, {**resumed, "status": "error",
+                                          "current": record["current"]})
+        with pytest.raises(ValueError, match="not eligible"):
+            music_backend.resume_failed_sdk_job(job_id)
+
+
 def test_recovery_only_marks_playable_saved_song_complete(tmp_path):
     jobs = tmp_path / "music-jobs"
     jobs.mkdir()
