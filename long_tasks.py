@@ -1561,7 +1561,7 @@ def process_music_request(p, action, note):
                 ).exists()
             )
             started = music_backend.start_music_job(
-                previous["prompt"] + ". " + direction, str(output),
+                previous["prompt"].rstrip(" .") + ". " + direction, str(output),
                 lyrics=previous.get("lyrics", ""),
                 duration_seconds=previous["duration_seconds"],
                 instrumental=previous["instrumental"], task_id=p["id"],

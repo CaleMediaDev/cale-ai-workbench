@@ -15,12 +15,37 @@ FEMALE_REFERENCES = (
     "miley cyrus", "olivia rodrigo", "sabrina carpenter", "chappell roan",
 )
 
+NEGATION = r"(?:without|no|not|avoid|exclude|skip|don'?t want|do not want)"
+NEGATED_GUITAR = re.compile(
+    rf"\b{NEGATION}\s+(?:any\s+)?(?:(?:electric|acoustic|distorted)\s+)?guitars?\b",
+    re.I,
+)
+NEGATED_SINGER = re.compile(
+    rf"\b{NEGATION}\s+(?:a\s+)?(male|man|guy|boy|female|woman|girl)"
+    r"\s+(?:voice|vocals?|singer)\b", re.I,
+)
+
+
+def _clean_negations(prompt: str) -> tuple[str, bool, bool]:
+    """Remove rejected sounds before ACE-Step sees words it may imitate."""
+    rejected = [match.group(1).lower() for match in NEGATED_SINGER.finditer(prompt)]
+    cleaned = NEGATED_SINGER.sub("", prompt)
+    cleaned = NEGATED_GUITAR.sub("", cleaned)
+    cleaned = re.sub(r"\s+([,.;!?])", r"\1", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,.;")
+    return cleaned, any(word in ("male", "man", "guy", "boy") for word in rejected), any(
+        word in ("female", "woman", "girl") for word in rejected
+    )
+
 
 def vocal_intent(prompt: str, instrumental: bool = False) -> str:
     """Use the person's current request before any appended learned examples."""
     if instrumental:
         return "none"
-    request = prompt.split("Past user feedback", 1)[0].lower()
+    request, no_male, no_female = _clean_negations(
+        prompt.split("Past user feedback", 1)[0]
+    )
+    request = request.lower()
     female = bool(re.search(r"\b(?:female|woman|women|girl|feminine)\b", request))
     male = bool(re.search(r"\b(?:male|man|men|guy|masculine)\b", request))
     if female and male:
@@ -28,6 +53,10 @@ def vocal_intent(prompt: str, instrumental: bool = False) -> str:
     if female:
         return "female"
     if male:
+        return "male"
+    if no_male and not no_female:
+        return "female"
+    if no_female and not no_male:
         return "male"
     if any(name in request for name in FEMALE_REFERENCES):
         return "female"
@@ -37,23 +66,24 @@ def vocal_intent(prompt: str, instrumental: bool = False) -> str:
 def enhance(prompt: str, instrumental: bool = False) -> str:
     """Make vocal intent unambiguous in the local music model's caption."""
     intent = vocal_intent(prompt, instrumental)
+    cleaned, _, _ = _clean_negations(prompt)
     cues = []
     if intent == "female":
         cue = "Prominent expressive female lead vocals throughout, clear sung verses and chorus"
-        if any(name in prompt.lower() for name in ("katy perry", "katy pary")):
+        if any(name in cleaned.lower() for name in ("katy perry", "katy pary")):
             cue += ", bright polished dance-pop production and a catchy anthemic hook"
         cues.append(cue)
     elif intent == "male":
         cues.append("Prominent expressive male lead vocals throughout, clear sung verses and chorus")
-    request = prompt.split("Past user feedback", 1)[0].lower()
+    request = cleaned.split("Past user feedback", 1)[0].lower()
     if (re.search(r"\b(?:techno|tehno|electronic dance|dubstep|edm)\b", request)
-            and not re.search(r"\b(?:guitar|acoustic|live band|rock)\b", request)):
+            and not re.search(r"\b(?:guitars?|acoustic|live band|rock)\b", request)):
         cues.append(
             "Entirely electronic production with a drum machine, four-on-the-floor kick, "
-            "sequenced synthesizers, synthetic bass and club textures; no live band instruments"
+            "sequenced synthesizers, synthetic bass and club textures"
         )
-    additions = [cue for cue in cues if cue.lower() not in prompt.lower()]
-    return prompt.rstrip(" .") + ". " + ". ".join(additions) + "." if additions else prompt
+    additions = [cue for cue in cues if cue.lower() not in cleaned.lower()]
+    return ". ".join(additions) + ". " + cleaned if additions else cleaned
 
 
 def feedback_direction(note: str, original_request: str) -> str:

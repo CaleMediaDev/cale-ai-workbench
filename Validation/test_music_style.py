@@ -15,7 +15,7 @@ def test_techno_uses_electronic_instruments_unless_guitar_is_requested():
     prompt = music_style.enhance("Make a techno song", instrumental=True)
     assert "drum machine" in prompt
     assert "sequenced synthesizers" in prompt
-    assert "live band instruments" in prompt
+    assert prompt.startswith("Entirely electronic production")
     assert music_style.enhance(prompt, instrumental=True) == prompt
     assert "drum machine" in music_style.enhance("Make a tehno beat", instrumental=True)
     assert music_style.enhance("Make techno with distorted guitar", instrumental=True) == (
@@ -26,6 +26,18 @@ def test_techno_uses_electronic_instruments_unless_guitar_is_requested():
 def test_explicit_vocal_request_overrides_artist_reference():
     assert music_style.vocal_intent("Make a Katy Perry style song with male vocals") == "male"
     assert music_style.vocal_intent("Make a song with female and male duet") == "duet"
+
+
+def test_negated_instruments_and_singers_do_not_override_intent():
+    techno = music_style.enhance("Make techno without guitars", instrumental=True)
+    assert techno.startswith("Entirely electronic production")
+    assert "guitar" not in techno.lower()
+    assert music_style.enhance(techno, instrumental=True) == techno
+    pop = music_style.enhance("Make a Katy Perry song, not a guy voice")
+    assert pop.startswith("Prominent expressive female lead vocals")
+    assert "guy" not in pop.lower()
+    assert music_style.vocal_intent("Make a Katy Perry song, not a guy voice") == "female"
+    assert music_style.enhance(pop) == pop
 
 
 def test_misspelled_artist_and_feedback_become_positive_music_directions():
