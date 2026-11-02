@@ -177,6 +177,104 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(board.call_args_list[-1].args, ("archive", "t-rap"))
         self.assertEqual(start.call_args.args[1]["duration_seconds"], 180)
 
+    def test_blocked_agent_sdk_recovers_after_import_is_repaired(self):
+        import core_tool_health
+
+        task_module.update(self.pid, card="broken-agent", status="needs_input",
+                           detail="Agent stopped on a missing module")
+        snapshot = {
+            "task": {"status": "blocked"},
+            "latest_summary": "ModuleNotFoundError: No module named "
+                              "'openai.types.shared_params.response_format_json_object'",
+            "runs": [{"started_at": 1, "ended_at": 2}],
+        }
+        with (patch.object(task_module, "board", return_value=snapshot) as board,
+              patch.object(task_module, "worker_handoff_settled", return_value=True),
+              patch.object(task_module, "create_card") as create,
+              patch.object(core_tool_health, "_agent_python", return_value=Path("agent.exe")),
+              patch.object(core_tool_health, "_runnable", return_value=True),
+              patch.object(core_tool_health, "start_background") as repair):
+            task_module.advance_project(self.item())
+        current = self.item()
+        self.assertEqual(current["status"], "working")
+        self.assertEqual(current["generation"], 1)
+        self.assertEqual(current["failures"], 1)
+        board.assert_any_call("archive", "broken-agent")
+        create.assert_called_once()
+        repair.assert_not_called()
+
+    def test_blocked_agent_sdk_waits_for_background_repair(self):
+        import core_tool_health
+
+        task_module.update(self.pid, card="broken-agent", status="working")
+        snapshot = {"task": {"status": "blocked"},
+                    "latest_summary": "ImportError: cannot import name ResponseFormatJSONObject",
+                    "runs": [{"started_at": 1, "ended_at": 2}]}
+        with (patch.object(task_module, "board", return_value=snapshot) as board,
+              patch.object(task_module, "recover_blocked_audio_review", return_value=False),
+              patch.object(core_tool_health, "_agent_python", return_value=Path("agent.exe")),
+              patch.object(core_tool_health, "_runnable", return_value=False),
+              patch.object(core_tool_health, "missing", return_value=["Agent model SDK"]),
+              patch.object(core_tool_health, "start_background", return_value=True) as repair):
+            task_module.advance_project(self.item())
+        self.assertEqual(self.item()["status"], "working")
+        self.assertIn("Repairing the agent model SDK", self.item()["detail"])
+        self.assertFalse(any(call.args[0] == "archive" for call in board.call_args_list))
+        repair.assert_called_once()
+
+    def test_sdk_recovery_ignores_unrelated_or_exhausted_blockers(self):
+        task_module.update(self.pid, card="broken-agent", status="needs_input")
+        snapshot = {"task": {"status": "blocked"},
+                    "latest_summary": "No module named torch",
+                    "runs": [{"started_at": 1, "ended_at": 2}]}
+        self.assertFalse(task_module.recover_blocked_agent_sdk(self.item(), snapshot))
+        task_module.update(self.pid, brief="Fix openai.types.shared_params.response_format_json_object")
+        self.assertFalse(task_module.recover_blocked_agent_sdk(self.item(), snapshot))
+        snapshot["latest_summary"] = "No module named openai.types.shared_params.response_format_json_object"
+        task_module.update(self.pid, failures=2)
+        self.assertFalse(task_module.recover_blocked_agent_sdk(self.item(), snapshot))
+
+    def test_sdk_recovery_waits_for_old_worker_exit(self):
+        import core_tool_health
+
+        task_module.update(self.pid, card="broken-agent", status="working")
+        snapshot = {"task": {"status": "blocked"},
+                    "latest_summary": "No module named openai.types.shared_params.response_format_json_object",
+                    "runs": [{"started_at": 1, "ended_at": 2}]}
+        with (patch.object(core_tool_health, "_agent_python", return_value=Path("agent.exe")),
+              patch.object(core_tool_health, "_runnable", return_value=True),
+              patch.object(task_module, "worker_handoff_settled", return_value=False),
+              patch.object(task_module, "board") as board):
+            self.assertTrue(task_module.recover_blocked_agent_sdk(self.item(), snapshot))
+        self.assertIn("old worker to exit", self.item()["detail"])
+        board.assert_not_called()
+
+    def test_sdk_repair_stops_after_three_distinct_failed_repair_runs(self):
+        import core_tool_health
+
+        task_module.update(self.pid, card="broken-agent", status="working")
+        snapshot = {"task": {"status": "blocked"},
+                    "latest_summary": "No module named openai.types.shared_params.response_format_json_object",
+                    "runs": [{"started_at": 1, "ended_at": 2}]}
+        repair_file = task_module.STATE / "core-tool-repair.json"
+        repair_file.parent.mkdir(parents=True, exist_ok=True)
+        with (patch.object(core_tool_health, "_agent_python", return_value=Path("agent.exe")),
+              patch.object(core_tool_health, "_runnable", return_value=False),
+              patch.object(core_tool_health, "missing", return_value=["Agent model SDK"]),
+              patch.object(core_tool_health, "start_background", return_value=True) as repair):
+            for number in range(3):
+                repair_file.write_text(json.dumps({
+                    "status": "failed", "detail": "Still missing: Agent model SDK",
+                    "updated": self.item()["created"] + number + 1,
+                }))
+                self.assertTrue(task_module.recover_blocked_agent_sdk(self.item(), snapshot))
+                if number == 0:
+                    self.assertTrue(task_module.recover_blocked_agent_sdk(self.item(), snapshot))
+        self.assertEqual(self.item()["status"], "needs_input")
+        self.assertIn("three automatic attempts", self.item()["detail"])
+        self.assertEqual(repair.call_count, 3)
+        self.assertFalse(task_module.recover_blocked_agent_sdk(self.item(), snapshot))
+
     def test_desktop_lock_prevents_duplicate_window_and_focuses_existing(self):
         import msvcrt
 

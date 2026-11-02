@@ -203,6 +203,8 @@ def database():
     conn.execute("""CREATE TABLE IF NOT EXISTS task_retry_state (
       task_id TEXT PRIMARY KEY, status TEXT NOT NULL, card TEXT NOT NULL,
       attempts INTEGER NOT NULL, retry_at REAL NOT NULL)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS sdk_repair_failures (
+      task_id TEXT PRIMARY KEY, last_failed REAL NOT NULL, attempts INTEGER NOT NULL)""")
     conn.commit()
     try:
         yield conn
@@ -793,6 +795,78 @@ def recover_blocked_music_project(p: dict) -> bool:
         return False
     board("archive", p["card"])
     _start_music_project(p, spec)
+    return True
+
+
+def recover_blocked_agent_sdk(p: dict, snapshot: dict | None = None) -> bool:
+    """Resume a task after repairing the pinned model SDK it depended on.
+
+    Only a worker's latest failure summary qualifies. A task brief or an old
+    comment mentioning an import error must never trigger an automatic retry.
+    """
+    if (p.get("status") not in ("working", "needs_input") or not p.get("card")
+            or p["card"].startswith(("music-job:", "image-job:"))
+            or str(p.get("detail") or "").startswith("Agent SDK repair failed after three automatic attempts.")
+            or int(p.get("failures") or 0) >= 2):
+        return False
+    snapshot = snapshot or board("show", p["card"], "--json", parse=True)
+    if snapshot.get("task", {}).get("status") != "blocked":
+        return False
+    runs = snapshot.get("runs", [])
+    summary = " ".join((str(snapshot.get("latest_summary") or ""),
+                        str(runs[-1].get("summary") or "") if runs else ""))
+    if not re.search(r"\b(?:openai\.types\.shared_params\.response_format_json_object|"
+                     r"ResponseFormatJSONObject)\b", summary, re.I):
+        return False
+    import core_tool_health
+
+    agent_python = core_tool_health._agent_python(ROOT)
+    if agent_python is None:
+        return False  # Base setup, not this SDK repair, owns a missing agent.
+    if not core_tool_health._runnable(agent_python, "-c", core_tool_health.AGENT_SDK_PROBE):
+        try:
+            repair = json.loads((STATE / "core-tool-repair.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            repair = {}
+        try:
+            failed_at = float(repair.get("updated") or 0)
+        except (ValueError, TypeError):
+            failed_at = 0
+        if (repair.get("status") == "failed" and "Agent model SDK" in repair.get("detail", "")
+                and failed_at >= p["created"]):
+            with database() as conn:
+                previous = conn.execute(
+                    "SELECT last_failed,attempts FROM sdk_repair_failures WHERE task_id=?", (p["id"],)
+                ).fetchone()
+                attempts = int(previous["attempts"]) if previous else 0
+                if not previous or failed_at > float(previous["last_failed"]):
+                    attempts += 1
+                    conn.execute("""INSERT INTO sdk_repair_failures(task_id,last_failed,attempts)
+                        VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET
+                        last_failed=excluded.last_failed,attempts=excluded.attempts""",
+                        (p["id"], failed_at, attempts),
+                    )
+            if attempts >= 3:
+                update(p["id"], status="needs_input", detail=(
+                    "Agent SDK repair failed after three automatic attempts. "
+                    "The task and files are saved; see core-tool-repair.log for the exact error."
+                ))
+                return True
+        core_tool_health.missing(ROOT, fresh=True)
+        core_tool_health.start_background(ROOT)
+        if p["status"] != "working" or p["detail"] != "Repairing the agent model SDK automatically.":
+            update(p["id"], status="working", detail="Repairing the agent model SDK automatically.")
+        return True
+    if not worker_handoff_settled(snapshot):
+        update(p["id"], status="working", detail="Agent SDK is ready. Waiting for the old worker to exit.")
+        return True
+    board("archive", p["card"])
+    update(p["id"], card="", status="working", generation=p["generation"] + 1,
+           failures=p["failures"] + 1,
+           detail="Agent SDK repaired. Resuming from saved project progress.")
+    current = next(item for item in projects() if item["id"] == p["id"])
+    create_card(current, "The pinned agent model SDK import is repaired. Continue the original request "
+                        "from saved project files and verify the result.")
     return True
 
 
@@ -2207,6 +2281,8 @@ def process_requests():
         if status == "done":
             # A new instruction or control action supersedes any old failure.
             clear_task_retry(p["id"])
+            with database() as conn:
+                conn.execute("DELETE FROM sdk_repair_failures WHERE task_id=?", (p["id"],))
             remember_task_review(p, original_action, note)
 
 
@@ -2563,6 +2639,8 @@ def advance_project(p):
         return
     if p["status"] == "needs_input" and recover_blocked_music_project(p):
         return
+    if p["status"] == "needs_input" and recover_blocked_agent_sdk(p):
+        return
     if p["status"] == "needs_input" and recover_blocked_audio_review(p):
         return
     if p["status"] == "needs_input" and p["detail"] in (
@@ -2632,6 +2710,8 @@ def advance_project(p):
                status="working", detail="Worker turn budget reached. Continuing from saved progress.")
     elif task["status"] in ("blocked", "triage", "archived"):
         if task["status"] == "blocked" and recover_blocked_audio_review(p, snapshot):
+            return
+        if task["status"] == "blocked" and recover_blocked_agent_sdk(p, snapshot):
             return
         comments = snapshot.get("comments", [])
         update(
