@@ -530,18 +530,39 @@ def retry_derestricted(payload, result, original_model="", deadline=None):
     return result
 
 
-def estimated_context(payload):
-    """Reserve room for the input, tool schemas and the next model response.
+def estimated_input_tokens(payload):
+    """Estimate prompt tokens without treating encoded media as prose.
 
-    Character count is an estimate rather than a tokenizer guarantee. The
-    generous reserve prevents small routes from receiving near-limit prompts;
-    the main model remains available when a request grows beyond them.
+    Image URLs can contain megabytes of base64, but vision models consume
+    image patches rather than one text token per few encoded bytes. Reserve
+    space per image while still counting all ordinary text and tool schemas.
     """
-    input_bytes = len(json.dumps({
-        "messages": payload.get("messages", []),
-        "tools": payload.get("tools", []),
-    }, ensure_ascii=True).encode("utf-8"))
-    return max(8192, input_bytes // 3 + 8192)
+    def content_tokens(value):
+        if isinstance(value, dict):
+            return sum(
+                (8192 if key in ("image_url", "input_image") else
+                 16384 if key in ("input_audio", "audio") else
+                 content_tokens(item))
+                for key, item in value.items()
+            )
+        if isinstance(value, list):
+            return sum(content_tokens(item) for item in value)
+        if isinstance(value, str):
+            if value.startswith("data:image/"):
+                return 8192
+            if value.startswith("data:audio/"):
+                return 16384
+            return max(1, len(value.encode("utf-8")) // 3)
+        return 1
+
+    messages = payload.get("messages", [])
+    tools = payload.get("tools", [])
+    return max(1, content_tokens(messages) + content_tokens(tools) + 16 * len(messages))
+
+
+def estimated_context(payload):
+    """Reserve room for the input and the next model response."""
+    return max(8192, estimated_input_tokens(payload) + 8192)
 
 
 def loaded_local_models():
@@ -813,10 +834,7 @@ class Router:
         required_context = estimated_context(payload)
         expected_output = min(8192, int(payload.get("max_tokens") or
                                         payload.get("max_completion_tokens") or 4096))
-        prompt_estimate = max(1, len(json.dumps({
-            "messages": payload.get("messages", []),
-            "tools": payload.get("tools", []),
-        }, ensure_ascii=True).encode("utf-8")) // 3)
+        prompt_estimate = estimated_input_tokens(payload)
         paid_speed = (
             usage_history.recent_provider_speed("chatgpt", 140)
             if mode == "floor_it" else 140

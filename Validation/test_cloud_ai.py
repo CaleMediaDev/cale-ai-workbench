@@ -453,6 +453,23 @@ class CloudTests(unittest.TestCase):
         self.assertLess(cloud.estimated_context(short), 65536)
         self.assertGreater(cloud.estimated_context(long), 65536)
 
+    def test_image_payload_uses_vision_budget_instead_of_encoded_byte_count(self):
+        image = "data:image/png;base64," + "A" * 1_000_000
+        request = {"messages": [{"role": "user", "content": [
+            {"type": "text", "text": "Describe this image."},
+            {"type": "image_url", "image_url": {"url": image}},
+        ]}], "tools": []}
+        self.assertLess(cloud.estimated_context(request), 65536)
+        self.assertLess(cloud.estimated_input_tokens(request), 16384)
+
+    def test_many_images_and_long_text_still_require_a_large_window(self):
+        image = "data:image/jpeg;base64," + "A" * 100_000
+        request = {"messages": [{"role": "user", "content": [
+            {"type": "text", "text": "x" * 100_000},
+            *({"type": "image_url", "image_url": {"url": image}} for _ in range(4)),
+        ]}], "tools": []}
+        self.assertGreater(cloud.estimated_context(request), 65536)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.state = patch.object(cloud, "STATE", Path(self.temp.name))
