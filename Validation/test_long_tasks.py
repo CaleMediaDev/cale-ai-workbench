@@ -1089,6 +1089,47 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(task_module.task_controls_for("accepted"),
                          task_module.task_controls_for("ready_for_review"))
 
+    def test_listening_review_finishes_verified_audio_and_freezes_timer(self):
+        task_module.update(
+            self.pid, brief="Make a 0.1 minute dubstep banger", card="song-card",
+            status="needs_input",
+        )
+        folder = Path(self.item()["folder"])
+        (folder / "Audio").mkdir()
+        with wave.open(str(folder / "Audio/final.wav"), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(8000)
+            audio.writeframes(b"\0\0" * (6 * 8000))
+        snapshot = {
+            "task": {"status": "blocked"},
+            "latest_summary": "Review handoff was rejected; please listen to the finished audio.",
+            "runs": [{"started_at": time.time() - 300, "ended_at": time.time() - 200}],
+        }
+        with (patch.object(task_module, "board") as board,
+              patch.object(task_module, "verify_project", return_value=(True, "3 checks passed")),
+              patch("music_backend.audio_file_ok", return_value=True)):
+            self.assertTrue(task_module.recover_blocked_audio_review(self.item(), snapshot))
+        board.assert_called_once_with("archive", "song-card")
+        finished = self.item()
+        self.assertEqual(task_module.task_progress(finished), (100, "Finished"))
+        self.assertEqual(finished["status"], "ready_for_review")
+        self.assertGreater(finished["finished"], 0)
+        self.assertIn("not independently confirmed", finished["detail"])
+        self.assertFalse(task_module.recover_blocked_audio_review(finished, snapshot))
+
+    def test_unverified_or_unrelated_blocker_stays_blocked(self):
+        task_module.update(self.pid, card="build-card", status="needs_input")
+        snapshot = {
+            "task": {"status": "blocked"},
+            "latest_summary": "Review handoff was rejected; please listen to the result.",
+            "runs": [{"started_at": time.time() - 300, "ended_at": time.time() - 200}],
+        }
+        with patch.object(task_module, "board") as board:
+            self.assertFalse(task_module.recover_blocked_audio_review(self.item(), snapshot))
+        board.assert_not_called()
+        self.assertEqual(self.item()["status"], "needs_input")
+
     def test_old_changed_project_review_recovers_without_user_action(self):
         task_module.update(
             self.pid, card="old-review", phase="review", status="needs_input",

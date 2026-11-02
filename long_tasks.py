@@ -1250,13 +1250,14 @@ def verify_audio_handoff(p):
     projects still need their own behavioral test script.
     """
     brief = str(p.get("brief", ""))
-    if not re.search(r"\b(song|music|rap|audio track)\b", brief, re.I):
+    if not re.search(r"\b(song|music|rap|audio track|banger|dubstep|riddim|brostep|tearout)\b", brief, re.I):
         return None
     if re.search(r"\b(app|website|software|program|plugin)\b", brief, re.I):
         return None
     folder = Path(p["folder"])
     audio = sorted(
-        (path for path in folder.iterdir()
+        (path for location in (folder, folder / "Audio") if location.is_dir()
+         for path in location.iterdir()
          if path.is_file() and path.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg", ".m4a")),
         key=lambda path: ("final" not in path.stem.lower(), -path.stat().st_mtime),
     )
@@ -1303,7 +1304,49 @@ def verify_audio_handoff(p):
             vocal_note = ""
     except (OSError, ValueError, RuntimeError, EOFError, KeyError, subprocess.TimeoutExpired) as exc:
         return False, f"Could not independently verify the song: {exc}"
-    return True, f"Built-in audio verification passed: {selected.name}, {duration:.1f}s, {channels} channel(s){vocal_note}."
+    return True, f"Built-in audio verification passed: {selected.name}, {duration:.1f}s{vocal_note}."
+
+
+def recover_blocked_audio_review(p, snapshot=None):
+    """Finish verified audio when Hermes asks for subjective listening feedback.
+
+    A listening preference cannot be established by an automated test. It also
+    must not leave a playable, technically checked song's timer running forever.
+    Only this specific rejected-review handoff qualifies; ordinary blockers keep
+    their normal user-input flow.
+    """
+    if not p.get("card") or p["status"] not in ("working", "needs_input"):
+        return False
+    snapshot = snapshot or board("show", p["card"], "--json", parse=True)
+    if snapshot.get("task", {}).get("status") != "blocked":
+        return False
+    summary = str(snapshot.get("latest_summary") or "")
+    if not ("review handoff was rejected" in summary.lower()
+            and re.search(r"\blisten(?:ing)?\b", summary, re.I)):
+        return False
+    runs = snapshot.get("runs", [])
+    if any(run.get("started_at") and not run.get("ended_at") for run in runs):
+        return False
+    ended = max((run.get("ended_at") or 0 for run in runs), default=0)
+    if not ended or time.time() - ended < 150:
+        return False
+    audio_passed, audio_evidence = verify_audio_handoff(p) or (False, "This is not an audio task.")
+    if not audio_passed:
+        return False
+    passed, evidence = verify_project(p)
+    if not passed:
+        return False
+    folder = Path(p["folder"])
+    checked = fingerprint(folder)
+    board("archive", p["card"])
+    update(
+        p["id"], card="", status="ready_for_review", phase="review", failures=0,
+        fingerprint=checked,
+        detail=("Finished. Audio and project checks passed. Listen to the song to judge "
+                "its sound and arrangement; exact tempo and artistic quality are not "
+                "independently confirmed.\n" + audio_evidence + "\n" + evidence[-2000:]),
+    )
+    return True
 
 
 def recover_media_artifacts(p, snapshot):
@@ -2119,6 +2162,8 @@ def advance_project(p):
         p["status"] = "queued"
     if p["status"] == "needs_input" and recover_blocked_music_project(p):
         return
+    if p["status"] == "needs_input" and recover_blocked_audio_review(p):
+        return
     if p["status"] == "needs_input" and p["detail"] in (
         "Files changed since the previous review. Resume to check them again.",
         "Files changed after verification. Resume to check them again.",
@@ -2190,6 +2235,8 @@ def advance_project(p):
         update(p["id"], card="", generation=p["generation"] + 1,
                status="working", detail="Worker turn budget reached. Continuing from saved progress.")
     elif task["status"] in ("blocked", "triage", "archived"):
+        if task["status"] == "blocked" and recover_blocked_audio_review(p, snapshot):
+            return
         comments = snapshot.get("comments", [])
         update(
             p["id"],
