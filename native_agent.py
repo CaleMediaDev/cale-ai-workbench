@@ -20,6 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 MAX_TURNS_PER_SLICE = 12
 MAX_TOOL_OUTPUT = 16_000
+RECENT_WORK_GROUPS = 4
 
 TOOLS = [
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
@@ -291,6 +292,34 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
     return [*base, *chosen]
 
 
+def fresh_messages(messages: list, folder: Path) -> list:
+    """Rebuild each model call from the durable checkpoint and recent exchanges."""
+    import task_context
+
+    base = [messages[0], {"role": "system", "content": task_context.snapshot(folder)}]
+    groups = []
+    current = []
+    for item in messages[1:]:
+        if item.get("role") == "system" and str(item.get("content", "")).startswith("Current task checkpoint"):
+            continue
+        if item.get("role") == "tool":
+            if current and current[0].get("role") == "assistant" and current[0].get("tool_calls"):
+                current.append(item)
+            continue
+        if current:
+            groups.append(current)
+        current = [item]
+    if current:
+        groups.append(current)
+    chosen = groups[-RECENT_WORK_GROUPS:]
+    # User steering is also written to USER-REQUESTS.md, but preserve the
+    # latest message verbatim in case a crash precedes that file write.
+    latest_user = next((group for group in reversed(groups) if group[0].get("role") == "user"), None)
+    if latest_user is not None and latest_user not in chosen:
+        chosen.insert(0, latest_user)
+    return [*base, *(item for group in chosen for item in group)]
+
+
 def repair_interrupted_tools(messages: list) -> list:
     """Close unfinished calls after a crash without blindly replaying effects."""
     if not messages:
@@ -358,6 +387,7 @@ def run_slice(project: dict, complete=None) -> dict:
         latest = read_state(project)
         if latest.get("status") in ("paused", "stopped"):
             return latest
+        messages = fresh_messages(messages, folder)
         messages = compact_messages(messages, folder, context_limit)
         response = call({"model": LOCAL_MODEL, "messages": messages, "tools": TOOLS,
                          "tool_choice": "auto", "stream": False, "temperature": 0.2})
@@ -414,6 +444,9 @@ def run_slice(project: dict, complete=None) -> dict:
                 result = f"Tool error: {exc}"
             messages.append({"role": "tool", "tool_call_id": item.get("id", ""),
                              "name": function.get("name", ""), "content": result[:MAX_TOOL_OUTPUT]})
+            import task_context
+
+            task_context.record_action(folder, function.get("name", ""), result)
             state["messages"] = messages
             state["current"] = f"{function.get('name', 'tool')}: {result[:150]}"
             save_state(project, state)

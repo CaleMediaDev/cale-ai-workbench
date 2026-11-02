@@ -9,6 +9,7 @@ from unittest.mock import patch
 import long_tasks
 import native_agent
 import cloud_ai
+import task_context
 
 
 def project(folder):
@@ -161,6 +162,47 @@ def test_native_context_rebuilds_from_durable_plan():
         assert len(compacted) < len(messages)
         assert "Check page" in compacted[1]["content"]
         assert compacted[-1]["content"].startswith("39")
+
+
+def test_fresh_context_uses_database_checkpoint_and_keeps_latest_tool_batch():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        notes = folder / ".local-ai"
+        (notes / "PLAN.md").write_text("- [x] Draft\n- [ ] Render and verify")
+        (notes / "PROGRESS.md").write_text("Draft saved. Next: run browser check.")
+        messages = [{"role": "system", "content": "Original request"}]
+        messages.extend({"role": "assistant", "content": f"old step {number} " * 1000} for number in range(30))
+        messages.extend([
+            {"role": "user", "content": "Also make the title blue."},
+            {"role": "assistant", "tool_calls": [{"id": "read-1", "function": {"name": "read_file", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "read-1", "content": "Latest file result"},
+        ])
+        task_context.record_action(folder, "read_file", "private contents must not be stored")
+        fresh = native_agent.fresh_messages(messages, folder)
+        assert len(fresh) <= 7
+        assert "Render and verify" in fresh[1]["content"]
+        assert "read_file: Completed" in fresh[1]["content"]
+        assert "private contents" not in fresh[1]["content"]
+        assert [entry["role"] for entry in fresh[-3:]] == ["user", "assistant", "tool"]
+        assert fresh[-1]["content"] == "Latest file result"
+        assert "old step 0" not in str(fresh)
+
+
+def test_task_checkpoint_refreshes_after_restart_and_does_not_lose_new_user_message():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        plan = folder / ".local-ai/PLAN.md"
+        plan.write_text("- [ ] First milestone")
+        assert "First milestone" in task_context.snapshot(folder)
+        plan.write_text("- [x] First milestone\n- [ ] Second milestone")
+        messages = [{"role": "system", "content": "Original request"},
+                    {"role": "user", "content": "Use a larger font"}]
+        messages.extend({"role": "assistant", "content": f"step {number}"} for number in range(12))
+        fresh = native_agent.fresh_messages(messages, folder)
+        assert "Second milestone" in fresh[1]["content"]
+        assert any(entry.get("content") == "Use a larger font" for entry in fresh)
 
 
 def test_context_compaction_uses_configured_window_and_keeps_tool_batches():
