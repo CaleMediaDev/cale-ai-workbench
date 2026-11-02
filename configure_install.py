@@ -40,6 +40,11 @@ def source_already_installed(source):
     return any(item.get("name") in (source, source + ":latest") for item in models)
 
 
+def auxiliary_source(profile: str, main_source: str) -> str:
+    """Keep light PCs on one set of weights for vision and quick tasks."""
+    return main_source if profile == "light" else "qwen3.5:9b"
+
+
 def configure(root, profile):
     """Install the selected main and vision models, then configure Hermes."""
     root = Path(root).resolve()
@@ -115,7 +120,7 @@ def configure(root, profile):
     # Keep the full main window, and also prepare a weight-sharing routine
     # alias so shorter work need not reserve the largest KV cache.
     model_library.ensure_main_standard()
-    vision_source = "qwen3.5:9b"
+    vision_source = auxiliary_source(profile, selection["source"])
     setup_progress(root, 75, "Downloading the vision model")
     with urlopen(
         Request(

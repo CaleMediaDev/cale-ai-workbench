@@ -16,6 +16,14 @@ import configure_install
 
 
 class AutoModelTests(unittest.TestCase):
+    def test_light_install_reuses_main_weights_for_vision_and_fast_route(self):
+        self.assertEqual(configure_install.auxiliary_source("light", "qwen3.5:4b"),
+                         "qwen3.5:4b")
+        self.assertEqual(configure_install.auxiliary_source("compact", "qwen3.5:9b"),
+                         "qwen3.5:9b")
+        self.assertEqual(configure_install.auxiliary_source("large", "qwen3-coder-next:q4_K_M"),
+                         "qwen3.5:9b")
+
     def test_installer_claims_a_source_only_when_ollama_did_not_have_its_tag(self):
         tags = {"models": [{"name": "qwen3.5:9b"}]}
         with patch.object(configure_install, "urlopen", side_effect=lambda *_args, **_kwargs: io.BytesIO(json.dumps(tags).encode())):
