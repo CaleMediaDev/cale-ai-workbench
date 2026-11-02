@@ -1,12 +1,28 @@
 """Business contact lookup must return live page evidence, not search snippets."""
 
 import unittest
+import os
 from unittest.mock import patch
 
 import web_tools
 
 
 class BusinessContactTests(unittest.TestCase):
+    def test_web_reader_uses_bundled_curl_when_windows_omits_it(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            bundled = root / "data/tools/git-2.53.0+3-win32-x64/mingw64/bin/curl.exe"
+            bundled.parent.mkdir(parents=True)
+            bundled.write_bytes(b"bundled curl")
+            with patch.dict(os.environ, {"SystemRoot": str(root / "no-windows-curl")}):
+                self.assertEqual(web_tools.curl_executable(root), str(bundled))
+                bundled.unlink()
+                with self.assertRaisesRegex(RuntimeError, "web downloader is missing"):
+                    web_tools.curl_executable(root)
+
     def test_business_name_does_not_match_a_similar_company(self):
         self.assertFalse(web_tools.business_name_matches(
             "Pure Michigan Lawn Care", "Pure Precision Lawn Care",

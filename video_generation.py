@@ -40,6 +40,19 @@ MODEL_HASHES = {
 }
 
 
+def _git_executable(root: Path = ROOT) -> str:
+    """Use the Git that first-run setup installs, even on a bare Windows PC."""
+    candidates = sorted((Path(root) / "data" / "tools").glob("git-*/cmd/git.exe"),
+                        reverse=True)
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    system = shutil.which("git")
+    if system:
+        return system
+    raise RuntimeError("The managed Git tool is missing; run Cale setup to repair it.")
+
+
 def _job_path(job_id: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{32}", job_id):
         raise ValueError("Invalid video job ID.")
@@ -81,8 +94,11 @@ def _hardware_ready(output: Path) -> None:
         raise ValueError("Choose an output location on an available drive.") from exc
     if output_free < 1 * 1024 ** 3:
         raise RuntimeError("The video output drive needs at least 1 GB free.")
-    result = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-                            capture_output=True, text=True, timeout=15, creationflags=HIDE)
+    try:
+        result = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                                capture_output=True, text=True, timeout=15, creationflags=HIDE)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("Automatic Wan video setup needs an NVIDIA GPU with at least 10 GB VRAM.") from exc
     if result.returncode or not any(int(match) >= 10000 for match in re.findall(r"\d+", result.stdout)):
         raise RuntimeError("Automatic Wan video setup needs an NVIDIA GPU with at least 10 GB VRAM.")
 
@@ -252,16 +268,17 @@ def _ensure_runtime_locked(job_id: str) -> None:
         return
     _write(job_id, state="installing", detail="Installing local ComfyUI and verified Wan 2.2 models")
     SOURCE.parent.mkdir(parents=True, exist_ok=True)
+    git = _git_executable()
     if not SOURCE.is_dir():
-        subprocess.run(["git", "init", str(SOURCE)], check=True, timeout=120, creationflags=HIDE)
-        subprocess.run(["git", "-C", str(SOURCE), "remote", "add", "origin", UPSTREAM],
+        subprocess.run([git, "init", str(SOURCE)], check=True, timeout=120, creationflags=HIDE)
+        subprocess.run([git, "-C", str(SOURCE), "remote", "add", "origin", UPSTREAM],
                        check=True, timeout=30, creationflags=HIDE)
-    current = subprocess.run(["git", "-C", str(SOURCE), "rev-parse", "HEAD"],
+    current = subprocess.run([git, "-C", str(SOURCE), "rev-parse", "HEAD"],
                              capture_output=True, text=True, creationflags=HIDE)
     if current.returncode or current.stdout.strip() != COMMIT:
-        subprocess.run(["git", "-C", str(SOURCE), "fetch", "--depth", "1", "origin", COMMIT],
+        subprocess.run([git, "-C", str(SOURCE), "fetch", "--depth", "1", "origin", COMMIT],
                        check=True, timeout=600, creationflags=HIDE)
-        subprocess.run(["git", "-C", str(SOURCE), "checkout", "--detach", COMMIT],
+        subprocess.run([git, "-C", str(SOURCE), "checkout", "--detach", COMMIT],
                        check=True, timeout=120, creationflags=HIDE)
     installer = SOURCE / "install.ps1"
     if not installer.is_file():

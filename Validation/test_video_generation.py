@@ -14,6 +14,18 @@ import pytest
 import video_generation
 
 
+def test_video_setup_uses_bundled_git_without_system_git(tmp_path):
+    bundled = tmp_path / "data/tools/git-2.53.0+3-win32-x64/cmd/git.exe"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_bytes(b"managed git")
+    with patch.object(video_generation.shutil, "which", return_value=None):
+        assert video_generation._git_executable(tmp_path) == str(bundled)
+    bundled.unlink()
+    with patch.object(video_generation.shutil, "which", return_value=None):
+        with pytest.raises(RuntimeError, match="managed Git tool is missing"):
+            video_generation._git_executable(tmp_path)
+
+
 def test_wan_graph_uses_local_5b_nodes_and_bounded_clip():
     graph = video_generation._workflow("A lighthouse at dawn", 2, "vertical", 42)
     assert graph["6"]["inputs"]["text"] == "A lighthouse at dawn"
@@ -65,6 +77,15 @@ def test_disk_requirement_shrinks_after_verified_install(tmp_path):
     ]):
         with pytest.raises(RuntimeError, match="output drive"):
             video_generation._hardware_ready(output)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows GPU setup")
+def test_missing_nvidia_driver_reports_hardware_requirement(tmp_path):
+    with patch.object(video_generation.subprocess, "run", side_effect=FileNotFoundError), patch.object(
+        video_generation.shutil, "disk_usage", return_value=SimpleNamespace(free=50 * 1024**3)
+    ):
+        with pytest.raises(RuntimeError, match="NVIDIA GPU with at least 10 GB VRAM"):
+            video_generation._hardware_ready(tmp_path / "clip.mp4")
 
 
 def test_video_status_reports_latest_sampler_progress(tmp_path):
