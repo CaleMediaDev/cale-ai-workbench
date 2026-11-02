@@ -1,6 +1,7 @@
 """Offline checks for the ChatGPT OAuth route's request contract and privacy."""
 
 import sys
+import io
 import json
 import unittest
 from pathlib import Path
@@ -12,6 +13,29 @@ import chatgpt_auth as c
 
 
 class ChatGPTAuthTests(unittest.TestCase):
+    def test_model_catalog_cache_reuses_current_token_and_refreshes(self):
+        catalog = {"models": [
+            {"slug": "gpt-6-luna", "visibility": "list"},
+            {"slug": "hidden", "visibility": "private"},
+        ]}
+        clock = [100.0]
+
+        def response(*_args, **_kwargs):
+            return io.BytesIO(json.dumps(catalog).encode())
+
+        with (patch.object(c, "_MODEL_CACHE", {}),
+              patch.object(c.time, "monotonic", side_effect=lambda: clock[0]),
+              patch.object(c, "tls_context", return_value=None),
+              patch.object(c, "urlopen", side_effect=response) as fetch):
+            self.assertEqual(c.available_models("first-token"), ["gpt-6-luna"])
+            self.assertEqual(c.available_models("first-token"), ["gpt-6-luna"])
+            self.assertEqual(fetch.call_count, 1)
+            clock[0] += c.MODEL_CACHE_SECONDS + 1
+            self.assertEqual(c.available_models("first-token"), ["gpt-6-luna"])
+            self.assertEqual(fetch.call_count, 2)
+            self.assertEqual(c.available_models("different-token"), ["gpt-6-luna"])
+            self.assertEqual(fetch.call_count, 3)
+
     def test_task_size_selects_available_plan_model(self):
         models = ["gpt-6.1-sol", "gpt-6-luna", "gpt-6.1-terra", "gpt-6-astra"]
         self.assertEqual(c.choose_model(models, "quick"), "gpt-6-luna")

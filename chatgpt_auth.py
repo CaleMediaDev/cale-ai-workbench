@@ -31,6 +31,8 @@ AUTH = "https://auth.openai.com"
 RESOURCE = "https://api.openai.com/v1"
 SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 LOCK = threading.RLock()
+MODEL_CACHE_SECONDS = 120
+_MODEL_CACHE = {}
 
 
 def tls_context():
@@ -261,6 +263,7 @@ def set_enabled(enabled):
 def disconnect():
     """Disable local use immediately, then attempt remote token revocation."""
     with LOCK:
+        _MODEL_CACHE.clear()
         value = load()
         if not value:
             return
@@ -329,19 +332,28 @@ def access_token():
 
 
 def available_models(token):
-    request = Request(
-        RESOURCE + "/models", headers={"Authorization": "Bearer " + token}
-    )
-    with urlopen(request, timeout=15, context=tls_context()) as response:
-        catalog = json.load(response)
-    models = [
-        item.get("slug")
-        for item in catalog.get("models", [])
-        if item.get("visibility") == "list" and item.get("slug")
-    ]
-    if not models:
-        raise RuntimeError("No ChatGPT plan models are available for this account.")
-    return models
+    """Reuse the account model list briefly across a worker's many tool turns."""
+    fingerprint = hashlib.sha256(token.encode()).digest()
+    with LOCK:
+        if (_MODEL_CACHE.get("fingerprint") == fingerprint
+                and time.monotonic() < _MODEL_CACHE.get("expires", 0)):
+            return list(_MODEL_CACHE["models"])
+        request = Request(
+            RESOURCE + "/models", headers={"Authorization": "Bearer " + token}
+        )
+        with urlopen(request, timeout=15, context=tls_context()) as response:
+            catalog = json.load(response)
+        models = [
+            item.get("slug")
+            for item in catalog.get("models", [])
+            if item.get("visibility") == "list" and item.get("slug")
+        ]
+        if not models:
+            raise RuntimeError("No ChatGPT plan models are available for this account.")
+        _MODEL_CACHE.update(fingerprint=fingerprint,
+                            expires=time.monotonic() + MODEL_CACHE_SECONDS,
+                            models=tuple(models))
+        return models
 
 
 def choose_model(models, size):
