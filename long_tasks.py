@@ -45,10 +45,10 @@ BOARD = "long-tasks"
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
-def update_dialog_open(children, preview_window=None):
-    """Ignore withdrawn helper windows while protecting visible user dialogs."""
+def update_dialog_open(children, ignored=()):
+    """Ignore read-only panels while protecting visible input dialogs."""
     return any(
-        child is not preview_window
+        child not in ignored
         and child.winfo_class() == "Toplevel"
         and child.winfo_viewable()
         for child in children
@@ -2952,6 +2952,7 @@ def gui():
     import ollama_runtime
     import pc_offline
     import project_preview
+    import readiness_checklist
     import self_update
     import voice_assistant
     from cloud_ai import (
@@ -4140,6 +4141,76 @@ def gui():
         font=("Segoe UI", 10, "bold"),
     ).pack(side="left", padx=(4, 10))
 
+    readiness_popup = [None]
+
+    def show_readiness_checklist():
+        """Give people one plain-language view of setup and live checks."""
+        existing = readiness_popup[0]
+        if existing is not None and existing.winfo_exists():
+            existing.lift()
+            return
+        dialog = tk.Toplevel(window)
+        readiness_popup[0] = dialog
+        dialog.title("Cale · Ready checklist")
+        dialog.geometry("680x650")
+        dialog.minsize(580, 540)
+        dialog.configure(background=bg)
+        if icon_path.is_file():
+            dialog.iconbitmap(default=str(icon_path))
+        content = ttk.Frame(dialog, padding=20)
+        content.pack(fill="both", expand=True)
+        ttk.Label(content, text="Is Cale ready?", font=("Segoe UI", 22, "bold")).pack(anchor="w")
+        summary = tk.StringVar(value="Checking this PC…")
+        ttk.Label(content, textvariable=summary, style="Muted.TLabel",
+                  font=("Segoe UI", 12)).pack(anchor="w", pady=(4, 12))
+        rows_frame = ttk.Frame(content)
+        rows_frame.pack(fill="both", expand=True)
+        ttk.Label(content, text=(
+            "Installed means the files are here. Cale checks a tool's actual output "
+            "the first time you use it. Large video and music models may install on demand."
+        ), style="Muted.TLabel", wraplength=620).pack(anchor="w", pady=(12, 0))
+        rendered = []
+
+        def display(result):
+            if not dialog.winfo_exists():
+                return
+            summary.set(("Core is ready" if result["core_ready"] else "Core is still getting ready")
+                        + f" · {result['installed']}/{result['total']} installed or checked")
+            for index, item in enumerate(result["rows"]):
+                if index >= len(rendered):
+                    line = ttk.Frame(rows_frame, style="Card.TFrame", padding=(12, 7))
+                    line.pack(fill="x", pady=3)
+                    title = tk.StringVar()
+                    detail = tk.StringVar()
+                    ttk.Label(line, textvariable=title, style="Card.TLabel",
+                              font=("Segoe UI", 11, "bold")).pack(anchor="w")
+                    ttk.Label(line, textvariable=detail, style="CardMuted.TLabel",
+                              wraplength=600).pack(anchor="w", pady=(2, 0))
+                    rendered.append((title, detail))
+                icon = {"ready": "✓", "installed": "✓", "working": "…",
+                        "attention": "!", "on_demand": "○"}.get(item["state"], "○")
+                rendered[index][0].set(f"{icon}  {item['label']} · {item['state'].replace('_', ' ').title()}")
+                rendered[index][1].set(item["detail"])
+
+        def check_again():
+            if not dialog.winfo_exists():
+                return
+
+            def worker():
+                try:
+                    result = readiness_checklist.snapshot(ROOT)
+                    dialog.after(0, lambda: display(result))
+                except (OSError, RuntimeError, tk.TclError):
+                    pass
+
+            threading.Thread(target=worker, daemon=True).start()
+            dialog.after(15000, check_again)
+
+        check_again()
+
+    ttk.Button(header, text="✓  Ready checklist", command=show_readiness_checklist,
+               style="Mode.TButton").pack(side="left", padx=(0, 6))
+
     def update_now():
         nonlocal manual_update_requested
         if pending_update is None or updating:
@@ -4148,7 +4219,7 @@ def gui():
         update_button.configure(text="Update queued", state="disabled")
         status.set(
             "Installing the verified update now…" if not self_update.active_tasks()
-            else "Update queued. It will install when current tasks finish."
+            else "Update queued. Cale will pause current tasks, install, and restart."
         )
 
     update_button = ttk.Button(
@@ -6098,7 +6169,10 @@ def gui():
             and not updating
             and (manual_update_requested or time.monotonic() - update_ready_at >= 30)
             and not self_update.active_tasks()
-            and not update_dialog_open(window.winfo_children(), preview_window)
+            and not update_dialog_open(
+                window.winfo_children(),
+                (preview_window, usage_window, readiness_popup[0]),
+            )
         ):
             setup_state = read_task_status(STATE / "install-progress.json")
             if not setup_state or setup_state.get("status") == "complete":

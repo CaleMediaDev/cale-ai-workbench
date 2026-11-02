@@ -38,9 +38,11 @@ class LongTaskTests(unittest.TestCase):
         hidden_usage = Window(False)
         preview = Window(True)
         visible_dialog = Window(True)
-        self.assertFalse(task_module.update_dialog_open([hidden_usage, preview], preview))
+        self.assertFalse(task_module.update_dialog_open([hidden_usage, preview], (preview,)))
         self.assertTrue(task_module.update_dialog_open(
-            [hidden_usage, preview, visible_dialog], preview))
+            [hidden_usage, preview, visible_dialog], (preview,)))
+        self.assertFalse(task_module.update_dialog_open(
+            [hidden_usage, preview, visible_dialog], (preview, visible_dialog)))
 
     def test_worker_handoff_starts_after_process_exit_and_file_settle(self):
         import psutil

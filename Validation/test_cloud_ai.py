@@ -681,6 +681,9 @@ class CloudTests(unittest.TestCase):
             patch.object(cloud, "task_size", return_value="deep"),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete", return_value=REFUSAL),
+            patch.object(cloud, "CATALOG", {"gptoss": cloud.CATALOG["gptoss"]}),
+            patch.object(cloud, "candidate_approved", return_value=True),
+            patch("model_fitness.suitable", return_value=True),
             patch.object(cloud, "post", side_effect=[
                 {"capabilities": ["completion"]}, ANSWER,
             ]) as post,
