@@ -1292,7 +1292,13 @@ def verify_audio_handoff(p):
 
         if not music_backend.audio_file_ok(selected):
             return False, "The finished song could not be decoded or has no audible signal."
-        if re.search(r"\b(rap|vocal|sing|lyrics|voice)\b", brief, re.I):
+        # Short vocal chops are sound-design elements, not a request for a
+        # lyric sheet or sustained lead singing.
+        sustained_vocals = re.search(
+            r"\b(rap|sing|singing|lyrics|voice|lead vocals?)\b", brief, re.I
+        ) or (re.search(r"\bvocals?\b", brief, re.I)
+              and not re.search(r"\bvocal chops?\b", brief, re.I))
+        if sustained_vocals:
             lyrics = folder / "lyrics.txt"
             if not lyrics.is_file() or len(lyrics.read_text(encoding="utf-8").split()) < 20:
                 return False, "The requested vocal song has no usable lyrics.txt."

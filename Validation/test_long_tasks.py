@@ -1091,7 +1091,8 @@ class LongTaskTests(unittest.TestCase):
 
     def test_listening_review_finishes_verified_audio_and_freezes_timer(self):
         task_module.update(
-            self.pid, brief="Make a 0.1 minute dubstep banger", card="song-card",
+            self.pid, brief="Make a 0.1 minute dubstep banger with minimal vocal chops",
+            card="song-card",
             status="needs_input",
         )
         folder = Path(self.item()["folder"])
