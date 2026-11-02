@@ -467,6 +467,48 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(task_module.task_progress(complete)[0], 100)
         self.assertTrue((Path(task["folder"]) / ".local-ai" / "PROGRESS.md").is_file())
 
+    def test_music_task_follows_recovered_worker_without_reopening_bad_old_result(self):
+        job_id = "3" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make an instrumental song",
+                {"prompt": "piano", "duration_seconds": 30, "instrumental": True},
+                str(self.base / "music-recovered"),
+            )
+        task_module.update(pid, status="needs_input", detail="Temporary music engine error")
+        item = next(p for p in task_module.projects() if p["id"] == pid)
+        with patch("music_backend.music_job_status", return_value={
+            "status": "complete", "finished": item["updated"] - 1,
+        }):
+            task_module.advance_project(item)
+        self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"],
+                         "needs_input")
+        with patch("music_backend.music_job_status", return_value={
+            "status": "working", "current": "Generating music locally",
+        }):
+            task_module.advance_project(item)
+        recovered = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(recovered["status"], "working")
+        self.assertEqual(recovered["detail"], "Generating music locally")
+
+    def test_image_task_accepts_newly_completed_worker_after_help_state(self):
+        job_id = "4" * 32
+        with patch("quick_image.start_image_job", return_value={"job_id": job_id}):
+            pid = task_module.add_image_project(
+                "make a beach image", "beach", str(self.base / "image-recovered")
+            )
+        task_module.update(pid, status="needs_input", detail="Image engine stopped")
+        item = next(p for p in task_module.projects() if p["id"] == pid)
+        output = Path(item["folder"]) / "image.png"
+        output.write_bytes(b"fake PNG for patched decoder")
+        with patch("quick_image.image_job_status", return_value={
+            "status": "complete", "finished": item["updated"] + 1,
+            "result": {"path": str(output)},
+        }), patch("quick_image.image_file_ok", return_value=True):
+            task_module.advance_project(item)
+        self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"],
+                         "ready_for_review")
+
     def test_changed_music_artifact_is_rechecked_instead_of_needing_help(self):
         job_id = "1" * 32
         with patch("music_backend.start_music_job", return_value={"job_id": job_id}):

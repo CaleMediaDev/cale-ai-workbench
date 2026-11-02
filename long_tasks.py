@@ -238,6 +238,20 @@ def music_job_id(p):
     return card.split(":", 1)[1] if card.startswith("music-job:") else ""
 
 
+def media_job_restarted(p, job):
+    """Distinguish a later worker recovery from an unchanged failed result."""
+    if p["status"] != "needs_input":
+        return False
+    if job.get("status") in ("queued", "working"):
+        return True
+    if job.get("status") == "complete":
+        try:
+            return float(job.get("finished") or 0) > float(p.get("updated") or 0)
+        except (TypeError, ValueError, OverflowError):
+            return False
+    return False
+
+
 def music_task_countdown(job_id):
     """Read a durable song ETA without letting a damaged record break the UI."""
     try:
@@ -2384,13 +2398,18 @@ def advance_project(p):
     if image_id:
         if recheck_changed_media(p, "Image"):
             return
-        if p["status"] in ("accepted", "stopped", "paused", "needs_input"):
+        if p["status"] in ("accepted", "stopped", "paused"):
             return
         if p["status"] == "ready_for_review":
             return
         import quick_image
 
         job = quick_image.image_job_status(ROOT, image_id)
+        if p["status"] == "needs_input":
+            if not media_job_restarted(p, job):
+                return
+            update(p["id"], status="working", detail="Image maker recovered. Checking its result.")
+            p["status"] = "working"
         status = job["status"]
         if status == "complete":
             output = Path(job["result"]["path"])
@@ -2420,7 +2439,7 @@ def advance_project(p):
     if job_id:
         if recheck_changed_media(p, "Music"):
             return
-        if p["status"] in ("accepted", "stopped", "paused", "needs_input"):
+        if p["status"] in ("accepted", "stopped", "paused"):
             return
         if p["status"] == "ready_for_review":
             return
@@ -2428,6 +2447,11 @@ def advance_project(p):
         import music_style
 
         job = music_backend.music_job_status(job_id)
+        if p["status"] == "needs_input":
+            if not media_job_restarted(p, job):
+                return
+            update(p["id"], status="working", detail="Music maker recovered. Checking its result.")
+            p["status"] = "working"
         status = job["status"]
         if status == "complete":
             output = Path(job["result"]["path"])
