@@ -97,6 +97,8 @@ class FileCatalogTests(unittest.TestCase):
             self.assertFalse(file_catalog.first_scan_pending(
                 state, {"status": "complete"}
             ))  # An older installation has no completion marker.
+            self.assertTrue((state / file_catalog.FIRST_SCAN_NAME).is_file())
+            (state / file_catalog.FIRST_SCAN_NAME).unlink()
             self.assertFalse(file_catalog.first_scan_pending(
                 state, {"status": "error"}
             ))  # A failed scan must not lock the whole app.

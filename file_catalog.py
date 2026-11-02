@@ -110,7 +110,13 @@ def first_scan_pending(state: str | Path, snapshot: dict | None = None) -> bool:
     trapping someone in an unusable first-run screen.
     """
     snapshot = status(state) if snapshot is None else snapshot
-    if (Path(state) / FIRST_SCAN_NAME).is_file():
+    marker = Path(state) / FIRST_SCAN_NAME
+    if marker.is_file():
+        return False
+    if snapshot.get("status") == "complete":
+        # An older release has a complete catalog but no marker. Migrate it
+        # now so its next daily refresh cannot re-lock the composer.
+        marker.write_text("complete", encoding="ascii")
         return False
     return snapshot.get("status") in {"not_started", "working"}
 
