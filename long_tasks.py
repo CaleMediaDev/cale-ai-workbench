@@ -2755,9 +2755,17 @@ def advance_project(p):
                     + (f"Captioned video: {video.name}; editable captions: {captions.name}.\n" if video else ""),
                     encoding="utf-8",
                 )
+            # Keep one obvious entry point even when an earlier instrumental
+            # take or a later revision remains in the same project folder.
+            playlist = Path(p["folder"]) / "00-PLAY-THIS.m3u"
+            playlist.write_text(
+                "#EXTM3U\n" + output.name + "\n", encoding="utf-8-sig",
+            )
             update(p["id"], status="ready_for_review",
-                   detail=(f"Song and captioned video are ready: {video.name}" if video
-                           else f"Music is ready: {output.name}"),
+                   detail=(f"Finished: play {output.name}"
+                           + (f" · video: {video.name}" if video else "")
+                           + (" · vocals verified" if (job.get("vocal_check") or {}).get("passed")
+                              else "")),
                    fingerprint=fingerprint(Path(p["folder"])))
         elif status in ("error", "stopped"):
             if not retry_music_after_sdk_repair(p, job) and not retry_song_without_vocals(p, job):
@@ -5682,6 +5690,15 @@ def gui():
         if kind == "open":
             os.startfile(item["folder"])
             return
+        if kind == "play_music":
+            import music_backend
+            job = music_backend.music_job_status(music_job_id(item))
+            audio = Path(str((job.get("result") or {}).get("path", "")))
+            if job.get("status") != "complete" or not audio.is_file():
+                status.set("This song is still being made.")
+                return
+            os.startfile(audio)
+            return
         if kind == "reuse":
             # Keep the draft editable; never start another task from one click.
             saved = original_request_path(item["folder"], pid)
@@ -6068,6 +6085,11 @@ def gui():
                 text=label,
                 style="Danger.TButton" if kind == "stop" else "TButton",
                 command=lambda pid=item["id"], action=kind: task_action(pid, action),
+            ).pack(side="left", padx=(0, 6))
+        if direct_music and item["status"] in ("ready_for_review", "accepted"):
+            ttk.Button(
+                controls, text="▶ Play song",
+                command=lambda pid=item["id"]: task_action(pid, "play_music"),
             ).pack(side="left", padx=(0, 6))
         if camera:
             ttk.Button(

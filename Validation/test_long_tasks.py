@@ -769,6 +769,8 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(complete["status"], "ready_for_review")
         self.assertEqual(task_module.task_progress(complete)[0], 100)
         self.assertTrue((Path(task["folder"]) / ".local-ai" / "PROGRESS.md").is_file())
+        self.assertEqual((Path(task["folder"]) / "00-PLAY-THIS.m3u").read_text(
+            encoding="utf-8-sig"), "#EXTM3U\nsong.mp3\n")
 
     def test_music_task_follows_recovered_worker_without_reopening_bad_old_result(self):
         job_id = "3" * 32
@@ -999,6 +1001,10 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(ready["status"], "ready_for_review")
         self.assertIn("[x] Apply the latest user request", plan.read_text(encoding="utf-8"))
         self.assertIn("song-with-vocals.mp3", (plan.parent / "PROGRESS.md").read_text())
+        self.assertEqual((Path(task["folder"]) / "00-PLAY-THIS.m3u").read_text(
+            encoding="utf-8-sig"), "#EXTM3U\nsong-with-vocals.mp3\n")
+        self.assertIn("play song-with-vocals.mp3", ready["detail"])
+        self.assertIn("vocals verified", ready["detail"])
 
     def test_sparse_vocal_chop_render_finishes_without_full_song_transcription(self):
         job_id = "9" * 32
