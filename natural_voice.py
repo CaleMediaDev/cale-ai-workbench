@@ -21,6 +21,12 @@ def ready():
     ).is_file()
 
 
+def whisper_ready():
+    """A config alone is insufficient if the transcription weights were lost."""
+    folder = ROOT / "Media/models/whisper"
+    return (folder / "config.json").is_file() and (folder / "model.bin").is_file()
+
+
 def install():
     """Install the pinned synthesizer and verified weights once per PC."""
     import msvcrt
@@ -79,6 +85,16 @@ def install():
                     timeout=600,
                     creationflags=HIDE,
                 )
+            if not whisper_ready():
+                save_download_status(
+                    STATUS, "working", "Restoring offline speech recognition", 75
+                )
+                subprocess.run(
+                    [str(MEDIA_PYTHON), str(ROOT / "media_worker.py"), "--download-whisper"],
+                    check=True, capture_output=True, timeout=900, creationflags=HIDE,
+                )
+            if not ready() or not whisper_ready():
+                raise RuntimeError("Offline speech files are still missing after repair.")
             save_download_status(STATUS, "complete", "Natural voice ready", 100)
         except Exception as exc:
             save_download_status(STATUS, "error", str(exc)[:400], 0)

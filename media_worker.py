@@ -602,6 +602,19 @@ def download_models():
     return {"installed": installed}
 
 
+def download_whisper():
+    """Restore only the pinned offline transcription model after file loss."""
+    from huggingface_hub import snapshot_download
+
+    item = json.loads((ROOT / "media-models.json").read_text(encoding="utf-8"))["whisper"]
+    snapshot_download(
+        item["repo"], revision=item["revision"],
+        local_dir=str(MEDIA / "models/whisper"),
+        allow_patterns=item["patterns"], max_workers=4,
+    )
+    return {"installed": "whisper"}
+
+
 def image_upgrade_complete():
     """Ignore interrupted downloads until all required fp16 weights exist."""
     folder = MEDIA / "models/ssd-1b"
@@ -690,6 +703,8 @@ if __name__ == "__main__":
             result = download_image_upgrade()
         elif "--download-voice" in sys.argv:
             result = download_natural_voice()
+        elif "--download-whisper" in sys.argv:
+            result = download_whisper()
         else:
             request = json.load(sys.stdin)
             action = request.pop("action")

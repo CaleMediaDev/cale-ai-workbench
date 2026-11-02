@@ -30,6 +30,15 @@ def _json(path: Path) -> dict:
         return {}
 
 
+def _voice_probe_current(probes: dict, root: Path) -> bool:
+    """A model repair must be followed by a fresh offline speech check."""
+    repair = _json(root / "LongTasks/natural-voice-progress.json")
+    try:
+        return float(probes.get("checked_at") or 0) >= float(repair.get("updated") or 0)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _item(label: str, state: str, detail: str, essential: bool = False) -> dict:
     return {"label": label, "state": state, "detail": detail, "essential": essential}
 
@@ -176,7 +185,8 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
         except (OSError, ValueError, TypeError):
             pass
     if (not force and previous.get("version") == result["version"]
-            and previous.get("voice", {}).get("ok")):
+            and previous.get("voice", {}).get("ok")
+            and _voice_probe_current(previous, root)):
         result["voice"] = previous["voice"]
     else:
         microphone = _media_probe(root, "microphone_status")
@@ -293,11 +303,14 @@ def snapshot(root: Path = ROOT) -> dict:
                       if indexed else "Indexing files on this PC", True))
 
     media_python = (media / "python/Scripts/python.exe").is_file()
-    whisper = (media / "models/whisper/config.json").is_file()
+    whisper = all((media / "models/whisper" / name).is_file()
+                  for name in ("config.json", "model.bin"))
     voice_files = all((media / "models/natural_voice" / name).is_file() for name in
                       ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin"))
     voice_ready = media_python and whisper and voice_files
     voice_probe = probes.get("voice", {})
+    if voice_probe and not _voice_probe_current(probes, root):
+        voice_probe = {}
     voice_state = ("ready" if voice_ready and voice_probe.get("ok") else "attention" if voice_probe
                    else "installed" if voice_ready else "working")
     rows.append(_item("Voice and listening", voice_state,
@@ -394,6 +407,32 @@ def request_safe_repairs(root: Path = ROOT, result: dict | None = None) -> list[
     result = result or snapshot(root)
     rows = {row["label"]: row for row in result.get("rows", [])}
     requested = []
+    if rows.get("Voice and listening", {}).get("state") == "attention":
+        media = root / "Media"
+        voice = media / "models/natural_voice"
+        whisper = media / "models/whisper"
+        missing_files = not all(path.is_file() for path in (
+            voice / "kokoro-v1.0.int8.onnx", voice / "voices-v1.0.bin",
+            whisper / "config.json", whisper / "model.bin"))
+        status = root / "LongTasks/natural-voice-progress.json"
+        previous = _json(status)
+        try:
+            last_attempt = float(previous.get("updated") or 0)
+        except (TypeError, ValueError, OverflowError):
+            last_attempt = 0
+        if (missing_files and (media / "python/Scripts/python.exe").is_file()
+                and (root / "natural_voice.py").is_file()
+                and time.time() - last_attempt >= 300):
+            try:
+                subprocess.Popen(
+                    [sys.executable, str(root / "natural_voice.py")], cwd=root,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                requested.append("Voice and listening")
+            except OSError:
+                pass
     if rows.get("FFmpeg media tools", {}).get("state") == "attention":
         ffmpeg_runtime.start_background(root)
         requested.append("FFmpeg media tools")

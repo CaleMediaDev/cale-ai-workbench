@@ -76,6 +76,7 @@ def test_optional_checks_only_count_for_the_current_install(tmp_path):
     whisper = tmp_path / "Media/models/whisper"
     whisper.mkdir(parents=True)
     (whisper / "config.json").write_text("{}")
+    (whisper / "model.bin").write_bytes(b"weights")
     python = tmp_path / "Media/python/Scripts"
     python.mkdir(parents=True)
     (python / "python.exe").write_bytes(b"runtime")
@@ -221,3 +222,53 @@ def test_safe_repair_is_queued_automatically_once_without_browser_pairing(tmp_pa
     assert marker.is_file()
     assert readiness_checklist.request_safe_repairs(tmp_path, rows) == []
     assert not any(tmp_path.rglob("*pair*"))
+
+
+def test_missing_voice_files_queue_background_repair_but_mic_failure_does_not(tmp_path):
+    runtime = tmp_path / "Media/python/Scripts/python.exe"
+    runtime.parent.mkdir(parents=True)
+    runtime.touch()
+    (tmp_path / "natural_voice.py").touch()
+    rows = {"rows": [{"label": "Voice and listening", "state": "attention"}]}
+    with patch.object(readiness_checklist.subprocess, "Popen") as launch:
+        assert readiness_checklist.request_safe_repairs(tmp_path, rows) == ["Voice and listening"]
+    assert str(tmp_path / "natural_voice.py") in launch.call_args.args[0]
+    voice = tmp_path / "Media/models/natural_voice"
+    whisper = tmp_path / "Media/models/whisper"
+    voice.mkdir(parents=True)
+    whisper.mkdir(parents=True)
+    for name in ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin"):
+        (voice / name).touch()
+    for name in ("config.json", "model.bin"):
+        (whisper / name).touch()
+    with patch.object(readiness_checklist.subprocess, "Popen") as launch:
+        assert readiness_checklist.request_safe_repairs(tmp_path, rows) == []
+    launch.assert_not_called()
+
+
+def test_repaired_speech_files_wait_for_a_fresh_probe(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    (state / "readiness-probes.json").write_text(json.dumps({
+        "version": "Cale AI Workbench 1", "checked_at": 100,
+        "voice": {"ok": True, "detail": "Old speech check"},
+    }))
+    (state / "natural-voice-progress.json").write_text(json.dumps({
+        "status": "complete", "updated": 200,
+    }))
+    media = tmp_path / "Media"
+    python = media / "python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    for name in ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin"):
+        file = media / "models/natural_voice" / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.touch()
+    for name in ("config.json", "model.bin"):
+        file = media / "models/whisper" / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.touch()
+    with patch.object(readiness_checklist, "urlopen", side_effect=OSError):
+        rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
+    assert rows["Voice and listening"]["state"] == "installed"
