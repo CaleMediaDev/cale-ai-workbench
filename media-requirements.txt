@@ -1,8 +1,8 @@
 torch==2.9.1+cu128
 torchvision==0.24.1+cu128
 diffusers==0.35.2
-transformers==4.57.1
-accelerate==1.11.0
+transformers==4.57.3
+accelerate==1.12.0
 faster-whisper==1.2.1
 av==18.1.0
 sounddevice==0.5.3

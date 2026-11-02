@@ -4699,7 +4699,9 @@ def gui():
         if read_task_status(STATE / "natural-voice-progress.json").get("status") != "complete":
             return
         auto_cale_voice_started = True
-        if (STATE / "cale-voice-ready.json").is_file():
+        import cale_voice
+
+        if cale_voice.ready():
             return
         path = STATE / "cale-voice-progress.json"
         save_download_status(path, "working", "Checking Cale's voice", 0)

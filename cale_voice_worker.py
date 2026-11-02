@@ -30,7 +30,7 @@ def load_model():
         )
 
 
-def generate(model, text: str, output_path: str) -> dict:
+def generate(model, voice_prompt, text: str, output_path: str) -> dict:
     """Render one bounded update using Cale's own reference recording."""
     import soundfile as sf
 
@@ -40,8 +40,7 @@ def generate(model, text: str, output_path: str) -> dict:
         audio, sample_rate = model.generate_voice_clone(
             text=str(text)[:280],
             language="English",
-            ref_audio=str(REFERENCE),
-            ref_text=REFERENCE_TEXT,
+            voice_clone_prompt=voice_prompt,
         )
     sf.write(target, audio[0], sample_rate)
     return {"path": str(target), "engine": "Cale's local voice"}
@@ -49,6 +48,11 @@ def generate(model, text: str, output_path: str) -> dict:
 
 def main():
     model = load_model()
+    # Extract the owner's voice once per worker. Re-encoding the same reference
+    # for every short chat line adds avoidable seconds to spoken replies.
+    voice_prompt = model.create_voice_clone_prompt(
+        ref_audio=str(REFERENCE), ref_text=REFERENCE_TEXT,
+    )
     if "--warm-model" in sys.argv:
         print(json.dumps({"ready": True}), flush=True)
         return
@@ -56,7 +60,7 @@ def main():
     for line in sys.stdin:
         try:
             request = json.loads(line)
-            response = generate(model, request["text"], request["output_path"])
+            response = generate(model, voice_prompt, request["text"], request["output_path"])
         except Exception as exc:
             response = {"error": str(exc)[:300]}
         print(json.dumps(response, ensure_ascii=True), flush=True)

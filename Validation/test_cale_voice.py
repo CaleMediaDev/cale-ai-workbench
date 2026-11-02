@@ -1,8 +1,33 @@
 """The optional voice model must release GPU memory after speech ends."""
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 import cale_voice
+
+
+def test_voice_ready_rejects_a_stale_marker_with_wrong_dependencies():
+    with TemporaryDirectory() as folder:
+        root = Path(folder)
+        python = root / "Media/python/Scripts/python.exe"
+        reference = root / "assets/reference.wav"
+        marker = root / "LongTasks/cale-voice-ready.json"
+        for path in (python, reference, marker):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        packages = root / "Media/python/Lib/site-packages"
+        for name, version in cale_voice.VOICE_PACKAGES.items():
+            (packages / f"{name}-{version}.dist-info").mkdir(parents=True)
+        with (patch.object(cale_voice, "ROOT", root),
+              patch.object(cale_voice, "MEDIA_PYTHON", python),
+              patch.object(cale_voice, "REFERENCE", reference),
+              patch.object(cale_voice, "MARKER", marker)):
+            assert cale_voice.ready()
+            (packages / "transformers-4.57.3.dist-info").rename(
+                packages / "transformers-4.57.1.dist-info"
+            )
+            assert not cale_voice.ready()
 
 
 def test_idle_release_ignores_newer_speech():

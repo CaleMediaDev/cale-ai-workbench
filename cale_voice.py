@@ -25,6 +25,11 @@ _lock = threading.Lock()
 _idle_timer = None
 _generation = 0
 IDLE_SECONDS = 60
+VOICE_PACKAGES = {
+    "transformers": "4.57.3",
+    "accelerate": "1.12.0",
+    "qwen_tts": "0.1.1",
+}
 
 
 class SpeechInterrupted(Exception):
@@ -32,8 +37,11 @@ class SpeechInterrupted(Exception):
 
 
 def ready() -> bool:
-    """Use the clone only after dependencies and model pass their warmup."""
-    return MEDIA_PYTHON.is_file() and REFERENCE.is_file() and MARKER.is_file()
+    """Use the clone only with the tested package set and warmed model."""
+    packages = ROOT / "Media/python/Lib/site-packages"
+    return (MEDIA_PYTHON.is_file() and REFERENCE.is_file() and MARKER.is_file()
+            and all((packages / f"{name}-{version}.dist-info").is_dir()
+                    for name, version in VOICE_PACKAGES.items()))
 
 
 def _run(args: list[str], timeout: int = 900):
@@ -61,6 +69,7 @@ def install():
         except OSError:
             return
         try:
+            MARKER.unlink(missing_ok=True)
             save_download_status(STATUS, "working", "Checking voice hardware", 5)
             probe = subprocess.run(
                 [str(MEDIA_PYTHON), "-c", "import torch; print(int(torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory >= 6_000_000_000))"],
@@ -82,6 +91,7 @@ def install():
             MARKER.write_text(json.dumps({"model": "Qwen3-TTS-12Hz-0.6B-Base"}), encoding="utf-8")
             save_download_status(STATUS, "complete", "Cale's voice is ready", 100)
         except (OSError, subprocess.SubprocessError) as exc:
+            MARKER.unlink(missing_ok=True)
             save_download_status(STATUS, "error", str(exc)[:400], 0)
 
 
@@ -155,12 +165,15 @@ def speak(text: str, output_path: str | Path, play: bool = True,
         try:
             if _worker is None or _worker.poll() is not None:
                 env = dict(os.environ, HF_HUB_OFFLINE="1")
-                _worker = subprocess.Popen(
-                    [str(MEDIA_PYTHON), str(ROOT / "cale_voice_worker.py")],
-                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
-                    bufsize=1, cwd=ROOT, env=env, creationflags=HIDE,
-                )
+                log = ROOT / "LongTasks/cale-voice-worker.log"
+                log.parent.mkdir(parents=True, exist_ok=True)
+                with log.open("a", encoding="utf-8") as errors:
+                    _worker = subprocess.Popen(
+                        [str(MEDIA_PYTHON), str(ROOT / "cale_voice_worker.py")],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=errors, text=True, encoding="utf-8",
+                        bufsize=1, cwd=ROOT, env=env, creationflags=HIDE,
+                    )
                 ready_line = json.loads(_line_with_timeout(_worker.stdout, 45, cancel))
                 if not ready_line.get("ready"):
                     raise RuntimeError("The voice worker did not start.")
