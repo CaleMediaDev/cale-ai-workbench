@@ -255,7 +255,7 @@ def test_vocal_song_with_no_sustained_words_is_not_marked_complete(tmp_path):
 
 
 def test_compose_lyrics_uses_small_local_model_and_rejects_truncation():
-    from cloud_ai import FAST_MODEL
+    from cloud_ai import FAST_MODEL, LOCAL_MODEL
 
     good = {"choices": [{"finish_reason": "stop", "message": {
         "content": "[Verse]\n" + "Michigan lights and water rolling " * 10}}]}
@@ -274,6 +274,14 @@ def test_compose_lyrics_uses_small_local_model_and_rejects_truncation():
     with patch("routing_mode.load_scope", return_value="local_only"), patch("cloud_ai.post", return_value=bad):
         with pytest.raises(RuntimeError, match="could not finish"):
             music_backend.compose_lyrics("Michigan rap", 60)
+    with patch("routing_mode.load_scope", return_value="local_only"), patch(
+        "cloud_ai.post", side_effect=[bad, bad, good]
+    ) as rescue:
+        assert music_backend.compose_lyrics("Michigan rap", 60).startswith("[Verse]")
+    assert rescue.call_count == 3
+    assert [call.args[1]["model"] for call in rescue.call_args_list] == [
+        FAST_MODEL, FAST_MODEL, LOCAL_MODEL,
+    ]
 
 
 def test_local_only_song_writes_lyrics_locally_when_global_scope_is_cloud_only():

@@ -511,7 +511,7 @@ def audio_file_ok(path: str | Path) -> bool:
 
 
 def compose_lyrics(prompt: str, duration_seconds: int) -> str:
-    """Write lyrics with the small local model before starting a vocal render.
+    """Write lyrics locally before rendering, escalating after weak drafts.
 
     ACE-Step can produce a mostly instrumental track when its lyrics field is
     empty. This bounded call runs in the durable music worker, not the UI.
@@ -523,9 +523,12 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
     target_words = max(20, min(450, round(duration_seconds * 1.6)))
     minimum_words = max(20, round(duration_seconds * 0.7))
     failures = []
-    for attempt in range(2):
+    for attempt in range(3):
         try:
-            payload = {"model": cloud_ai.FAST_MODEL, "stream": False, "temperature": 0.7,
+            # The main model is slower but can rescue a song when the fast
+            # writer twice returns truncated or unusable lyrics.
+            model = cloud_ai.LOCAL_MODEL if attempt == 2 else cloud_ai.FAST_MODEL
+            payload = {"model": model, "stream": False, "temperature": 0.7,
                  "max_tokens": min(2048, max(1024, target_words * (4 + attempt))),
                  "reasoning_effort": "none",
                  "messages": [
@@ -534,7 +537,8 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
                          f"Aim for about {target_words} words. Include [Verse] and [Chorus] "
                          "labels. Begin with a sung or rapped line and keep words going "
                          "through most of the track. Return lyrics only, no explanation. "
-                         + ("Use short lines and finish the whole song before your response ends."
+                         + (f"Use short lines, write at least {minimum_words} words, "
+                            "and finish the whole song before your response ends."
                             if attempt else "")
                      )},
                      {"role": "user", "content": prompt[:3000]},
