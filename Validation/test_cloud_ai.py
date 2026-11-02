@@ -1292,6 +1292,27 @@ class CloudTests(unittest.TestCase):
         self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
         self.assertEqual(post.call_args.args[1]["model"], cloud.PERMISSIVE_MODEL)
 
+    def test_free_cloud_only_overrides_an_old_manual_local_model_choice(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        (cloud.STATE / "model-choice.json").write_text('{"profile":"permissive"}')
+        with (patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
+              patch.object(cloud, "post") as local):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        free.assert_called_once()
+        local.assert_not_called()
+
+    def test_pc_offline_switch_overrides_cloud_only_and_keeps_local_inference(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "cloud_only")
+        self.offline.stop()
+        with (patch.object(cloud.pc_offline, "offline", return_value=True),
+              patch.object(cloud.Router, "local_candidates", return_value=[cloud.LOCAL_MODEL]),
+              patch.object(cloud_providers, "complete") as free,
+              patch.object(cloud, "post", return_value=ANSWER) as local):
+            self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
+        free.assert_not_called()
+        self.assertTrue(local.call_args.args[0].startswith("http://127.0.0.1:11434/"))
+
     def test_unsuitable_saved_manual_model_falls_back_to_eligible_local_model(self):
         self.connected()
         (cloud.STATE / "model-choice.json").write_text('{"profile":"permissive"}')

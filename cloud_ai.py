@@ -832,16 +832,23 @@ class Router:
             raise ValueError(
                 "Only the configured local model and automatic free routing are supported."
             )
-        profile = local_profile()
+        scope = routing_mode.load_scope(STATE)
+        disconnected = pc_offline.offline()
+        # The PC-wide offline switch has priority over a saved cloud choice.
+        # Conversely, Cloud only must override an older manual local-model
+        # selection. Neither control should silently ignore the visible mode.
+        if disconnected:
+            scope = "local_only"
+        profile = ("main" if scope in ("cloud_only", "free_cloud_only")
+                   else local_profile())
         messages = payload.get("messages", [])
         size = task_size(messages) if profile == "main" else "manual"
         repaired = repair_messages(messages)
         if repaired is not messages:
             payload = {**payload, "messages": repaired}
-        scope = routing_mode.load_scope(STATE) if profile == "main" else "both"
         cloud_only = profile == "main" and scope in ("cloud_only", "free_cloud_only")
         free_cloud_only = profile == "main" and scope == "free_cloud_only"
-        offline_mode = (pc_offline.offline() or scope == "local_only" or
+        offline_mode = (disconnected or scope == "local_only" or
                         (scope == "both" and task_route(
                             usage_history.CURRENT_TASK.get()) == "local_only"))
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
