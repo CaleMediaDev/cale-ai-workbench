@@ -309,6 +309,32 @@ class LongTaskTests(unittest.TestCase):
         router.assert_called_once_with()
         gateway.assert_called_once_with()
 
+    def test_cloud_only_task_starts_router_without_missing_local_model(self):
+        import cloud_ai
+        import pc_offline
+
+        with (patch.object(task_module.routing_mode, "load_scope", return_value="cloud_only"),
+              patch.object(pc_offline, "offline", return_value=False),
+              patch.object(task_module, "ensure_ollama") as ollama,
+              patch.object(task_module.subprocess, "run") as local_settings,
+              patch("context_window.sync") as context,
+              patch.object(cloud_ai, "ensure_router") as router,
+              patch.object(task_module, "ensure_gateway_current") as gateway):
+            task_module.prepare_active_services()
+            task_module.ensure_idle_services()
+        ollama.assert_not_called()
+        local_settings.assert_not_called()
+        context.assert_not_called()
+        self.assertEqual(router.call_count, 2)
+        self.assertEqual(gateway.call_count, 2)
+
+    def test_pc_offline_switch_restores_local_model_requirement(self):
+        import pc_offline
+
+        with (patch.object(task_module.routing_mode, "load_scope", return_value="cloud_only"),
+              patch.object(pc_offline, "offline", return_value=True)):
+            self.assertTrue(task_module.local_model_required())
+
     def test_idle_ollama_health_does_not_rewrite_model(self):
         with patch("urllib.request.urlopen", return_value=io.BytesIO(b'{"models":[]}')) as fetch:
             task_module.ensure_ollama(None)

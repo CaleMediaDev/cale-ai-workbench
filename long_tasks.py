@@ -2783,6 +2783,52 @@ def ensure_gateway_current():
     pending.unlink(missing_ok=True)
 
 
+def local_model_required():
+    """Cloud-only work needs the local router, but no Ollama model weights.
+
+    A PC-wide offline request always wins over the saved cloud preference.
+    """
+    import pc_offline
+
+    return (pc_offline.offline() or
+            routing_mode.load_scope(STATE) not in ("cloud_only", "free_cloud_only"))
+
+
+def prepare_active_services():
+    """Prepare only the model services needed by the current routing scope."""
+    if local_model_required():
+        facts_file = max(
+            (ROOT / "data/installs").glob("*/facts.json"),
+            key=lambda f: f.stat().st_mtime,
+        )
+        facts = json.loads(facts_file.read_text())
+        py = str(
+            Path(facts["packages"]["venv"]["environment"])
+            / "Scripts/python.exe"
+        )
+        settings = subprocess.run(
+            [py, str(ROOT / "read-settings.py")],
+            env=environment(), capture_output=True, text=True,
+            timeout=30, creationflags=HIDE,
+        )
+        if settings.returncode:
+            raise RuntimeError(
+                "Local model settings need repair: "
+                + (settings.stderr.strip()[-1000:] or "unknown validation error")
+            )
+        model = json.loads(settings.stdout)["model"]
+        ensure_ollama(model)
+        # A local worker needs the real, memory-aware window. Cloud-only
+        # requests instead use the provider context checked by the router.
+        import context_window
+
+        context_window.sync(ROOT, model)
+    from cloud_ai import ensure_router
+
+    ensure_router()
+    ensure_gateway_current()
+
+
 def ensure_idle_services():
     """Repair idle local services without requiring a new user task.
 
@@ -2792,11 +2838,11 @@ def ensure_idle_services():
     from cloud_ai import ensure_router
 
     failures = []
-    for name, check in (
-        ("Ollama", lambda: ensure_ollama(None)),
-        ("AI router", ensure_router),
-        ("Hermes gateway", ensure_gateway_current),
-    ):
+    checks = [("AI router", ensure_router),
+              ("Hermes gateway", ensure_gateway_current)]
+    if local_model_required():
+        checks.insert(0, ("Ollama", lambda: ensure_ollama(None)))
+    for name, check in checks:
         try:
             check()
         except Exception as exc:
@@ -2943,40 +2989,7 @@ def monitor():
                 prepare = ensure_idle_services
             if active and time.monotonic() - last_start > 120:
                 last_start = time.monotonic()
-
-                def prepare():
-                    facts_file = max(
-                        (ROOT / "data/installs").glob("*/facts.json"),
-                        key=lambda f: f.stat().st_mtime,
-                    )
-                    facts = json.loads(facts_file.read_text())
-                    py = str(
-                        Path(facts["packages"]["venv"]["environment"])
-                        / "Scripts/python.exe"
-                    )
-                    settings = subprocess.run(
-                        [py, str(ROOT / "read-settings.py")],
-                        env=environment(),
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        creationflags=HIDE,
-                    )
-                    if settings.returncode:
-                        raise RuntimeError(
-                            "Local model settings need repair: "
-                            + (settings.stderr.strip()[-1000:] or "unknown validation error")
-                        )
-                    ensure_ollama(json.loads(settings.stdout)["model"])
-                    # Align Hermes with this model's real, memory-aware window
-                    # before a worker sends its first request.
-                    import context_window
-
-                    context_window.sync(ROOT, json.loads(settings.stdout)["model"])
-                    from cloud_ai import ensure_router
-
-                    ensure_router()
-                    ensure_gateway_current()
+                prepare = prepare_active_services
 
             service_error = supervisor_step(prepare, service_error)
             if active and time.monotonic() - last_dispatch > 60:
