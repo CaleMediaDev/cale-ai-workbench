@@ -191,6 +191,9 @@ def database():
     conn.execute("""CREATE TABLE IF NOT EXISTS chat_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL,
       content TEXT NOT NULL, created REAL NOT NULL)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS task_retry_state (
+      task_id TEXT PRIMARY KEY, status TEXT NOT NULL, card TEXT NOT NULL,
+      attempts INTEGER NOT NULL, retry_at REAL NOT NULL)""")
     conn.commit()
     try:
         yield conn
@@ -458,6 +461,12 @@ def task_progress(p):
         waiting = active_worker_wait(p)
         if waiting:
             step = f"{step[:85]} · {waiting}"
+    if p["detail"].startswith("Supervisor will retry this task"):
+        remaining = task_retry_remaining(p["id"])
+        if remaining is not None:
+            reason = p["detail"].split(": ", 1)[-1]
+            step = (f"Retrying now: {reason}" if remaining == 0 else
+                    f"Retry in {remaining}s: {reason}")
     return percent, step[:180]
 
 
@@ -2164,15 +2173,83 @@ def process_requests():
                 with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
                     log.write(time.ctime() + "\nFollow-up file: " + traceback.format_exc() + "\n")
         if status == "done":
+            # A new instruction or control action supersedes any old failure.
+            clear_task_retry(p["id"])
             remember_task_review(p, original_action, note)
+
+
+_RETRY_LOOKUP = object()
+
+
+def task_retry_waits(p, now=None, row=_RETRY_LOOKUP):
+    """Delay repeated supervisor exceptions without delaying changed work."""
+    now = time.time() if now is None else now
+    if row is _RETRY_LOOKUP:
+        with database() as conn:
+            row = conn.execute(
+                "SELECT status,card,retry_at FROM task_retry_state WHERE task_id=?",
+                (p["id"],),
+            ).fetchone()
+    if not row:
+        return None
+    if row["status"] != p["status"] or row["card"] != p["card"]:
+        clear_task_retry(p["id"])
+        return None
+    return now < row["retry_at"]
+
+
+def task_retry_remaining(task_id, now=None):
+    """Read the durable retry clock for a task card without guessing."""
+    now = time.time() if now is None else now
+    with database() as conn:
+        row = conn.execute(
+            "SELECT retry_at FROM task_retry_state WHERE task_id=?", (task_id,)
+        ).fetchone()
+    return max(0, int(row["retry_at"] - now + 0.999)) if row else None
+
+
+def record_task_retry(p, now=None):
+    """Persist bounded exponential backoff for one unchanged task."""
+    now = time.time() if now is None else now
+    delays = (10, 30, 90, 300)
+    with database() as conn:
+        row = conn.execute(
+            "SELECT attempts,status,card FROM task_retry_state WHERE task_id=?",
+            (p["id"],),
+        ).fetchone()
+        attempts = (int(row["attempts"]) + 1 if row and
+                    row["status"] == p["status"] and row["card"] == p["card"] else 1)
+        delay = delays[min(attempts - 1, len(delays) - 1)]
+        conn.execute("""INSERT INTO task_retry_state(task_id,status,card,attempts,retry_at)
+            VALUES(?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET
+            status=excluded.status,card=excluded.card,attempts=excluded.attempts,
+            retry_at=excluded.retry_at""",
+            (p["id"], p["status"], p["card"], attempts, now + delay),
+        )
+    return delay
+
+
+def clear_task_retry(task_id):
+    with database() as conn:
+        conn.execute("DELETE FROM task_retry_state WHERE task_id=?", (task_id,))
 
 
 def tick():
     """Advance each runnable task by one supervisor step."""
     process_requests()
+    with database() as conn:
+        retry_rows = {row["task_id"]: dict(row) for row in conn.execute(
+            "SELECT task_id,status,card,retry_at FROM task_retry_state"
+        )}
+    now = time.time()
     for p in projects():
+        retry_state = task_retry_waits(p, now, retry_rows.get(p["id"]))
+        if retry_state is True:
+            continue
         try:
             advance_project(p)
+            if retry_state is False:
+                clear_task_retry(p["id"])
         except Exception as exc:
             current = next((item for item in projects() if item["id"] == p["id"]), None)
             if (not current or current["status"] != p["status"]
@@ -2180,7 +2257,8 @@ def tick():
                 # Another supervisor pass or a user action superseded this
                 # snapshot. Preserve its newer status and detail.
                 continue
-            detail = f"Supervisor will retry this task: {type(exc).__name__}: {exc}"
+            delay = record_task_retry(p)
+            detail = f"Supervisor will retry this task in {delay}s: {type(exc).__name__}: {exc}"
             if p["detail"] != detail:
                 update(p["id"], detail=detail)
                 with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:

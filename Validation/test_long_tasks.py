@@ -1912,6 +1912,37 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("Supervisor will retry", self.item()["detail"])
         self.assertEqual(next(p for p in task_module.projects() if p["id"] == second)["card"], "second-card")
 
+    def test_repeated_supervisor_error_backs_off_but_changed_task_runs_now(self):
+        with patch.object(task_module, "advance_project", side_effect=RuntimeError("offline")) as advance:
+            with patch.object(task_module.time, "time", return_value=1000):
+                task_module.tick()
+            self.assertEqual(advance.call_count, 1)
+            self.assertIn("in 10s", self.item()["detail"])
+            with patch.object(task_module.time, "time", return_value=1005):
+                self.assertEqual(task_module.task_progress(self.item())[1],
+                                 "Retry in 5s: RuntimeError: offline")
+            with patch.object(task_module.time, "time", return_value=1005):
+                task_module.tick()
+            self.assertEqual(advance.call_count, 1)
+            with patch.object(task_module.time, "time", return_value=1011):
+                task_module.tick()
+            self.assertEqual(advance.call_count, 2)
+            self.assertIn("in 30s", self.item()["detail"])
+            with patch.object(task_module.time, "time", return_value=1012):
+                task_module.update(self.pid, status="paused")
+                task_module.tick()
+            self.assertEqual(advance.call_count, 3)
+
+    def test_user_control_clears_pending_supervisor_backoff(self):
+        task_module.record_task_retry(self.item(), now=time.time())
+        self.assertTrue(task_module.task_retry_waits(self.item()))
+        task_module.request(self.pid, "pause")
+        with patch.object(task_module, "advance_project") as advance:
+            task_module.tick()
+        advance.assert_called_once()
+        self.assertEqual(self.item()["status"], "paused")
+        self.assertIsNone(task_module.task_retry_waits(self.item()))
+
     def test_service_startup_failure_still_processes_pause_request(self):
         task_module.request(self.pid, "pause")
 
