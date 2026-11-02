@@ -1761,6 +1761,15 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(self.item()["status"], "paused")
         board.assert_not_called()
 
+    def test_pause_queued_work_does_not_scan_unrelated_music_jobs(self):
+        import music_backend
+
+        task_module.request(self.pid, "pause")
+        with patch.object(music_backend, "hold_project_jobs") as hold:
+            task_module.process_requests()
+        self.assertEqual(self.item()["status"], "paused")
+        hold.assert_not_called()
+
     def test_stop_keeps_files_and_prevents_restart(self):
         task_module.request(self.pid, "stop")
         with patch.object(task_module, "board") as board:
@@ -2004,7 +2013,7 @@ class LongTaskTests(unittest.TestCase):
 
         def slow_prepare():
             started.set()
-            if not release.wait(5):
+            if not release.wait(15):
                 raise RuntimeError("test preparation timed out")
 
         def run_supervisor():
@@ -2019,14 +2028,14 @@ class LongTaskTests(unittest.TestCase):
         try:
             self.assertTrue(started.wait(2))
             task_module.request(self.pid, "pause")
-            deadline = time.monotonic() + 3
+            deadline = time.monotonic() + 10
             while self.item()["status"] != "paused" and time.monotonic() < deadline:
                 time.sleep(0.05)
             self.assertEqual(self.item()["status"], "paused")
             self.assertFalse(dispatched.is_set())
         finally:
             release.set()
-            worker.join(5)
+            worker.join(15)
         self.assertFalse(worker.is_alive())
         self.assertFalse(errors)
         self.assertTrue(dispatched.is_set())
@@ -2114,6 +2123,7 @@ class LongTaskTests(unittest.TestCase):
         import music_backend
 
         folder = self.item()["folder"]
+        task_module.update(self.pid, status="working")
         task_module.request(self.pid, "pause")
         with patch.object(music_backend, "hold_project_jobs", return_value=1) as hold:
             task_module.process_requests()

@@ -2082,12 +2082,14 @@ def process_requests():
                     and task["status"] in ("review", "done", "triage")
                 ):
                     board("archive", p["card"])
-                # Agent tools launch music in a separate process. Blocking
-                # the board worker alone must not leave its render running.
-                import music_backend
+                # Agent tools launch music in a separate process. A task that
+                # has never started cannot own a render, so avoid scanning old
+                # job records while its Pause or Stop control is pending.
+                if p["card"] or p["status"] not in ("queued", "waiting_for_setup"):
+                    import music_backend
 
-                music_backend.hold_project_jobs(
-                    p["id"], p["folder"], paused=action == "pause")
+                    music_backend.hold_project_jobs(
+                        p["id"], p["folder"], paused=action == "pause")
                 if action == "delete":
                     REVIEW_PROJECTS_CHECKED.pop(p["id"], None)
                     REVIEW_FILE_STATE.pop(p["id"], None)
