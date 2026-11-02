@@ -18,6 +18,25 @@ class UserFileMemoryTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.state = self.root / "state"
 
+    def test_unreadable_file_does_not_abort_remaining_folder_index(self):
+        folder = self.root / "selected"
+        folder.mkdir()
+        vanished = folder / "a-vanished.txt"
+        kept = folder / "b-kept.txt"
+        vanished.write_text("old value", encoding="utf-8")
+        kept.write_text("useful memory", encoding="utf-8")
+        original_stat = Path.stat
+
+        def stat(path, *args, **kwargs):
+            if path == vanished:
+                raise FileNotFoundError("file changed during scan")
+            return original_stat(path, *args, **kwargs)
+
+        with patch.object(Path, "stat", stat):
+            result = user_file_memory.ingest(self.state, [str(folder)])
+        self.assertEqual(result["indexed"], 1)
+        self.assertEqual(user_file_memory.search(self.state, "useful")[0]["path"], str(kept))
+
     def test_selected_file_refreshes_and_deleted_file_disappears(self):
         path = self.root / "notes.txt"
         path.write_text("Michigan lawn care invoices use blue folders.", encoding="utf-8")

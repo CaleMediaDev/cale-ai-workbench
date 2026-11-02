@@ -63,13 +63,19 @@ def _files(paths: list[str]):
 
             candidates = walk()
         for path in candidates:
-            if path.is_symlink() or not _safe_file_path(path):
+            try:
+                if path.is_symlink() or not _safe_file_path(path):
+                    continue
+                if path.suffix.casefold() not in SUPPORTED:
+                    continue
+                if not path.is_file() or path.stat().st_size > _file_limit(path):
+                    continue
+                resolved = path.resolve(strict=True)
+            except OSError:
+                # Files may disappear during an active folder scan. Continue
+                # with the remaining selections instead of losing the batch.
                 continue
-            if path.suffix.casefold() not in SUPPORTED:
-                continue
-            if not path.is_file() or path.stat().st_size > _file_limit(path):
-                continue
-            yield path.resolve()
+            yield resolved
 
 
 def _media_call(action: str, path: Path, **options) -> dict:

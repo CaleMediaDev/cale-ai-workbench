@@ -18,6 +18,34 @@ class ProjectMemoryTests(unittest.TestCase):
         self.folder = Path(self.temp.name) / "project"
         self.folder.mkdir()
 
+    def test_unreadable_project_file_does_not_abort_code_index_or_leak_stale_text(self):
+        busy = self.folder / "a.py"
+        kept = self.folder / "b.py"
+        busy.write_text("old_private_phrase", encoding="utf-8")
+        kept.write_text("useful_component", encoding="utf-8")
+        memory.index(self.folder, include_code=True)
+        original_read = Path.read_bytes
+
+        def read(path):
+            if path == busy:
+                raise PermissionError("editor is replacing this file")
+            return original_read(path)
+
+        with patch.object(Path, "read_bytes", read):
+            self.assertEqual(memory.search(self.folder, "old_private_phrase"), [])
+            result = memory.index(self.folder, include_code=True)
+            self.assertEqual(result["skipped"], 1)
+        self.assertEqual(memory.search(self.folder, "useful_component")[0]["source_path"],
+                         "b.py")
+
+    def test_second_edit_during_search_hides_old_project_memory(self):
+        source = self.folder / "app.py"
+        source.write_text("old_widget", encoding="utf-8")
+        memory.index(self.folder, include_code=True)
+        source.write_text("new_widget", encoding="utf-8")
+        with patch.object(memory, "index_file", side_effect=FileNotFoundError):
+            self.assertEqual(memory.search(self.folder, "old_widget"), [])
+
     def test_database_creates_automatically_and_persists_typed_memory(self):
         path = Path(memory.initialize(self.folder))
         self.assertTrue(path.is_file())

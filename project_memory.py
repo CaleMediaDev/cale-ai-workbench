@@ -168,18 +168,26 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
                     break
             if truncated:
                 break
-    changed = unchanged = 0
+    changed = unchanged = skipped = 0
     seen = set()
     with connection(root) as conn:
         for path in paths:
             if not _eligible(root, path):
                 continue
             relative = path.relative_to(root).as_posix()
-            data = path.read_bytes()
+            identifier = "file:" + relative
+            try:
+                data = path.read_bytes()
+            except OSError:
+                # An editor may replace or lock one file mid-scan. Remove its
+                # stale text and continue indexing the rest of the project.
+                conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
+                conn.execute("DELETE FROM memory_fts WHERE id=?", (identifier,))
+                skipped += 1
+                continue
             if b"\x00" in data:
                 continue
             digest = hashlib.sha256(data).hexdigest()
-            identifier = "file:" + relative
             seen.add(identifier)
             previous = conn.execute("SELECT source_hash FROM memories WHERE id=?", (identifier,)).fetchone()
             if previous and previous["source_hash"] == digest:
@@ -199,7 +207,8 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
             conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
             conn.execute("DELETE FROM memory_fts WHERE id=?", (identifier,))
     return {"database": str(database_path(root)), "indexed": changed,
-            "unchanged": unchanged, "removed": len(stale), "truncated": truncated}
+            "unchanged": unchanged, "skipped": skipped,
+            "removed": len(stale), "truncated": truncated}
 
 
 def _refresh_file_record(root: Path, row) -> bool:
@@ -217,7 +226,13 @@ def _refresh_file_record(root: Path, row) -> bool:
             conn.execute("DELETE FROM memories WHERE id=?", (row["id"],))
             conn.execute("DELETE FROM memory_fts WHERE id=?", (row["id"],))
         return True
-    data = path.read_bytes()
+    try:
+        data = path.read_bytes()
+    except OSError:
+        with connection(root) as conn:
+            conn.execute("DELETE FROM memories WHERE id=?", (row["id"],))
+            conn.execute("DELETE FROM memory_fts WHERE id=?", (row["id"],))
+        return True
     if b"\x00" in data:
         with connection(root) as conn:
             conn.execute("DELETE FROM memories WHERE id=?", (row["id"],))
@@ -226,7 +241,14 @@ def _refresh_file_record(root: Path, row) -> bool:
     digest = hashlib.sha256(data).hexdigest()
     if digest == row["source_hash"]:
         return False
-    index_file(root, path)
+    try:
+        index_file(root, path)
+    except (OSError, ValueError):
+        # The source can change again between this read and the reindex read.
+        # Hide the old hit until a later successful scan sees stable bytes.
+        with connection(root) as conn:
+            conn.execute("DELETE FROM memories WHERE id=?", (row["id"],))
+            conn.execute("DELETE FROM memory_fts WHERE id=?", (row["id"],))
     return True
 
 
