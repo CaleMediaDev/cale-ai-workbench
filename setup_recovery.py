@@ -56,6 +56,12 @@ def _installer_running(progress: dict) -> bool:
                     if not installer_pid and actual != script:
                         continue
                     if installer_pid:
+                        # A second Cale install can use an extracted script
+                        # with the same name. Its progress is not ours.
+                        destination = next((command[position + 1] for position, value in enumerate(command[:-1])
+                                            if value.lower() == "-destination"), None)
+                        if destination and Path(destination.strip('"')).resolve() != ROOT.resolve():
+                            continue
                         created = process.create_time()
                         started = float(progress.get("installer_started") or 0)
                         updated = float(progress.get("updated") or 0)
@@ -138,6 +144,8 @@ def recover() -> bool:
         return False
     if _retry_runner_running():
         return False
+    if _installer_running(progress):
+        return False
     script = ROOT / "Install-Backend.ps1"
     if not script.is_file():
         return False
@@ -167,6 +175,8 @@ def recover() -> bool:
             if progress.get("owner") == "runtime_features":
                 return False
             if _retry_runner_running():
+                return False
+            if _installer_running(progress):
                 return False
             record = _read(record_path)
             attempts = max(0, int(record.get("attempts", 0)))

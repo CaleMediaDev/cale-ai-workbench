@@ -33,6 +33,10 @@ def test_extracted_installer_pid_is_recognized_without_duplicate_repair(tmp_path
     ):
         assert setup_recovery._installer_running(progress)
         assert not setup_recovery.recover()
+    worker.cmdline.return_value[-1] = str(tmp_path / "other-install")
+    with patch("psutil.Process", return_value=worker):
+        assert not setup_recovery._installer_running(progress)
+    worker.cmdline.return_value[-1] = str(tmp_path)
     worker.create_time.return_value = now + 10
     with patch("psutil.Process", return_value=worker):
         assert not setup_recovery._installer_running(progress)
@@ -63,6 +67,21 @@ def test_first_run_retry_process_prevents_duplicate_repair(tmp_path, monkeypatch
     runner.cmdline.return_value[-3] = str(tmp_path / "someone-else")
     with patch("psutil.process_iter", return_value=[runner]):
         assert not setup_recovery._retry_runner_running()
+
+
+def test_failed_status_waits_for_its_still_running_installer(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    (state / "install-progress.json").write_text(json.dumps({
+        "status": "error", "current": "Setup needs attention: download failed",
+        "updated": time.time() - 1000,
+    }), encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: True)
+    with patch.object(setup_recovery.subprocess, "Popen", side_effect=AssertionError("duplicate repair")):
+        assert not setup_recovery.recover()
 
 
 def test_base_setup_retries_with_backoff_and_limit(tmp_path, monkeypatch):
