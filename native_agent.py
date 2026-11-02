@@ -53,11 +53,22 @@ def state_file(project: dict) -> Path:
     return Path(project["folder"]) / ".local-ai" / "native-worker.json"
 
 
+def process_file(project: dict) -> Path:
+    """Keep supervisor process identity separate from worker checkpoints."""
+    return Path(project["folder"]) / ".local-ai" / "native-worker-process.json"
+
+
 def read_state(project: dict) -> dict:
     try:
-        return json.loads(state_file(project).read_text(encoding="utf-8"))
+        state = json.loads(state_file(project).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"status": "new", "messages": [], "turns": 0, "failures": 0}
+        state = {"status": "new", "messages": [], "turns": 0, "failures": 0}
+    try:
+        identity = json.loads(process_file(project).read_text(encoding="utf-8"))
+        state.update(pid=int(identity["pid"]), process_created=float(identity["process_created"]))
+    except (OSError, ValueError, TypeError, KeyError):
+        pass  # Older worker checkpoints still carry their process identity.
+    return state
 
 
 def save_state(project: dict, state: dict) -> None:
@@ -78,7 +89,8 @@ def project_path(folder: Path, name: str) -> Path:
     target = (folder / relative).resolve()
     if not target.is_relative_to(folder.resolve()):
         raise ValueError("The path leaves the task folder")
-    if target == folder / ".local-ai" / "native-worker.json":
+    if target in {folder / ".local-ai" / "native-worker.json",
+                  folder / ".local-ai" / "native-worker-process.json"}:
         raise ValueError("Worker checkpoints are internal; read PLAN.md and PROGRESS.md instead")
     return target
 
@@ -92,7 +104,8 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             return "\n".join(
                 str(item.relative_to(folder)) + ("/" if item.is_dir() else "")
                 for item in sorted(target.iterdir(), key=lambda item: item.name.lower())[:200]
-                if item.name not in {"native-worker.json", "native-worker.tmp"}
+                if item.name not in {"native-worker.json", "native-worker.tmp",
+                                     "native-worker-process.json", "native-worker-process.tmp"}
             )
         if name == "read_file":
             target = project_path(folder, arguments["path"])
@@ -714,14 +727,20 @@ def start_worker(project: dict) -> dict:
                                stderr=subprocess.DEVNULL,
                                env=long_tasks.environment(),
                                creationflags=0x08000000 if os.name == "nt" else 0)
-    state = read_state(project)  # The child may already have written a checkpoint.
     try:
         created = psutil.Process(process.pid).create_time()
     except psutil.NoSuchProcess:
         created = time.time()
-    state.update(pid=process.pid, process_created=created)
-    save_state(project, state)
-    return state
+    identity = process_file(project)
+    temporary = identity.with_suffix(".tmp")
+    try:
+        temporary.write_text(json.dumps({"pid": process.pid, "process_created": created}),
+                             encoding="utf-8")
+        os.replace(temporary, identity)
+    except OSError:
+        process.terminate()  # Never leave an untracked worker running.
+        raise
+    return read_state(project)
 
 
 def advance(project: dict) -> tuple[str, str] | None:

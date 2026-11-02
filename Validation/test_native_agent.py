@@ -6,6 +6,7 @@ import os
 import sqlite3
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import long_tasks
@@ -62,6 +63,37 @@ def test_native_worker_reuses_router_across_model_turns():
         assert state["status"] == "done"
         assert len(created) == 1
         assert created[0].calls == 2
+
+
+def test_worker_start_does_not_overwrite_a_child_checkpoint():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        saved_messages = [{"role": "assistant", "content": "First action saved"}]
+
+        def child_starts(*_args, **_kwargs):
+            # Reproduce the child saving progress before Popen returns to the
+            # supervisor. The parent must not write its older state over it.
+            native_agent.save_state(item, {"status": "running", "turns": 1,
+                                           "messages": saved_messages})
+            return SimpleNamespace(pid=43210)
+
+        with (patch.object(long_tasks, "environment", return_value={}),
+              patch.object(native_agent.subprocess, "Popen", side_effect=child_starts),
+              patch("psutil.Process", return_value=SimpleNamespace(create_time=lambda: 123.0))):
+            state = native_agent.start_worker(item)
+        assert state["messages"] == saved_messages
+        assert state["turns"] == 1
+        assert native_agent.read_state(item)["pid"] == 43210
+        assert json.loads(native_agent.state_file(item).read_text())["messages"] == saved_messages
+        assert json.loads(native_agent.process_file(item).read_text())["pid"] == 43210
+        assert "native-worker-process.json" not in native_agent.execute_tool(
+            Path(item["folder"]), "list_files", {"path": ".local-ai"})
+        try:
+            native_agent.project_path(Path(item["folder"]), ".local-ai/native-worker-process.json")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Worker process metadata must not be editable by file tools")
 
 
 def test_native_worker_continues_when_model_claims_done_without_verifier():
