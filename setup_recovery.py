@@ -65,7 +65,12 @@ def _installer_running(progress: dict) -> bool:
                         created = process.create_time()
                         started = float(progress.get("installer_started") or 0)
                         updated = float(progress.get("updated") or 0)
-                        if started and abs(created - started) > 15:
+                        # The process can spend minutes initializing PowerShell
+                        # and waiting for the install lock before writing its
+                        # first progress record. A process created *after* the
+                        # recorded start is a reused PID; an earlier process
+                        # with this script and destination is still our installer.
+                        if started and created > started + 10:
                             continue
                         if not started and (not updated or created > updated + 10):
                             continue

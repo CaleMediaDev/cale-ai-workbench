@@ -33,6 +33,10 @@ def test_extracted_installer_pid_is_recognized_without_duplicate_repair(tmp_path
     ):
         assert setup_recovery._installer_running(progress)
         assert not setup_recovery.recover()
+    # Slow PowerShell startup is still a live install, not an abandoned one.
+    worker.create_time.return_value = progress["installer_started"] - 120
+    with patch("psutil.Process", return_value=worker):
+        assert setup_recovery._installer_running(progress)
     worker.cmdline.return_value[-1] = str(tmp_path / "other-install")
     with patch("psutil.Process", return_value=worker):
         assert not setup_recovery._installer_running(progress)
