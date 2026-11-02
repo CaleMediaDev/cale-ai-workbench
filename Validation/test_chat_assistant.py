@@ -184,6 +184,23 @@ def test_instrumental_breakdown_does_not_remove_requested_rap_vocals():
     assert chat_assistant.music_request("Make an instrumental rap beat")["instrumental"] is True
 
 
+def test_vocal_intent_survives_new_instrumental_section_names():
+    for section in ("instrumental opening", "instrumental transition", "instrumental solo"):
+        brief = (
+            "Make a song with a male rapper, two rap verses, and a layered vocal hook. "
+            f"Add a short {section} before the final chorus."
+        )
+        assert chat_assistant.music_request(brief)["instrumental"] is False
+    assert chat_assistant.music_request("Make a fully instrumental song")["instrumental"] is True
+    assert chat_assistant.music_request("Make a rap song without lyrics")["instrumental"] is True
+    assert chat_assistant.music_request(
+        "Make an instrumental song with a male rapper and sung chorus"
+    ) is None
+    assert chat_assistant.music_request(
+        "Make a song without vocals, with a male rapper"
+    ) is None
+
+
 def test_detailed_create_track_or_banger_skips_general_agent_planning():
     track = (
         "Create an insanely catchy, high-energy melodic dubstep and heavy bass "

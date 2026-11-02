@@ -152,17 +152,35 @@ def music_request(text: str) -> dict | None:
             duration = 180 if re.search(r"\b(?:rap|music)\b", prompt, re.IGNORECASE) else 30
     if not 10 <= duration <= 600:
         raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
-    # A short instrumental breakdown is an arrangement instruction, not a
-    # request to strip the rapper or singer from the entire song.
+    # "Instrumental" can describe one part of a vocal song. A clear singer or
+    # rapper request wins over an unqualified instrumental adjective, even if
+    # the section name is new to this parser.
     instrumental_mentions = list(re.finditer(r"\binstrumental\b", prompt, re.IGNORECASE))
     section_only = bool(instrumental_mentions) and all(
         re.match(r"\s+(?:breakdown|break|bridge|interlude|intro|outro|section|passage|drop)\b",
                  prompt[match.end():], re.IGNORECASE)
         for match in instrumental_mentions
     )
-    instrumental = bool(re.search(r"\b(?:no vocals|without vocals|no singing)\b",
-                                  prompt, re.IGNORECASE)) or bool(
-                                      instrumental_mentions and not section_only)
+    no_vocals = bool(re.search(
+        r"\b(?:no vocals|without vocals|no singing|no lyrics|without lyrics)\b",
+        prompt, re.IGNORECASE,
+    ))
+    lead_vocals = bool(lyrics or re.search(
+        r"\b(?:singer|rapper|singing|rapping|sung|rapped|"
+        r"(?:male|female|lead|layered|backing|deep|gritty)\s+vocals?|"
+        r"vocal\s+(?:verses?|chorus|hook)|rap\s+verses?)\b",
+        prompt, re.IGNORECASE,
+    ))
+    whole_instrumental = bool(re.search(
+        r"\b(?:instrumental\s+(?:song|track|beat|music|piece|version|only)|"
+        r"(?:fully|entirely|all)\s+instrumental)\b",
+        prompt, re.IGNORECASE,
+    ))
+    if lead_vocals and (whole_instrumental or no_vocals):
+        return None  # Conflicting whole-song instructions need interpretation.
+    instrumental = no_vocals or bool(
+        instrumental_mentions and not section_only and not lead_vocals
+    )
     # A beat or background soundtrack normally has no singer. Preserve an
     # explicit vocal request instead of silently changing it to instrumental.
     if (not instrumental and not lyrics
