@@ -91,6 +91,33 @@ class ChatGPTAuthTests(unittest.TestCase):
         self.assertNotIn("temperature", payload)
         self.assertNotIn("max_output_tokens", payload)
 
+    def test_response_payload_converts_image_parts_without_losing_text(self):
+        source = "data:image/png;base64,AAAA"
+        payload = c.response_payload({"messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": "What is shown?"},
+                {"type": "image_url", "image_url": {"url": source, "detail": "high"}},
+            ]},
+            {"role": "assistant", "content": "It shows a chart."},
+            {"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": "https://example.com/chart.png"}},
+            ]},
+        ]}, "gpt-test")
+        self.assertEqual(payload["input"][0]["content"], [
+            {"type": "input_text", "text": "What is shown?"},
+            {"type": "input_image", "image_url": source, "detail": "high"},
+        ])
+        self.assertEqual(payload["input"][1]["content"], "It shows a chart.")
+        self.assertEqual(payload["input"][2]["content"], [
+            {"type": "input_image", "image_url": "https://example.com/chart.png"},
+        ])
+
+    def test_response_payload_rejects_untranslatable_image(self):
+        with self.assertRaisesRegex(ValueError, "Image input has no URL"):
+            c.response_payload({"messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {}},
+            ]}]}, "gpt-test")
+
     def test_completed_response_preserves_tool_calls(self):
         result = c.response_to_completion(
             {

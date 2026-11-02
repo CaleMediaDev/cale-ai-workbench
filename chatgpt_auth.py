@@ -354,6 +354,35 @@ def choose_model(models, size):
     return next((name for name in preferences if name in models), models[0])
 
 
+def response_message_content(role, content):
+    """Convert Hermes chat parts to the Responses API's input format."""
+    if not isinstance(content, list):
+        return content or ""
+    converted = []
+    for part in content:
+        if isinstance(part, str):
+            converted.append({"type": "input_text", "text": part})
+        elif isinstance(part, dict) and part.get("type") in ("text", "input_text"):
+            converted.append({"type": "input_text", "text": part.get("text", "")})
+        elif isinstance(part, dict) and part.get("type") in ("image_url", "input_image"):
+            image = part.get("image_url")
+            detail = image.get("detail") if isinstance(image, dict) else part.get("detail")
+            url = image.get("url") if isinstance(image, dict) else image
+            if not isinstance(url, str) or not url:
+                raise ValueError("Image input has no URL or data URL.")
+            item = {"type": "input_image", "image_url": url}
+            if detail in ("auto", "low", "high", "original"):
+                item["detail"] = detail
+            converted.append(item)
+        else:
+            raise ValueError("Unsupported chat content part for ChatGPT plan.")
+    if role == "assistant":
+        if any(part["type"] != "input_text" for part in converted):
+            raise ValueError("Assistant history cannot contain image input.")
+        return "".join(part["text"] for part in converted)
+    return converted
+
+
 def response_payload(completion, model):
     """Translate Hermes chat messages and tool calls to Responses API input."""
     instructions = []
@@ -391,7 +420,7 @@ def response_payload(completion, model):
                 )
             continue
         if role in ("user", "assistant", "developer"):
-            items.append({"role": role, "content": content or ""})
+            items.append({"role": role, "content": response_message_content(role, content)})
     tools = []
     for tool in completion.get("tools", []):
         if tool.get("type") != "function":
