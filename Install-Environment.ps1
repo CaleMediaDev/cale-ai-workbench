@@ -48,6 +48,23 @@ function Find-CaleHermesPython([string]$HermesHome) {
     } catch { return '' }
 }
 
+# Windows reports a mutex as abandoned when the previous installer crashed.
+# WaitOne grants ownership in that case, so the new run should resume setup.
+function Enter-CaleInstallLock([string]$Destination) {
+    $name = 'Local\CaleAIInstall-' +
+        ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')
+    $lock = New-Object Threading.Mutex($false, $name)
+    try {
+        try { $acquired = $lock.WaitOne(0) }
+        catch [Threading.AbandonedMutexException] { $acquired = $true }
+        if (-not $acquired) { throw 'An installer is already running for this folder.' }
+        return $lock
+    } catch {
+        $lock.Dispose()
+        throw
+    }
+}
+
 function Get-CaleInstallDestination([string]$Requested = '') {
     $local = [IO.Path]::GetFullPath($env:LOCALAPPDATA)
     $ordinary = Join-Path $local 'CaleMedia\AIWorkbench'

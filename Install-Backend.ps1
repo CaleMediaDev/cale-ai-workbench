@@ -18,8 +18,7 @@ if (Test-Path -LiteralPath $Destination) {
  if ((Get-ChildItem -LiteralPath $Destination -Force | Select-Object -First 1) -and -not (Test-Path -LiteralPath (Join-Path $Destination '.cale-ai-install'))) { throw 'Choose an empty folder or an existing Cale AI Workbench installation.' }
 }
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-$taskLock=New-Object Threading.Mutex($false,('Local\CaleAIInstall-'+([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Destination))).Replace('/','_').Replace('\','_')))
-if (-not $taskLock.WaitOne(0)) { throw 'An installer is already running for this folder.' }
+$taskLock=Enter-CaleInstallLock $Destination
 try {
  $script:installerStarted=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
  # Keep recovery metadata beside the install from its first step. The source
@@ -253,7 +252,7 @@ try {
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.275')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.276')
  Write-SetupStatus 100 'Your AI is ready' 'complete'
  # Optional local models continue in a separate process after the installer closes.
  Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden

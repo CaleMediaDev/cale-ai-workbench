@@ -12,6 +12,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == "nt", "Windows installer only")
 class InstallEnvironmentTests(unittest.TestCase):
+    def test_crashed_installer_lock_can_be_reacquired(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            child = base / "abandon.ps1"
+            child.write_text(
+                "$m=[Threading.Mutex]::OpenExisting($env:CALE_MUTEX_NAME)\n"
+                "$null=$m.WaitOne()\n"
+                "[Environment]::Exit(0)\n", encoding="utf-8",
+            )
+            harness = base / "recover.ps1"
+            harness.write_text(
+                ". $env:CALE_INSTALL_HELPER\n"
+                "$anchor=New-Object Threading.Mutex($false,$env:CALE_MUTEX_NAME)\n"
+                "try {\n"
+                "  $child=Start-Process powershell.exe -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File \"'+$env:CALE_CHILD+'\"') -Wait -PassThru -WindowStyle Hidden\n"
+                "  if ($child.ExitCode -ne 0) { throw 'child failed' }\n"
+                "  $lock=Enter-CaleInstallLock $env:CALE_INSTALL\n"
+                "  try { 'reacquired' } finally { $lock.ReleaseMutex(); $lock.Dispose() }\n"
+                "} finally { $anchor.Dispose() }\n", encoding="utf-8",
+            )
+            install = str(base / "Cale")
+            name = "Local\\CaleAIInstall-" + __import__("base64").b64encode(
+                install.encode("utf-8")).decode("ascii").replace("/", "_").replace("\\", "_")
+            env = os.environ.copy()
+            env.update(CALE_INSTALL_HELPER=str(ROOT / "Install-Environment.ps1"),
+                       CALE_INSTALL=install, CALE_CHILD=str(child), CALE_MUTEX_NAME=name)
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+                env=env, capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "reacquired")
+
     def test_interrupted_agent_facts_trigger_bootstrap_again(self):
         with tempfile.TemporaryDirectory() as folder:
             base = Path(folder)
