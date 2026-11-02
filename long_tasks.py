@@ -1122,6 +1122,23 @@ def review_files_changed(p):
     return changed
 
 
+def recheck_changed_media(p, kind):
+    """Reverify changed media without making the person repair a stale review.
+
+    A captioned video or another file can be added after the audio/image was
+    reviewed. The fresh artifact still needs verification and a new review,
+    but an ordinary file change is not itself a task failure.
+    """
+    stale_detail = f"{kind} files changed after review. Check them before accepting."
+    if p["status"] == "needs_input" and p["detail"] == stale_detail:
+        update(p["id"], status="working", detail=f"Rechecking changed {kind.lower()} files")
+        return True
+    if p["status"] == "ready_for_review" and review_files_changed(p):
+        update(p["id"], status="working", detail=f"Rechecking changed {kind.lower()} files")
+        return True
+    return False
+
+
 def legacy_fingerprint(folder):
     """Read the old metadata checksum only to migrate pending reviews safely."""
     old_skip = SKIP - {".ruff_cache", "playwright-report", "test-results"}
@@ -1890,12 +1907,11 @@ def advance_project(p):
         return
     image_id = image_job_id(p)
     if image_id:
+        if recheck_changed_media(p, "Image"):
+            return
         if p["status"] in ("accepted", "stopped", "paused", "needs_input"):
             return
         if p["status"] == "ready_for_review":
-            if review_files_changed(p):
-                update(p["id"], status="needs_input",
-                       detail="Image files changed after review. Check them before accepting.")
             return
         import quick_image
 
@@ -1927,12 +1943,11 @@ def advance_project(p):
         return
     job_id = music_job_id(p)
     if job_id:
+        if recheck_changed_media(p, "Music"):
+            return
         if p["status"] in ("accepted", "stopped", "paused", "needs_input"):
             return
         if p["status"] == "ready_for_review":
-            if review_files_changed(p):
-                update(p["id"], status="needs_input",
-                       detail="Music files changed after review. Check them before accepting.")
             return
         import music_backend
 

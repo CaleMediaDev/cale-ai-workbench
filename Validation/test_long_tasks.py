@@ -314,6 +314,57 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(task_module.task_progress(complete)[0], 95)
         self.assertTrue((Path(task["folder"]) / ".local-ai" / "PROGRESS.md").is_file())
 
+    def test_changed_music_artifact_is_rechecked_instead_of_needing_help(self):
+        job_id = "1" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make an instrumental techno song",
+                {"prompt": "instrumental techno", "duration_seconds": 30,
+                 "instrumental": True}, str(self.base / "music-recheck"),
+            )
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        output = Path(task["folder"]) / "song.mp3"
+        output.write_bytes(b"A" * 8192)
+        job = {"status": "complete", "instrumental": True,
+               "result": {"path": str(output)}}
+        with patch("music_backend.music_job_status", return_value=job), patch(
+            "music_backend.audio_file_ok", return_value=True
+        ):
+            task_module.advance_project(task)
+            reviewed = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(reviewed["status"], "ready_for_review")
+            (Path(task["folder"]) / "song-video.mp4").write_bytes(b"new video")
+            task_module.advance_project(reviewed)
+            checking = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(checking["status"], "working")
+            task_module.advance_project(checking)
+        again = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(again["status"], "ready_for_review")
+        self.assertEqual(again["fingerprint"], task_module.fingerprint(Path(task["folder"])))
+
+    def test_old_stale_media_review_status_recovers_automatically(self):
+        job_id = "2" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make an instrumental song",
+                {"prompt": "instrumental", "duration_seconds": 30,
+                 "instrumental": True}, str(self.base / "music-old-stale"),
+            )
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        output = Path(task["folder"]) / "song.mp3"
+        output.write_bytes(b"A" * 8192)
+        task_module.update(pid, status="needs_input",
+                           detail="Music files changed after review. Check them before accepting.")
+        task_module.advance_project(next(p for p in task_module.projects() if p["id"] == pid))
+        self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"],
+                         "working")
+        with patch("music_backend.music_job_status", return_value={
+            "status": "complete", "instrumental": True, "result": {"path": str(output)},
+        }), patch("music_backend.audio_file_ok", return_value=True):
+            task_module.advance_project(next(p for p in task_module.projects() if p["id"] == pid))
+        self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"],
+                         "ready_for_review")
+
     def test_direct_music_passes_exact_user_lyrics_to_local_job(self):
         import chat_assistant
 
