@@ -84,6 +84,17 @@ def test_long_file_end_question_keeps_tail_context():
     assert "postpone" in excerpt
 
 
+def test_tight_excerpt_budget_keeps_best_match_near_end():
+    blocks = [f"Section {index}. ".ljust(350, "x") for index in range(30)]
+    blocks[3] = "Unrelated warranty code mentioned here. ".ljust(350, "x")
+    blocks[27] = ("Warranty code: W-4817. " * 8).ljust(350, "x")
+    excerpt = file_chat.select_excerpt(
+        "".join(blocks), "What is the warranty code?", limit=900,
+    )
+    assert "W-4817" in excerpt
+    assert len(excerpt) <= 900
+
+
 def test_long_file_answer_discloses_omitted_sections(tmp_path):
     path = tmp_path / "long.txt"
     path.write_text("Opening.\n" + "Filler.\n" * 2000 + "Answer: 42.\n", encoding="utf-8")

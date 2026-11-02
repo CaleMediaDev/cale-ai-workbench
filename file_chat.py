@@ -47,25 +47,35 @@ def select_excerpt(text: str, question: str, limit: int = 12000, subject: str = 
     lower_chunks = [chunk.casefold() for chunk in chunks]
     scores = [sum(chunk.count(word) for word in words) for chunk in lower_chunks]
     summary = bool(re.search(r"\b(summarize|summary|overview|main points)\b", question, re.I))
-    priority = [0, len(chunks) - 1]
+    hints = []
     if re.search(r"\b(end|ending|final|conclusion|last)\b", question, re.I):
-        priority.append(len(chunks) - 2)
+        hints.append(len(chunks) - 2)
     if re.search(r"\b(start|beginning|first|intro)\b", question, re.I):
-        priority.append(1)
+        hints.append(1)
     if summary or not any(scores):
-        priority.extend([len(chunks) // 3, 2 * len(chunks) // 3])
+        priority = [*hints, 0, len(chunks) - 1, len(chunks) // 3,
+                    2 * len(chunks) // 3]
     else:
         ranked = sorted(range(len(chunks)), key=lambda i: (-scores[i], i))
-        priority.extend(ranked[:3])
-    selected = set(list(dict.fromkeys(priority))[:5])
-    result = []
-    # Keep the excerpt below its cap even when explicit start/end hints add spans.
-    for index in sorted(selected):
-        span = f"[Characters {index * chunk_size + 1}-{min((index + 1) * chunk_size, len(text))}]\n{chunks[index]}"
-        if sum(map(len, result)) + len(span) + 100 > limit:
+        priority = [*ranked[:3], *hints, 0, len(chunks) - 1]
+    header = f"[Selected excerpts from a longer {subject}; other sections are omitted.]\n"
+    chosen = []
+    used = len(header)
+    # Reserve the budget in relevance order, then display selected spans in
+    # source order. Sorting before reserving used to drop the best late match.
+    for index in dict.fromkeys(priority):
+        if len(chosen) == 5:
             break
-        result.append(span)
-    return f"[Selected excerpts from a longer {subject}; other sections are omitted.]\n" + "\n\n".join(result)
+        span = f"[Characters {index * chunk_size + 1}-{min((index + 1) * chunk_size, len(text))}]\n{chunks[index]}"
+        cost = len(span) + (2 if chosen else 0)
+        if used + cost <= limit:
+            chosen.append((index, span))
+            used += cost
+    if not chosen and len(header) < limit:
+        index = next(iter(dict.fromkeys(priority)))
+        label = f"[Characters {index * chunk_size + 1}-...]\n"
+        chosen.append((index, label + chunks[index][:max(0, limit - len(header) - len(label))]))
+    return (header + "\n\n".join(span for _, span in sorted(chosen)))[:limit]
 
 
 def image_description(path: Path, question: str) -> str:
