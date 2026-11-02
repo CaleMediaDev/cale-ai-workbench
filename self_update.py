@@ -299,6 +299,11 @@ def active_tasks():
                 if retire_terminal_board_worker(process):
                     continue
                 return True
+            if (executable and len(command) >= 4
+                    and Path(executable).resolve().is_relative_to(install)
+                    and Path(command[1]).resolve() == install / "native_agent.py"
+                    and command[2] == "run"):
+                return True
         except (OSError, psutil.Error):
             continue
     return False
@@ -364,6 +369,19 @@ def retire_update_paused_workers():
         try:
             command = process.info["cmdline"] or []
             executable = process.info["exe"]
+            native = (executable and len(command) >= 4
+                      and Path(executable).resolve().is_relative_to(install)
+                      and Path(command[1]).resolve() == install / "native_agent.py"
+                      and command[2] == "run" and command[3] in paused)
+            if native:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except psutil.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+                stopped += 1
+                continue
             if (not executable or command[1:] != ["-m", "agent.managed_worker"]
                     or not Path(executable).resolve().is_relative_to(install)
                     or Path(process.cwd()).resolve() not in folders):
@@ -401,7 +419,14 @@ def resume_projects_after_update(force=False):
             continue
         try:
             card = str(project.get("card") or "")
-            runs = (board("show", card, "--json", parse=True).get("runs", [])
+            if project.get("engine") == "native":
+                import native_agent
+
+                if native_agent.process_alive(native_agent.read_state(project)):
+                    continue
+                runs = []
+            else:
+                runs = (board("show", card, "--json", parse=True).get("runs", [])
                     if card and not card.startswith(("music-job:", "image-job:")) else [])
             if any(run.get("started_at") and not run.get("ended_at") for run in runs):
                 continue

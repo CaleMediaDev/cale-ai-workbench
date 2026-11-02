@@ -17,6 +17,55 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_paused_native_worker_blocks_source_swap_until_process_exits(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Toolbox/python/Scripts/python.exe"
+            command = [str(python), str(root / "native_agent.py"), "run", "native-1"]
+            worker = MagicMock(info={"exe": str(python), "cmdline": command})
+            with (patch.object(self_update, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[{"status": "paused"}]),
+                  patch("psutil.process_iter", return_value=[worker])):
+                self.assertTrue(self_update.active_tasks())
+
+    def test_paused_native_task_resumes_after_update_without_hermes_board(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            task_id = "native-1"
+            path = root / "Updates/resume-after-update.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps({"version": "0.5.351", "tasks": {task_id: str(root / "page")}}))
+            project = {"id": task_id, "status": "paused", "engine": "native",
+                       "folder": str(root / "page"), "card": ""}
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "current_version", return_value=(0, 5, 351)),
+                  patch("long_tasks.projects", return_value=[project]),
+                  patch("long_tasks.board", side_effect=AssertionError("Hermes used")),
+                  patch("native_agent.process_alive", return_value=False),
+                  patch("long_tasks.request") as request):
+                self.assertEqual(self_update.resume_projects_after_update(), 1)
+            request.assert_called_once_with(task_id, "resume", "Continuing after Workbench update")
+
+    def test_update_retires_only_its_paused_native_worker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            task_id = "native-1"
+            path = root / "Updates/resume-after-update.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps({"version": "0.5.351", "tasks": {task_id: str(root / "page")}}))
+            python = root / "Toolbox/python/Scripts/python.exe"
+            worker = MagicMock(info={"exe": str(python), "cmdline": [
+                str(python), str(root / "native_agent.py"), "run", task_id]})
+            unrelated = MagicMock(info={"exe": str(python), "cmdline": [
+                str(python), str(root / "native_agent.py"), "run", "other-task"]})
+            with (patch.object(self_update, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[{"id": task_id,
+                      "status": "paused", "folder": str(root / "page")}]),
+                  patch("psutil.process_iter", return_value=[worker, unrelated])):
+                self.assertEqual(self_update.retire_update_paused_workers(), 1)
+            worker.terminate.assert_called_once()
+            unrelated.terminate.assert_not_called()
+
     def test_verified_update_queues_pause_only_for_active_projects(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
