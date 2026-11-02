@@ -1,6 +1,6 @@
 [
   "capability_index.py", "Validation/test_capability_index.py",
-  "native_agent.py", "Validation/test_native_agent.py",
+  "native_agent.py", "Validation/test_native_agent.py", "native_browser.py", "Validation/test_native_browser.py",
   "model_fitness.py", "Validation/test_model_fitness.py", "Install-Retry.ps1", "Validation/test_install_retry.py", "core_tool_health.py", "Repair-CoreTools.ps1", "browser_probe.js", "Validation/test_core_tool_health.py",
   "README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "LICENSE", "HERMES-LICENSE", "THIRD-PARTY-NOTICES.md", "ASSETS.md",
   "assets/cale-logo.png", "assets/cale-logo-original.jpg", "assets/cale-icon.ico", "assets/cale-talking.webp", "assets/cale-voice-reference.wav", "assets/cale-wake-ack.wav", "assets/cale-reading-ack.wav", "assets/dgx-spark-nvidia.jpg",
