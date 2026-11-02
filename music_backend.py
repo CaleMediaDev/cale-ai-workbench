@@ -23,6 +23,8 @@ from urllib.request import Request, urlopen
 
 import requests
 
+import music_style
+
 ROOT = Path(__file__).resolve().parent
 ENGINE = ROOT / "Media" / "music" / "ACE-Step-1.5"
 REVISION = "ca1e85fe9430179831e6bc6be790c332190a3866"
@@ -260,8 +262,6 @@ def _generate_music(
     if source and (not source.is_file() or source.suffix.lower() not in (".wav", ".mp3", ".flac")):
         raise ValueError("The cover source must be an existing WAV, MP3 or FLAC file.")
     start_server()
-    import music_style
-
     request = {
         "prompt": music_style.enhance(prompt.strip(), instrumental),
         "lyrics": "[Instrumental]" if instrumental else lyrics,
@@ -574,8 +574,11 @@ def recover_music_jobs() -> None:
             if output.is_file():
                 if audio_file_ok(output):
                     vocal_check = info.get("vocal_check")
-                    if (info.get("duration_seconds") and not info.get("instrumental")
-                            and not info.get("source_path") and not (vocal_check or {}).get("passed")):
+                    if (info.get("duration_seconds") and not info.get("source_path")
+                            and music_style.requires_sustained_vocals(
+                                info.get("prompt", ""), info.get("lyrics", ""),
+                                bool(info.get("instrumental")))
+                            and not (vocal_check or {}).get("passed")):
                         try:
                             vocal_check = vocal_evidence(output, info["duration_seconds"])
                         except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
@@ -687,7 +690,9 @@ def _run_job(job_id: str) -> None:
     attribution = usage_history.CURRENT_TASK.set(info.get("task_id", ""))
     try:
         lyrics = info["lyrics"]
-        needs_vocals = not info["instrumental"] and not info["source_path"]
+        needs_vocals = not info["source_path"] and music_style.requires_sustained_vocals(
+            info["prompt"], info.get("lyrics", ""), info["instrumental"]
+        )
         if needs_vocals and not lyrics.strip():
             working["current"] = "Writing lyrics locally"
             _write_job(job_id, working)

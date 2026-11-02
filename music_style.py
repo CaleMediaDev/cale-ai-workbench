@@ -24,6 +24,28 @@ NEGATED_SINGER = re.compile(
     rf"\b{NEGATION}\s+(?:a\s+)?(male|man|guy|boy|female|woman|girl)"
     r"\s+(?:voice|vocals?|singer)\b", re.I,
 )
+VOCAL_TEXTURE = re.compile(
+    r"\b(?:vocal chops?|chopped vocals?|wordless vocals?|"
+    r"(?:minimal|sparse|occasional) vocals?)\b", re.I,
+)
+LEAD_VOCALS = re.compile(
+    r"\b(?:lead vocals?|sung verses?|singing|singer|rap|rapped)\b", re.I,
+)
+
+
+def requires_sustained_vocals(prompt: str, lyrics: str = "",
+                              instrumental: bool = False) -> bool:
+    """Distinguish a lyric-driven song from sparse vocal sound design.
+
+    A request for chops should not trigger full-length lyric writing or a
+    speech-recognition threshold intended for verses and choruses.
+    """
+    if instrumental:
+        return False
+    if lyrics.strip():
+        return True
+    request = prompt.split("Past user feedback", 1)[0]
+    return not (VOCAL_TEXTURE.search(request) and not LEAD_VOCALS.search(request))
 
 
 def _clean_negations(prompt: str) -> tuple[str, bool, bool]:
@@ -68,13 +90,16 @@ def enhance(prompt: str, instrumental: bool = False) -> str:
     intent = vocal_intent(prompt, instrumental)
     cleaned, _, _ = _clean_negations(prompt)
     cues = []
-    if intent == "female":
+    sustained = requires_sustained_vocals(cleaned, instrumental=instrumental)
+    if sustained and intent == "female":
         cue = "Prominent expressive female lead vocals throughout, clear sung verses and chorus"
         if any(name in cleaned.lower() for name in ("katy perry", "katy pary")):
             cue += ", bright polished dance-pop production and a catchy anthemic hook"
         cues.append(cue)
-    elif intent == "male":
+    elif sustained and intent == "male":
         cues.append("Prominent expressive male lead vocals throughout, clear sung verses and chorus")
+    if not instrumental and not sustained:
+        cues.append("Sparse chopped vocal syllables as rhythmic accents between instrumental sections")
     request = cleaned.split("Past user feedback", 1)[0].lower()
     if (re.search(r"\b(?:techno|tehno|electronic dance|dubstep|edm)\b", request)
             and not re.search(r"\b(?:guitars?|acoustic|live band|rock)\b", request)):

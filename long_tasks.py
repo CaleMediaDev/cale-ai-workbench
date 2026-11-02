@@ -2111,6 +2111,7 @@ def advance_project(p):
         if p["status"] == "ready_for_review":
             return
         import music_backend
+        import music_style
 
         job = music_backend.music_job_status(job_id)
         status = job["status"]
@@ -2120,7 +2121,10 @@ def advance_project(p):
                 update(p["id"], status="needs_input",
                        detail="The music engine returned a file that could not be decoded as audio.")
                 return
-            if not job.get("instrumental") and not job.get("source_path"):
+            if (not job.get("source_path")
+                    and music_style.requires_sustained_vocals(
+                        job.get("prompt", ""), job.get("lyrics", ""),
+                        bool(job.get("instrumental")))):
                 try:
                     check = job.get("vocal_check") or music_backend.vocal_evidence(
                         output, job["duration_seconds"]

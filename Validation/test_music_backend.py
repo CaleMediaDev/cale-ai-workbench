@@ -125,6 +125,57 @@ def test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio(tmp_pat
     assert render.call_args.kwargs["lyrics"] == lyrics
 
 
+def test_sparse_vocal_chops_do_not_trigger_lyric_or_singing_checks(tmp_path):
+    jobs = tmp_path / "jobs"
+    output = tmp_path / "song.mp3"
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_launch_job"
+    ):
+        started = music_backend.start_music_job(
+            "Heavy dubstep with minimal robotic vocal chops", str(output),
+            duration_seconds=60,
+        )
+        with (patch.object(music_backend, "compose_lyrics") as compose,
+              patch.object(music_backend, "generate_music",
+                           return_value={"path": str(output)}) as generate,
+              patch.object(music_backend, "vocal_evidence") as check,
+              patch("song_video.render", return_value={
+                  "path": "song-video.mp4", "captions_path": "song.captions.srt"
+              }) as render):
+            music_backend._run_job(started["job_id"])
+        job = music_backend.music_job_status(started["job_id"])
+    compose.assert_not_called()
+    check.assert_not_called()
+    assert generate.call_args.args[2] == ""
+    assert render.call_args.kwargs["lyrics"] == ""
+    assert job["status"] == "complete"
+    assert job["vocal_check"] is None
+
+
+def test_saved_vocal_chop_song_recovers_without_singing_check(tmp_path):
+    jobs = tmp_path / "jobs"
+    output = tmp_path / "song.mp3"
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_launch_job"
+    ):
+        started = music_backend.start_music_job(
+            "Techno with occasional vocal chops", str(output), duration_seconds=60,
+        )
+        output.write_bytes(b"saved song")
+        job = music_backend.music_job_status(started["job_id"])
+        music_backend._write_job(started["job_id"], {**job, "status": "working"})
+        with (patch.object(music_backend, "_worker_running", return_value=False),
+              patch.object(music_backend, "audio_file_ok", return_value=True),
+              patch.object(music_backend, "vocal_evidence") as check,
+              patch("song_video.render", return_value={
+                  "path": "song-video.mp4", "captions_path": "song.captions.srt"
+              })):
+            music_backend.recover_music_jobs()
+        recovered = music_backend.music_job_status(started["job_id"])
+    check.assert_not_called()
+    assert recovered["status"] == "complete"
+
+
 def test_vocal_song_with_no_sustained_words_is_not_marked_complete(tmp_path):
     jobs = tmp_path / "jobs"
     output = tmp_path / "song.mp3"

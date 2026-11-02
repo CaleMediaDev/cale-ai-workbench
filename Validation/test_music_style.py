@@ -59,3 +59,14 @@ def test_techno_feedback_does_not_repeat_rejected_instrument_name():
     )
     assert "sequenced synth bass" in direction
     assert "guitar" not in direction
+
+
+def test_vocal_chops_are_texture_not_full_length_singing():
+    request = "Heavy dubstep with minimal robotic vocal chops and a fake drop"
+    assert not music_style.requires_sustained_vocals(request)
+    caption = music_style.enhance(request)
+    assert "Sparse chopped vocal syllables" in caption
+    assert not music_style.requires_sustained_vocals(caption)
+    assert music_style.requires_sustained_vocals("Rap song with vocal chops")
+    assert music_style.requires_sustained_vocals(request, lyrics="[Verse] Sing this")
+    assert music_style.requires_sustained_vocals("Make a pop song with lead vocals")

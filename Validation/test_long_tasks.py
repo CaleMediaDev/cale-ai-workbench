@@ -532,6 +532,30 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("[x] Apply the latest user request", plan.read_text(encoding="utf-8"))
         self.assertIn("song-with-vocals.mp3", (plan.parent / "PROGRESS.md").read_text())
 
+    def test_sparse_vocal_chop_render_finishes_without_full_song_transcription(self):
+        job_id = "9" * 32
+        with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
+            pid = task_module.add_music_project(
+                "make dubstep with vocal chops",
+                {"prompt": "dubstep with minimal vocal chops", "duration_seconds": 30,
+                 "instrumental": False}, str(self.base / "chop-song"),
+            )
+        task = next(p for p in task_module.projects() if p["id"] == pid)
+        output = Path(task["folder"]) / "song.mp3"
+        output.write_bytes(b"saved audio")
+        with (patch("music_backend.music_job_status", return_value={
+                  "status": "complete", "prompt": "dubstep with minimal vocal chops",
+                  "lyrics": "", "instrumental": False, "source_path": "",
+                  "duration_seconds": 30, "result": {"path": str(output)},
+              }),
+              patch("music_backend.audio_file_ok", return_value=True),
+              patch("music_backend.vocal_evidence") as vocal_check):
+            task_module.advance_project(task)
+        vocal_check.assert_not_called()
+        ready = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(ready["status"], "ready_for_review")
+        self.assertEqual(task_module.task_progress(ready), (100, "Finished"))
+
     def test_complex_music_revision_still_uses_agent(self):
         job_id = "c" * 32
         with patch("music_backend.start_music_job", return_value={"job_id": job_id}):
