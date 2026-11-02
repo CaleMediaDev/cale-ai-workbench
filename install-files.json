@@ -1,4 +1,5 @@
 [
+  "capability_index.py", "Validation/test_capability_index.py",
   "native_agent.py", "Validation/test_native_agent.py",
   "model_fitness.py", "Validation/test_model_fitness.py", "Install-Retry.ps1", "Validation/test_install_retry.py", "core_tool_health.py", "Repair-CoreTools.ps1", "browser_probe.js", "Validation/test_core_tool_health.py",
   "README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "LICENSE", "HERMES-LICENSE", "THIRD-PARTY-NOTICES.md", "ASSETS.md",

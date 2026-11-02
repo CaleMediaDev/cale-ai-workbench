@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent
 
 import ffmpeg_runtime
 import core_tool_health
+import capability_index
 
 
 def _json(path: Path) -> dict:
@@ -317,6 +318,11 @@ def snapshot(root: Path = ROOT) -> dict:
     rows.append(_item("Task supervisor", "ready" if active_monitor else "attention",
                       "Running and checking tasks" if active_monitor else "Waiting for supervisor heartbeat", True))
 
+    capabilities = capability_index.health(root)
+    rows.append(_item("Skills and tools", "ready" if capabilities["ok"] else "attention",
+                      f"Fast local search tested: {capabilities['skills']} skills, {capabilities['tools']} tools"
+                      if capabilities["ok"] else "Building or repairing the local skills and tools index", True))
+
     scan = _json(state / "computer-files-status.json")
     indexed = (state / "computer-files-first-scan.done").is_file() or scan.get("status") == "complete"
     index_responds = indexed and _file_index_responds(state)
@@ -490,6 +496,25 @@ def request_safe_repairs(root: Path = ROOT, result: dict | None = None) -> list[
     if rows.get("Core work tools", {}).get("state") == "attention":
         if core_tool_health.start_background(root):
             requested.append("Core work tools")
+    if (rows.get("Skills and tools", {}).get("state") == "attention"
+            and (root / "capability_index.py").is_file()):
+        marker = root / "LongTasks/capability-index-repair.json"
+        previous = _json(marker)
+        try:
+            last_attempt = float(previous.get("updated") or 0)
+        except (TypeError, ValueError, OverflowError):
+            last_attempt = 0
+        if time.time() - last_attempt >= 300:
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(json.dumps({"updated": time.time()}), encoding="utf-8")
+                subprocess.Popen([sys.executable, str(root / "capability_index.py")],
+                                 cwd=root, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                requested.append("Skills and tools")
+            except OSError:
+                pass
     if rows.get("Fast file search", {}).get("state") == "attention":
         marker = root / "LongTasks/computer-files-recheck.request"
         try:

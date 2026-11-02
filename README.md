@@ -6,6 +6,8 @@ Created by [Cale Media](https://calemedia.com/). New general tasks use Cale's na
 
 The native worker saves each model/tool step, resumes after a crash, keeps a project plan and progress file, and independently reruns the project's verification script before marking work finished. It can search public webpages, edit project files, run commands, and discover Cale's installed local image, audio, video, camera, memory, and training tools. Existing Hermes tasks retain their board history during this migration. The installer still includes Hermes for that recovery path and for capabilities that have not moved to the native worker yet; signed-in Chrome/DevTools sessions remain one such gap. No OpenClaw runtime or source code is bundled.
 
+Skills and tool descriptions are also indexed in a local SQLite FTS5 database (`LongTasks/capabilities.sqlite3`). Setup builds it before opening the desktop; launch and the supervisor refresh it automatically, including locally edited skills. The native worker can search that catalog and load a relevant skill without scanning every Markdown file on each task. The index is rebuildable from the installed files and tool registrations; it contains no account keys or project documents. The readiness checklist queries the database and offers automatic repair if it fails. Large optional model weights still download according to the PC's available resources, so a capability appears as ready only after its runtime or model has actually passed its check.
+
 ## Install
 
 **[Download the Windows installer](https://github.com/CaleMediaDev/cale-ai-workbench/releases/latest)**

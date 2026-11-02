@@ -25,6 +25,7 @@ import wave
 from pathlib import Path
 
 import cale_voice
+import capability_index
 import chrome_connector
 import core_tool_health
 import feedback_learning
@@ -3103,6 +3104,7 @@ def monitor():
     last_setup_recovery = 0
     last_self_check = 0
     last_idle_health = 0
+    last_capability_refresh = time.monotonic()
     service_error = ""
     catalog_thread = None
     catalog_refresh_seconds = 24 * 60 * 60
@@ -3119,6 +3121,13 @@ def monitor():
         ).read_bytes() != installed_marker:
             return  # A newly installed version starts its own supervisor.
         try:
+            if time.monotonic() - last_capability_refresh >= 300:
+                last_capability_refresh = time.monotonic()
+                try:
+                    capability_index.sync(ROOT)
+                except (OSError, ValueError, sqlite3.Error, ImportError) as exc:
+                    with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
+                        log.write(time.ctime() + f"\nCapability index refresh: {exc}\n")
             if time.monotonic() - last_setup_recovery >= 30:
                 last_setup_recovery = time.monotonic()
                 runtime_features.start_background()
@@ -6824,6 +6833,11 @@ def prepare_desktop():
     except (OSError, ValueError) as exc:
         (ROOT / "Updates").mkdir(exist_ok=True)
         (ROOT / "Updates/skills-error.txt").write_text(str(exc), encoding="utf-8")
+    try:
+        capability_index.sync(ROOT)
+    except (OSError, ValueError, sqlite3.Error, ImportError) as exc:
+        (ROOT / "Updates").mkdir(exist_ok=True)
+        (ROOT / "Updates/capabilities-error.txt").write_text(str(exc), encoding="utf-8")
 
 
 def gui_single_instance():
