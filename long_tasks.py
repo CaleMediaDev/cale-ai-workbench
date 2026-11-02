@@ -6545,9 +6545,11 @@ def gui():
             window.after(900, connect)
         window.after(5000, poll)
 
-    # Arm the microphone on launch without cutting off Cale's introduction.
-    # Recording begins only after the device check and any speech finish.
-    toggle_listening(interrupt_speech=False)
+    # Give the first microphone turn priority over the launch greeting. A long
+    # introduction otherwise makes "Mic On" appear ready while every Hey Cale
+    # request is ignored until all of its speech has finished. The greeting
+    # remains queued and plays once the initial listening clip is complete.
+    toggle_listening(interrupt_speech=True)
     voice_poll()
     poll()
 
