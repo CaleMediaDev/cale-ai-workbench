@@ -539,11 +539,13 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
                      )},
                      {"role": "user", "content": prompt[:3000]},
                  ]}
-            if routing_mode.load_scope(cloud_ai.STATE) in ("cloud_only", "free_cloud_only"):
+            task_id = usage_history.CURRENT_TASK.get()
+            cloud_scope = routing_mode.load_scope(cloud_ai.STATE) in ("cloud_only", "free_cloud_only")
+            if cloud_scope and cloud_ai.task_route(task_id) != "local_only":
                 try:
                     result = cloud_ai.Router().complete(
                         {**payload, "model": cloud_ai.LOCAL_MODEL},
-                        task_id=usage_history.CURRENT_TASK.get(),
+                        task_id=task_id,
                     )
                 except Exception:
                     # Local lyrics are part of the offline music tool. Cloud

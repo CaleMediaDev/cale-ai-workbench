@@ -8,6 +8,15 @@ import pytest
 import chat_assistant
 
 
+@pytest.fixture(autouse=True)
+def isolate_chat_scope_from_installed_user_settings(tmp_path):
+    """Chat routing tests must not inherit the user's live cloud toggle."""
+    import cloud_ai
+
+    with patch.object(cloud_ai, "STATE", tmp_path):
+        yield
+
+
 def test_free_cloud_chat_uses_connected_model_without_local_inference(tmp_path):
     import cloud_ai
     import routing_mode

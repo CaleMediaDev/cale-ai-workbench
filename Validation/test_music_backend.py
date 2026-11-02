@@ -259,21 +259,40 @@ def test_compose_lyrics_uses_small_local_model_and_rejects_truncation():
 
     good = {"choices": [{"finish_reason": "stop", "message": {
         "content": "[Verse]\n" + "Michigan lights and water rolling " * 10}}]}
-    with patch("cloud_ai.post", return_value=good) as post:
+    with patch("routing_mode.load_scope", return_value="local_only"), patch("cloud_ai.post", return_value=good) as post:
         lyrics = music_backend.compose_lyrics("Michigan rap", 60)
     assert "Michigan lights" in lyrics
     assert post.call_args.args[1]["model"] == FAST_MODEL
     bad = {"choices": [{"finish_reason": "length", "message": {
         "content": good["choices"][0]["message"]["content"]}}]}
-    with patch("cloud_ai.post", side_effect=[bad, good]) as retry:
+    with patch("routing_mode.load_scope", return_value="local_only"), patch("cloud_ai.post", side_effect=[bad, good]) as retry:
         assert music_backend.compose_lyrics("Michigan rap", 60).startswith("[Verse]")
     assert retry.call_count == 2
-    with patch("cloud_ai.post", side_effect=[TimeoutError("model busy"), good]) as retry:
+    with patch("routing_mode.load_scope", return_value="local_only"), patch("cloud_ai.post", side_effect=[TimeoutError("model busy"), good]) as retry:
         assert music_backend.compose_lyrics("Michigan rap", 60).startswith("[Verse]")
     assert retry.call_count == 2
-    with patch("cloud_ai.post", return_value=bad):
+    with patch("routing_mode.load_scope", return_value="local_only"), patch("cloud_ai.post", return_value=bad):
         with pytest.raises(RuntimeError, match="could not finish"):
             music_backend.compose_lyrics("Michigan rap", 60)
+
+
+def test_local_only_song_writes_lyrics_locally_when_global_scope_is_cloud_only():
+    import usage_history
+    import cloud_ai
+
+    good = {"choices": [{"finish_reason": "stop", "message": {
+        "content": "[Verse]\n" + "Tahoe water and summer mountains " * 10}}]}
+    token = usage_history.CURRENT_TASK.set("a" * 12)
+    try:
+        with (patch("routing_mode.load_scope", return_value="cloud_only"),
+              patch.object(cloud_ai, "task_route", return_value="local_only"),
+              patch.object(cloud_ai, "post", return_value=good) as local,
+              patch.object(cloud_ai.Router, "complete") as cloud):
+            assert "Tahoe water" in music_backend.compose_lyrics("Tahoe song", 60)
+        local.assert_called_once()
+        cloud.assert_not_called()
+    finally:
+        usage_history.CURRENT_TASK.reset(token)
 
 
 def test_cloud_only_music_writes_lyrics_in_cloud_then_falls_back_locally():
