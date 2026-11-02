@@ -286,6 +286,38 @@ def publish_latest_song(folder: str | Path, audio: Path, video: Path | None) -> 
             shutil.copy2(source, alias)
 
 
+def restore_reviewed_song_aliases(p: dict, job: dict) -> bool:
+    """Make the finished take obvious after an older install missed its aliases."""
+    if job.get("status") != "complete":
+        return False
+    result = job.get("result") or {}
+    folder = Path(p["folder"]).resolve()
+    audio = Path(result.get("path") or "").resolve()
+    if not audio.is_file() or audio.parent != folder:
+        return False
+    video_path = (result.get("video") or {}).get("path")
+    video = Path(video_path).resolve() if video_path else None
+    if video is not None and (not video.is_file() or video.parent != folder):
+        video = None
+    alias = folder / ("00-LATEST-SONG" + audio.suffix)
+    video_alias = folder / "00-LATEST-VIDEO.mp4"
+    playlist = folder / "00-PLAY-THIS.m3u"
+    try:
+        current_audio = alias.is_file() and os.path.samefile(alias, audio)
+        current_video = (video is None or
+                         video_alias.is_file() and os.path.samefile(video_alias, video))
+        current_playlist = (playlist.is_file() and
+                            playlist.read_text(encoding="utf-8-sig") ==
+                            "#EXTM3U\n" + audio.name + "\n")
+    except OSError:
+        current_audio = current_video = current_playlist = False
+    if current_audio and current_video and current_playlist:
+        return False
+    publish_latest_song(folder, audio, video)
+    update(p["id"], fingerprint=fingerprint(folder))
+    return True
+
+
 def task_usage_labels(p, tokens, source_totals):
     """Distinguish text tokens from local audio generation on music cards."""
     sources = " · ".join(
@@ -2742,10 +2774,11 @@ def advance_project(p):
                 import music_backend
                 import music_style
 
+                job = music_backend.music_job_status(job_id)
                 if music_style.unambiguous_vocal_song(p["brief"]):
-                    job = music_backend.music_job_status(job_id)
                     if repair_instrumental_misroute(p, job):
                         return
+                restore_reviewed_song_aliases(p, job)
                 _reviewed_music_routes.add(route_key)
             return
         import music_backend
@@ -5813,6 +5846,21 @@ def gui():
             pane, text=item["title"], font=("Segoe UI", 17, "bold"), wraplength=620
         ).pack(anchor="w")
         if re.search(r"\b(song|music|rap|audio track|dubstep)\b", item["brief"], re.I):
+            def play_latest_song():
+                latest = next(
+                    (Path(item["folder"]) / ("00-LATEST-SONG" + suffix)
+                     for suffix in (".mp3", ".wav", ".flac")
+                     if (Path(item["folder"]) / ("00-LATEST-SONG" + suffix)).is_file()),
+                    None,
+                )
+                versions = song_versions(item["folder"])
+                selected = latest or (versions[0] if versions else None)
+                if selected:
+                    os.startfile(selected)
+                else:
+                    messagebox.showinfo("Song", "No saved song yet.", parent=dialog)
+            ttk.Button(pane, text="Play latest song",
+                       command=play_latest_song).pack(anchor="w", pady=(8, 0))
             def show_song_versions():
                 versions = song_versions(item["folder"])
                 if not versions:

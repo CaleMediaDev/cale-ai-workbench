@@ -840,6 +840,27 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual((folder / "00-PLAY-THIS.m3u").read_text(
             encoding="utf-8-sig"), "#EXTM3U\nsong-with-vocals.mp3\n")
 
+    def test_reviewed_old_song_recovers_vocal_alias_without_changing_takes(self):
+        folder = self.base / "old-reviewed-song"
+        folder.mkdir()
+        original = folder / "song.mp3"
+        original.write_bytes(b"instrumental")
+        vocal = folder / "song-with-vocals.mp3"
+        vocal.write_bytes(b"sung")
+        video = folder / "song-with-vocals-video.mp4"
+        video.write_bytes(b"video")
+        job = {"status": "complete", "result": {
+            "path": str(vocal), "video": {"path": str(video)},
+        }}
+        task = {"id": "a" * 12, "folder": str(folder)}
+        with patch.object(task_module, "update") as update:
+            self.assertTrue(task_module.restore_reviewed_song_aliases(task, job))
+            self.assertFalse(task_module.restore_reviewed_song_aliases(task, job))
+        self.assertEqual(update.call_count, 1)
+        self.assertEqual((folder / "00-LATEST-SONG.mp3").read_bytes(), b"sung")
+        self.assertEqual((folder / "00-LATEST-VIDEO.mp4").read_bytes(), b"video")
+        self.assertEqual(original.read_bytes(), b"instrumental")
+
     def test_no_vocals_feedback_starts_a_vocal_revision(self):
         self.assertTrue(task_module.simple_vocal_revision("no vocals on the song"))
         self.assertTrue(task_module.simple_vocal_revision("it has no audible vocals"))
