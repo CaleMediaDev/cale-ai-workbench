@@ -84,6 +84,15 @@ def test_vocal_chops_are_texture_not_full_length_singing():
     assert music_style.requires_sustained_vocals("Make a pop song with lead vocals")
 
 
+def test_clear_vocal_request_is_distinct_from_negated_or_instrumental_brief():
+    assert music_style.unambiguous_vocal_song(
+        "Male rapper with two verses and a vocal hook, then an instrumental break")
+    assert not music_style.unambiguous_vocal_song("Make an instrumental rap beat")
+    assert not music_style.unambiguous_vocal_song("No male vocals; instrumental only")
+    assert not music_style.unambiguous_vocal_song(
+        "Make an instrumental song with a male rapper")
+
+
 def test_explicit_bpm_is_parsed_for_music_engine():
     assert music_style.requested_bpm("Heavy dubstep at 150 BPM") == 150
     assert music_style.requested_bpm("80-bpm synth groove") == 80

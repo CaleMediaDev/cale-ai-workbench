@@ -788,11 +788,15 @@ def _start_music_project(p: dict, spec: dict) -> None:
         )
         direction = music_style.learned_directions(learned, spec["prompt"])
         prompt = spec["prompt"] + (". " + direction if direction else "")
+        instrumental = bool(spec["instrumental"])
+        if instrumental and music_style.unambiguous_vocal_song(
+                p["brief"], spec.get("lyrics", "")):
+            instrumental = False
         job = music_backend.start_music_job(
             prompt, str(folder / "song.mp3"),
             lyrics=spec.get("lyrics", ""),
             duration_seconds=spec["duration_seconds"],
-            instrumental=spec["instrumental"],
+            instrumental=instrumental,
             task_id=pid,
         )
     except Exception as exc:
@@ -932,6 +936,51 @@ def retry_song_without_vocals(p: dict, job: dict) -> bool:
     )
     update(p["id"], card="music-job:" + started["job_id"], status="working",
            detail=f"Trying the song once more with clearer vocals ({attempt + 1}/1)")
+    return True
+
+
+def repair_instrumental_misroute(p: dict, job: dict) -> bool:
+    """Preserve an instrumental render and make a vocal take when the brief requires it."""
+    import music_style
+
+    if (job.get("status") != "complete" or not job.get("instrumental")
+            or job.get("source_path") or not music_style.unambiguous_vocal_song(
+                p["brief"], str(job.get("lyrics", "")))):
+        return False
+    import music_backend
+
+    original = Path(job["output_path"])
+    existing = next((candidate for candidate in reversed(music_backend.project_jobs(
+        p["id"], p["folder"]
+    )) if candidate.get("job_id") != job.get("job_id")
+        and not candidate.get("instrumental")
+        and candidate.get("status") in ("queued", "working", "complete")
+        and Path(str(candidate.get("output_path", ""))).stem.startswith(
+            original.stem + "-with-vocals")), None)
+    if existing:
+        update(p["id"], card="music-job:" + existing["job_id"], status="working",
+               detail="Continuing the saved vocal version")
+        return True
+    output = original.with_name(f"{original.stem}-with-vocals{original.suffix}")
+    if output.exists():
+        output = next(
+            original.with_name(f"{original.stem}-with-vocals-{number}{original.suffix}")
+            for number in range(2, 1000)
+            if not original.with_name(
+                f"{original.stem}-with-vocals-{number}{original.suffix}"
+            ).exists()
+        )
+    prompt = str(job["prompt"]).rstrip(" .") + (
+        ". Prominent clear lead vocals with verses and a chorus throughout; "
+        "the instrumental section is only a short break."
+    )
+    started = music_backend.start_music_job(
+        prompt, str(output), lyrics=str(job.get("lyrics", "")),
+        duration_seconds=int(job["duration_seconds"]), instrumental=False,
+        task_id=p["id"],
+    )
+    update(p["id"], card="music-job:" + started["job_id"], status="working",
+           detail="The first take missed requested vocals; making a vocal version")
     return True
 
 
@@ -2650,6 +2699,8 @@ def advance_project(p):
             if not music_backend.audio_file_ok(output):
                 update(p["id"], status="needs_input",
                        detail="The music engine returned a file that could not be decoded as audio.")
+                return
+            if repair_instrumental_misroute(p, job):
                 return
             if (not job.get("source_path")
                     and music_style.requires_sustained_vocals(

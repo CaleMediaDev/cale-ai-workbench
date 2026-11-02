@@ -31,6 +31,33 @@ VOCAL_TEXTURE = re.compile(
 LEAD_VOCALS = re.compile(
     r"\b(?:lead vocals?|sung verses?|singing|singer|rap|rapped)\b", re.I,
 )
+EXPLICIT_LEAD = re.compile(
+    r"\b(?:singer|rapper|singing|rapping|sung|rapped|"
+    r"(?:male|female|lead|layered|backing|deep|gritty)\s+vocals?|"
+    r"vocal\s+(?:verses?|chorus|hook)|rap\s+verses?)\b", re.I,
+)
+NO_VOCALS = re.compile(
+    r"\b(?:no vocals|without vocals|no singing|no lyrics|without lyrics)\b", re.I,
+)
+WHOLE_INSTRUMENTAL = re.compile(
+    r"\b(?:instrumental\s+(?:song|track|beat|music|piece|version|only)|"
+    r"(?:fully|entirely|all)\s+instrumental)\b", re.I,
+)
+
+
+def explicit_lead_vocals(prompt: str, lyrics: str = "") -> bool:
+    """Recognize a requested singer or rapper, excluding negated descriptions."""
+    if lyrics.strip():
+        return True
+    request, _, _ = _clean_negations(prompt.split("Past user feedback", 1)[0])
+    return bool(EXPLICIT_LEAD.search(request))
+
+
+def unambiguous_vocal_song(prompt: str, lyrics: str = "") -> bool:
+    """Use only clear vocal intent for automatic correction of a music job."""
+    return (explicit_lead_vocals(prompt, lyrics)
+            and not NO_VOCALS.search(prompt)
+            and not WHOLE_INSTRUMENTAL.search(prompt))
 
 
 def requested_bpm(prompt: str) -> int | None:

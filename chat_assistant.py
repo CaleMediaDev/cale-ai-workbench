@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import music_style
 import subprocess
 import time
 from pathlib import Path
@@ -161,21 +162,9 @@ def music_request(text: str) -> dict | None:
                  prompt[match.end():], re.IGNORECASE)
         for match in instrumental_mentions
     )
-    no_vocals = bool(re.search(
-        r"\b(?:no vocals|without vocals|no singing|no lyrics|without lyrics)\b",
-        prompt, re.IGNORECASE,
-    ))
-    lead_vocals = bool(lyrics or re.search(
-        r"\b(?:singer|rapper|singing|rapping|sung|rapped|"
-        r"(?:male|female|lead|layered|backing|deep|gritty)\s+vocals?|"
-        r"vocal\s+(?:verses?|chorus|hook)|rap\s+verses?)\b",
-        prompt, re.IGNORECASE,
-    ))
-    whole_instrumental = bool(re.search(
-        r"\b(?:instrumental\s+(?:song|track|beat|music|piece|version|only)|"
-        r"(?:fully|entirely|all)\s+instrumental)\b",
-        prompt, re.IGNORECASE,
-    ))
+    no_vocals = bool(music_style.NO_VOCALS.search(prompt))
+    lead_vocals = music_style.explicit_lead_vocals(prompt, lyrics)
+    whole_instrumental = bool(music_style.WHOLE_INSTRUMENTAL.search(prompt))
     if lead_vocals and (whole_instrumental or no_vocals):
         return None  # Conflicting whole-song instructions need interpretation.
     instrumental = no_vocals or bool(

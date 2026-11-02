@@ -36,6 +36,76 @@ class LongTaskTests(unittest.TestCase):
             "AI used: ACE-Step 1.5 local audio · Local 1,091 tokens",
         ))
 
+    def test_music_preflight_corrects_a_misrouted_vocal_request(self):
+        import music_backend
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            (folder / ".local-ai").mkdir()
+            item = {"id": "a" * 12, "folder": str(folder),
+                    "brief": "Male rapper with two verses, a vocal hook and an instrumental break"}
+            spec = {"prompt": item["brief"], "lyrics": "", "duration_seconds": 180,
+                    "instrumental": True}
+            with (patch.object(task_module.feedback_learning, "guidance", return_value=""),
+                  patch.object(music_backend, "start_music_job", return_value={"job_id": "vocal"}) as start,
+                  patch.object(task_module, "update")):
+                task_module._start_music_project(item, spec)
+            self.assertFalse(start.call_args.kwargs["instrumental"])
+
+    def test_completed_misrouted_song_gets_vocal_take_without_deleting_original(self):
+        import music_backend
+
+        with tempfile.TemporaryDirectory() as temp:
+            original = Path(temp) / "song.mp3"
+            original.write_bytes(b"original")
+            item = {"id": "b" * 12, "folder": temp,
+                    "brief": "Male rapper with verses and a vocal hook, then an instrumental break"}
+            job = {"status": "complete", "instrumental": True, "source_path": "",
+                   "prompt": item["brief"], "output_path": str(original),
+                   "duration_seconds": 180, "lyrics": ""}
+            with (patch.object(music_backend, "start_music_job", return_value={"job_id": "take-2"}) as start,
+                  patch.object(task_module, "update") as update):
+                self.assertTrue(task_module.repair_instrumental_misroute(item, job))
+            self.assertTrue(original.is_file())
+            self.assertEqual(Path(start.call_args.args[1]).name, "song-with-vocals.mp3")
+            self.assertFalse(start.call_args.kwargs["instrumental"])
+            self.assertEqual(update.call_args.kwargs["card"], "music-job:take-2")
+
+    def test_music_completion_checks_for_misroute_before_marking_finished(self):
+        import music_backend
+
+        item = {"id": "c" * 12, "folder": str(self.base / "song"),
+                "status": "working", "card": "music-job:" + "d" * 32,
+                "brief": "A male rapper and vocal chorus"}
+        job = {"status": "complete", "result": {"path": str(self.base / "song.mp3")}}
+        with (patch.object(task_module, "recheck_changed_media", return_value=False),
+              patch.object(music_backend, "music_job_status", return_value=job),
+              patch.object(music_backend, "audio_file_ok", return_value=True),
+              patch.object(task_module, "repair_instrumental_misroute", return_value=True) as repair,
+              patch.object(task_module, "update") as update):
+            task_module.advance_project(item)
+        repair.assert_called_once_with(item, job)
+        update.assert_not_called()
+
+    def test_music_misroute_reuses_vocal_job_after_interrupted_card_update(self):
+        import music_backend
+
+        with tempfile.TemporaryDirectory() as temp:
+            original = Path(temp) / "song.mp3"
+            item = {"id": "e" * 12, "folder": temp,
+                    "brief": "Male rapper with a vocal hook and instrumental break"}
+            job = {"job_id": "old", "status": "complete", "instrumental": True,
+                   "source_path": "", "prompt": item["brief"],
+                   "output_path": str(original), "duration_seconds": 180}
+            saved = {"job_id": "saved", "status": "working", "instrumental": False,
+                     "output_path": str(Path(temp) / "song-with-vocals.mp3")}
+            with (patch.object(music_backend, "project_jobs", return_value=[job, saved]),
+                  patch.object(music_backend, "start_music_job") as start,
+                  patch.object(task_module, "update") as update):
+                self.assertTrue(task_module.repair_instrumental_misroute(item, job))
+            start.assert_not_called()
+            self.assertEqual(update.call_args.kwargs["card"], "music-job:saved")
+
     def test_missing_configured_main_model_recovers_before_task_dispatch(self):
         calls = []
 
