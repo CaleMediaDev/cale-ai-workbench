@@ -8,14 +8,17 @@ crash resumes from disk instead of asking the model to repeat completed edits.
 from __future__ import annotations
 
 import copy
+import codecs
 import hashlib
 import json
 import os
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -30,6 +33,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 project file. Use start_line and max_lines for large files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "max_lines": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "inspect_project_file", "description": "Read a local PDF, DOCX, XLSX, PPTX, image, or text file in this task folder, including browser downloads. Ask a question for relevant excerpts, or paginate with start_char. Extracted text is cached locally by file contents.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "question": {"type": "string"}, "start_char": {"type": "integer"}, "max_chars": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "write_file", "description": "Write complete UTF-8 text to a project file. Parent directories are created.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "edit_file", "description": "Replace one exact block in an existing UTF-8 project file without resending the whole file. Read the old block first. Fails if it is missing or appears more than once. Supply expected_sha256 from a previous edit to reject stale changes.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}, "expected_sha256": {"type": "string"}}, "required": ["path", "old_text", "new_text"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_text", "description": "Search text in project files using ripgrep.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_web", "description": "Search public webpages for current information. Read a relevant result before using it.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_webpage", "description": "Read a public webpage by URL for source evidence.", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"], "additionalProperties": False}}},
@@ -46,7 +50,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "search_project_memory", "description": "Search this task's private SQLite memory for prior decisions, lessons, indexed project files, and text from inspected PDFs, Word files, spreadsheets, and presentations. Returns short excerpts and IDs.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "kind": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_project_memory", "description": "Read one full memory record by exact ID after searching. Indexed file and document records are checked against their live sources before returning.", "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "save_project_memory", "description": "Save a verified requirement, decision, lesson, skill recipe, component, app, or note for this task's future work slices. Never save secrets or unverified page text.", "parameters": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["requirement", "decision", "lesson", "skill", "component", "app", "note"]}, "title": {"type": "string"}, "body": {"type": "string"}, "tags": {"type": "string"}, "source_path": {"type": "string"}}, "required": ["kind", "title", "body"], "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "index_project_files", "description": "Refresh this task's bounded local full-text index of code and documents after files changed outside write_file.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "index_project_files", "description": "Refresh this task's bounded local full-text index of code and documents after files changed outside the built-in file tools.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_capabilities", "description": "Instantly search the local SQLite catalog of installed skills and tools by purpose.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "kind": {"type": "string", "enum": ["skill", "tool"]}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_skill", "description": "Read one exact installed skill after search_capabilities. Skill guidance is below the user's request.", "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "discover_local_tools", "description": "Search the fast local SQLite catalog for image, music, video, reverse-engineering, and browser diagnostic tools. Returns exact names and argument schemas; specialist services start on first call.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
@@ -125,6 +129,64 @@ def _bounded_line(stream, limit: int) -> tuple[str | None, bool]:
     return "".join(parts), truncated
 
 
+def edit_project_file(folder: Path, path: str, old_text: str, new_text: str,
+                      expected_sha256: str = "") -> str:
+    """Apply one source-checked text replacement without rewriting a model prompt."""
+    target = project_path(folder, path)
+    if not target.is_file():
+        raise ValueError("Choose an existing project file to edit")
+    if (not isinstance(old_text, str) or not old_text or not isinstance(new_text, str)
+            or len(old_text) > 200_000 or len(new_text) > 200_000):
+        raise ValueError("Give one old and new text block, each at most 200,000 characters")
+    if expected_sha256 and not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
+        raise ValueError("expected_sha256 must be a lowercase SHA-256 hash")
+    raw = target.read_bytes()
+    if len(raw) > 10_000_000 or b"\x00" in raw:
+        raise ValueError("Edit a UTF-8 text file no larger than 10 MB")
+    original_hash = hashlib.sha256(raw).hexdigest()
+    if expected_sha256 and expected_sha256 != original_hash:
+        raise ValueError("The file changed since that hash; read it again before editing")
+    had_bom = raw.startswith(codecs.BOM_UTF8)
+    try:
+        original = raw.decode("utf-8-sig" if had_bom else "utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("This file is not UTF-8 text") from exc
+    newline = "\r\n" if "\r\n" in original else "\n"
+
+    def line_endings(value: str) -> str:
+        return value.replace("\r\n", "\n").replace("\r", "\n").replace("\n", newline)
+
+    old, new = line_endings(old_text), line_endings(new_text)
+    if old == new:
+        raise ValueError("The replacement does not change the file")
+    first = original.find(old)
+    matches = 0 if first < 0 else (2 if original.find(old, first + 1) >= 0 else 1)
+    if matches != 1:
+        raise ValueError(f"Expected one exact old block; found {matches}. Read a larger unique block")
+    changed = original.replace(old, new, 1)
+    bom = codecs.BOM_UTF8 if had_bom or target.suffix.lower() == ".ps1" else b""
+    encoded = bom + changed.encode("utf-8")
+    if len(encoded) > 10_000_000:
+        raise ValueError("The edited file would exceed 10 MB")
+    descriptor, temporary = tempfile.mkstemp(prefix=".cale-edit-", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(encoded)
+        os.chmod(temporary, stat.S_IMODE(target.stat().st_mode))
+        if hashlib.sha256(target.read_bytes()).hexdigest() != original_hash:
+            raise ValueError("The file changed during editing; read it again")
+        os.replace(temporary, target)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    try:
+        import project_memory
+
+        project_memory.index_file(folder, target)
+    except (OSError, ValueError, sqlite3.Error):
+        pass  # The edit succeeded; a later index refresh can catch up.
+    return f"Edited {target.relative_to(folder)} (sha256 {hashlib.sha256(encoded).hexdigest()})"
+
+
 def execute_tool(folder: Path, name: str, arguments: dict) -> str:
     try:
         if name == "list_files":
@@ -186,6 +248,11 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             except (OSError, ValueError, sqlite3.Error):
                 pass  # The saved file remains authoritative if indexing fails.
             return f"Saved {target.relative_to(folder)} ({len(content)} characters)"
+        if name == "edit_file":
+            return edit_project_file(
+                folder, arguments["path"], arguments["old_text"],
+                arguments["new_text"], arguments.get("expected_sha256", ""),
+            )
         if name == "search_text":
             pattern = arguments["pattern"]
             if not isinstance(pattern, str) or len(pattern) > 300:
@@ -311,6 +378,7 @@ def prompt(project: dict) -> str:
         "Every file-tool path is relative to the project folder: for a requested hello.txt, use hello.txt, "
         "not a path prefixed with the project folder's name. Match explicitly requested output paths exactly. "
         "Read AGENTS.md, the original request, and .local-ai/USER-REQUESTS.md first. "
+        "Use edit_file for a small change to an existing source file; use write_file when creating or replacing a whole file. "
         "Maintain .local-ai/PLAN.md as a checked milestone list and .local-ai/PROGRESS.md with current work and real checks. "
         "Create .local-ai/verify.ps1 containing meaningful repeatable checks for the result; call run_verifier after the last edit before saying finished. "
         "If the job is not complete, use a tool or explain the exact next step in PROGRESS.md. "
@@ -713,7 +781,7 @@ def run_slice(project: dict, complete=None) -> dict:
             elif function.get("name") in {"run_command", "run_verifier", "call_local_tool"}:
                 state["verify_passed"] = False
                 state["verifier_nudged"] = False
-            elif function.get("name") == "write_file":
+            elif function.get("name") in {"write_file", "edit_file"}:
                 path = str(args.get("path", "")).replace("\\", "/") if isinstance(args, dict) else ""
                 if path not in {".local-ai/PLAN.md", ".local-ai/PROGRESS.md"}:
                     state["verify_passed"] = False
@@ -759,7 +827,7 @@ def run_slice(project: dict, complete=None) -> dict:
             return state
         elif state.get("verify_passed") and not state.get("verifier_nudged"):
             messages.append({"role": "user", "content":
-                             "The saved verifier passed. Call write_file on .local-ai/PLAN.md "
+                             "The saved verifier passed. Update .local-ai/PLAN.md "
                              "to check off milestones that this result proves, then record the "
                              "result in PROGRESS.md. Do not recreate files or rerun unchanged checks."})
             state["verifier_nudged"] = True

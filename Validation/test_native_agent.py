@@ -1,6 +1,7 @@
 """Behavior checks for Cale's native, restartable project worker."""
 
 import copy
+import hashlib
 import json
 import os
 import sqlite3
@@ -324,6 +325,37 @@ def test_source_write_after_verification_invalidates_automatic_handoff():
         assert state["verify_passed"] is False
 
 
+def test_source_edit_after_verification_requires_another_check():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        notes = folder / ".local-ai"
+        (notes / "verify.ps1").write_text("exit 0")
+        (notes / "PLAN.md").write_text("- [ ] Edit and check the page\n")
+        (notes / "PROGRESS.md").write_text("Working on the page.\n")
+        (folder / "index.html").write_text("<h1>Old</h1>", encoding="utf-8")
+        responses = iter([
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "verify-1", "function": {"name": "run_command",
+                    "arguments": '{"command":"powershell -File .local-ai/verify.ps1"}'}}]}}]},
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "edit-1", "function": {"name": "edit_file", "arguments": json.dumps({
+                    "path": "index.html", "old_text": "Old", "new_text": "New",
+                })}}]}}]},
+        ])
+        original = native_agent.execute_tool
+
+        def tool(root, name, args):
+            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args)
+
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2), \
+                patch.object(native_agent, "execute_tool", side_effect=tool):
+            state = native_agent.run_slice(item, complete=lambda _: next(responses))
+        assert state["status"] == "continue"
+        assert state["verify_passed"] is False
+        assert (folder / "index.html").read_text() == "<h1>New</h1>"
+
+
 def test_valid_model_turn_resets_consecutive_worker_failures():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
@@ -358,6 +390,10 @@ def test_native_file_tools_cannot_escape_project_folder():
         })
         assert result.startswith("Tool error:")
         assert not (Path(temporary) / "outside.txt").exists()
+        edit = native_agent.execute_tool(folder, "edit_file", {
+            "path": "../outside.txt", "old_text": "secret", "new_text": "changed",
+        })
+        assert edit.startswith("Tool error:")
 
 
 def test_powershell_file_tool_uses_utf8_bom_and_reads_without_marker():
@@ -372,6 +408,51 @@ def test_powershell_file_tool_uses_utf8_bom_and_reads_without_marker():
         read = native_agent.execute_tool(folder, "read_file", {"path": ".local-ai/verify.ps1"})
         assert read.startswith("1: Write-Output")
         assert "✓ check passed" in read
+
+
+def test_edit_file_changes_one_block_and_refreshes_search_without_full_rewrite():
+    import project_memory
+
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        source = folder / "app.py"
+        source.write_bytes(b"# keep this header\r\ndef old_widget():\r\n    return 1\r\n")
+        prior = hashlib.sha256(source.read_bytes()).hexdigest()
+        edited = native_agent.execute_tool(folder, "edit_file", {
+            "path": "app.py", "old_text": "def old_widget():\n    return 1",
+            "new_text": "def new_widget():\n    return 2", "expected_sha256": prior,
+        })
+        assert edited.startswith("Edited app.py (sha256 ")
+        assert source.read_bytes() == b"# keep this header\r\ndef new_widget():\r\n    return 2\r\n"
+        assert project_memory.search(folder, "new_widget", kind="file")
+        assert not project_memory.search(folder, "old_widget", kind="file")
+        stale = native_agent.execute_tool(folder, "edit_file", {
+            "path": "app.py", "old_text": "return 2", "new_text": "return 3",
+            "expected_sha256": prior,
+        })
+        assert "file changed since that hash" in stale
+        assert b"return 2" in source.read_bytes()
+
+
+def test_edit_file_rejects_ambiguous_block_and_preserves_powershell_bom():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        script = folder / "verify.ps1"
+        script.write_bytes(b"Write-Output 'old'\r\nWrite-Output 'old'\r\n")
+        ambiguous = native_agent.execute_tool(folder, "edit_file", {
+            "path": "verify.ps1", "old_text": "Write-Output 'old'",
+            "new_text": "Write-Output 'new'",
+        })
+        assert "found 2" in ambiguous
+        assert script.read_bytes() == b"Write-Output 'old'\r\nWrite-Output 'old'\r\n"
+        edited = native_agent.execute_tool(folder, "edit_file", {
+            "path": "verify.ps1", "old_text": "Write-Output 'old'\nWrite-Output 'old'",
+            "new_text": "Write-Output '✓'",
+        })
+        assert edited.startswith("Edited verify.ps1")
+        assert script.read_bytes() == b"\xef\xbb\xbfWrite-Output '\xe2\x9c\x93'\r\n"
 
 
 def test_native_worker_indexes_existing_code_and_recalls_typed_memory():
