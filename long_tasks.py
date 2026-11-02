@@ -27,6 +27,7 @@ from pathlib import Path
 import cale_voice
 import chrome_connector
 import feedback_learning
+import ffmpeg_runtime
 import file_catalog
 import project_memory
 import routing_mode
@@ -115,6 +116,7 @@ def environment():
         ROOT / "Toolbox/node-v26.13.0-win-x64",
         ROOT / "Toolbox/node_modules/.bin",
         ROOT / "Toolbox/python/Scripts",
+        ROOT / "Toolbox/bin",
         ROOT / "bin",
     ]
     env["PATH"] = os.pathsep.join(map(str, paths)) + os.pathsep + env.get("PATH", "")
@@ -2717,6 +2719,7 @@ def monitor():
             if time.monotonic() - last_setup_recovery >= 30:
                 last_setup_recovery = time.monotonic()
                 runtime_features.start_background()
+                ffmpeg_runtime.start_background()
                 # The recovery helper checks the actual installer process and
                 # retry backoff. A stale "working" task must not suppress it:
                 # setup can freeze that task before its status is updated.
@@ -2995,6 +2998,7 @@ def gui():
     except (OSError, RuntimeError) as exc:
         config_migration_error = "Design tools setup needs attention: " + str(exc)
     runtime_features.start_background()
+    ffmpeg_runtime.start_background()
     start_monitor()
     if os.name == "nt":
         # Give the taskbar a stable Cale identity instead of Python's generic one.

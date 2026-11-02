@@ -152,6 +152,10 @@ try {
  }
  & $python (Join-Path $Destination 'skill_catalog.py')
  if ($LASTEXITCODE -ne 0) { throw 'Local skill setup failed.' }
+ Write-SetupStatus 38 'Checking and installing FFmpeg media tools'
+ & $python (Join-Path $Destination 'ffmpeg_runtime.py') --ensure
+ if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation or version check failed.' }
+ $env:PATH=(Join-Path $box 'bin')+';'+$env:PATH
  # Prepare signed-in Chrome control locally. Chrome itself asks the user to
  # approve its extension and explicitly choose which tabs Cale may access.
  $env:PATH=(Join-Path $env:HERMES_HOME 'bin')+';'+$env:PATH
@@ -227,7 +231,7 @@ try {
  & $mediaPython (Join-Path $Destination 'Validation/test_media.py')
  if ($LASTEXITCODE -ne 0) { throw 'Installed media checks failed.' }
  if (-not $NoStartup) { & (Join-Path $Destination 'Install Long Tasks Startup.ps1'); Start-ScheduledTask -TaskName 'CaleAI_LongTasks' -ErrorAction SilentlyContinue }
- [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.268')
+ [IO.File]::WriteAllText((Join-Path $Destination '.cale-ai-install'),'Cale AI Workbench 0.5.269')
  Write-SetupStatus 100 'Your AI is ready' 'complete'
  # Optional local models continue in a separate process after the installer closes.
  Start-Process -FilePath (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'model_library.py')+'" --auto --status-dir "'+(Join-Path $Destination 'LongTasks')+'"') -WindowStyle Hidden

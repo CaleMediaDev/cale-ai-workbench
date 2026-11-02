@@ -18,6 +18,8 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 
+import ffmpeg_runtime
+
 
 def _json(path: Path) -> dict:
     try:
@@ -307,6 +309,11 @@ def snapshot(root: Path = ROOT) -> dict:
                       browser_probe.get("detail", "Companion installed; choose Run checks to test Chrome pairing"
                                         if browser_ready else "Preparing local browser tools")))
 
+    ffmpeg_ok = ffmpeg_runtime.working(root)
+    rows.append(_item("FFmpeg media tools", "ready" if ffmpeg_ok else "attention",
+                      "FFmpeg answered a local version check" if ffmpeg_ok else
+                      "FFmpeg is missing or broken; Cale is repairing it"))
+
     video_ready = (media / "video/runtime/cale-video-ready.json").is_file()
     video_verified = video_ready and _successful_job(media / "video/jobs", "state", min_bytes=1000)
     rows.append(_item("Video maker", "ready" if video_verified else "on_demand",
@@ -341,6 +348,9 @@ def request_safe_repairs(root: Path = ROOT, result: dict | None = None) -> list[
     result = result or snapshot(root)
     rows = {row["label"]: row for row in result.get("rows", [])}
     requested = []
+    if rows.get("FFmpeg media tools", {}).get("state") == "attention":
+        ffmpeg_runtime.start_background(root)
+        requested.append("FFmpeg media tools")
     if rows.get("Fast file search", {}).get("state") == "attention":
         marker = root / "LongTasks/computer-files-recheck.request"
         try:
