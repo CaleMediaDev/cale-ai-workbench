@@ -672,11 +672,21 @@ def run_slice(project: dict, complete=None) -> dict:
                 return latest
             function = item.get("function") or {}
             args = {}
+            signature = ""
             try:
                 args = json.loads(function.get("arguments") or "{}")
                 if not isinstance(args, dict):
                     raise ValueError("Arguments must be an object")
-                result = execute_tool(folder, function.get("name", ""), args)
+                signature = hashlib.sha256((
+                    str(function.get("name") or "") + "\0" +
+                    json.dumps(args, sort_keys=True, ensure_ascii=False)
+                ).encode("utf-8", errors="replace")).hexdigest()
+                if (state.get("last_failed_tool") == signature
+                        and int(state.get("same_tool_failures", 0)) >= 2):
+                    result = ("Tool error: This exact call failed twice and was skipped. "
+                              "Inspect the earlier error or change the method or arguments.")
+                else:
+                    result = execute_tool(folder, function.get("name", ""), args)
             except ValueError as exc:
                 result = f"Tool error: {exc}"
             messages.append({"role": "tool", "tool_call_id": item.get("id", ""),
@@ -696,8 +706,10 @@ def run_slice(project: dict, complete=None) -> dict:
                     state["verify_passed"] = False
                     state["verifier_nudged"] = False
             if outcome.startswith("Failed"):
-                signature = hashlib.sha256((function.get("name", "") + "\0" +
+                signature = signature or hashlib.sha256((str(function.get("name") or "") + "\0" +
                     str(function.get("arguments") or "")).encode("utf-8", errors="replace")).hexdigest()
+                if state.get("last_failed_tool") != signature:
+                    state["failure_nudged"] = False
                 state["same_tool_failures"] = (
                     int(state.get("same_tool_failures", 0)) + 1
                     if state.get("last_failed_tool") == signature else 1)
@@ -705,15 +717,18 @@ def run_slice(project: dict, complete=None) -> dict:
             else:
                 state["same_tool_failures"] = 0
                 state.pop("last_failed_tool", None)
+                state["failure_nudged"] = False
             state["messages"] = messages
             state["current"] = f"{function.get('name', 'tool')}: {result[:150]}"
             save_state(project, state)
-        if int(state.get("same_tool_failures", 0)) >= 2:
+        if (int(state.get("same_tool_failures", 0)) >= 2
+                and not state.get("failure_nudged")):
             messages.append({"role": "user", "content":
                              "The same tool call failed repeatedly. Do not retry it unchanged. "
                              "Inspect the error, repair its cause, or use another method. "
                              "Record a real external blocker in PROGRESS.md if no repair is possible."})
             state["messages"] = messages
+            state["failure_nudged"] = True
             save_state(project, state)
         if user_request_stamp(folder) != request_before:
             state["verify_passed"] = False

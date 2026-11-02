@@ -592,6 +592,25 @@ def test_repeated_identical_tool_failure_prompts_a_different_approach():
         assert "read_file missing.txt: Failed" in task_context.snapshot(folder)
 
 
+def test_third_identical_failed_tool_call_is_not_executed_again():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / ".local-ai/verify.ps1").write_text("exit 0")
+        responses = iter([
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": f"read-{number}", "function": {"name": "read_file",
+                    "arguments": '{"path":"missing.txt"}'}}]}}]}
+            for number in range(3)
+        ] + [{"choices": [{"message": {"role": "assistant", "content": "Finished"}}]}])
+        with patch.object(native_agent, "execute_tool", return_value="Tool error: missing") as tool:
+            state = native_agent.run_slice(item, complete=lambda _payload: next(responses))
+        assert state["status"] == "done"
+        assert tool.call_count == 2
+        assert "exact call failed twice and was skipped" in str(state["messages"])
+        assert str(state["messages"]).count("Do not retry it unchanged") == 1
+
+
 def test_instruction_during_tool_call_follows_complete_tool_batch():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
