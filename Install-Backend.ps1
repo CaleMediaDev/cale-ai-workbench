@@ -44,6 +44,11 @@ try {
  function Download-Verified($url,$sha,$name) {
    $target=Join-Path $DownloadCache $name
    if ((Test-Path -LiteralPath $target) -and (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLower() -eq $sha.ToLower()) { return $target }
+   $stage=2
+   if (Test-Path -LiteralPath $setupState) {
+     try { $stage=[int]((Get-Content -LiteralPath $setupState -Raw | ConvertFrom-Json).percent) } catch { }
+   }
+   Write-SetupStatus $stage ("Downloading and checking " + $name) | Out-Host
    Write-Output "Downloading $name" | Out-Host
    $partial=$target+'.partial'
    & curl.exe --fail --location --retry 3 --output $partial $url
@@ -72,10 +77,12 @@ try {
  New-Item -ItemType Directory -Path $box -Force | Out-Null
  if (-not (Test-Path -LiteralPath (Join-Path $box 'python/Scripts/python.exe'))) { & $runtime -m venv (Join-Path $box 'python'); if ($LASTEXITCODE -ne 0) { throw 'Could not create the tool runtime.' } }
  $python=Join-Path $box 'python/Scripts/python.exe'
+ Write-SetupStatus 26 'Installing document, database and file tools'
  Write-Output 'Installing document, database, testing and model-connection tools...'
  & $python -m pip install --disable-pip-version-check -r (Join-Path $PSScriptRoot 'requirements-windows.txt')
  if ($LASTEXITCODE -ne 0) { throw 'Python tool installation failed.' }
  # Crawl4AI uses Python Playwright, separate from the JavaScript MCP browser.
+ Write-SetupStatus 29 'Downloading the local browser tools'
  & $python -m playwright install chromium --only-shell
  if ($LASTEXITCODE -ne 0) { throw 'Local crawler browser download failed.' }
  if (-not (Test-Path -LiteralPath (Join-Path $box 'node-v26.13.0-win-x64/node.exe'))) {
@@ -102,6 +109,7 @@ try {
  try {
    if ($reuseNode) { Write-Output 'JavaScript tools are already current; keeping the running browser and agent tools.' }
    else {
+     Write-SetupStatus 32 'Installing browser and design tools'
      & (Join-Path (Split-Path $node) 'npm.cmd') ci --ignore-scripts --no-audit --no-fund
      if ($LASTEXITCODE -ne 0) { throw 'JavaScript tool installation failed.' }
      & $node (Join-Path $box 'node_modules/playwright/cli.js') install chromium
@@ -110,6 +118,7 @@ try {
  } finally { Pop-Location }
  foreach ($entry in @(@{Name='java';Folder='jdk-21.0.13+9';Archive='jdk.zip'},@{Name='ghidra';Folder='ghidra_12.1.4_PUBLIC';Archive='ghidra-12.1.4.zip'})) {
    if (-not (Test-Path -LiteralPath (Join-Path $box $entry.Folder))) {
+     Write-SetupStatus 36 ("Adding " + $entry.Folder + " tools")
      $pin=$pins.($entry.Name); $archive=Download-Verified $pin.url $pin.sha256 $entry.Archive
      Expand-Archive -LiteralPath $archive -DestinationPath $box -Force
    }

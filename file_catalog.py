@@ -20,6 +20,7 @@ from pathlib import Path
 
 DB_NAME = "computer-files.sqlite3"
 STATUS_NAME = "computer-files-status.json"
+FIRST_SCAN_NAME = "computer-files-first-scan.done"
 BATCH = 1000
 MIN_FREE_BYTES = 5 * 1024**3
 
@@ -100,6 +101,20 @@ def status(state: str | Path) -> dict:
         return {"status": "not_started", "files": 0, "folders": 0}
 
 
+def first_scan_pending(state: str | Path, snapshot: dict | None = None) -> bool:
+    """Hold first-run tasks until one complete scan; never gate daily refreshes.
+
+    Older installations already have a completed status but no marker. Treat
+    that status as proof so an update does not interrupt their task composer.
+    An indexing error releases the composer with a visible warning instead of
+    trapping someone in an unusable first-run screen.
+    """
+    snapshot = status(state) if snapshot is None else snapshot
+    if (Path(state) / FIRST_SCAN_NAME).is_file():
+        return False
+    return snapshot.get("status") in {"not_started", "working"}
+
+
 def refresh_delay(snapshot: dict, refresh_seconds: int = 24 * 60 * 60,
                   now: float | None = None) -> float:
     """Reuse a recent completed catalog across app restarts.
@@ -125,7 +140,8 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> d
     roots = [root for root in roots if root.is_dir() and not root.is_symlink()]
     scan_id = uuid.uuid4().hex
     files = folders = unreadable = processed = 0
-    _status(state, status="working", files=0, folders=0, roots=[str(r) for r in roots])
+    _status(state, status="working", files=0, folders=0, roots=[str(r) for r in roots],
+            current="Starting the local file scan")
     try:
         with database(state) as conn:
             if not enough_space(state):
@@ -171,6 +187,7 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> d
                                             state, status="working", files=files,
                                             folders=folders, unreadable=unreadable,
                                             roots=[str(r) for r in roots],
+                                            current=str(folder),
                                         )
                                     if processed % (BATCH * 10) == 0 and not enough_space(state):
                                         result = {
@@ -202,6 +219,7 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None) -> d
             "unreadable": unreadable, "roots": [str(r) for r in roots],
         }
         _status(state, **result)
+        (Path(state) / FIRST_SCAN_NAME).write_text("complete", encoding="ascii")
         return result
     except Exception as exc:
         _status(

@@ -84,6 +84,26 @@ class FileCatalogTests(unittest.TestCase):
             file_catalog.scan_computer(state, [root])
             self.assertEqual(file_catalog.search(state, "sunset")[0]["path"], str(replacement))
             self.assertEqual(file_catalog.status(state)["status"], "complete")
+            self.assertFalse(file_catalog.first_scan_pending(state))
+            self.assertTrue((state / file_catalog.FIRST_SCAN_NAME).is_file())
+
+    def test_first_scan_only_holds_first_run(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            self.assertTrue(file_catalog.first_scan_pending(state))
+            self.assertTrue(file_catalog.first_scan_pending(
+                state, {"status": "working", "files": 5}
+            ))
+            self.assertFalse(file_catalog.first_scan_pending(
+                state, {"status": "complete"}
+            ))  # An older installation has no completion marker.
+            self.assertFalse(file_catalog.first_scan_pending(
+                state, {"status": "error"}
+            ))  # A failed scan must not lock the whole app.
+            (state / file_catalog.FIRST_SCAN_NAME).write_text("complete")
+            self.assertFalse(file_catalog.first_scan_pending(
+                state, {"status": "working"}
+            ))  # Daily rescans continue in the background.
 
     def test_natural_phrase_returns_closest_filename(self):
         with tempfile.TemporaryDirectory() as temp:

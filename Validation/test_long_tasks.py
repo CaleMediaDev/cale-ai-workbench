@@ -717,6 +717,33 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(create.call_args.args[0]["id"], pid)
         self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "queued")
 
+    def test_first_launch_readiness_waits_for_setup_and_first_file_scan(self):
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text(json.dumps({
+            "status": "working", "current": "Downloading your main AI model",
+        }), encoding="utf-8")
+        ready, message = task_module.first_launch_readiness(task_module.STATE)
+        self.assertFalse(ready)
+        self.assertIn("Downloading your main AI model", message)
+
+        progress.write_text('{"status":"complete"}', encoding="utf-8")
+        ready, message = task_module.first_launch_readiness(task_module.STATE)
+        self.assertFalse(ready)
+        self.assertIn("index", message.lower())
+
+        import file_catalog
+        (task_module.STATE / file_catalog.STATUS_NAME).write_text(json.dumps({
+            "status": "working", "files": 1234,
+        }), encoding="utf-8")
+        ready, message = task_module.first_launch_readiness(task_module.STATE)
+        self.assertFalse(ready)
+        self.assertIn("1,234", message)
+
+        (task_module.STATE / file_catalog.FIRST_SCAN_NAME).write_text("complete")
+        ready, message = task_module.first_launch_readiness(task_module.STATE)
+        self.assertTrue(ready)
+        self.assertEqual(message, "")
+
     def test_optional_tool_failure_releases_previously_waiting_task(self):
         task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"

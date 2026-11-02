@@ -27,6 +27,7 @@ from pathlib import Path
 import cale_voice
 import chrome_connector
 import feedback_learning
+import file_catalog
 import project_memory
 import routing_mode
 import runtime_diagnostics
@@ -459,6 +460,33 @@ def setup_blocks_tasks(setup):
     """Only the base AI install must hold work; added tools update in parallel."""
     return bool(setup and setup.get("status") != "complete"
                 and setup.get("owner") != "runtime_features")
+
+
+def first_launch_readiness(state=None):
+    """Describe the two required first-run stages shown above the composer.
+
+    Optional model/tool updates and later daily file rescans must not make a
+    working installation unavailable. An initial catalog error is visible but
+    releases the composer so a disk or permissions problem cannot trap users.
+    """
+    state = STATE if state is None else Path(state)
+    setup = read_task_status(state / "install-progress.json")
+    if setup_blocks_tasks(setup):
+        current = str(setup.get("current") or "Preparing your local AI")
+        return False, "Getting Cale ready: " + current
+    catalog = file_catalog.status(state)
+    if file_catalog.first_scan_pending(state, catalog):
+        files = int(catalog.get("files") or 0)
+        if catalog.get("status") == "working":
+            return False, f"Indexing this PC locally: {files:,} files found. Cale will be ready after this first scan."
+        return False, "Preparing to index this PC's files. Cale will be ready after the first scan."
+    if catalog.get("status") in ("error", "waiting_for_space") and not (
+        state / file_catalog.FIRST_SCAN_NAME
+    ).is_file():
+        return True, "Cale is ready, but file search needs attention: " + str(
+            catalog.get("message") or catalog.get("error") or "The scan could not finish."
+        )[:180]
+    return True, ""
 
 
 def token_legend_layout(models, width):
@@ -2508,7 +2536,17 @@ def monitor():
                 continue
             if catalog_thread is not None and not catalog_thread.is_alive():
                 catalog_thread = None
-                next_catalog_refresh = time.monotonic() + catalog_refresh_seconds
+                latest_catalog = file_catalog.status(STATE)
+                # An interrupted first scan must recover promptly. The daily
+                # refresh remains quiet once an initial catalog exists.
+                retry_seconds = (
+                    60 if not (STATE / file_catalog.FIRST_SCAN_NAME).is_file()
+                    and latest_catalog.get("status") in ("error", "not_started", "working")
+                    else 300 if not (STATE / file_catalog.FIRST_SCAN_NAME).is_file()
+                    and latest_catalog.get("status") == "waiting_for_space"
+                    else catalog_refresh_seconds
+                )
+                next_catalog_refresh = time.monotonic() + retry_seconds
             if catalog_thread is None and time.monotonic() >= next_catalog_refresh:
                 catalog_thread = threading.Thread(
                     target=file_catalog.scan_computer,
@@ -4011,6 +4049,12 @@ def gui():
     chat_heading.pack(fill="x", pady=(0, 5))
     ttk.Label(chat_heading, text="Chat with Cale", style="Card.TLabel",
               font=("Segoe UI", 12, "bold")).pack(side="left")
+    readiness_text = tk.StringVar(value="")
+    readiness_label = ttk.Label(
+        chat_panel, textvariable=readiness_text, style="CardMuted.TLabel",
+        wraplength=900, justify="left",
+    )
+    readiness_label.pack(fill="x", pady=(0, 6))
     mode_row = ttk.Frame(chat_heading, style="Card.TFrame")
     mode_row.pack(side="right")
     selected_mode = [routing_mode.load(ROOT / "Cloud")]
@@ -4271,6 +4315,10 @@ def gui():
 
     def submit_chat_text(value=None):
         nonlocal pending_followup
+        ready, explanation = first_launch_readiness(STATE)
+        if not ready:
+            readiness_text.set(explanation)
+            return
         raw_value = (
             chat_input.get("1.0", "end-1c") if value is None else value
         ).strip()
@@ -4404,6 +4452,23 @@ def gui():
     send_button = ttk.Button(entry_row, text="Send", command=submit_chat_text, style="Accent.TButton")
     send_button.pack(side="right")
     attach_button.pack(side="right", padx=(0, 8))
+
+    def refresh_readiness():
+        """Keep first-run work visible and disable task entry until it is usable."""
+        ready, explanation = first_launch_readiness(STATE)
+        readiness_text.set(explanation)
+        if explanation:
+            if not readiness_label.winfo_manager():
+                readiness_label.pack(fill="x", pady=(0, 6), after=chat_heading)
+        else:
+            readiness_label.pack_forget()
+        desired = "normal" if ready else "disabled"
+        if str(chat_input.cget("state")) != desired:
+            chat_input.configure(state=desired)
+        send_button.configure(state=desired)
+        attach_button.configure(state=desired)
+
+    refresh_readiness()
     def composer_return(event):
         if event.state & 0x0001:  # Shift+Enter adds a line; Enter sends.
             chat_input.insert("insert", "\n")
@@ -4893,6 +4958,7 @@ def gui():
 
     task_cards = {}
     setup_card = None
+    first_scan_card = None
     setup_card_dismissed = STATE / "setup-card-dismissed"
     voice_card = None
     cale_voice_card = None
@@ -5054,7 +5120,7 @@ def gui():
 
     def render_cards():
         """Update existing widgets in place so polling never resets the scroll."""
-        nonlocal setup_card, voice_card, cale_voice_card, ollama_card, empty_label
+        nonlocal setup_card, first_scan_card, voice_card, cale_voice_card, ollama_card, empty_label
         setup = read_task_status(STATE / "install-progress.json")
         if setup and not setup_card_dismissed.is_file():
             if setup_card is None:
@@ -5072,7 +5138,13 @@ def gui():
                     setup_card = None
                     render_cards()
 
-                ttk.Button(controls, text="Delete", command=dismiss_setup).pack(side="left")
+                setup_card["dismiss"] = ttk.Button(
+                    controls, text="Delete", command=dismiss_setup
+                )
+                setup_card["dismiss"].pack(side="left")
+            setup_card["dismiss"].configure(
+                state="normal" if setup.get("status") == "complete" else "disabled"
+            )
             update_progress_card(
                 setup_card,
                 setup.get("percent", 0),
@@ -5084,6 +5156,52 @@ def gui():
         elif setup_card is not None:
             setup_card["panel"].destroy()
             setup_card = None
+
+        catalog = file_catalog.status(STATE)
+        first_scan_done = (STATE / file_catalog.FIRST_SCAN_NAME).is_file()
+        if not first_scan_done and catalog.get("status") != "complete":
+            if first_scan_card is None:
+                panel = ttk.Frame(cards, style="Card.TFrame", padding=(17, 12))
+                panel.pack(fill="x", pady=(0, 9), before=models_section)
+                ttk.Label(
+                    panel, text="Indexing your PC's files", style="Card.TLabel",
+                    font=("Segoe UI", 15, "bold"),
+                ).pack(anchor="w")
+                detail = tk.StringVar(value="Starting the local file scan")
+                ttk.Label(
+                    panel, textvariable=detail, style="CardMuted.TLabel",
+                    wraplength=900,
+                ).pack(anchor="w", pady=(5, 6))
+                bar = ttk.Progressbar(
+                    panel, mode="indeterminate", style="Cale.Horizontal.TProgressbar"
+                )
+                bar.pack(fill="x")
+                first_scan_card = {"panel": panel, "detail": detail, "bar": bar,
+                                   "running": False}
+            if catalog.get("status") in ("not_started", "working"):
+                if not first_scan_card["running"]:
+                    first_scan_card["bar"].start(12)
+                    first_scan_card["running"] = True
+                count = int(catalog.get("files") or 0)
+                current = Path(str(catalog.get("current") or "")).name
+                first_scan_card["detail"].set(
+                    f"{count:,} files found locally. " +
+                    (f"Scanning {current}. " if current else "Preparing the scan. ") +
+                    "You can give Cale tasks when this first scan finishes."
+                )
+            else:
+                if first_scan_card["running"]:
+                    first_scan_card["bar"].stop()
+                    first_scan_card["running"] = False
+                first_scan_card["detail"].set(
+                    "File search needs attention: " + str(
+                        catalog.get("message") or catalog.get("error") or "Scan incomplete."
+                    )[:180] + " You can still give Cale tasks."
+                )
+        elif first_scan_card is not None:
+            first_scan_card["bar"].stop()
+            first_scan_card["panel"].destroy()
+            first_scan_card = None
 
         voice_setup = read_task_status(STATE / "natural-voice-progress.json")
         if voice_setup.get("status") in ("working", "error"):
@@ -5454,6 +5572,7 @@ def gui():
     def refresh():
         nonlocal idle_since, idle_slot, setup_spoken_step, voice_upgrade_queued
         setup = read_task_status(STATE / "install-progress.json")
+        refresh_readiness()
         introduce_if_ready(setup)
         check = read_task_status(STATE / "self-check.json")
         check_version = self_diagnostics.version(ROOT)
