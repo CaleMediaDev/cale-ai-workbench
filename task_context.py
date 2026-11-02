@@ -7,6 +7,7 @@ keeps a quick snapshot and a bounded action trail for restartable model calls.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 from pathlib import Path
@@ -128,12 +129,35 @@ def snapshot(folder: str | Path) -> str:
     return "\n".join(lines)
 
 
+def action_outcome(tool: str, result: str) -> str:
+    """Distinguish structured tool failures without saving their private text."""
+    if result.startswith("Tool error:"):
+        return "Failed"
+    exit_code = re.search(r"^Exit code:\s*(-?\d+)", result)
+    if exit_code:
+        return "Completed" if exit_code.group(1) == "0" else "Failed (exit " + exit_code.group(1) + ")"
+    if tool in {"search_web", "read_webpage", "call_local_tool", "read_skill",
+                "search_project_memory", "read_project_memory", "save_project_memory",
+                "index_project_files", "search_capabilities", "discover_local_tools"}:
+        try:
+            value = json.loads(result)
+        except ValueError:
+            # A long JSON result may have been truncated. Error fields in its
+            # opening object are still useful, but ordinary text is not.
+            return "Failed" if re.match(r'\s*\{\s*"(?:error|isError)"\s*:\s*(?:"|true)', result) else "Completed"
+        if isinstance(value, dict):
+            status = value.get("status")
+            if (("error" in value and value["error"] is not None)
+                    or value.get("isError") is True or value.get("ok") is False
+                    or (isinstance(status, str) and status.lower() in {"error", "failed", "blocked"})):
+                return "Failed"
+    return "Completed"
+
+
 def record_action(folder: str | Path, tool: str, result: str, arguments: dict | None = None) -> None:
     """Record only a short outcome, never full tool output or input documents."""
     # Tool output can contain private file contents or web text. Keep status only.
-    exit_code = re.search(r"Exit code:\s*(-?\d+)", result)
-    outcome = (f"Exit code {exit_code.group(1)}" if exit_code else
-               "Failed" if result.startswith("Tool error:") else "Completed")
+    outcome = action_outcome(tool, result)
     subject = ""
     if tool in {"read_file", "write_file", "list_files"} and isinstance(arguments, dict):
         raw = str(arguments.get("path") or "")

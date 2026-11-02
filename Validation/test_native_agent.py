@@ -280,6 +280,47 @@ def test_task_action_ledger_names_files_without_storing_content():
         assert "secret document text" not in summary
 
 
+def test_task_action_ledger_marks_structured_failures_without_error_details():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        task_context.record_action(folder, "search_web",
+                                   '{"results":[],"error":"private query failed"}')
+        task_context.record_action(folder, "call_local_tool",
+                                   '{"isError":true,"content":[{"text":"private backend detail"}]}')
+        task_context.record_action(folder, "run_command", "Exit code: 7\nprivate command output")
+        summary = task_context.snapshot(folder)
+        assert "search_web: Failed" in summary
+        assert "call_local_tool: Failed" in summary
+        assert "run_command: Failed (exit 7)" in summary
+        assert "private" not in summary
+        assert task_context.action_outcome("call_local_tool", '{"status":[]}') == "Completed"
+
+
+def test_repeated_identical_tool_failure_prompts_a_different_approach():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / ".local-ai/verify.ps1").write_text("exit 0")
+        responses = iter([
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": call_id, "function": {"name": "read_file",
+                    "arguments": '{"path":"missing.txt"}'}}]}}]}
+            for call_id in ("read-1", "read-2")
+        ] + [{"choices": [{"message": {"role": "assistant", "content": "Finished"}}]}])
+        seen = []
+
+        def complete(payload):
+            seen.append(copy.deepcopy(payload))
+            return next(responses)
+
+        state = native_agent.run_slice(item, complete=complete)
+        assert state["status"] == "done"
+        assert len(seen) == 3
+        assert "Do not retry it unchanged" in str(seen[2]["messages"])
+        assert "read_file missing.txt: Failed" in task_context.snapshot(folder)
+
+
 def test_instruction_during_tool_call_follows_complete_tool_batch():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

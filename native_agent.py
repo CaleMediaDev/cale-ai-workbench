@@ -8,6 +8,7 @@ crash resumes from disk instead of asking the model to repeat completed edits.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -540,8 +541,26 @@ def run_slice(project: dict, complete=None) -> dict:
             import task_context
 
             task_context.record_action(folder, function.get("name", ""), result, args)
+            outcome = task_context.action_outcome(function.get("name", ""), result)
+            if outcome.startswith("Failed"):
+                signature = hashlib.sha256((function.get("name", "") + "\0" +
+                    str(function.get("arguments") or "")).encode("utf-8", errors="replace")).hexdigest()
+                state["same_tool_failures"] = (
+                    int(state.get("same_tool_failures", 0)) + 1
+                    if state.get("last_failed_tool") == signature else 1)
+                state["last_failed_tool"] = signature
+            else:
+                state["same_tool_failures"] = 0
+                state.pop("last_failed_tool", None)
             state["messages"] = messages
             state["current"] = f"{function.get('name', 'tool')}: {result[:150]}"
+            save_state(project, state)
+        if int(state.get("same_tool_failures", 0)) >= 2:
+            messages.append({"role": "user", "content":
+                             "The same tool call failed repeatedly. Do not retry it unchanged. "
+                             "Inspect the error, repair its cause, or use another method. "
+                             "Record a real external blocker in PROGRESS.md if no repair is possible."})
+            state["messages"] = messages
             save_state(project, state)
         if user_request_stamp(folder) != request_before:
             messages.append({"role": "user", "content":
