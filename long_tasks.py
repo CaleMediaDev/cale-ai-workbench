@@ -3522,6 +3522,8 @@ def gui():
     update_events = queue.Queue()
     pending_update = None
     updating = False
+    update_ready_at = 0.0
+    manual_update_requested = False
 
     def check_updates():
         try:
@@ -3985,6 +3987,29 @@ def gui():
         highlightthickness=0, borderwidth=0,
     )
     presence.pack(side="left", padx=(8, 0))
+    installed_version = self_update.current_version()
+    ttk.Label(
+        header,
+        text=("v" + ".".join(map(str, installed_version)))
+        if any(installed_version) else "Setting up",
+        style="Muted.TLabel",
+        font=("Segoe UI", 10, "bold"),
+    ).pack(side="left", padx=(4, 10))
+
+    def update_now():
+        nonlocal manual_update_requested
+        if pending_update is None or updating:
+            return
+        manual_update_requested = True
+        update_button.configure(text="Update queued", state="disabled")
+        status.set(
+            "Installing the verified update now…" if not self_update.active_tasks()
+            else "Update queued. It will install when current tasks finish."
+        )
+
+    update_button = ttk.Button(
+        header, text="Update now", style="Mode.TButton", command=update_now,
+    )
     presence_phase = [0]
     presence_mode = ["ready"]
 
@@ -5852,7 +5877,7 @@ def gui():
     first_connect = STATE / "browser-connection-offered"
 
     def poll():
-        nonlocal pending_update, updating
+        nonlocal pending_update, updating, update_ready_at, manual_update_requested
         refresh()
         try:
             while True:
@@ -5865,8 +5890,11 @@ def gui():
                     pending_update is None or candidate[1] > pending_update[1]
                 ):
                     pending_update = candidate
+                    update_ready_at = time.monotonic()
+                    update_button.configure(text="Update now", state="normal")
+                    update_button.pack(side="left", padx=(0, 8))
                     status.set(
-                        "A verified update is ready. It will install when tasks are idle."
+                        "A verified update is ready. Select Update now or it will install automatically."
                     )
         except queue.Empty:
             pass
@@ -5879,6 +5907,7 @@ def gui():
         if (
             pending_update
             and not updating
+            and (manual_update_requested or time.monotonic() - update_ready_at >= 30)
             and not self_update.active_tasks()
             and not any(
                 isinstance(child, tk.Toplevel) and child is not preview_window
@@ -5907,12 +5936,15 @@ def gui():
                         creationflags=HIDE,
                     )
                     updating = True
+                    update_button.configure(text="Updating…", state="disabled")
                     status.set("Installing the update and reopening your AI…")
                     window.after(1000, window.destroy)
                     return
                 except OSError as exc:
                     status.set("Could not start the update: " + str(exc))
                     pending_update = None
+                    manual_update_requested = False
+                    update_button.pack_forget()
         if (time.monotonic() - getattr(window, "monitor_restart_at", 0) > 15
                 and monitor_restart_needed()):
             window.monitor_restart_at = time.monotonic()
