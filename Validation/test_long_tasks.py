@@ -823,6 +823,28 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual((Path(task["folder"]) / "00-PLAY-THIS.m3u").read_text(
             encoding="utf-8-sig"), "#EXTM3U\nsong.mp3\n")
 
+    def test_latest_song_aliases_follow_vocal_revision(self):
+        folder = self.base / "music-aliases"
+        folder.mkdir()
+        old = folder / "song.mp3"
+        old.write_bytes(b"instrumental")
+        vocal = folder / "song-with-vocals.mp3"
+        vocal.write_bytes(b"sung")
+        video = folder / "song-with-vocals-video.mp4"
+        video.write_bytes(b"vocal video")
+        task_module.publish_latest_song(folder, old, None)
+        task_module.publish_latest_song(folder, vocal, video)
+        self.assertEqual((folder / "00-LATEST-SONG.mp3").read_bytes(), b"sung")
+        self.assertEqual((folder / "00-LATEST-VIDEO.mp4").read_bytes(), b"vocal video")
+        self.assertEqual(old.read_bytes(), b"instrumental")
+        self.assertEqual((folder / "00-PLAY-THIS.m3u").read_text(
+            encoding="utf-8-sig"), "#EXTM3U\nsong-with-vocals.mp3\n")
+
+    def test_no_vocals_feedback_starts_a_vocal_revision(self):
+        self.assertTrue(task_module.simple_vocal_revision("no vocals on the song"))
+        self.assertTrue(task_module.simple_vocal_revision("it has no audible vocals"))
+        self.assertFalse(task_module.simple_vocal_revision("change the drum mix"))
+
     def test_music_task_follows_recovered_worker_without_reopening_bad_old_result(self):
         job_id = "3" * 32
         with patch("music_backend.start_music_job", return_value={"job_id": job_id}):

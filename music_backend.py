@@ -670,7 +670,23 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
                        + "; ".join(failures) + ").")
 
 
-def lyric_match(transcript: str, lyrics: str) -> tuple[int, int]:
+def vocal_lines(lyrics: str) -> str:
+    """Exclude instrumental stage directions from words expected to be sung."""
+    lines = []
+    singing = True
+    for line in lyrics.splitlines():
+        section = re.match(r"\s*\[([^]]+)\]\s*(.*)", line)
+        if section:
+            singing = not bool(re.search(
+                r"\b(?:instrumental|break|drop|solo)\b", section.group(1), re.I,
+            ))
+            line = section.group(2)
+        if singing and line.strip():
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def lyric_match(transcript: str, lyrics: str, *, vocal_sections_only: bool = False) -> tuple[int, int]:
     """Count distinct authored words heard in the song, ignoring stage tags."""
     def terms(value: str) -> set[str]:
         return {
@@ -682,9 +698,14 @@ def lyric_match(transcript: str, lyrics: str) -> tuple[int, int]:
             }
         }
 
+    had_lyrics = bool(lyrics.strip())
+    if vocal_sections_only:
+        lyrics = vocal_lines(lyrics)
+    if not had_lyrics:
+        return 0, 0  # No authored words exist to compare with the transcript.
     authored = terms(re.sub(r"\[[^]]+\]|\([^)]*\)", " ", lyrics))
     if len(authored) < 4:
-        return 0, 0  # Repeated syllables cannot distinguish a real lyric match.
+        return 0, 4  # Repeated syllables cannot establish a real lyric match.
     required = min(15, max(4, round(len(authored) * 0.2)))
     return len(authored & terms(transcript)), required
 
@@ -721,7 +742,10 @@ def vocal_evidence(path: str | Path, duration_seconds: int, lyrics: str = "",
     # Require enough words for verses and choruses across the song, while
     # allowing instrumental breaks and bass drops between them.
     required_words = max(5, round(duration_seconds * (0.3 if sparse_vocals else 0.85)))
-    matched_terms, required_terms = lyric_match(str(transcript.get("text") or ""), lyrics)
+    matched_terms, required_terms = lyric_match(
+        str(transcript.get("text") or ""), lyrics,
+        vocal_sections_only=sparse_vocals,
+    )
     return {"recognized_words": words, "last_vocal_second": round(final_second, 1),
             "required_words": required_words,
             "matched_lyric_terms": matched_terms, "required_lyric_terms": required_terms,

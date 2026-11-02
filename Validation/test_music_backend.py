@@ -459,6 +459,19 @@ def test_lyric_match_ignores_stage_directions():
     assert matched >= required >= 4
 
 
+def test_sparse_vocal_check_does_not_count_instrumental_drop_directions():
+    lyrics = ("[Hook]\nI want waapy waaap, make your head go wet\n"
+              "[Instrumental Drop]\nMetallic alien growl, rubbery bass rumble\n"
+              "[Hook]\nI want waapy waaap, make your head go wet")
+    transcript = "Metallic alien growl rubbery bass rumble and make your head"
+    assert music_backend.lyric_match(transcript, lyrics)[0] >= 4
+    matched, required = music_backend.lyric_match(
+        transcript, lyrics, vocal_sections_only=True,
+    )
+    assert matched < required
+    assert "Metallic" not in music_backend.vocal_lines(lyrics)
+
+
 def test_rejects_remote_audio_url(tmp_path):
     responses = iter([
         {"code": 200, "data": {"task_id": "task-1"}},

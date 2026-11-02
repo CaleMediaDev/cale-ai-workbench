@@ -257,6 +257,35 @@ def music_job_id(p):
     return card.split(":", 1)[1] if card.startswith("music-job:") else ""
 
 
+def publish_latest_song(folder: str | Path, audio: Path, video: Path | None) -> None:
+    """Give the current take obvious names while preserving earlier renders.
+
+    A music revision leaves older audio and videos in the task folder. Explorer
+    sorts their generic names ahead of ``song-with-vocals``, so users can play
+    an obsolete instrumental take by mistake. Hard links need no extra disk
+    space on NTFS; copying is a fallback for filesystems that reject them.
+    """
+    directory = Path(folder)
+    directory.joinpath("00-PLAY-THIS.m3u").write_text(
+        "#EXTM3U\n" + audio.name + "\n", encoding="utf-8-sig",
+    )
+    for source, name in ((audio, "00-LATEST-SONG" + audio.suffix),
+                         (video, "00-LATEST-VIDEO.mp4")):
+        alias = directory / name
+        if source is None or not source.is_file():
+            if alias.exists():
+                alias.unlink()
+            continue
+        if alias.exists():
+            if os.path.samefile(alias, source):
+                continue
+            alias.unlink()
+        try:
+            os.link(source, alias)
+        except OSError:
+            shutil.copy2(source, alias)
+
+
 def task_usage_labels(p, tokens, source_totals):
     """Distinguish text tokens from local audio generation on music cards."""
     sources = " · ".join(
@@ -2033,8 +2062,9 @@ def simple_vocal_revision(note):
     """Recognize only a plain request for a new vocal version of this song."""
     value = note.strip().rstrip(".!?").casefold()
     return bool(re.fullmatch(
-        r"(?:please\s+)?(?:add|put in)\s+(?:some\s+)?(?:vocals?|singing|rap vocals)"
-        r"(?:\s+to\s+(?:it|the song))?",
+        r"(?:please\s+)?(?:(?:add|put in)\s+(?:some\s+)?(?:vocals?|singing|rap vocals)"
+        r"(?:\s+to\s+(?:it|the song))?|(?:there (?:are|is) |it has |i hear )?"
+        r"no (?:audible |clear )?(?:vocals?|singing)(?:\s+on\s+(?:it|the song))?)",
         value,
     ))
 
@@ -2146,20 +2176,30 @@ def process_music_request(p, action, note):
                 # ACE-Step's cover mode did not reliably introduce singing in
                 # a local smoke test. Render a fresh vocal take, clearly named,
                 # while preserving the original backing as a separate file.
-                clean_prompt = re.sub(
-                    r"\b(?:instrumental|no vocals|without vocals|no singing)\b",
-                    "", previous["prompt"], flags=re.IGNORECASE,
-                ).strip(" ,.;")
-                vocal_prompt = clean_prompt + ". Clear lead vocals throughout."
-                output = original.with_name(original.stem + "-with-vocals" + original.suffix)
+                clean_prompt = previous["prompt"]
+                if previous.get("instrumental"):
+                    clean_prompt = re.sub(
+                        r"\b(?:instrumental|no vocals|without vocals|no singing)\b",
+                        "", clean_prompt, flags=re.IGNORECASE,
+                    ).strip(" ,.;")
+                vocal_direction = (
+                    "Clear, unmistakable sung vocal hook at the start, between each bass drop, "
+                    "and at the end; keep the drops instrumental."
+                    if music_style.sparse_vocal_style(p["brief"]) else
+                    "Clear, prominent lead vocals with verses and choruses throughout."
+                )
+                vocal_prompt = clean_prompt.rstrip(" .") + ". " + vocal_direction
+                stem = ("song-with-vocals" if "with-vocals" not in original.stem
+                        else "song-vocal-take")
+                output = original.with_name(stem + original.suffix)
                 if output.exists():
                     output = next(
                         original.with_name(
-                            f"{original.stem}-with-vocals-{number}{original.suffix}"
+                            f"{stem}-{number}{original.suffix}"
                         )
                         for number in range(2, 1000)
                         if not original.with_name(
-                            f"{original.stem}-with-vocals-{number}{original.suffix}"
+                            f"{stem}-{number}{original.suffix}"
                         ).exists()
                     )
                 started = music_backend.start_music_job(
@@ -2781,10 +2821,7 @@ def advance_project(p):
                 )
             # Keep one obvious entry point even when an earlier instrumental
             # take or a later revision remains in the same project folder.
-            playlist = Path(p["folder"]) / "00-PLAY-THIS.m3u"
-            playlist.write_text(
-                "#EXTM3U\n" + output.name + "\n", encoding="utf-8-sig",
-            )
+            publish_latest_song(p["folder"], output, video)
             update(p["id"], status="ready_for_review",
                    detail=(f"Finished: play {output.name}"
                            + (f" · video: {video.name}" if video else "")
