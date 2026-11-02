@@ -149,3 +149,15 @@ def test_background_checks_do_not_probe_a_model_with_real_usage(tmp_path):
          patch.object(readiness_checklist, "_probe_local_ai") as probe:
         readiness_checklist.run_optional_checks(tmp_path, test_local=True)
     probe.assert_not_called()
+
+
+def test_safe_repair_is_queued_automatically_once_without_browser_pairing(tmp_path):
+    rows = {"rows": [
+        {"label": "Fast file search", "state": "attention"},
+        {"label": "Browser tools", "state": "attention"},
+    ]}
+    marker = tmp_path / "LongTasks/computer-files-recheck.request"
+    assert readiness_checklist.request_safe_repairs(tmp_path, rows) == ["Fast file search"]
+    assert marker.is_file()
+    assert readiness_checklist.request_safe_repairs(tmp_path, rows) == []
+    assert not any(tmp_path.rglob("*pair*"))

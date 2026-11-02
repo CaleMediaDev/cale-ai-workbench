@@ -2043,6 +2043,12 @@ def process_requests():
                     and task["status"] in ("review", "done", "triage")
                 ):
                     board("archive", p["card"])
+                # Agent tools launch music in a separate process. Blocking
+                # the board worker alone must not leave its render running.
+                import music_backend
+
+                music_backend.hold_project_jobs(
+                    p["id"], p["folder"], paused=action == "pause")
                 if action == "delete":
                     REVIEW_PROJECTS_CHECKED.pop(p["id"], None)
                     REVIEW_FILE_STATE.pop(p["id"], None)
@@ -2075,6 +2081,10 @@ def process_requests():
                     raise ValueError(
                         "The paused worker is retiring. Wait up to three minutes before resuming to avoid overlapping edits."
                     )
+                if p["status"] == "paused":
+                    import music_backend
+
+                    music_backend.resume_project_jobs(p["id"], p["folder"])
                 if note:
                     if task and task["status"] != "review":
                         board("comment", p["card"], "USER FOLLOW-UP: " + note)
@@ -4210,13 +4220,9 @@ def gui():
         def fix_issues():
             """Retry safe checks and guide the only pairing step needing consent."""
             current = readiness_checklist.snapshot(ROOT)
+            readiness_checklist.request_safe_repairs(ROOT, current)
             browser_row = next((row for row in current["rows"]
                                 if row["label"] == "Browser tools"), {})
-            file_row = next((row for row in current["rows"]
-                             if row["label"] == "Fast file search"), {})
-            if file_row.get("state") == "attention":
-                (STATE / "computer-files-recheck.request").write_text(
-                    str(time.time()), encoding="ascii")
             if browser_row.get("state") == "attention":
                 connect_chrome()
             run_checks()
@@ -6338,6 +6344,7 @@ def gui():
             try:
                 readiness_checklist.run_optional_checks(
                     ROOT, test_local=not self_update.active_tasks())
+                readiness_checklist.request_safe_repairs(ROOT)
             except (OSError, RuntimeError, ValueError):
                 pass  # The checklist keeps an honest installed/attention state.
 

@@ -679,8 +679,10 @@ def start_music_job(
     """Start a durable local song, instrumental, or cover job and return its ID immediately. Poll music_job_status."""
     import music_backend
 
+    task_id = music_backend.project_for_output(output_path)
     return music_backend.start_music_job(
-        prompt, output_path, lyrics, duration_seconds, instrumental, source_path
+        prompt, output_path, lyrics, duration_seconds, instrumental, source_path,
+        **({"task_id": task_id} if task_id else {}),
     )
 
 

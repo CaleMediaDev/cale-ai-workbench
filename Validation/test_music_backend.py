@@ -4,6 +4,7 @@ import io
 import json
 import math
 import os
+import sqlite3
 import struct
 import subprocess
 import wave
@@ -659,3 +660,37 @@ def test_video_retry_stops_after_three_failures_without_losing_audio(tmp_path):
         music_backend.recover_music_jobs()
     assert render.call_count == 3
     assert output.read_bytes() == b"preserved audio"
+
+
+def test_agent_music_job_is_attributed_and_task_controls_only_its_renders(tmp_path):
+    task_id = "a" * 12
+    project = tmp_path / "Projects" / task_id
+    project.mkdir(parents=True)
+    other = tmp_path / "Projects" / ("b" * 12)
+    other.mkdir(parents=True)
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    with sqlite3.connect(state / "projects.db") as connection:
+        connection.execute("CREATE TABLE projects (id TEXT, folder TEXT)")
+        connection.execute("INSERT INTO projects VALUES (?,?)", (task_id, str(project)))
+    jobs = state / "music-jobs"
+    jobs.mkdir()
+    records = [
+        ("1" * 32, "working", project / "song-v1.wav"),
+        ("2" * 32, "paused", project / "song-v2.wav"),
+        ("3" * 32, "working", other / "song.wav"),
+    ]
+    for job_id, status, output in records:
+        (jobs / (job_id + ".json")).write_text(json.dumps({
+            "job_id": job_id, "status": status, "output_path": str(output),
+            "created": int(job_id[0]),
+        }))
+    with patch.object(music_backend, "ROOT", tmp_path), patch.object(music_backend, "JOBS", jobs):
+        assert music_backend.project_for_output(str(project / "song-v3.wav")) == task_id
+        assert music_backend.project_for_output(str(other / "song.wav")) == ""
+        with patch.object(music_backend, "hold_music_job") as hold:
+            assert music_backend.hold_project_jobs(task_id, project, paused=True) == 1
+            hold.assert_called_once_with("1" * 32, paused=True)
+        with patch.object(music_backend, "resume_music_job") as resume:
+            assert music_backend.resume_project_jobs(task_id, project) == 1
+            resume.assert_called_once_with("2" * 32)

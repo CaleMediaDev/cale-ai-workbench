@@ -55,6 +55,16 @@ def test_music_tool_is_discoverable_and_callable_from_toolbox_search():
     assert result["path"] == "song.mp3"
 
 
+def test_agent_started_music_carries_the_registered_task_id():
+    import music_backend
+
+    with patch.object(music_backend, "project_for_output", return_value="a" * 12), \
+         patch.object(music_backend, "start_music_job", return_value={"job_id": "x"}) as start:
+        result = toolbox_mcp.start_music_job("female vocal dubstep", "C:/Tasks/song.wav")
+    assert result["job_id"] == "x"
+    assert start.call_args.kwargs["task_id"] == "a" * 12
+
+
 def test_audio_stem_tool_is_discoverable_and_callable():
     found = toolbox_mcp.toolbox_search("separate vocals instrumental")
     assert any(tool["name"] == "local.separate_music" for tool in found["tools"])

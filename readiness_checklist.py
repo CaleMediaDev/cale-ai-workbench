@@ -329,3 +329,25 @@ def snapshot(root: Path = ROOT) -> dict:
             "verified": sum(row["state"] == "ready" for row in rows),
             "installed": sum(row["state"] in ("ready", "installed") for row in rows),
             "total": len(rows)}
+
+
+def request_safe_repairs(root: Path = ROOT, result: dict | None = None) -> list[str]:
+    """Queue local fixes that need no browser approval or user interaction.
+
+    The supervisor owns the actual scan and setup recovery. A small cooldown
+    avoids restarting a slow scan every time the checklist refreshes.
+    """
+    root = Path(root)
+    result = result or snapshot(root)
+    rows = {row["label"]: row for row in result.get("rows", [])}
+    requested = []
+    if rows.get("Fast file search", {}).get("state") == "attention":
+        marker = root / "LongTasks/computer-files-recheck.request"
+        try:
+            if not marker.is_file() or time.time() - marker.stat().st_mtime > 300:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(str(time.time()), encoding="ascii")
+                requested.append("Fast file search")
+        except OSError:
+            pass
+    return requested

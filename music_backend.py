@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -379,6 +380,62 @@ def music_job_status(job_id: str) -> dict:
     if not path.is_file():
         raise ValueError("Music job not found.")
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def project_for_output(output_path: str) -> str:
+    """Attribute an agent-started render to its registered Workbench task."""
+    database = ROOT / "LongTasks/projects.db"
+    if not database.is_file():
+        return ""
+    target = Path(output_path).resolve()
+    try:
+        with sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True,
+                             timeout=2) as connection:
+            rows = connection.execute("SELECT id,folder FROM projects").fetchall()
+        matches = [(len(str(Path(folder).resolve())), task_id) for task_id, folder in rows
+                   if folder and re.fullmatch(r"[a-f0-9]{12}", str(task_id))
+                   and target.is_relative_to(Path(folder).resolve())]
+        return max(matches, default=(0, ""))[1]
+    except (OSError, sqlite3.Error, ValueError):
+        return ""
+
+
+def project_jobs(task_id: str, folder: str | Path) -> list[dict]:
+    """Find durable music jobs belonging to one task, including older records."""
+    if not re.fullmatch(r"[a-f0-9]{12}", task_id):
+        return []
+    project = Path(folder).resolve()
+    found = []
+    for path in JOBS.glob("*.json"):
+        try:
+            info = json.loads(path.read_text(encoding="utf-8"))
+            output_path = info.get("output_path")
+            owned_path = bool(output_path) and Path(str(output_path)).resolve().is_relative_to(project)
+            if info.get("task_id") == task_id or owned_path:
+                found.append(info)
+        except (OSError, ValueError, TypeError):
+            continue
+    return sorted(found, key=lambda job: float(job.get("created") or 0))
+
+
+def hold_project_jobs(task_id: str, folder: str | Path, *, paused: bool) -> int:
+    """Pause or stop all active renders when their parent task is controlled."""
+    count = 0
+    for job in project_jobs(task_id, folder):
+        if job.get("status") in ("queued", "working"):
+            hold_music_job(job["job_id"], paused=paused)
+            count += 1
+    return count
+
+
+def resume_project_jobs(task_id: str, folder: str | Path) -> int:
+    """Reattach renders the task was waiting for before its worker resumes."""
+    count = 0
+    for job in project_jobs(task_id, folder):
+        if job.get("status") == "paused":
+            resume_music_job(job["job_id"])
+            count += 1
+    return count
 
 
 def hold_music_job(job_id: str, *, paused: bool = False) -> dict:

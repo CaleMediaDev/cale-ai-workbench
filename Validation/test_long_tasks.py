@@ -1957,6 +1957,22 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(self.item()["status"], "ready_for_review")
         self.assertTrue(self.item()["fingerprint"].startswith("content-v2:"))
 
+    def test_pausing_agent_task_also_holds_its_separate_music_render(self):
+        import music_backend
+
+        folder = self.item()["folder"]
+        task_module.request(self.pid, "pause")
+        with patch.object(music_backend, "hold_project_jobs", return_value=1) as hold:
+            task_module.process_requests()
+        hold.assert_called_once_with(self.pid, folder, paused=True)
+        self.assertEqual(self.item()["status"], "paused")
+
+        task_module.request(self.pid, "resume")
+        with patch.object(music_backend, "resume_project_jobs", return_value=1) as resume:
+            task_module.process_requests()
+        resume.assert_called_once_with(self.pid, folder)
+        self.assertEqual(self.item()["status"], "working")
+
     def test_paused_card_is_archived_after_its_run_ends(self):
         task_module.update(self.pid, status="paused", card="paused-card")
         ended = {"task": {"status": "triage"}, "runs": [
