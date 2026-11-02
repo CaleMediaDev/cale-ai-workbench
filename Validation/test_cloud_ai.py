@@ -935,6 +935,28 @@ class CloudTests(unittest.TestCase):
               patch.object(cloud, "post", side_effect=show)):
             self.assertEqual(cloud.Router().local_candidates("balanced")[0], cloud.BALANCED_MODEL)
 
+    def test_loaded_largest_model_does_not_hijack_quick_or_balanced_route(self):
+        self.candidates.stop()
+        sizes = {
+            cloud.FAST_MODEL: "9B",
+            cloud.BALANCED_MODEL: "35B",
+            cloud.LOCAL_MODEL: "79B",
+        }
+
+        def show(_url, payload, **_kwargs):
+            return {"capabilities": ["completion", "tools"],
+                    "parameters": "num_ctx 65536\n",
+                    "details": {"parameter_size": sizes[payload["model"]]}}
+
+        with (patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "candidate_approved", return_value=True),
+              patch.object(cloud, "post", side_effect=show),
+              patch.object(cloud, "loaded_local_models", return_value=[cloud.LOCAL_MODEL])):
+            router = cloud.Router()
+            self.assertEqual(router.local_candidates("quick")[0], cloud.FAST_MODEL)
+            self.assertEqual(router.local_candidates("balanced")[0], cloud.BALANCED_MODEL)
+            self.assertEqual(router.local_candidates("deep")[0], cloud.LOCAL_MODEL)
+
     def test_oversized_request_uses_connected_free_fallback(self):
         self.candidates.stop()
         self.connected()

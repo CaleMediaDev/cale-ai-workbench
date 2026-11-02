@@ -698,8 +698,15 @@ class Router:
             ordered.insert(0, STANDARD_MAIN_ALIAS)
         elif size in ("quick", "balanced"):
             for loaded in loaded_local_models():
-                if (loaded in ordered and
-                        (size == "quick" or self.model_cache.get(loaded, 0) >= 20)):
+                parameters = self.model_cache.get(loaded, 0)
+                same_tier = (
+                    0 < parameters <= 40 if size == "quick"
+                    else 20 <= parameters <= 40
+                )
+                # Reusing loaded weights saves startup time only when the
+                # model stays within the fast or middle-size range. A loaded
+                # 79B model can make every quick or balanced turn crawl.
+                if loaded in ordered and same_tier:
                     ordered.remove(loaded)
                     ordered.insert(0, loaded)
                     break
