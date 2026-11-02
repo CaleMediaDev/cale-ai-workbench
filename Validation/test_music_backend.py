@@ -71,6 +71,49 @@ def test_sends_explicit_tempo_as_numeric_music_setting(tmp_path):
     assert request.call_args_list[0].args[1]["bpm"] == 150
 
 
+def test_vocal_song_uses_loaded_music_planner(tmp_path):
+    responses = iter([
+        {"code": 200, "data": {"task_id": "planned"}},
+        {"code": 200, "data": [{"status": 1, "result": '[{"file":"/v1/audio?path=planned"}]'}]},
+    ])
+    with (patch.object(music_backend, "start_server", return_value=True),
+          patch.object(music_backend, "_request",
+                       side_effect=lambda *_args, **_kwargs: next(responses)) as request,
+          patch.object(music_backend, "urlopen", return_value=io.BytesIO(b"audio")),
+          patch.object(music_backend.time, "sleep")):
+        music_backend.generate_music(
+            "Female pop at 150 BPM", str(tmp_path / "planned.mp3"),
+            lyrics="[Chorus]\nSing it again",
+        )
+    assert request.call_args_list[0].args[1]["thinking"] is True
+
+
+def test_music_planner_status_falls_back_when_unavailable():
+    with patch.object(music_backend, "_request", return_value={
+        "data": {"service": "ACE-Step API", "llm_initialized": False}
+    }):
+        assert music_backend.music_lm_ready() is False
+    with patch.object(music_backend, "_request", side_effect=OSError("offline")):
+        assert music_backend.music_lm_ready() is False
+
+
+def test_music_server_allows_gpu_tier_to_load_planner(tmp_path):
+    engine = tmp_path / "ACE-Step-1.5"
+    executable = engine / ".venv" / "Scripts" / "acestep-api.exe"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    (tmp_path / "Media" / "music").mkdir(parents=True)
+    with (patch.object(music_backend, "ROOT", tmp_path),
+          patch.object(music_backend, "ENGINE", engine),
+          patch.object(music_backend, "healthy", side_effect=[False, False, True]),
+          patch.object(music_backend, "music_lm_ready", return_value=True),
+          patch.object(music_backend, "_setup_lock", return_value=nullcontext()),
+          patch.object(music_backend, "install"),
+          patch.object(music_backend.subprocess, "Popen") as launch):
+        assert music_backend.start_server() is True
+    assert launch.call_args.kwargs["env"]["ACESTEP_INIT_LLM"] == "auto"
+
+
 def test_sends_user_lyrics_to_local_music_engine_unchanged(tmp_path):
     lyrics = "[Verse]\nWe made it home\n[Chorus]\nSing it again"
     responses = iter([

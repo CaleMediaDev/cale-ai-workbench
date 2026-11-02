@@ -173,7 +173,15 @@ def healthy() -> bool:
     try:
         result = _request("/health", timeout=2)
         return result.get("data", {}).get("service") == "ACE-Step API"
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, RuntimeError):
+        return False
+
+
+def music_lm_ready() -> bool:
+    """Use the LM only when the engine confirms it loaded successfully."""
+    try:
+        return bool(_request("/health", timeout=2).get("data", {}).get("llm_initialized"))
+    except (OSError, ValueError, KeyError, RuntimeError):
         return False
 
 
@@ -209,19 +217,21 @@ def install() -> Path:
     return ENGINE
 
 
-def start_server() -> None:
-    """Start the local API on demand, using its own model/runtime directory."""
+def start_server() -> bool:
+    """Start the local API and report whether its music-planning LM is ready."""
     if healthy():
-        return
+        return music_lm_ready()
     with _setup_lock():
         if healthy():
-            return
+            return music_lm_ready()
         install()
     env = os.environ.copy()
     env.update({
         "ACESTEP_API_HOST": "127.0.0.1",
         "ACESTEP_API_PORT": "8001",
-        "ACESTEP_INIT_LLM": "false",
+        # Let ACE-Step's GPU tiers enable its lyric/music planner on machines
+        # that can run it; forcing it off reduced vocal-song quality on 12 GB.
+        "ACESTEP_INIT_LLM": "auto",
         "ACESTEP_LM_BACKEND": "pt",
         "HF_HOME": str(ROOT / "Media" / "music" / "huggingface"),
     })
@@ -236,7 +246,7 @@ def start_server() -> None:
         )
     for _ in range(180):
         if healthy():
-            return
+            return music_lm_ready()
         if process.poll() is not None:
             break
         time.sleep(2)
@@ -261,12 +271,12 @@ def _generate_music(
     source = Path(source_path).resolve() if source_path else None
     if source and (not source.is_file() or source.suffix.lower() not in (".wav", ".mp3", ".flac")):
         raise ValueError("The cover source must be an existing WAV, MP3 or FLAC file.")
-    start_server()
+    lm_ready = start_server()
     request = {
         "prompt": music_style.enhance(prompt.strip(), instrumental),
         "lyrics": "[Instrumental]" if instrumental else lyrics,
         "audio_format": target.suffix.lower()[1:], "audio_duration": duration_seconds,
-        "thinking": False, "inference_steps": 8, "batch_size": 1,
+        "thinking": bool(lm_ready is True and not source), "inference_steps": 8, "batch_size": 1,
     }
     tempo = music_style.requested_bpm(prompt)
     if tempo is not None:
