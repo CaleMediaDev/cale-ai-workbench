@@ -701,7 +701,7 @@ def _retry_captioned_video(job_id: str, info: dict, error: Exception) -> None:
 
 
 def recover_music_jobs() -> None:
-    """Resume queued or working jobs whose worker died during a reboot."""
+    """Reattach dead jobs without doing transcription or video work in the supervisor."""
     if not JOBS.is_dir():
         return
     for path in JOBS.glob("*.json"):
@@ -716,62 +716,14 @@ def recover_music_jobs() -> None:
             if _worker_running(job_id, info):
                 continue
             output = Path(info["output_path"])
-            if output.is_file():
-                if audio_file_ok(output):
-                    vocal_check = info.get("vocal_check")
-                    if (info.get("duration_seconds") and not info.get("source_path")
-                            and music_style.requires_sustained_vocals(
-                                info.get("prompt", ""), info.get("lyrics", ""),
-                                bool(info.get("instrumental")))
-                            and not (vocal_check or {}).get("passed")):
-                        try:
-                            vocal_check = vocal_evidence(
-                                output, info["duration_seconds"], info.get("lyrics", ""),
-                            )
-                        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
-                            _write_job(job_id, {
-                                **info, "status": "error",
-                                "current": "Could not verify the saved vocals: " + str(exc)[:200],
-                                "finished": time.time(),
-                            })
-                            continue
-                        if not vocal_check["passed"]:
-                            _write_job(job_id, {
-                                **info, "status": "error",
-                                "current": "The saved song has too few clear vocals. Try again or supply lyrics.",
-                                "vocal_check": vocal_check, "finished": time.time(),
-                            })
-                            continue
-                    import song_video
-
-                    _write_job(job_id, {**info, "status": "working",
-                                        "current": "Finishing the captioned video", "progress": 88})
-                    try:
-                        video = song_video.render(
-                            str(output), segments=(vocal_check or {}).get("segments", []),
-                            lyrics=info.get("lyrics", ""), title=info.get("prompt", "Song"),
-                            instrumental=bool(info.get("instrumental")),
-                            duration=int(info.get("duration_seconds") or 30),
-                        )
-                    except Exception as exc:
-                        _retry_captioned_video(job_id, {**info, "vocal_check": vocal_check}, exc)
-                        continue
-                    _write_job(job_id, {
-                        **info, "status": "complete", "current": "Music and captioned video are ready",
-                        "progress": 100,
-                        "result": {**(info.get("result") or {"path": str(output),
-                                       "model": "ACE-Step 1.5"}), "video": video},
-                        "vocal_check": vocal_check, "finished": time.time(),
-                    })
-                else:
-                    # The engine may have produced a damaged file before the
-                    # worker died. Keep it for diagnosis, and avoid claiming
-                    # success or starting a duplicate render at the same path.
-                    _write_job(job_id, {
-                        **info, "status": "error",
-                        "current": "The saved song could not be played. Try a new render.",
-                        "finished": time.time(),
-                    })
+            if output.is_file() and not audio_file_ok(output):
+                # Preserve a damaged render for diagnosis. The worker must not
+                # overwrite it or claim that the song passed verification.
+                _write_job(job_id, {
+                    **info, "status": "error",
+                    "current": "The saved song could not be played. Try a new render.",
+                    "finished": time.time(),
+                })
                 continue
             attempts = int(info.get("recoveries", 0)) + 1
             if attempts > 3:
@@ -781,8 +733,11 @@ def recover_music_jobs() -> None:
                 })
                 continue
             resumed = {
-                **info, "status": "queued", "current": "Resuming local music",
-                "progress": 10, "recoveries": attempts,
+                **info, "status": "queued",
+                "current": ("Finishing saved music" if output.is_file()
+                            else "Resuming local music"),
+                "progress": 70 if output.is_file() else 10,
+                "recoveries": attempts,
                 "worker_pid": None, "created": time.time(),
             }
             _write_job(job_id, resumed)

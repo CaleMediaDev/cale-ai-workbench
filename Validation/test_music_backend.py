@@ -229,6 +229,8 @@ def test_saved_vocal_chop_song_recovers_without_singing_check(tmp_path):
                   "path": "song-video.mp4", "captions_path": "song.captions.srt"
               })):
             music_backend.recover_music_jobs()
+            check.assert_not_called()
+            music_backend._run_job(started["job_id"])
         recovered = music_backend.music_job_status(started["job_id"])
     check.assert_not_called()
     assert recovered["status"] == "complete"
@@ -718,7 +720,9 @@ def test_recovery_only_marks_playable_saved_song_complete(tmp_path):
     output.write_bytes(b"incomplete audio")
     (jobs / (job_id + ".json")).write_text(json.dumps({
         "job_id": job_id, "status": "working", "current": "Generating",
-        "output_path": str(output), "created": 1,
+        "output_path": str(output), "created": 1, "lyrics": "",
+        "prompt": "instrumental song", "instrumental": True,
+        "source_path": "", "duration_seconds": 30,
     }))
     with patch.object(music_backend, "JOBS", jobs), patch.object(
         music_backend, "_worker_running", return_value=False
@@ -735,12 +739,41 @@ def test_recovery_only_marks_playable_saved_song_complete(tmp_path):
         music_backend, "_launch_job"
     ) as launch, patch("song_video.render", return_value={
         "path": "song-video.mp4", "captions_path": "song.captions.srt"
-    }):
+    }) as render:
         record = music_backend.music_job_status(job_id)
         music_backend._write_job(job_id, {**record, "status": "working"})
         music_backend.recover_music_jobs()
+        assert music_backend.music_job_status(job_id)["status"] == "queued"
+        launch.assert_called_once_with(job_id)
+        render.assert_not_called()  # The supervisor stays free for other tasks.
+        music_backend._run_job(job_id)
         assert music_backend.music_job_status(job_id)["status"] == "complete"
-        launch.assert_not_called()
+
+
+def test_saved_song_vocal_failure_uses_normal_retry_signal(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    job_id = "f" * 32
+    output = tmp_path / "song.wav"
+    output.write_bytes(b"saved audio")
+    (jobs / (job_id + ".json")).write_text(json.dumps({
+        "job_id": job_id, "status": "working", "created": 1,
+        "output_path": str(output), "prompt": "female lead vocals",
+        "lyrics": "Sing the bright summer chorus across the water and keep the melody alive " * 3,
+        "duration_seconds": 60, "instrumental": False, "source_path": "",
+    }))
+    with (patch.object(music_backend, "JOBS", jobs),
+          patch.object(music_backend, "_worker_running", return_value=False),
+          patch.object(music_backend, "audio_file_ok", return_value=True),
+          patch.object(music_backend, "_launch_job") as launch,
+          patch.object(music_backend, "vocal_evidence", return_value={"passed": False}) as check):
+        music_backend.recover_music_jobs()
+        check.assert_not_called()
+        launch.assert_called_once_with(job_id)
+        music_backend._run_job(job_id)
+        recovered = music_backend.music_job_status(job_id)
+    assert recovered["status"] == "error"
+    assert "sustained vocals were not detected" in recovered["current"]
 
 
 def test_failed_video_retries_saved_audio_without_generating_song_again(tmp_path):
@@ -770,6 +803,8 @@ def test_failed_video_retries_saved_audio_without_generating_song_again(tmp_path
                 music_backend._write_job(started["job_id"], {**music_backend.music_job_status(
                     started["job_id"]), "created": 0})
                 music_backend.recover_music_jobs()
+                assert music_backend.music_job_status(started["job_id"])["status"] == "queued"
+                music_backend._run_job(started["job_id"])
                 assert music_backend.music_job_status(started["job_id"])["video_retries"] == expected
         finished = music_backend.music_job_status(started["job_id"])
     assert finished["status"] == "complete"
@@ -789,6 +824,7 @@ def test_video_retry_stops_after_three_failures_without_losing_audio(tmp_path):
         "job_id": job_id, "status": "working", "created": 0,
         "output_path": str(output), "instrumental": True,
         "duration_seconds": 30, "prompt": "beach music", "lyrics": "",
+        "source_path": "",
     }))
     with patch.object(music_backend, "JOBS", jobs), patch.object(
         music_backend, "_worker_running", return_value=False
@@ -797,6 +833,8 @@ def test_video_retry_stops_after_three_failures_without_losing_audio(tmp_path):
     ) as render:
         for attempt in range(1, 4):
             music_backend.recover_music_jobs()
+            assert music_backend.music_job_status(job_id)["status"] == "queued"
+            music_backend._run_job(job_id)
             record = music_backend.music_job_status(job_id)
             assert record["video_retries"] == attempt
             assert record["status"] == ("error" if attempt == 3 else "queued")
