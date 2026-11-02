@@ -428,6 +428,73 @@ def test_recovery_polls_existing_server_task_without_submitting_twice(tmp_path):
     assert all(call.args[0] != "/release_task" for call in request.call_args_list)
 
 
+def test_lost_fresh_music_task_is_resubmitted_once(tmp_path):
+    submitted = iter(("first", "replacement"))
+    polled = []
+
+    def engine(path, data=None):
+        if path == "/release_task":
+            return {"code": 200, "data": {"task_id": next(submitted)}}
+        polled.append(data["task_id_list"][0])
+        if len(polled) <= 10:
+            return {"data": [{"task_id": "first", "status": 0, "result": "[]"}]}
+        return {"data": [{"status": 1,
+                          "result": '[{"file":"/v1/audio?path=replacement"}]'}]}
+
+    saved = []
+    with (patch.object(music_backend, "start_server"),
+          patch.object(music_backend, "_request", side_effect=engine),
+          patch.object(music_backend, "urlopen", return_value=io.BytesIO(b"song")),
+          patch.object(music_backend.time, "sleep")):
+        music_backend.generate_music(
+            "jazz", str(tmp_path / "song.mp3"),
+            on_task_submitted=saved.append,
+        )
+    assert polled == ["first"] * 10 + ["replacement"]
+    assert saved == ["first", "replacement"]
+
+
+def test_running_music_task_is_not_resubmitted_during_long_generation(tmp_path):
+    polls = 0
+    submissions = 0
+
+    def engine(path, data=None):
+        nonlocal polls, submissions
+        if path == "/release_task":
+            submissions += 1
+            return {"code": 200, "data": {"task_id": "working"}}
+        polls += 1
+        if polls <= 12:
+            return {"data": [{"status": 0, "result": '[{"stage":"generating","progress":0.2}]'}]}
+        return {"data": [{"status": 1, "result": '[{"file":"/v1/audio?path=working"}]'}]}
+
+    with (patch.object(music_backend, "start_server"),
+          patch.object(music_backend, "_request", side_effect=engine),
+          patch.object(music_backend, "urlopen", return_value=io.BytesIO(b"song")),
+          patch.object(music_backend.time, "sleep")):
+        music_backend.generate_music("jazz", str(tmp_path / "song.mp3"))
+    assert polls == 13
+    assert submissions == 1
+
+
+def test_repeatedly_lost_music_task_reports_error_without_two_hour_wait(tmp_path):
+    submissions = 0
+
+    def engine(path, data=None):
+        nonlocal submissions
+        if path == "/release_task":
+            submissions += 1
+            return {"code": 200, "data": {"task_id": str(submissions)}}
+        return {"data": [{"status": 0, "result": "[]"}]}
+
+    with (patch.object(music_backend, "start_server"),
+          patch.object(music_backend, "_request", side_effect=engine),
+          patch.object(music_backend.time, "sleep")):
+        with pytest.raises(RuntimeError, match="repeatedly lost this song"):
+            music_backend.generate_music("jazz", str(tmp_path / "song.mp3"))
+    assert submissions == 3
+
+
 def test_cover_uploads_source_audio_to_local_server(tmp_path):
     source = tmp_path / "original.wav"
     source.write_bytes(b"source audio")

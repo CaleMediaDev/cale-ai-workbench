@@ -298,21 +298,34 @@ def _generate_music(
     # request alive while that one-time setup finishes on slower connections.
     deadline = time.monotonic() + 7200
     missing_polls = 0
+    lost_task_retries = 0
     while time.monotonic() < deadline:
         time.sleep(3)
         result = _request("/query_result", {"task_id_list": [task_id]})
         rows = result.get("data") or []
-        if not rows:
-            if existing_task_id:
-                missing_polls += 1
-                if missing_polls >= 10:
-                    # The API server restarted and forgot the old in-memory task.
-                    # Only then submit a replacement; a live task is never doubled.
-                    task_id = submit()
-                    existing_task_id = ""
+        row = rows[0] if rows else None
+        # ACE-Step returns a placeholder row for an unknown task ID. It has
+        # status 0 and result "[]", unlike a queued task, whose result holds
+        # a stage/progress record. A server restart can lose either a fresh or
+        # recovered submission; neither should leave the card at 35% for hours.
+        missing = (row is None or
+                   row.get("status") == 0 and row.get("result") in ("[]", [], None)
+                   and not row.get("progress_text"))
+        if missing:
+            missing_polls += 1
+            if missing_polls >= 10:
+                if lost_task_retries >= 2:
+                    raise RuntimeError(
+                        "The local music engine repeatedly lost this song. "
+                        "Restart the music engine and try again."
+                    )
+                # The server has not known this ID for 30 seconds. Submit one
+                # replacement and persist its ID through on_task_submitted.
+                task_id = submit()
+                lost_task_retries += 1
+                missing_polls = 0
             continue
         missing_polls = 0
-        row = rows[0]
         if row.get("status") == 2:
             raise RuntimeError("The local music engine could not finish this song.")
         if row.get("status") != 1:
