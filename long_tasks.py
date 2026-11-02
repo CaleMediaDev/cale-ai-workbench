@@ -3241,10 +3241,11 @@ def gui():
         header, text="🚀  Supercharge my AI", command=show_super, style="Accent.TButton"
     )
     rocket.pack(side="right")
-    # Keep the cloud/local choice visible beside Supercharge during tasks.
+    # A separate top row keeps all four route choices visible on 1280px screens
+    # without hiding the version or the Ready checklist in the brand header.
     provider_scope = tk.StringVar(value=routing_mode.load_scope(ROOT / "Cloud"))
-    scope_frame = ttk.Frame(header)
-    scope_frame.pack(side="right", padx=(0, 12))
+    scope_frame = ttk.Frame(outer)
+    scope_frame.pack(anchor="e", before=gauge_row, pady=(0, 4))
     scope_buttons = {}
 
     def choose_scope(scope):
