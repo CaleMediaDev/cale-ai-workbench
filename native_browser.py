@@ -15,6 +15,30 @@ from urllib.parse import urlparse
 
 _PLAYWRIGHT = None
 _CONTEXTS = {}
+MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
+
+
+def _control(page, ref: str):
+    """Resolve only a control numbered by the last browser snapshot."""
+    if not re.fullmatch(r"[0-9]{1,4}", ref):
+        raise ValueError("Use a numbered ref from browser_snapshot")
+    return page.locator(f'[data-cale-ref="{ref}"]')
+
+
+def _download_target(folder: Path, filename: str) -> Path:
+    """Keep an untrusted server filename inside this task's download folder."""
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", filename).strip(" .")
+    name = name[:120] or "download.bin"
+    destination = folder / "Downloads"
+    destination.mkdir(parents=True, exist_ok=True)
+    target = destination / name
+    if target.exists():
+        target = next(
+            destination / f"{target.stem}-{number}{target.suffix}"
+            for number in range(2, 1000)
+            if not (destination / f"{target.stem}-{number}{target.suffix}").exists()
+        )
+    return target
 
 
 def _page(folder: Path):
@@ -73,21 +97,43 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
             raise ValueError("Use a full http:// or https:// URL")
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
     elif action == "click":
-        ref = str(arguments["ref"])
-        if not re.fullmatch(r"[0-9]{1,4}", ref):
-            raise ValueError("Use a numbered ref from browser_snapshot")
-        page.locator(f'[data-cale-ref="{ref}"]').click(timeout=10000)
+        _control(page, str(arguments["ref"])).click(timeout=10000)
     elif action == "type":
-        ref = str(arguments["ref"])
-        if not re.fullmatch(r"[0-9]{1,4}", ref):
-            raise ValueError("Use a numbered ref from browser_snapshot")
         text = str(arguments["text"])
         if len(text) > 10000:
             raise ValueError("Text is too long")
-        target = page.locator(f'[data-cale-ref="{ref}"]')
+        target = _control(page, str(arguments["ref"]))
         target.fill(text, timeout=10000)
         if arguments.get("submit"):
             target.press("Enter")
+    elif action == "select":
+        value = str(arguments["value"])
+        if len(value) > 200:
+            raise ValueError("Dropdown value is too long")
+        selected = _control(page, str(arguments["ref"])).select_option(value=value, timeout=10000)
+        _preview(folder, page)
+        return json.dumps({"url": page.url, "selected": selected}, ensure_ascii=False)
+    elif action == "press":
+        key = str(arguments["key"])
+        if key not in {"Enter", "Tab", "Escape", "Space", "Backspace",
+                       "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"}:
+            raise ValueError("Use a supported browser key")
+        _control(page, str(arguments["ref"])).press(key, timeout=10000)
+    elif action == "back":
+        page.go_back(wait_until="domcontentloaded", timeout=15000)
+    elif action == "download":
+        with page.expect_download(timeout=30000) as event:
+            _control(page, str(arguments["ref"])).click(timeout=10000)
+        download = event.value
+        source = Path(download.path())
+        size = source.stat().st_size
+        if size > MAX_DOWNLOAD_BYTES:
+            download.delete()
+            raise ValueError("Browser download exceeds 512 MB; use a project command for large files")
+        target = _download_target(folder, download.suggested_filename)
+        download.save_as(str(target))
+        return json.dumps({"saved": target.relative_to(folder).as_posix(),
+                           "bytes": size, "url": download.url}, ensure_ascii=False)
     elif action == "scroll":
         page.mouse.wheel(0, max(-5000, min(5000, int(arguments.get("pixels", 600)))))
     elif action == "snapshot":
