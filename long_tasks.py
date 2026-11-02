@@ -321,6 +321,18 @@ def record_replay_outcome(replay_id: int, succeeded: bool) -> str:
     return message
 
 
+def current_progress_file(project):
+    """Use the freshest progress note when a worker saved it at project root."""
+    project = Path(project)
+    standard = project / ".local-ai/PROGRESS.md"
+    alternate = project / "PROGRESS.md"
+    if alternate.is_file() and (
+        not standard.is_file() or alternate.stat().st_mtime > standard.stat().st_mtime
+    ):
+        return alternate
+    return standard
+
+
 def task_progress(p):
     """Show 100% once independent checks finish; edits can reopen the work."""
     state = p["status"]
@@ -362,7 +374,7 @@ def task_progress(p):
         return 0, p["detail"][:180]
     folder = Path(p["folder"]) / ".local-ai"
     plan = folder / "PLAN.md"
-    progress = folder / "PROGRESS.md"
+    progress = current_progress_file(p["folder"])
     checklist = (
         plan.read_text(encoding="utf-8", errors="replace") if plan.is_file() else ""
     )
@@ -388,12 +400,13 @@ def task_progress(p):
         else ""
     )
     step = ""
-    match = re.search(
-        r"(?im)^\s*(?:#{1,4}\s*)?(?:[-*]\s*)?(?:next(?: concrete)? step|current task|working on)\s*[:\-]\s*(.*)$",
+    matches = list(re.finditer(
+        r"(?im)^\s*(?:#{1,4}\s*)?(?:[-*]\s*)?(?:={2,}\s*)?(?:next(?: concrete)? step|current task|working on)\s*[:\-]\s*(.*)$",
         note,
-    )
+    ))
+    match = matches[-1] if matches else None
     if match:
-        step = match.group(1).strip()
+        step = match.group(1).strip(" =\t")
         if not step:
             following = note[match.end() :].splitlines()
             step = next((line.strip(" -*\t") for line in following if line.strip()), "")
@@ -414,7 +427,9 @@ def task_progress(p):
         if setup.get("status") in ("failed", "error"):
             step = "AI setup needs attention: " + str(setup.get("current", "Unknown error"))
     elif state == "working":
-        step = active_worker_wait(p) or step
+        waiting = active_worker_wait(p)
+        if waiting:
+            step = f"{step[:85]} · {waiting}"
     return percent, step[:180]
 
 
@@ -970,7 +985,7 @@ def recovery_snapshot(folder):
     if verifier.is_file():
         notes.append("Existing independent check: .local-ai/verify.ps1. Run it before any new render.")
     for name in ("PLAN.md", "PROGRESS.md"):
-        path = folder / name
+        path = current_progress_file(project) if name == "PROGRESS.md" else folder / name
         if not path.is_file():
             continue
         size = path.stat().st_size

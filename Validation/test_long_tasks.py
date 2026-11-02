@@ -1140,8 +1140,12 @@ class LongTaskTests(unittest.TestCase):
             ))
             conn.commit()
         task_module.update(self.pid, status="working")
+        (Path(self.item()["folder"]) / ".local-ai/PROGRESS.md").write_text(
+            "Current task: Rendering the song\n", encoding="utf-8"
+        )
         with patch.object(task_module, "ROOT", root):
             _, step = task_module.task_progress(self.item())
+        self.assertIn("Rendering the song", step)
         self.assertIn("150s waiting for its first reply", step)
 
     def test_success_starts_separate_review(self):
@@ -1595,13 +1599,24 @@ class LongTaskTests(unittest.TestCase):
             "- [x] Plan\n- [ ] Build\n- [ ] Test\n", encoding="utf-8"
         )
         (folder / "PROGRESS.md").write_text(
-            "Next step: Build the homepage\n", encoding="utf-8"
+            "Current task: Drafting an outline\nNext step: Build the homepage\n", encoding="utf-8"
         )
         percent, step = task_module.task_progress(self.item())
         self.assertEqual(percent, 33)
         self.assertEqual(step, "Build the homepage")
         task_module.update(self.pid, status="accepted")
         self.assertEqual(task_module.task_progress(self.item())[0], 100)
+
+    def test_newer_root_progress_is_visible_and_recovered(self):
+        project = self.base / "project"
+        standard = project / ".local-ai/PROGRESS.md"
+        standard.write_text("Current task: Old step\n", encoding="utf-8")
+        alternate = project / "PROGRESS.md"
+        alternate.write_text("=== Current task: Rendering the vocal test ===\n", encoding="utf-8")
+        newer = standard.stat().st_mtime + 2
+        os.utime(alternate, (newer, newer))
+        self.assertEqual(task_module.task_progress(self.item())[1], "Rendering the vocal test")
+        self.assertIn("Rendering the vocal test", task_module.recovery_snapshot(project))
 
     def test_blocker_requires_explicit_resume(self):
         task_module.update(self.pid, card="test", status="working")
