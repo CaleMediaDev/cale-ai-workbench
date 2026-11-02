@@ -23,6 +23,18 @@ def test_techno_uses_electronic_instruments_unless_guitar_is_requested():
     )
 
 
+def test_dubstep_caption_keeps_halftime_drops_instead_of_techno_kick():
+    request = "150 BPM heavy dubstep with halftime drums, syncopated wobbles and huge bass drops"
+    caption = music_style.enhance(request, instrumental=True)
+    assert "halftime snare-led drums" in caption
+    assert "four-on-the-floor" not in caption
+    assert music_style.enhance(caption, instrumental=True) == caption
+    explicit = music_style.enhance(
+        "Make dubstep with a four-on-the-floor kick", instrumental=True
+    )
+    assert "four-on-the-floor kick" in explicit
+
+
 def test_explicit_vocal_request_overrides_artist_reference():
     assert music_style.vocal_intent("Make a Katy Perry style song with male vocals") == "male"
     assert music_style.vocal_intent("Make a song with female and male duet") == "duet"

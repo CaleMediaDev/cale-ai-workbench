@@ -114,12 +114,19 @@ def enhance(prompt: str, instrumental: bool = False) -> str:
     if not instrumental and not sustained:
         cues.append("Sparse chopped vocal syllables as rhythmic accents between instrumental sections")
     request = cleaned.split("Past user feedback", 1)[0].lower()
-    if (re.search(r"\b(?:techno|tehno|electronic dance|dubstep|edm)\b", request)
+    if (re.search(r"\b(?:techno|tehno|electronic dance|dubstep|riddim|brostep|tearout|edm)\b", request)
             and not re.search(r"\b(?:guitars?|acoustic|live band|rock)\b", request)):
-        cues.append(
-            "Entirely electronic production with a drum machine, four-on-the-floor kick, "
-            "sequenced synthesizers, synthetic bass and club textures"
-        )
+        if (re.search(r"\b(?:dubstep|riddim|brostep|tearout)\b", request)
+                and not re.search(r"\b(?:four.on.the.floor|four.on.floor|4/4 kick)\b", request)):
+            cues.append(
+                "Entirely electronic production with halftime snare-led drums, "
+                "syncopated wobble bass, sequenced synthesizers and sharp bass drops"
+            )
+        else:
+            cues.append(
+                "Entirely electronic production with a drum machine, four-on-the-floor kick, "
+                "sequenced synthesizers, synthetic bass and club textures"
+            )
     additions = [cue for cue in cues if cue.lower() not in cleaned.lower()]
     return ". ".join(additions) + ". " + cleaned if additions else cleaned
 
