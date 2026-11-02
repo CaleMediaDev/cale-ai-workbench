@@ -788,7 +788,8 @@ class Router:
         if repaired is not messages:
             payload = {**payload, "messages": repaired}
         scope = routing_mode.load_scope(STATE) if profile == "main" else "both"
-        cloud_only = profile == "main" and scope == "cloud_only"
+        cloud_only = profile == "main" and scope in ("cloud_only", "free_cloud_only")
+        free_cloud_only = profile == "main" and scope == "free_cloud_only"
         offline_mode = (pc_offline.offline() or scope == "local_only" or
                         (scope == "both" and task_route(
                             usage_history.CURRENT_TASK.get()) == "local_only"))
@@ -840,7 +841,7 @@ class Router:
 
         def try_paid():
             nonlocal paid_attempted, reason
-            if (profile != "main" or offline_mode or paid_attempted
+            if (profile != "main" or offline_mode or paid_attempted or free_cloud_only
                     or time.time() < self.chatgpt_cooldown
                     or time.time() - paid_pressure["last_limit"] < 3600):
                 return None
@@ -868,7 +869,7 @@ class Router:
         # Learn from observed limits without pretending to know the account's
         # remaining allowance. Quick work is kept local; repeated plan limits
         # reserve paid access for deep work after its cooldown expires.
-        if profile == "main" and routing_mode.paid_first(
+        if profile == "main" and not free_cloud_only and routing_mode.paid_first(
             mode, size, local_speed, paid_speed, fastest_free_speed,
             routing_memory.use_paid(size, local_speed, paid_pressure),
         ):
@@ -902,11 +903,16 @@ class Router:
                         provider, provider_key, payload,
                         account_id=(account.get("provider_accounts") or {}).get(provider, ""))
                     result = valid_completion(result, payload)
+                    if free_cloud_only and is_refusal(result):
+                        routing_memory.record(provider, size, "refusal")
+                        reason = "Connected free cloud models declined this request."
+                        continue
                     routing_memory.record(provider, size, "success")
                     usage_history.record_completion(result, provider, elapsed)
                     record(provider, "Connected free-plan cloud response received.",
                            result.get("model", spec["model"]))
-                    return retry_derestricted(payload, result, result.get("model", ""))
+                    return (result if free_cloud_only else retry_derestricted(
+                        payload, result, result.get("model", "")))
                 except HTTPError as exc:
                     routing_memory.record(provider, size, routing_memory.failure_kind(exc))
                     self.provider_cooldowns[provider] = time.time() + (
@@ -937,23 +943,27 @@ class Router:
                 result = valid_completion(post(
                     API + "/chat/completions", cloud_payload(payload), key, timeout=120,
                 ), payload)
-                routing_memory.record("openrouter", size, "success")
-                record("free cloud", "Free route accelerated demanding work.",
-                       result.get("model", "openrouter/free"))
-                return retry_derestricted(payload, result, result.get("model", ""))
+                if free_cloud_only and is_refusal(result):
+                    reason = "Connected free cloud models declined this request."
+                else:
+                    routing_memory.record("openrouter", size, "success")
+                    record("free cloud", "Free route accelerated demanding work.",
+                           result.get("model", "openrouter/free"))
+                    return (result if free_cloud_only else retry_derestricted(
+                        payload, result, result.get("model", "")))
             except HTTPError as exc:
                 routing_memory.record("openrouter", size, routing_memory.failure_kind(exc))
                 self.cooldown = time.time() + (3600 if exc.code in (401, 402, 403, 429) else 120)
             except Exception as exc:
                 routing_memory.record("openrouter", size, routing_memory.failure_kind(exc))
                 self.cooldown = time.time() + 120
-        if (mode == "floor_it" and profile == "main" and not offline_mode
+        if (mode == "floor_it" and profile == "main" and not offline_mode and not free_cloud_only
                 and cloud_providers.likely_faster(size, paid_speed, local_speed)):
             paid_result = try_paid()
             if paid_result is not None:
                 return paid_result
         selected = (
-            [] if profile == "main" and scope == "cloud_only" else
+            [] if cloud_only else
             self.local_candidates(size, required_context) if profile == "main" else
             [CATALOG[profile]["alias"]]
         )
@@ -1001,13 +1011,17 @@ class Router:
                         timeout=120,
                     ), payload
                 )
-                routing_memory.record("openrouter", size, "success")
-                record(
-                    "free cloud",
-                    "Free cloud response received.",
-                    result.get("model", "openrouter/free"),
-                )
-                return retry_derestricted(payload, result, result.get("model", ""))
+                if free_cloud_only and is_refusal(result):
+                    reason = "Connected free cloud models declined this request."
+                else:
+                    routing_memory.record("openrouter", size, "success")
+                    record(
+                        "free cloud",
+                        "Free cloud response received.",
+                        result.get("model", "openrouter/free"),
+                    )
+                    return (result if free_cloud_only else retry_derestricted(
+                        payload, result, result.get("model", "")))
             except HTTPError as exc:
                 routing_memory.record("openrouter", size, routing_memory.failure_kind(exc))
                 # No response body, keys or project text is written into logs.
@@ -1021,13 +1035,15 @@ class Router:
                 reason = "Free cloud unavailable or incompatible."
         elif key:
             reason = "Free quota, rate limit or cooldown reached."
-        if (mode in ("paid_saver", "floor_it") or cloud_only) and profile == "main" and not offline_mode:
+        if (mode in ("paid_saver", "floor_it") or cloud_only) and profile == "main" and not offline_mode and not free_cloud_only:
             paid_result = try_paid()
             if paid_result is not None:
                 return paid_result
         record("unavailable", reason, selected[-1] if selected else "")
         if last_error:
             raise last_error
+        if not selected and free_cloud_only:
+            raise RuntimeError("Free cloud only is selected, but no connected free cloud model answered. Connect a free provider in Supercharge or select Both.")
         if not selected and scope == "cloud_only" and profile == "main":
             raise RuntimeError("Cloud only is selected, but no connected cloud model is available. Connect one in Supercharge or select Both.")
         if not selected and profile == "main":

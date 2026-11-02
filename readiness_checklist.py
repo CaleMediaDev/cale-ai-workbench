@@ -1,7 +1,7 @@
 """Show what is installed and what has actually answered a local health check.
 
-The checklist never opens user files, sends telemetry, or downloads models.
-Optional media tools can remain on demand on PCs without enough resources.
+The checklist only reads local status records and file metadata. It never
+sends telemetry, opens a person's deliverables, or downloads models.
 """
 
 from __future__ import annotations
@@ -24,6 +24,32 @@ def _json(path: Path) -> dict:
 
 def _item(label: str, state: str, detail: str, essential: bool = False) -> dict:
     return {"label": label, "state": state, "detail": detail, "essential": essential}
+
+
+def _successful_job(folder: Path, status_key: str, *, min_bytes: int = 100) -> bool:
+    """A completed job with a saved deliverable is evidence of real local use.
+
+    Only the newest 100 small job records are examined. The output itself is
+    never opened, and a deleted output cannot count as a successful check.
+    """
+    try:
+        records = sorted(folder.glob("*.json"), key=lambda path: path.stat().st_mtime,
+                         reverse=True)[:100]
+    except OSError:
+        return False
+    for path in records:
+        job = _json(path)
+        if job.get(status_key) != "complete":
+            continue
+        output = job.get("output_path")
+        if not isinstance(output, str) or not output:
+            continue
+        try:
+            if Path(output).is_file() and Path(output).stat().st_size >= min_bytes:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def snapshot(root: Path = ROOT) -> dict:
@@ -71,13 +97,19 @@ def snapshot(root: Path = ROOT) -> dict:
                       if voice_ready else "Installing offline speech models"))
 
     image_ready = media_python and (media / "models/lcm/model_index.json").is_file()
-    rows.append(_item("Image maker", "installed" if image_ready else "working",
+    image_verified = image_ready and _successful_job(state / "image-jobs", "status")
+    rows.append(_item("Image maker", "ready" if image_verified else
+                      "installed" if image_ready else "working",
+                      "Rendered an image successfully on this PC" if image_verified else
                       "Local image model installed; render checked on first image"
                       if image_ready else "Installing local image model"))
 
     music_ready = ((media / "music/ACE-Step-1.5/.cale-model-ready").is_file()
                    and (media / "music/ACE-Step-1.5/.venv/Scripts/python.exe").is_file())
-    rows.append(_item("Music maker", "installed" if music_ready else "on_demand",
+    music_verified = music_ready and _successful_job(state / "music-jobs", "status", min_bytes=1000)
+    rows.append(_item("Music maker", "ready" if music_verified else
+                      "installed" if music_ready else "on_demand",
+                      "Rendered a song successfully on this PC" if music_verified else
                       "Local music model installed; render checked on first song"
                       if music_ready else "Installs when this PC can run it or when music is requested"))
 
@@ -88,7 +120,10 @@ def snapshot(root: Path = ROOT) -> dict:
                       if browser_ready else "Preparing local browser tools"))
 
     video_ready = (media / "video/runtime/cale-video-ready.json").is_file()
-    rows.append(_item("Video maker", "installed" if video_ready else "on_demand",
+    video_verified = video_ready and _successful_job(media / "video/jobs", "state", min_bytes=1000)
+    rows.append(_item("Video maker", "ready" if video_verified else
+                      "installed" if video_ready else "on_demand",
+                      "Rendered a video successfully on this PC" if video_verified else
                       "Local video model installed; render checked on first video"
                       if video_ready else "Large video model installs on first use if this PC qualifies"))
 
@@ -106,5 +141,6 @@ def snapshot(root: Path = ROOT) -> dict:
 
     essential = [row for row in rows if row["essential"]]
     return {"rows": rows, "core_ready": all(row["state"] == "ready" for row in essential),
+            "verified": sum(row["state"] == "ready" for row in rows),
             "installed": sum(row["state"] in ("ready", "installed") for row in rows),
             "total": len(rows)}

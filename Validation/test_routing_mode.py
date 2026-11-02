@@ -25,6 +25,8 @@ def test_local_cloud_or_both_choice_persists(tmp_path):
     assert routing_mode.load_scope(tmp_path) == "cloud_only"
     routing_mode.save_scope(tmp_path, "local_only")
     assert routing_mode.load_scope(tmp_path) == "local_only"
+    routing_mode.save_scope(tmp_path, "free_cloud_only")
+    assert routing_mode.load_scope(tmp_path) == "free_cloud_only"
     with pytest.raises(ValueError):
         routing_mode.save_scope(tmp_path, "unknown")
 

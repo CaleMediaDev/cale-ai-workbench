@@ -28,6 +28,7 @@ def test_checklist_distinguishes_installed_optional_tools_from_checked_core(tmp_
     with patch.object(readiness_checklist, "urlopen", return_value=response):
         result = readiness_checklist.snapshot(tmp_path)
     assert result["core_ready"]
+    assert result["verified"] == 5
     rows = {row["label"]: row for row in result["rows"]}
     assert rows["Image maker"]["state"] == "installed"
     assert rows["Music maker"]["state"] == "on_demand"
@@ -40,3 +41,17 @@ def test_checklist_distinguishes_installed_optional_tools_from_checked_core(tmp_
         result = readiness_checklist.snapshot(tmp_path)
     assert not result["core_ready"]
     assert result["rows"][-1]["state"] == "attention"
+
+
+def test_completed_media_job_only_counts_when_its_output_still_exists(tmp_path):
+    jobs = tmp_path / "image-jobs"
+    jobs.mkdir()
+    output = tmp_path / "image.png"
+    (jobs / "one.json").write_text(json.dumps({
+        "status": "complete", "output_path": str(output)}))
+    assert not readiness_checklist._successful_job(jobs, "status")
+    output.write_bytes(b"x" * 120)
+    assert readiness_checklist._successful_job(jobs, "status")
+    (jobs / "one.json").write_text(json.dumps({
+        "status": "error", "output_path": str(output)}))
+    assert not readiness_checklist._successful_job(jobs, "status")

@@ -638,6 +638,20 @@ def web_sources(question: str, preferred_business: str = "") -> tuple[list[dict]
     return pages, leads
 
 
+def _cloud_scope_completion(messages: list[dict], max_tokens: int,
+                            temperature: float) -> dict | None:
+    """Honor cloud-only chat choices while local lookup tools remain usable."""
+    import cloud_ai
+    import routing_mode
+
+    if routing_mode.load_scope(cloud_ai.STATE) not in ("cloud_only", "free_cloud_only"):
+        return None
+    return cloud_ai.Router().complete({
+        "model": cloud_ai.LOCAL_MODEL, "messages": messages,
+        "max_tokens": max_tokens, "temperature": temperature, "stream": False,
+    })
+
+
 def answer_from_web(question: str, preferred_business: str = "") -> str:
     """Synthesize a sourced answer locally and expose exactly what was read."""
     from cloud_ai import (
@@ -689,9 +703,12 @@ def answer_from_web(question: str, preferred_business: str = "") -> str:
         },
         {"role": "user", "content": f"Question: {question}\n\nLive source excerpts:\n{evidence}"},
     ]
-    for model in dict.fromkeys((BALANCED_MODEL, FAST_MODEL, LOCAL_MODEL)):
+    cloud_result = _cloud_scope_completion(messages, 1100, 0.1)
+    models = (None,) if cloud_result is not None else dict.fromkeys(
+        (BALANCED_MODEL, FAST_MODEL, LOCAL_MODEL))
+    for model in models:
         try:
-            result = post(
+            result = cloud_result if model is None else post(
                 "http://127.0.0.1:11434/v1/chat/completions",
                 {"model": model, "messages": messages, "stream": False,
                  "max_tokens": 1100, "temperature": 0.1,
@@ -700,7 +717,7 @@ def answer_from_web(question: str, preferred_business: str = "") -> str:
             )
             if result["choices"][0].get("finish_reason") == "length":
                 continue
-            result = retry_derestricted(
+            result = result if model is None else retry_derestricted(
                 {"messages": messages, "max_tokens": 1100, "temperature": 0.1},
                 result, model,
             )
@@ -720,11 +737,11 @@ def answer_from_web(question: str, preferred_business: str = "") -> str:
         except (KeyError, IndexError, OSError, ValueError):
             continue
     references = "\n".join(f"- {page['title']}: {page['url']}" for page in pages)
-    return "I read live pages, but the local model could not summarize them. Sources:\n" + references
+    return "I read live pages, but the selected model could not summarize them. Sources:\n" + references
 
 
 def local_answer(question: str, history: list[dict], file_evidence: str = "") -> str:
-    """Answer quick chat locally; this path never spends connected cloud credits."""
+    """Answer quick chat using the selected scope, with local tools intact."""
     from cloud_ai import FAST_MODEL, LOCAL_MODEL, post, retry_derestricted
     from tone_adaptation import STYLE_GUIDE
 
@@ -754,6 +771,13 @@ def local_answer(question: str, history: list[dict], file_evidence: str = "") ->
         if item["role"] in ("user", "assistant")
     )
     messages.append({"role": "user", "content": question})
+    cloud_result = _cloud_scope_completion(messages, 2048, 0.3)
+    if cloud_result is not None:
+        choice = cloud_result["choices"][0]
+        answer = (choice["message"].get("content") or "").strip()
+        if answer and choice.get("finish_reason") != "length":
+            return answer
+        raise RuntimeError("The connected cloud model did not finish a chat answer. Try again or make it a task.")
     # This worker handles chat requests in order. A stalled model must not
     # hold every later question hostage for several 180/360-second attempts.
     deadline = time.monotonic() + 150

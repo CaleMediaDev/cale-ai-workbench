@@ -46,6 +46,41 @@ REQUEST = {
 
 
 class CloudTests(unittest.TestCase):
+    def test_free_cloud_only_uses_connected_free_model_and_keeps_tool_calls(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        request = {**REQUEST, "tools": [{"type": "function", "function": {
+            "name": "read_file", "parameters": {"type": "object", "properties": {}}}}]}
+        with (patch("chatgpt_auth.status", return_value={"enabled": True}),
+              patch("chatgpt_auth.complete") as paid,
+              patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
+              patch.object(cloud, "post") as local):
+            self.assertEqual(cloud.Router().complete(request), ANSWER)
+        self.assertEqual(free.call_args.args[2]["tools"], request["tools"])
+        paid.assert_not_called()
+        local.assert_not_called()
+
+    def test_free_cloud_only_never_spends_paid_or_uses_local_when_unavailable(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        with (patch("chatgpt_auth.status", return_value={"enabled": True}),
+              patch("chatgpt_auth.complete") as paid,
+              patch.object(cloud, "post") as local):
+            with self.assertRaisesRegex(RuntimeError, "Free cloud only is selected"):
+                cloud.Router().complete(REQUEST)
+        paid.assert_not_called()
+        local.assert_not_called()
+
+    def test_free_cloud_only_does_not_retry_refusal_on_local_model(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (patch.object(cloud_providers, "complete", return_value=(REFUSAL, 0.5)),
+              patch("chatgpt_auth.complete") as paid,
+              patch.object(cloud, "post") as local):
+            with self.assertRaisesRegex(RuntimeError, "Free cloud only is selected"):
+                cloud.Router().complete(REQUEST)
+        paid.assert_not_called()
+        local.assert_not_called()
+
     def test_cloud_only_does_not_fall_back_to_local(self):
         with (tempfile.TemporaryDirectory() as directory,
               patch.object(cloud, "STATE", Path(directory)),

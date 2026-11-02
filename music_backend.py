@@ -482,7 +482,7 @@ def compose_lyrics(prompt: str, duration_seconds: int) -> str:
                      )},
                      {"role": "user", "content": prompt[:3000]},
                  ]}
-            if routing_mode.load_scope(cloud_ai.STATE) == "cloud_only":
+            if routing_mode.load_scope(cloud_ai.STATE) in ("cloud_only", "free_cloud_only"):
                 try:
                     result = cloud_ai.Router().complete(
                         {**payload, "model": cloud_ai.LOCAL_MODEL},

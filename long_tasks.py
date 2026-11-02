@@ -3255,14 +3255,15 @@ def gui():
                 button.configure(style="SelectedMode.TButton" if key == scope else "Mode.TButton")
             status.set({
                 "local_only": "Chat uses local AI. Music and image generation also run locally.",
+                "free_cloud_only": "Chat and tasks use connected free cloud AI. Local files, music, images, and other tools still work.",
                 "cloud_only": "Chat uses connected cloud AI. Music and image generation still run locally.",
                 "both": "Cale chooses local or connected cloud AI for chat. Music and images run locally.",
             }[scope])
         except OSError as exc:
             status.set("Could not save model choice: " + str(exc)[:120])
 
-    for scope, label in (("local_only", "Local only"), ("cloud_only", "Cloud only"),
-                         ("both", "Both")):
+    for scope, label in (("local_only", "Local"), ("free_cloud_only", "Free cloud only"),
+                         ("cloud_only", "Cloud"), ("both", "Both")):
         button = ttk.Button(scope_frame, text=label,
                             command=lambda choice=scope: choose_scope(choice),
                             style="SelectedMode.TButton" if provider_scope.get() == scope else "Mode.TButton")
@@ -4188,7 +4189,8 @@ def gui():
             if not dialog.winfo_exists():
                 return
             summary.set(("Core is ready" if result["core_ready"] else "Core is still getting ready")
-                        + f" · {result['installed']}/{result['total']} installed or checked")
+                        + f" · {result['verified']} working, "
+                        + f"{result['installed']}/{result['total']} installed")
             for index, item in enumerate(result["rows"]):
                 if index >= len(rendered):
                     line = ttk.Frame(rows_frame, style="Card.TFrame", padding=(12, 7))

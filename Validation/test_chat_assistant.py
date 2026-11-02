@@ -8,6 +8,34 @@ import pytest
 import chat_assistant
 
 
+def test_free_cloud_chat_uses_connected_model_without_local_inference(tmp_path):
+    import cloud_ai
+    import routing_mode
+
+    routing_mode.save_scope(tmp_path, "free_cloud_only")
+    response = {"choices": [{"message": {"content": "Hello from free cloud."},
+                             "finish_reason": "stop"}]}
+    with (patch.object(cloud_ai, "STATE", tmp_path),
+          patch.object(cloud_ai.Router, "complete", return_value=response) as cloud,
+          patch.object(cloud_ai, "post") as local):
+        answer = chat_assistant.local_answer("Say hello", [])
+    assert answer == "Hello from free cloud."
+    assert cloud.call_args.args[0]["model"] == cloud_ai.LOCAL_MODEL
+    local.assert_not_called()
+
+
+def test_free_cloud_scope_keeps_local_calculator_tool(tmp_path):
+    import cloud_ai
+    import routing_mode
+
+    routing_mode.save_scope(tmp_path, "free_cloud_only")
+    with (patch.object(cloud_ai, "STATE", tmp_path),
+          patch.object(cloud_ai.Router, "complete") as cloud):
+        answer = chat_assistant.answer_with_tools("What is 2 + 3?", [])
+    assert "5" in answer
+    cloud.assert_not_called()
+
+
 def test_questions_stay_in_chat():
     assert chat_assistant.route("What's the weather?", []) == "answer"
     assert chat_assistant.route("How do I build a website?", []) == "answer"

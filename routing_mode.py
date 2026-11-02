@@ -8,7 +8,7 @@ from pathlib import Path
 
 MODES = ("paid_saver", "medium", "floor_it")
 DEFAULT = "medium"
-SCOPES = ("both", "local_only", "cloud_only")
+SCOPES = ("both", "local_only", "cloud_only", "free_cloud_only")
 
 
 def load(state: Path) -> str:
@@ -42,7 +42,7 @@ def load_scope(state: Path) -> str:
 
 def save_scope(state: Path, scope: str) -> None:
     if scope not in SCOPES:
-        raise ValueError("Choose Local only, Cloud only, or Both.")
+        raise ValueError("Choose Local, Free cloud only, Cloud, or Both.")
     state.mkdir(parents=True, exist_ok=True)
     target = state / "provider-scope.json"
     temporary = state / f"provider-scope.{os.getpid()}.tmp"
