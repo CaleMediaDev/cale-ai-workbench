@@ -44,7 +44,7 @@ $path.ReadOnly=$true
 $path.BackColor=$card; $path.ForeColor=$ink; $path.BorderStyle='FixedSingle'
 $path.SetBounds(26,157,758,30); $form.Controls.Add($path)
 $notice = New-Object Windows.Forms.Label
-$notice.Text = 'Setup starts automatically. The workbench shows progress in My tasks. After setup, compatible large models download one at a time when RAM and storage allow.'
+$notice.Text = 'Setup starts automatically and retries temporary errors. The workbench shows progress in My tasks. After setup, compatible large models download when RAM and storage allow.'
 $notice.ForeColor=$muted
 $notice.SetBounds(26,205,758,60); $form.Controls.Add($notice)
 $install = New-Object Windows.Forms.Button
@@ -68,13 +68,13 @@ $timer.Add_Tick({
     if ($script:taskProcess -and $script:taskProcess.HasExited) {
         $timer.Stop(); $install.Enabled=$true
         if ($script:taskProcess.ExitCode -eq 0) { $open.Enabled=$true; $log.AppendText("`r`nReady. The workbench is open. You can close this setup window.") }
-        else { $log.AppendText("`r`nInstallation paused after an error. Fix the issue and click Install to retry.`r`n"+(Get-Content -LiteralPath $script:taskError -Tail 25 -ErrorAction SilentlyContinue | Out-String)) }
+        else { $log.AppendText("`r`nSetup still needs attention after automatic retries. You can click Retry setup after fixing the issue.`r`n"+(Get-Content -LiteralPath $script:taskError -Tail 25 -ErrorAction SilentlyContinue | Out-String)) }
     }
     $log.SelectionStart=$log.Text.Length; $log.ScrollToCaret()
 })
 $install.Add_Click({
     $install.Enabled=$false; $open.Enabled=$false
-    $arguments='-NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $PSScriptRoot 'Install-Backend.ps1')+'" -Destination "'+$path.Text+'" -Profile auto'
+    $arguments='-NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $PSScriptRoot 'Install-Retry.ps1')+'" -Destination "'+$path.Text+'" -Profile auto'
     $script:taskProcess=Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:taskLog -RedirectStandardError $script:taskError
     $log.Text='Starting installation. Large model downloads can take a while. Closing this window leaves installation running.'
     $timer.Start()

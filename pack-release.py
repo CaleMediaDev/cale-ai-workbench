@@ -20,6 +20,7 @@ if missing_tests:
 extras = [
     "Install.cmd",
     "Setup.ps1",
+    "Install-Retry.ps1",
     "Install-Backend.ps1",
     "InstallerBootstrap.cs",
     "build-release.ps1",
