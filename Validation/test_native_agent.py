@@ -39,6 +39,27 @@ def test_native_worker_writes_files_and_checkpoints_tool_results():
         assert native_agent.read_state(item)["status"] == "done"
 
 
+def test_read_file_streams_large_files_and_bounds_one_extremely_long_line():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        source = folder / "large.txt"
+        with source.open("w", encoding="utf-8") as stream:
+            stream.write("ordinary line\n" * 20_000)
+            stream.write("x" * 250_000 + "\n")
+            stream.write("last line\n")
+        with patch.object(Path, "read_text", side_effect=AssertionError("whole-file read")):
+            result = native_agent.execute_tool(folder, "read_file", {
+                "path": "large.txt", "start_line": 20_001, "max_lines": 2})
+            last = native_agent.execute_tool(folder, "read_file", {
+                "path": "large.txt", "start_line": 20_002, "max_lines": 1})
+        assert result.startswith("20001: " + "x" * 100)
+        assert "[line truncated]" in result
+        assert "20002: last line" in result
+        assert len(result) < 5000
+        assert last == "20002: last line"
+
+
 def test_native_worker_reuses_router_across_model_turns():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

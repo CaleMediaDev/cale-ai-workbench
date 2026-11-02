@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent
 MAX_TURNS_PER_SLICE = 12
 MAX_TOOL_OUTPUT = 16_000
 RECENT_WORK_GROUPS = 4
+MAX_READ_LINE = 4000
 
 TOOLS = [
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
@@ -95,6 +96,29 @@ def project_path(folder: Path, name: str) -> Path:
     return target
 
 
+def _bounded_line(stream, limit: int) -> tuple[str | None, bool]:
+    """Read one logical line in chunks, including a line without a newline."""
+    parts = []
+    remaining = limit
+    found = False
+    truncated = False
+    while chunk := stream.readline(8192):
+        found = True
+        end_of_line = chunk.endswith("\n")
+        content = chunk[:-1] if end_of_line else chunk
+        take = min(len(content), remaining)
+        if take:
+            parts.append(content[:take])
+            remaining -= take
+        if take < len(content):
+            truncated = True
+        if end_of_line:
+            break
+    if not found:
+        return None, False
+    return "".join(parts), truncated
+
+
 def execute_tool(folder: Path, name: str, arguments: dict) -> str:
     try:
         if name == "list_files":
@@ -110,10 +134,25 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
         if name == "read_file":
             target = project_path(folder, arguments["path"])
             encoding = "utf-8-sig" if target.suffix.lower() == ".ps1" else "utf-8"
-            lines = target.read_text(encoding=encoding, errors="replace").splitlines()
             start = max(1, int(arguments.get("start_line", 1)))
             count = max(1, min(300, int(arguments.get("max_lines", 150))))
-            return "\n".join(f"{i+1}: {line}" for i, line in enumerate(lines[start-1:start-1+count], start-1))
+            lines = []
+            budget = MAX_TOOL_OUTPUT
+            with target.open("r", encoding=encoding, errors="replace") as stream:
+                for _ in range(start - 1):
+                    if _bounded_line(stream, 0)[0] is None:
+                        return ""
+                for number in range(start, start + count):
+                    prefix = f"{number}: "
+                    line, truncated = _bounded_line(stream, min(MAX_READ_LINE, max(0, budget - len(prefix) - 20)))
+                    if line is None:
+                        break
+                    entry = prefix + line + (" … [line truncated]" if truncated else "")
+                    lines.append(entry)
+                    budget -= len(entry) + 1
+                    if budget < 50:
+                        break
+            return "\n".join(lines)
         if name == "write_file":
             target = project_path(folder, arguments["path"])
             content = arguments["content"]
