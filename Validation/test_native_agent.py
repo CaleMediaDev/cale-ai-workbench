@@ -2,6 +2,7 @@
 
 import copy
 import json
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -203,6 +204,85 @@ def test_task_checkpoint_refreshes_after_restart_and_does_not_lose_new_user_mess
         fresh = native_agent.fresh_messages(messages, folder)
         assert "Second milestone" in fresh[1]["content"]
         assert any(entry.get("content") == "Use a larger font" for entry in fresh)
+
+
+def test_inflight_user_instruction_prevents_early_completion():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        notes = Path(item["folder"]) / ".local-ai"
+        (notes / "verify.ps1").write_text("exit 0")
+        seen = []
+
+        def complete(payload):
+            seen.append(copy.deepcopy(payload))
+            if len(seen) == 1:
+                (notes / "USER-REQUESTS.md").write_text("Make the title blue")
+                return {"choices": [{"message": {"role": "assistant", "content": "Finished"}}]}
+            assert "Make the title blue" in str(payload["messages"])
+            return {"choices": [{"message": {"role": "assistant", "content": "Blue title finished"}}]}
+
+        state = native_agent.run_slice(item, complete=complete)
+        assert state["status"] == "done"
+        assert state["answer"] == "Blue title finished"
+        assert len(seen) == 2
+
+
+def test_task_action_ledger_names_files_without_storing_content():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        task_context.record_action(folder, "read_file", "secret document text",
+                                   {"path": "src/page.py"})
+        summary = task_context.snapshot(folder)
+        assert "read_file src/page.py: Completed" in summary
+        assert "secret document text" not in summary
+
+
+def test_instruction_during_tool_call_follows_complete_tool_batch():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        notes = folder / ".local-ai"
+        (notes / "verify.ps1").write_text("exit 0")
+        responses = iter([
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "list-1", "function": {"name": "list_files", "arguments": "{}"}}]}}]},
+            {"choices": [{"message": {"role": "assistant", "content": "Finished"}}]},
+        ])
+        seen = []
+        original = native_agent.execute_tool
+
+        def tool_with_note(root, name, arguments):
+            (notes / "USER-REQUESTS.md").write_text("Use blue")
+            return original(root, name, arguments)
+
+        def complete(payload):
+            seen.append(copy.deepcopy(payload))
+            return next(responses)
+
+        with patch.object(native_agent, "execute_tool", side_effect=tool_with_note):
+            assert native_agent.run_slice(item, complete=complete)["status"] == "done"
+        assert [entry["role"] for entry in seen[1]["messages"][-3:]] == ["assistant", "tool", "user"]
+        assert "Use blue" in str(seen[1]["messages"])
+
+
+def test_existing_task_database_migrates_action_subject_column():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        import project_memory
+
+        project_memory.initialize(folder)
+        conn = sqlite3.connect(project_memory.database_path(folder))
+        try:
+            conn.execute("""CREATE TABLE task_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, tool TEXT NOT NULL,
+                outcome TEXT NOT NULL, created REAL NOT NULL)""")
+            conn.commit()
+        finally:
+            conn.close()
+        task_context.record_action(folder, "write_file", "Saved src/app.py", {"path": "src/app.py"})
+        assert "write_file src/app.py: Completed" in task_context.snapshot(folder)
 
 
 def test_context_compaction_uses_configured_window_and_keeps_tool_batches():

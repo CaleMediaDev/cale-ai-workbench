@@ -357,6 +357,15 @@ def completion_issue(folder: Path) -> str:
     return ""
 
 
+def user_request_stamp(folder: Path) -> tuple[int, int] | None:
+    """Detect an instruction appended while a model or tool call is in flight."""
+    try:
+        info = (folder / ".local-ai" / "USER-REQUESTS.md").stat()
+        return (info.st_size, info.st_mtime_ns)
+    except FileNotFoundError:
+        return None
+
+
 def run_slice(project: dict, complete=None) -> dict:
     """Execute a bounded set of model turns, checkpointing each completed tool."""
     from cloud_ai import LOCAL_MODEL, Router
@@ -389,6 +398,7 @@ def run_slice(project: dict, complete=None) -> dict:
             return latest
         messages = fresh_messages(messages, folder)
         messages = compact_messages(messages, folder, context_limit)
+        request_before = user_request_stamp(folder)
         response = call({"model": LOCAL_MODEL, "messages": messages, "tools": TOOLS,
                          "tool_choice": "auto", "stream": False, "temperature": 0.2})
         latest = read_state(project)
@@ -407,6 +417,14 @@ def run_slice(project: dict, complete=None) -> dict:
         save_state(project, state)
         calls = message.get("tool_calls") or []
         if not calls:
+            if user_request_stamp(folder) != request_before:
+                messages.append({"role": "user", "content":
+                                 "A new user instruction arrived while you were answering. "
+                                 "Read .local-ai/USER-REQUESTS.md and apply it before finishing."})
+                state["status"] = "continue"
+                state["messages"] = messages
+                save_state(project, state)
+                continue
             issue = completion_issue(folder)
             if issue:
                 state["premature_finishes"] = int(state.get("premature_finishes", 0)) + 1
@@ -435,6 +453,7 @@ def run_slice(project: dict, complete=None) -> dict:
             if latest.get("status") in ("paused", "stopped"):
                 return latest
             function = item.get("function") or {}
+            args = {}
             try:
                 args = json.loads(function.get("arguments") or "{}")
                 if not isinstance(args, dict):
@@ -446,9 +465,15 @@ def run_slice(project: dict, complete=None) -> dict:
                              "name": function.get("name", ""), "content": result[:MAX_TOOL_OUTPUT]})
             import task_context
 
-            task_context.record_action(folder, function.get("name", ""), result)
+            task_context.record_action(folder, function.get("name", ""), result, args)
             state["messages"] = messages
             state["current"] = f"{function.get('name', 'tool')}: {result[:150]}"
+            save_state(project, state)
+        if user_request_stamp(folder) != request_before:
+            messages.append({"role": "user", "content":
+                             "A new user instruction arrived during this step. "
+                             "Read .local-ai/USER-REQUESTS.md before your next action."})
+            state["messages"] = messages
             save_state(project, state)
     state["status"] = "continue"
     state["messages"] = messages
