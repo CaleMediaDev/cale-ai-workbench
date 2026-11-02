@@ -28,6 +28,7 @@ MAX_READ_LINE = 4000
 TOOLS = [
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 project file. Use start_line and max_lines for large files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "max_lines": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "inspect_project_file", "description": "Read a local PDF, DOCX, XLSX, PPTX, image, or text file in this task folder, including browser downloads. Ask a question for relevant excerpts, or paginate with start_char. Extracted text is cached locally by file contents.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "question": {"type": "string"}, "start_char": {"type": "integer"}, "max_chars": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "write_file", "description": "Write complete UTF-8 text to a project file. Parent directories are created.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_text", "description": "Search text in project files using ripgrep.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_web", "description": "Search public webpages for current information. Read a relevant result before using it.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
@@ -158,6 +159,14 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                     if budget < 50:
                         break
             return "\n".join(lines)
+        if name == "inspect_project_file":
+            import project_documents
+
+            value = project_documents.inspect(
+                folder, arguments["path"], arguments.get("question", ""),
+                arguments.get("start_char", 0), arguments.get("max_chars", 10_000),
+            )
+            return json.dumps(value, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "write_file":
             target = project_path(folder, arguments["path"])
             content = arguments["content"]
