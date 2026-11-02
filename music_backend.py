@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import traceback
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -949,8 +950,24 @@ def _run_job(job_id: str) -> None:
             "finished": time.time(),
         })
     except Exception as exc:
+        # Keep the full local traceback beside the song. A short task-card
+        # error cannot identify which of Cale's Python runtimes failed.
+        stage = str(working.get("current", "Preparing music locally"))
+        diagnostic_path = ""
+        try:
+            diagnostic = Path(info["output_path"]).parent / ".local-ai" / f"music-error-{job_id}.log"
+            diagnostic.parent.mkdir(parents=True, exist_ok=True)
+            diagnostic.write_text(
+                f"Music job: {job_id}\nWorker Python: {sys.executable}\n"
+                f"Stage: {stage}\n\n{traceback.format_exc()[-32000:]}",
+                encoding="utf-8",
+            )
+            diagnostic_path = str(diagnostic)
+        except OSError:
+            pass  # A full disk must not hide the original render error.
         _write_job(job_id, {
             **working, "status": "error", "current": str(exc)[:300],
+            "error_stage": stage, "diagnostic_path": diagnostic_path,
             "finished": time.time(),
         })
     finally:

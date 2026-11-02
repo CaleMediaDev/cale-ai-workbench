@@ -780,6 +780,26 @@ def test_sdk_failure_retries_same_saved_music_job_once(tmp_path):
             music_backend.resume_failed_sdk_job(job_id)
 
 
+def test_music_worker_saves_runtime_and_traceback_for_failed_render(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    output = tmp_path / "song.mp3"
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_launch_job"
+    ):
+        started = music_backend.start_music_job(
+            "instrumental techno", str(output), instrumental=True)
+        with patch.object(music_backend, "generate_music", side_effect=ModuleNotFoundError(
+            "No module named 'openai.types.shared_params.response_format_json_object'")):
+            music_backend._run_job(started["job_id"])
+        failed = music_backend.music_job_status(started["job_id"])
+    assert failed["status"] == "error"
+    assert failed["error_stage"] == "Generating music locally"
+    diagnostic = tmp_path / ".local-ai" / f"music-error-{started['job_id']}.log"
+    assert failed["diagnostic_path"] == str(diagnostic)
+    assert "Worker Python:" in diagnostic.read_text()
+    assert "ModuleNotFoundError" in diagnostic.read_text()
+
+
 def test_recovery_only_marks_playable_saved_song_complete(tmp_path):
     jobs = tmp_path / "music-jobs"
     jobs.mkdir()
