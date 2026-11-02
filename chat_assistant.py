@@ -622,7 +622,10 @@ def web_sources(question: str, preferred_business: str = "") -> tuple[list[dict]
         )
     pages = []
     seen_hosts = set()
+    read_deadline = time.monotonic() + 75
     for lead in leads:
+        if time.monotonic() >= read_deadline:
+            break
         url = lead.get("url", "")
         parsed = urlsplit(url)
         host = (parsed.hostname or "").lower()
@@ -715,22 +718,29 @@ def answer_from_web(question: str, preferred_business: str = "") -> str:
         {"role": "user", "content": f"Question: {question}\n\nLive source excerpts:\n{evidence}"},
     ]
     cloud_result = _cloud_scope_completion(messages, 1100, 0.1)
+    # A short sourced answer should not hold the entire chat queue for several
+    # 180-second attempts. The fast model gets the first chance; citation and
+    # completion checks still send weak answers to a stronger local model.
+    deadline = time.monotonic() + 120
     models = (None,) if cloud_result is not None else dict.fromkeys(
-        (BALANCED_MODEL, FAST_MODEL, LOCAL_MODEL))
+        (FAST_MODEL, BALANCED_MODEL, LOCAL_MODEL))
     for model in models:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         try:
             result = cloud_result if model is None else post(
                 "http://127.0.0.1:11434/v1/chat/completions",
                 {"model": model, "messages": messages, "stream": False,
                  "max_tokens": 1100, "temperature": 0.1,
                  "reasoning_effort": "none"},
-                timeout=180,
+                timeout=min(60, remaining),
             )
             if result["choices"][0].get("finish_reason") == "length":
                 continue
             result = result if model is None else retry_derestricted(
                 {"messages": messages, "max_tokens": 1100, "temperature": 0.1},
-                result, model,
+                result, model, deadline=deadline,
             )
             choice = result["choices"][0]
             if choice.get("finish_reason") == "length":
@@ -813,7 +823,7 @@ def local_answer(question: str, history: list[dict], file_evidence: str = "") ->
                     continue
                 result = retry_derestricted(
                     {"messages": messages, "max_tokens": limit, "temperature": 0.3},
-                    result, model, deadline=time.monotonic() + 120,
+                    result, model, deadline=deadline,
                 )
                 choice = result["choices"][0]
                 if choice.get("finish_reason") == "length":

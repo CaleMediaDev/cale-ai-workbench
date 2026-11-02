@@ -510,6 +510,26 @@ def test_web_sources_read_pages_and_skip_search_only_leads():
     assert read.call_count == 2
 
 
+def test_web_sources_stop_after_bounded_failed_page_reads():
+    leads = [{"title": f"Page {index}", "url": f"https://site{index}.example/page"}
+             for index in range(8)]
+    clock = [0.0]
+
+    def unreadable(*_args, **_kwargs):
+        clock[0] += 28
+        raise RuntimeError("page unreachable")
+
+    with (
+        patch("web_tools.search_web", return_value={"results": leads}),
+        patch("web_tools.read_webpage", side_effect=unreadable) as read,
+        patch.object(chat_assistant.time, "monotonic", side_effect=lambda: clock[0]),
+    ):
+        sources, returned = chat_assistant.web_sources("Find current information")
+    assert sources == []
+    assert returned == leads
+    assert read.call_count == 3
+
+
 def test_web_answer_uses_local_model_and_lists_read_sources():
     pages = [{
         "title": "Official page", "url": "https://example.gov/current",
@@ -542,6 +562,31 @@ def test_web_answer_does_not_present_a_cut_off_citation_as_complete():
     assert "The value is 42 [1]." in answer
     assert "and\nSources:" not in answer
     assert post.call_count == 2
+
+
+def test_web_answer_stops_local_retries_at_one_chat_budget():
+    from cloud_ai import FAST_MODEL
+
+    pages = [{"title": "Official page", "url": "https://example.gov/fact",
+              "retrieved_at": "2026-11-01T00:00:00Z", "excerpt": "The value is 42."}]
+    clock = [0.0]
+    timeouts = []
+
+    def stalled(_url, payload, **kwargs):
+        timeouts.append((payload["model"], kwargs["timeout"]))
+        clock[0] += kwargs["timeout"] + 1
+        raise OSError("model stalled")
+
+    with (
+        patch.object(chat_assistant, "web_sources", return_value=(pages, [])),
+        patch.object(chat_assistant.time, "monotonic", side_effect=lambda: clock[0]),
+        patch("cloud_ai.post", side_effect=stalled),
+    ):
+        answer = chat_assistant.answer_from_web("What is the value?")
+    assert "could not summarize" in answer
+    assert timeouts[0][0] == FAST_MODEL
+    assert sum(timeout for _model, timeout in timeouts) <= 120
+    assert len(timeouts) == 2
 
 
 def test_quick_chat_disables_reasoning_trace_to_leave_room_for_answer():
@@ -597,9 +642,12 @@ def test_quick_chat_retries_model_refusal_with_derestricted():
         patch("cloud_ai.post", return_value=rejected),
         patch("cloud_ai.retry_derestricted", return_value=accepted) as retry,
     ):
+        started = chat_assistant.time.monotonic()
         answer = chat_assistant.local_answer("Explain the task", [])
+        finished = chat_assistant.time.monotonic()
     assert answer == "Here is the answer."
     assert retry.call_count == 1
+    assert started + 150 <= retry.call_args.kwargs["deadline"] <= finished + 150
 
 
 def test_business_address_prefers_official_no_office_statement():
