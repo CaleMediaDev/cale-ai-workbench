@@ -710,8 +710,17 @@ def deferred_model_retry_ready(state, tasks):
 def request(pid, action, note=""):
     """Queue a UI action for the monitor instead of blocking the window."""
     with database() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         if not conn.execute("SELECT 1 FROM projects WHERE id=?", (pid,)).fetchone():
             raise ValueError("This task is no longer in the list.")
+        if action in ("pause", "stop", "delete"):
+            # A delayed plain Continue must not undo a later control. Requests
+            # carrying user instructions remain in history for recovery.
+            conn.execute(
+                "UPDATE requests SET status='done',result=? WHERE project=? "
+                "AND status='pending' AND action='resume' AND trim(note)=''",
+                ("Superseded by later " + action, pid),
+            )
         conn.execute(
             "INSERT INTO requests(project,action,note) VALUES(?,?,?)",
             (pid, action, note),
@@ -2349,6 +2358,12 @@ def process_requests():
             )
         ]
     for req in pending:
+        with database() as conn:
+            current = conn.execute(
+                "SELECT status FROM requests WHERE id=?", (req["id"],)
+            ).fetchone()
+        if not current or current["status"] != "pending":
+            continue  # A newer control may have cancelled this queue snapshot.
         try:
             p = next((x for x in projects() if x["id"] == req["project"]), None)
             if not p:
@@ -2506,7 +2521,7 @@ def process_requests():
             result, status = str(exc), "error"
         with database() as conn:
             conn.execute(
-                "UPDATE requests SET status=?,result=? WHERE id=?",
+                "UPDATE requests SET status=?,result=? WHERE id=? AND status='pending'",
                 (status, result, req["id"]),
             )
         if status == "done" and action in ("resume", "note") and note:

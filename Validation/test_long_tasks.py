@@ -2372,6 +2372,27 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(request["status"], "done")
         self.assertEqual(request["result"], "Applied")
 
+    def test_later_stop_cancels_queued_continue_without_restarting_worker(self):
+        task_module.update(self.pid, card="paused-card", status="paused")
+        task_module.request(self.pid, "resume")
+        snapshot = {"task": {"status": "blocked"}, "runs": [
+            {"started_at": time.time() - 30, "ended_at": None},
+        ]}
+        with patch.object(task_module, "board", return_value=snapshot):
+            task_module.process_requests()
+        task_module.request(self.pid, "stop")
+        with patch.object(task_module, "board", return_value=snapshot) as board:
+            task_module.process_requests()
+            task_module.process_requests()
+        self.assertEqual(self.item()["status"], "stopped")
+        self.assertFalse(any(call.args[0] == "unblock" for call in board.call_args_list))
+        with task_module.database() as conn:
+            resume = conn.execute(
+                "SELECT status,result FROM requests WHERE action='resume'"
+            ).fetchone()
+        self.assertEqual(resume["status"], "done")
+        self.assertEqual(resume["result"], "Superseded by later stop")
+
     def test_goal_turn_budget_rolls_to_new_worker_after_old_run_exits(self):
         task_module.update(self.pid, card="old-card", status="working")
         snapshot = {
