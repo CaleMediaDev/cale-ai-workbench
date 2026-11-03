@@ -52,7 +52,8 @@ TOOLS = [
                                  "Use check_tool='run_verifier' for integration. Other work can use a read-only "
                                  'check_command. complete runs the saved acceptance check and advances only on '
                                  'success without source changes. split makes smaller steps; revise corrects the '
-                                 'active check with steps=[one corrected step]. status resumes progress. A '
+                                 'active check with steps=[one corrected step]. steps must be an actual JSON '
+                                 'array, never a quoted or escaped string. status resumes progress. A '
                                  'native worker may use {action:complete} without step_id to check the exact '
                                  'active unit shown in its current checkpoint; changed units/checks are rejected. '
                                  'completed batch is not whole-project verification.',
@@ -64,7 +65,7 @@ TOOLS = [
                                                                     'split',
                                                                     'revise']},
                                                 'step_id': {'type': 'integer'},
-                                                'steps': {'anyOf': [{'type': 'array',
+                                                'steps': {'type': 'array',
                                                                      'minItems': 1,
                                                                      'maxItems': 8,
                                                                      'items': {'type': 'object',
@@ -83,8 +84,7 @@ TOOLS = [
                                                                                                                       'run_verifier']},
                                                                                               'check_arguments': {'type': 'object'}},
                                                                                'required': ['phase', 'title'],
-                                                                               'additionalProperties': False}},
-                                                                    {'type': 'string', 'maxLength': 64000}]}},
+                                                                               'additionalProperties': False}}},
                                  'required': ['action'],
                                  'additionalProperties': False}}},
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},

@@ -584,6 +584,21 @@ def test_step_strings_decode_strict_json_and_report_format_errors_without_creati
         task_context.revise_step(folder, queue["active"]["id"], [{**step, "step_id": 1}])
 
 
+def test_step_tool_advertises_real_array_while_legacy_json_strings_keep_exact_quotes(tmp_path):
+    import pytest
+    from jsonschema import ValidationError, validate
+
+    tool = next(tool["function"] for tool in native_agent.TOOLS if tool["function"]["name"] == "task_steps")
+    command = 'python -c "print(\'quoted value\')"'
+    step = {"phase": "Check", "title": "Keep quoting", "check_command": command}
+    validate({"action": "plan", "steps": [step]}, tool["parameters"])
+    with pytest.raises(ValidationError):
+        validate({"action": "plan", "steps": json.dumps([step])}, tool["parameters"])
+    folder = Path(project(tmp_path / "legacy-quoted")["folder"])
+    active = task_context.plan_steps(folder, json.dumps([step]))["active"]
+    assert active["check_command"] == command
+
+
 def test_failed_initial_plan_blocks_completion_and_survives_fresh_context_until_real_plan(tmp_path):
     item = project(tmp_path / "planned")
     folder = Path(item["folder"])

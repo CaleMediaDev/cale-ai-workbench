@@ -1,0 +1,68 @@
+{
+  "fault_injection": "First response has a quoted steps array. It is synthetic and executes no tool.",
+  "calls": [
+    {
+      "model": "cale-main-64k",
+      "injected_response": true,
+      "has_correction_feedback": false,
+      "max_tokens": null,
+      "timeout": 1800
+    },
+    {
+      "model": "cale-main-64k",
+      "injected_response": false,
+      "has_correction_feedback": true,
+      "max_tokens": 4096,
+      "timeout": 120,
+      "response_choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "reasoning": "The user is asking me to revise an active SQLite step 7 using specific parameters they provided. They want me to call `task_steps` with the \"revise\" action and provide a corrected step with the proper JSON array format (not a string).\n\nLooking at the tool definition:\n- `task_steps` has an `action` parameter that can be \"plan\", \"status\", \"complete\", \"split\", or \"revise\"\n- It has a `step_id` parameter (integer) \n- It has a `steps` parameter which should be an array of objects\n\nEach step object should have:\n- `phase` (string, maxLength 100)\n- `title` (string, maxLength 240)\n- One of these check fields: `check_tool` with `check_arguments`, OR `check_command`\n- Optional: `shell` (enum for \"default\" or \"powershell\")\n\nThe user provided corrected step data:\n```json\n{\"phase\": \"Controls\", \"title\": \"Verify movement and shooting\", \"check_tool\": \"check_webapp\", \"check_arguments\": {\"path\": \"index.html\", \"cases\": [{\"keys\": [{\"key\": \"ArrowRight\", \"hold_ms\": 200}], \"state\": {\"game.player.x\": {\"gt\": 300}}}, {\"keys\": [{\"key\": \"Space\"}], \"state\": {\"game.bullets.length\": {\"gte\": 1}}}]}}\n```\n\nThis needs to be wrapped as a single-element array in the `steps` parameter. The action should be \"revise\" and step_id should be 7.\n\nLet me construct the corrected tool call:\n\n```json\n{\n  \"action\": \"revise\",\n  \"step_id\": 7,\n  \"steps\": [\n    {\n      \"phase\": \"Controls\",\n      \"title\": \"Verify movement and shooting\",\n      \"check_tool\": \"check_webapp\",\n      \"check_arguments\": {\n        \"path\": \"index.html\",\n        \"cases\": [\n          {\n            \"keys\": [{\"key\": \"ArrowRight\", \"hold_ms\": 200}],\n            \"state\": {\"game.player.x\": {\"gt\": 300}}\n          },\n          {\n            \"keys\": [{\"key\": \"Space\"}],\n            \"state\": {\"game.bullets.length\": {\"gte\": 1}}\n          }\n        ]\n      }\n    }\n  ]\n}\n```\n\nThis should be the correct format with proper JSON arrays and objects, not escaped strings.",
+            "tool_calls": [
+              {
+                "id": "call_uwlau6ii",
+                "index": 0,
+                "type": "function",
+                "function": {
+                  "name": "task_steps",
+                  "arguments": "{\"action\":\"revise\",\"step_id\":7,\"steps\":[{\"check_arguments\":{\"cases\":[{\"keys\":[{\"hold_ms\":200,\"key\":\"ArrowRight\"}],\"state\":{\"game.player.x\":{\"gt\":300}}},{\"keys\":[{\"key\":\"Space\"}],\"state\":{\"game.bullets.length\":{\"gte\":1}}}],\"path\":\"index.html\"},\"check_tool\":\"check_webapp\",\"phase\":\"Controls\",\"title\":\"Verify movement and shooting\"}]}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 854,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens": 708,
+        "total_tokens": 1562
+      }
+    }
+  ],
+  "passed": true,
+  "usage": {
+    "prompt_tokens": 854,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens": 708,
+    "total_tokens": 1562
+  },
+  "model": "cale-main-64k",
+  "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+  "grade": {
+    "outer_json": true,
+    "schema_valid": true,
+    "real_array": true,
+    "semantics_preserved": true,
+    "passed": true
+  },
+  "seconds": 20.21
+}

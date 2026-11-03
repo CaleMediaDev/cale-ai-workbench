@@ -225,6 +225,26 @@ temperature scenario too: it should stay on the ordinary coding path.
 
 ## Recorded automatic local runs
 
+`step_argument_format.py --output C:\path\to\new-report.json` compares three
+seeded local Qwen calls per schema, preserving the tools and exact required
+acceptance cases in the report. The [November 3 format report](results/step-argument-format-20261103.json)
+records 3/3 exact data results for array-only versus 2/3 for array-or-string.
+The failed old-schema sample exhausted its 1,800-token output allowance without
+a usable call. Six samples do not establish general reliability or a speed gain.
+
+`--repair-only` instead injects one synthetic quoted-array response into the
+production local-only router, then sends its correction to a real local model.
+No generated tool is executed. The [initial correction report](results/router-schema-repair-20261103.json)
+needed an extra fallback call, despite eventually returning correct data, and
+failed the strict immediate-correction fixture. After reporting expected types
+without copying malformed values, the [typed-feedback report](results/router-schema-repair-typed-20261103.json)
+passed in 20.21 s: one injected response and one real correction preserved every
+required case. This isolates one fault-recovery path, not spontaneous error rates
+or whole-app quality. The existing full worker assertion-repair fixture separately
+passed in 74.06 s / 9 model calls with both SQLite units complete and its verifier
+rejecting an invalid-state mutation. Both earlier failed and passing runs remain
+in the [routing report](results/local-repair-routing-20261103.json).
+
 `native_game_build.py --runtime-root C:\path\to\AIWorkbench --keep-folder C:\path\to\new-game`
 asks the full native worker to build an offline space shooter, with automatic
 local-only routing, real candidate approvals and at least two completed SQLite

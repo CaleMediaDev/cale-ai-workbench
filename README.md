@@ -29,6 +29,18 @@ recognized checks commit progress only if the acceptance identity is still
 current, preventing an older result from completing a revised check. Direct
 tool dispatch outside the native worker still requires an explicit step ID.
 
+New step-tool requests advertise `steps` as an actual JSON array, rather than
+offering a string alternative that can encourage escaped-JSON loops. Existing
+valid JSON-string plans still decode through the compatibility dispatcher.
+When a decoded local tool call fails its offered argument schema, the router can
+make one correction attempt on that same model, using the schema rule and field
+path instead of repeating the malformed value. It offers only the rejected
+tool and preserves explicit tool-choice restrictions. Calls rejected by validation never reach
+the worker. This extra local attempt must fit the configured context, stops on
+cancellation, and is capped at 4,096 output tokens and 120 seconds. It does not
+add retries to cloud routes or change account permissions. Syntax-broken outer
+JSON and unavailable tool names continue through the existing fallback path.
+
 For interactive single-file HTML apps, the native worker can use an offline Chromium check that fills real inputs, inspects visible results and errors, and checks mobile width. A passing check saves a repeatable browser verifier. The worker must rerun the check after changing the page before it can finish. This catches behavior that a source-text scan misses; it does not establish that an entire website is correct or visually polished.
 
 Canvas apps and games can also expose their actual live state for passive checks.

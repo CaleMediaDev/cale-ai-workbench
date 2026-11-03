@@ -1,0 +1,45 @@
+{
+  "fault_injection": "First response has a quoted steps array. It is synthetic and executes no tool.",
+  "calls": [
+    {
+      "model": "cale-main-64k",
+      "injected_response": true,
+      "has_correction_feedback": false,
+      "max_tokens": null,
+      "timeout": 1800
+    },
+    {
+      "model": "cale-main-64k",
+      "injected_response": false,
+      "has_correction_feedback": true,
+      "max_tokens": 4096,
+      "timeout": 120
+    },
+    {
+      "model": "cale-local",
+      "injected_response": false,
+      "has_correction_feedback": false,
+      "max_tokens": null,
+      "timeout": 1800
+    }
+  ],
+  "passed": false,
+  "usage": {
+    "prompt_tokens": 745,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens": 347,
+    "total_tokens": 1092
+  },
+  "model": "cale-local",
+  "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+  "grade": {
+    "outer_json": true,
+    "schema_valid": true,
+    "real_array": true,
+    "semantics_preserved": true,
+    "passed": true
+  },
+  "seconds": 53.29
+}

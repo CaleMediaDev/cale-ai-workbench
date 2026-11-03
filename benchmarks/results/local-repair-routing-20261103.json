@@ -1,6 +1,5 @@
 {
-  "scope": "Two synthetic local-only browser repair runs on RTX 3060 12 GB and 128 GB RAM. Different eligibility configuration; not a controlled speed comparison or universal quality claim. No cloud inference.",
-  "app_version": "0.5.442",
+  "scope": "Three synthetic local-only browser repair runs on RTX 3060 12 GB and 128 GB RAM. Different app versions and eligibility configuration; not a controlled speed comparison or universal quality claim. No cloud inference.",
   "runs": [
     {
       "scenario": "saved_browser_assertion_repair",
@@ -258,7 +257,8 @@
         "done": 0,
         "remaining": 2
       },
-      "approval_scope": "development checkout: no candidate approvals, only duplicate 9B weights eligible"
+      "approval_scope": "development checkout: no candidate approvals, only duplicate 9B weights eligible",
+      "app_version": "0.5.442"
     },
     {
       "scenario": "saved_browser_assertion_repair",
@@ -368,7 +368,105 @@
         "done": 2,
         "remaining": 0
       },
-      "approval_scope": "installed runtime tool-probe approvals"
+      "approval_scope": "installed runtime tool-probe approvals",
+      "app_version": "0.5.442"
+    },
+    {
+      "scenario": "saved_browser_assertion_repair",
+      "model": "automatic_local",
+      "seconds_including_seed_check": 74.06,
+      "model_calls": 9,
+      "tool_calls": 8,
+      "tools_used": [
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "write_file",
+        "write_file"
+      ],
+      "prompt_tokens": 52668,
+      "completion_tokens": 1535,
+      "assertion_revision_attempts": 1,
+      "successful_assertion_revisions": 1,
+      "step_tool_errors": [
+        "Tool error: ValueError: steps must be a JSON array of step objects, not an object or scalar"
+      ],
+      "revision_errors": [],
+      "routes": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.5
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 3.23
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 14.66
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 1.76
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.28
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.23
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 11.7
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 12.98
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.03
+        }
+      ],
+      "status": "done",
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": true,
+        "verifier_rejects_invalid_state_regression": true,
+        "passed": true,
+        "steps_completed": true
+      },
+      "steps": {
+        "total": 2,
+        "done": 2,
+        "remaining": 0
+      },
+      "app_version": "0.5.445",
+      "approval_scope": "installed runtime tool-probe approvals; array-only step schema"
     }
   ]
 }

@@ -44,8 +44,113 @@ REQUEST = {
     "messages": [{"role": "user", "content": "test"}],
 }
 
+ARGUMENT_REQUEST = {**REQUEST, "max_tokens": 1000, "tools": [{"type": "function", "function": {
+    "name": "save_plan", "parameters": {"type": "object", "properties": {
+        "steps": {"type": "array", "items": {"type": "integer"}}},
+        "required": ["steps"], "additionalProperties": False}}}]}
+
+
+def argument_reply(steps):
+    return {**ANSWER, "choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [
+        {"id": "plan", "type": "function", "function": {"name": "save_plan",
+            "arguments": json.dumps({"steps": steps})}}]}}]}
+
 
 class CloudTests(unittest.TestCase):
+    def test_local_schema_feedback_repairs_once_without_mutating_original_request(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        request = json.loads(json.dumps(ARGUMENT_REQUEST))
+        original = json.loads(json.dumps(request))
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536}
+        good = argument_reply([1, 2])
+        with patch.object(cloud, "post", side_effect=[argument_reply('[1,2]'), good]) as post:
+            self.assertEqual(router.complete(request, "repair-task"), good)
+        self.assertEqual(request, original)
+        self.assertEqual(post.call_count, 2)
+        repair = post.call_args_list[1].args[1]
+        self.assertIn('steps', repair["messages"][-1]["content"])
+        self.assertIn('array', repair["messages"][-1]["content"])
+        self.assertIn('No tool or source edit ran', repair["messages"][-1]["content"])
+        self.assertEqual(repair["max_tokens"], 1000)
+        self.assertEqual(post.call_args_list[1].kwargs["timeout"], 120)
+        self.assertEqual(repair["tool_choice"], {"type": "function", "function": {"name": "save_plan"}})
+        self.assertEqual(router.last_local_model, cloud.LOCAL_MODEL)
+
+    def test_schema_feedback_is_one_extra_call_across_all_local_candidates(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536, "other": 65536}
+        with (patch.object(router, "local_candidates", return_value=[cloud.LOCAL_MODEL, "other"]),
+              patch.object(cloud, "post", return_value=argument_reply('[1,2]')) as post):
+            with self.assertRaises(cloud.ToolArgumentError):
+                router.complete(ARGUMENT_REQUEST)
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual([call.args[1]["model"] for call in post.call_args_list],
+                         [cloud.LOCAL_MODEL, cloud.LOCAL_MODEL, "other"])
+
+    def test_schema_feedback_does_not_overfill_context_or_repair_unparsed_json(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: cloud.estimated_context(ARGUMENT_REQUEST)}
+        with patch.object(cloud, "post", return_value=argument_reply('[1,2]')) as post:
+            with self.assertRaises(cloud.ToolArgumentError):
+                router.complete(ARGUMENT_REQUEST)
+        self.assertEqual(post.call_count, 1)
+        router.model_contexts[cloud.LOCAL_MODEL] = 65536
+        broken = argument_reply([1])
+        broken["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = '{broken'
+        with patch.object(cloud, "post", return_value=broken) as post:
+            with self.assertRaises(json.JSONDecodeError):
+                router.complete(ARGUMENT_REQUEST)
+        self.assertEqual(post.call_count, 1)
+
+    def test_schema_feedback_cancellation_stops_before_retry_or_fallback(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536, "other": 65536}
+        cancelled = False
+        def invalid(*args, **kwargs):
+            nonlocal cancelled
+            cancelled = True
+            return argument_reply('[1,2]')
+        with (patch.object(router, "local_candidates", return_value=[cloud.LOCAL_MODEL, "other"]),
+              patch.object(cloud, "post", side_effect=invalid) as post):
+            with self.assertRaises(InterruptedError):
+                router.complete(ARGUMENT_REQUEST, cancel=lambda: cancelled)
+        self.assertEqual(post.call_count, 1)
+
+    def test_schema_feedback_never_adds_local_calls_to_free_cloud_only(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (patch.object(cloud_providers, "complete", return_value=(argument_reply('[1,2]'), 0.5)) as free,
+              patch.object(cloud, "post") as local):
+            with self.assertRaises(RuntimeError):
+                cloud.Router().complete(ARGUMENT_REQUEST)
+        free.assert_called_once()
+        local.assert_not_called()
+
+    def test_schema_feedback_bounds_output_and_diagnostic_data(self):
+        request = {**ARGUMENT_REQUEST, "max_tokens": 20000, "max_completion_tokens": 20000}
+        with self.assertRaises(cloud.ToolArgumentError) as failure:
+            cloud.valid_completion(argument_reply('x' * 10000), request)
+        repair = cloud.argument_repair_request(request, failure.exception)
+        self.assertEqual(repair["max_tokens"], 4096)
+        self.assertNotIn("max_completion_tokens", repair)
+        self.assertLess(len(repair["messages"][-1]["content"]), 1500)
+        self.assertEqual(request["max_tokens"], 20000)
+
+    def test_schema_feedback_cannot_enable_disabled_tools_or_override_named_choice(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536}
+        for choice in ("none", {"type": "function", "function": {"name": "other"}}):
+            request = {**ARGUMENT_REQUEST, "tool_choice": choice}
+            with patch.object(cloud, "post", return_value=argument_reply('[1,2]')) as post:
+                with self.assertRaises(cloud.ToolArgumentError):
+                    router.complete(request)
+            self.assertEqual(post.call_count, 1)
+
     def test_local_semantic_repair_uses_other_weights_and_keeps_hint_out_of_upstream_payload(self):
         cloud.routing_mode.save_scope(cloud.STATE, "local_only")
         router = cloud.Router()
