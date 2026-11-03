@@ -323,6 +323,19 @@ def task_usage_labels(p, tokens, source_totals):
     return f"Tokens: {tokens:,}", "AI used: " + (sources or "waiting for first response")
 
 
+def completed_music_video_issue(job):
+    """Branded song videos need no SRT; legacy captioned videos still do."""
+    video = (job.get("result") or {}).get("video") or {}
+    if not video:
+        return ""
+    if not isinstance(video, dict) or not video.get("path") or not Path(video["path"]).is_file():
+        return "The song is saved, but its video file is missing."
+    captions = video.get("captions_path")
+    if (video.get("kind") != "branded_song_video" or captions) and (not captions or not Path(captions).is_file()):
+        return "The song is saved, but its captioned video needs repair."
+    return ""
+
+
 def media_job_restarted(p, job):
     """Distinguish a later worker recovery from an unchanged failed result."""
     if p["status"] != "needs_input":
@@ -2815,7 +2828,11 @@ def advance_project(p):
 
         job = music_backend.music_job_status(job_id)
         if p["status"] == "needs_input":
-            if not media_job_restarted(p, job):
+            repaired_video = (job.get("status") == "complete" and (job.get("result") or {}).get("video")
+                              and p.get("detail") in {"The song is saved, but its captioned video needs repair.",
+                                                       "The song is saved, but its video file is missing."}
+                              and not completed_music_video_issue(job))
+            if not repaired_video and not media_job_restarted(p, job):
                 return
             update(p["id"], status="working", detail="Music maker recovered. Checking its result.")
             p["status"] = "working"
@@ -2847,10 +2864,12 @@ def advance_project(p):
             video_info = job["result"].get("video") or {}
             video = Path(video_info["path"]) if video_info.get("path") else None
             captions = Path(video_info["captions_path"]) if video_info.get("captions_path") else None
-            if video_info and (not video or not video.is_file() or not captions or not captions.is_file()):
-                update(p["id"], status="needs_input",
-                       detail="The song is saved, but its captioned video needs repair.")
+            video_issue = completed_music_video_issue(job)
+            if video_issue:
+                update(p["id"], status="needs_input", detail=video_issue)
                 return
+            video_note = ((f"Video: {video.name}.\n" + (f"Editable captions: {captions.name}.\n" if captions else ""))
+                          if video else "")
             notes = Path(p["folder"]) / ".local-ai"
             plan = notes / "PLAN.md"
             progress = notes / "PROGRESS.md"
@@ -2868,7 +2887,7 @@ def advance_project(p):
                     stream.write(
                         f"\nVocal version ready: {output.name} "
                         f"({output.stat().st_size:,} bytes). Original audio is preserved.\n"
-                        + (f"Captioned video: {video.name}; editable captions: {captions.name}.\n" if video else "")
+                        + video_note
                     )
             else:
                 plan.write_text(
@@ -2878,7 +2897,7 @@ def advance_project(p):
                 )
                 progress.write_text(
                     f"# Progress\n\nMusic saved: {output.name} ({output.stat().st_size:,} bytes). Open files to listen and review.\n"
-                    + (f"Captioned video: {video.name}; editable captions: {captions.name}.\n" if video else ""),
+                    + video_note,
                     encoding="utf-8",
                 )
             # Keep one obvious entry point even when an earlier instrumental

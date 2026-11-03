@@ -3,7 +3,6 @@
 import contextlib
 import importlib.util
 import io
-from urllib.error import HTTPError
 import json
 import os
 import sqlite3
@@ -16,6 +15,7 @@ import unittest
 import wave
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -563,7 +563,7 @@ class LongTaskTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder, patch.object(task_module, "STATE", Path(folder)):
             task_module.save_chat("assistant", "Here is the answer you asked for.")
-            message = task_module.record_replay_outcome(
+            task_module.record_replay_outcome(
                 20, False, "Cale's own voice is still preparing."
             )
             self.assertIn("voice is still preparing", task_module.chat_history()[-1]["content"])
@@ -864,6 +864,52 @@ class LongTaskTests(unittest.TestCase):
         self.assertTrue((Path(task["folder"]) / ".local-ai" / "PROGRESS.md").is_file())
         self.assertEqual((Path(task["folder"]) / "00-PLAY-THIS.m3u").read_text(
             encoding="utf-8-sig"), "#EXTM3U\nsong.mp3\n")
+
+    def test_branded_song_finishes_and_recovers_stale_caption_error_without_regeneration(self):
+        with patch("music_backend.start_music_job", return_value={"job_id": "b" * 32}):
+            pid = task_module.add_music_project("make an instrumental song",
+                {"prompt": "dubstep", "duration_seconds": 180, "instrumental": True},
+                str(self.base / "branded-song"))
+        item = next(p for p in task_module.projects() if p["id"] == pid)
+        output = Path(item["folder"]) / "song.mp3"
+        video = output.with_suffix(".mp4")
+        output.write_bytes(b"saved song")
+        video.write_bytes(b"saved branded video")
+        job = {"status": "complete", "finished": item["updated"] - 10, "instrumental": True,
+               "result": {"path": str(output), "video": {"path": str(video), "kind": "branded_song_video"}}}
+        with (patch("music_backend.music_job_status", return_value=job),
+              patch("music_backend.audio_file_ok", return_value=True),
+              patch("music_backend.start_music_job") as regenerate):
+            task_module.advance_project(item)
+            complete = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(complete["status"], "ready_for_review")
+            self.assertIn("Video: song.mp4", (Path(item["folder"]) / ".local-ai/PROGRESS.md").read_text())
+            task_module.update(pid, status="needs_input", detail="The song is saved, but its captioned video needs repair.")
+            stale = next(p for p in task_module.projects() if p["id"] == pid)
+            task_module.advance_project(stale)
+            recovered = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(recovered["status"], "ready_for_review")
+            self.assertEqual(task_module.task_progress(recovered)[0], 100)
+            self.assertEqual(task_module.latest_song(item["folder"]), output.resolve())
+            regenerate.assert_not_called()
+        self.assertEqual(output.read_bytes(), b"saved song")
+        self.assertEqual(video.read_bytes(), b"saved branded video")
+
+    def test_video_validation_preserves_legacy_caption_requirements(self):
+        video = self.base / "captioned.mp4"
+        video.write_bytes(b"video")
+        info = {"path": str(video)}
+        job = {"result": {"video": info}}
+        self.assertIn("captioned video", task_module.completed_music_video_issue(job))
+        info["kind"] = "branded_song_video"
+        self.assertEqual(task_module.completed_music_video_issue(job), "")
+        info["captions_path"] = str(self.base / "missing.srt")
+        self.assertIn("captioned video", task_module.completed_music_video_issue(job))
+        info["captions_path"] = str(self.base / "lyrics.srt")
+        Path(info["captions_path"]).write_text("captions")
+        self.assertEqual(task_module.completed_music_video_issue(job), "")
+        video.unlink()
+        self.assertIn("video file is missing", task_module.completed_music_video_issue(job))
 
     def test_latest_song_aliases_follow_vocal_revision(self):
         folder = self.base / "music-aliases"
