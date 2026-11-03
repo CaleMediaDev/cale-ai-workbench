@@ -254,6 +254,329 @@ def test_saved_verifier_check_recognizes_direct_supervisor_equivalent():
             "command": "powershell -File other.ps1"}) is None
 
 
+def run_typed_python_check(item, arguments):
+    folder = Path(item["folder"])
+    state = folder / ".local-ai/test-supervisor"
+    state.mkdir(exist_ok=True)
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state):
+        return json.loads(native_agent.execute_tool(folder, "check_python_function", arguments))
+
+
+def test_typed_python_checker_passes_real_cases_and_rejects_regression_in_saved_verifier():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "O'Brien's folder")
+        folder = Path(item["folder"])
+        source = folder / "temperature.py"
+        source.write_text("def to_celsius(f):\n    return (f-32)*5/9\n")
+        result = run_typed_python_check(item, {"path": "temperature.py", "function": "to_celsius",
+            "cases": [{"args": [32], "expected": 0}, {"args": [212], "expected": 100},
+                      {"args": [-40], "expected": -40}, {"args": [98.6], "expected": 37}]})
+        assert result["passed"] and result["case_count"] == 4
+        assert result["verifier_saved"] and result["verifier_check_passed"], result
+        source.write_text("def to_celsius(f):\n    return f*5/9\n")
+        checked = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File",
+            str(folder / ".local-ai/verify.ps1")], cwd=folder, capture_output=True, text=True, timeout=20)
+        assert checked.returncode != 0 and '"passed": false' in checked.stdout
+
+
+def test_typed_python_cases_check_nested_values_kwargs_exceptions_and_bool_types():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        folder = Path(item["folder"])
+        (folder / "calc.py").write_text(
+            "def calculate(n, scale=2):\n    if n<0: raise ValueError('negative')\n"
+            "    return {'value':n*scale,'flags':[True,False]}\n")
+        spec = {"path": "calc.py", "function": "calculate", "cases": [
+            {"args": [2], "kwargs": {"scale": 3}, "expected": {"value": 6, "flags": [True, False]}},
+            {"args": [-1], "raises": "ValueError"}]}
+        result = run_typed_python_check(item, spec)
+        assert result["passed"] and result["case_count"] == 2
+        spec["cases"][0]["expected"]["flags"] = [1, 0]
+        assert not run_typed_python_check(item, spec)["passed"]
+
+
+def test_typed_python_suite_keeps_other_functions_and_earlier_boundary_cases():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        folder = Path(item["folder"])
+        source = folder / "helpers.py"
+        correct = "def double(n): return n*2\ndef increment(n): return n+1\n"
+        source.write_text(correct)
+        assert run_typed_python_check(item, {"path": "helpers.py", "function": "double",
+            "cases": [{"args": [2], "expected": 4}]})["passed"]
+        assert run_typed_python_check(item, {"path": "helpers.py", "function": "increment",
+            "cases": [{"args": [2], "expected": 3}]})["passed"]
+        source.write_text(correct.replace("n*2", "n*3"))
+        request = {"path": "helpers.py", "function": "increment", "cases": [{"args": [3], "expected": 4}]}
+        failed = run_typed_python_check(item, request)
+        assert not failed["passed"] and failed["case_count"] == 3
+        assert failed["cases"][0]["function"] == "double"
+        state = {}
+        native_agent.remember_checker_verdict(state, "check_python_function", request, json.dumps(failed))
+        assert state["failed_checks"]
+        source.write_text(correct)
+        passed = run_typed_python_check(item, request)
+        native_agent.remember_checker_verdict(state, "check_python_function", request, json.dumps(passed))
+        assert passed["passed"] and passed["case_count"] == 3 and not state["failed_checks"]
+
+
+def test_typed_python_input_rejects_expressions_vacuous_cases_and_nonfinite_numbers():
+    import pytest
+
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "code")["folder"])
+        (folder / "code.py").write_text("def calculate(n): return n\n")
+        base = {"path": "code.py", "function": "calculate", "cases": [{"args": [1], "expected": 1}]}
+        for change in ({"function": "__import__('os').system('bad')"}, {"cases": []},
+                       {"cases": [{"args": [1]}]}, {"cases": [{"expected": 1, "raises": "ValueError"}]},
+                       {"cases": [{"expected": float("nan")}]}, {"tolerance": 100}):
+            with pytest.raises(ValueError):
+                native_agent.normalize_python_check(folder, {**base, **change})
+        assert not (folder / ".local-ai/cale-python-checks.json").exists()
+
+
+def test_typed_python_checker_rejects_output_creation_and_preserves_custom_verifier():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        folder = Path(item["folder"])
+        source = folder / "code.py"
+        source.write_text("def calculate(n):\n    open('fake-output.txt','w').write('made by test')\n    return n*2\n")
+        arguments = {"path": "code.py", "function": "calculate", "cases": [{"args": [2], "expected": 4}]}
+        failed = run_typed_python_check(item, arguments)
+        assert not failed["passed"] and not failed["verifier_saved"]
+        assert "read-only" in str(failed["errors"])
+        source.write_text("def calculate(n): return n*2\n")
+        verifier = folder / ".local-ai/verify.ps1"
+        original = "# Custom project verifier\nexit 1\n"
+        verifier.write_text(original)
+        passed = run_typed_python_check(item, arguments)
+        assert passed["passed"] and not passed["verifier_saved"]
+        assert verifier.read_text() == original
+
+
+def test_python_verifier_rejects_changed_cases_and_changed_user_instructions():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        folder = Path(item["folder"])
+        (folder / "code.py").write_text("def calculate(n): return n*2\n")
+        assert run_typed_python_check(item, {"path": "code.py", "function": "calculate",
+            "cases": [{"args": [2], "expected": 4}]})["passed"]
+        record = folder / ".local-ai/cale-python-checks.json"
+        original = record.read_bytes()
+        record.write_bytes(original + b" ")
+        command = ["powershell.exe", "-NoProfile", "-File", str(folder / ".local-ai/verify.ps1")]
+        changed = subprocess.run(command, cwd=folder, capture_output=True, text=True, timeout=20)
+        assert changed.returncode != 0 and "cases changed" in changed.stdout
+        record.write_bytes(original)
+        (folder / ".local-ai/USER-REQUESTS.md").write_text("Change the required multiplier to three")
+        stale = subprocess.run(command, cwd=folder, capture_output=True, text=True, timeout=20)
+        assert stale.returncode != 0 and "instructions changed" in stale.stdout
+
+
+def test_python_checker_ignores_stale_same_timestamp_dependency_bytecode():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        folder = Path(item["folder"])
+        (folder / "code.py").write_text("import helper\ndef calculate(n): return helper.add(n)\n")
+        helper = folder / "helper.py"
+        helper.write_text("def add(n): return n+1\n")
+        subprocess.run([sys.executable, "-m", "py_compile", str(helper)], check=True)
+        stamp = helper.stat()
+        helper.write_text("def add(n): return n+9\n")
+        os.utime(helper, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        result = run_typed_python_check(item, {"path": "code.py", "function": "calculate",
+            "cases": [{"args": [2], "expected": 3}]})
+        assert not result["passed"] and "got 11" in str(result)
+
+
+def test_python_checker_guard_preserves_owned_verifier_and_respects_user_framework_choice():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        item["brief"] = "Fix the arithmetic function in arithmetic.py"
+        folder = Path(item["folder"])
+        (folder / "arithmetic.py").write_text("def double(n): return n*2\n")
+        args = {"path": ".local-ai/verify.ps1", "content": "wrong generated script"}
+        assert native_agent.python_function_candidate(item) == ("arithmetic.py", ["double"])
+        assert "check_python_function" in native_agent.python_verifier_write_issue(folder, item, "write_file", args)
+        verifier = folder / ".local-ai/verify.ps1"
+        verifier.write_text("# Generated by Cale check_python_function\nexit 0")
+        assert "Preserve" in native_agent.python_verifier_write_issue(folder, item, "edit_file", args)
+        (folder / ".local-ai/USER-REQUESTS.md").write_text("Use pytest for the project test suite")
+        assert native_agent.python_function_candidate(item) is None
+        assert not native_agent.python_verifier_write_issue(folder, item, "write_file", args)
+
+
+def test_checker_first_guard_leaves_io_and_non_json_functions_on_normal_test_route():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        item["brief"] = "Fix the function in code.py"
+        source = Path(item["folder"]) / "code.py"
+        for body in ("return {n}", "yield n", "return range(n)", "return b'bytes'",
+                     "return open('file.txt').read()"):
+            source.write_text("def calculate(n):\n    " + body + "\n")
+            assert native_agent.python_function_candidate(item) is None, body
+
+
+def test_large_valid_python_case_data_returns_complete_parseable_verdict():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        (Path(item["folder"]) / "code.py").write_text("def count(text): return len(text)\n")
+        result = run_typed_python_check(item, {"path": "code.py", "function": "count",
+            "cases": [{"args": [chr(97+i) * 7000], "expected": 7000} for i in range(7)]})
+        assert result["passed"] and result["case_count"] == 7 and result["passed_cases"] == 7
+        assert result["diagnostics_limited"] and len(result["cases"]) == 4
+        assert result["verifier_check_passed"]
+
+
+def test_python_suite_diagnostics_follow_failing_function_and_clear_across_files():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        folder = Path(item["folder"])
+        first = folder / "first.py"
+        first.write_text("def double(n): return n*2\n")
+        (folder / "second.py").write_text("def increment(n): return n+1\n")
+        assert run_typed_python_check(item, {"path": "first.py", "function": "double",
+            "cases": [{"args": [2], "expected": 4}]})["passed"]
+        first.write_text("def double(n): return n*3\n")
+        args = {"path": "second.py", "function": "increment", "cases": [{"args": [3], "expected": 4}]}
+        failed = run_typed_python_check(item, args)
+        task_context.record_action(folder, "check_python_function", json.dumps(failed), args)
+        diagnostic = task_context.checker_failures(folder)[0]
+        assert diagnostic["path"] == ".local-ai/cale-python-checks.json"
+        assert "first.py:double" in diagnostic["details"] and '"args": [2]' in diagnostic["details"]
+        first.write_text("def double(n): return n*2\n")
+        passed = run_typed_python_check(item, args)
+        assert passed["passed"] and passed["case_count"] == 2
+        task_context.record_action(folder, "check_python_function", json.dumps(passed), args)
+        assert not task_context.checker_failures(folder)
+
+
+def test_structured_step_plans_before_source_exists_and_checks_real_function():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        folder = Path(item["folder"])
+        arguments = {"path": "calc.py", "function": "double", "cases": [{"args": [2], "expected": 4}]}
+        queue = task_context.plan_steps(folder, [{"phase": "Core", "title": "Implement double",
+            "check_tool": "check_python_function", "check_arguments": arguments}])
+        assert queue["active"]["check_arguments"] == arguments
+        source = folder / "calc.py"
+        source.write_text("def double(n): return n*3\n")
+        state = folder / ".local-ai/test-supervisor"
+        state.mkdir()
+        with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state):
+            failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": queue["active"]["id"]}))
+            assert not failed["passed"] and failed["done"] == 0
+            source.write_text("def double(n): return n*2\n")
+            before = long_tasks.fingerprint(folder, include_verifier=False)
+            passed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": queue["active"]["id"]}))
+            assert passed["passed"] and passed["done"] == 1 and passed["verifier_check_passed"]
+            assert long_tasks.fingerprint(folder, include_verifier=False) == before
+        assert (folder / ".local-ai/verify.ps1").is_file()
+
+
+def test_direct_structured_check_advances_matching_step_with_valid_json_reply():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        folder = Path(item["folder"])
+        (folder / "calc.py").write_text("def double(n): return n*2\n")
+        arguments = {"path": "calc.py", "function": "double", "cases": [{"args": [2], "expected": 4}]}
+        task_context.plan_steps(folder, [{"phase": "Core", "title": "Implement double",
+            "check_tool": "check_python_function", "check_arguments": arguments},
+            {"phase": "Integration", "title": "Final integration", "check_tool": "run_verifier"}])
+        response = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "check", "function": {
+            "name": "check_python_function", "arguments": json.dumps(arguments)}}]}}]}
+        state_folder = folder / ".local-ai/test-supervisor"
+        state_folder.mkdir()
+        with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state_folder), \
+             patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+            state = native_agent.run_slice(item, complete=lambda _: response)
+        assert task_context.step_status(folder)["done"] == 1
+        reply = next(message for message in state["messages"] if message.get("role") == "tool")
+        parsed = json.loads(reply["content"])
+        assert parsed["passed"] and parsed["step_progress"]["done"] == 1
+        assert state["verify_passed"]
+
+
+def test_wrong_step_expectation_is_revised_in_sqlite_without_changing_correct_source():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        folder = Path(item["folder"])
+        source = folder / "calc.py"
+        source.write_text("def double(n): return n*2\n")
+        original = source.read_bytes()
+        step = {"phase": "Core", "title": "Check double", "check_tool": "check_python_function",
+                "check_arguments": {"path": "calc.py", "function": "double",
+                                    "cases": [{"args": [2], "expected": 6}]}}
+        queue = task_context.plan_steps(folder, [step])
+        step_id = queue["active"]["id"]
+        state = folder / ".local-ai/test-supervisor"
+        state.mkdir()
+        with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state):
+            failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": step_id}))
+            assert not failed["passed"]
+            assert f"step_id={step_id}" in failed["next_action"] and "SQLite" in failed["next_action"]
+            assert "authoritative" in task_context.snapshot(folder)
+            step["check_arguments"]["cases"][0]["expected"] = 4
+            revised = json.loads(native_agent.execute_tool(folder, "task_steps",
+                                {"action": "revise", "step_id": step_id, "steps": [step]}))
+            assert revised["active"]["check_arguments"]["cases"][0]["expected"] == 4
+            passed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": step_id}))
+            assert passed["passed"] and passed["verifier_check_passed"]
+        assert source.read_bytes() == original
+
+
+def test_legacy_step_database_migration_preserves_commands_and_failed_attempts():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "code")["folder"])
+        project_memory.save(folder, "decision", "Keep architecture", "Retain earlier design decisions")
+        with project_memory.connection(folder) as connection:
+            connection.execute("""CREATE TABLE task_steps(id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_hash TEXT NOT NULL,position INTEGER NOT NULL,phase TEXT NOT NULL,title TEXT NOT NULL,
+                check_command TEXT NOT NULL,shell TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,
+                evidence TEXT NOT NULL DEFAULT '',updated REAL NOT NULL)""")
+            connection.execute("""INSERT INTO task_steps(request_hash,position,phase,title,check_command,shell,status,attempts,updated)
+                VALUES(?,1,'Core','Old step','exit 3','default','active',2,?)""", (task_context.request_identity(folder), time.time()))
+        active = task_context.step_status(folder)["active"]
+        assert active["check_command"] == "exit 3" and active["attempts"] == 2
+        assert active["check_tool"] == "run_command" and active["check_arguments"] == {}
+        assert project_memory.search(folder, "architecture")
+
+
+def test_structured_step_rejects_unknown_execution_and_ambiguous_checks():
+    import pytest
+
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "code")["folder"])
+        for fields in ({"check_tool": "run_command", "check_arguments": {"command": "bad"}},
+                       {"check_tool": "call_local_tool", "check_arguments": {}},
+                       {"check_tool": "check_python_function", "check_arguments": {}},
+                       {"check_tool": "run_verifier", "check_command": "exit 0"}):
+            with pytest.raises(ValueError):
+                task_context.plan_steps(folder, [{"phase": "Core", "title": "A step", **fields}])
+
+
+def test_resumed_worker_refreshes_owned_instructions_and_retains_work_history():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        item["brief"] = "Repair double(n) in calc.py"
+        folder = Path(item["folder"])
+        (folder / "calc.py").write_text("def double(n): return n*2\n")
+        native_agent.save_state(item, {"status": "continue", "turns": 5, "messages": [
+            {"role": "system", "content": "You are Cale's native project worker. Obsolete old instructions"},
+            {"role": "assistant", "content": "A useful completed observation"}]})
+        seen = []
+        def complete(payload):
+            seen.append(payload)
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "read", "function": {
+                "name": "read_file", "arguments": '{"path":"calc.py"}'}}]}}]}
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+            native_agent.run_slice(item, complete=complete)
+        assert "check_python_function" in seen[0]["messages"][0]["content"]
+        assert item["brief"] in seen[0]["messages"][0]["content"]
+        assert "Obsolete old instructions" not in str(seen)
+        assert "A useful completed observation" in str(seen)
+
+
 def test_native_worker_writes_files_and_checkpoints_tool_results():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

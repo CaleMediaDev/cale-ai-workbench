@@ -1,5 +1,31 @@
 # Native worker reality check
 
+## Structured Python acceptance checks
+
+Run `native_worker_smoke.py --scenario shipping --stepwise --model cale-fast`
+to exercise two pricing zones, fractional weights, defaults and invalid inputs.
+The independent grader also replaces the correct function with four separate
+pricing/validation defects and requires the model's saved verifier to reject each.
+It restores the original bytes afterward. These are isolated synthetic projects.
+
+The [November 3 typed-check report](results/typed-python-checks-20261103.json)
+records a local 9B temperature repair completing in 72.65 seconds with 15 calls,
+and a fresh shipping repair in 203.05 seconds with 34 calls. Neither supplied a
+verifier. Shipping used structured SQLite acceptance steps, passed all 11
+independent behavior cases, and caught all four mutations. An earlier shipping
+checkpoint had correct implementation but retained only invalid-input cases;
+the stronger pricing mutations expose that insufficient verifier. The new run
+also initially chose a wrong expected price and wasted calls editing generated
+JSON instead of revising its SQLite step. Current failure messages identify that
+distinction and give the exact revision action. The observed timings predate
+that final message improvement; no speed benefit is claimed for it.
+
+Cases still come from the model, so the helper cannot prove requirement coverage.
+Broader apps need integration tests. Different runs used evolving code, not a
+controlled speed comparison. The explicit database migration, fresh-source
+checks, cross-file case retention, invalid data and revised-step recovery are
+also covered by the validation suite.
+
 ## Local 3D integration checks
 
 The [November 3 3D report](results/local-3d-20261103.json) records actual local

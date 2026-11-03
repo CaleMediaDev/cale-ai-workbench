@@ -39,6 +39,16 @@ def to_celsius(fahrenheit):
     return fahrenheit * 5 / 9
 '''
 
+SHIPPING_BRIEF = (
+    "Repair quote_shipping(weight_kg, zone='local') in shipping.py, preserving its API. "
+    "For positive weights up to and including 1 kg, local shipping costs 5 and remote "
+    "shipping costs 9. Above 1 kg, add 2 per extra kg for local or 3 per extra kg for "
+    "remote, proportionally including fractional kg. Thus local 1.5 kg costs 6, local "
+    "3 kg costs 9 and remote 2.5 kg costs 13.5. Zero/negative weights and unknown "
+    "zones must raise ValueError. Make and run a repeatable verifier with real cases."
+)
+SHIPPING_STARTER = "def quote_shipping(weight_kg, zone='local'):\n    return weight_kg * 5\n"
+
 CONTACTS_BRIEF = (
     "Create cleaned_contacts.csv from contacts.csv. Keep the first row for each "
     "10-digit phone number, in the original order. Trim and title-case names "
@@ -272,6 +282,68 @@ def grade_temperature(folder: Path) -> dict:
     return result
 
 
+def grade_shipping(folder: Path) -> dict:
+    """Check unseen weight boundaries, both zones and rejected inputs in a child."""
+    source = folder / "shipping.py"
+    verifier = folder / ".local-ai/verify.ps1"
+    result = {"source_present": source.is_file(), "verifier_present": verifier.is_file()}
+    result["behavior"] = False
+    result["verifier_passes_correct"] = False
+    result["verifier_catches_regression"] = False
+    if source.is_file():
+        driver = """import sys,json,math
+scope={};exec(compile(open(sys.argv[1],encoding='utf-8-sig').read(),sys.argv[1],'exec'),scope)
+f=scope['quote_shipping'];checks={}
+for weight,zone,expected in [(0.5,'local',5),(1,'local',5),(1.5,'local',6),(3,'local',9),
+                             (0.5,'remote',9),(1,'remote',9),(2.5,'remote',13.5)]:
+    checks[str((weight,zone))]=math.isclose(f(weight,zone),expected,rel_tol=0,abs_tol=1e-8)
+checks['default_zone']=math.isclose(f(1.5),6,rel_tol=0,abs_tol=1e-8)
+for weight,zone in [(0,'local'),(-1,'remote'),(2,'moon')]:
+    try:f(weight,zone);checks[str((weight,zone))]=False
+    except ValueError:checks[str((weight,zone))]=True
+print(json.dumps(checks))
+"""
+        try:
+            checked = subprocess.run([sys.executable, "-c", driver, str(source)], cwd=folder,
+                capture_output=True, text=True, timeout=10, check=False)
+            cases = json.loads(checked.stdout.splitlines()[-1])
+            result["cases"] = cases
+            result["behavior"] = checked.returncode == 0 and len(cases) == 11 and all(cases.values())
+        except (OSError, ValueError, IndexError, subprocess.TimeoutExpired) as error:
+            result["error"] = str(error)[-500:]
+    if verifier.is_file() and result["behavior"]:
+        fixed = source.read_bytes()
+        command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(verifier)]
+        try:
+            checked = subprocess.run(command, cwd=folder, capture_output=True, text=True, timeout=30, check=False)
+            result["verifier_passes_correct"] = checked.returncode == 0
+            source.write_text(SHIPPING_STARTER, encoding="utf-8")
+            rejected = subprocess.run(command, cwd=folder, capture_output=True, text=True, timeout=30, check=False)
+            result["verifier_catches_regression"] = rejected.returncode != 0
+            # Reject independent pricing and validation defects. A suite that
+            # checks only exceptions can reject the original broken starter
+            # while silently accepting every wrong price.
+            mutants = {
+                "pricing_only": "if weight_kg <= 0 or zone not in ('local','remote'): raise ValueError()\n    return 123",
+                "validation_only": "base,rate=(5,2) if zone=='local' else (9,3)\n    return base+max(0,weight_kg-1)*rate",
+                "remote_rate": "if weight_kg <= 0 or zone not in ('local','remote'): raise ValueError()\n    base,rate=(5,2) if zone=='local' else (9,2)\n    return base+max(0,weight_kg-1)*rate",
+                "fractional_weight": "if weight_kg <= 0 or zone not in ('local','remote'): raise ValueError()\n    base,rate=(5,2) if zone=='local' else (9,3)\n    return base+max(0,int(weight_kg)-1)*rate",
+            }
+            result["verifier_mutations"] = {}
+            for name, body in mutants.items():
+                source.write_text("def quote_shipping(weight_kg, zone='local'):\n    " + body + "\n", encoding="utf-8")
+                checked = subprocess.run(command, cwd=folder, capture_output=True, text=True, timeout=30, check=False)
+                result["verifier_mutations"][name] = checked.returncode != 0
+        except (OSError, subprocess.TimeoutExpired) as error:
+            result["error"] = str(error)[-500:]
+        finally:
+            source.write_bytes(fixed)
+    result["passed"] = all(result[key] for key in ("source_present", "verifier_present", "behavior",
+                                                   "verifier_passes_correct", "verifier_catches_regression"))
+    result["passed"] = result["passed"] and all(result.get("verifier_mutations", {}).values()) and len(result.get("verifier_mutations", {})) == 4
+    return result
+
+
 def grade_contacts(folder: Path) -> dict:
     """Check the CSV answer and reject a verifier that misses invalid data."""
     output = folder / "cleaned_contacts.csv"
@@ -476,7 +548,7 @@ def grade_document(folder: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("temperature", "contacts", "webapp", "webapp_repair", "document"),
+    parser.add_argument("--scenario", choices=("temperature", "shipping", "contacts", "webapp", "webapp_repair", "document"),
                         default="temperature")
     parser.add_argument("--model", default="cale-fast")
     parser.add_argument("--stepwise", action="store_true",
@@ -502,7 +574,7 @@ def main() -> int:
         if args.keep_folder:
             folder.mkdir(parents=True, exist_ok=False)
         (folder / ".local-ai").mkdir()
-        brief = {"temperature": TEMPERATURE_BRIEF, "contacts": CONTACTS_BRIEF,
+        brief = {"temperature": TEMPERATURE_BRIEF, "shipping": SHIPPING_BRIEF, "contacts": CONTACTS_BRIEF,
                  "webapp": WEBAPP_BRIEF, "webapp_repair": WEBAPP_REPAIR_BRIEF,
                  "document": DOCUMENT_BRIEF}[args.scenario]
         if args.stepwise:
@@ -525,6 +597,8 @@ def main() -> int:
         if args.scenario == "temperature":
             (folder / "temperature.py").write_text(
                 TEMPERATURE_STARTER, encoding="utf-8")
+        elif args.scenario == "shipping":
+            (folder / "shipping.py").write_text(SHIPPING_STARTER, encoding="utf-8")
         elif args.scenario == "contacts":
             (folder / "contacts.csv").write_text(CONTACTS_STARTER, encoding="utf-8")
         elif args.scenario == "document":
@@ -542,6 +616,7 @@ def main() -> int:
             task_context.record_action(folder, "check_webapp", json.dumps(failed), cases)
         project_instruction = {
             "temperature": "Fix the conversion and verify it.\n",
+            "shipping": "Repair both shipping zones, fractional weights and invalid inputs.\n",
             "contacts": "Clean the contacts and verify the saved CSV.\n",
             "webapp": "Build the requested offline page and test it.\n",
             "webapp_repair": "Repair the existing validation bug; preserve working behavior.\n",
@@ -596,7 +671,7 @@ def main() -> int:
             "focused_check_calls": int(state.get("focused_check_calls", 0)),
             "current": state.get("current", ""),
             "completion_issue": native_agent.completion_issue(folder, project, state),
-            "grade": {"temperature": grade_temperature,
+            "grade": {"temperature": grade_temperature, "shipping": grade_shipping,
                       "contacts": grade_contacts,
                       "webapp": grade_webapp,
                       "webapp_repair": grade_webapp_repair,

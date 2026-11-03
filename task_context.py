@@ -47,6 +47,11 @@ def _schema(conn):
         updated REAL NOT NULL)""")
     conn.execute("""CREATE INDEX IF NOT EXISTS task_steps_queue
         ON task_steps(request_hash,status,position,id)""")
+    step_columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_steps)")}
+    for name, definition in (("check_tool", "TEXT NOT NULL DEFAULT 'run_command'"),
+                             ("check_arguments", "TEXT NOT NULL DEFAULT '{}'")):
+        if name not in step_columns:
+            conn.execute(f"ALTER TABLE task_steps ADD COLUMN {name} {definition}")
     # Existing project databases were created before the subject field existed.
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_events)")}
     if "subject" not in columns:
@@ -217,6 +222,15 @@ def snapshot(folder: str | Path) -> str:
         lines.append("Work only on the active step. Make one small source change, run its check "
                      "with task_steps action=complete, then continue from the fresh checkpoint. "
                      "Use split if it is too broad. Completing a batch is not completing the whole request.")
+        if queue["active"] and queue["active"]["check_tool"] == "check_python_function":
+            lines.append("SQLite check_arguments above are authoritative for this step. If a case contradicts "
+                         "the original requirement, revise the active step through task_steps action=revise, "
+                         "preserving its other cases. Editing the generated JSON suite does not revise the step.")
+        if queue["active"] and "SyntaxError" in queue["active"]["evidence"]:
+            lines.append("Inspect whether the saved acceptance command or the project source has the syntax error. "
+                         "For a broken Python one-liner, revise the active step to check_tool='check_python_function' "
+                         "with check_arguments containing the function and input/expected cases. "
+                         "Do not change working application behavior just to repair test-command syntax.")
     return "\n".join(lines)
 
 
@@ -225,16 +239,19 @@ def _step_status(conn, request_hash: str) -> dict:
     counts = {row["status"]: row["n"] for row in conn.execute(
         "SELECT status,COUNT(*) n FROM task_steps WHERE request_hash=? GROUP BY status",
         (request_hash,))}
-    active = conn.execute("""SELECT id,phase,title,check_command,shell,status,attempts,evidence
+    active = conn.execute("""SELECT id,phase,title,check_command,shell,status,attempts,evidence,check_tool,check_arguments
         FROM task_steps WHERE request_hash=? AND status IN ('active','pending')
         ORDER BY position,id LIMIT 1""", (request_hash,)).fetchone()
     recent = conn.execute("""SELECT phase,title FROM task_steps
         WHERE request_hash=? AND status='done' ORDER BY updated DESC,id DESC LIMIT 2""",
         (request_hash,)).fetchall()
+    unit = dict(active) if active else None
+    if unit:
+        unit["check_arguments"] = json.loads(unit["check_arguments"])
     return {"total": sum(n for status, n in counts.items() if status != "split"),
             "done": counts.get("done", 0),
             "remaining": counts.get("active", 0) + counts.get("pending", 0),
-            "active": dict(active) if active else None,
+            "active": unit,
             "recent_completed": [dict(row) for row in recent]}
 
 
@@ -250,10 +267,10 @@ def _validate_steps(steps: list) -> list[tuple]:
         raise ValueError("Plan 1 to 8 small steps for the next phase, not the whole project.")
     validated = []
     for step in steps:
-        if not isinstance(step, dict) or set(step) - {"phase", "title", "check_command", "shell"}:
-            raise ValueError("Each step needs phase, title, check_command and optional shell.")
+        if not isinstance(step, dict) or set(step) - {"phase", "title", "check_command", "shell", "check_tool", "check_arguments"}:
+            raise ValueError("Use phase, title, and either check_command or a structured check_tool/check_arguments.")
         values = []
-        for name, maximum in (("phase", 100), ("title", 240), ("check_command", 2000)):
+        for name, maximum in (("phase", 100), ("title", 240)):
             value = step.get(name)
             if not isinstance(value, str) or not value.strip() or len(value) > maximum or "\x00" in value:
                 raise ValueError(f"Use a nonempty {name} of at most {maximum} characters.")
@@ -261,7 +278,37 @@ def _validate_steps(steps: list) -> list[tuple]:
         shell = step.get("shell", "default")
         if shell not in {"default", "powershell"}:
             raise ValueError("Choose shell default or powershell.")
-        validated.append((*values, shell))
+        tool = step.get("check_tool", "run_command")
+        command = step.get("check_command", "")
+        if tool == "run_command":
+            if (not isinstance(command, str) or not command.strip() or len(command) > 2000
+                    or "\x00" in command or "check_arguments" in step):
+                raise ValueError("Use a short check_command, or prefer structured check_tool/check_arguments.")
+            arguments = {}
+        else:
+            if tool not in {"check_python_function", "run_verifier"} or "check_command" in step or "shell" in step:
+                raise ValueError("Structured steps support check_python_function or run_verifier; omit shell/check_command.")
+            arguments = step.get("check_arguments", {})
+            if not isinstance(arguments, dict):
+                raise ValueError("check_arguments must be a JSON object.")
+            # Use the worker's published schema, without running the check or
+            # requiring a source file which an earlier step has yet to build.
+            from jsonschema import ValidationError, validate
+
+            from native_agent import TOOLS
+
+            schema = next(item["function"]["parameters"] for item in TOOLS if item["function"]["name"] == tool)
+            try:
+                validate(arguments, schema)
+            except ValidationError as error:
+                raise ValueError("Invalid structured acceptance arguments: " + error.message[:300]) from error
+        try:
+            encoded = json.dumps(arguments, allow_nan=False)
+        except (ValueError, TypeError, RecursionError) as error:
+            raise ValueError("Acceptance arguments must be finite JSON data.") from error
+        if len(encoded) > 12000:
+            raise ValueError("Use acceptance arguments under 12 KB per step.")
+        validated.append((*values, command.strip(), shell, tool, encoded))
     return validated
 
 
@@ -292,11 +339,11 @@ def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None) 
             conn.execute("UPDATE task_steps SET position=position+? WHERE request_hash=? AND position>?",
                          (len(values), request_hash, position))
             conn.execute("UPDATE task_steps SET status='split',updated=? WHERE id=?", (time.time(), split_id))
-        for offset, (phase, title, check, shell) in enumerate(values):
+        for offset, (phase, title, check, shell, tool, arguments) in enumerate(values):
             conn.execute("""INSERT INTO task_steps
-                (request_hash,position,phase,title,check_command,shell,status,updated)
-                VALUES(?,?,?,?,?,?,?,?)""", (request_hash, position + offset, phase, title, check, shell,
-                                             "active" if offset == 0 else "pending", time.time()))
+                (request_hash,position,phase,title,check_command,shell,check_tool,check_arguments,status,updated)
+                VALUES(?,?,?,?,?,?,?,?,?,?)""", (request_hash, position + offset, phase, title, check, shell, tool, arguments,
+                                                 "active" if offset == 0 else "pending", time.time()))
         return _step_status(conn, request_hash)
 
 
@@ -351,10 +398,10 @@ def revise_step(folder: str | Path, step_id: int, steps: list) -> dict:
         queue = _step_status(conn, request_hash)
         if not queue["active"] or queue["active"]["id"] != step_id:
             raise ValueError("Only the current active step can be revised.")
-        phase, title, check, shell = values[0]
-        conn.execute("""UPDATE task_steps SET phase=?,title=?,check_command=?,shell=?,
+        phase, title, check, shell, tool, arguments = values[0]
+        conn.execute("""UPDATE task_steps SET phase=?,title=?,check_command=?,shell=?,check_tool=?,check_arguments=?,
             evidence='Acceptance check revised; not yet passed',updated=? WHERE id=?""",
-            (phase, title, check, shell, time.time(), step_id))
+            (phase, title, check, shell, tool, arguments, time.time(), step_id))
         return _step_status(conn, request_hash)
 
 
@@ -368,7 +415,7 @@ def action_outcome(tool: str, result: str) -> str:
             return "Failed" if isinstance(value, dict) and value.get("passed") is False else "Completed"
         except (ValueError, TypeError):
             return "Failed"
-    if tool in {"check_webapp", "check_document_report"}:
+    if tool in {"check_webapp", "check_document_report", "check_python_function"}:
         # Running the checker successfully is different from its assertions
         # passing. Only an explicit true verdict is evidence of completion.
         try:
@@ -443,7 +490,7 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
     This local project memory excludes arbitrary read output and full reports.
     Quoting messages keeps embedded newlines from masquerading as instructions.
     """
-    if tool not in {"check_webapp", "check_document_report"} or not isinstance(arguments, dict):
+    if tool not in {"check_webapp", "check_document_report", "check_python_function"} or not isinstance(arguments, dict):
         return None
     if result.startswith("Tool error: This exact call failed twice"):
         return None  # A skipped call is not new evidence; preserve its real diagnostic.
@@ -452,7 +499,8 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
                    else json.loads(result))
         if not isinstance(verdict, dict) or type(verdict.get("passed")) is not bool:
             return None
-        name = arguments.get("path" if tool == "check_webapp" else "report_path")
+        name = (".local-ai/cale-python-checks.json" if tool == "check_python_function" else
+                arguments.get("path" if tool == "check_webapp" else "report_path"))
         if not isinstance(name, str) or not name or Path(name).is_absolute():
             return None
         target = (root/name).resolve()
@@ -473,17 +521,19 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
         for case in verdict.get("cases", [])[:12]:
             if isinstance(case, dict) and case.get("passed") is False:
                 number = case.get("case")
-                inputs = {}
+                inputs = case.get("inputs", {}) if tool == "check_python_function" else {}
                 if (isinstance(supplied_cases, list) and type(number) is int
                         and 1 <= number <= len(supplied_cases)
-                        and isinstance(supplied_cases[number-1], dict)):
+                        and isinstance(supplied_cases[number-1], dict) and not inputs):
                     inputs = {key: supplied_cases[number-1][key]
                               for key in ("set", "click", "keys", "wait_ms")
                               if supplied_cases[number-1].get(key)}
                 context = " inputs=" + json.dumps(inputs, sort_keys=True)[:240] if inputs else ""
                 for reason in case.get("failures", [])[:3]:
                     if isinstance(reason, str):
-                        details.append(f"Case {number}{context}: " + json.dumps(reason[:280]))
+                        function = (" " + str(case.get("path", "")) + ":" + str(case.get("function", ""))
+                                    if tool == "check_python_function" else "")
+                        details.append(f"Case {number}{function}{context}: " + json.dumps(reason[:280]))
         for field in ("javascript_errors", "errors"):
             for reason in verdict.get(field, [])[:4]:
                 if isinstance(reason, str):

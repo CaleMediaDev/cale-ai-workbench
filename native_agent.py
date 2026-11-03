@@ -34,8 +34,19 @@ PROJECT_COMMAND_TIMEOUT = 90
 
 TOOLS = [
     {"type": "function", "function": {
+        "name": "check_python_function",
+        "description": "Run real input/output tests for a top-level Python function, without writing test code or PowerShell. Example: path='temperature.py', function='to_celsius', cases=[{args:[32],expected:0},{args:[212],expected:100},{args:[-40],expected:-40}]. Use kwargs when needed, or raises='ValueError' instead of expected for an exception case. Numeric tolerance defaults to 1e-8. Saves a repeatable verifier on success, preserving a custom verifier. Cases accumulate by function and input; resubmitting an input corrects its expectation. All retained functions must pass.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}, "function": {"type": "string"},
+            "tolerance": {"type": "number", "minimum": 0, "maximum": 0.0001},
+            "cases": {"type": "array", "minItems": 1, "maxItems": 24, "items": {
+                "type": "object", "properties": {"args": {"type": "array"},
+                    "kwargs": {"type": "object"}, "expected": {}, "raises": {"type": "string"}},
+                "additionalProperties": False}}},
+            "required": ["path", "function", "cases"], "additionalProperties": False}}},
+    {"type": "function", "function": {
         "name": "task_steps",
-        "description": "Durable SQLite queue for small steps and phases. Plan 2-6 tiny steps for the next phase; each needs a short read-only check_command. Work only on the active step. complete runs its saved check and advances only on exit 0 with unchanged project files. split replaces the active step with smaller ones. revise fixes its mistaken command using steps=[one corrected step]; retain behavioral coverage. status resumes progress. A completed batch is not whole-project verification.",
+        "description": "Durable SQLite queue for small phases. Plan 2-6 tiny steps. Prefer check_tool='check_python_function' with check_arguments={path,function,cases}, or check_tool='run_verifier'. Other work can use a read-only check_command. complete runs the saved acceptance test and advances only if it passes without changing project source. split makes smaller steps; revise corrects the active check with steps=[one corrected step]. status resumes progress. A completed batch is not whole-project verification.",
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string", "enum": ["plan", "status", "complete", "split", "revise"]},
             "step_id": {"type": "integer"},
@@ -44,8 +55,10 @@ TOOLS = [
                     "phase": {"type": "string", "maxLength": 100},
                     "title": {"type": "string", "maxLength": 240},
                     "check_command": {"type": "string", "maxLength": 2000},
-                    "shell": {"type": "string", "enum": ["default", "powershell"]}},
-                "required": ["phase", "title", "check_command"], "additionalProperties": False}}},
+                    "shell": {"type": "string", "enum": ["default", "powershell"]},
+                    "check_tool": {"type": "string", "enum": ["check_python_function", "run_verifier"]},
+                    "check_arguments": {"type": "object"}},
+                "required": ["phase", "title"], "additionalProperties": False}}},
             "required": ["action"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 project file. Use start_line and max_lines for large files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "max_lines": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
@@ -465,19 +478,42 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                     raise ValueError("Supply the active step_id to revise.")
                 value = task_context.revise_step(folder, arguments["step_id"], arguments.get("steps"))
             elif action == "complete":
-                import long_tasks
-
                 request_hash = task_context.request_identity(folder)
                 active = task_context.step_status(folder)["active"]
                 if (not active or type(arguments.get("step_id")) is not int
                         or active["id"] != arguments["step_id"]):
-                    raise ValueError("Supply the current active step_id; steps cannot be skipped.")
-                before = long_tasks.fingerprint(folder)
-                checked = execute_tool(folder, "run_command", {
-                    "command": active["check_command"], "shell": active["shell"]})
-                value = task_context.record_step_check(folder, active["id"], request_hash, checked,
-                    unchanged=long_tasks.fingerprint(folder) == before)
+                    current = f" {active['id']} ({active['title']})" if active else " (there is no unfinished step)"
+                    raise ValueError("Supply the current active step_id" + current + "; steps cannot be skipped.")
+                kind = active["check_tool"]
+                check_args = (active["check_arguments"] if kind != "run_command" else
+                              {"command": active["check_command"], "shell": active["shell"]})
+                structured = kind == "check_python_function"
+                before = step_source_fingerprint(folder, structured)
+                checked = execute_tool(folder, kind, check_args)
+                status_result = step_exit_result(kind, checked)
+                if structured:
+                    task_context.record_action(folder, kind, checked, check_args, request_hash=request_hash)
+                value = task_context.record_step_check(folder, active["id"], request_hash, status_result,
+                    unchanged=step_source_fingerprint(folder, structured) == before)
                 value["check_output"] = checked[-2500:]
+                value["check_tool"] = kind
+                if structured:
+                    try:
+                        verdict = json.loads(checked)
+                    except ValueError:
+                        verdict = {}
+                    value["check_verdict"] = {"passed": value["passed"]}
+                    value["verifier_check_passed"] = value["passed"] and verdict.get("verifier_check_passed") is True
+                    if not value["passed"]:
+                        value["next_action"] = (
+                            "Compare the failed case with the original requirement. Fix source if it is wrong. "
+                            "If the expected value is wrong, use task_steps action=revise with step_id="
+                            f"{active['id']} and steps=[one corrected step including all its acceptance cases]. "
+                            "Then complete that step again. Editing cale-python-checks.json does not revise "
+                            "the acceptance cases saved in SQLite.")
+                elif kind == "run_verifier":
+                    value["verifier_check_passed"] = value["passed"]
+                value = compact_step_progress(value)
             else:
                 raise ValueError("Choose plan, status, complete, split or revise.")
             return json.dumps(value, ensure_ascii=False)
@@ -532,6 +568,8 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                     folder, arguments, result["source_sha256"])
             result["ok"] = result["passed"]
             return json.dumps(result, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
+        if name == "check_python_function":
+            return json.dumps(check_python_function(folder, arguments), ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "check_webapp":
             # The task browser keeps a Playwright sync event loop alive. The
             # independent offline checker needs its own fresh event loop.
@@ -775,6 +813,209 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
         return f"Tool error: {type(exc).__name__}: {exc}"
 
 
+def normalize_python_check(folder: Path, spec: dict) -> dict:
+    """Validate plain JSON test data and an actual local function before saving."""
+    import ast
+    import math
+
+    if not isinstance(spec, dict) or set(spec) - {"path", "function", "cases", "tolerance"}:
+        raise ValueError("Use path, function, cases and optional tolerance.")
+    path = project_path(folder, spec.get("path", ""))
+    if not path.is_file() or path.suffix.lower() != ".py" or path.stat().st_size > 500_000:
+        raise ValueError("Choose a Python source file under 500 KB inside this project.")
+    if len(path.relative_to(folder.resolve()).as_posix()) > 512:
+        raise ValueError("Use a Python source path under 512 characters.")
+    name = spec.get("function")
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_]\w{0,79}", name):
+        raise ValueError("Use one Python function name, not an expression or dotted path.")
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    functions = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
+    if name not in functions:
+        raise ValueError(f"Top-level function {name!r} was not found. Available functions: {', '.join(functions[:16]) or 'none'}")
+    tolerance = spec.get("tolerance", 1e-8)
+    if type(tolerance) not in (int, float) or not math.isfinite(tolerance) or not 0 <= tolerance <= 1e-4:
+        raise ValueError("Numeric tolerance must be finite and between 0 and 0.0001.")
+    cases = spec.get("cases")
+    if not isinstance(cases, list) or not 1 <= len(cases) <= 24:
+        raise ValueError("Use 1 to 24 concrete input/output cases.")
+    normalized = []
+    for case in cases:
+        if (not isinstance(case, dict) or set(case) - {"args", "kwargs", "expected", "raises"}
+                or ("expected" in case) == ("raises" in case)):
+            raise ValueError("Each case needs exactly one of expected or raises, plus optional args and kwargs.")
+        args, kwargs = case.get("args", []), case.get("kwargs", {})
+        if not isinstance(args, list) or len(args) > 16 or not isinstance(kwargs, dict) or len(kwargs) > 16:
+            raise ValueError("Use up to 16 positional or keyword arguments per case.")
+        if any(not isinstance(key, str) or not key.isidentifier() for key in kwargs):
+            raise ValueError("Keyword argument names must be Python identifiers.")
+        if "raises" in case and (not isinstance(case["raises"], str) or not re.fullmatch(r"[A-Za-z_]\w{0,79}", case["raises"])):
+            raise ValueError("raises must name an exception type such as ValueError.")
+        value = {"args": args, "kwargs": kwargs, **{key: case[key] for key in ("expected", "raises") if key in case}}
+        try:
+            encoded = json.dumps(value, allow_nan=False)
+        except (ValueError, TypeError, RecursionError) as error:
+            raise ValueError("Cases must contain finite JSON values.") from error
+        if len(encoded) > 8000:
+            raise ValueError("Each case must be under 8 KB; use a saved test suite for large data.")
+        normalized.append(value)
+    return {"path": path.relative_to(folder.resolve()).as_posix(), "function": name,
+            "cases": normalized, "tolerance": tolerance}
+
+
+def python_values_match(actual, expected, tolerance):
+    """Compare JSON-shaped values without treating True as the number 1."""
+    import math
+
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return type(actual) is type(expected) and actual == expected
+    if type(actual) in (int, float) and type(expected) in (int, float):
+        return math.isfinite(actual) and math.isclose(actual, expected, rel_tol=0, abs_tol=tolerance)
+    if isinstance(actual, (list, tuple)) and isinstance(expected, list):
+        return len(actual) == len(expected) and all(python_values_match(a, b, tolerance) for a, b in zip(actual, expected))
+    if isinstance(actual, dict) and isinstance(expected, dict):
+        return actual.keys() == expected.keys() and all(python_values_match(actual[key], expected[key], tolerance) for key in expected)
+    return type(actual) is type(expected) and actual == expected
+
+
+def run_python_checks(folder: Path, spec_path: Path, expected_sha: str) -> dict:
+    """Fixed subprocess runner: JSON is data; only the project's Python executes.
+
+    Project code is not a security sandbox. The existing command/supervisor
+    process containment and timeout apply, and the caller verifies read-only
+    behavior. Discard arbitrary project stdout instead of retaining documents.
+    """
+    import contextlib
+    import importlib.util
+
+    if not spec_path.resolve().is_relative_to((folder / ".local-ai").resolve()):
+        raise ValueError("Python check specs must be in this project's .local-ai folder.")
+    if spec_path.stat().st_size > 64_000:
+        raise ValueError("The saved Python check suite must be under 64 KB.")
+    raw = spec_path.read_bytes()
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_sha) or hashlib.sha256(raw).hexdigest() != expected_sha:
+        raise ValueError("Python acceptance cases changed after the verifier was saved.")
+    record = json.loads(raw)
+    import task_context
+
+    if record.get("request_hash") != task_context.request_identity(folder):
+        raise ValueError("User instructions changed; refresh Python acceptance cases before verification.")
+    checks = record.get("checks")
+    if not isinstance(checks, list) or not 1 <= len(checks) <= 8:
+        raise ValueError("The saved Python checker needs 1 to 8 functions.")
+    results, errors = [], []
+    for requested in checks:
+        spec = normalize_python_check(folder, requested)
+        source = project_path(folder, spec["path"])
+        before = hashlib.sha256(source.read_bytes()).hexdigest()
+        loader = importlib.util.spec_from_file_location("_cale_python_subject_" + before[:16], source)
+        module = importlib.util.module_from_spec(loader)
+        sys.modules[loader.name] = module
+        sys.path.insert(0, str(source.parent))
+        with open(os.devnull, "w") as silent, contextlib.redirect_stdout(silent), contextlib.redirect_stderr(silent):
+            try:
+                # Compile current bytes directly: same-second, same-size edits
+                # must never run stale __pycache__ code during a regression check.
+                exec(compile(source.read_bytes(), str(source), "exec"), module.__dict__)
+                function = getattr(module, spec["function"])
+            except BaseException as error:
+                errors.append(f"{spec['path']} import failed: {type(error).__name__}: {str(error)[:240]}")
+                continue
+            for number, case in enumerate(spec["cases"], 1):
+                failures = []
+                try:
+                    actual = function(*copy.deepcopy(case["args"]), **copy.deepcopy(case["kwargs"]))
+                    if "raises" in case:
+                        failures.append(f"Expected {case['raises']}, but the function returned normally")
+                    elif not python_values_match(actual, case["expected"], spec["tolerance"]):
+                        failures.append(f"Expected {json.dumps(case['expected'])[:240]}, got {repr(actual)[:240]}")
+                except BaseException as error:
+                    if case.get("raises") != type(error).__name__:
+                        failures.append(f"Raised {type(error).__name__}: {str(error)[:240]}")
+                results.append({"path": spec["path"], "function": spec["function"], "case": number,
+                                "inputs": {"args": case["args"], "kwargs": case["kwargs"]},
+                                "passed": not failures, "failures": failures})
+        if hashlib.sha256(source.read_bytes()).hexdigest() != before:
+            errors.append(spec["path"] + " changed while it was being checked")
+    if hashlib.sha256(spec_path.read_bytes()).hexdigest() != expected_sha:
+        errors.append("Acceptance cases changed during verification")
+    failed = [item for item in results if not item["passed"]]
+    diagnostics = (failed or results)[:4]
+    for item in diagnostics:
+        encoded = json.dumps(item["inputs"], ensure_ascii=True)
+        if len(encoded) > 500:
+            item["inputs"] = {"preview": encoded[:480]}
+    return {"passed": bool(results) and not failed and not errors,
+            "case_count": len(results), "passed_cases": len(results) - len(failed),
+            "cases": diagnostics, "diagnostics_limited": len(failed or results) > 4,
+            "errors": errors[:8]}
+
+
+def check_python_function(folder: Path, arguments: dict) -> dict:
+    """Run typed cases and generate an owned verifier, preserving other checks."""
+    import long_tasks
+    import task_context
+
+    folder = folder.resolve()
+    incoming = normalize_python_check(folder, arguments)
+    notes = project_path(folder, ".local-ai")
+    notes.mkdir(exist_ok=True)
+    target = notes / "cale-python-checks.json"
+    request_hash = task_context.request_identity(folder)
+    checks = []
+    if target.is_file():
+        prior = json.loads(target.read_text(encoding="utf-8"))
+        if prior.get("request_hash") == request_hash:
+            checks = [normalize_python_check(folder, item) for item in prior.get("checks", [])]
+    key = (incoming["path"], incoming["function"])
+    old = next((item for item in checks if (item["path"], item["function"]) == key), None)
+    if old:
+        merged = {json.dumps([case["args"], case["kwargs"]], sort_keys=True): case for case in old["cases"]}
+        merged.update({json.dumps([case["args"], case["kwargs"]], sort_keys=True): case for case in incoming["cases"]})
+        incoming["cases"] = list(merged.values())
+        incoming = normalize_python_check(folder, incoming)
+    checks = [item for item in checks if (item["path"], item["function"]) != key] + [incoming]
+    if len(checks) > 8:
+        raise ValueError("Use a saved test suite for more than eight functions.")
+    raw = json.dumps({"request_hash": request_hash, "checks": checks}, allow_nan=False).encode("utf-8")
+    if len(raw) > 64_000:
+        raise ValueError("The saved Python check suite must be under 64 KB.")
+    temporary = target.with_suffix(".tmp")
+    temporary.write_bytes(raw)
+    os.replace(temporary, target)
+    spec_sha = hashlib.sha256(raw).hexdigest()
+    def literal(text):
+        return "'" + str(text).replace("'", "''") + "'"
+    command = "& " + " ".join(literal(value) for value in (sys.executable, Path(__file__).resolve(),
+        "check-python", folder, target, spec_sha))
+    before = long_tasks.fingerprint(folder)
+    checked = execute_tool(folder, "run_command", {"command": command, "shell": "powershell"})
+    try:
+        result = json.loads(checked.splitlines()[-1])
+        if not isinstance(result, dict) or type(result.get("passed")) is not bool:
+            raise ValueError("Missing checker verdict")
+    except (ValueError, IndexError):
+        return {"passed": False, "errors": [checked[-1600:]], "verifier_saved": False}
+    if not checked.startswith("Exit code: 0\n"):
+        result["passed"] = False
+    if long_tasks.fingerprint(folder) != before:
+        result["passed"] = False
+        result.setdefault("errors", []).append("Project files changed during the check; keep acceptance checks read-only.")
+    verifier = notes / "verify.ps1"
+    marker = "# Generated by Cale check_python_function"
+    existing = verifier.read_text(encoding="utf-8-sig") if verifier.is_file() else ""
+    result["verifier_saved"] = False
+    if result["passed"] and (not existing or existing.startswith(marker)):
+        script = marker + "\n$ErrorActionPreference='Stop'\n" + command + "\nexit $LASTEXITCODE\n"
+        staged = verifier.with_suffix(".tmp")
+        staged.write_text(script, encoding="utf-8-sig")
+        os.replace(staged, verifier)
+        result["verifier_saved"] = True
+        verification = execute_tool(folder, "run_verifier", {})
+        result["verifier_check_passed"] = verification.startswith("Exit code: 0\n")
+        result["verification"] = verification[-1200:]
+    return result
+
+
 def prompt(project: dict) -> str:
     folder = Path(project["folder"])
     try:
@@ -850,6 +1091,15 @@ def prompt(project: dict) -> str:
         "installing or generating. Only claim a mesh after complete status and a real GLB/OBJ/STL. "
         if re.search(r"(?i)\b(?:3d|mesh|glb|stl)\b", brief) else ""
     )
+    python_hint = (
+        "For a small Python function, use check_python_function with its actual name, concrete "
+        "args/kwargs and expected results, including boundaries. It executes the cases and saves "
+        "a repeatable verifier so you need not write PowerShell. Cases accumulate across functions. "
+        "For steps, save check_tool='check_python_function' and check_arguments with those cases, "
+        "then task_steps complete runs the saved data directly. Use check_tool='run_verifier' for integration. "
+        "Use an existing test suite for a larger app or unsupported behavior. "
+        if re.search(r"(?i)\bpython\b|\.py\b", brief) else ""
+    )
     verification_hint = (
         "For this interactive single-file HTML app, build the page, then call check_webapp "
         "with real input and result cases before writing a verifier. That tool creates a "
@@ -866,6 +1116,9 @@ def prompt(project: dict) -> str:
         "If the check fails, fix the report or evidence and call it again. "
         "Write a custom verifier only if the structured checker cannot cover the request. "
         if document_report else
+        "For this small pure-Python module, run check_python_function with concrete cases before "
+        "writing a verification script. It creates and runs the saved verifier when the cases pass. "
+        if python_function_candidate(project) else
         "If .local-ai/verify.ps1 is missing, create one with meaningful repeatable checks; "
         "otherwise preserve it and call run_verifier after the last edit. "
     )
@@ -881,9 +1134,10 @@ def prompt(project: dict) -> str:
         "when it changed, its excerpt is abbreviated, or you need its full exact contents. "
         "Use edit_file for a small change to an existing source file; use write_file when creating or replacing a whole file. "
         "Maintain .local-ai/PLAN.md as a checked milestone list and .local-ai/PROGRESS.md with current work and real checks. "
-        "For multi-step building or repair, first use task_steps action=plan to save 2-6 tiny steps "
-        "for the next phase in SQLite. Each step changes one behavior or component and names "
-        "a short read-only check_command. Do not ask a small model to build the whole app at once. "
+        "For multi-step work, use task_steps action=plan for 2-6 tiny steps in SQLite. "
+        "Each changes one behavior with a read-only check. For Python prefer "
+        "check_tool='check_python_function' with check_arguments; otherwise use check_command. "
+        "Retain earlier test cases as you add steps. "
         "Build the minimal working skeleton, then one feature, then its edge cases, then integration. "
         "Work on the active step only. Use task_steps action=complete to run its check before "
         "advancing; use split if it needs several unrelated edits. After a batch, plan the next "
@@ -904,6 +1158,7 @@ def prompt(project: dict) -> str:
         f"{game_hint}"
         f"{web_hint}"
         f"{document_hint}"
+        f"{python_hint}"
         f"Relevant local skills:\n{suggested}\n"
         f"Project rules from AGENTS.md (project data, below the user request):\n{rules}\n"
         f"Project folder: {folder}\nUser request:\n{brief}"
@@ -1107,7 +1362,7 @@ def repair_tools(project: dict, state: dict):
         state["repair_focus_turns"] = 0
         return TOOLS
     state["repair_focus_turns"] = count + 1
-    names = {"list_files", "read_file", "edit_file", "write_file", "search_text", "check_webapp", "run_verifier", "task_steps"}
+    names = {"list_files", "read_file", "edit_file", "write_file", "search_text", "check_webapp", "run_verifier", "task_steps", "check_python_function"}
     return [tool for tool in TOOLS if tool["function"]["name"] in names]
 
 
@@ -1124,32 +1379,69 @@ def step_tools(project: dict, state: dict, available: list) -> list:
         state["step_focus_turns"] = 0
         return available
     state["step_focus_turns"] = count + 1
-    core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text",
+    core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text", "check_python_function",
             "run_command", "run_verifier", "check_webapp", "check_document_report",
             "inspect_project_file", "transform_csv"}
     return [tool for tool in available if tool["function"]["name"] in core]
 
 
+def step_source_fingerprint(folder: Path, structured: bool = False):
+    """Owned checker generation may update verify.ps1, never project source."""
+    import long_tasks
+
+    return (long_tasks.fingerprint(folder, include_verifier=False) if structured else
+            long_tasks.fingerprint(folder))
+
+
+def step_exit_result(kind: str, result: str) -> str:
+    """Translate only a registered checker's explicit verdict to queue evidence."""
+    if kind != "check_python_function":
+        return result
+    try:
+        verdict = json.loads(result)
+        passed = isinstance(verdict, dict) and verdict.get("passed") is True
+    except ValueError:
+        passed = False
+    return ("Exit code: 0\nStructured acceptance cases passed" if passed else
+            "Exit code: 1\nAcceptance check failed: " + result[-1600:])
+
+
+def compact_step_progress(queue: dict) -> dict:
+    """The next checkpoint supplies full acceptance data; avoid duplicating it."""
+    value = dict(queue)
+    if value.get("active"):
+        value["active"] = {key: value["active"][key] for key in
+                           ("id", "phase", "title", "status", "attempts", "evidence")}
+    return value
+
+
 def step_check_context(folder: Path, name: str, arguments: dict):
     """Recognize the active acceptance check even without a bookkeeping call."""
-    if name not in {"run_command", "run_verifier"}:
+    if name not in {"run_command", "run_verifier", "check_python_function"}:
         return None
-    import long_tasks
     import task_context
 
     active = task_context.step_status(folder)["active"]
     if not active:
         return None
-    saved = active["check_command"].strip()
-    command = str(arguments.get("command", "")).strip()
-    equivalent_verifier = is_verifier_invocation(saved) and (
-        name == "run_verifier" or name == "run_command" and is_verifier_invocation(command))
-    exact = (name == "run_command" and command == saved
-             and arguments.get("shell", "default") == active["shell"])
-    if not (exact or equivalent_verifier):
-        return None
+    structured = active["check_tool"] == "check_python_function"
+    if structured:
+        try:
+            if name != active["check_tool"] or normalize_python_check(folder, arguments) != normalize_python_check(folder, active["check_arguments"]):
+                return None
+        except (OSError, ValueError, SyntaxError):
+            return None
+    else:
+        saved = active["check_command"].strip()
+        command = str(arguments.get("command", "")).strip()
+        equivalent_verifier = (is_verifier_invocation(saved) or active["check_tool"] == "run_verifier") and (
+            name == "run_verifier" or name == "run_command" and is_verifier_invocation(command))
+        exact = (name == "run_command" and active["check_tool"] == "run_command" and command == saved
+                 and arguments.get("shell", "default") == active["shell"])
+        if not (exact or equivalent_verifier):
+            return None
     return {"step_id": active["id"], "request_hash": task_context.request_identity(folder),
-            "fingerprint": long_tasks.fingerprint(folder)}
+            "fingerprint": step_source_fingerprint(folder, structured), "structured": structured}
 
 
 def focused_browser_check(project: dict, state: dict, request_hash: str):
@@ -1346,6 +1638,76 @@ def browser_verifier_write_issue(folder: Path, project: dict, name: str,
     return ""  # A pre-existing custom check may need a legitimate update.
 
 
+def python_function_candidate(project: dict | None):
+    """Recognize an obvious pure module for checker-first verification.
+
+    Imports, classes, unknown calls and IO keep their normal test-suite route.
+    This is a routing heuristic, not a sandbox or a proof of purity.
+    """
+    import ast
+
+    if not project:
+        return None
+    brief = str(project.get("brief", ""))
+    latest = ""
+    try:
+        with (Path(project["folder"]) / ".local-ai/USER-REQUESTS.md").open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 8000))
+            latest = stream.read(8000).decode("utf-8", errors="replace")
+    except OSError:
+        pass
+    if re.search(r"(?i)\b(?:pytest|unittest|hypothesis|custom (?:verifier|tests?|test suite))\b", brief + "\n" + latest):
+        return None
+    paths = set(re.findall(r"(?i)\b([\w.-]+\.py)\b", brief))
+    if len(paths) != 1:
+        return None
+    try:
+        path = project_path(Path(project["folder"]), next(iter(paths)))
+        if not path.is_file() or path.stat().st_size > 8000:
+            return None
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, SyntaxError):
+        return None
+    functions = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
+    if not 1 <= len(functions) <= 8:
+        return None
+    allowed = set(functions) | {"abs", "round", "min", "max", "len", "sum", "sorted", "int", "float",
+        "str", "bool", "list", "tuple", "dict", "set", "range", "enumerate", "zip", "isinstance",
+        "ValueError", "TypeError", "ZeroDivisionError"}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom, ast.ClassDef, ast.AsyncFunctionDef)):
+            return None
+        if isinstance(node, (ast.Set, ast.SetComp, ast.Yield, ast.YieldFrom, ast.GeneratorExp)):
+            return None
+        if isinstance(node, ast.Constant) and isinstance(node.value, (bytes, complex)):
+            return None
+        if (isinstance(node, ast.Return) and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id in {"range", "set", "enumerate", "zip"}):
+            return None
+        if isinstance(node, ast.Call) and (not isinstance(node.func, ast.Name) or node.func.id not in allowed):
+            return None
+    return next(iter(paths)), functions
+
+
+def python_verifier_write_issue(folder: Path, project: dict, name: str, arguments: dict) -> str:
+    if name not in {"write_file", "edit_file"} or not python_function_candidate(project):
+        return ""
+    if str(arguments.get("path", "")).replace("\\", "/").casefold() != ".local-ai/verify.ps1":
+        return ""
+    verifier = folder / ".local-ai/verify.ps1"
+    existing = verifier.read_text(encoding="utf-8-sig") if verifier.is_file() else ""
+    if existing.startswith("# Generated by Cale check_python_function"):
+        return "Preserve the generated Python verifier; add or correct cases through check_python_function."
+    if not existing:
+        path, functions = python_function_candidate(project)
+        return (f"Use check_python_function on {path}, with the actual function name "
+                f"({', '.join(functions)}) and numeric/JSON input-output cases. "
+                "It creates the repeatable verifier automatically; do not write PowerShell first.")
+    return ""  # A user's existing custom suite remains editable.
+
+
 def invalidate_checks(state: dict) -> None:
     """A new user instruction makes old acceptance evidence stale."""
     state["verify_passed"] = False
@@ -1364,7 +1726,7 @@ def invalidate_checks(state: dict) -> None:
 
 def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: str) -> None:
     """A failed assertion stays pending until that file's checker passes."""
-    if tool not in {"check_webapp", "check_document_report"}:
+    if tool not in {"check_webapp", "check_document_report", "check_python_function"}:
         return
     try:
         verdict = json.loads(result)
@@ -1372,7 +1734,8 @@ def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: st
         return
     if not isinstance(verdict, dict) or type(verdict.get("passed")) is not bool:
         return
-    path = str(arguments.get("report_path" if tool == "check_document_report" else "path") or "")
+    path = (".local-ai/cale-python-checks.json" if tool == "check_python_function" else
+            str(arguments.get("report_path" if tool == "check_document_report" else "path") or ""))
     path = os.path.normcase(os.path.normpath(path)).replace("\\", "/")
     key = tool + ":" + path
     failed = state.setdefault("failed_checks", {})
@@ -1628,6 +1991,12 @@ def run_slice(project: dict, complete=None) -> dict:
             state["memory_error"] = f"{type(exc).__name__}: {exc}"
     messages = state.get("messages") or [{"role": "system", "content": prompt(project)},
                                          {"role": "user", "content": "Begin the task from the saved briefing. Take the next useful action."}]
+    if (messages and messages[0].get("role") == "system"
+            and str(messages[0].get("content", "")).startswith("You are Cale's native project worker.")):
+        # Auto-updates must not leave a weeks-long task using frozen tool
+        # instructions. Rebuild only our owned system briefing from the same
+        # authoritative task brief and rules; retain its recent work history.
+        messages[0] = {"role": "system", "content": prompt(project)}
     messages = repair_interrupted_tools(messages)
     # Keep provider cooldowns and local model discovery across the work slice.
     # Constructing a fresh Router for each turn forces repeated model probes
@@ -1805,6 +2174,8 @@ def run_slice(project: dict, complete=None) -> dict:
                     project, state, function.get("name", ""), args)
                 verifier_issue = verifier_issue or browser_verifier_write_issue(
                     folder, project, function.get("name", ""), args)
+                verifier_issue = verifier_issue or python_verifier_write_issue(
+                    folder, project, function.get("name", ""), args)
                 if step_boundary:
                     result = ("Tool error: The step queue advanced earlier in this response. "
                               "Read the fresh active step in the next turn before doing more work.")
@@ -1818,14 +2189,19 @@ def run_slice(project: dict, complete=None) -> dict:
                     step_check = step_check_context(folder, function.get("name", ""), args)
                     result = execute_tool(folder, function.get("name", ""), args)
                     if step_check:
-                        import long_tasks
                         import task_context
 
                         queue_result = task_context.record_step_check(folder, step_check["step_id"],
-                            step_check["request_hash"], result,
-                            unchanged=long_tasks.fingerprint(folder) == step_check["fingerprint"])
+                            step_check["request_hash"], step_exit_result(function.get("name", ""), result),
+                            unchanged=step_source_fingerprint(folder, step_check["structured"]) == step_check["fingerprint"])
                         step_boundary = queue_result["passed"]
-                        result += "\nSQLite step progress: " + json.dumps(queue_result, ensure_ascii=False)
+                        queue_result = compact_step_progress(queue_result)
+                        if step_check["structured"]:
+                            verdict = json.loads(result)
+                            verdict["step_progress"] = queue_result
+                            result = json.dumps(verdict, ensure_ascii=False)
+                        else:
+                            result += "\nSQLite step progress: " + json.dumps(queue_result, ensure_ascii=False)
             except ValueError as exc:
                 result = f"Tool error: {exc}"
             messages.append({"role": "tool", "tool_call_id": item.get("id", ""),
@@ -1841,6 +2217,22 @@ def run_slice(project: dict, complete=None) -> dict:
             read_cycle_notice = remember_read_cycle(
                 state, function.get("name", ""), args, result, outcome) or read_cycle_notice
             remember_checker_verdict(state, function.get("name", ""), args, result)
+            if function.get("name") == "task_steps" and args.get("action") == "complete":
+                try:
+                    step_result = json.loads(result)
+                    if step_result.get("check_tool") == "check_python_function":
+                        remember_checker_verdict(state, "check_python_function", {}, json.dumps(step_result["check_verdict"]))
+                    if step_result.get("verifier_check_passed") is True:
+                        state["verify_passed"] = True
+                except (ValueError, KeyError, AttributeError):
+                    pass
+            if function.get("name") == "check_python_function":
+                try:
+                    verdict = json.loads(result)
+                    if verdict.get("passed") is True and verdict.get("verifier_check_passed") is True:
+                        state["verify_passed"] = True
+                except (ValueError, AttributeError):
+                    pass
             if function.get("name") == "check_document_report":
                 state["document_checker_attempted"] = True
                 try:
@@ -2084,6 +2476,19 @@ def apply_request(project: dict, action: str, note: str) -> str:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 5 and sys.argv[1] == "check-python":
+        try:
+            folder = Path(sys.argv[2]).resolve()
+            # A fresh unused cache prefix avoids stale dependency bytecode too.
+            # No project code or cache is deleted or rewritten by this runner.
+            notes = project_path(folder, ".local-ai")
+            sys.pycache_prefix = str(notes / f"uncached-{os.getpid()}-{time.time_ns()}")
+            sys.dont_write_bytecode = True
+            result = run_python_checks(folder, Path(sys.argv[3]).resolve(), sys.argv[4])
+        except BaseException as error:
+            result = {"passed": False, "errors": [f"{type(error).__name__}: {str(error)[:500]}"]}
+        print(json.dumps(result))
+        raise SystemExit(0 if result["passed"] else 1)
     if len(sys.argv) != 3 or sys.argv[1] != "run":
         raise SystemExit("Usage: native_agent.py run TASK_ID")
     raise SystemExit(worker_main(sys.argv[2]))

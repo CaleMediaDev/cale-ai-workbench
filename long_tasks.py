@@ -1521,7 +1521,7 @@ SKIP = {
 }
 
 
-def fingerprint(folder):
+def fingerprint(folder, *, include_verifier=True):
     """Hash project contents and the check script, not mutable timestamps."""
     digest = hashlib.sha256()
     count = 0
@@ -1545,11 +1545,13 @@ def fingerprint(folder):
                 raise RuntimeError(
                     "Project too large for the completion freshness check."
                 )
-    # The actual verification entry point is always included.
+    # Normal completion proofs include the verification entry point. A
+    # structured-check invocation may create that entry point itself, so its
+    # separate source-only proof excludes it while retaining all app files.
     verify = Path(folder) / ".local-ai/verify.ps1"
-    if verify.exists():
+    if include_verifier and verify.exists():
         digest.update(verify.read_bytes())
-    return "content-v2:" + digest.hexdigest()
+    return ("content-v2:" if include_verifier else "source-v1:") + digest.hexdigest()
 
 
 REVIEW_FILE_STATE = {}  # project id -> (accepted fingerprint, file metadata, full-check time)
@@ -3429,8 +3431,8 @@ def monitor():
 
 def ensure_ollama(model):
     """Start Ollama and repair an older main alias with too little context."""
-    from urllib.request import Request, urlopen
     from urllib.error import HTTPError
+    from urllib.request import Request, urlopen
 
     try:
         with urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as response:
@@ -3590,9 +3592,9 @@ def gui():
     import avatar_video
     import chat_assistant
     import chatgpt_auth
+    import cloud_providers
     import donation
     import donation_ui
-    import cloud_providers
     import file_chat
     import github_account
     import ollama_runtime
