@@ -28,8 +28,12 @@ def wants_preview(project):
         "ready_for_review",
     ):
         return False
-    brief = project.get("brief") or ""
-    title = project.get("title") or ""
+    # Imported or incomplete records can contain null/non-text fields. Keep
+    # valid text useful without interpreting arbitrary JSON as project intent.
+    brief = project.get("brief")
+    title = project.get("title")
+    brief = brief if isinstance(brief, str) else ""
+    title = title if isinstance(title, str) else ""
     return bool(WEB_WORDS.search(brief + " " + title))
 
 

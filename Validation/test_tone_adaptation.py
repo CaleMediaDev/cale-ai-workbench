@@ -29,6 +29,14 @@ class ToneAdaptationTests(unittest.TestCase):
                     self.assertEqual(tone_adaptation.social_reply("Hello"),
                                      "I heard you. What do you need?")
 
+    def test_non_text_content_is_not_spoken_as_python_or_json(self):
+        for content in ({"text": "Hello"}, ["Hello"], 42, True, None):
+            with self.subTest(content=content):
+                result = {"choices": [{"message": {"content": content}}]}
+                with patch("cloud_ai.post", return_value=result):
+                    self.assertEqual(tone_adaptation.social_reply("Hello"),
+                                     "I heard you. What do you need?")
+
     def test_next_speaker_does_not_inherit_previous_rudeness(self):
         result = {"choices": [{"message": {"content": "Glad I could help!"}}]}
         with patch("cloud_ai.post", return_value=result) as post:

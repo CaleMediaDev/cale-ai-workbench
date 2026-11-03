@@ -43,6 +43,13 @@ class ProjectPreviewTests(unittest.TestCase):
             )
         )
 
+    def test_non_text_fields_are_ignored_without_losing_valid_project_text(self):
+        for invalid in (17, True, ["web app"], {"title": "web app"}):
+            with self.subTest(value=invalid):
+                self.assertFalse(preview.wants_preview({"status": "working", "title": invalid, "brief": invalid}))
+                self.assertTrue(preview.wants_preview({"status": "working", "title": invalid, "brief": "Build dashboard"}))
+                self.assertTrue(preview.wants_preview({"status": "working", "title": "game", "brief": invalid}))
+
     def test_only_explicit_loopback_servers_are_allowed(self):
         self.assertEqual(
             preview.safe_loopback_url("http://127.0.0.1:3000/"),

@@ -40,9 +40,12 @@ def social_reply(utterance: str) -> str:
              "max_tokens": 80, "temperature": 0.6, "reasoning_effort": "none"},
             timeout=20,
         )
-        answer = str(result["choices"][0]["message"].get("content") or "").strip().strip('"')
-        if answer and len(answer) <= 240 and "\n" not in answer:
-            return answer
+        content = result["choices"][0]["message"].get("content")
+        # Protocol data is not speech: never read Python/JSON representations.
+        if isinstance(content, str):
+            answer = content.strip().strip('"')
+            if answer and len(answer) <= 240 and "\n" not in answer:
+                return answer
     except (KeyError, IndexError, TypeError, AttributeError, OSError, ValueError, TimeoutError):
         pass
     return "I heard you. What do you need?"
