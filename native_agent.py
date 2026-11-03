@@ -412,6 +412,9 @@ def readable_powershell_error(stderr: str) -> str:
         return stderr
     decoded = "".join(messages)
     decoded = re.sub(r"_x([0-9A-Fa-f]{4})_", lambda match: chr(int(match[1], 16)), decoded)
+    # .NET escapes UTF-16 code units. Join emoji surrogate pairs and replace
+    # lone units so saving the worker's UTF-8 checkpoint cannot fail.
+    decoded = decoded.encode("utf-16le", errors="surrogatepass").decode("utf-16le", errors="replace")
     return prefix + decoded
 
 

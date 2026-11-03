@@ -165,6 +165,14 @@ def test_partial_powershell_error_xml_is_preserved_instead_of_hidden():
     assert native_agent.readable_powershell_error("ordinary stderr") == "ordinary stderr"
 
 
+def test_powershell_error_emoji_and_literal_escape_text_remain_checkpoint_safe():
+    serialized = ('#< CLIXML\n<Objs><S S="Error">Bad &amp; token '
+                  '_xD83D__xDE80_ _x005F_x000A_ _xD800_</S></Objs>')
+    message = native_agent.readable_powershell_error(serialized)
+    assert message == "Bad & token \U0001f680 _x000A_ \ufffd"
+    assert json.dumps({"content": message}, ensure_ascii=False).encode("utf-8")
+
+
 def test_run_command_rejects_unknown_shell_before_execution():
     with tempfile.TemporaryDirectory() as temporary:
         with patch.object(native_agent.subprocess, "Popen") as launch:
