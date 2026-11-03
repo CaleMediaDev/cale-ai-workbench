@@ -18,6 +18,25 @@ end-to-end result, not a speed or reliability claim. Failure diagnostics gained
 function signatures during the run, so it is not a controlled comparison.
 It does not qualify a model for complete-game routing.
 
+The [case-recovery trial](results/javascript-logic-recovery-20261103.json) keeps
+the same brief and independent grader. Its fresh run took 202.31 seconds and
+24 model calls. All 13 helper behaviors passed, but only two of five planned
+units completed and the saved verifier accepted two of four deliberate behavior
+regressions. Its end-to-end result remains failed. Regression tests ran alongside
+this trial; individual timings do not establish a speed advantage. `--resume`
+continues the fixture's existing worker checkpoint and files without resetting
+its code, plan, progress or SQLite units. Continuations are reported separately.
+
+The saved checkpoint continuation took another 167.71 seconds / 24 calls and
+still finished only two units. All 13 source behaviors remained correct, but
+the worker edited the generated suite directly and invalidated its verifier's
+checksum. The verifier then rejected the correct baseline as well as all four
+mutants; those rejections do not demonstrate regression coverage. This is
+another retained failure. Afterward, the worker's generic file tools were
+changed to preserve generated function-suite files and direct revisions through
+the checksum-bound checker API. That protection has regression-test evidence,
+not another live-model success claim.
+
 ## Saved browser assertion repair
 
 `browser_assertion_repair.py --model cale-gemma4-edge --keep-folder C:\path\to\new-folder`

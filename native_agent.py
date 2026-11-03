@@ -38,6 +38,10 @@ TOOLS = [
         "description": "Test an actual synchronous JavaScript function with concrete JSON args and expected results, or raises='RangeError'. Supports plain scripts, CommonJS named exports and import-free ES modules (.js/.cjs/.mjs), including default exports. No DOM, browser APIs or imports; use browser checks for integration. Example: path='logic.js', function='movePlayer', cases=[{args:[100,1,0.5,600,120],expected:160}]. Cases accumulate per function/input in a bounded, repeatable local verifier. Tests execute current source, not a copy. Preserves an existing custom verifier; other integration checks remain necessary.",
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string"}, "function": {"type": "string"},
+            "saved_case": {"type": "integer", "minimum": 1, "maximum": 24,
+                "description": "One-time revision: replace this saved case for this exact function with cases=[one corrected case]. Requires current suite_sha256. Preserve correct source; then revise the SQLite step to corrected inputs."},
+            "suite_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$",
+                "description": "Current checksum returned by the failed checker; required with saved_case."},
             "tolerance": {"type": "number", "minimum": 0, "maximum": 0.0001},
             "cases": {"type": "array", "minItems": 1, "maxItems": 24, "items": {
                 "type": "object", "properties": {"args": {"type": "array"},
@@ -48,6 +52,10 @@ TOOLS = [
         "description": "Run real input/output tests for a top-level Python function, without writing test code or PowerShell. Example: path='temperature.py', function='to_celsius', cases=[{args:[32],expected:0},{args:[212],expected:100},{args:[-40],expected:-40}]. Use kwargs when needed, or raises='ValueError' instead of expected for an exception case. Numeric tolerance defaults to 1e-8. Saves a repeatable verifier on success, preserving a custom verifier. Cases accumulate by function and input; resubmitting an input corrects its expectation. All retained functions must pass.",
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string"}, "function": {"type": "string"},
+            "saved_case": {"type": "integer", "minimum": 1, "maximum": 24,
+                "description": "One-time revision: replace this saved case for this exact function with cases=[one corrected case]. Requires current suite_sha256; then revise the SQLite step to corrected inputs."},
+            "suite_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$",
+                "description": "Current checksum returned by the failed checker; required with saved_case."},
             "tolerance": {"type": "number", "minimum": 0, "maximum": 0.0001},
             "cases": {"type": "array", "minItems": 1, "maxItems": 24, "items": {
                 "type": "object", "properties": {"args": {"type": "array"},
@@ -1331,19 +1339,39 @@ def check_function(folder: Path, arguments: dict, *, javascript: bool = False) -
     folder = folder.resolve()
     normalize = normalize_javascript_check if javascript else normalize_python_check
     language = "javascript" if javascript else "python"
-    incoming = normalize(folder, arguments)
+    incoming = normalize(folder, {key: value for key, value in arguments.items()
+                                  if key not in {"saved_case", "suite_sha256"}})
     notes = project_path(folder, ".local-ai")
     notes.mkdir(exist_ok=True)
     target = notes / f"cale-{language}-checks.json"
     request_hash = task_context.request_identity(folder)
+    # Ordinary saves accumulate inputs. A mistaken input needs an explicit,
+    # checksum-bound replacement or it would remain in the suite forever.
+    revision = "saved_case" in arguments or "suite_sha256" in arguments
+    prior_raw = target.read_bytes() if target.is_file() else None
+    if revision:
+        number, digest = arguments.get("saved_case"), arguments.get("suite_sha256")
+        if (type(number) is not int or not 1 <= number <= 24 or len(incoming["cases"]) != 1
+                or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)):
+            raise ValueError("To revise one saved input, provide saved_case, suite_sha256 and exactly one corrected case.")
+        if prior_raw is None or hashlib.sha256(prior_raw).hexdigest() != digest:
+            raise ValueError("The saved function suite changed; rerun its checker for a fresh suite_sha256 before revising.")
     checks = []
-    if target.is_file():
-        prior = json.loads(target.read_text(encoding="utf-8"))
+    if prior_raw is not None:
+        prior = json.loads(prior_raw)
+        if revision and prior.get("request_hash") != request_hash:
+            raise ValueError("User instructions changed; old function cases cannot be revised into this request.")
         if prior.get("request_hash") == request_hash:
             checks = [normalize(folder, item) for item in prior.get("checks", [])]
     key = (incoming["path"], incoming["function"])
     old = next((item for item in checks if (item["path"], item["function"]) == key), None)
-    if old:
+    if revision:
+        if not old or number > len(old["cases"]):
+            raise ValueError("saved_case must identify a retained case of this exact path and function.")
+        cases = copy.deepcopy(old["cases"])
+        cases[number - 1] = incoming["cases"][0]
+        incoming = normalize(folder, {**old, "cases": cases})
+    elif old:
         merged = {json.dumps([case["args"], case.get("kwargs", {})], sort_keys=True): case for case in old["cases"]}
         merged.update({json.dumps([case["args"], case.get("kwargs", {})], sort_keys=True): case for case in incoming["cases"]})
         incoming["cases"] = list(merged.values())
@@ -1355,6 +1383,8 @@ def check_function(folder: Path, arguments: dict, *, javascript: bool = False) -
     if len(raw) > 64_000:
         raise ValueError(f"The saved {language} check suite must be under 64 KB.")
     temporary = target.with_suffix(".tmp")
+    if revision and (target.read_bytes() != prior_raw or task_context.request_identity(folder) != request_hash):
+        raise ValueError("The saved suite or user instructions changed while revising; refresh the check first.")
     temporary.write_bytes(raw)
     os.replace(temporary, target)
     spec_sha = hashlib.sha256(raw).hexdigest()
@@ -1372,6 +1402,12 @@ def check_function(folder: Path, arguments: dict, *, javascript: bool = False) -
         return {"passed": False, "errors": [checked[-1600:]], "verifier_saved": False}
     if not checked.startswith("Exit code: 0\n"):
         result["passed"] = False
+    result["suite_sha256"] = spec_sha
+    if not result["passed"]:
+        result["case_revision_help"] = ("If a saved input contradicts the required API, use this tool with the exact "
+            "path/function, saved_case=its one-based case number, suite_sha256, and cases=[one corrected case]. "
+            "Other cases remain. Then revise the SQLite step's acceptance arguments to the corrected inputs. "
+            "Do not change correct source to satisfy a mistaken test.")
     if long_tasks.fingerprint(folder) != before:
         result["passed"] = False
         result.setdefault("errors", []).append("Project files changed during the check; keep acceptance checks read-only.")
@@ -1897,6 +1933,9 @@ def step_check_context(folder: Path, name: str, arguments: dict):
     """Recognize the active acceptance check even without a bookkeeping call."""
     if name not in {"run_command", "run_verifier", "check_python_function", "check_javascript_function", "check_webapp"}:
         return None
+    if name in {"check_python_function", "check_javascript_function"} and (
+            "saved_case" in arguments or "suite_sha256" in arguments):
+        return None  # A one-time assertion revision cannot complete saved acceptance.
     import task_context
 
     active = task_context.step_status(folder)["active"]
@@ -2220,6 +2259,16 @@ def python_function_candidate(project: dict | None):
 
 def python_verifier_write_issue(folder: Path, project: dict, name: str, arguments: dict) -> str:
     """Protect both typed verifiers; guide eligible Python modules before custom scripts."""
+    if name in {"write_file", "edit_file"}:
+        try:
+            target = project_path(folder, arguments.get("path", ""))
+            for language in ("python", "javascript"):
+                if target == project_path(folder, f".local-ai/cale-{language}-checks.json"):
+                    return (f"Preserve the generated function suite. Use check_{language}_function to add cases, "
+                            "or saved_case plus the current suite_sha256 and one corrected case to repair an input. "
+                            "Then revise the active SQLite step's acceptance arguments; do not edit this JSON directly.")
+        except (ValueError, OSError, TypeError):
+            pass  # The normal file-tool path validation will report this error.
     if (name in {"write_file", "edit_file"} and str(arguments.get("path", "")).replace("\\", "/").casefold() == ".local-ai/verify.ps1"):
         script = folder / ".local-ai/verify.ps1"
         existing = script.read_text(encoding="utf-8-sig") if script.is_file() else ""
@@ -2982,7 +3031,8 @@ def run_slice(project: dict, complete=None) -> dict:
             state["messages"] = messages
             save_state(project, state)
             return state
-        elif state.get("verify_passed") and not state.get("verifier_nudged"):
+        elif (state.get("verify_passed") and not state.get("verifier_nudged")
+                and not task_context.step_status(folder)["remaining"]):
             messages.append({"role": "user", "content":
                              "The saved verifier passed. Update .local-ai/PLAN.md "
                              "to check off milestones that this result proves, then record the "

@@ -309,6 +309,10 @@ def _validate_steps(steps: list) -> list[tuple]:
             arguments = step.get("check_arguments", {})
             if not isinstance(arguments, dict):
                 raise ValueError("check_arguments must be a JSON object.")
+            if tool in {"check_python_function", "check_javascript_function"} and (
+                    "saved_case" in arguments or "suite_sha256" in arguments):
+                raise ValueError("Saved-case revision is a one-time checker action, not repeatable step acceptance. "
+                                 "Revise the saved case through the function checker first; store corrected cases in this step.")
             # Use the worker's published schema, without running the check or
             # requiring a source file which an earlier step has yet to build.
             from jsonschema import ValidationError, validate
@@ -588,6 +592,11 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
                      if tool == "check_webapp" and isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{64}", sha)
                      and any(isinstance(case, dict) and "saved_sequence" in case for case in verdict.get("cases", [])) else "")
         repair = verdict.get("assertion_revision_reference")
+        if (tool in {"check_python_function", "check_javascript_function"}
+                and isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{64}", sha)):
+            reference = ("Saved function suite_sha256=" + sha + "; correct a mistaken saved input via " + tool
+                + " with saved_case=Case number and cases=[one corrected case], preserving the other cases. "
+                "Then revise the SQLite step to corrected inputs. Do not alter correct code to match a bad test. ")
         if tool == "check_webapp" and isinstance(repair, dict) and len(json.dumps(repair)) <= 800:
             reference = ("If consistent with the latest user request, correct the mistaken saved assertion via "
                          "check_webapp arguments=" + json.dumps(repair, sort_keys=True)

@@ -1,0 +1,467 @@
+{
+  "scope": "Synthetic local-only pure-module trial and checkpoint continuation; not a complete game or controlled comparison. The fresh trial ran alongside the regression suite.",
+  "app_version": "0.5.448-development",
+  "runs": [
+    {
+      "scenario": "javascript_logic_repair",
+      "scope": "Repair real JS game helpers through local tools, then independently grade them.\n\nThis is a pure-module fixture, not a complete playable game or visual benchmark.\nNo cloud account, original user project, model installation or app task is used.\n",
+      "brief": "Repair logic.js, the actual plain-script module loaded by a browser game.\nPreserve its four top-level function APIs and plain function-declaration format:\nmovePlayer(x,direction,seconds,width,speed) moves by direction*speed*seconds and\nclamps the player's center to [20,width-20]. Inputs have direction -1..1, width>=40,\nfinite numbers and nonnegative seconds. Verify left/right bounds and frame-independent timing.\noverlaps(a,b) takes top-left x,y,w,h rectangles. Only positive-area overlap is true;\ntouching edges and separated rectangles are false.\nadvanceWave(wave,remaining,spawned) adds one only when remaining===0 AND spawned is true.\ntickCooldown(remaining,seconds) subtracts seconds and clamps at zero.\nUse one small SQLite unit per function, four completed units total. Save meaningful\ncheck_javascript_function input/expected acceptance cases in each unit, including\nthe explicit boundaries above. Run the accumulated read-only verifier. No PowerShell\ntest code is needed. Do not create a test-only copy or change the public APIs.\nKeep PLAN.md and PROGRESS.md accurate. This request is for the helper module only.\n",
+      "seconds": 202.31,
+      "model_calls": 24,
+      "tool_calls": 25,
+      "prompt_tokens": 163266,
+      "completion_tokens": 5117,
+      "tools_used": [
+        "list_files",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "edit_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "read_file",
+        "read_file",
+        "check_javascript_function",
+        "edit_file",
+        "check_javascript_function",
+        "read_file",
+        "list_files",
+        "edit_file",
+        "run_verifier",
+        "read_file",
+        "read_file",
+        "write_file",
+        "write_file",
+        "read_file",
+        "edit_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.96
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 1.01
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 3.91
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 16.7
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.14
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.83
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.56
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 33.75
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.41
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.97
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.08
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 10.64
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 12.36
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.8
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.64
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.74
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.64
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 3.91
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 1.7
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.69
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.35
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 10.85
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.78
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 3.19
+        }
+      ],
+      "router_call_attempts": 24,
+      "upstream_local_calls": 24,
+      "checkpoint_status": "continue",
+      "inference_error": null,
+      "grade": {
+        "checks": {
+          "movement": true,
+          "left": true,
+          "right": true,
+          "still": true,
+          "frame_independence": true,
+          "hit": true,
+          "edge": true,
+          "miss": true,
+          "complete": true,
+          "incomplete": true,
+          "not_spawned": true,
+          "cooldown": true,
+          "cooldown_clamp": true
+        },
+        "verifier_passes_correct": true,
+        "mutations": {
+          "frame_time": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "touching_edges": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "unspawned_wave": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": false
+          },
+          "negative_cooldown": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": false
+          }
+        },
+        "steps": {
+          "total": 5,
+          "done": 2,
+          "remaining": 3
+        },
+        "passed": false
+      },
+      "run_outcome": "failed"
+    },
+    {
+      "scenario": "javascript_logic_repair",
+      "scope": "Repair real JS game helpers through local tools, then independently grade them.\n\nThis is a pure-module fixture, not a complete playable game or visual benchmark.\nNo cloud account, original user project, model installation or app task is used.\n",
+      "brief": "Repair logic.js, the actual plain-script module loaded by a browser game.\nPreserve its four top-level function APIs and plain function-declaration format:\nmovePlayer(x,direction,seconds,width,speed) moves by direction*speed*seconds and\nclamps the player's center to [20,width-20]. Inputs have direction -1..1, width>=40,\nfinite numbers and nonnegative seconds. Verify left/right bounds and frame-independent timing.\noverlaps(a,b) takes top-left x,y,w,h rectangles. Only positive-area overlap is true;\ntouching edges and separated rectangles are false.\nadvanceWave(wave,remaining,spawned) adds one only when remaining===0 AND spawned is true.\ntickCooldown(remaining,seconds) subtracts seconds and clamps at zero.\nUse one small SQLite unit per function, four completed units total. Save meaningful\ncheck_javascript_function input/expected acceptance cases in each unit, including\nthe explicit boundaries above. Run the accumulated read-only verifier. No PowerShell\ntest code is needed. Do not create a test-only copy or change the public APIs.\nKeep PLAN.md and PROGRESS.md accurate. This request is for the helper module only.\n",
+      "resumed": true,
+      "seconds": 167.71,
+      "model_calls": 24,
+      "tool_calls": 24,
+      "prompt_tokens": 165609,
+      "completion_tokens": 3702,
+      "tools_used": [
+        "run_verifier",
+        "edit_file",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "run_verifier",
+        "read_file",
+        "read_file",
+        "read_file",
+        "run_verifier",
+        "list_files",
+        "read_file",
+        "read_file",
+        "run_verifier",
+        "list_files",
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "run_verifier"
+      ],
+      "routes": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.12
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.76
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.75
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.74
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.13
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.75
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.77
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.71
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.16
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 2.87
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.86
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.93
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.48
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.47
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 2.02
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.1
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.53
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.09
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.03
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.39
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.51
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.42
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 29.26
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.48
+        }
+      ],
+      "router_call_attempts": 24,
+      "upstream_local_calls": 24,
+      "checkpoint_status": "continue",
+      "inference_error": null,
+      "grade": {
+        "checks": {
+          "movement": true,
+          "left": true,
+          "right": true,
+          "still": true,
+          "frame_independence": true,
+          "hit": true,
+          "edge": true,
+          "miss": true,
+          "complete": true,
+          "incomplete": true,
+          "not_spawned": true,
+          "cooldown": true,
+          "cooldown_clamp": true
+        },
+        "verifier_passes_correct": false,
+        "mutations": {
+          "frame_time": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "touching_edges": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "unspawned_wave": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "negative_cooldown": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          }
+        },
+        "steps": {
+          "total": 5,
+          "done": 2,
+          "remaining": 3
+        },
+        "passed": false
+      },
+      "run_outcome": "failed"
+    }
+  ],
+  "development_note": "Continuation used the component-verifier reminder fix. Generic file-tool protection for generated function suites was added after continuation ended; it is covered by a worker regression test, not this live trial."
+}

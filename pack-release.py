@@ -48,6 +48,7 @@ extras = [
     "benchmarks/results/input-step-coverage-20261103.json",
     "benchmarks/javascript_logic_repair.py",
     "benchmarks/results/javascript-logic-20261103.json",
+    "benchmarks/results/javascript-logic-recovery-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",

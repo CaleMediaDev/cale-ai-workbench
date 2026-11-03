@@ -237,6 +237,20 @@ to help repair positional-input mistakes. Large integer comparisons no longer
 round unequal integers into a passing result. Context compaction also preserves
 a short durable plan when it fits alongside the tool catalog.
 
+When a saved Python or JavaScript input is itself mistaken, the function checker
+can replace that single case using its one-based `saved_case`, current
+`suite_sha256`, exact path/function, and `cases=[one corrected case]`. All other
+cases remain and the suite reruns. Stale checksums and old-request references
+are rejected. This is a one-time repair action; SQLite steps store the corrected
+repeatable acceptance arguments, not a revision reference. Correcting a saved
+case alone does not complete an active step or prove the revised test covers
+the user's requirements.
+The native worker's generic file tools preserve these generated suite files and
+direct the model to the checker API for revisions instead of raw JSON edits.
+Passing a component verifier while SQLite steps remain no longer triggers the
+worker's overall-plan completion reminder. The worker must continue the queue;
+project handoff still requires all steps and suitable whole-project checks.
+
 The model still chooses its tests. The retained local JavaScript repair trial
 failed to complete its four steps, despite partial code repairs. Passing the
 checker implementation's regression suite is not proof of reliable game

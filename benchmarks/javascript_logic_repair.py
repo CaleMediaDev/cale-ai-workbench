@@ -86,20 +86,26 @@ def main() -> int:
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--keep-folder", type=Path, required=True)
     parser.add_argument("--slices", type=int, default=2)
+    parser.add_argument("--resume", action="store_true", help="Continue this fixture's existing checkpoint without resetting its code or steps")
     args = parser.parse_args()
     runtime = args.runtime_root.resolve(strict=True)
     if not (runtime / "LongTasks/model-approvals.json").is_file():
         parser.error("Use an installed runtime's actual tool-probe approvals")
     folder = args.keep_folder.resolve()
-    folder.mkdir(parents=True, exist_ok=False)
+    if args.resume:
+        if not (folder / ".local-ai/native-worker.json").is_file():
+            parser.error("--resume requires this fixture's existing native worker checkpoint")
+    else:
+        folder.mkdir(parents=True, exist_ok=False)
     notes = folder / ".local-ai"
-    notes.mkdir()
-    (folder / "logic.js").write_text(STARTER)
-    (folder / "AGENTS.md").write_text("Repair and check the real module. Keep its APIs and retain earlier cases.")
-    (notes / "USER-REQUESTS.md").write_text("")
-    (notes / "PLAN.md").write_text(long_tasks.INITIAL_PLAN)
-    (notes / "PROGRESS.md").write_text(long_tasks.INITIAL_PROGRESS)
-    long_tasks.save_original_request(folder, "benchmark", BRIEF)
+    if not args.resume:
+        notes.mkdir()
+        (folder / "logic.js").write_text(STARTER)
+        (folder / "AGENTS.md").write_text("Repair and check the real module. Keep its APIs and retain earlier cases.")
+        (notes / "USER-REQUESTS.md").write_text("")
+        (notes / "PLAN.md").write_text(long_tasks.INITIAL_PLAN)
+        (notes / "PROGRESS.md").write_text(long_tasks.INITIAL_PROGRESS)
+        long_tasks.save_original_request(folder, "benchmark", BRIEF)
     project = {"id": "benchmark", "folder": str(folder), "brief": BRIEF}
     stats = {"model_calls": 0, "tool_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "tools_used": [], "routes": []}
     router = observed_router(stats)
@@ -122,7 +128,7 @@ def main() -> int:
             graded = grade(folder, runtime)
         except Exception as error:
             graded = {"passed": False, "error": f"{type(error).__name__}: {str(error)[:500]}"}
-    report = {"scenario": "javascript_logic_repair", "scope": __doc__, "brief": BRIEF,
+    report = {"scenario": "javascript_logic_repair", "scope": __doc__, "brief": BRIEF, "resumed": args.resume,
               "seconds": round(elapsed, 2), **stats, "checkpoint_status": state.get("status"),
               "inference_error": failure, "grade": graded}
     report["run_outcome"] = "passed" if state.get("status") == "done" and graded["passed"] and not failure else "failed"

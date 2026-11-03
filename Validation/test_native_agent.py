@@ -280,6 +280,108 @@ def javascript_report(folder, source, cases, name="calculate", suffix="js"):
     return native_agent.run_javascript_checks(folder, target, digest), target, digest
 
 
+def test_saved_function_input_revision_preserves_other_cases_and_steps(tmp_path):
+    for javascript in (False, True):
+        item = project(tmp_path / ("revise-js" if javascript else "revise-py"))
+        folder = Path(item["folder"])
+        path = "logic.js" if javascript else "logic.py"
+        source = ("function subtract(x,y){return x-y}\nfunction double(x){return x*2}\n" if javascript else
+                  "def subtract(x,y): return x-y\ndef double(x): return x*2\n")
+        (folder / path).write_text(source)
+        run = run_typed_javascript_check if javascript else run_typed_python_check
+        tool = "check_javascript_function" if javascript else "check_python_function"
+        run(item, {"path": path, "function": "double", "cases": [{"args": [2], "expected": 4}]})
+        spec = {"path": path, "function": "subtract", "cases": [
+            {"args": [2, 8], "expected": 6}, {"args": [5, 2], "expected": 3}]}
+        report = run(item, spec)
+        assert report["passed"] is False and "suite_sha256" in report
+        step = {"phase": "Logic", "title": "Subtraction", "check_tool": tool, "check_arguments": spec}
+        active = task_context.plan_steps(folder, [step])["active"]
+        task_context.record_action(folder, tool, json.dumps(report), spec)
+        snapshot = task_context.snapshot(folder)
+        assert report["suite_sha256"] in snapshot and "saved_case" in snapshot
+        revision = {"path": path, "function": "subtract", "saved_case": 1,
+            "suite_sha256": report["suite_sha256"], "cases": [{"args": [8, 2], "expected": 6}]}
+        assert native_agent.step_check_context(folder, tool, revision) is None
+        fixed = run(item, revision)
+        assert fixed["passed"] and fixed["case_count"] == 3 and fixed["verifier_saved"]
+        assert (folder / path).read_text() == source
+        assert task_context.step_status(folder)["done"] == 0
+        corrected = {**spec, "cases": [revision["cases"][0], spec["cases"][1]]}
+        task_context.revise_step(folder, active["id"], [{**step, "check_arguments": corrected}])
+        with patch.object(long_tasks, "projects", return_value=[item]):
+            result = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+        assert result["passed"] and result["done"] == 1
+        # A different function's previously saved behavior still matters.
+        (folder / path).write_text(source.replace("x*2", "x*3"))
+        assert run(item, corrected)["passed"] is False
+
+
+def test_saved_function_revision_rejects_stale_or_invalid_references_before_write(tmp_path):
+    import pytest
+
+    item = project(tmp_path / "revision-guards")
+    folder = Path(item["folder"])
+    (folder / "logic.js").write_text("function calculate(x){return x}\nfunction other(x){return x}")
+    spec = {"path": "logic.js", "function": "calculate", "cases": [{"args": [2], "expected": 3}]}
+    report = run_typed_javascript_check(item, spec)
+    target = folder / ".local-ai/cale-javascript-checks.json"
+    raw = target.read_bytes()
+    revision = {**spec, "saved_case": 1, "suite_sha256": report["suite_sha256"]}
+    for change in ({"saved_case": True}, {"saved_case": 2}, {"saved_case": 0},
+                   {"suite_sha256": "0" * 64}, {"suite_sha256": None},
+                   {"cases": spec["cases"] * 2}, {"function": "other"}):
+        with pytest.raises(ValueError):
+            native_agent.check_javascript_function(folder, {**revision, **change})
+        assert target.read_bytes() == raw
+    with pytest.raises(ValueError, match="one-time checker action"):
+        task_context.plan_steps(folder, [{"phase": "Logic", "title": "Bad revision", "check_tool":
+            "check_javascript_function", "check_arguments": revision}])
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("A new user request")
+    with pytest.raises(ValueError, match="instructions changed"):
+        native_agent.check_javascript_function(folder, revision)
+    assert target.read_bytes() == raw
+
+
+def test_partial_function_verifier_does_not_nudge_plan_handoff_with_steps_remaining(tmp_path):
+    item = project(tmp_path / "partial-js-verifier")
+    folder = Path(item["folder"])
+    (folder / "logic.js").write_text("function first(x){return x+1}\nfunction second(x){return x*2}")
+    first = {"path": "logic.js", "function": "first", "cases": [{"args": [1], "expected": 2}]}
+    second = {"path": "logic.js", "function": "second", "cases": [{"args": [2], "expected": 4}]}
+    task_context.plan_steps(folder, [{"phase": "Logic", "title": name, "check_tool": "check_javascript_function",
+        "check_arguments": spec} for name, spec in (("First", first), ("Second", second))])
+    response = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "check-first", "function": {
+        "name": "check_javascript_function", "arguments": json.dumps(first)}}]}}]}
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(item, complete=lambda _: response)
+    assert state["verify_passed"] and task_context.step_status(folder)["done"] == 1
+    assert task_context.step_status(folder)["remaining"] == 1
+    assert not state.get("verifier_nudged")
+    assert not any("The saved verifier passed. Update" in str(m.get("content", "")) for m in state["messages"])
+
+
+def test_worker_preserves_owned_function_suite_and_directs_case_revision(tmp_path):
+    item = project(tmp_path / "owned-case-suite")
+    folder = Path(item["folder"])
+    target = folder / ".local-ai/cale-javascript-checks.json"
+    raw = b'{"request_hash":"fixture","checks":[]}'
+    target.write_bytes(raw)
+    response = {"choices": [{"message": {"role": "assistant", "tool_calls": [
+        {"id": "overwrite", "function": {"name": "write_file", "arguments": json.dumps({
+            "path": "./.local-ai/cale-javascript-checks.json", "content": "{}"})}},
+        {"id": "edit", "function": {"name": "edit_file", "arguments": json.dumps({
+            "path": ".local-ai\\cale-javascript-checks.json", "old_text": "fixture", "new_text": "different"})}}]}}]}
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(item, complete=lambda _: response)
+    assert target.read_bytes() == raw
+    replies = [m["content"] for m in state["messages"] if m.get("role") == "tool"]
+    assert len(replies) == 2 and all("saved_case" in reply and "suite_sha256" in reply for reply in replies)
+    assert native_agent.python_verifier_write_issue(folder, item, "write_file", {"path": "custom-tests.json"}) == ""
+    assert "check_python_function" in native_agent.python_verifier_write_issue(folder, item, "edit_file", {
+        "path": ".local-ai/cale-python-checks.json"})
+
+
 def test_javascript_formats_execute_current_source_and_generate_repeatable_verifiers(tmp_path):
     formats = [("js", "function calculate(x){return x*2}", "calculate"),
         ("js", "const calculate=x=>x*2", "calculate"),
