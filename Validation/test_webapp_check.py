@@ -601,3 +601,191 @@ def test_failed_visibility_reports_requested_and_observed_state(tmp_path):
     result=webapp_check.check(tmp_path,{"path":"index.html","cases":[{"visible":["error"]}]})
     message=result["cases"][0]["failures"][0]
     assert "expected visible" in message and "observed hidden" in message
+
+
+def test_saved_case_revision_preserves_actions_other_assertions_and_real_evidence(tmp_path):
+    source = '''<label for="bill">Bill</label><input id="bill" type="number" value="100">
+<p id="answer"></p><p id="error" hidden>Invalid</p><script>
+const bill=document.getElementById('bill'),out=document.getElementById('answer'),err=document.getElementById('error');
+function update(){const n=Number(bill.value),valid=n>0;out.hidden=!valid;err.hidden=valid;
+if(valid)out.textContent='$'+(n*1.2).toFixed(2);}bill.addEventListener('input',update);update();</script>'''
+    (tmp_path / "index.html").write_text(source)
+    bad = {"path": "index.html", "cases": [
+        {"set": {"bill": "80"}, "expect": {"answer": "96.00"}},
+        {"set": {"bill": "0"}, "expect": {"answer": "", "error": "Invalid"}}]}
+    assert webapp_check.save_verifier(tmp_path, bad, accumulate=True)
+    incoming = {"path": "index.html", "cases": [{"set": {"bill": "50"}, "expect": {"answer": "60.00"}}]}
+    item = {"id": "assertion-repair", "folder": str(tmp_path)}
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        failed_text = native_agent.execute_tool(tmp_path, "check_webapp", incoming)
+        failed = json.loads(failed_text)
+        assert not failed["passed"] and failed["cases"][0]["inputs"] == {"set": {"bill": "0"}}
+        assert failed["cases"][0]["saved_sequence"] == 1 and failed["cases"][0]["case"] == 2
+        task_context.record_action(tmp_path, "check_webapp", failed_text, incoming)
+        for _ in range(105):
+            task_context.record_action(tmp_path, "read_file", "Unrelated contents", {"path": "index.html"})
+        checkpoint = task_context.snapshot(tmp_path)
+        assert '"bill": "0"' in checkpoint and "saved_sequence=1" in checkpoint
+        assert failed["suite_sha256"] in checkpoint
+        revision = failed["assertion_revision_reference"]
+        assert revision == {"path": "index.html", "saved_sequence": 1, "saved_case": 2,
+                            "suite_sha256": failed["suite_sha256"], "cases": [{"hidden": ["answer"]}]}
+        passed_text = native_agent.execute_tool(tmp_path, "check_webapp", revision)
+        passed = json.loads(passed_text)
+        assert passed["passed"] and passed["verifier_check_passed"]
+        assert native_agent.browser_check_evidence(tmp_path, revision, passed_text)["browser_verified"]
+        task_context.record_action(tmp_path, "check_webapp", passed_text, revision)
+        assert "assertion sequence 1, case 2): Completed" in task_context.snapshot(tmp_path)
+    stored = json.loads((tmp_path / ".local-ai/webapp-check.json").read_text())
+    repaired = stored["checks"][-1]["cases"]
+    assert repaired[0] == bad["cases"][0]
+    assert repaired[1] == {"set": {"bill": "0"}, "expect": {"error": "Invalid"}, "hidden": ["answer"]}
+    assert stored["checks"][0] == incoming
+    assert (tmp_path / "index.html").read_text() == source
+    spec = tmp_path / ".local-ai/webapp-check.json"
+    spec.write_text(spec.read_text() + " ")
+    assert native_agent.browser_check_evidence(tmp_path, revision, passed_text) == {}
+
+
+def test_case_revision_rejects_stale_input_edits_custom_verifiers_and_changed_instructions(tmp_path):
+    import hashlib
+
+    (tmp_path / "index.html").write_text(PAGE)
+    webapp_check.save_verifier(tmp_path, SPEC, accumulate=True)
+    spec = tmp_path / ".local-ai/webapp-check.json"
+    raw = spec.read_bytes()
+    revision = {"path": "index.html", "saved_sequence": 1, "saved_case": 2,
+                "suite_sha256": hashlib.sha256(raw).hexdigest(), "cases": [{"expect": {"answer": "96.00"}}]}
+    for update in ({"suite_sha256": "0" * 64}, {"saved_sequence": True}, {"saved_case": 0},
+                   {"cases": [{"set": {"bill": "10"}, "expect": {"answer": "12.00"}}]}):
+        with pytest.raises(ValueError):
+            webapp_check.prepare_assertion_revision(tmp_path, {**revision, **update})
+        assert spec.read_bytes() == raw
+    batch, context = webapp_check.prepare_assertion_revision(tmp_path, revision)
+    repeated_inputs = {**revision, "cases": [{"set": {"bill": "80"}, "expect": {"answer": "96.00"}}]}
+    repeated_batch, _ = webapp_check.prepare_assertion_revision(tmp_path, repeated_inputs)
+    assert repeated_batch["cases"][1]["set"] == {"bill": "80"}
+    (tmp_path / ".local-ai/USER-REQUESTS.md").write_text('New user instructions')
+    with pytest.raises(ValueError, match="instructions changed"):
+        webapp_check.save_verifier(tmp_path, batch, accumulate=True, expected_sha=context["previous_sha256"])
+    assert spec.read_bytes() == raw
+    (tmp_path / ".local-ai/USER-REQUESTS.md").write_text('')
+    script = tmp_path / ".local-ai/verify.ps1"
+    script.write_text('exit 0\n')
+    with pytest.raises(ValueError, match="custom verifier"):
+        webapp_check.prepare_assertion_revision(tmp_path, revision)
+    assert script.read_text() == 'exit 0\n'
+
+
+def test_case_revision_does_not_claim_success_if_verifier_ownership_changes(tmp_path):
+    import hashlib
+
+    (tmp_path / "index.html").write_text(PAGE)
+    webapp_check.save_verifier(tmp_path, SPEC, accumulate=True)
+    spec = tmp_path / ".local-ai/webapp-check.json"
+    raw = spec.read_bytes()
+    arguments = {"path": "index.html", "saved_sequence": 1, "saved_case": 2,
+                 "suite_sha256": hashlib.sha256(raw).hexdigest(), "cases": [{"expect": {"answer": "96.00"}}]}
+    check = webapp_check.check
+    def changed_owner(*args, **kwargs):
+        result = check(*args, **kwargs)
+        (tmp_path / ".local-ai/verify.ps1").write_text('Write-Output "User custom checks"\nexit 0\n')
+        return result
+    with patch.object(webapp_check, "check", side_effect=changed_owner):
+        result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", arguments))
+    assert not result["passed"] and not result["verifier_saved"]
+    assert "ownership changed" in result["errors"][0] and spec.read_bytes() == raw
+
+
+def test_coalesced_failure_keeps_actual_inputs_in_durable_diagnostic(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    arguments = {"path": "index.html", "cases": [
+        {"set": {"bill": "80"}}, {"expect": {"answer": "wrong"}},
+        {"set": {"bill": "10"}}, {"expect": {"answer": "also wrong"}}]}
+    result = webapp_check.check(tmp_path, arguments)
+    task_context.record_action(tmp_path, "check_webapp", json.dumps(result), arguments)
+    detail = task_context.checker_failures(tmp_path, "index.html")[0]["details"]
+    assert '"bill": "80"' in detail and '"bill": "10"' in detail
+    assert result["cases"][1]["inputs"] == {"set": {"bill": "10"}}
+
+
+def test_large_browser_failures_return_valid_json_without_changing_verdict(tmp_path):
+    (tmp_path / "index.html").write_text('<p id="answer">' + 'a' * 200 + '</p>')
+    arguments = {"path": "index.html", "cases": [{"expect": {"answer": 'b' * 200}} for _ in range(12)]}
+    result = webapp_check.check(tmp_path, arguments)
+    assert not result["passed"] and len(result["cases"]) == 12
+    # Include realistically repetitive verifier diagnostics to cross the
+    # transport limit. Compaction must retain an explicit failing verdict.
+    result["verification"] = 'long diagnostic ' * 2000
+    encoded = webapp_check.serialize_result(result)
+    compact = json.loads(encoded)
+    assert len(encoded) <= 16000 and not compact["passed"] and compact["diagnostics_limited"]
+    assert compact["failed_case_count"] == 12 and compact["cases"]
+
+
+def test_default_failed_case_does_not_borrow_inputs_from_another_sequence(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    failed = webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"expect": {"answer": "wrong"}}]})
+    assert failed["cases"][0]["inputs"] == {}
+    current = {"path": "index.html", "cases": [{"set": {"bill": "80"}, "expect": {"answer": "96.00"}}]}
+    task_context.record_action(tmp_path, "check_webapp", json.dumps(failed), current)
+    detail = task_context.checker_failures(tmp_path, "index.html")[0]["details"]
+    assert "inputs={}" in detail and '"bill": "80"' not in detail
+
+
+def test_large_saved_report_keeps_parseable_case_references_and_rejects_stale_data(tmp_path):
+    import hashlib
+
+    (tmp_path / "index.html").write_text(PAGE)
+    for number in range(8):
+        webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [
+            {"set": {"bill": str(number + 1)}, "expect": {"answer": "wrong"}}]}, accumulate=True)
+    spec = tmp_path / ".local-ai/webapp-check.json"
+    original = spec.read_bytes()
+    report = {"passed": False, "suite_sha256": hashlib.sha256(original).hexdigest(),
+        "case_count": 8, "failed_case_count": 8, "verified_paths": [], "checks": [
+            {"path": "index.html", "passed": False, "case_count": 1, "failed_case_count": 1,
+             "javascript_errors": ['large error ' * 200] * 3,
+             "cases": [{"case": 1, "passed": False, "inputs": {"set": {"bill": '8' * 2000}},
+                        "failures": ['large failure ' * 100] * 20}] if number < 4 else []}
+            for number in range(8)], "errors": []}
+    encoded = webapp_check.serialize_saved_report(report)
+    assert len(encoded) <= 10000 and not json.loads(encoded)["passed"]
+    # Tighten the transport budget enough to elide duplicate path strings.
+    compact = json.loads(webapp_check.serialize_saved_report(json.loads(encoded), len(encoded) - 40))
+    assert compact["paths_in_spec"] and "path" not in compact["checks"][0]
+    resolved = webapp_check.resolve_saved_report(tmp_path, compact)
+    assert len(resolved["checks"]) == 8 and resolved["checks"][0]["path"] == "index.html"
+    assert resolved["checks"][0]["cases"][0]["case"] == 1
+    assert resolved["failed_case_count"] == 8
+    spec.write_bytes(original + b' ')
+    with pytest.raises(ValueError, match="changed after verification"):
+        webapp_check.resolve_saved_report(tmp_path, compact)
+    spec.write_bytes(original)
+    (tmp_path / ".local-ai/USER-REQUESTS.md").write_text('New requirements')
+    with pytest.raises(ValueError, match="current instructions"):
+        webapp_check.resolve_saved_report(tmp_path, compact)
+    (tmp_path / ".local-ai/USER-REQUESTS.md").write_text('')
+    compact["passed"] = True
+    with pytest.raises(ValueError, match="contradictory"):
+        webapp_check.resolve_saved_report(tmp_path, compact)
+
+
+def test_unicode_saved_reports_are_ascii_safe_bounded_and_keep_exact_paths(tmp_path):
+    import hashlib
+
+    name = '模型.html'
+    (tmp_path / name).write_text(PAGE, encoding="utf-8")
+    for number in range(8):
+        webapp_check.save_verifier(tmp_path, {"path": name, "cases": [
+            {"set": {"bill": str(number + 1)}, "expect": {"answer": "wrong"}}]}, accumulate=True)
+    raw = (tmp_path / ".local-ai/webapp-check.json").read_bytes()
+    report = {"passed": False, "suite_sha256": hashlib.sha256(raw).hexdigest(), "checks": [
+        {"path": name, "passed": False, "javascript_errors": ['错误' * 150] * 3,
+         "cases": [{"case": 1, "passed": False, "inputs": {}, "failures": ['错误' * 150] * 20}]
+         if number < 4 else []} for number in range(8)]}
+    encoded = webapp_check.serialize_saved_report(report)
+    assert encoded.isascii() and len(encoded) <= 10000
+    resolved = webapp_check.resolve_saved_report(tmp_path, json.loads(encoded))
+    assert all(check["path"] == name for check in resolved["checks"])
+    assert not resolved["passed"] and resolved["checks"][0]["cases"]

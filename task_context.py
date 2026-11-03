@@ -266,10 +266,25 @@ def step_status(folder: str | Path) -> dict:
 
 
 def _validate_steps(steps: list) -> list[tuple]:
-    if not isinstance(steps, list) or not 1 <= len(steps) <= 8:
+    if isinstance(steps, str):
+        if len(steps) > 64000:
+            raise ValueError("The steps JSON string must be under 64 KB")
+        try:
+            steps = json.loads(steps)
+        except ValueError as error:
+            raise ValueError(
+                'Malformed steps tool argument: supply an actual JSON array such as '
+                '[{"phase":"Check","title":"Run existing checks","check_tool":"run_verifier"}]. '
+                'Do not double-escape quotes. For revise, supply exactly one step; step_id belongs '
+                'at the top level of the task_steps call. Correct tool arguments, not application source.') from error
+    if not isinstance(steps, list):
+        raise ValueError("steps must be a JSON array of step objects, not an object or scalar")
+    if not 1 <= len(steps) <= 8:
         raise ValueError("Plan 1 to 8 small steps for the next phase, not the whole project.")
     validated = []
     for step in steps:
+        if isinstance(step, dict) and "step_id" in step:
+            raise ValueError("step_id belongs at the top level of task_steps, not inside a planned step")
         if not isinstance(step, dict) or set(step) - {"phase", "title", "check_command", "shell", "check_tool", "check_arguments"}:
             raise ValueError("Use phase, title, and either check_command or a structured check_tool/check_arguments.")
         values = []
@@ -516,6 +531,13 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
             return None
         details = []
         supplied_cases = arguments.get("cases", [])
+        if tool == "check_webapp":
+            import webapp_check
+
+            try:
+                supplied_cases = webapp_check.normalize_spec(arguments).get("cases", [])
+            except ValueError:
+                supplied_cases = []
         if isinstance(supplied_cases, str):
             try:
                 supplied_cases = json.loads(supplied_cases)
@@ -524,24 +546,40 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
         for case in verdict.get("cases", [])[:12]:
             if isinstance(case, dict) and case.get("passed") is False:
                 number = case.get("case")
-                inputs = case.get("inputs", {}) if tool == "check_python_function" else {}
+                actual_inputs = "inputs" in case and isinstance(case["inputs"], dict)
+                inputs = case["inputs"] if actual_inputs else {}
                 if (isinstance(supplied_cases, list) and type(number) is int
                         and 1 <= number <= len(supplied_cases)
-                        and isinstance(supplied_cases[number-1], dict) and not inputs):
+                        and isinstance(supplied_cases[number-1], dict) and not actual_inputs):
                     inputs = {key: supplied_cases[number-1][key]
                               for key in ("set", "click", "keys", "wait_ms")
                               if supplied_cases[number-1].get(key)}
-                context = " inputs=" + json.dumps(inputs, sort_keys=True)[:240] if inputs else ""
+                context = " inputs=" + json.dumps(inputs, sort_keys=True)[:240] if inputs or actual_inputs else ""
                 for reason in case.get("failures", [])[:3]:
                     if isinstance(reason, str):
                         function = (" " + str(case.get("path", "")) + ":" + str(case.get("function", ""))
                                     if tool == "check_python_function" else "")
-                        details.append(f"Case {number}{function}{context}: " + json.dumps(reason[:280]))
+                        location = ""
+                        if tool == "check_webapp" and isinstance(case.get("path"), str):
+                            location += " page=" + json.dumps(case["path"][:512])
+                        if tool == "check_webapp" and type(case.get("saved_sequence")) is int:
+                            location += f" saved_sequence={case['saved_sequence']}"
+                        details.append(f"Case {number}{function}{location}{context}: " + json.dumps(reason[:280]))
         for field in ("javascript_errors", "errors"):
             for reason in verdict.get(field, [])[:4]:
                 if isinstance(reason, str):
                     details.append(json.dumps(reason[:280]))
-        detail = " | ".join(details[:4])[:1400]
+        sha = verdict.get("suite_sha256")
+        reference = ("Saved browser suite_sha256=" + sha + "; saved case assertions can be revised through check_webapp. "
+                     if tool == "check_webapp" and isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{64}", sha)
+                     and any(isinstance(case, dict) and "saved_sequence" in case for case in verdict.get("cases", [])) else "")
+        repair = verdict.get("assertion_revision_reference")
+        if tool == "check_webapp" and isinstance(repair, dict) and len(json.dumps(repair)) <= 800:
+            reference = ("If consistent with the latest user request, correct the mistaken saved assertion via "
+                         "check_webapp arguments=" + json.dumps(repair, sort_keys=True)
+                         + "; supply one corrected assertion-only case if cases is absent. "
+                         "A hidden suggestion applies only when hiding, rather than clearing text, is required. ")
+        detail = (reference + " | ".join(details[:4]))[:1400]
         if not detail and not verdict["passed"]:
             detail = "Checker returned failed without detailed assertions; inspect its saved spec/result."
         if not isinstance(request_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", request_hash):
@@ -583,6 +621,14 @@ def record_action(folder: str | Path, tool: str, result: str, arguments: dict | 
         except (ValueError, TypeError, KeyError):
             pass
         subject = subject[:180]
+    if tool == "check_webapp" and subject and isinstance(arguments, dict):
+        try:
+            revision = json.loads(result).get("revision", {})
+            sequence, number = revision.get("saved_sequence"), revision.get("saved_case")
+            if type(sequence) is int and type(number) is int and 1 <= sequence <= 8 and 1 <= number <= 12:
+                subject = subject[:120] + f" (assertion sequence {sequence}, case {number})"
+        except (ValueError, AttributeError):
+            pass
     with project_memory.connection(folder) as conn:
         _schema(conn)
         conn.execute("INSERT INTO task_events(tool,outcome,created,subject) VALUES(?,?,?,?)",

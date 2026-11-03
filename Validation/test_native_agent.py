@@ -566,6 +566,56 @@ def test_real_failed_step_checks_route_deeper_after_history_compaction_and_reset
             assert task_size(recovered) == "balanced"
 
 
+def test_step_strings_decode_strict_json_and_report_format_errors_without_creating_work(tmp_path):
+    import pytest
+
+    item = project(tmp_path / "steps")
+    folder = Path(item["folder"])
+    step = {"phase": "Check", "title": "Run checks", "check_tool": "run_verifier"}
+    queue = task_context.plan_steps(folder, json.dumps([step]))
+    assert queue["total"] == 1 and queue["active"]["title"] == "Run checks"
+    for bad in ('[{\\"phase\\":\\"Check\\"}]', '{"phase":"Check"}', '[]'):
+        with pytest.raises(ValueError):
+            task_context.revise_step(folder, queue["active"]["id"], bad)
+        assert task_context.step_status(folder)["total"] == 1
+    with pytest.raises(ValueError, match="Malformed steps tool argument"):
+        task_context.revise_step(folder, queue["active"]["id"], '[{\\"phase\\":\\"Check\\"}]')
+    with pytest.raises(ValueError, match="top level"):
+        task_context.revise_step(folder, queue["active"]["id"], [{**step, "step_id": 1}])
+
+
+def test_failed_initial_plan_blocks_completion_and_survives_fresh_context_until_real_plan(tmp_path):
+    item = project(tmp_path / "planned")
+    folder = Path(item["folder"])
+    (folder / "hello.txt").write_text('Hello')
+    (folder / ".local-ai/verify.ps1").write_text('exit 0\n')
+    (folder / ".local-ai/PLAN.md").write_text('- [x] Finished\n')
+    (folder / ".local-ai/PROGRESS.md").write_text('Work completed and the saved verifier passed.')
+    native_agent.save_state(item, {"status": "continue", "verify_passed": True})
+    bad = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "plan", "function": {
+        "name": "task_steps", "arguments": json.dumps({"action": "plan", "steps": [{"title": "Missing phase"}]})}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(item, complete=lambda _: bad)
+    assert state["status"] == "continue" and state["uncreated_step_plan"]
+    assert "initial SQLite plan was not created" in native_agent.completion_issue(folder, item, state)
+    fresh = native_agent.fresh_messages(state["messages"], folder, state, item)
+    assert "nonempty phase" in fresh[1]["content"]
+    final = {"choices": [{"message": {"role": "assistant", "content": "Finished"}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        rejected = native_agent.run_slice(item, complete=lambda _: final)
+    assert rejected["status"] == "continue"
+    good = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "fixed-plan", "function": {
+        "name": "task_steps", "arguments": json.dumps({"action": "plan", "steps": [
+            {"phase": "Verify", "title": "Run checks", "check_tool": "run_verifier"},
+            {"phase": "Handoff", "title": "Check final work", "check_tool": "run_verifier"}]})}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        repaired = native_agent.run_slice(item, complete=lambda _: good)
+    assert "uncreated_step_plan" not in repaired and task_context.step_status(folder)["total"] == 2
+    pending = {"uncreated_step_plan": {"request_hash": task_context.request_identity(folder), "error": "old"}}
+    native_agent.invalidate_checks(pending)
+    assert "uncreated_step_plan" not in pending
+
+
 def test_legacy_step_database_migration_preserves_commands_and_failed_attempts():
     with tempfile.TemporaryDirectory() as temporary:
         folder = Path(project(Path(temporary) / "code")["folder"])

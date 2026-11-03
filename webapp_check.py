@@ -341,6 +341,7 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
 
             for number, case in enumerate(spec["cases"], 1):
                 failures = []
+                suggested_hidden = []
                 before = asserted_state(case)
                 for element_id, value in case.get("set", {}).items():
                     control = page.locator("#" + element_id)
@@ -394,6 +395,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                         # Exact empty content, never the vacuous empty-substring
                         # test. Inspect the complete DOM text, not its preview.
                         if not target.evaluate("el => !(el.textContent || '').trim()"):
+                            if not target.is_visible():
+                                suggested_hidden.append(element_id)
                             hint = (" It is hidden; if the request only requires hiding stale output, "
                                     "correct this case to hidden instead of an empty-text assertion."
                                     if not target.is_visible() else "")
@@ -415,7 +418,13 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                 if (case.get("mobile_fit") or spec.get("mobile_fit")) and not page.evaluate(
                     "document.documentElement.scrollWidth <= window.innerWidth + 1"):
                     failures.append("Page overflows the viewport")
-                results.append({"case": number, "passed": not failures, "failures": failures})
+                outcome = {"case": number, "passed": not failures, "failures": failures}
+                if failures:
+                    outcome["inputs"] = {name: copy.deepcopy(case[name]) for name in
+                                         ("set", "click", "keys", "wait_ms") if name in case}
+                    if suggested_hidden:
+                        outcome["suggested_assertions"] = {"hidden": suggested_hidden}
+                results.append(outcome)
                 actions = [kind for kind in ("set", "click", "keys") if case.get(kind)]
                 after = asserted_state(case)
                 changed = [name for name, value in after.items() if before.get(name) != value]
@@ -430,6 +439,7 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
     if hashlib.sha256(page_path.read_bytes()).hexdigest() != page_hash:
         errors.append("HTML source changed while the browser check was running; rerun the check.")
     return {"passed": all(item["passed"] for item in results) and not errors,
+            "case_count": len(results), "failed_case_count": sum(not item["passed"] for item in results),
             "cases": results, "javascript_errors": errors,
             "page_sha256": page_hash, "interactions": interactions,
             "normalized_inputs": normalized_inputs}
@@ -544,16 +554,177 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
         failures_left -= len(failures)
         results.append({"path": spec["path"], "viewport_width": spec.get("viewport_width", 375),
                         "passed": result["passed"], "cases": failures,
+                        "case_count": result["case_count"], "failed_case_count": result["failed_case_count"],
                         "javascript_errors": result["javascript_errors"][:3]})
     unchanged = (spec_file.read_bytes() == raw
                  and saved["request_hash"] == task_context.request_identity(folder))
     passed = all(result["passed"] for result in results) and unchanged
-    return {"passed": passed, "verified_paths": sorted({spec["path"] for spec in checks}) if passed else [],
+    return {"passed": passed, "suite_sha256": digest,
+            "verified_paths": sorted({spec["path"] for spec in checks}) if passed else [],
+            "case_count": sum(result["case_count"] for result in results),
+            "failed_case_count": sum(result["failed_case_count"] for result in results),
             "checks": results, "errors": [] if unchanged else ["Saved cases or user instructions changed during verification"]}
 
 
-def save_verifier(folder: Path, spec: dict, *, accumulate: bool = False) -> bool:
+def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dict]:
+    """Select one saved case by checksum; callers may change assertions only."""
+    import task_context
+
+    path = (folder / ".local-ai/webapp-check.json").resolve()
+    if not path.is_relative_to(folder.resolve()) or not path.is_file() or path.stat().st_size > 64000:
+        raise ValueError("A bounded saved browser suite is required for an assertion revision")
+    raw = path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    if arguments.get("suite_sha256") != digest:
+        raise ValueError("Saved browser cases changed; current suite_sha256=" + digest)
+    saved = json.loads(raw)
+    if (not isinstance(saved, dict) or saved.get("suite_version") != 1
+            or saved.get("request_hash") != task_context.request_identity(folder)):
+        raise ValueError("Saved browser instructions changed; rerun check_webapp")
+    verifier = folder / ".local-ai/verify.ps1"
+    if verifier.is_symlink() or not verifier.is_file() or not verifier.read_text(encoding="utf-8-sig").startswith(
+            "# Generated by Cale check_webapp"):
+        raise ValueError("Preserve the user's custom verifier; revise only an owned browser suite")
+    sequence, number = arguments.get("saved_sequence"), arguments.get("saved_case")
+    checks = saved.get("checks", [])
+    if type(sequence) is not int or not isinstance(checks, list) or not 1 <= sequence <= len(checks) <= 8:
+        raise ValueError("Use the saved sequence index from the failed checker result")
+    batch = normalize_spec(copy.deepcopy(checks[sequence - 1]))
+    validate_spec(folder, batch)
+    if _project_file(folder, arguments.get("path")) != _project_file(folder, batch["path"]):
+        raise ValueError("The revision path must match the selected saved sequence")
+    if type(number) is not int or not 1 <= number <= len(batch["cases"]):
+        raise ValueError("Use the saved case index from the failed checker result")
+    supplied = normalize_spec(arguments).get("cases")
+    if (not isinstance(supplied, list) or len(supplied) != 1 or not isinstance(supplied[0], dict)
+            or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "set", "click", "keys", "wait_ms"}):
+        raise ValueError("An assertion revision needs one case correcting assertions; saved input actions cannot change")
+    old = batch["cases"][number - 1]
+    if any(name in supplied[0] and (name not in old or supplied[0][name] != old[name])
+           for name in ("set", "click", "keys", "wait_ms")):
+        raise ValueError("Assertion revisions cannot change input actions; repeated actions must exactly match the saved case")
+    batch["cases"][number - 1] = {**{name: copy.deepcopy(old[name]) for name in
+        ("set", "click", "keys", "wait_ms") if name in old}, **copy.deepcopy(supplied[0])}
+    validate_spec(folder, batch)
+    return batch, {"saved_sequence": sequence, "saved_case": number,
+                   "previous_sha256": digest, "request_hash": saved["request_hash"]}
+
+
+def serialize_result(result: dict, limit: int = 16000) -> str:
+    """Keep verdicts parseable; limit displayed diagnostics, never test execution."""
+    encoded = json.dumps(result, ensure_ascii=False)
+    if len(encoded) <= limit:
+        return encoded
+    value = copy.deepcopy(result)
+    cases = value.get("cases", [])
+    failed = [case for case in cases if case.get("passed") is False]
+    value.setdefault("case_count", len(cases))
+    value.setdefault("failed_case_count", len(failed))
+    value["diagnostics_limited"] = True
+    value["cases"] = (failed or cases)[:4]
+    for case in value["cases"]:
+        case["failures"] = [str(reason)[:400] for reason in case.get("failures", [])[:3]]
+        inputs = case.get("inputs", {})
+        if len(json.dumps(inputs)) > 1000:
+            case["inputs"] = {"preview": json.dumps(inputs, ensure_ascii=False)[:700], "truncated": True}
+    for field in ("errors", "javascript_errors"):
+        if field in value:
+            value[field] = [str(reason)[:400] for reason in value[field][:4]]
+    value.pop("normalized_inputs", None)
+    if "interactions" in value:
+        value["interactions"] = value["interactions"][:12]
+        for interaction in value["interactions"]:
+            interaction["targets"] = interaction.get("targets", [])[:4]
+    encoded = json.dumps(value, ensure_ascii=False)
+    if len(encoded) > limit:
+        value.pop("verification", None)
+        value["cases"] = value["cases"][:2]
+        value["interactions"] = value.get("interactions", [])[:2]
+        encoded = json.dumps(value, ensure_ascii=False)
+    if len(encoded) > limit:
+        raise ValueError("Browser diagnostics exceed the output budget; use fewer assertion targets per case")
+    return encoded
+
+
+def serialize_saved_report(result: dict, limit: int = 10000) -> str:
+    """Fit ASCII-safe JSON inside the supervisor's 12 KB PowerShell log tail."""
+    if not isinstance(result.get("checks"), list):
+        return serialize_result(result, limit)  # Preserve legacy single-spec scripts.
+    encoded = json.dumps(result, ensure_ascii=True)
+    if len(encoded) <= limit:
+        return encoded
+    value = copy.deepcopy(result)
+    value["diagnostics_limited"] = True
+    errors_left = 2
+    for sequence, check_result in enumerate(value.get("checks", []), 1):
+        check_result["sequence"] = sequence
+        check_result["javascript_errors"] = [str(error)[:240]
+            for error in check_result.get("javascript_errors", [])[:errors_left]]
+        errors_left -= len(check_result["javascript_errors"])
+        for case in check_result.get("cases", []):
+            case["failures"] = [str(error)[:240] for error in case.get("failures", [])[:2]]
+            if len(json.dumps(case.get("inputs", {}))) > 500:
+                case["inputs"] = {"note": "Input preview omitted; use this saved sequence/case reference"}
+            if case.get("suggested_assertions"):
+                case["suggested_assertions"] = {"hidden": case["suggested_assertions"].get("hidden", [])[:4]}
+    encoded = json.dumps(value, ensure_ascii=True)
+    if len(encoded) > limit:
+        # Sequence indexes remain stable. The consumer can recover exact
+        # paths from the checksum-bound suite instead of truncating strings.
+        value["paths_in_spec"] = True
+        value.pop("verified_paths", None)
+        for check_result in value.get("checks", []):
+            check_result.pop("path", None)
+            check_result["javascript_errors"] = [error[:100] for error in check_result.get("javascript_errors", [])]
+            for case in check_result.get("cases", []):
+                case["failures"] = [error[:100] for error in case.get("failures", [])]
+                case["inputs"] = {"note": "Use the saved sequence/case reference for exact inputs"}
+        encoded = json.dumps(value, ensure_ascii=True)
+    if len(encoded) > limit:
+        raise ValueError("Saved browser diagnostics exceed the bounded report size")
+    return encoded
+
+
+def resolve_saved_report(folder: Path, report: dict) -> dict:
+    """Bind compact verifier diagnostics to the exact suite that produced them."""
+    import task_context
+
+    path = (folder / ".local-ai/webapp-check.json").resolve()
+    if not path.is_relative_to(folder.resolve()) or not path.is_file() or path.stat().st_size > 64000:
+        raise ValueError("The saved browser suite is unavailable; rerun check_webapp")
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != report.get("suite_sha256"):
+        raise ValueError("Saved browser cases changed after verification; rerun check_webapp")
+    suite = json.loads(raw)
+    if not isinstance(suite, dict) or not isinstance(suite.get("checks"), list):
+        raise ValueError("The saved browser suite is malformed")
+    checks = suite.get("checks", [])
+    results = report.get("checks", [])
+    if (suite.get("request_hash") != task_context.request_identity(folder)
+            or not isinstance(results, list) or len(results) != len(checks) or not 1 <= len(checks) <= 8):
+        raise ValueError("Saved browser report does not match current instructions and sequences")
+    resolved = copy.deepcopy(report)
+    for sequence, result in enumerate(resolved["checks"], 1):
+        if not isinstance(result, dict):
+            raise ValueError("Saved browser report needs structured check results")
+        if result.get("sequence", sequence) != sequence:
+            raise ValueError("Saved browser report sequence indexes changed")
+        expected = checks[sequence - 1]["path"]
+        if not report.get("paths_in_spec") and result.get("path") != expected:
+            raise ValueError("Saved browser report paths changed")
+        result["path"] = expected
+    if report.get("passed") is True:
+        if any(result.get("passed") is not True for result in resolved["checks"]):
+            raise ValueError("Saved browser report has contradictory verdicts")
+        resolved["verified_paths"] = sorted({spec["path"] for spec in checks})
+    return resolved
+
+
+def save_verifier(folder: Path, spec: dict, *, accumulate: bool = False,
+                  expected_sha: str | None = None) -> bool:
     """Seed a read-only project verifier, preserving a custom existing check."""
+    if expected_sha is not None and not accumulate:
+        raise ValueError("Assertion revisions require an accumulated browser suite")
     spec = normalize_spec(spec)
     validate_spec(folder, spec)
     folder = folder.resolve()
@@ -577,12 +748,22 @@ def save_verifier(folder: Path, spec: dict, *, accumulate: bool = False) -> bool
             if spec_path.stat().st_size > 64000:
                 raise ValueError("Saved browser checks must be under 64 KB")
             previous = json.loads(spec_path.read_text(encoding="utf-8"))
+        if expected_sha is not None:
+            import task_context
+
+            if (not spec_path.is_file() or hashlib.sha256(spec_path.read_bytes()).hexdigest() != expected_sha
+                    or not isinstance(previous, dict) or previous.get("request_hash") != task_context.request_identity(folder)):
+                raise ValueError("Saved cases or instructions changed during the assertion revision; retry from current data")
         spec = saved_suite(folder, spec, previous)
     raw = json.dumps(spec, indent=2, allow_nan=False).encode("utf-8")
     if len(raw) > 64000:
         raise ValueError("Saved browser checks must be under 64 KB")
     staged = spec_path.with_suffix(".tmp")
     staged.write_bytes(raw)
+    if expected_sha is not None and (hashlib.sha256(spec_path.read_bytes()).hexdigest() != expected_sha
+            or previous["request_hash"] != task_context.request_identity(folder)):
+        staged.unlink(missing_ok=True)
+        raise ValueError("Saved cases or instructions changed before the assertion revision was saved")
     os.replace(staged, spec_path)
     attestation = " --spec-sha256 " + hashlib.sha256(raw).hexdigest() if accumulate else ""
     def literal(value: str) -> str:
@@ -613,7 +794,7 @@ def main() -> int:
     if not spec_file.is_relative_to(folder / ".local-ai"):
         raise ValueError("Browser check spec must be in this project's .local-ai folder")
     result = run_saved_checks(folder, spec_file, args.spec_sha256)
-    print(json.dumps(result, ensure_ascii=False))
+    print(serialize_saved_report(result))
     return 0 if result["passed"] else 1
 
 

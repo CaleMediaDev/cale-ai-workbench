@@ -36,6 +36,8 @@ extras = [
     "benchmarks/results/typed-python-checks-20261103.json",
     "benchmarks/results/webapp-steps-20261103.json",
     "benchmarks/results/numeric-coverage-20261103.json",
+    "benchmarks/browser_assertion_repair.py",
+    "benchmarks/results/browser-assertion-repair-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",

@@ -1,5 +1,40 @@
 # Native worker reality check
 
+## Saved browser assertion repair
+
+`browser_assertion_repair.py --model cale-gemma4-edge --keep-folder C:\path\to\new-folder`
+creates a correct app with an overstrict saved assertion: a hidden old total is
+incorrectly required to have empty DOM text. The agent must repair verification,
+preserve every HTML byte and the other cases, complete at least two SQLite steps,
+pass its verifier, and reject an injected invalid-state regression. The task brief
+states the required hidden-output behavior; recorded checker evidence locates the failing case.
+All inference is local. The developer runner counts successful use of the saved-case
+revision API separately from model tool-call counts.
+
+The [November 3 report](results/browser-assertion-repair-20261103.json) includes failed
+9B runs and successful/unsuccessful alternate-model runs. A 38.07-second alternate
+run corrected the assertion but declared done without its requested database plan;
+it remains a failed benchmark. After the first-plan completion gate was added,
+another run completed three steps in 102.25 seconds, used one successful saved-case
+revision, preserved the HTML and passed the regression grader. The production gate
+prevents a failed first plan from silently becoming done; it does not impose a plan
+on every one-step task or infer arbitrary natural-language workflow requirements.
+
+Code and prompt details evolved during these individual runs, so they are not a
+controlled speed comparison or a model ranking. Default model routing is unchanged.
+The first prototype's source-preservation check also compared CRLF bytes against an
+LF constant; the report retains that original result and records the byte-hash
+regrade. Its overall benchmark still failed on verification and workflow. Current
+runs capture the original file hash before model work. Timings include fixture seeding
+and omit final independent grading, except the first prototype which included grading.
+
+For a mistaken saved assertion, `check_webapp` accepts `saved_sequence`, `saved_case`
+and `suite_sha256` from its failure, plus `cases=[one corrected assertion case]`.
+The current path must match the referenced sequence. Actions remain immutable;
+repeated action data is accepted only when identical. The whole retained suite
+is checked after the correction. The controller does not apply suggested hidden
+assertions automatically; the user's actual requirement determines the right fix.
+
 ## Named numeric examples and recovery
 
 The [numeric coverage report](results/numeric-coverage-20261103.json) records a

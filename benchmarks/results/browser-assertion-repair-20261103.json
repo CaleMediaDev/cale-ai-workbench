@@ -1,0 +1,312 @@
+{
+  "scope": "Single-machine synthetic local inference and independent assertion-repair grading. Code/instructions evolved; not a controlled speed comparison or general reliability ranking. No cloud inference or user documents.",
+  "runs": {
+    "initial_9b": {
+      "scenario": "saved_browser_assertion_repair",
+      "model": "cale-fast",
+      "seconds_including_seed_check": 168.31,
+      "model_calls": 24,
+      "tool_calls": 24,
+      "tools_used": [
+        "list_files",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "check_webapp",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "check_webapp"
+      ],
+      "prompt_tokens": 128959,
+      "completion_tokens": 4281,
+      "reasoning_effort": "none",
+      "status": "continue",
+      "grade": {
+        "source_preserved": false,
+        "app_behavior": true,
+        "verifier_passes_correct": false,
+        "verifier_rejects_invalid_state_regression": true,
+        "passed": false,
+        "steps_completed": false
+      },
+      "steps": {
+        "total": 1,
+        "done": 0,
+        "remaining": 1
+      }
+    },
+    "guided_9b": {
+      "scenario": "saved_browser_assertion_repair",
+      "model": "cale-fast",
+      "seconds_including_seed_check": 60.77,
+      "model_calls": 9,
+      "tool_calls": 9,
+      "tools_used": [
+        "list_files",
+        "read_file",
+        "task_steps",
+        "check_webapp",
+        "check_webapp",
+        "read_file",
+        "read_file",
+        "write_file",
+        "write_file"
+      ],
+      "prompt_tokens": 52805,
+      "completion_tokens": 1469,
+      "reasoning_effort": "none",
+      "status": "done",
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": true,
+        "verifier_rejects_invalid_state_regression": true,
+        "passed": false,
+        "steps_completed": false
+      },
+      "steps": {
+        "total": 0,
+        "done": 0,
+        "remaining": 0
+      }
+    },
+    "confirmed_9b": {
+      "scenario": "saved_browser_assertion_repair",
+      "model": "cale-fast",
+      "seconds_including_seed_check": 152.43,
+      "model_calls": 24,
+      "tool_calls": 24,
+      "tools_used": [
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps"
+      ],
+      "prompt_tokens": 116069,
+      "completion_tokens": 3938,
+      "assertion_revision_attempts": 3,
+      "successful_assertion_revisions": 0,
+      "reasoning_effort": "none",
+      "status": "continue",
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": false,
+        "verifier_rejects_invalid_state_regression": true,
+        "passed": false,
+        "steps_completed": false
+      },
+      "steps": {
+        "total": 2,
+        "done": 0,
+        "remaining": 2
+      }
+    },
+    "format_9b": {
+      "scenario": "saved_browser_assertion_repair",
+      "model": "cale-fast",
+      "seconds_including_seed_check": 142.92,
+      "model_calls": 36,
+      "tool_calls": 36,
+      "tools_used": [
+        "read_file",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "run_verifier",
+        "check_webapp",
+        "read_file",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp"
+      ],
+      "prompt_tokens": 177904,
+      "completion_tokens": 4265,
+      "assertion_revision_attempts": 1,
+      "successful_assertion_revisions": 0,
+      "step_tool_errors": [],
+      "revision_errors": [
+        "Tool error: ValueError: Saved browser cases changed; current suite_sha256=8876ad878064e71b343959aa8f9dccefe5353c0db4ebd95ba0aa2e3aa4fd4306"
+      ],
+      "reasoning_effort": "none",
+      "status": "continue",
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": false,
+        "verifier_rejects_invalid_state_regression": true,
+        "passed": false,
+        "steps_completed": false
+      },
+      "steps": {
+        "total": 0,
+        "done": 0,
+        "remaining": 0
+      }
+    },
+    "alternate_before_plan_gate": {
+      "scenario": "saved_browser_assertion_repair",
+      "model": "cale-gemma4-edge",
+      "seconds_including_seed_check": 38.07,
+      "model_calls": 9,
+      "tool_calls": 7,
+      "tools_used": [
+        "task_steps",
+        "check_webapp",
+        "task_steps",
+        "read_file",
+        "read_file",
+        "search_project_memory",
+        "write_file"
+      ],
+      "prompt_tokens": 46989,
+      "completion_tokens": 1989,
+      "assertion_revision_attempts": 1,
+      "successful_assertion_revisions": 1,
+      "step_tool_errors": [
+        "Tool error: ValueError: Use phase, title, and either check_command or a structured check_tool/check_arguments.",
+        "Tool error: ValueError: Supply the current active step_id (there is no unfinished step); steps cannot be skipped."
+      ],
+      "revision_errors": [],
+      "reasoning_effort": "none",
+      "status": "done",
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": true,
+        "verifier_rejects_invalid_state_regression": true,
+        "passed": false,
+        "steps_completed": false
+      },
+      "steps": {
+        "total": 0,
+        "done": 0,
+        "remaining": 0
+      }
+    },
+    "alternate_with_plan_gate": {
+      "scenario": "saved_browser_assertion_repair",
+      "model": "cale-gemma4-edge",
+      "seconds_including_seed_check": 102.25,
+      "model_calls": 24,
+      "tool_calls": 22,
+      "tools_used": [
+        "check_webapp",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "search_project_memory",
+        "list_files",
+        "read_file",
+        "write_file",
+        "write_file",
+        "task_steps",
+        "list_files"
+      ],
+      "prompt_tokens": 128770,
+      "completion_tokens": 4690,
+      "assertion_revision_attempts": 1,
+      "successful_assertion_revisions": 1,
+      "step_tool_errors": [
+        "Tool error: ValueError: steps must be a JSON array of step objects, not an object or scalar",
+        "Tool error: ValueError: Use a nonempty phase of at most 100 characters.",
+        "Tool error: ValueError: step_id belongs at the top level of task_steps, not inside a planned step",
+        "Tool error: ValueError: step_id belongs at the top level of task_steps, not inside a planned step"
+      ],
+      "revision_errors": [],
+      "reasoning_effort": "none",
+      "status": "done",
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": true,
+        "verifier_rejects_invalid_state_regression": true,
+        "passed": true,
+        "steps_completed": true
+      },
+      "steps": {
+        "total": 3,
+        "done": 3,
+        "remaining": 0
+      }
+    }
+  },
+  "initial_source_preservation_regrade": {
+    "reason": "The first prototype compared CRLF-decoded bytes against an LF constant. Current runs capture the initial byte hash instead. The original overall failed result is preserved.",
+    "matches_original_windows_seed_bytes": true
+  },
+  "limitations": "The successful alternate-model run is one fixture, not automatic model promotion or proof of reliable full-app development. Initial prototype timings include grading; later runs include seeding but exclude grading."
+}

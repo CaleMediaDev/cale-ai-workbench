@@ -44,28 +44,102 @@ TOOLS = [
                     "kwargs": {"type": "object"}, "expected": {}, "raises": {"type": "string"}},
                 "additionalProperties": False}}},
             "required": ["path", "function", "cases"], "additionalProperties": False}}},
-    {"type": "function", "function": {
-        "name": "task_steps",
-        "description": "Durable SQLite queue for small phases. Plan 2-6 tiny steps. Use check_tool='check_python_function' with check_arguments={path,function,cases}, or check_tool='check_webapp' with check_arguments={path,cases} for HTML apps. Use check_tool='run_verifier' for integration. Other work can use a read-only check_command. complete runs the saved acceptance check and advances only on success without source changes. split makes smaller steps; revise corrects the active check with steps=[one corrected step]. status resumes progress. A completed batch is not whole-project verification.",
-        "parameters": {"type": "object", "properties": {
-            "action": {"type": "string", "enum": ["plan", "status", "complete", "split", "revise"]},
-            "step_id": {"type": "integer"},
-            "steps": {"type": "array", "minItems": 1, "maxItems": 8, "items": {
-                "type": "object", "properties": {
-                    "phase": {"type": "string", "maxLength": 100},
-                    "title": {"type": "string", "maxLength": 240},
-                    "check_command": {"type": "string", "maxLength": 2000},
-                    "shell": {"type": "string", "enum": ["default", "powershell"]},
-                    "check_tool": {"type": "string", "enum": ["check_python_function", "check_webapp", "run_verifier"]},
-                    "check_arguments": {"type": "object"}},
-                "required": ["phase", "title"], "additionalProperties": False}}},
-            "required": ["action"], "additionalProperties": False}}},
+    {'type': 'function',
+     'function': {'name': 'task_steps',
+                  'description': 'Durable SQLite queue for small phases. Plan 2-6 tiny steps. Use '
+                                 "check_tool='check_python_function' with check_arguments={path,function,cases}, "
+                                 "or check_tool='check_webapp' with check_arguments={path,cases} for HTML apps. "
+                                 "Use check_tool='run_verifier' for integration. Other work can use a read-only "
+                                 'check_command. complete runs the saved acceptance check and advances only on '
+                                 'success without source changes. split makes smaller steps; revise corrects the '
+                                 'active check with steps=[one corrected step]. status resumes progress. A '
+                                 'completed batch is not whole-project verification.',
+                  'parameters': {'type': 'object',
+                                 'properties': {'action': {'type': 'string',
+                                                           'enum': ['plan',
+                                                                    'status',
+                                                                    'complete',
+                                                                    'split',
+                                                                    'revise']},
+                                                'step_id': {'type': 'integer'},
+                                                'steps': {'anyOf': [{'type': 'array',
+                                                                     'minItems': 1,
+                                                                     'maxItems': 8,
+                                                                     'items': {'type': 'object',
+                                                                               'properties': {'phase': {'type': 'string',
+                                                                                                        'maxLength': 100},
+                                                                                              'title': {'type': 'string',
+                                                                                                        'maxLength': 240},
+                                                                                              'check_command': {'type': 'string',
+                                                                                                                'maxLength': 2000},
+                                                                                              'shell': {'type': 'string',
+                                                                                                        'enum': ['default',
+                                                                                                                 'powershell']},
+                                                                                              'check_tool': {'type': 'string',
+                                                                                                             'enum': ['check_python_function',
+                                                                                                                      'check_webapp',
+                                                                                                                      'run_verifier']},
+                                                                                              'check_arguments': {'type': 'object'}},
+                                                                               'required': ['phase', 'title'],
+                                                                               'additionalProperties': False}},
+                                                                    {'type': 'string', 'maxLength': 64000}]}},
+                                 'required': ['action'],
+                                 'additionalProperties': False}}},
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 project file. Use start_line and max_lines for large files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "max_lines": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "inspect_project_file", "description": "Read a local PDF, DOCX, XLSX, PPTX, image, or text file in this task folder, including browser downloads. Ask a question for relevant excerpts, or paginate with start_char. Extracted text is cached locally by file contents.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "question": {"type": "string"}, "start_char": {"type": "integer"}, "max_chars": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "check_document_report", "description": "Check a report against exact excerpts from a local source document and optional add/subtract money arithmetic. Each fact maps source_text to report_text; calculations use two source_texts and one report_text. On success saves a read-only verifier bound to the source bytes. Example: facts=[{source_text:'Payment due: November 15, 2026',report_text:'Final due date: November 15, 2026'}], calculations=[{operation:'subtract',source_texts:['Base fee: $1,280','Setup credit: $180'],report_text:'Net payable: $1,100'}]. facts and calculations may be JSON arrays or JSON-encoded strings.", "parameters": {"type": "object", "properties": {"source_path": {"type": "string"}, "report_path": {"type": "string"}, "facts": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"source_text": {"type": "string"}, "report_text": {"type": "string"}}, "required": ["source_text", "report_text"], "additionalProperties": False}}, {"type": "string"}]}, "calculations": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"operation": {"type": "string", "enum": ["add", "subtract"]}, "source_texts": {"type": "array", "items": {"type": "string"}}, "report_text": {"type": "string"}}, "required": ["operation", "source_texts", "report_text"], "additionalProperties": False}}, {"type": "string"}]}}, "required": ["source_path", "report_path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "transform_csv", "description": "Clean a project CSV with a real CSV parser. Use transforms such as title for names/cities and digits for phones, exact_lengths to discard invalid values, and unique_by to keep the first matching row. Example: transforms={name:title,phone:digits,city:title}, exact_lengths={phone:10}, unique_by=[phone]. Creates a separate output file; does not change the source.", "parameters": {"type": "object", "properties": {"input_path": {"type": "string"}, "output_path": {"type": "string"}, "transforms": {"type": "object", "additionalProperties": {"type": "string", "enum": ["keep", "trim", "title", "upper", "lower", "digits"]}}, "exact_lengths": {"type": "object", "additionalProperties": {"type": "integer"}}, "unique_by": {"type": "array", "items": {"type": "string"}}}, "required": ["input_path", "output_path"], "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "check_webapp", "description": "Open a local HTML page in offline Chromium and replay fills, button clicks, keys, waits, then visible assertions. cases is an array or JSON string. set and expect map element IDs to text; click lists IDs; visible/hidden list IDs or text. keys lists objects such as {key:'ArrowRight',hold_ms:200} or {key:'Space'} for keyboard apps and games. hold_ms is 0..1000, wait_ms is 0..2000 after keys, total wait <=10000ms. Assert observable outcomes, not just that keys were pressed. Example: cases=[{set:{bill:'80'},expect:{'per-person':'24.00'}},{set:{people:'0'},visible:['error']}]. On success saves a repeatable verifier unless a custom one exists.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "viewport_width": {"type": "integer"}, "mobile_fit": {"type": "boolean"}, "cases": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"set": {"type": "object", "additionalProperties": {"type": "string"}}, "click": {"type": "array", "items": {"type": "string"}}, "keys": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "hold_ms": {"type": "integer", "minimum": 0, "maximum": 1000}}, "required": ["key"], "additionalProperties": False}}, "wait_ms": {"type": "integer", "minimum": 0, "maximum": 2000}, "expect": {"type": "object", "additionalProperties": {"type": "string"}}, "visible": {"type": "array", "items": {"type": "string"}}, "hidden": {"type": "array", "items": {"type": "string"}}, "mobile_fit": {"type": "boolean"}}, "additionalProperties": False}}, {"type": "string"}]}}, "required": ["path", "cases"], "additionalProperties": False}}},
+    {'type': 'function',
+     'function': {'name': 'check_webapp',
+                  'description': 'Open a local HTML page in offline Chromium and replay fills, button clicks, '
+                                 'keys, waits, then visible assertions. cases is an array or JSON string. set '
+                                 'and expect map element IDs to text; click lists IDs; visible/hidden list IDs '
+                                 "or text. keys lists objects such as {key:'ArrowRight',hold_ms:200} or "
+                                 "{key:'Space'} for keyboard apps and games. hold_ms is 0..1000, wait_ms is "
+                                 '0..2000 after keys, total wait <=10000ms. Assert observable outcomes, not just '
+                                 'that keys were pressed. Example: '
+                                 "cases=[{set:{bill:'80'},expect:{'per-person':'24.00'}},{set:{people:'0'},visible:['error']}]. "
+                                 'On success saves a repeatable verifier unless a custom one exists. To correct '
+                                 'one saved assertion, supply saved_sequence, saved_case and suite_sha256 from '
+                                 'its failure, with cases=[one assertion-only case]. Saved input actions and '
+                                 'unrelated cases remain intact; original requirements determine the correct '
+                                 'assertion.',
+                  'parameters': {'type': 'object',
+                                 'properties': {'path': {'type': 'string'},
+                                                'viewport_width': {'type': 'integer'},
+                                                'mobile_fit': {'type': 'boolean'},
+                                                'cases': {'anyOf': [{'type': 'array',
+                                                                     'items': {'type': 'object',
+                                                                               'properties': {'set': {'type': 'object',
+                                                                                                      'additionalProperties': {'type': 'string'}},
+                                                                                              'click': {'type': 'array',
+                                                                                                        'items': {'type': 'string'}},
+                                                                                              'keys': {'type': 'array',
+                                                                                                       'items': {'type': 'object',
+                                                                                                                 'properties': {'key': {'type': 'string'},
+                                                                                                                                'hold_ms': {'type': 'integer',
+                                                                                                                                            'minimum': 0,
+                                                                                                                                            'maximum': 1000}},
+                                                                                                                 'required': ['key'],
+                                                                                                                 'additionalProperties': False}},
+                                                                                              'wait_ms': {'type': 'integer',
+                                                                                                          'minimum': 0,
+                                                                                                          'maximum': 2000},
+                                                                                              'expect': {'type': 'object',
+                                                                                                         'additionalProperties': {'type': 'string'}},
+                                                                                              'visible': {'type': 'array',
+                                                                                                          'items': {'type': 'string'}},
+                                                                                              'hidden': {'type': 'array',
+                                                                                                         'items': {'type': 'string'}},
+                                                                                              'mobile_fit': {'type': 'boolean'}},
+                                                                               'additionalProperties': False}},
+                                                                    {'type': 'string'}]},
+                                                'saved_sequence': {'type': 'integer', 'minimum': 1, 'maximum': 8},
+                                                'saved_case': {'type': 'integer', 'minimum': 1, 'maximum': 12},
+                                                'suite_sha256': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}},
+                                 'required': ['path', 'cases'],
+                                 'additionalProperties': False}}},
     {"type": "function", "function": {"name": "write_file", "description": "Write complete UTF-8 text to a project file. Parent directories are created.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "edit_file", "description": "Replace one exact block in an existing UTF-8 project file without resending the whole file. Read the old block first. Fails if it is missing or appears more than once. Supply expected_sha256 from a previous edit to reject stale changes.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}, "expected_sha256": {"type": "string"}}, "required": ["path", "old_text", "new_text"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_text", "description": "Search text in project files using ripgrep.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"], "additionalProperties": False}}},
@@ -503,6 +577,11 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                     except ValueError:
                         verdict = {}
                     value["check_verdict"] = {"passed": value["passed"]}
+                    value["check_summary"] = {
+                        "cases": [{key: case[key] for key in
+                                   ("case", "path", "function", "saved_sequence", "inputs", "failures") if key in case}
+                                  for case in verdict.get("cases", []) if case.get("passed") is False][:2],
+                        "errors": verdict.get("errors", [])[:2]}
                     value["check_path"] = check_args.get("path", "")
                     value["verifier_check_passed"] = value["passed"] and verdict.get("verifier_check_passed") is True
                     if kind == "check_webapp":
@@ -582,7 +661,11 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             import webapp_check
 
             native_browser.close()
+            revision = None
+            if any(name in arguments for name in ("saved_sequence", "saved_case", "suite_sha256")):
+                arguments, revision = webapp_check.prepare_assertion_revision(folder, arguments)
             result = webapp_check.check(folder, arguments, screenshot=True)
+            result["path"] = arguments["path"]
             result["interaction_proven"] = bool(result.get("interactions"))
             if result["passed"] and not result["interaction_proven"]:
                 result["note"] = (
@@ -591,27 +674,72 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                     "text or visibility in the actual game/app state."
                 )
             if result["passed"]:
-                result["verifier_saved"] = webapp_check.save_verifier(folder, arguments, accumulate=True)
+                result["verifier_saved"] = webapp_check.save_verifier(folder, arguments, accumulate=True,
+                    expected_sha=revision["previous_sha256"] if revision else None)
+                if revision and not result["verifier_saved"]:
+                    result["passed"] = False
+                    result["errors"] = ["Verifier ownership changed during the assertion revision; no revision was saved."]
                 if result["verifier_saved"]:
                     verification = execute_tool(folder, "run_verifier", {})
                     result["verifier_check_passed"] = verification.startswith("Exit code: 0\n")
                     result["verification"] = verification[-1200:]
-                    if result["verifier_check_passed"]:
-                        # The supervisor appends its own exit-code footer.
-                        # Read the checker's JSON line, not that final footer.
-                        for line in reversed(verification.splitlines()):
-                            try:
-                                verified = json.loads(line)
-                                if isinstance(verified, dict) and verified.get("passed") is True:
-                                    result["verified_paths"] = verified.get("verified_paths", [])
-                                    break
-                            except ValueError:
-                                continue
+                    report = None
+                    report_error = ""
+                    for line in reversed(verification.splitlines()):
+                        try:
+                            value = json.loads(line)
+                            if isinstance(value, dict) and type(value.get("passed")) is bool and isinstance(value.get("checks"), list):
+                                report = value
+                                break
+                        except ValueError:
+                            continue
+                    if report:
+                        try:
+                            report = webapp_check.resolve_saved_report(folder, report)
+                        except (OSError, ValueError, TypeError, KeyError) as error:
+                            report_error = str(error)
+                            report = None
+                            result["verifier_check_passed"] = False
+                    if result["verifier_check_passed"] and report:
+                        result["verified_paths"] = report.get("verified_paths", [])
                     if not result["verifier_check_passed"]:
                         result["passed"] = False
-                        result["errors"] = ["Retained browser checks failed: " + verification[-1200:]]
+                        result["errors"] = ["Retained browser checks failed; inspect their saved sequence/case and correct the actual cause."]
+                        if report:
+                            result["case_count"] = report.get("case_count", len(result["cases"]))
+                            result["failed_case_count"] = report.get("failed_case_count", 0)
+                            result["cases"] = [{**case, "path": check["path"], "saved_sequence": sequence}
+                                for sequence, check in enumerate(report["checks"], 1)
+                                for case in check.get("cases", []) if case.get("passed") is False]
+                            result["javascript_errors"] = [error for check in report["checks"]
+                                for error in check.get("javascript_errors", [])][:4]
+                            result["errors"] += report.get("errors", [])[:4]
+                        else:
+                            result["errors"].append(report_error or verification[-1200:])
+            saved = folder / ".local-ai/webapp-check.json"
+            if saved.is_file() and saved.stat().st_size <= 64000:
+                raw = saved.read_bytes()
+                result["suite_sha256"] = hashlib.sha256(raw).hexdigest()
+                if revision:
+                    result["revision"] = revision
+                    if result.get("verifier_saved"):
+                        result["checked_sequence"] = len(json.loads(raw).get("checks", []))
+                failures = [case for case in result.get("cases", []) if case.get("passed") is False
+                            and type(case.get("saved_sequence")) is int]
+                if failures:
+                    first = failures[0]
+                    reference = {"path": first["path"], "saved_sequence": first["saved_sequence"],
+                                 "saved_case": first["case"], "suite_sha256": result["suite_sha256"]}
+                    if first.get("suggested_assertions"):
+                        reference["cases"] = [first["suggested_assertions"]]
+                    result["assertion_revision_reference"] = reference
+                    result["revision_guidance"] = (
+                        "Compare the assertion with the latest user request. If it is mistaken, call check_webapp "
+                        "with this reference and cases=[one corrected assertion-only case]. A suggested hidden "
+                        "assertion is appropriate only when the user requires hiding rather than clearing text. "
+                        "The checker retains input actions and unrelated assertions; it does not repair source bugs.")
             result["ok"] = result["passed"]
-            return json.dumps(result, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
+            return webapp_check.serialize_result(result, MAX_TOOL_OUTPUT)
         if name == "write_file":
             target = project_path(folder, arguments["path"])
             content = arguments["content"]
@@ -1126,6 +1254,8 @@ def prompt(project: dict) -> str:
         "accumulate and each starts from a fresh page; reuse a sequence to correct its expectations. "
         "An empty expect value asserts cleared DOM text; hidden asserts invisibility even if text remains. "
         "Choose the outcome required by the user. "
+        "To correct a saved assertion, use check_webapp with its assertion_revision_reference and one "
+        "assertion-only case; input actions are retained. task_steps revise changes SQLite step checks. "
         "Use real input and result cases before writing a verifier. The tool creates a "
         "repeatable .local-ai/verify.ps1 when its cases pass. Fix failed cases, rerun the "
         "browser check after edits, and then run the saved verifier. Keep any required "
@@ -1321,6 +1451,10 @@ def fresh_messages(messages: list, folder: Path, state: dict | None = None,
     import task_context
 
     checkpoint = task_context.snapshot(folder)
+    queue = task_context.step_status(folder)
+    plan_issue = uncreated_plan_issue(folder, state, queue)
+    if plan_issue:
+        checkpoint += "\n" + plan_issue
     if state and state.get("failed_checks"):
         checkpoint += ("\nUnresolved failed checks: " + ", ".join(state["failed_checks"].values())
                        + ". Repair the cause and rerun those checks before finishing.")
@@ -1350,7 +1484,6 @@ def fresh_messages(messages: list, folder: Path, state: dict | None = None,
         groups.append(current)
     # The current DB unit replaces older step conversations, not the original
     # request, architecture notes, failed checks or project files.
-    queue = task_context.step_status(folder)
     chosen = groups[-(2 if queue["total"] else RECENT_WORK_GROUPS):]
     # User steering is also written to USER-REQUESTS.md, but preserve the
     # latest message verbatim in case a crash precedes that file write.
@@ -1591,6 +1724,27 @@ def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
         import webapp_check
 
         verdict = json.loads(result)
+        if any(key in arguments for key in ("saved_sequence", "saved_case", "suite_sha256")):
+            import task_context
+
+            revision = verdict.get("revision", {})
+            if (revision.get("saved_sequence") != arguments.get("saved_sequence")
+                    or revision.get("saved_case") != arguments.get("saved_case")
+                    or revision.get("previous_sha256") != arguments.get("suite_sha256")
+                    or verdict.get("verifier_check_passed") is not True):
+                return {}
+            raw = project_path(folder, ".local-ai/webapp-check.json").read_bytes()
+            if hashlib.sha256(raw).hexdigest() != verdict.get("suite_sha256"):
+                return {}
+            saved = json.loads(raw)
+            sequence = verdict.get("checked_sequence")
+            if (saved.get("request_hash") != task_context.request_identity(folder)
+                    or type(sequence) is not int or not 1 <= sequence <= len(saved.get("checks", []))):
+                return {}
+            effective = saved["checks"][sequence - 1]
+            if project_path(folder, effective["path"]) != project_path(folder, arguments["path"]):
+                return {}
+            arguments = effective
         cases = webapp_check.normalize_spec(arguments).get("cases", [])
         if (verdict.get("passed") is not True or not isinstance(cases, list)
                 or len(cases) < 2
@@ -1760,6 +1914,21 @@ def invalidate_checks(state: dict) -> None:
     state.pop("failed_checks", None)
     state.pop("recent_read_hashes", None)
     state.pop("read_cycle_nudged", None)
+    state.pop("uncreated_step_plan", None)
+
+
+def uncreated_plan_issue(folder: Path, state: dict | None, queue: dict) -> str:
+    """A failed first plan cannot silently become a completed workflow."""
+    import task_context
+
+    pending = (state or {}).get("uncreated_step_plan")
+    if (not isinstance(pending, dict) or queue["total"]
+            or pending.get("request_hash") != task_context.request_identity(folder)):
+        return ""
+    return ("The initial SQLite plan was not created. Correct the task_steps action=plan arguments "
+            "and create the requested small steps before finishing. Each step needs phase, title, "
+            "and check_tool/check_arguments or check_command. Earlier argument error (data): "
+            + json.dumps(str(pending.get("error", ""))[:600]))
 
 
 def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: str) -> None:
@@ -1798,6 +1967,9 @@ def completion_issue(folder: Path, project: dict | None = None,
     import task_context
 
     queue = task_context.step_status(folder)
+    plan_issue = uncreated_plan_issue(folder, state, queue)
+    if plan_issue:
+        return plan_issue
     if queue["remaining"]:
         return ("The SQLite step queue still has unfinished work. Complete or split the active "
                 "step with task_steps; its actual acceptance check must pass before advancing.")
@@ -2273,6 +2445,12 @@ def run_slice(project: dict, complete=None) -> dict:
             task_context.record_action(folder, function.get("name", ""), result, args,
                                        request_hash=planned_request_hash)
             outcome = task_context.action_outcome(function.get("name", ""), result)
+            if function.get("name") == "task_steps":
+                queue_now = task_context.step_status(folder)
+                if queue_now["total"]:
+                    state.pop("uncreated_step_plan", None)
+                elif args.get("action") == "plan" and outcome.startswith("Failed"):
+                    state["uncreated_step_plan"] = {"request_hash": planned_request_hash, "error": result[:700]}
             if function.get("name") == "task_steps" and outcome == "Completed":
                 step_boundary = args.get("action") in {"plan", "split", "revise"} or (
                     args.get("action") == "complete" and json.loads(result).get("passed") is True)
