@@ -6348,7 +6348,7 @@ def gui():
                 controls, text="▶ Play song",
                 command=lambda pid=item["id"]: task_action(pid, "play_music"),
             ).pack(side="left", padx=(0, 6))
-        if standalone_audio_project(item) and item["status"] in ("ready_for_review", "accepted"):
+        if (direct_music or standalone_audio_project(item)) and item["status"] in ("ready_for_review", "accepted"):
             ttk.Button(controls, text="Share to Facebook",
                        command=lambda pid=item["id"]: task_action(pid, "share_facebook")).pack(
                            side="left", padx=(0, 6))
