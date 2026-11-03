@@ -22,6 +22,12 @@ missing_tests = sorted(
 if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
+    # Developer evidence stays in source ZIPs, not the installed runtime's
+    # bounded allowlist. Older updaters accept at most 250 manifest entries.
+    "benchmarks/results/webapp-auto-20261103.json",
+    "benchmarks/results/document-auto-20261103.json",
+    "benchmarks/native_worker_smoke.py",
+    "benchmarks/README.md",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",
@@ -50,4 +56,10 @@ with ZipFile(destination, "w", ZIP_DEFLATED, compresslevel=9) as archive:
             archive.writestr(name, backend)
         else:
             archive.write(path, name)
-print(f"Packed {len(names)} source files in {destination}")
+# Exercise the actual updater contract before compiling/publishing an EXE.
+# Source unit tests alone cannot prove that this particular ZIP is installable.
+from self_update import validated_manifest
+
+with ZipFile(destination) as archive:
+    validated_manifest(archive)
+print(f"Packed and update-validated {len(names)} source files in {destination}")
