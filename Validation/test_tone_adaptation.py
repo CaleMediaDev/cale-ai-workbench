@@ -22,6 +22,13 @@ class ToneAdaptationTests(unittest.TestCase):
             self.assertEqual(tone_adaptation.social_reply("Hello"),
                              "I heard you. What do you need?")
 
+    def test_malformed_model_response_leaves_a_short_reply(self):
+        for result in ({"choices": None}, {"choices": [{"message": None}]}):
+            with self.subTest(result=result):
+                with patch("cloud_ai.post", return_value=result):
+                    self.assertEqual(tone_adaptation.social_reply("Hello"),
+                                     "I heard you. What do you need?")
+
     def test_next_speaker_does_not_inherit_previous_rudeness(self):
         result = {"choices": [{"message": {"content": "Glad I could help!"}}]}
         with patch("cloud_ai.post", return_value=result) as post:

@@ -43,6 +43,6 @@ def social_reply(utterance: str) -> str:
         answer = str(result["choices"][0]["message"].get("content") or "").strip().strip('"')
         if answer and len(answer) <= 240 and "\n" not in answer:
             return answer
-    except (KeyError, IndexError, OSError, ValueError, TimeoutError):
+    except (KeyError, IndexError, TypeError, AttributeError, OSError, ValueError, TimeoutError):
         pass
     return "I heard you. What do you need?"
