@@ -946,7 +946,7 @@ def start_music_job(
     import task_eta
 
     estimate = task_eta.music_estimate_seconds(
-        JOBS, duration_seconds, bool(instrumental), source_path,
+        JOBS, duration_seconds, bool(instrumental), source_path, reference_mode,
     )
     started = time.time()
     info = {

@@ -87,3 +87,33 @@ def test_short_vocal_eta_prefers_similar_songs_over_scaled_long_renders(tmp_path
         "duration_seconds": 60, "created": 1000, "finished": 1010,
     }), encoding="utf-8")
     assert task_eta.music_estimate_seconds(jobs, 60, False) == 104
+
+
+def test_style_reference_eta_excludes_quick_covers_and_legacy_jobs(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    for index, elapsed in enumerate((12, 20, 28)):
+        (jobs / f"cover-{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "source_path": "clip.mp4", "reference_mode": "cover",
+            "duration_seconds": 180, "created": 1000,
+            "finished": 1000 + elapsed,
+        }), encoding="utf-8")
+    (jobs / "old.json").write_text(json.dumps({
+        "status": "complete", "instrumental": False,
+        "source_path": "clip.mp4", "duration_seconds": 180,
+        "created": 1000, "finished": 1010,
+    }), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(
+        jobs, 180, False, "clip.mp4", "style",
+    ) is None
+    for index, elapsed in enumerate((90, 130)):
+        (jobs / f"style-{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "source_path": "clip.mp4", "reference_mode": "style",
+            "duration_seconds": 180, "created": 1000,
+            "finished": 1000 + elapsed,
+        }), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(
+        jobs, 180, False, "clip.mp4", "style",
+    ) == 110

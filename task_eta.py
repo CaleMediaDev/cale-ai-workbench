@@ -51,7 +51,8 @@ def total_time(created: float, updated: float, status: str,
 
 
 def music_estimate_seconds(jobs_dir: Path, duration_seconds: int,
-                           instrumental: bool, source_path: str = "") -> int | None:
+                           instrumental: bool, source_path: str = "",
+                           reference_mode: str = "cover") -> int | None:
     """Estimate a local song from recent completed renders on this PC.
 
     The median resists first-use downloads and other unusually slow renders.
@@ -74,6 +75,7 @@ def music_estimate_seconds(jobs_dir: Path, duration_seconds: int,
             if (job.get("status") != "complete" or not length or
                     bool(job.get("instrumental")) != instrumental or
                     bool(job.get("source_path")) != bool(source_path) or
+                    (bool(source_path) and job.get("reference_mode") != reference_mode) or
                     int(job.get("vocal_retry") or 0) > 0 or
                     not 2 <= elapsed <= 3600):
                 continue

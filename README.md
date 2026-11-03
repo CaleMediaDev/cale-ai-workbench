@@ -34,6 +34,8 @@ Music jobs reconcile the agent's tool arguments with the written request: a clea
 
 For a requested song longer than a supplied audio clip, Cale uploads that clip as a style reference to ACE-Step's text-to-music path. The cover path follows the source clip's length and cannot extend it. Style-reference jobs check the finished duration and, when vocals were requested, check the rendered audio for sung words before reporting success. A style reference guides the new recording; it does not guarantee the same melody or voice.
 
+Music countdowns use recent completed renders of the same kind. Longer style-reference songs are timed against style-reference jobs, rather than quick covers of short clips; when there is not enough comparable history, the task card says it is estimating instead of showing a misleading short countdown.
+
 Music references can also be MP4, MOV, M4V, WebM, or MKV videos with an audio track. Cale extracts the audio locally into a temporary WAV for the music engine and removes that temporary copy after upload. The video frames are not sent to the music engine, and a video without readable audio returns a clear error.
 
 Phone recordings and other compressed audio in M4A, AAC, OGG, or OPUS format can also be used as references. Cale converts those files locally to a temporary WAV for upload; the original remains untouched.
