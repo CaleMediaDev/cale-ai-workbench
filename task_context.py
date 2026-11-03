@@ -225,7 +225,7 @@ def snapshot(folder: str | Path) -> str:
         lines.append("Work only on the active step. Make one small source change, run its check "
                      "with task_steps action=complete, then continue from the fresh checkpoint. "
                      "Use split if it is too broad. Completing a batch is not completing the whole request.")
-        if queue["active"] and queue["active"]["check_tool"] in {"check_python_function", "check_webapp"}:
+        if queue["active"] and queue["active"]["check_tool"] in {"check_python_function", "check_javascript_function", "check_webapp"}:
             lines.append("SQLite check_arguments above are authoritative for this step. If a case contradicts "
                          "the original requirement, revise the active step through task_steps action=revise, "
                          "preserving its other cases. Editing the generated JSON suite does not revise the step.")
@@ -304,8 +304,8 @@ def _validate_steps(steps: list) -> list[tuple]:
                 raise ValueError("Use a short check_command, or prefer structured check_tool/check_arguments.")
             arguments = {}
         else:
-            if tool not in {"check_python_function", "check_webapp", "run_verifier"} or "check_command" in step or "shell" in step:
-                raise ValueError("Structured steps support check_python_function, check_webapp or run_verifier; omit shell/check_command.")
+            if tool not in {"check_python_function", "check_javascript_function", "check_webapp", "run_verifier"} or "check_command" in step or "shell" in step:
+                raise ValueError("Structured steps support check_python_function, check_javascript_function, check_webapp or run_verifier; omit shell/check_command.")
             arguments = step.get("check_arguments", {})
             if not isinstance(arguments, dict):
                 raise ValueError("check_arguments must be a JSON object.")
@@ -319,7 +319,11 @@ def _validate_steps(steps: list) -> list[tuple]:
             try:
                 validate(arguments, schema)
             except ValidationError as error:
-                raise ValueError("Invalid structured acceptance arguments: " + error.message[:300]) from error
+                path = ".".join(str(part)[:80] for part in list(error.absolute_path)[:12]) or "$"
+                hint = (" JavaScript cases need positional JSON args, not named objects."
+                        if tool == "check_javascript_function" and path.endswith(".args") else "")
+                raise ValueError(f"Invalid structured acceptance arguments at {path}: "
+                                 f"{error.validator} expected {json.dumps(error.validator_value)[:160]}." + hint) from error
         try:
             encoded = json.dumps(arguments, allow_nan=False)
         except (ValueError, TypeError, RecursionError) as error:
@@ -442,7 +446,7 @@ def action_outcome(tool: str, result: str) -> str:
             return "Failed" if isinstance(value, dict) and value.get("passed") is False else "Completed"
         except (ValueError, TypeError):
             return "Failed"
-    if tool in {"check_webapp", "check_document_report", "check_python_function"}:
+    if tool in {"check_webapp", "check_document_report", "check_python_function", "check_javascript_function"}:
         # Running the checker successfully is different from its assertions
         # passing. Only an explicit true verdict is evidence of completion.
         try:
@@ -517,7 +521,7 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
     This local project memory excludes arbitrary read output and full reports.
     Quoting messages keeps embedded newlines from masquerading as instructions.
     """
-    if tool not in {"check_webapp", "check_document_report", "check_python_function"} or not isinstance(arguments, dict):
+    if tool not in {"check_webapp", "check_document_report", "check_python_function", "check_javascript_function"} or not isinstance(arguments, dict):
         return None
     if result.startswith("Tool error: This exact call failed twice"):
         return None  # A skipped call is not new evidence; preserve its real diagnostic.
@@ -527,6 +531,7 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
         if not isinstance(verdict, dict) or type(verdict.get("passed")) is not bool:
             return None
         name = (".local-ai/cale-python-checks.json" if tool == "check_python_function" else
+                ".local-ai/cale-javascript-checks.json" if tool == "check_javascript_function" else
                 arguments.get("path" if tool == "check_webapp" else "report_path"))
         if not isinstance(name, str) or not name or Path(name).is_absolute():
             return None
@@ -567,7 +572,7 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
                 for reason in case.get("failures", [])[:3]:
                     if isinstance(reason, str):
                         function = (" " + str(case.get("path", "")) + ":" + str(case.get("function", ""))
-                                    if tool == "check_python_function" else "")
+                                    if tool in {"check_python_function", "check_javascript_function"} else "")
                         location = ""
                         if tool == "check_webapp" and isinstance(case.get("path"), str):
                             location += " page=" + json.dumps(case["path"][:512])

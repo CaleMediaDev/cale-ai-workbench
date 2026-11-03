@@ -1,5 +1,23 @@
 # Native worker reality check
 
+## Typed JavaScript logic repair
+
+`javascript_logic_repair.py --runtime-root C:\path\to\AIWorkbench --keep-folder C:\path\to\new-folder`
+asks the production local-only worker to repair four real game helper functions,
+plan one SQLite unit per function, and build typed JavaScript acceptance cases.
+Independent grading checks 13 behaviors and, when a saved verifier exists,
+four deliberate behavior regressions. This exercises a pure module, not a
+complete game, rendering, or visual quality. It does not alter user projects.
+
+The [retained trial](results/javascript-logic-20261103.json) took 666.61 seconds,
+18 validated model responses and 20 upstream local inference calls. It repaired
+movement and cooldown behavior, but completed zero of four units, missed edge
+collision and unspawned-wave behavior, and did not save a passing verifier.
+The worker repeatedly confused positional test arguments. This is a failed
+end-to-end result, not a speed or reliability claim. Failure diagnostics gained
+function signatures during the run, so it is not a controlled comparison.
+It does not qualify a model for complete-game routing.
+
 ## Saved browser assertion repair
 
 `browser_assertion_repair.py --model cale-gemma4-edge --keep-folder C:\path\to\new-folder`

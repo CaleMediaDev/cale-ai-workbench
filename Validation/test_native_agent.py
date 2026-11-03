@@ -262,6 +262,223 @@ def run_typed_python_check(item, arguments):
         return json.loads(native_agent.execute_tool(folder, "check_python_function", arguments))
 
 
+def run_typed_javascript_check(item, arguments):
+    folder = Path(item["folder"])
+    state = folder / ".local-ai/test-supervisor"
+    state.mkdir(exist_ok=True)
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state):
+        return json.loads(native_agent.execute_tool(folder, "check_javascript_function", arguments))
+
+
+def javascript_report(folder, source, cases, name="calculate", suffix="js"):
+    (folder / ("logic." + suffix)).write_text(source, encoding="utf-8")
+    raw = json.dumps({"request_hash": task_context.request_identity(folder), "checks": [{
+        "path": "logic." + suffix, "function": name, "cases": cases}]}).encode()
+    target = folder / ".local-ai/test-javascript.json"
+    target.write_bytes(raw)
+    digest = hashlib.sha256(raw).hexdigest()
+    return native_agent.run_javascript_checks(folder, target, digest), target, digest
+
+
+def test_javascript_formats_execute_current_source_and_generate_repeatable_verifiers(tmp_path):
+    formats = [("js", "function calculate(x){return x*2}", "calculate"),
+        ("js", "const calculate=x=>x*2", "calculate"),
+        ("js", "export function calculate(x){return x*2}", "calculate"),
+        ("mjs", "export default x=>x*2", "default"),
+        ("cjs", "exports.calculate=x=>x*2", "calculate"),
+        ("cjs", "module.exports=x=>x*2", "default")]
+    for number, (suffix, source, function) in enumerate(formats):
+        item = project(tmp_path / ("O'Brien JS " + str(number)))
+        folder = Path(item["folder"])
+        path = "logic." + suffix
+        (folder / path).write_text(source)
+        spec = {"path": path, "function": function, "cases": [{"args": [2], "expected": 4}, {"args": [-1], "expected": -2}]}
+        result = run_typed_javascript_check(item, spec)
+        assert result["passed"] and result["verifier_saved"] and result["verifier_check_passed"]
+        (folder / path).write_text(source.replace("x*2", "x*3"))  # Same size, no module cache allowed.
+        with patch.object(long_tasks, "projects", return_value=[item]):
+            assert native_agent.execute_tool(folder, "run_verifier", {}).startswith("Exit code: 1")
+
+
+def test_javascript_cases_compare_nested_types_unicode_and_exception_names(tmp_path):
+    folder = Path(project(tmp_path / "typed-js")["folder"])
+    source = """function calculate(x){if(x<0)throw new RangeError('negative');
+      console.log('discard this');return {ok:true,total:x,parts:[null,'£é']}}"""
+    cases = [{"args": [3.25], "expected": {"ok": True, "total": 3.25, "parts": [None, '£é']}},
+             {"args": [-1], "raises": "RangeError"}]
+    assert javascript_report(folder, source, cases)[0]["passed"]
+    cases[0]["expected"]["ok"] = 1
+    assert not javascript_report(folder, source, cases)[0]["passed"]
+    cases[0]["expected"]["ok"] = True
+    cases[1]["raises"] = "TypeError"
+    assert not javascript_report(folder, source, cases)[0]["passed"]
+    custom = "class NeedsPositive extends Error{};function calculate(){throw new NeedsPositive('negative')}"
+    assert javascript_report(folder, custom, [{"raises": "NeedsPositive"}])[0]["passed"]
+
+
+def test_function_numbers_do_not_round_large_integer_mismatches_into_success(tmp_path):
+    assert native_agent.python_values_match(10**200, 10**200, 1e-8)
+    assert not native_agent.python_values_match(2**53, 2**53 + 1, 1e-8)
+    assert not native_agent.python_values_match(2**53 + 1, float(2**53), 1e-8)
+    folder = Path(project(tmp_path / "large-js")["folder"])
+    report = javascript_report(folder, "function calculate(){return 9007199254740992}", [
+        {"expected": 9007199254740993}])[0]
+    assert not report["passed"]
+
+
+def test_javascript_harness_failures_never_satisfy_expected_error_cases(tmp_path):
+    folder = Path(project(tmp_path / "unsupported-js")["folder"])
+    for expression in ("undefined", "NaN", "Infinity", "Array(1)", "Promise.resolve(2)", "new Date()", "1n"):
+        source = f"function calculate(){{return {expression}}}"
+        result = javascript_report(folder, source, [{"raises": "Error"}])[0]
+        assert not result["passed"] and "checker" in str(result).lower()
+    for source in ("function calculate(){while(true){}}", "while(true){};function calculate(){}"):
+        started = time.monotonic()
+        assert not javascript_report(folder, source, [{"raises": "Error"}])[0]["passed"]
+        assert time.monotonic() - started < 12
+    assert not javascript_report(folder, '// calculate is absent', [{"args": [2], "expected": {}}], name="Object")[0]["passed"]
+    assert not javascript_report(folder, "import fs from 'node:fs';export function calculate(){}",
+                                 [{"raises": "Error"}], suffix="mjs")[0]["passed"]
+
+
+def test_javascript_cases_reset_module_state_and_clone_mutable_arguments(tmp_path):
+    folder = Path(project(tmp_path / "fresh-js")["folder"])
+    assert javascript_report(folder, "let n=0;function calculate(){return ++n}", [
+        {"expected": 1}, {"expected": 1}])[0]["passed"]
+    cases = [{"args": [[1, 2]], "expected": [2, 1]}, {"args": [[3, 4]], "expected": [4, 3]}]
+    assert javascript_report(folder, "function calculate(x){x.reverse();return x}", cases)[0]["passed"]
+    assert cases[0]["args"] == [[1, 2]]
+
+
+def test_javascript_cases_accumulate_across_functions_and_preserve_custom_verifier(tmp_path):
+    item = project(tmp_path / "retained-js")
+    folder = Path(item["folder"])
+    source = "function double(n){return n*2} function increment(n){return n+1}"
+    (folder / "logic.js").write_text(source)
+    def check(function, value, expected):
+        return run_typed_javascript_check(item, {"path": "logic.js", "function": function,
+            "cases": [{"args": [value], "expected": expected}]})
+    assert check("double", 2, 4)["passed"]
+    assert check("increment", 2, 3)["passed"]
+    (folder / "logic.js").write_text(source.replace("n*2", "n*3"))
+    failed = check("increment", 3, 4)
+    assert not failed["passed"] and failed["case_count"] == 3
+    assert failed["cases"][0]["function"] == "double"
+    state = {}
+    native_agent.remember_checker_verdict(state, "check_javascript_function", {"path": "logic.js"}, json.dumps(failed))
+    assert state["failed_checks"]
+    (folder / "logic.js").write_text(source)
+    passed = check("increment", 3, 4)
+    native_agent.remember_checker_verdict(state, "check_javascript_function", {"path": "logic.js"}, json.dumps(passed))
+    assert passed["passed"] and not state["failed_checks"]
+    custom = '# User integration suite\nexit 0\n'
+    (folder / ".local-ai/verify.ps1").write_text(custom)
+    assert not check("double", 3, 6)["verifier_saved"]
+    assert (folder / ".local-ai/verify.ps1").read_text() == custom
+
+
+def test_javascript_sqlite_units_use_saved_cases_and_auto_advance_on_real_direct_check(tmp_path):
+    item = project(tmp_path / "queued-js")
+    folder = Path(item["folder"])
+    spec = {"path": "logic.js", "function": "double", "cases": [{"args": [2], "expected": 4}]}
+    queue = task_context.plan_steps(folder, [{"phase": "Logic", "title": "Fix double",
+        "check_tool": "check_javascript_function", "check_arguments": spec}])
+    (folder / "logic.js").write_text("function double(n){return n*3}")
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": queue["active"]["id"]}))
+    assert not failed["passed"] and "double" in task_context.snapshot(folder)
+    (folder / "logic.js").write_text("function double(n){return n*2}")
+    response = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "check", "function": {
+        "name": "check_javascript_function", "arguments": json.dumps(spec)}}]}}]}
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(item, complete=lambda _: response)
+    assert task_context.step_status(folder)["done"] == 1
+    assert state["verify_passed"] and not state["failed_checks"]
+
+
+def test_javascript_acceptance_pins_cases_request_and_source_snapshot(tmp_path):
+    import pytest
+
+    folder = Path(project(tmp_path / "bound-js")["folder"])
+    result, target, digest = javascript_report(folder, "function calculate(x){return x}", [{"args": [2], "expected": 2}])
+    assert result["passed"]
+    raw = target.read_bytes()
+    target.write_bytes(raw + b' ')
+    with pytest.raises(ValueError, match="cases changed"):
+        native_agent.run_javascript_checks(folder, target, digest)
+    target.write_bytes(raw)
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("New instructions")
+    with pytest.raises(ValueError, match="instructions changed"):
+        native_agent.run_javascript_checks(folder, target, digest)
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("")
+    run = native_agent.subprocess.run
+    def edit_source(*args, **kwargs):
+        result = run(*args, **kwargs)
+        (folder / "logic.js").write_text("function calculate(x){return x+1}")
+        return result
+    with patch.object(native_agent.subprocess, "run", side_effect=edit_source):
+        report = native_agent.run_javascript_checks(folder, target, digest)
+    assert not report["passed"] and "changed during verification" in str(report["errors"])
+
+
+def test_javascript_rejects_expression_names_keyword_args_and_unbounded_case_data(tmp_path):
+    import pytest
+
+    folder = Path(project(tmp_path / "js-arguments")["folder"])
+    (folder / "logic.js").write_text("function calculate(x){return x}")
+    base = {"path": "logic.js", "function": "calculate", "cases": [{"args": [1], "expected": 1}]}
+    for change in ({"function": "process.exit()"}, {"path": "../outside.js"},
+                   {"cases": [{"kwargs": {"x": 1}, "expected": 1}]}, {"cases": []},
+                   {"cases": [{"args": [1], "expected": float('nan')}]}, {"tolerance": True},
+                   {"cases": [{"expected": 1, "raises": "Error"}]}, {"cases": [{"args": ['x' * 9000], "expected": 1}]}):
+        with pytest.raises(ValueError):
+            native_agent.normalize_javascript_check(folder, {**base, **change})
+    assert not (folder / ".local-ai/cale-javascript-checks.json").exists()
+
+
+def test_javascript_function_count_and_missing_node_fail_before_subject_execution(tmp_path):
+    import pytest
+
+    folder = Path(project(tmp_path / "node-readiness")["folder"])
+    _, target, _ = javascript_report(folder, "function calculate(x){return x}", [{"args": [1], "expected": 1}])
+    data = json.loads(target.read_text())
+    data["checks"] *= 9
+    raw = json.dumps(data).encode()
+    target.write_bytes(raw)
+    with patch.object(native_agent.subprocess, "run") as child, pytest.raises(ValueError, match="1 to 8"):
+        native_agent.run_javascript_checks(folder, target, hashlib.sha256(raw).hexdigest())
+    child.assert_not_called()
+    data["checks"] = data["checks"][:1]
+    raw = json.dumps(data).encode()
+    target.write_bytes(raw)
+    with (patch.object(native_agent, "ROOT", folder), patch.object(native_agent.sys, "executable", r'C:\missing-python.exe'),
+          patch.object(native_agent.shutil, "which", return_value=None), pytest.raises(ValueError, match="Node runtime is not ready")):
+        native_agent.run_javascript_checks(folder, target, hashlib.sha256(raw).hexdigest())
+
+
+def test_javascript_module_sources_are_searchable_and_explicit_outputs_are_required(tmp_path):
+    folder = Path(project(tmp_path / "module-memory")["folder"])
+    (folder / "movement.mjs").write_text("export function steerShip(x){return x+1}")
+    (folder / "waves.cjs").write_text("exports.finishWave=n=>n+1")
+    project_memory.index(folder, include_code=True)
+    assert project_memory.search(folder, "steerShip")
+    assert project_memory.search(folder, "finishWave")
+    assert native_agent.requested_root_files("Create logic.mjs and save waves.cjs") == ["logic.mjs", "waves.cjs"]
+
+
+def test_javascript_structured_argument_errors_identify_array_path_without_copying_bad_value(tmp_path):
+    import pytest
+
+    folder = Path(project(tmp_path / "js-plan-diagnostic")["folder"])
+    with pytest.raises(ValueError) as failure:
+        task_context.plan_steps(folder, [{"phase": "Movement", "title": "Move player", "check_tool": "check_javascript_function",
+            "check_arguments": {"path": "logic.js", "function": "movePlayer", "cases": [
+                {"args": {"private_named_argument": 10}, "expected": 10}]}}])
+    assert "cases.0.args" in str(failure.value) and 'expected "array"' in str(failure.value)
+    assert "positional JSON args" in str(failure.value)
+    assert "private_named_argument" not in str(failure.value)
+
+
 def test_typed_python_checker_passes_real_cases_and_rejects_regression_in_saved_verifier():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "O'Brien's folder")

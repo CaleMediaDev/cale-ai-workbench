@@ -218,6 +218,30 @@ Image generation uses Segmind SSD-1B when the PC has at least 8 GB of GPU memory
 
 ## Long tasks
 
+Pure JavaScript logic can use `check_javascript_function` with a project path,
+function name, positional JSON `args`, and an `expected` value or exception
+constructor name in `raises`. The same typed cases work in SQLite step
+acceptance checks. This runs current source through the bundled Node runtime;
+plain scripts, CommonJS exports, and import-free ES modules (`.js`, `.cjs`,
+`.mjs`) are supported. Each case starts with fresh module state. Functions must
+be synchronous and return finite, plain JSON values. DOM interactions, imports,
+and asynchronous workflows need the project's browser or integration tests.
+
+Cases accumulate across up to eight functions, with 24 cases per function.
+The generated verifier binds the saved suite to its checksum and current user
+instructions, detects source changes during verification, and reruns all retained
+cases. Existing custom or other component verifiers are preserved; a passing
+function check does not replace an integration check. Nested argument errors
+identify the incorrect field, and failures show the actual function signature
+to help repair positional-input mistakes. Large integer comparisons no longer
+round unequal integers into a passing result. Context compaction also preserves
+a short durable plan when it fits alongside the tool catalog.
+
+The model still chooses its tests. The retained local JavaScript repair trial
+failed to complete its four steps, despite partial code repairs. Passing the
+checker implementation's regression suite is not proof of reliable game
+building; see the developer benchmark evidence below.
+
 The project queue and native Hermes task board use SQLite. Each project also gets `.local-ai/memory.sqlite3` automatically, using the SQLite FTS5 engine bundled with Python. The agent can search indexed files and save typed memory; it re-reads live files before trusting an excerpt. The worker maintains `.local-ai/PLAN.md` and `PROGRESS.md`. When Hermes exhausts one worker's goal-turn budget, the supervisor waits for that run to exit, then starts a new generation from the saved files and user follow-ups. Actual requests for user input still stop for a decision. The supervisor runs the project's verification script independently, starts a separate review pass, and checks again before acceptance. It hashes project file contents before and after verification, so a check that edits the project cannot certify its own new output. It also compares file contents before acceptance, including same-size edits with unchanged timestamps. Existing tasks waiting for review get a fresh independent check when upgraded to this stronger record. Repeated verification failures stop for input rather than retrying forever.
 
 Your PC must be on and awake. The optional sign-in task restarts the supervisor when you sign back in. This is resumable work across days, not a promise that any request will complete unattended. One demanding local worker runs at a time.

@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 KINDS = frozenset({"requirement", "decision", "lesson", "skill", "component", "app", "note", "file", "document"})
-TEXT_SUFFIXES = frozenset({".md", ".txt", ".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".html", ".css", ".yaml", ".yml", ".toml", ".ps1", ".sql"})
+TEXT_SUFFIXES = frozenset({".md", ".txt", ".py", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".json", ".html", ".css", ".yaml", ".yml", ".toml", ".ps1", ".sql"})
 DOCUMENT_SUFFIXES = frozenset({".pdf", ".docx", ".xlsx", ".pptx"})
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 DOCUMENT_CHUNK_CHARS = 16_000

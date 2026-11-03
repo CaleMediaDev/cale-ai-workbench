@@ -1,0 +1,178 @@
+{
+  "scenario": "javascript_logic_repair",
+  "scope": "Repair real JS game helpers through local tools, then independently grade them.\n\nThis is a pure-module fixture, not a complete playable game or visual benchmark.\nNo cloud account, original user project, model installation or app task is used.\n",
+  "brief": "Repair logic.js, the actual plain-script module loaded by a browser game.\nPreserve its four top-level function APIs and plain function-declaration format:\nmovePlayer(x,direction,seconds,width,speed) moves by direction*speed*seconds and\nclamps the player's center to [20,width-20]. Inputs have direction -1..1, width>=40,\nfinite numbers and nonnegative seconds. Verify left/right bounds and frame-independent timing.\noverlaps(a,b) takes top-left x,y,w,h rectangles. Only positive-area overlap is true;\ntouching edges and separated rectangles are false.\nadvanceWave(wave,remaining,spawned) adds one only when remaining===0 AND spawned is true.\ntickCooldown(remaining,seconds) subtracts seconds and clamps at zero.\nUse one small SQLite unit per function, four completed units total. Save meaningful\ncheck_javascript_function input/expected acceptance cases in each unit, including\nthe explicit boundaries above. Run the accumulated read-only verifier. No PowerShell\ntest code is needed. Do not create a test-only copy or change the public APIs.\nKeep PLAN.md and PROGRESS.md accurate. This request is for the helper module only.\n",
+  "seconds": 666.61,
+  "model_calls": 18,
+  "tool_calls": 14,
+  "prompt_tokens": 137874,
+  "completion_tokens": 21603,
+  "tools_used": [
+    "list_files",
+    "read_file",
+    "task_steps",
+    "task_steps",
+    "task_steps",
+    "task_steps",
+    "read_file",
+    "edit_file",
+    "task_steps",
+    "read_file",
+    "run_command",
+    "read_file",
+    "read_file",
+    "edit_file"
+  ],
+  "routes": [
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 26.45
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 3.57
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 10.99
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 85.17
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "seconds": 80.8
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "seconds": 15.95
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 4.39
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 9.27
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 4.09
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 5.05
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 7.6
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 88.84
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 4.36
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 89.05
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 7.32
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 37.85
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 90.78
+    },
+    {
+      "model": "cale-fast",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "seconds": 93.13
+    }
+  ],
+  "router_call_attempts": 18,
+  "upstream_local_calls": 20,
+  "checkpoint_status": "continue",
+  "inference_error": null,
+  "grade": {
+    "checks": {
+      "movement": true,
+      "left": true,
+      "right": true,
+      "still": true,
+      "frame_independence": true,
+      "hit": true,
+      "edge": false,
+      "miss": true,
+      "complete": true,
+      "incomplete": true,
+      "not_spawned": false,
+      "cooldown": true,
+      "cooldown_clamp": true
+    },
+    "verifier_passes_correct": false,
+    "mutations": {},
+    "steps": {
+      "total": 4,
+      "done": 0,
+      "remaining": 4
+    },
+    "passed": false
+  },
+  "run_outcome": "failed",
+  "app_version": "0.5.447-development",
+  "development_note": "Function-signature diagnostics were added during this trial; evolving code, not a controlled comparison."
+}

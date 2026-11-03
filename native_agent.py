@@ -34,6 +34,16 @@ PROJECT_COMMAND_TIMEOUT = 90
 
 TOOLS = [
     {"type": "function", "function": {
+        "name": "check_javascript_function",
+        "description": "Test an actual synchronous JavaScript function with concrete JSON args and expected results, or raises='RangeError'. Supports plain scripts, CommonJS named exports and import-free ES modules (.js/.cjs/.mjs), including default exports. No DOM, browser APIs or imports; use browser checks for integration. Example: path='logic.js', function='movePlayer', cases=[{args:[100,1,0.5,600,120],expected:160}]. Cases accumulate per function/input in a bounded, repeatable local verifier. Tests execute current source, not a copy. Preserves an existing custom verifier; other integration checks remain necessary.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}, "function": {"type": "string"},
+            "tolerance": {"type": "number", "minimum": 0, "maximum": 0.0001},
+            "cases": {"type": "array", "minItems": 1, "maxItems": 24, "items": {
+                "type": "object", "properties": {"args": {"type": "array"},
+                    "expected": {}, "raises": {"type": "string"}}, "additionalProperties": False}}},
+            "required": ["path", "function", "cases"], "additionalProperties": False}}},
+    {"type": "function", "function": {
         "name": "check_python_function",
         "description": "Run real input/output tests for a top-level Python function, without writing test code or PowerShell. Example: path='temperature.py', function='to_celsius', cases=[{args:[32],expected:0},{args:[212],expected:100},{args:[-40],expected:-40}]. Use kwargs when needed, or raises='ValueError' instead of expected for an exception case. Numeric tolerance defaults to 1e-8. Saves a repeatable verifier on success, preserving a custom verifier. Cases accumulate by function and input; resubmitting an input corrects its expectation. All retained functions must pass.",
         "parameters": {"type": "object", "properties": {
@@ -48,6 +58,7 @@ TOOLS = [
      'function': {'name': 'task_steps',
                   'description': 'Durable SQLite queue for small phases. Plan 2-6 tiny steps. Use '
                                  "check_tool='check_python_function' with check_arguments={path,function,cases}, "
+                                 "or check_tool='check_javascript_function' for a pure JavaScript module, "
                                  "or check_tool='check_webapp' with check_arguments={path,cases} for HTML apps. "
                                  "Use check_tool='run_verifier' for integration. Other work can use a read-only "
                                  'check_command. complete runs the saved acceptance check and advances only on '
@@ -83,6 +94,7 @@ TOOLS = [
                                                                                                                  'powershell']},
                                                                                               'check_tool': {'type': 'string',
                                                                                                              'enum': ['check_python_function',
+                                                                                                                      'check_javascript_function',
                                                                                                                       'check_webapp',
                                                                                                                       'run_verifier']},
                                                                                               'check_arguments': {'type': 'object'}},
@@ -573,7 +585,7 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                 kind = active["check_tool"]
                 check_args = (active["check_arguments"] if kind != "run_command" else
                               {"command": active["check_command"], "shell": active["shell"]})
-                structured = kind in {"check_python_function", "check_webapp"}
+                structured = kind in {"check_python_function", "check_javascript_function", "check_webapp"}
                 before = step_source_fingerprint(folder, structured)
                 checked = execute_tool(folder, kind, check_args)
                 if kind == "check_webapp":
@@ -672,6 +684,8 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             return json.dumps(result, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "check_python_function":
             return json.dumps(check_python_function(folder, arguments), ensure_ascii=False)[:MAX_TOOL_OUTPUT]
+        if name == "check_javascript_function":
+            return json.dumps(check_javascript_function(folder, arguments), ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "check_webapp":
             # The task browser keeps a Playwright sync event loop alive. The
             # independent offline checker needs its own fresh event loop.
@@ -988,6 +1002,14 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
 
 
 def normalize_python_check(folder: Path, spec: dict) -> dict:
+    return normalize_function_check(folder, spec)
+
+
+def normalize_javascript_check(folder: Path, spec: dict) -> dict:
+    return normalize_function_check(folder, spec, javascript=True)
+
+
+def normalize_function_check(folder: Path, spec: dict, *, javascript: bool = False) -> dict:
     """Validate plain JSON test data and an actual local function before saving."""
     import ast
     import math
@@ -995,17 +1017,21 @@ def normalize_python_check(folder: Path, spec: dict) -> dict:
     if not isinstance(spec, dict) or set(spec) - {"path", "function", "cases", "tolerance"}:
         raise ValueError("Use path, function, cases and optional tolerance.")
     path = project_path(folder, spec.get("path", ""))
-    if not path.is_file() or path.suffix.lower() != ".py" or path.stat().st_size > 500_000:
-        raise ValueError("Choose a Python source file under 500 KB inside this project.")
+    label = "JavaScript" if javascript else "Python"
+    suffixes = {".js", ".mjs", ".cjs"} if javascript else {".py"}
+    if not path.is_file() or path.suffix.lower() not in suffixes or path.stat().st_size > 500_000:
+        raise ValueError(f"Choose a {label} source file under 500 KB inside this project.")
     if len(path.relative_to(folder.resolve()).as_posix()) > 512:
-        raise ValueError("Use a Python source path under 512 characters.")
+        raise ValueError(f"Use a {label} source path under 512 characters.")
     name = spec.get("function")
-    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_]\w{0,79}", name):
-        raise ValueError("Use one Python function name, not an expression or dotted path.")
-    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
-    functions = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
-    if name not in functions:
-        raise ValueError(f"Top-level function {name!r} was not found. Available functions: {', '.join(functions[:16]) or 'none'}")
+    pattern = r"[A-Za-z_$][A-Za-z0-9_$]{0,79}" if javascript else r"[A-Za-z_]\w{0,79}"
+    if not isinstance(name, str) or not re.fullmatch(pattern, name):
+        raise ValueError(f"Use one {label} function name, not an expression or dotted path.")
+    if not javascript:
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        functions = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
+        if name not in functions:
+            raise ValueError(f"Top-level function {name!r} was not found. Available functions: {', '.join(functions[:16]) or 'none'}")
     tolerance = spec.get("tolerance", 1e-8)
     if type(tolerance) not in (int, float) or not math.isfinite(tolerance) or not 0 <= tolerance <= 1e-4:
         raise ValueError("Numeric tolerance must be finite and between 0 and 0.0001.")
@@ -1018,13 +1044,16 @@ def normalize_python_check(folder: Path, spec: dict) -> dict:
                 or ("expected" in case) == ("raises" in case)):
             raise ValueError("Each case needs exactly one of expected or raises, plus optional args and kwargs.")
         args, kwargs = case.get("args", []), case.get("kwargs", {})
+        if javascript and kwargs:
+            raise ValueError("JavaScript cases use positional args; keyword arguments are not supported.")
         if not isinstance(args, list) or len(args) > 16 or not isinstance(kwargs, dict) or len(kwargs) > 16:
             raise ValueError("Use up to 16 positional or keyword arguments per case.")
         if any(not isinstance(key, str) or not key.isidentifier() for key in kwargs):
             raise ValueError("Keyword argument names must be Python identifiers.")
         if "raises" in case and (not isinstance(case["raises"], str) or not re.fullmatch(r"[A-Za-z_]\w{0,79}", case["raises"])):
             raise ValueError("raises must name an exception type such as ValueError.")
-        value = {"args": args, "kwargs": kwargs, **{key: case[key] for key in ("expected", "raises") if key in case}}
+        value = {"args": args, **({} if javascript else {"kwargs": kwargs}),
+                 **{key: case[key] for key in ("expected", "raises") if key in case}}
         try:
             encoded = json.dumps(value, allow_nan=False)
         except (ValueError, TypeError, RecursionError) as error:
@@ -1043,7 +1072,17 @@ def python_values_match(actual, expected, tolerance):
     if isinstance(actual, bool) or isinstance(expected, bool):
         return type(actual) is type(expected) and actual == expected
     if type(actual) in (int, float) and type(expected) in (int, float):
-        return math.isfinite(actual) and math.isclose(actual, expected, rel_tol=0, abs_tol=tolerance)
+        if any(type(value) is float and not math.isfinite(value) for value in (actual, expected)):
+            return False
+        if type(actual) is int and type(expected) is int:
+            return actual == expected
+        if abs(actual) > 2**53 or abs(expected) > 2**53:
+            from decimal import Decimal, localcontext
+
+            with localcontext() as context:
+                context.prec = max(len(str(actual)), len(str(expected))) + 40
+                return abs(Decimal(str(actual)) - Decimal(str(expected))) <= Decimal(str(tolerance))
+        return math.isclose(actual, expected, rel_tol=0, abs_tol=tolerance)
     if isinstance(actual, (list, tuple)) and isinstance(expected, list):
         return len(actual) == len(expected) and all(python_values_match(a, b, tolerance) for a, b in zip(actual, expected))
     if isinstance(actual, dict) and isinstance(expected, dict):
@@ -1124,35 +1163,197 @@ def run_python_checks(folder: Path, spec_path: Path, expected_sha: str) -> dict:
             "errors": errors[:8]}
 
 
+JAVASCRIPT_CHECK_DRIVER = r"""
+const vm=require('node:vm'),fs=require('node:fs');
+const input=JSON.parse(fs.readFileSync(0,'utf8'));
+// Every case gets fresh module state. Project console output is discarded.
+const bootstrap=`globalThis.module={exports:{}};globalThis.exports=module.exports;
+globalThis.console=Object.freeze({log(){},warn(){},error(){},info(){},debug(){},trace(){}});`;
+const invoke=`(()=>{
+ let value;
+ try {value=__cale_subject(...JSON.parse(__cale_args));}
+ catch(error){return JSON.stringify({exception:String(error instanceof Error?
+   (error.constructor&&error.constructor.name||error.name||'Error'):'ThrownValue').slice(0,80),
+   message:String(error&&error.message||error).slice(0,240)});}
+ try {
+  let nodes=0;const seen=new Set();
+  function plain(value,depth=0){
+   if(++nodes>10000||depth>32)throw Error('Return value exceeds the JSON size/depth limits');
+   if(value===null||typeof value==='boolean')return;
+   if(typeof value==='number'&&Number.isFinite(value))return;
+   if(typeof value==='string'&&value.length<=8000)return;
+   if(typeof value!=='object'||seen.has(value))throw Error('Return only finite plain JSON values');
+   const proto=Object.getPrototypeOf(value);
+   if(!Array.isArray(value)&&proto!==Object.prototype&&proto!==null)throw Error('Return plain JSON, not promises or class instances');
+   if(Array.isArray(value)){
+    if(value.length>10000)throw Error('Return array is too large');
+    for(let i=0;i<value.length;i++)if(!Object.hasOwn(value,i))throw Error('Return explicit JSON values, not sparse arrays');
+   }
+   seen.add(value);
+   for(const key of Object.keys(value)){
+    const prop=Object.getOwnPropertyDescriptor(value,key);
+    if(!Object.hasOwn(prop,'value'))throw Error('Return plain data, not getters');
+    plain(prop.value,depth+1);
+   }
+   seen.delete(value);
+  }
+  plain(value);return JSON.stringify({value});
+ }catch(error){return JSON.stringify({checker_error:String(error.message).slice(0,240)});}
+})()`;
+async function run(){
+ const results=[];
+ for(const args of input.args){
+  try {
+   const context=vm.createContext(Object.create(null),{codeGeneration:{strings:false,wasm:false},microtaskMode:'afterEvaluate'});
+   vm.runInContext(bootstrap,context,{timeout:500});
+   let script=null,moduleMode=input.path.endsWith('.mjs');
+   if(!moduleMode){try{script=new vm.Script(input.source,{filename:input.path});}catch(_){moduleMode=true;}}
+   let subject;
+   if(moduleMode){
+    const module=new vm.SourceTextModule(input.source,{context,identifier:input.path});
+    await module.link(()=>{throw Error('Imports are unsupported here; use the project integration suite');});
+    await module.evaluate({timeout:500});
+    subject=Object.hasOwn(module.namespace,input.function)?module.namespace[input.function]:undefined;
+   }else{
+    let previous;try{previous=vm.runInContext(input.function,context,{timeout:100});}catch(_){}
+    script.runInContext(context,{timeout:500});
+    try{subject=vm.runInContext(input.function,context,{timeout:100});}catch(_){}
+    if(subject===previous)subject=undefined; // A builtin is not a project-defined function.
+    if(typeof subject!=='function'){
+     context.__cale_name=input.function;
+     subject=vm.runInContext(`Object.hasOwn(module.exports,__cale_name)?module.exports[__cale_name]:
+       (__cale_name==='default'&&typeof module.exports==='function'?module.exports:undefined)`,context,{timeout:100});
+    }
+   }
+   if(typeof subject!=='function')throw Error('The requested project function/export was not found');
+   context.__cale_subject=subject;context.__cale_args=JSON.stringify(args);
+   const encoded=vm.runInContext(invoke,context,{timeout:250});
+   if(typeof encoded!=='string'||Buffer.byteLength(encoded)>8192)throw Error('Return JSON must be under 8 KB');
+   results.push({...JSON.parse(encoded),signature:Function.prototype.toString.call(subject).slice(0,200)});
+  }catch(error){results.push({checker_error:String(error.message).slice(0,240)});}
+ }
+ process.stdout.write(JSON.stringify(results));
+}
+run().catch(error=>{process.stderr.write(String(error.message));process.exitCode=1;});
+"""
+
+
+def run_javascript_checks(folder: Path, spec_path: Path, expected_sha: str) -> dict:
+    """Run current, import-free JS functions with bounded Node processes.
+
+    This is a function test runner, not a security boundary or a browser. Node
+    permissions, VM deadlines and the existing supervisor containment apply.
+    """
+    import task_context
+
+    if (not spec_path.resolve().is_relative_to((folder / ".local-ai").resolve())
+            or spec_path.stat().st_size > 64_000):
+        raise ValueError("Use a JavaScript acceptance suite under 64 KB in .local-ai.")
+    raw = spec_path.read_bytes()
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_sha) or hashlib.sha256(raw).hexdigest() != expected_sha:
+        raise ValueError("JavaScript acceptance cases changed after the verifier was saved.")
+    record = json.loads(raw)
+    if record.get("request_hash") != task_context.request_identity(folder):
+        raise ValueError("User instructions changed; refresh JavaScript acceptance cases.")
+    checks = record.get("checks")
+    if not isinstance(checks, list) or not 1 <= len(checks) <= 8:
+        raise ValueError("Use 1 to 8 functions in the saved JavaScript checker.")
+    roots = [ROOT, *([Path(sys.executable).resolve().parents[3]] if len(Path(sys.executable).parents) > 3 else [])]
+    node = next((str(root / "Toolbox/node-v26.13.0-win-x64/node.exe") for root in roots
+                 if (root / "Toolbox/node-v26.13.0-win-x64/node.exe").is_file()), None) or shutil.which("node")
+    if not node:
+        raise ValueError("The Node runtime is not ready; allow Cale's core-tool setup to finish.")
+    specs = [normalize_javascript_check(folder, requested) for requested in checks]
+    # One byte snapshot per file avoids mixing versions between functions or
+    # reading different source between hashing and execution. No require cache.
+    sources = {path: project_path(folder, path).read_bytes() for path in dict.fromkeys(spec["path"] for spec in specs)}
+    if any(len(source) > 500_000 for source in sources.values()):
+        raise ValueError("JavaScript source grew beyond the 500 KB check limit.")
+    results, errors = [], []
+    for spec in specs:
+        try:
+            child = subprocess.run([node, "--permission", "--experimental-vm-modules", "--max-old-space-size=128",
+                "-e", JAVASCRIPT_CHECK_DRIVER], input=json.dumps({"source": sources[spec["path"]].decode("utf-8-sig"),
+                    "path": spec["path"], "function": spec["function"], "args": [case["args"] for case in spec["cases"]]}),
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8, check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            if child.returncode or not child.stdout:
+                raise ValueError("Node did not return cases; imports, top-level await and runtime errors need an integration suite. "
+                                 + child.stderr[-300:])
+            actuals = json.loads(child.stdout)
+            if not isinstance(actuals, list) or len(actuals) != len(spec["cases"]):
+                raise ValueError("JavaScript runner returned an incomplete result.")
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            errors.append(f"{spec['path']} {spec['function']}: {str(error)[:400]}")
+            continue
+        for number, (case, actual) in enumerate(zip(spec["cases"], actuals, strict=True), 1):
+            failures = []
+            if actual.get("checker_error"):
+                failures.append("JavaScript checker: " + actual["checker_error"])
+            elif "exception" in actual:
+                if case.get("raises") != actual["exception"]:
+                    failures.append(f"Raised {actual['exception']}: {actual.get('message', '')}")
+            elif "raises" in case:
+                failures.append(f"Expected {case['raises']}, but the function returned normally")
+            elif "value" not in actual or not python_values_match(actual["value"], case["expected"], spec["tolerance"]):
+                failures.append(f"{actual.get('signature', spec['function'])}: expected {json.dumps(case['expected'])[:160]}, "
+                                f"got {json.dumps(actual.get('value'))[:160]}. Check positional input order and arithmetic against the required API.")
+            inputs = {"args": case["args"]}
+            if len(json.dumps(inputs)) > 500:
+                inputs = {"preview": json.dumps(inputs)[:480]}
+            results.append({"path": spec["path"], "function": spec["function"], "case": number,
+                            "inputs": inputs, "function_signature": actual.get("signature", ""),
+                            "passed": not failures, "failures": failures})
+    for path, source in sources.items():
+        if hashlib.sha256(project_path(folder, path).read_bytes()).digest() != hashlib.sha256(source).digest():
+            errors.append(path + " changed during verification")
+    if hashlib.sha256(spec_path.read_bytes()).hexdigest() != expected_sha or record["request_hash"] != task_context.request_identity(folder):
+        errors.append("JavaScript acceptance cases or user instructions changed during verification")
+    failed = [case for case in results if not case["passed"]]
+    return {"passed": bool(results) and not failed and not errors, "case_count": len(results),
+            "passed_cases": len(results) - len(failed), "cases": (failed or results)[:4],
+            "diagnostics_limited": len(failed or results) > 4, "errors": errors[:8]}
+
+
 def check_python_function(folder: Path, arguments: dict) -> dict:
+    return check_function(folder, arguments)
+
+
+def check_javascript_function(folder: Path, arguments: dict) -> dict:
+    return check_function(folder, arguments, javascript=True)
+
+
+def check_function(folder: Path, arguments: dict, *, javascript: bool = False) -> dict:
     """Run typed cases and generate an owned verifier, preserving other checks."""
     import long_tasks
     import task_context
 
     folder = folder.resolve()
-    incoming = normalize_python_check(folder, arguments)
+    normalize = normalize_javascript_check if javascript else normalize_python_check
+    language = "javascript" if javascript else "python"
+    incoming = normalize(folder, arguments)
     notes = project_path(folder, ".local-ai")
     notes.mkdir(exist_ok=True)
-    target = notes / "cale-python-checks.json"
+    target = notes / f"cale-{language}-checks.json"
     request_hash = task_context.request_identity(folder)
     checks = []
     if target.is_file():
         prior = json.loads(target.read_text(encoding="utf-8"))
         if prior.get("request_hash") == request_hash:
-            checks = [normalize_python_check(folder, item) for item in prior.get("checks", [])]
+            checks = [normalize(folder, item) for item in prior.get("checks", [])]
     key = (incoming["path"], incoming["function"])
     old = next((item for item in checks if (item["path"], item["function"]) == key), None)
     if old:
-        merged = {json.dumps([case["args"], case["kwargs"]], sort_keys=True): case for case in old["cases"]}
-        merged.update({json.dumps([case["args"], case["kwargs"]], sort_keys=True): case for case in incoming["cases"]})
+        merged = {json.dumps([case["args"], case.get("kwargs", {})], sort_keys=True): case for case in old["cases"]}
+        merged.update({json.dumps([case["args"], case.get("kwargs", {})], sort_keys=True): case for case in incoming["cases"]})
         incoming["cases"] = list(merged.values())
-        incoming = normalize_python_check(folder, incoming)
+        incoming = normalize(folder, incoming)
     checks = [item for item in checks if (item["path"], item["function"]) != key] + [incoming]
     if len(checks) > 8:
         raise ValueError("Use a saved test suite for more than eight functions.")
     raw = json.dumps({"request_hash": request_hash, "checks": checks}, allow_nan=False).encode("utf-8")
     if len(raw) > 64_000:
-        raise ValueError("The saved Python check suite must be under 64 KB.")
+        raise ValueError(f"The saved {language} check suite must be under 64 KB.")
     temporary = target.with_suffix(".tmp")
     temporary.write_bytes(raw)
     os.replace(temporary, target)
@@ -1160,7 +1361,7 @@ def check_python_function(folder: Path, arguments: dict) -> dict:
     def literal(text):
         return "'" + str(text).replace("'", "''") + "'"
     command = "& " + " ".join(literal(value) for value in (sys.executable, Path(__file__).resolve(),
-        "check-python", folder, target, spec_sha))
+        "check-" + language, folder, target, spec_sha))
     before = long_tasks.fingerprint(folder)
     checked = execute_tool(folder, "run_command", {"command": command, "shell": "powershell"})
     try:
@@ -1175,7 +1376,7 @@ def check_python_function(folder: Path, arguments: dict) -> dict:
         result["passed"] = False
         result.setdefault("errors", []).append("Project files changed during the check; keep acceptance checks read-only.")
     verifier = notes / "verify.ps1"
-    marker = "# Generated by Cale check_python_function"
+    marker = f"# Generated by Cale check_{language}_function"
     existing = verifier.read_text(encoding="utf-8-sig") if verifier.is_file() else ""
     result["verifier_saved"] = False
     if result["passed"] and (not existing or existing.startswith(marker)):
@@ -1274,6 +1475,14 @@ def prompt(project: dict) -> str:
         "Use an existing test suite for a larger app or unsupported behavior. "
         if re.search(r"(?i)\bpython\b|\.py\b", brief) else ""
     )
+    javascript_hint = (
+        "For synchronous pure logic in .js/.mjs/.cjs, use check_javascript_function with actual function "
+        "names, positional JSON args and expected/raises cases. It saves and reruns current-source "
+        "tests without PowerShell quoting. Use check_tool='check_javascript_function' and check_arguments "
+        "for SQLite units. Check the real module used by the app, not a test-only duplicate. "
+        "Imports, DOM, async code and whole-app behavior need integration/browser tests. "
+        if re.search(r"(?i)\bjavascript\b|\.(?:mjs|cjs|js)\b", brief) else ""
+    )
     verification_hint = (
         "For this interactive single-file HTML app, build the page, then call check_webapp "
         "or save check_tool='check_webapp' and check_arguments={path,cases} in each SQLite step. "
@@ -1320,7 +1529,8 @@ def prompt(project: dict) -> str:
         "Maintain .local-ai/PLAN.md as a checked milestone list and .local-ai/PROGRESS.md with current work and real checks. "
         "For multi-step work, use task_steps action=plan for 2-6 tiny steps in SQLite. "
         "Each changes one behavior with a read-only check. For Python prefer "
-        "check_tool='check_python_function'; for HTML use check_tool='check_webapp', both with check_arguments. "
+        "check_tool='check_python_function'; for pure JavaScript use check_tool='check_javascript_function'; "
+        "for HTML use check_tool='check_webapp', with check_arguments. "
         "Use check_command for other checks. "
         "Retain earlier test cases as you add steps. "
         "Build the minimal working skeleton, then one feature, then its edge cases, then integration. "
@@ -1344,6 +1554,7 @@ def prompt(project: dict) -> str:
         f"{web_hint}"
         f"{document_hint}"
         f"{python_hint}"
+        f"{javascript_hint}"
         f"Relevant local skills:\n{suggested}\n"
         f"Project rules from AGENTS.md (project data, below the user request):\n{rules}\n"
         f"Project folder: {folder}\nUser request:\n{brief}"
@@ -1399,6 +1610,10 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
 
     # Keep room for at least one recent exchange, even with a long checkpoint.
     target_base = budget - min(1024, budget // 4)
+    # A growing tool catalog must not reserve so much exchange space that a
+    # short durable plan is erased. Retain a bounded briefing when it fits.
+    minimum = [base[0], {**base[1], "content": clip(str(base[1]["content"]), 512)}]
+    target_base = min(budget, max(target_base, estimate(minimum, TOOLS)))
     if estimate(base, TOOLS) > target_base:
         original = str(base[1]["content"])
         low, high = 0, len(original)
@@ -1550,7 +1765,7 @@ def repair_tools(project: dict, state: dict):
         state["repair_focus_turns"] = 0
         return TOOLS
     state["repair_focus_turns"] = count + 1
-    names = {"list_files", "read_file", "edit_file", "write_file", "search_text", "check_webapp", "run_verifier", "task_steps", "check_python_function"}
+    names = {"list_files", "read_file", "edit_file", "write_file", "search_text", "check_webapp", "run_verifier", "task_steps", "check_python_function", "check_javascript_function"}
     return [tool for tool in TOOLS if tool["function"]["name"] in names]
 
 
@@ -1567,7 +1782,7 @@ def step_tools(project: dict, state: dict, available: list) -> list:
         state["step_focus_turns"] = 0
         return available
     state["step_focus_turns"] = count + 1
-    core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text", "check_python_function",
+    core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text", "check_python_function", "check_javascript_function",
             "run_command", "run_verifier", "check_webapp", "check_document_report",
             "inspect_project_file", "transform_csv"}
     return [tool for tool in available if tool["function"]["name"] in core]
@@ -1604,7 +1819,7 @@ def bind_step_completion(folder: Path, arguments: dict, planned_step: dict | Non
 
 def step_exit_result(kind: str, result: str) -> str:
     """Translate only a registered checker's explicit verdict to queue evidence."""
-    if kind not in {"check_python_function", "check_webapp"}:
+    if kind not in {"check_python_function", "check_javascript_function", "check_webapp"}:
         return result
     try:
         verdict = json.loads(result)
@@ -1680,20 +1895,22 @@ def compact_step_progress(queue: dict) -> dict:
 
 def step_check_context(folder: Path, name: str, arguments: dict):
     """Recognize the active acceptance check even without a bookkeeping call."""
-    if name not in {"run_command", "run_verifier", "check_python_function", "check_webapp"}:
+    if name not in {"run_command", "run_verifier", "check_python_function", "check_javascript_function", "check_webapp"}:
         return None
     import task_context
 
     active = task_context.step_status(folder)["active"]
     if not active:
         return None
-    structured = active["check_tool"] in {"check_python_function", "check_webapp"}
+    structured = active["check_tool"] in {"check_python_function", "check_javascript_function", "check_webapp"}
     if structured:
         try:
             if name != active["check_tool"]:
                 return None
             if name == "check_python_function":
                 same = normalize_python_check(folder, arguments) == normalize_python_check(folder, active["check_arguments"])
+            elif name == "check_javascript_function":
+                same = normalize_javascript_check(folder, arguments) == normalize_javascript_check(folder, active["check_arguments"])
             else:
                 import webapp_check
 
@@ -1802,7 +2019,7 @@ def requested_root_files(brief: str) -> list[str]:
     """Find simple explicitly named output files without guessing app structure."""
     pattern = (r"(?i)\b(?:create|write|save)\s+(?:(?:a|an|the)\s+)?"
                r"(?:file\s+(?:named|called)\s+)?[`\"']?"
-               r"([A-Za-z0-9][A-Za-z0-9_.-]*\.(?:txt|md|html|css|js|jsx|ts|tsx|py|json|csv|ps1))\b")
+               r"([A-Za-z0-9][A-Za-z0-9_.-]*\.(?:txt|md|html|css|js|mjs|cjs|jsx|ts|tsx|py|json|csv|ps1))\b")
     found = []
     for match in re.finditer(pattern, brief):
         name = match.group(1)
@@ -2002,6 +2219,12 @@ def python_function_candidate(project: dict | None):
 
 
 def python_verifier_write_issue(folder: Path, project: dict, name: str, arguments: dict) -> str:
+    """Protect both typed verifiers; guide eligible Python modules before custom scripts."""
+    if (name in {"write_file", "edit_file"} and str(arguments.get("path", "")).replace("\\", "/").casefold() == ".local-ai/verify.ps1"):
+        script = folder / ".local-ai/verify.ps1"
+        existing = script.read_text(encoding="utf-8-sig") if script.is_file() else ""
+        if existing.startswith("# Generated by Cale check_javascript_function"):
+            return "Preserve the generated JavaScript verifier; add or correct cases through check_javascript_function."
     if name not in {"write_file", "edit_file"} or not python_function_candidate(project):
         return ""
     if str(arguments.get("path", "")).replace("\\", "/").casefold() != ".local-ai/verify.ps1":
@@ -2089,7 +2312,7 @@ def uncreated_plan_issue(folder: Path, state: dict | None, queue: dict) -> str:
 
 def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: str) -> None:
     """A failed assertion stays pending until that file's checker passes."""
-    if tool not in {"check_webapp", "check_document_report", "check_python_function"}:
+    if tool not in {"check_webapp", "check_document_report", "check_python_function", "check_javascript_function"}:
         return
     try:
         verdict = json.loads(result)
@@ -2098,6 +2321,7 @@ def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: st
     if not isinstance(verdict, dict) or type(verdict.get("passed")) is not bool:
         return
     path = (".local-ai/cale-python-checks.json" if tool == "check_python_function" else
+            ".local-ai/cale-javascript-checks.json" if tool == "check_javascript_function" else
             str(arguments.get("report_path" if tool == "check_document_report" else "path") or ""))
     path = os.path.normcase(os.path.normpath(path)).replace("\\", "/")
     key = tool + ":" + path
@@ -2625,7 +2849,7 @@ def run_slice(project: dict, complete=None) -> dict:
             if function.get("name") == "task_steps" and args.get("action") == "complete":
                 try:
                     step_result = json.loads(result)
-                    if step_result.get("check_tool") in {"check_python_function", "check_webapp"}:
+                    if step_result.get("check_tool") in {"check_python_function", "check_javascript_function", "check_webapp"}:
                         remember_checker_verdict(state, step_result["check_tool"], {"path": step_result.get("check_path", "")}, json.dumps(step_result["check_verdict"]))
                     if step_result.get("check_tool") == "check_webapp":
                         if step_result.get("browser_evidence"):
@@ -2636,7 +2860,7 @@ def run_slice(project: dict, complete=None) -> dict:
                         state["verify_passed"] = True
                 except (ValueError, KeyError, AttributeError):
                     pass
-            if function.get("name") == "check_python_function":
+            if function.get("name") in {"check_python_function", "check_javascript_function"}:
                 try:
                     verdict = json.loads(result)
                     if verdict.get("passed") is True and verdict.get("verifier_check_passed") is True:
@@ -2700,7 +2924,7 @@ def run_slice(project: dict, complete=None) -> dict:
             if router is not None:
                 kind = function.get("name", "")
                 proven = verifier_command_passed(kind, args, outcome)
-                if kind in {"check_webapp", "check_python_function", "check_document_report", "task_steps"}:
+                if kind in {"check_webapp", "check_python_function", "check_javascript_function", "check_document_report", "task_steps"}:
                     try:
                         verdict = json.loads(result)
                         proven = (outcome == "Completed" and isinstance(verdict, dict) and (
@@ -2904,7 +3128,7 @@ def apply_request(project: dict, action: str, note: str) -> str:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 5 and sys.argv[1] == "check-python":
+    if len(sys.argv) == 5 and sys.argv[1] in {"check-python", "check-javascript"}:
         try:
             folder = Path(sys.argv[2]).resolve()
             # A fresh unused cache prefix avoids stale dependency bytecode too.
@@ -2912,7 +3136,8 @@ if __name__ == "__main__":
             notes = project_path(folder, ".local-ai")
             sys.pycache_prefix = str(notes / f"uncached-{os.getpid()}-{time.time_ns()}")
             sys.dont_write_bytecode = True
-            result = run_python_checks(folder, Path(sys.argv[3]).resolve(), sys.argv[4])
+            runner = run_javascript_checks if sys.argv[1] == "check-javascript" else run_python_checks
+            result = runner(folder, Path(sys.argv[3]).resolve(), sys.argv[4])
         except BaseException as error:
             result = {"passed": False, "errors": [f"{type(error).__name__}: {str(error)[:500]}"]}
         print(json.dumps(result))
