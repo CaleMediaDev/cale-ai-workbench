@@ -320,7 +320,7 @@ def access_token(purpose="chat"):
             consent = donation.settings(ROOT)
             subject = str(value.get("subject") or "")
             fingerprint = hashlib.sha256(subject.encode()).hexdigest() if subject else ""
-            allowed = bool(consent["enabled"] and fingerprint and
+            allowed = bool(consent["enabled"] and "chatgpt" in consent.get("sources", ["chatgpt"]) and fingerprint and
                            consent.get("chatgpt_account") == fingerprint)
         elif purpose != "chat":
             allowed = False

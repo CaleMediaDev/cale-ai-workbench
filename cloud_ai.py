@@ -824,17 +824,18 @@ class Router:
                 self.last_attempt = now
             return True
 
-    def complete(self, payload, task_id=""):
+    def complete(self, payload, task_id="", *, scope_override=None, cancel=None):
         """Attribute this router request before any provider records its usage."""
         import usage_history
 
         token = usage_history.CURRENT_TASK.set(task_id)
         try:
-            return self._complete(payload)
+            return (self._complete(payload) if scope_override is None and cancel is None else
+                    self._complete(payload, scope_override=scope_override, cancel=cancel))
         finally:
             usage_history.CURRENT_TASK.reset(token)
 
-    def _complete(self, payload):
+    def _complete(self, payload, scope_override=None, cancel=None):
         """Return a validated completion from ChatGPT, free cloud, or Ollama."""
         import usage_history
 
@@ -844,6 +845,16 @@ class Router:
             )
         scope = routing_mode.load_scope(STATE)
         disconnected = pc_offline.offline()
+        def check_cancel():
+            if cancel and cancel():
+                raise InterruptedError("Inference cancelled by foreground activity")
+        check_cancel()
+        if scope_override is not None:
+            if scope_override != "free_cloud_only":
+                raise ValueError("Only a restrictive free-cloud request policy is supported")
+            if disconnected or scope == "local_only" or task_route(usage_history.CURRENT_TASK.get()) == "local_only":
+                raise RuntimeError("Cloud requests are blocked by the offline or local-only policy")
+            scope = "free_cloud_only"
         # Offline and an explicit per-task local restriction take priority
         # over every global mode, including Cloud/Free cloud only. Resolve
         # this before selecting a profile or loading cloud credentials.
@@ -949,6 +960,7 @@ class Router:
         if profile == "main" and not offline_mode:
             for provider, spec in sorted(connected,
                                          key=lambda pair: measured_speeds[pair[0]], reverse=True):
+                check_cancel()
                 provider_key = keys.get(provider)
                 provider_context = prompt_estimate + min(expected_output, spec.get("max_tokens", 8192)) + 1024
                 estimated_cost = cloud_providers.estimated_neurons(provider, payload)
@@ -1005,6 +1017,7 @@ class Router:
                     cloud_providers.likely_faster(size, openrouter_speed, local_speed),
                 ))
                 and self.reserve_free_request()):
+            check_cancel()
             openrouter_attempted = True
             try:
                 result = valid_completion(post(
@@ -1079,6 +1092,7 @@ class Router:
         # Free cloud is a fallback after installed local models fail. It never
         # uses paid OpenRouter models and has a persisted daily request cap.
         if key and not openrouter_attempted and self.reserve_free_request():
+            check_cancel()
             try:
                 result = valid_completion(
                     post(

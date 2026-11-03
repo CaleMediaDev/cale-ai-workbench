@@ -11,6 +11,7 @@ import threading
 import time
 from contextlib import closing
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import pytest
 
@@ -34,7 +35,7 @@ FINGERPRINT = hashlib.sha256(b"donor-subject").hexdigest()
 
 
 def enable(root):
-    donation.set_enabled(True, root, chatgpt_account=FINGERPRINT, github_account="donor")
+    donation.set_enabled(True, root, chatgpt_account=FINGERPRINT, github_account="donor", sources=["chatgpt"])
 
 
 def test_opt_in_is_off_until_saved_and_damage_fails_closed(tmp_path):
@@ -123,7 +124,7 @@ def test_cancel_before_start_never_reads_credentials_or_calls_inference():
 def test_account_changes_disable_donations_before_reading_source_or_spending(tmp_path, login, fingerprint):
     enable(tmp_path)
     service = donation.Service(tmp_path)
-    service.last_activity -= 121
+    service.last_activity -= 301
     with (patch("pc_offline.offline", return_value=False),
           patch("github_account.account", return_value=login),
           patch("chatgpt_auth.status", return_value={"sharing": True}),
@@ -140,7 +141,7 @@ def test_account_changes_disable_donations_before_reading_source_or_spending(tmp
 def test_idle_service_respects_foreground_privacy_modes_and_offline(tmp_path):
     service = donation.Service(tmp_path)
     enable(tmp_path)
-    service.last_activity -= 121
+    service.last_activity -= 301
     with patch("pc_offline.offline", return_value=False), patch.object(service, "_run") as work:
         for mode in ("local_only", "free_cloud_only"):
             routing_mode.save_scope(tmp_path / "Cloud", mode)
@@ -189,7 +190,7 @@ def test_background_flow_uses_only_public_source_and_keeps_usage_on_cancellation
     enable(tmp_path)
     (tmp_path / "personal-document.txt").write_text("PRIVATE DOCUMENT MUST NOT BE SENT")
     service = donation.Service(tmp_path)
-    service.last_activity -= 121
+    service.last_activity -= 301
     cancel = threading.Event()
     payloads = []
     def public(path, revision):
@@ -250,3 +251,179 @@ def test_completed_stream_keeps_reported_usage_when_user_returns_on_final_event(
             result = chatgpt_auth.complete({}, cancel=cancel.is_set, on_usage=accounted.append)
             assert result["usage"]["total_tokens"] == 15
     assert accounted[0]["usage"]["total_tokens"] == 15
+
+
+def test_local_consent_needs_only_github_and_cannot_authorize_chatgpt(tmp_path):
+    donation.set_enabled(True, tmp_path, sources=["local"], github_account="donor", chatgpt_account=FINGERPRINT)
+    assert donation.settings(tmp_path)["sources"] == ["local"]
+    assert donation.settings(tmp_path)["chatgpt_account"] == ""  # Older apps cannot reuse a paid grant either.
+    credentials = {"enabled": False, "subject": "donor-subject", "scopes": ["chatgpt.tokens.use.direct"],
+                   "expires_at": time.time() + 3600, "access_token": "test"}
+    with patch.object(chatgpt_auth, "ROOT", tmp_path), patch.object(chatgpt_auth, "load", return_value=credentials):
+        with pytest.raises(ValueError):
+            chatgpt_auth.access_token(purpose="donation")
+
+
+def test_local_only_setup_button_does_not_require_chatgpt(tmp_path):
+    import donation_ui
+
+    control = object.__new__(donation_ui.Controls)
+    control.service = SimpleNamespace(root=tmp_path, activity=lambda: None, message="")
+    control.login, control.chat_ready, control.local_ready = "donor", False, True
+    control.fingerprint = control.free_fingerprint = ""
+    control.source_vars = {key: SimpleNamespace(get=lambda source=key: source == "local") for key in donation.SOURCES}
+    control.intensity = SimpleNamespace(get=lambda: "medium")
+    control.refresh = lambda: None
+    assert control.ready_to_start()
+    control.toggle()
+    assert donation.settings(tmp_path)["enabled"]
+    assert donation.settings(tmp_path)["sources"] == ["local"]
+    assert donation.settings(tmp_path)["intensity"] == "medium"
+
+
+def test_upgrade_preserves_existing_chatgpt_only_consent_and_usage(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (state / "donation-settings.json").write_text(json.dumps({"enabled": True,
+        "chatgpt_account": FINGERPRINT, "github_account": "donor"}))
+    with closing(sqlite3.connect(state / "donations.db")) as conn, conn:
+        conn.execute("CREATE TABLE runs(id TEXT PRIMARY KEY,started REAL,status TEXT,tokens INTEGER,model TEXT,url TEXT,job TEXT)")
+        conn.execute("INSERT INTO runs VALUES('old',1,'submitted',75,'old-model','','old-job')")
+    assert donation.settings(tmp_path)["sources"] == ["chatgpt"]
+    assert donation.settings(tmp_path)["enabled"]
+    assert donation.total_tokens(tmp_path) == 75
+    assert donation.source_totals(tmp_path) == {"chatgpt": 75}
+
+
+@pytest.mark.parametrize("intensity,limit", [("slow", 1), ("medium", 4), ("full_blast", 12)])
+def test_intensity_caps_remain_durable_across_resources(tmp_path, intensity, limit):
+    for number in range(limit):
+        assert donation.claim_run(tmp_path, str(number), donation.SOURCES[number % 3], intensity)
+    assert not donation.claim_run(tmp_path, "too-many", "local", intensity)
+
+
+def test_token_receipts_add_free_fallbacks_without_double_counting(tmp_path):
+    run = donation.claim_run(tmp_path, "fix", "free_cloud", "medium")
+    donation.record_result(tmp_path, run, RESULT, "provider-1", "groq")
+    second = {**RESULT, "usage": {"total_tokens": 30}}
+    donation.record_result(tmp_path, run, second, "provider-2", "openrouter")
+    donation.record_result(tmp_path, run, second, "provider-2", "openrouter")
+    assert donation.total_tokens(tmp_path) == 80
+    assert donation.source_totals(tmp_path) == {"free_cloud": 80}
+
+
+def test_free_donation_observes_usage_without_leaking_context_or_double_recording(tmp_path):
+    import usage_history
+    received = []
+    class Router:
+        def complete(self, payload, **kwargs):
+            assert kwargs["scope_override"] == "free_cloud_only"
+            usage_history.record_completion(RESULT, "groq")
+            return RESULT
+    before = usage_history.OBSERVER.get()
+    with patch("cloud_ai.Router", Router), patch.object(usage_history, "DATABASE", tmp_path / "usage.db"):
+        result = donation.complete_donation({"messages": []}, "free_cloud", "medium", lambda: False,
+                                            lambda *args: received.append(args))
+    assert result == RESULT
+    assert usage_history.OBSERVER.get() is before
+    assert len(received) == 1 and received[0][1:] == ("groq", "free-1", True)
+
+
+@pytest.mark.parametrize("intensity,threads", [("slow", 2), ("medium", 4), ("full_blast", 8)])
+def test_local_stream_uses_only_loopback_and_reports_real_usage(intensity, threads):
+    calls, receipts = [], []
+    class Stream:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            pass
+        def __iter__(self):
+            yield b'{"message":{"content":"{\\"changes\\":[]}"},"done":false}\n'
+            yield b'{"model":"local-test","message":{"content":""},"done":true,"prompt_eval_count":12,"eval_count":4}\n'
+    def opened(request, **_kwargs):
+        assert request.full_url == "http://127.0.0.1:11434/api/chat"
+        calls.append(json.loads(request.data))
+        return Stream()
+    with (patch("cloud_ai.Router.local_candidates", return_value=["local-test"]),
+          patch.object(donation, "urlopen", side_effect=opened), patch.object(donation.os, "cpu_count", return_value=8),
+          patch("chatgpt_auth.complete") as paid):
+        result = donation.local_completion({"messages": [{"role": "user", "content": "Public code"}]},
+                                           intensity, lambda: False, lambda *args: receipts.append(args))
+    assert calls[0]["options"]["num_thread"] == threads
+    assert calls[0]["stream"] is True and calls[0]["think"] is False
+    assert result["usage"]["total_tokens"] == 16
+    assert json.loads(result["choices"][0]["message"]["content"]) == {"changes": []}
+    assert receipts[0][1] == "ollama"
+    paid.assert_not_called()
+
+
+def test_local_stream_closes_when_foreground_activity_interrupts():
+    cancel, closed = threading.Event(), []
+    class Stream:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            closed.append(True)
+        def __iter__(self):
+            cancel.set()
+            yield b'{"message":{"content":"partial"},"done":false}\n'
+    with patch("cloud_ai.Router.local_candidates", return_value=["local-test"]), patch.object(donation, "urlopen", return_value=Stream()):
+        with pytest.raises(InterruptedError):
+            donation.local_completion({"messages": []}, "slow", cancel.is_set, lambda *_args: None)
+    assert closed == [True]
+
+
+def test_local_background_flow_does_not_require_a_chatgpt_account(tmp_path):
+    donation.set_enabled(True, tmp_path, sources=["local"], github_account="donor")
+    service = donation.Service(tmp_path)
+    service.last_activity -= 301
+    def public(path, _revision):
+        return json.dumps([JOB]) if path == "donation-tasks.json" else SOURCES[path]
+    def local(_payload, _intensity, _cancel, receipt):
+        receipt(RESULT, "ollama", "main", False)
+        return RESULT
+    with (patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"),
+          patch.object(donation, "local_available", return_value=True),
+          patch.object(donation, "local_completion", side_effect=local),
+          patch("chatgpt_auth.status", side_effect=AssertionError("ChatGPT should not be needed")),
+          patch("usage_history.record_completion"), patch.object(donation, "public_file", side_effect=public),
+          patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
+          patch.object(donation, "open_proposal", return_value="https://github.com/test/pull/2") as publish):
+        service._run(threading.Event())
+    publish.assert_called_once()
+    assert donation.source_totals(tmp_path) == {"local": 50}
+
+
+def merged_fix(number, login="alice", author=1, **changes):
+    return {"number": number, "state": "closed", "merged_at": "2026-11-03T00:00:00Z", "draft": False,
+            "title": "[Donation] A real fix", "body": "<!-- cale-donation:example-fix -->",
+            "head": {"ref": "cale-donation-" + "a" * 16},
+            "base": {"ref": "main", "repo": {"full_name": donation.UPSTREAM}},
+            "user": {"id": author, "login": login}, **changes}
+
+
+def test_leaderboard_uses_merged_fixes_not_claimed_tokens_and_deduplicates(tmp_path):
+    pulls = [merged_fix(1), merged_fix(2), merged_fix(2), merged_fix(3, "bob", 2),
+             merged_fix(4, merged_at=None), merged_fix(5, state="open"),
+             merged_fix(6, title="Not a donation"), merged_fix(7, body="I donated 99999999 tokens"),
+             merged_fix(8, head={"ref": "ordinary-branch"}),
+             merged_fix(9, base={"ref": "main", "repo": {"full_name": "other/repository"}})]
+    with patch("pc_offline.offline", return_value=False):
+        result = donation.refresh_leaderboard(tmp_path, fetch=lambda _endpoint: pulls)
+    assert result["complete"]
+    assert result["rows"] == [{"login": "alice", "accepted": 2}, {"login": "bob", "accepted": 1}]
+    with patch("pc_offline.offline", return_value=True):
+        cached = donation.refresh_leaderboard(tmp_path, fetch=lambda _endpoint: pytest.fail("Offline request"))
+    assert cached["rows"] == result["rows"]
+
+
+def test_leaderboard_continues_partial_history_without_double_credit(tmp_path):
+    def pages(endpoint):
+        page = int(endpoint.rsplit("page=", 1)[1])
+        return [merged_fix(n) for n in range((page - 1) * 100 + 1, page * 100 + 1)] if page <= 10 else []
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1000):
+        partial = donation.refresh_leaderboard(tmp_path, fetch=pages)
+    assert not partial["complete"] and partial["rows"][0]["accepted"] == 1000
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1061):
+        complete = donation.refresh_leaderboard(tmp_path, fetch=pages, force=True)
+    assert complete["complete"] and complete["rows"][0]["accepted"] == 1000

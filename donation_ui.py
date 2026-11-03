@@ -13,13 +13,14 @@ import github_account
 
 
 class Controls:
-    """Show the token counter and a three-button opt-in connection flow."""
+    """Show resource choices, intensity, reported tokens and accepted-fix rankings."""
 
-    def __init__(self, header, window, service, connect_github, connect_chatgpt):
+    def __init__(self, header, window, service, connect_github, connect_chatgpt, connect_free=None):
         self.window = window
         self.service = service
         self.connect_github = connect_github
         self.connect_chatgpt = connect_chatgpt
+        self.connect_free = connect_free or (lambda: webbrowser.open("https://openrouter.ai"))
         self.popup = None
         self.checked_at = 0
         self.last_counter = 0
@@ -28,10 +29,14 @@ class Controls:
         self.login = ""
         self.chat_ready = False
         self.fingerprint = ""
+        self.free_fingerprint = ""
+        self.local_ready = False
+        self.leaderboard_popup = None
         frame = ttk.Frame(header)
         frame.pack(side="right", padx=(12, 10))
-        ttk.Button(frame, text="Donate my ChatGPT", command=self.open).pack()
+        ttk.Button(frame, text="Donate AI power", command=self.open).pack()
         self.counter = tk.StringVar(value="Total tokens donated: 0")
+        self.breakdown = tk.StringVar(value="Local: 0 · Free cloud: 0 · ChatGPT: 0")
         ttk.Label(frame, textvariable=self.counter, style="Muted.TLabel").pack(pady=(3, 0))
 
     def refresh(self):
@@ -41,13 +46,15 @@ class Controls:
             self.last_counter = now
             try:
                 self.counter.set(f"Total tokens donated: {donation.total_tokens(self.service.root):,}")
+                totals = donation.source_totals(self.service.root)
+                self.breakdown.set(f"Local: {totals.get('local', 0):,} · Free cloud: {totals.get('free_cloud', 0):,} · ChatGPT: {totals.get('chatgpt', 0):,}")
             except Exception:
                 self.counter.set("Total tokens donated: checking…")
         if not self.popup or not self.popup.winfo_exists():
             return
         try:
             while True:
-                self.login, self.chat_ready, self.fingerprint = self.events.get_nowait()
+                self.login, self.chat_ready, self.fingerprint, self.free_fingerprint, self.local_ready = self.events.get_nowait()
                 self.chat_ready = bool(self.chat_ready and self.fingerprint)
                 self.probing = False
         except queue.Empty:
@@ -58,28 +65,63 @@ class Controls:
             def probe():
                 try:
                     self.events.put((github_account.account(), bool(chatgpt_auth.status().get("sharing")),
-                                     chatgpt_auth.account_fingerprint()))
+                                     chatgpt_auth.account_fingerprint(), donation.free_fingerprint(), donation.local_available()))
                 except Exception:
-                    self.events.put(("", False, ""))
+                    self.events.put(("", False, "", "", False))
             threading.Thread(target=probe, daemon=True).start()
         self.github_text.set("Connected · " + self.login if self.login else "Not connected yet")
         self.chat_text.set("Connected · plan permission approved" if self.chat_ready else "Connect and approve plan permission")
+        self.free_text.set("Free routes connected" if self.free_fingerprint else "Connect a free route or use an existing provider in Supercharge")
+        self.local_text.set("Local AI is available" if self.local_ready else "Waiting for Ollama and a local model")
         self.github_button.configure(text="Reconnect GitHub" if self.login else "1. Connect GitHub")
         self.chat_button.configure(text="Reconnect ChatGPT" if self.chat_ready else "2. Connect ChatGPT")
         enabled = donation.settings(self.service.root)["enabled"]
-        self.enable_button.configure(text="Stop donating" if enabled else "3. Start donating when idle",
-                                     state="normal" if enabled or (self.login and self.chat_ready) else "disabled")
-        self.state_text.set(("On · " + self.service.message) if enabled else "Off · your allowance is not used for contributions.")
+        selected = [key for key, variable in self.source_vars.items() if variable.get()]
+        self.enable_button.configure(text="Stop donating" if enabled else "Start donating when idle",
+                                     state="normal" if enabled or self.ready_to_start() else "disabled")
+        self.state_text.set(("On · " + self.service.message) if enabled else "Off · donations use no AI until you start them.")
+        profile = donation.PROFILES[self.intensity.get()]
+        wait = str(profile["idle"] // 60) + " minutes" if profile["idle"] >= 60 else str(profile["idle"]) + " seconds"
+        attempts = "attempt" if profile["daily"] == 1 else "attempts"
+        drafts = "draft" if profile["open"] == 1 else "drafts"
+        self.intensity_text.set(f"{wait} idle · {profile['daily']} {attempts}/day · up to {profile['open']} open {drafts}")
+        for key, button in self.intensity_buttons.items():
+            button.configure(style="SelectedMode.TButton" if key == self.intensity.get() else "Mode.TButton")
+        if "chatgpt" in selected:
+            self.chat_row.pack(fill="x", before=self.power_row, pady=(3, 8))
+        else:
+            self.chat_row.pack_forget()
+        if "free_cloud" in selected:
+            self.free_row.pack(fill="x", before=self.power_row, pady=(3, 8))
+        else:
+            self.free_row.pack_forget()
+
+    def ready_to_start(self):
+        """Require only the accounts/runtimes for the resources actually selected."""
+        selected = [key for key, value in self.source_vars.items() if value.get()]
+        return bool(self.login and selected and ("local" not in selected or self.local_ready)
+                    and ("chatgpt" not in selected or self.chat_ready)
+                    and ("free_cloud" not in selected or self.free_fingerprint))
+
+    def choose_configuration(self):
+        """Resource/intensity changes stop the old grant until explicitly restarted."""
+        donation.set_enabled(False, self.service.root, sources=[key for key, value in self.source_vars.items() if value.get()],
+                             intensity=self.intensity.get())
+        self.service.activity()
+        self.service.next_attempt = 0
+        self.refresh()
 
     def toggle(self):
         """Only this explicit action authorizes background plan use."""
         enabled = donation.settings(self.service.root)["enabled"]
-        if not enabled and not (self.login and self.chat_ready):
+        if not enabled and not self.ready_to_start():
             return
         donation.set_enabled(not enabled, self.service.root,
-                             chatgpt_account=self.fingerprint, github_account=self.login)
+                             chatgpt_account=self.fingerprint, github_account=self.login,
+                             free_account=self.free_fingerprint,
+                             sources=[key for key, value in self.source_vars.items() if value.get()], intensity=self.intensity.get())
         self.service.activity()
-        self.service.message = "Starts after two minutes away from Cale." if not enabled else "Off."
+        self.service.message = "Starts when Cale is idle at your chosen intensity." if not enabled else "Off."
         self.refresh()
 
     def open(self):
@@ -89,7 +131,7 @@ class Controls:
             self.popup.lift()
             return
         self.popup = popup = tk.Toplevel(self.window)
-        popup.title("Donate my ChatGPT")
+        popup.title("Donate AI power")
         popup.geometry(f"700x{min(720, popup.winfo_screenheight() - 100)}")
         popup.minsize(620, 540)
         # The installed desktop uses larger fonts/padding than a plain Tk
@@ -97,7 +139,8 @@ class Controls:
         footer = ttk.Frame(popup, padding=(24, 10, 24, 16))
         footer.pack(side="bottom", fill="x")
         ttk.Button(footer, text="View contributions on GitHub ↗",
-                   command=lambda: webbrowser.open(donation.REVIEW_URL)).pack(anchor="w")
+                   command=lambda: webbrowser.open(donation.REVIEW_URL)).pack(side="left")
+        ttk.Button(footer, text="Leaderboard", command=self.open_leaderboard).pack(side="right")
         canvas = tk.Canvas(popup, highlightthickness=0, borderwidth=0,
                            background=ttk.Style(popup).lookup("TFrame", "background"))
         scrollbar = ttk.Scrollbar(popup, orient="vertical", command=canvas.yview)
@@ -115,30 +158,137 @@ class Controls:
         popup.bind("<MouseWheel>", scroll, add="+")
         ttk.Label(outer, text="Help make Cale better", font=("Segoe UI", 23, "bold")).pack(anchor="w")
         ttk.Label(outer, text=(
-            "Let Cale use your ChatGPT/Codex allowance or available credits while you're away. "
-            "Only public Cale source code is sent. Proposed improvements go to GitHub "
+            "Contribute local AI, connected free cloud, or your ChatGPT allowance while you're away. "
+            "Only public Cale source code is used. Proposed improvements go to GitHub "
             "for the owner's review—nothing merges automatically."),
             wraplength=585, justify="left").pack(anchor="w", pady=(10, 14))
         self.github_text = tk.StringVar(value="Checking your connection…")
         self.chat_text = tk.StringVar(value="Checking your connection…")
         self.state_text = tk.StringVar()
-        self.github_button = ttk.Button(outer, text="1. Connect GitHub", command=self.connect_github)
-        self.github_button.pack(anchor="w", ipady=4)
-        ttk.Label(outer, textvariable=self.github_text, style="Muted.TLabel").pack(anchor="w", pady=(4, 12))
-        self.chat_button = ttk.Button(outer, text="2. Connect ChatGPT", command=self.connect_chatgpt)
-        self.chat_button.pack(anchor="w", ipady=4)
-        ttk.Label(outer, textvariable=self.chat_text, style="Muted.TLabel").pack(anchor="w", pady=(4, 14))
-        self.enable_button = ttk.Button(outer, text="3. Start donating when idle", command=self.toggle,
+        config = donation.settings(self.service.root)
+        sources_row = ttk.Frame(outer)
+        sources_row.pack(fill="x", pady=(0, 10))
+        self.source_vars = {key: tk.BooleanVar(value=key in config["sources"]) for key in donation.SOURCES}
+        for key, label in (("local", "Local models"), ("free_cloud", "Free cloud"), ("chatgpt", "ChatGPT plan / credits")):
+            ttk.Checkbutton(sources_row, text=label, variable=self.source_vars[key],
+                            command=self.choose_configuration).pack(side="left", padx=(0, 12))
+        self.local_text = tk.StringVar()
+        ttk.Label(outer, textvariable=self.local_text, style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
+        ttk.Style(popup).configure("Donation.Connect.TButton", padding=(12, 6), font=("Segoe UI", 10, "bold"))
+        self.github_row = ttk.Frame(outer)
+        self.github_row.pack(fill="x", pady=(0, 8))
+        self.github_button = ttk.Button(self.github_row, text="Connect GitHub", command=self.connect_github,
+                                        style="Donation.Connect.TButton")
+        self.github_button.pack(side="left")
+        ttk.Label(self.github_row, textvariable=self.github_text, style="Muted.TLabel", wraplength=350).pack(side="left", padx=(10, 0))
+        self.chat_row = ttk.Frame(outer)
+        self.chat_button = ttk.Button(self.chat_row, text="Connect ChatGPT", command=self.connect_chatgpt,
+                                     style="Donation.Connect.TButton")
+        self.chat_button.pack(side="left")
+        ttk.Label(self.chat_row, textvariable=self.chat_text, style="Muted.TLabel", wraplength=350).pack(side="left", padx=(10, 0))
+        self.free_text = tk.StringVar()
+        self.free_row = ttk.Frame(outer)
+        ttk.Button(self.free_row, text="Connect free cloud", command=self.connect_free,
+                   style="Donation.Connect.TButton").pack(side="left")
+        ttk.Label(self.free_row, textvariable=self.free_text, style="Muted.TLabel", wraplength=350).pack(side="left", padx=(10, 0))
+        self.power_row = ttk.Frame(outer)
+        self.power_row.pack(fill="x", pady=(10, 6))
+        self.intensity = tk.StringVar(value=config["intensity"])
+        self.intensity_buttons = {}
+        def select_intensity(key):
+            self.intensity.set(key)
+            self.choose_configuration()
+        for key, label in (("slow", "Slow"), ("medium", "Medium"), ("full_blast", "Full Blast")):
+            self.intensity_buttons[key] = ttk.Button(self.power_row, text=label,
+                                                    command=lambda selected=key: select_intensity(selected))
+            self.intensity_buttons[key].pack(side="left", padx=(0, 8))
+        self.intensity_text = tk.StringVar()
+        ttk.Label(outer, textvariable=self.intensity_text, style="Muted.TLabel", wraplength=585).pack(anchor="w", pady=(0, 12))
+        self.enable_button = ttk.Button(outer, text="Start donating when idle", command=self.toggle,
                                         style="Accent.TButton", state="disabled")
         self.enable_button.pack(anchor="w", ipady=5)
         ttk.Label(outer, textvariable=self.state_text, wraplength=585).pack(anchor="w", pady=(10, 10))
         ttk.Label(outer, text=(
-            "One AI proposal attempt per day. Your tasks and chat come first. "
-            "Returning to Cale stops further work; a request already in flight may still use tokens. "
-            "Local-only, free-cloud-only and offline modes pause donations."),
+            "Your tasks and chat always come first. Slow uses smaller local models and longer rests; "
+            "Full Blast allows more work, within your hardware and account limits. "
+            "A request already in flight may still use tokens. Local mode blocks cloud donations; offline pauses all contributions."),
             style="Muted.TLabel", wraplength=585, justify="left").pack(anchor="w")
         ttk.Label(outer, textvariable=self.counter).pack(anchor="w", pady=(14, 3))
+        ttk.Label(outer, textvariable=self.breakdown, style="Muted.TLabel", wraplength=585).pack(anchor="w", pady=(0, 3))
         ttk.Label(outer, text="Counts reported input and output tokens, including reviews with no code change.",
                   style="Muted.TLabel", wraplength=585).pack(anchor="w")
         self.checked_at = 0
         self.refresh()
+
+    def open_leaderboard(self):
+        """Show public GitHub-authoritative accepted fixes, including a cached view."""
+        self.service.activity()
+        if self.leaderboard_popup and self.leaderboard_popup.winfo_exists():
+            self.leaderboard_popup.lift()
+            return
+        self.leaderboard_popup = dialog = tk.Toplevel(self.window)
+        dialog.title("Cale contribution leaderboard")
+        dialog.geometry("700x600")
+        dialog.minsize(620, 450)
+        outer = ttk.Frame(dialog, padding=20)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="Accepted fixes leaderboard", font=("Segoe UI", 21, "bold")).pack(anchor="w")
+        ttk.Label(outer, text="One merged donation fix = one point. Open, rejected or unmerged PRs do not count.",
+                  wraplength=600, style="Muted.TLabel").pack(anchor="w", pady=(6, 14))
+        footer = ttk.Frame(outer)
+        footer.pack(side="bottom", fill="x")
+        style = ttk.Style(dialog)
+        style.configure("Donation.Treeview", background="#151d31", fieldbackground="#151d31",
+                        foreground="#edf3ff", rowheight=32, font=("Segoe UI", 11))
+        style.configure("Donation.Treeview.Heading", background="#202d46", foreground="#edf3ff",
+                        font=("Segoe UI", 10, "bold"))
+        style.map("Donation.Treeview", background=[("selected", "#4f63c8")], foreground=[("selected", "white")])
+        table_shell = ttk.Frame(outer)
+        table_shell.pack(fill="both", expand=True)
+        table = ttk.Treeview(table_shell, columns=("rank", "login", "fixes"), show="headings", height=9,
+                             style="Donation.Treeview")
+        scroll = ttk.Scrollbar(table_shell, orient="vertical", command=table.yview)
+        scroll.pack(side="right", fill="y")
+        table.configure(yscrollcommand=scroll.set)
+        for column, text, width in (("rank", "Rank", 65), ("login", "Contributor", 350), ("fixes", "Accepted fixes", 140)):
+            table.heading(column, text=text)
+            table.column(column, width=width, anchor="w")
+        table.pack(fill="both", expand=True)
+        for rank, color in (("1", "#ffd17d"), ("2", "#c8d8ed"), ("3", "#e4b18c")):
+            table.tag_configure(rank, foreground=color)
+        notice = tk.StringVar(value="Checking GitHub merge records…")
+        ttk.Label(footer, textvariable=notice, wraplength=600, style="Muted.TLabel").pack(anchor="w", pady=10)
+        events = queue.Queue()
+        loading = [False]
+        def display(value):
+            table.delete(*table.get_children())
+            for rank, row in enumerate(value.get("rows", []), 1):
+                table.insert("", "end", values=(rank, "@" + row["login"], row["accepted"]), tags=(str(rank),))
+            notice.set(value.get("notice") or ("Checking GitHub merge records…" if not value.get("checked_at") else
+                       "No accepted fixes yet · be the first contributor." if not value.get("rows")
+                       and value.get("complete") else "Verified from GitHub merged PRs." if value.get("complete")
+                       else "Partial history · refresh again to load older accepted fixes."))
+        def refresh():
+            if loading[0]:
+                return
+            loading[0] = True
+            def worker():
+                try:
+                    events.put(donation.refresh_leaderboard(self.service.root, force=True))
+                except Exception:
+                    events.put({**donation.leaderboard(self.service.root), "notice": "GitHub unavailable · showing cached counts."})
+            threading.Thread(target=worker, daemon=True).start()
+        ttk.Button(footer, text="Refresh accepted fixes", command=refresh).pack(anchor="w")
+        display(donation.leaderboard(self.service.root))
+        refresh()
+        def poll():
+            if not dialog.winfo_exists():
+                return
+            try:
+                while True:
+                    display(events.get_nowait())
+                    loading[0] = False
+            except queue.Empty:
+                pass
+            dialog.after(500, poll)
+        poll()

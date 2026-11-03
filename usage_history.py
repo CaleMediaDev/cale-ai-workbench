@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DATABASE = ROOT / "LongTasks/usage.db"
 CURRENT_TASK = ContextVar("cale_usage_task", default="")
+OBSERVER = ContextVar("cale_usage_observer", default=None)
 
 
 def _connection():
@@ -58,6 +59,12 @@ def record_completion(result: dict, source: str, elapsed_seconds: float | None =
     total = _count(usage.get("total_tokens")) or prompt + completion
     if total <= 0:
         return False
+    observer = OBSERVER.get()
+    if observer:
+        try:
+            observer(result, source)
+        except Exception:
+            pass  # Optional accounting must not corrupt an inference reply.
     model = str(result.get("model") or "")[:150]
     task_id = CURRENT_TASK.get()
     if not isinstance(task_id, str) or not re.fullmatch(r"[a-f0-9]{12}", task_id):

@@ -46,6 +46,34 @@ REQUEST = {
 
 
 class CloudTests(unittest.TestCase):
+    def test_free_request_override_never_uses_paid_or_changes_global_mode(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "both")
+        cloud.routing_mode.save(cloud.STATE, "floor_it")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (patch("chatgpt_auth.status", return_value={"enabled": True}),
+              patch("chatgpt_auth.complete") as paid,
+              patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.2)) as free,
+              patch.object(cloud, "post") as local):
+            self.assertEqual(cloud.Router().complete(REQUEST, scope_override="free_cloud_only"), ANSWER)
+        paid.assert_not_called()
+        local.assert_not_called()
+        free.assert_called_once()
+        self.assertEqual(cloud.routing_mode.load_scope(cloud.STATE), "both")
+
+    def test_free_request_override_cannot_bypass_local_only_or_fall_back(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        with patch("chatgpt_auth.complete") as paid, patch.object(cloud, "post") as inference:
+            with self.assertRaisesRegex(RuntimeError, "blocked"):
+                cloud.Router().complete(REQUEST, scope_override="free_cloud_only")
+        paid.assert_not_called()
+        inference.assert_not_called()
+        cloud.routing_mode.save_scope(cloud.STATE, "both")
+        with patch("chatgpt_auth.complete") as paid, patch.object(cloud, "post") as inference:
+            with self.assertRaisesRegex(RuntimeError, "Free cloud only"):
+                cloud.Router().complete(REQUEST, scope_override="free_cloud_only")
+        paid.assert_not_called()
+        inference.assert_not_called()
+
     def test_free_cloud_only_uses_connected_free_model_and_keeps_tool_calls(self):
         cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
