@@ -2330,6 +2330,18 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(task_module.task_progress(self.item())[1], "Rendering the vocal test")
         self.assertIn("Rendering the vocal test", task_module.recovery_snapshot(project))
 
+    def test_newer_root_plan_drives_card_and_recovery(self):
+        project = self.base / "project"
+        standard = project / ".local-ai/PLAN.md"
+        standard.write_text("- [ ] Old plan\n", encoding="utf-8")
+        alternate = project / "PLAN.md"
+        alternate.write_text("- [x] Draft\n- [ ] Verify output\n", encoding="utf-8")
+        newer = standard.stat().st_mtime + 2
+        os.utime(alternate, (newer, newer))
+        self.assertEqual(task_module.task_progress(self.item())[0], 45)
+        self.assertIn("Verify output", task_module.recovery_snapshot(project))
+        self.assertNotIn("Old plan", task_module.recovery_snapshot(project))
+
     def test_blocker_requires_explicit_resume(self):
         task_module.update(self.pid, card="test", status="working")
         with patch.object(

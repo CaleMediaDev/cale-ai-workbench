@@ -909,6 +909,51 @@ def test_task_checkpoint_refreshes_after_restart_and_does_not_lose_new_user_mess
         assert any(entry.get("content") == "Use a larger font" for entry in fresh)
 
 
+def test_checkpoint_uses_newest_root_notes_then_returns_to_updated_canonical_files():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        for name, old, new in (
+                ("PLAN.md", "- [ ] Stale plan", "- [ ] Build the actual page"),
+                ("PROGRESS.md", "Next: Stale progress", "Next: Verify the actual page")):
+            canonical = folder / ".local-ai" / name
+            alternate = folder / name
+            canonical.write_text(old, encoding="utf-8")
+            alternate.write_text(new, encoding="utf-8")
+            stamp = time.time_ns()
+            os.utime(canonical, ns=(stamp, stamp))
+            os.utime(alternate, ns=(stamp + 2_000_000_000, stamp + 2_000_000_000))
+            assert task_context.document_path(folder, name) == alternate
+        summary = task_context.snapshot(folder)
+        assert "Next step: Verify the actual page" in summary
+        assert "Build the actual page" in summary
+        assert "[Saved at project root: PROGRESS.md]" in summary
+        assert "Stale" not in summary
+        # A later worker resumes the standard location; no stale DB excerpt
+        # or root file should override its newer checkpoint.
+        canonical = folder / ".local-ai/PLAN.md"
+        canonical.write_text("- [ ] Publish the checked page", encoding="utf-8")
+        newer = (folder / "PROGRESS.md").stat().st_mtime_ns + 2_000_000_000
+        os.utime(canonical, ns=(newer, newer))
+        assert "Next step: Publish the checked page" in task_context.snapshot(folder)
+        # Equal timestamps prefer the canonical file too.
+        alternate = folder / "PLAN.md"
+        os.utime(alternate, ns=(newer, newer))
+        assert task_context.document_path(folder, "PLAN.md") == canonical
+
+
+def test_root_user_requests_never_replace_the_queue_backed_request_file():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / "USER-REQUESTS.md").write_text("Unrelated root requests", encoding="utf-8")
+        canonical = folder / ".local-ai/USER-REQUESTS.md"
+        canonical.write_text("The actual queued request", encoding="utf-8")
+        summary = task_context.snapshot(folder)
+        assert "The actual queued request" in summary
+        assert "Unrelated root requests" not in summary
+
+
 def test_unchanged_task_checkpoint_reads_cached_sqlite_document():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

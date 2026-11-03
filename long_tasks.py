@@ -459,14 +459,9 @@ def record_replay_outcome(replay_id: int, succeeded: bool, reason: str = "") -> 
 
 def current_progress_file(project):
     """Use the freshest progress note when a worker saved it at project root."""
-    project = Path(project)
-    standard = project / ".local-ai/PROGRESS.md"
-    alternate = project / "PROGRESS.md"
-    if alternate.is_file() and (
-        not standard.is_file() or alternate.stat().st_mtime > standard.stat().st_mtime
-    ):
-        return alternate
-    return standard
+    from task_context import document_path
+
+    return document_path(project, "PROGRESS.md")
 
 
 def task_progress(p):
@@ -511,8 +506,9 @@ def task_progress(p):
         return 100, "Finished"
     if state == "needs_input" and p["detail"].startswith("AI setup failed after automatic retries:"):
         return 0, p["detail"][:180]
-    folder = Path(p["folder"]) / ".local-ai"
-    plan = folder / "PLAN.md"
+    from task_context import document_path
+
+    plan = document_path(p["folder"], "PLAN.md")
     progress = current_progress_file(p["folder"])
     checklist = (
         plan.read_text(encoding="utf-8", errors="replace") if plan.is_file() else ""
@@ -1310,6 +1306,8 @@ the result and evidence. Do not call kanban_complete: the desktop supervisor che
 
 def recovery_snapshot(folder):
     """Carry bounded on-disk milestones into a fresh worker's first message."""
+    from task_context import document_path
+
     project = Path(folder)
     folder = project / ".local-ai"
     notes = []
@@ -1349,7 +1347,7 @@ def recovery_snapshot(folder):
     if verifier.is_file():
         notes.append("Existing independent check: .local-ai/verify.ps1. Run it before any new render.")
     for name in ("PLAN.md", "PROGRESS.md"):
-        path = current_progress_file(project) if name == "PROGRESS.md" else folder / name
+        path = document_path(project, name)
         if not path.is_file():
             continue
         size = path.stat().st_size

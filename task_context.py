@@ -70,6 +70,28 @@ def _document_state(path: Path) -> tuple[int, int]:
         return -1, -1
 
 
+def document_path(folder: str | Path, name: str) -> Path:
+    """Read the freshest worker checkpoint without moving project files.
+
+    Some workers write plans/progress at project root. Keep user requests in
+    their dedicated queue-backed file, and never follow a root alias outside
+    the project. The canonical checkpoint wins equal timestamps.
+    """
+    root = Path(folder)
+    standard = root / ".local-ai" / name
+    if name not in {"PLAN.md", "PROGRESS.md"}:
+        return standard
+    alternate = root / name
+    try:
+        if (alternate.is_file() and alternate.resolve().is_relative_to(root.resolve())
+                and (not standard.is_file()
+                     or alternate.stat().st_mtime_ns > standard.stat().st_mtime_ns)):
+            return alternate
+    except (OSError, ValueError):
+        pass  # A removed or inaccessible alternative must not break recovery.
+    return standard
+
+
 def snapshot(folder: str | Path) -> str:
     """Refresh changed source documents and return a concise DB-backed briefing."""
     root = Path(folder)
@@ -79,8 +101,10 @@ def snapshot(folder: str | Path) -> str:
         steps = {}
         stamps = {}
         refreshed = {}
+        sources = {}
         for name in DOCUMENTS:
-            path = root / ".local-ai" / name
+            path = document_path(root, name)
+            sources[name] = path.relative_to(root).as_posix()
             stamp = _document_state(path)
             raw = b""
             stable = False
@@ -141,7 +165,9 @@ def snapshot(folder: str | Path) -> str:
                               "Use the plan and progress excerpts below to define the first unfinished milestone.")]
     for name in DOCUMENTS:
         if documents[name].strip():
-            lines.append(name + ":\n" + documents[name])
+            source = ("[Saved at project root: " + sources[name] + "]\n"
+                      if sources[name] == name else "")
+            lines.append(name + ":\n" + source + documents[name])
     if events:
         lines.append("Recent actions:\n" + "\n".join(
             f"- {event['tool']}{' ' + event['subject'] if event['subject'] else ''}: {event['outcome']}"
