@@ -848,6 +848,26 @@ def test_native_context_rebuilds_from_durable_plan():
         assert compacted[-1]["content"].startswith("39")
 
 
+def test_first_native_turn_includes_short_rules_and_saved_checkpoint():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / "AGENTS.md").write_text("Use a blue header.", encoding="utf-8")
+        (folder / ".local-ai/PLAN.md").write_text("- [ ] Build the page\n", encoding="utf-8")
+        seen = []
+
+        def complete(payload):
+            seen.append(payload)
+            return {"choices": [{"message": {"role": "assistant", "content": "Working."}}]}
+
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+            native_agent.run_slice(item, complete=complete)
+        assert "Use a blue header." in seen[0]["messages"][0]["content"]
+        assert "Build the page" in seen[0]["messages"][1]["content"]
+        assert "Take the next useful action" in seen[0]["messages"][2]["content"]
+        assert "Read AGENTS.md, the original request" not in seen[0]["messages"][0]["content"]
+
+
 def test_fresh_context_uses_database_checkpoint_and_keeps_latest_tool_batch():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

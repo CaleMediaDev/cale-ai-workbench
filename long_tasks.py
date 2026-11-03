@@ -58,7 +58,7 @@ def update_dialog_open(children, ignored=()):
         for child in children
     )
 INITIAL_PLAN = (
-    "# Plan\n\nThe worker has not written milestones yet. Read the original request and "
+    "# Plan\n\nThe worker has not written milestones yet. Use the original request and "
     "user follow-ups, then replace this note with concrete acceptance checks.\n"
 )
 INITIAL_PROGRESS = (

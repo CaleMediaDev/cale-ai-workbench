@@ -159,6 +159,28 @@ def ollama_completion(model: str, timeout: int, stats: dict):
     return complete
 
 
+def routed_local_completion(stats: dict):
+    """Exercise Cale's real model tier selection with cloud disabled."""
+    import cloud_ai
+
+    router = cloud_ai.Router()
+
+    def complete(payload: dict) -> dict:
+        result = router.complete(payload, "benchmark")
+        stats["model_calls"] += 1
+        stats["models_used"].append(result.get("model", ""))
+        calls = result.get("choices", [{}])[0].get("message", {}).get("tool_calls") or []
+        stats["tool_calls"] += len(calls)
+        stats["tools_used"].extend(
+            str(item.get("function", {}).get("name", "")) for item in calls)
+        usage = result.get("usage") or {}
+        for name in ("prompt_tokens", "completion_tokens"):
+            stats[name] += int(usage.get(name) or 0)
+        return result
+
+    return complete
+
+
 def grade_temperature(folder: Path) -> dict:
     """Check the code and whether its verifier detects the old bug."""
     source = folder / "temperature.py"
@@ -367,6 +389,8 @@ def main() -> int:
     parser.add_argument("--scenario", choices=("temperature", "contacts", "webapp", "document"),
                         default="temperature")
     parser.add_argument("--model", default="cale-fast")
+    parser.add_argument("--auto-route", action="store_true",
+                        help="Use Cale's real local model router; cloud access is disabled")
     parser.add_argument("--call-timeout", type=int, default=120)
     parser.add_argument("--command-timeout", type=int, default=90,
                         help="Limit each project command; lower this when diagnosing hangs")
@@ -406,14 +430,19 @@ def main() -> int:
         long_tasks.save_original_request(folder, "benchmark", brief)
         project = {"id": "benchmark", "folder": str(folder), "brief": brief}
         stats = {"model_calls": 0, "tool_calls": 0,
-                 "prompt_tokens": 0, "completion_tokens": 0, "tools_used": []}
-        complete = ollama_completion(args.model, args.call_timeout, stats)
+                 "prompt_tokens": 0, "completion_tokens": 0,
+                 "tools_used": [], "models_used": []}
+        complete = (routed_local_completion(stats) if args.auto_route else
+                    ollama_completion(args.model, args.call_timeout, stats))
         error = None
         state = {}
         # The isolated benchmark folder is intentionally absent from the real
         # task database. Let its verifier use the same contained supervisor
         # path as a registered task without creating a visible app task.
-        with patch.object(long_tasks, "projects", return_value=[project]):
+        # A benchmark must never consume a connected free or paid account.
+        # This patch also covers a user who changes the visible mode mid-run.
+        local_scope = patch("routing_mode.load_scope", return_value="local_only")
+        with local_scope, patch.object(long_tasks, "projects", return_value=[project]):
             for _ in range(args.slices):
                 try:
                     state = native_agent.run_slice(project, complete=complete)
@@ -428,7 +457,7 @@ def main() -> int:
 
         native_browser.close()
         report = {
-            "model": args.model,
+            "model": "automatic-local" if args.auto_route else args.model,
             "scenario": args.scenario,
             "command_timeout": args.command_timeout,
             "seconds": round(time.monotonic() - started, 2),
