@@ -3530,3 +3530,128 @@ def test_native_schema_recovery_is_bounded_and_honors_stop(tmp_path):
         native_agent.save_state(other, {"status": "stopped"})
         return rejected(payload)
     assert native_agent.run_slice(other, complete=stopped)["status"] == "stopped"
+
+
+def test_function_notes_follow_real_acceptance_and_survive_restart(tmp_path):
+    item = project(tmp_path / "owned-notes")
+    item["brief"] = "Repair helpers.py.\nfirst(value) returns value.\nsecond(value) returns value."
+    folder = Path(item["folder"])
+    (folder / "helpers.py").write_text("def first(value): return value\ndef second(value): return value\n")
+    state = {"status": "running"}
+    native_agent.save_state(item, state)
+    def plan(_):
+        return {"choices": [{"message": {"tool_calls": [{"function": {"name": "plan_function_step",
+            "arguments": json.dumps({"cases": [{"reason": "Identity preserves 2", "inputs": {"value": 2}, "expected": 2}]})}}]}}]}
+    messages = []
+    assert not native_agent.sync_function_notes(item, state)
+    assert native_agent.plan_declared_function_step(item, state, messages, plan)
+    assert native_agent.sync_function_notes(item, state)
+    plan_path, progress_path = folder / ".local-ai/PLAN.md", folder / ".local-ai/PROGRESS.md"
+    assert plan_path.read_text(encoding="utf-8").count("- [ ]") == 2
+    assert "0 of 2" in progress_path.read_text(encoding="utf-8")
+    assert not state.get("verify_passed")
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        assert native_agent.advance_checked_steps(item, state, messages)
+        assert native_agent.sync_function_notes(item, state)
+        assert "- [x] `first`" in plan_path.read_text(encoding="utf-8")
+        assert "- [ ] `second`" in plan_path.read_text(encoding="utf-8")
+        native_agent.save_state(item, state)
+        state = native_agent.read_state(item)
+        assert not native_agent.sync_function_notes(item, state)
+        assert native_agent.plan_declared_function_step(item, state, messages, plan)
+        assert native_agent.advance_checked_steps(item, state, messages)
+        assert native_agent.sync_function_notes(item, state)
+    assert "2 of 2" in progress_path.read_text(encoding="utf-8")
+    assert plan_path.read_text(encoding="utf-8").count("- [x]") == 2
+    assert state["status"] == "running"  # Notes never complete the project.
+    custom = plan_path.read_text(encoding="utf-8") + "\n- [ ] Keep a user-added requirement\n"
+    plan_path.write_text(custom, encoding="utf-8")
+    state["verify_passed"] = False
+    assert native_agent.sync_function_notes(item, state)
+    assert plan_path.read_text(encoding="utf-8") == custom
+    assert "not confirmed" in progress_path.read_text(encoding="utf-8")
+    assert "unchecked milestones" in native_agent.completion_issue(folder, item, state)
+    assert not state["verify_passed"]
+
+
+def test_function_notes_preserve_custom_documents_and_ignore_forged_markers(tmp_path):
+    item = project(tmp_path / "custom-notes")
+    item["brief"] = "Repair helpers.py.\nfirst(value) returns value.\nsecond(value) returns value."
+    folder = Path(item["folder"])
+    (folder / "helpers.py").write_text("def first(value): return value\ndef second(value): return value\n")
+    task_context.plan_steps(folder, [{"phase": "Functions", "title": "First", "check_tool": "check_python_function",
+        "check_arguments": {"path": "helpers.py", "function": "first", "cases": [{"args": [2], "expected": 2}]}}])
+    state = {"status": "running", "function_step_planning": {"request": task_context.request_identity(folder), "path": "helpers.py"}}
+    native_agent.save_state(item, state)
+    custom = "<!-- cale:function-notes -->\n# My roadmap\n- [ ] User work\n"
+    for name in ["PLAN.md", "PROGRESS.md"]:
+        (folder / ".local-ai" / name).write_text(custom, encoding="utf-8")
+    assert not native_agent.sync_function_notes(item, state)
+    assert all((folder / ".local-ai" / name).read_text(encoding="utf-8") == custom for name in ["PLAN.md", "PROGRESS.md"])
+    # Refreshing canonical notes must not make a newer user-authored root alias disappear.
+    for name, initial in [("PLAN.md", long_tasks.INITIAL_PLAN), ("PROGRESS.md", long_tasks.INITIAL_PROGRESS)]:
+        canonical = folder / ".local-ai" / name
+        canonical.write_text(initial, encoding="utf-8")
+        alias = folder / name
+        alias.write_text(custom, encoding="utf-8")
+        later = canonical.stat().st_mtime + 2
+        os.utime(alias, (later, later))
+    assert not native_agent.sync_function_notes(item, state)
+    assert task_context.document_path(folder, "PLAN.md") == folder / "PLAN.md"
+    assert (folder / ".local-ai/PLAN.md").read_text(encoding="utf-8") == long_tasks.INITIAL_PLAN
+    state["function_note_receipts"] = None
+    assert not native_agent.sync_function_notes(item, state)
+
+
+def test_function_notes_recheck_controls_and_concurrent_edits_before_replace(tmp_path):
+    for mode in ["pause", "instruction", "edit", "alias"]:
+        item = project(tmp_path / mode)
+        item["brief"] = "Repair helpers.py.\nfirst(value) returns value.\nsecond(value) returns value."
+        folder = Path(item["folder"])
+        (folder / "helpers.py").write_text("def first(value): return value\ndef second(value): return value\n")
+        task_context.plan_steps(folder, [{"phase": "Functions", "title": "First", "check_tool": "check_python_function",
+            "check_arguments": {"path": "helpers.py", "function": "first", "cases": [{"args": [2], "expected": 2}]}}])
+        state = {"status": "running", "function_step_planning": {"request": task_context.request_identity(folder), "path": "helpers.py"}}
+        native_agent.save_state(item, state)
+        note = folder / ".local-ai/PLAN.md"
+        note.write_text(long_tasks.INITIAL_PLAN, encoding="utf-8")
+        original = native_agent.tempfile.mkstemp
+        def interrupted(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if mode == "pause":
+                native_agent.save_state(item, {**state, "status": "paused"})
+            elif mode == "instruction":
+                (folder / ".local-ai/USER-REQUESTS.md").write_text("New request: explain only.")
+            elif mode == "alias":
+                alias = folder / "PLAN.md"
+                alias.write_text("# A newer root roadmap\n", encoding="utf-8")
+                later = note.stat().st_mtime + 2
+                os.utime(alias, (later, later))
+            else:
+                note.write_text("# User edited this while the refresh was running\n", encoding="utf-8")
+            return result
+        with patch.object(native_agent.tempfile, "mkstemp", side_effect=interrupted):
+            native_agent.sync_function_notes(item, state)
+        expected = "# User edited this while the refresh was running\n" if mode == "edit" else long_tasks.INITIAL_PLAN
+        assert note.read_text(encoding="utf-8") == expected
+        assert "PLAN.md" not in state.get("function_note_receipts", {})
+        assert not list((folder / ".local-ai").glob(".cale-notes-*.tmp"))
+        if mode == "pause":
+            assert native_agent.read_state(item)["status"] == "paused"
+
+
+def test_automatic_function_acceptance_planning_can_reason_instead_of_quick_mode(tmp_path):
+    item = project(tmp_path / "reasoned-planning")
+    item["brief"] = "Repair helpers.py.\nfirst(value) returns value.\nsecond(value) returns value."
+    seen = []
+    def complete(payload, task_id, **options):
+        seen.append((payload, options))
+        return {"choices": [{"message": {"tool_calls": [{"function": {"name": "plan_function_step",
+            "arguments": json.dumps({"cases": [{"reason": "Identity preserves 2", "inputs": {"value": 2}, "expected": 2}]})}}]}}]}
+    with patch("cloud_ai.Router", return_value=SimpleNamespace(complete=complete)), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        native_agent.run_slice(item)
+    assert len(seen) == 1
+    assert seen[0][1]["size_hint"] == "balanced"
+    assert seen[0][0]["reasoning_effort"] == "low"
+    assert seen[0][0]["max_tokens"] == 4096
+    assert task_context.step_status(item["folder"])["total"] == 1

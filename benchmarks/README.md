@@ -434,3 +434,19 @@ part of an installed app's validation requirements. A reasoned model-generated
 case plan remains a hypothesis; compare expected results against the original
 request and preserve the public input/return shapes. Never damage correct code
 just to satisfy a mistaken expected value.
+
+
+### Durable function notes and acceptance planning (November 3)
+
+[Retained trials](results/function-notes-20261103.json) show both the failed
+notes-only run (missed zero-area behavior) and the final balanced-planning run.
+The final fresh local-only trial completed in 268.61 seconds / 18 calls,
+with all 17 independent behavior checks, four completed SQL units, and a saved
+verifier rejecting all five behavioral regressions. PLAN/PROGRESS match their
+persisted ownership receipts; there were zero recorded model read/write/edit
+operations on those notes. The reference run recorded three note writes.
+
+The runs used evolving code and varying generated cases; this is not a general
+speed comparison or model ranking. Saved unit acceptance does not establish
+whole-task correctness. User-authored notes and newer project-root aliases
+retain authority. Generic non-template app construction remains unproven.

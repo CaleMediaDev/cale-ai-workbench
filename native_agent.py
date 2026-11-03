@@ -2565,6 +2565,101 @@ def function_coverage(project: dict) -> dict:
             "suite_pinned": pinned}
 
 
+
+def sync_function_notes(project: dict, state: dict) -> bool:
+    """Render owned function-unit notes from SQL without an inference call.
+
+    Checkboxes describe saved unit acceptance, not whole-project correctness.
+    Custom notes, edited generated notes, controls, and new instructions win.
+    Exact byte receipts keep ownership durable across worker restarts.
+    """
+    import long_tasks
+    import project_memory
+    import task_context
+
+    folder = Path(project["folder"])
+    request = task_context.request_identity(folder)
+    owner = state.get("function_step_planning") or {}
+    contract = declared_function_contract(project)
+    if not contract or owner != {"request": request, "path": contract[0]}:
+        return False
+    stamp = user_request_stamp(folder)
+
+    def current():
+        return (task_context.request_identity(folder) == request and user_request_stamp(folder) == stamp
+                and read_state(project).get("status") not in {"paused", "stopped", "done"})
+
+    if not current():
+        return False
+    try:
+        queue = task_context.step_status(folder)
+        if not queue["total"]:
+            return False
+        path, names = contract
+        coverage = set(function_coverage(project).get("covered_functions", []))
+        with project_memory.connection(folder) as conn:
+            rows = conn.execute("SELECT check_arguments FROM task_steps WHERE request_hash=? AND status='done' "
+                                "AND check_tool IN ('check_python_function','check_javascript_function') LIMIT 65",
+                                (request,)).fetchall()
+        if len(rows) > 64:
+            return False
+        completed = set()
+        for row in rows:
+            check = json.loads(row["check_arguments"])
+            if check.get("path") == path and check.get("function") in coverage:
+                completed.add(check["function"])
+        completed.intersection_update(names)
+        active = queue["active"]
+        next_step = (active["title"] if active else
+                     "Plan the next named function unit" if len(completed) < len(names) else
+                     "Review the original request and current verification before handoff")
+        verification = ("Saved accumulated verifier passed" if state.get("verify_passed") and not state.get("failed_checks")
+                        else "Current accumulated verification is not confirmed; inspect the checker evidence")
+        marker = "<!-- cale:function-notes -->\n"
+        plan = marker + "# Plan\n\nFunction units for `" + path + "`; the full original request and follow-ups remain authoritative.\n\n"
+        plan += "".join("- [" + ("x" if name in completed else " ") + "] `" + name
+                        + "` — saved unit acceptance\n" for name in names)
+        progress = (marker + "# Progress\n\n" + str(len(completed)) + " of " + str(len(names))
+                    + " named function units have saved passing acceptance.\n\n" + verification
+                    + ". This is not whole-task completion.\n\nNext: " + next_step.replace("\n", " ")[:200] + ".\n")
+        receipts = state.setdefault("function_note_receipts", {})
+        if not isinstance(receipts, dict):
+            return False
+        changed = False
+        for filename, content, initial in [("PLAN.md", plan, long_tasks.INITIAL_PLAN),
+                                            ("PROGRESS.md", progress, long_tasks.INITIAL_PROGRESS)]:
+            if not current():
+                break
+            target = project_path(folder, ".local-ai/" + filename)
+            if task_context.document_path(folder, filename).resolve() != target.resolve():
+                continue  # Do not shadow a newer roadmap written at project root.
+            before = target.read_bytes() if target.exists() else None
+            if before is not None and len(before) > 32_000:
+                continue
+            digest = hashlib.sha256(before or b"").hexdigest()
+            text = (before or b"").decode("utf-8-sig").replace("\r\n", "\n").strip()
+            if digest != receipts.get(filename) and text not in {"", initial.strip()}:
+                continue  # Ownership markers alone never authorize overwriting an edit.
+            desired = content.encode("utf-8")
+            if before == desired:
+                continue
+            descriptor, temporary = tempfile.mkstemp(prefix=".cale-notes-", suffix=".tmp", dir=target.parent)
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(desired)
+                if (not current() or task_context.document_path(folder, filename).resolve() != target.resolve()
+                        or (target.read_bytes() if target.exists() else None) != before):
+                    continue
+                os.replace(temporary, target)
+                receipts[filename] = hashlib.sha256(desired).hexdigest()
+                changed = True
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+        return changed
+    except (OSError, ValueError, TypeError, AttributeError, sqlite3.Error):
+        return False  # Ordinary file tools remain available if notes cannot be refreshed.
+
+
 def plan_declared_function_step(project: dict, state: dict, messages: list, call) -> bool:
     """Ask for named test inputs for one declared API, then save one SQLite unit.
 
@@ -2640,8 +2735,8 @@ def plan_declared_function_step(project: dict, state: dict, messages: list, call
     attempted.append(attempt)
     state["function_planning_attempted"] = attempted[-32:]
     try:
-        response = call({"model": LOCAL_MODEL, "stream": False, "temperature": 0, "max_tokens": 2048,
-            "_native_workload": "function_step_planning",
+        response = call({"model": LOCAL_MODEL, "stream": False, "temperature": 0, "max_tokens": 4096,
+            "reasoning_effort": "low", "_native_workload": "function_step_planning",
             "messages": [{"role": "system", "content": (
                 "Plan meaningful acceptance for ONE requested function. Call plan_function_step once. "
                 "Derive expected values independently from the original requirements below. "
@@ -3440,8 +3535,12 @@ def run_slice(project: dict, complete=None) -> dict:
         stage = payload.get("_native_workload")
         payload = {key: value for key, value in payload.items() if key != "_native_workload"}
         options = {"repair_avoid": avoid} if avoid else {}
-        if stage in {"starter_selection", "starter_scope_review", "function_step_planning"}:
+        if stage in {"starter_selection", "starter_scope_review"}:
             options["size_hint"] = "quick"
+        elif stage == "function_step_planning":
+            # Acceptance is an oracle for later source edits. Its arithmetic
+            # and boundary reasoning must not be forced into the no-thinking path.
+            options["size_hint"] = "balanced"
         return router.complete(payload, project["id"], **options)
     call = complete or automatic_call
     context_limit = configured_context(ROOT)
@@ -3476,6 +3575,11 @@ def run_slice(project: dict, complete=None) -> dict:
             return latest
         if user_request_stamp(folder) != request_before:
             continue
+        if sync_function_notes(project, state):
+            latest = read_state(project)
+            if latest.get("status") in {"paused", "stopped", "done"}:
+                return latest
+            save_state(project, state)
         if plan_declared_function_step(project, state, messages, call):
             continue
         messages = fresh_messages(messages, folder, state, project)

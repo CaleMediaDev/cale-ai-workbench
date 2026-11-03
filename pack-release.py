@@ -49,6 +49,7 @@ extras = [
     "benchmarks/javascript_logic_repair.py",
     "benchmarks/results/javascript-logic-20261103.json",
     "benchmarks/results/function-phases-20261103.json",
+    "benchmarks/results/function-notes-20261103.json",
     "benchmarks/results/javascript-logic-recovery-20261103.json",
     "benchmarks/results/automatic-steps-20261103.json",
     "benchmarks/results/api-coverage-20261103.json",

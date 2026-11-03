@@ -1,0 +1,1010 @@
+{
+  "scope": "Pure-module function repair and owned SQL note synchronization; no general-app or model-ranking claim.",
+  "status": "Final fresh local-only trial passed all 17 behaviors and five verifier mutations, with durable owned notes and no recorded read/write/edit operations on PLAN/PROGRESS by the model.",
+  "trials": [
+    {
+      "fixture": "native-js-positive-area-457",
+      "report": {
+        "scenario": "javascript_logic_repair",
+        "scope": "Repair real JS game helpers through local tools, then independently grade them.\n\nThis is a pure-module fixture, not a complete playable game or visual benchmark.\nNo cloud account, original user project, model installation or app task is used.\n",
+        "brief": "Repair logic.js, the actual plain-script module loaded by a browser game.\nPreserve its four top-level function APIs and plain function-declaration format:\nmovePlayer(x,direction,seconds,width,speed) moves by direction*speed*seconds and\nclamps the player's center to [20,width-20]. Inputs have direction -1..1, width>=40,\nfinite numbers and nonnegative seconds. Verify left/right bounds and frame-independent timing.\noverlaps(a,b) takes top-left x,y,w,h rectangles. Only positive-area overlap is true;\ntouching edges and separated rectangles are false. Zero-width or zero-height rectangles\nnever overlap, even when wholly inside another rectangle.\nadvanceWave(wave,remaining,spawned) adds one only when remaining===0 AND spawned is true.\ntickCooldown(remaining,seconds) subtracts seconds and clamps at zero.\nUse one small SQLite unit per function, four completed units total. Save meaningful\ncheck_javascript_function input/expected acceptance cases in each unit, including\nthe explicit boundaries above. Run the accumulated read-only verifier. No PowerShell\ntest code is needed. Do not create a test-only copy or change the public APIs.\nKeep PLAN.md and PROGRESS.md accurate. This request is for the helper module only.\n",
+        "resumed": false,
+        "automatic_step_checks": 10,
+        "seconds": 250.49,
+        "model_calls": 17,
+        "tool_calls": 16,
+        "prompt_tokens": 126343,
+        "completion_tokens": 8391,
+        "tools_used": [
+          "plan_function_step",
+          "edit_file",
+          "plan_function_step",
+          "edit_file",
+          "edit_file",
+          "read_file",
+          "edit_file",
+          "plan_function_step",
+          "edit_file",
+          "plan_function_step",
+          "read_file",
+          "edit_file",
+          "task_steps",
+          "write_file",
+          "write_file",
+          "write_file"
+        ],
+        "routes": [
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "quick",
+            "seconds": 26.49
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 8.87
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "quick",
+            "seconds": 16.37
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 10.74
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 29.65
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 5.71
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 10.39
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "quick",
+            "seconds": 7.31
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 9.09
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "quick",
+            "seconds": 8.07
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 8.07
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 15.07
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 13.33
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 20.33
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 20.21
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 13.78
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 14.74
+          }
+        ],
+        "router_call_attempts": 17,
+        "upstream_local_calls": 19,
+        "checkpoint_status": "done",
+        "inference_error": null,
+        "grade": {
+          "checks": {
+            "movement": true,
+            "left": true,
+            "right": true,
+            "still": true,
+            "frame_independence": true,
+            "hit": true,
+            "edge": true,
+            "miss": true,
+            "complete": true,
+            "incomplete": true,
+            "not_spawned": true,
+            "cooldown": true,
+            "cooldown_clamp": true,
+            "zero_width_inside": true,
+            "zero_height_inside": true,
+            "zero_width_first": true,
+            "zero_height_first": true
+          },
+          "verifier_passes_correct": true,
+          "mutations": {
+            "frame_time": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "touching_edges": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "unspawned_wave": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "negative_cooldown": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            }
+          },
+          "steps": {
+            "total": 4,
+            "done": 4,
+            "remaining": 0
+          },
+          "passed": true
+        },
+        "run_outcome": "passed"
+      },
+      "recorded_note_file_operations": [
+        [
+          "write_file",
+          ".local-ai/PLAN.md",
+          "Completed"
+        ],
+        [
+          "write_file",
+          ".local-ai/PLAN.md",
+          "Completed"
+        ],
+        [
+          "write_file",
+          ".local-ai/PROGRESS.md",
+          "Completed"
+        ]
+      ]
+    },
+    {
+      "fixture": "native-js-notes-460",
+      "report": {
+        "scenario": "javascript_logic_repair",
+        "scope": "Repair real JS game helpers through local tools, then independently grade them.\n\nThis is a pure-module fixture, not a complete playable game or visual benchmark.\nNo cloud account, original user project, model installation or app task is used.\n",
+        "brief": "Repair logic.js, the actual plain-script module loaded by a browser game.\nPreserve its four top-level function APIs and plain function-declaration format:\nmovePlayer(x,direction,seconds,width,speed) moves by direction*speed*seconds and\nclamps the player's center to [20,width-20]. Inputs have direction -1..1, width>=40,\nfinite numbers and nonnegative seconds. Verify left/right bounds and frame-independent timing.\noverlaps(a,b) takes top-left x,y,w,h rectangles. Only positive-area overlap is true;\ntouching edges and separated rectangles are false. Zero-width or zero-height rectangles\nnever overlap, even when wholly inside another rectangle.\nadvanceWave(wave,remaining,spawned) adds one only when remaining===0 AND spawned is true.\ntickCooldown(remaining,seconds) subtracts seconds and clamps at zero.\nUse one small SQLite unit per function, four completed units total. Save meaningful\ncheck_javascript_function input/expected acceptance cases in each unit, including\nthe explicit boundaries above. Run the accumulated read-only verifier. No PowerShell\ntest code is needed. Do not create a test-only copy or change the public APIs.\nKeep PLAN.md and PROGRESS.md accurate. This request is for the helper module only.\n",
+        "resumed": false,
+        "automatic_step_checks": 12,
+        "seconds": 351.22,
+        "model_calls": 20,
+        "tool_calls": 21,
+        "prompt_tokens": 158655,
+        "completion_tokens": 10098,
+        "tools_used": [
+          "plan_function_step",
+          "read_file",
+          "edit_file",
+          "task_steps",
+          "task_steps",
+          "task_steps",
+          "task_steps",
+          "task_steps",
+          "plan_function_step",
+          "read_file",
+          "edit_file",
+          "edit_file",
+          "plan_function_step",
+          "task_steps",
+          "read_file",
+          "edit_file",
+          "plan_function_step",
+          "edit_file",
+          "task_steps",
+          "read_file",
+          "read_file"
+        ],
+        "routes": [
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "quick",
+            "seconds": 37.37
+          },
+          {
+            "model": "cale-local",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 72.13
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 19.19
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 16.41
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 11.95
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [
+              {
+                "model": "cale-main-64k",
+                "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+              }
+            ],
+            "size_hint": null,
+            "seconds": 11.34
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [
+              {
+                "model": "cale-main-64k",
+                "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+              }
+            ],
+            "size_hint": null,
+            "seconds": 15.08
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [
+              {
+                "model": "cale-main-64k",
+                "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+              }
+            ],
+            "size_hint": null,
+            "seconds": 13.48
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "quick",
+            "seconds": 16.01
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 6.57
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 11.32
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 27.15
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "quick",
+            "seconds": 9.38
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 12.0
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 12.45
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 9.02
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "quick",
+            "seconds": 5.9
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 7.2
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 15.12
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 7.35
+          }
+        ],
+        "router_call_attempts": 20,
+        "upstream_local_calls": 23,
+        "checkpoint_status": "done",
+        "inference_error": null,
+        "grade": {
+          "checks": {
+            "movement": true,
+            "left": true,
+            "right": true,
+            "still": true,
+            "frame_independence": true,
+            "hit": true,
+            "edge": true,
+            "miss": true,
+            "complete": true,
+            "incomplete": true,
+            "not_spawned": true,
+            "cooldown": true,
+            "cooldown_clamp": true,
+            "zero_width_inside": false,
+            "zero_height_inside": false,
+            "zero_width_first": false,
+            "zero_height_first": false
+          },
+          "verifier_passes_correct": true,
+          "mutations": {
+            "frame_time": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "touching_edges": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "unspawned_wave": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "negative_cooldown": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "zero_area_overlap": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": false
+            }
+          },
+          "steps": {
+            "total": 4,
+            "done": 4,
+            "remaining": 0
+          },
+          "passed": false
+        },
+        "run_outcome": "failed"
+      },
+      "recorded_note_file_operations": [
+        [
+          "read_file",
+          ".local-ai/PLAN.md",
+          "Completed"
+        ],
+        [
+          "read_file",
+          ".local-ai/PROGRESS.md",
+          "Completed"
+        ]
+      ]
+    },
+    {
+      "fixture": "native-js-reasoned-notes-460",
+      "report": {
+        "scenario": "javascript_logic_repair",
+        "scope": "Repair real JS game helpers through local tools, then independently grade them.\n\nThis is a pure-module fixture, not a complete playable game or visual benchmark.\nNo cloud account, original user project, model installation or app task is used.\n",
+        "brief": "Repair logic.js, the actual plain-script module loaded by a browser game.\nPreserve its four top-level function APIs and plain function-declaration format:\nmovePlayer(x,direction,seconds,width,speed) moves by direction*speed*seconds and\nclamps the player's center to [20,width-20]. Inputs have direction -1..1, width>=40,\nfinite numbers and nonnegative seconds. Verify left/right bounds and frame-independent timing.\noverlaps(a,b) takes top-left x,y,w,h rectangles. Only positive-area overlap is true;\ntouching edges and separated rectangles are false. Zero-width or zero-height rectangles\nnever overlap, even when wholly inside another rectangle.\nadvanceWave(wave,remaining,spawned) adds one only when remaining===0 AND spawned is true.\ntickCooldown(remaining,seconds) subtracts seconds and clamps at zero.\nUse one small SQLite unit per function, four completed units total. Save meaningful\ncheck_javascript_function input/expected acceptance cases in each unit, including\nthe explicit boundaries above. Run the accumulated read-only verifier. No PowerShell\ntest code is needed. Do not create a test-only copy or change the public APIs.\nKeep PLAN.md and PROGRESS.md accurate. This request is for the helper module only.\n",
+        "resumed": false,
+        "automatic_step_checks": 9,
+        "seconds": 268.61,
+        "model_calls": 18,
+        "tool_calls": 18,
+        "prompt_tokens": 128620,
+        "completion_tokens": 9381,
+        "tools_used": [
+          "plan_function_step",
+          "edit_file",
+          "plan_function_step",
+          "read_file",
+          "edit_file",
+          "edit_file",
+          "plan_function_step",
+          "task_steps",
+          "run_verifier",
+          "read_file",
+          "edit_file",
+          "plan_function_step",
+          "task_steps",
+          "task_steps",
+          "run_verifier",
+          "read_file",
+          "edit_file",
+          "read_file"
+        ],
+        "routes": [
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "balanced",
+            "seconds": 30.25
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 9.5
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "balanced",
+            "seconds": 31.03
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 11.58
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 22.36
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 21.02
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "balanced",
+            "seconds": 13.89
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 11.99
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 5.28
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 6.05
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 14.12
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": "balanced",
+            "seconds": 16.04
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 20.88
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 9.34
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 5.92
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [
+              {
+                "model": "cale-main-64k",
+                "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+              }
+            ],
+            "size_hint": null,
+            "seconds": 6.1
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [
+              {
+                "model": "cale-main-64k",
+                "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+              }
+            ],
+            "size_hint": null,
+            "seconds": 13.94
+          },
+          {
+            "model": "cale-main-64k",
+            "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+            "repair_avoid": [],
+            "size_hint": null,
+            "seconds": 6.74
+          }
+        ],
+        "router_call_attempts": 18,
+        "upstream_local_calls": 19,
+        "checkpoint_status": "done",
+        "inference_error": null,
+        "grade": {
+          "checks": {
+            "movement": true,
+            "left": true,
+            "right": true,
+            "still": true,
+            "frame_independence": true,
+            "hit": true,
+            "edge": true,
+            "miss": true,
+            "complete": true,
+            "incomplete": true,
+            "not_spawned": true,
+            "cooldown": true,
+            "cooldown_clamp": true,
+            "zero_width_inside": true,
+            "zero_height_inside": true,
+            "zero_width_first": true,
+            "zero_height_first": true
+          },
+          "verifier_passes_correct": true,
+          "mutations": {
+            "frame_time": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "touching_edges": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "unspawned_wave": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "negative_cooldown": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            },
+            "zero_area_overlap": {
+              "valid_behavior_mutation": true,
+              "verifier_rejected": true
+            }
+          },
+          "steps": {
+            "total": 4,
+            "done": 4,
+            "remaining": 0
+          },
+          "passed": true
+        },
+        "run_outcome": "passed"
+      },
+      "recorded_note_file_operations": [],
+      "owned_notes_match_receipts": {
+        "PLAN.md": true,
+        "PROGRESS.md": true
+      }
+    }
+  ],
+  "validation": {
+    "native_agent_suite_passed": 174
+  },
+  "limits": "These evolving single runs do not establish a general speed ranking. SQL unit acceptance is distinct from whole-task correctness.",
+  "final_artifact": {
+    "source": "function movePlayer(x,direction,seconds,width,speed){\n  let newX = x + direction * speed * seconds;\n  return Math.max(20, Math.min(width - 20, newX));\n}\nfunction overlaps(a,b){if(!a.w||!a.h||!b.w||!b.h)return false;return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}\nfunction advanceWave(wave,remaining,spawned){return remaining===0&&spawned?wave+1:wave}\nfunction tickCooldown(remaining,seconds){return Math.max(0, remaining-seconds)}\n",
+    "acceptance": {
+      "request_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "checks": [
+        {
+          "path": "logic.js",
+          "function": "movePlayer",
+          "cases": [
+            {
+              "args": [
+                50,
+                1,
+                2,
+                100,
+                5
+              ],
+              "expected": 60
+            },
+            {
+              "args": [
+                70,
+                -1,
+                2,
+                100,
+                5
+              ],
+              "expected": 60
+            },
+            {
+              "args": [
+                75,
+                1,
+                5,
+                100,
+                5
+              ],
+              "expected": 80
+            },
+            {
+              "args": [
+                25,
+                -1,
+                5,
+                100,
+                5
+              ],
+              "expected": 20
+            },
+            {
+              "args": [
+                50,
+                0,
+                2,
+                100,
+                5
+              ],
+              "expected": 50
+            },
+            {
+              "args": [
+                50,
+                1,
+                0,
+                100,
+                5
+              ],
+              "expected": 50
+            }
+          ],
+          "tolerance": 1e-08
+        },
+        {
+          "path": "logic.js",
+          "function": "overlaps",
+          "cases": [
+            {
+              "args": [
+                {
+                  "h": 50,
+                  "w": 50,
+                  "x": 0,
+                  "y": 0
+                },
+                {
+                  "h": 30,
+                  "w": 30,
+                  "x": 20,
+                  "y": 20
+                }
+              ],
+              "expected": true
+            },
+            {
+              "args": [
+                {
+                  "h": 50,
+                  "w": 50,
+                  "x": 0,
+                  "y": 0
+                },
+                {
+                  "h": 30,
+                  "w": 30,
+                  "x": 50,
+                  "y": 0
+                }
+              ],
+              "expected": false
+            },
+            {
+              "args": [
+                {
+                  "h": 30,
+                  "w": 30,
+                  "x": 0,
+                  "y": 0
+                },
+                {
+                  "h": 30,
+                  "w": 30,
+                  "x": 60,
+                  "y": 0
+                }
+              ],
+              "expected": false
+            },
+            {
+              "args": [
+                {
+                  "h": 100,
+                  "w": 100,
+                  "x": 0,
+                  "y": 0
+                },
+                {
+                  "h": 30,
+                  "w": 0,
+                  "x": 20,
+                  "y": 20
+                }
+              ],
+              "expected": false
+            },
+            {
+              "args": [
+                {
+                  "h": 100,
+                  "w": 50,
+                  "x": 0,
+                  "y": 0
+                },
+                {
+                  "h": 0,
+                  "w": 30,
+                  "x": 10,
+                  "y": 0
+                }
+              ],
+              "expected": false
+            },
+            {
+              "args": [
+                {
+                  "h": 100,
+                  "w": 100,
+                  "x": 0,
+                  "y": 0
+                },
+                {
+                  "h": 30,
+                  "w": 30,
+                  "x": 20,
+                  "y": 20
+                }
+              ],
+              "expected": true
+            }
+          ],
+          "tolerance": 1e-08
+        },
+        {
+          "path": "logic.js",
+          "function": "advanceWave",
+          "cases": [
+            {
+              "args": [
+                5,
+                0,
+                true
+              ],
+              "expected": 6
+            },
+            {
+              "args": [
+                5,
+                1,
+                true
+              ],
+              "expected": 5
+            },
+            {
+              "args": [
+                5,
+                0,
+                false
+              ],
+              "expected": 5
+            },
+            {
+              "args": [
+                5,
+                -1,
+                true
+              ],
+              "expected": 5
+            },
+            {
+              "args": [
+                5,
+                1000,
+                true
+              ],
+              "expected": 5
+            },
+            {
+              "args": [
+                0,
+                0,
+                true
+              ],
+              "expected": 1
+            }
+          ],
+          "tolerance": 1e-08
+        },
+        {
+          "path": "logic.js",
+          "function": "tickCooldown",
+          "cases": [
+            {
+              "args": [
+                10,
+                3
+              ],
+              "expected": 7
+            },
+            {
+              "args": [
+                5,
+                5
+              ],
+              "expected": 0
+            },
+            {
+              "args": [
+                3,
+                8
+              ],
+              "expected": 0
+            },
+            {
+              "args": [
+                7,
+                0
+              ],
+              "expected": 7
+            },
+            {
+              "args": [
+                0,
+                5
+              ],
+              "expected": 0
+            }
+          ],
+          "tolerance": 1e-08
+        }
+      ]
+    },
+    "plan": "<!-- cale:function-notes -->\n# Plan\n\nFunction units for `logic.js`; the full original request and follow-ups remain authoritative.\n\n- [x] `movePlayer` \u2014 saved unit acceptance\n- [x] `overlaps` \u2014 saved unit acceptance\n- [x] `advanceWave` \u2014 saved unit acceptance\n- [x] `tickCooldown` \u2014 saved unit acceptance\n",
+    "progress": "<!-- cale:function-notes -->\n# Progress\n\n4 of 4 named function units have saved passing acceptance.\n\nSaved accumulated verifier passed. This is not whole-task completion.\n\nNext: Review the original request and current verification before handoff.\n"
+  }
+}
