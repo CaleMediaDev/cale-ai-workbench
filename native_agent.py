@@ -881,6 +881,13 @@ def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
         return {}
 
 
+def invalidate_checks(state: dict) -> None:
+    """A new user instruction makes old acceptance evidence stale."""
+    state["verify_passed"] = False
+    state["browser_verified"] = False
+    state["verifier_nudged"] = False
+
+
 def completion_issue(folder: Path, project: dict | None = None,
                      state: dict | None = None) -> str:
     """Catch a premature handoff before the costly independent review starts."""
@@ -909,7 +916,7 @@ def completion_issue(folder: Path, project: dict | None = None,
                     "Mark only proven milestones complete; work on any genuinely unfinished ones. "
                     "Do not recreate files or rerun unchanged checks.")
         return "PLAN.md still has unchecked milestones. Finish and verify them, then update the plan before handoff."
-    if state is not None and plan.is_file() and not state.get("verify_passed"):
+    if state is not None and not state.get("verify_passed"):
         return ("Run .local-ai/verify.ps1 with run_verifier after the last edit. "
                 "A created verifier is not evidence that it passed.")
     return ""
@@ -1121,6 +1128,7 @@ def run_slice(project: dict, complete=None) -> dict:
         calls = message.get("tool_calls") or []
         if not calls:
             if user_request_stamp(folder) != request_before:
+                invalidate_checks(state)
                 messages.append({"role": "user", "content":
                                  "A new user instruction arrived while you were answering. "
                                  "Read .local-ai/USER-REQUESTS.md and apply it before finishing."})
@@ -1229,7 +1237,7 @@ def run_slice(project: dict, complete=None) -> dict:
             state["failure_nudged"] = True
             save_state(project, state)
         if user_request_stamp(folder) != request_before:
-            state["verify_passed"] = False
+            invalidate_checks(state)
             messages.append({"role": "user", "content":
                              "A new user instruction arrived during this step. "
                              "Read .local-ai/USER-REQUESTS.md before your next action."})
@@ -1371,6 +1379,7 @@ def apply_request(project: dict, action: str, note: str) -> str:
             notes = Path(project["folder"]) / ".local-ai" / "USER-REQUESTS.md"
             with notes.open("a", encoding="utf-8") as stream:
                 stream.write("\n## New instruction\n" + note.strip() + "\n")
+            invalidate_checks(state)
         state["status"] = "continue"
         state["messages"] = (state.get("messages") or []) + ([{"role": "user", "content": note}] if note else [])
         save_state(project, state)

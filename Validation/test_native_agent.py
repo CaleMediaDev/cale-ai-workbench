@@ -328,6 +328,27 @@ def test_browser_check_evidence_accepts_json_encoded_cases():
         assert native_agent.browser_check_evidence(folder, arguments, '{"passed":false}') == {}
 
 
+def test_new_instruction_invalidates_saved_browser_and_verifier_checks():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        item["brief"] = "Build a single-file index.html app with an input that updates a total."
+        folder = Path(item["folder"])
+        page = folder / "index.html"
+        page.write_text("<input id='bill'><p id='total'>30</p>", encoding="utf-8")
+        (folder / ".local-ai/verify.ps1").write_text("exit 0", encoding="utf-8")
+        (folder / ".local-ai/PLAN.md").write_text("- [x] Build and verify\n", encoding="utf-8")
+        native_agent.save_state(item, {"status": "done", "verify_passed": True,
+                                       "browser_verified": True, "browser_checked_path": "index.html",
+                                       "browser_checked_hash": hashlib.sha256(page.read_bytes()).hexdigest()})
+        with patch.object(long_tasks, "update"):
+            assert native_agent.apply_request(item, "note", "Also add a reset button") == "Applied"
+        state = native_agent.read_state(item)
+        assert state["status"] == "continue"
+        assert state["verify_passed"] is False
+        assert state["browser_verified"] is False
+        assert "Run check_webapp" in native_agent.completion_issue(folder, item, state)
+
+
 def test_read_file_streams_large_files_and_bounds_one_extremely_long_line():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
@@ -353,6 +374,7 @@ def test_native_worker_reuses_router_across_model_turns():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
         (Path(item["folder"]) / ".local-ai/verify.ps1").write_text("exit 0")
+        native_agent.save_state(item, {"status": "continue", "verify_passed": True})
         created = []
 
         class Router:
@@ -409,6 +431,7 @@ def test_worker_start_does_not_overwrite_a_child_checkpoint():
 def test_native_worker_continues_when_model_claims_done_without_verifier():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
+        (Path(item["folder"]) / "index.html").write_text("<h1>Ready</h1>")
         responses = iter([
             {"choices": [{"message": {"role": "assistant", "content": "Finished."}}]},
             {"choices": [{"message": {"role": "assistant", "content": None,
@@ -416,6 +439,9 @@ def test_native_worker_continues_when_model_claims_done_without_verifier():
                     "name": "write_file", "arguments":
                     '{"path":".local-ai/verify.ps1","content":"if (-not (Test-Path index.html)) { exit 1 }"}'
                 }}]}}]},
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "run-verify-1", "function": {"name": "run_command",
+                    "arguments": '{"command":"powershell -File .local-ai/verify.ps1"}'}}]}}]},
             {"choices": [{"message": {"role": "assistant", "content": "Finished."}}]},
         ])
         seen = []
@@ -424,7 +450,7 @@ def test_native_worker_continues_when_model_claims_done_without_verifier():
             return next(responses)
         state = native_agent.run_slice(item, complete=complete)
         assert state["status"] == "done"
-        assert len(seen) == 3
+        assert len(seen) == 4
         assert "not ready for handoff" in seen[1]["messages"][-1]["content"]
         assert (Path(item["folder"]) / ".local-ai/verify.ps1").is_file()
 
@@ -460,6 +486,7 @@ def test_empty_final_reply_gets_one_summary_retry():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
         (Path(item["folder"]) / ".local-ai/verify.ps1").write_text("exit 0")
+        native_agent.save_state(item, {"status": "continue", "verify_passed": True})
         seen = []
         responses = iter([
             {"choices": [{"message": {"role": "assistant", "content": ""}}]},
@@ -648,7 +675,8 @@ def test_valid_model_turn_resets_consecutive_worker_failures():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
         (Path(item["folder"]) / ".local-ai/verify.ps1").write_text("exit 0")
-        native_agent.save_state(item, {"status": "continue", "messages": [], "failures": 2})
+        native_agent.save_state(item, {"status": "continue", "messages": [],
+                                       "failures": 2, "verify_passed": True})
         state = native_agent.run_slice(item, complete=lambda _: {
             "choices": [{"message": {"role": "assistant", "content": "Finished."}}],
         })
@@ -904,6 +932,8 @@ def test_inflight_user_instruction_prevents_early_completion():
         item = project(Path(temporary) / "page")
         notes = Path(item["folder"]) / ".local-ai"
         (notes / "verify.ps1").write_text("exit 0")
+        native_agent.save_state(item, {"status": "continue", "verify_passed": True,
+                                       "browser_verified": True})
         seen = []
 
         def complete(payload):
@@ -914,9 +944,11 @@ def test_inflight_user_instruction_prevents_early_completion():
             assert "Make the title blue" in str(payload["messages"])
             return {"choices": [{"message": {"role": "assistant", "content": "Blue title finished"}}]}
 
-        state = native_agent.run_slice(item, complete=complete)
-        assert state["status"] == "done"
-        assert state["answer"] == "Blue title finished"
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2):
+            state = native_agent.run_slice(item, complete=complete)
+        assert state["status"] == "continue"
+        assert state["verify_passed"] is False
+        assert state["browser_verified"] is False
         assert len(seen) == 2
 
 
@@ -966,6 +998,7 @@ def test_repeated_identical_tool_failure_prompts_a_different_approach():
         item = project(Path(temporary) / "page")
         folder = Path(item["folder"])
         (folder / ".local-ai/verify.ps1").write_text("exit 0")
+        native_agent.save_state(item, {"status": "continue", "verify_passed": True})
         responses = iter([
             {"choices": [{"message": {"role": "assistant", "tool_calls": [{
                 "id": call_id, "function": {"name": "read_file",
@@ -990,6 +1023,7 @@ def test_third_identical_failed_tool_call_is_not_executed_again():
         item = project(Path(temporary) / "page")
         folder = Path(item["folder"])
         (folder / ".local-ai/verify.ps1").write_text("exit 0")
+        native_agent.save_state(item, {"status": "continue", "verify_passed": True})
         responses = iter([
             {"choices": [{"message": {"role": "assistant", "tool_calls": [{
                 "id": f"read-{number}", "function": {"name": "read_file",
@@ -1010,6 +1044,8 @@ def test_instruction_during_tool_call_follows_complete_tool_batch():
         folder = Path(item["folder"])
         notes = folder / ".local-ai"
         (notes / "verify.ps1").write_text("exit 0")
+        native_agent.save_state(item, {"status": "continue", "verify_passed": True,
+                                       "browser_verified": True})
         responses = iter([
             {"choices": [{"message": {"role": "assistant", "tool_calls": [{
                 "id": "list-1", "function": {"name": "list_files", "arguments": "{}"}}]}}]},
@@ -1026,8 +1062,12 @@ def test_instruction_during_tool_call_follows_complete_tool_batch():
             seen.append(copy.deepcopy(payload))
             return next(responses)
 
-        with patch.object(native_agent, "execute_tool", side_effect=tool_with_note):
-            assert native_agent.run_slice(item, complete=complete)["status"] == "done"
+        with (patch.object(native_agent, "execute_tool", side_effect=tool_with_note),
+              patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2)):
+            state = native_agent.run_slice(item, complete=complete)
+        assert state["status"] == "continue"
+        assert state["verify_passed"] is False
+        assert state["browser_verified"] is False
         assert [entry["role"] for entry in seen[1]["messages"][-3:]] == ["assistant", "tool", "user"]
         assert "Use blue" in str(seen[1]["messages"])
 
