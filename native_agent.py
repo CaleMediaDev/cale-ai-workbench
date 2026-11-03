@@ -1079,6 +1079,7 @@ def run_slice(project: dict, complete=None) -> dict:
     from cloud_ai import LOCAL_MODEL, Router
 
     folder = Path(project["folder"])
+    known_request_stamp = user_request_stamp(folder)
     state = read_state(project)
     if state.get("status") in ("paused", "stopped", "done"):
         return state
@@ -1106,14 +1107,35 @@ def run_slice(project: dict, complete=None) -> dict:
         latest = read_state(project)
         if latest.get("status") in ("paused", "stopped"):
             return latest
+        request_before = user_request_stamp(folder)
+        if request_before != known_request_stamp:
+            invalidate_checks(state)
+            messages.append({"role": "user", "content":
+                             "A new user instruction arrived between steps. "
+                             "Read .local-ai/USER-REQUESTS.md and apply it before finishing."})
+            state["messages"] = messages
+            known_request_stamp = request_before
+            save_state(project, state)
         messages = fresh_messages(messages, folder, state)
         messages = compact_messages(messages, folder, context_limit)
-        request_before = user_request_stamp(folder)
         response = call({"model": LOCAL_MODEL, "messages": messages, "tools": TOOLS,
                          "tool_choice": "auto", "stream": False, "temperature": 0.2})
         latest = read_state(project)
         if latest.get("status") in ("paused", "stopped"):
             return latest
+        current_request_stamp = user_request_stamp(folder)
+        if current_request_stamp != request_before:
+            # The response was planned against the older brief. Do not run
+            # its tool calls after a user has changed the task.
+            invalidate_checks(state)
+            known_request_stamp = current_request_stamp
+            messages.append({"role": "user", "content":
+                             "A new user instruction arrived while you were planning. "
+                             "Read .local-ai/USER-REQUESTS.md and apply it before acting."})
+            state["messages"] = messages
+            state["current"] = "Reading the new instruction before continuing"
+            save_state(project, state)
+            continue
         if "error" in response:
             raise RuntimeError(str(response["error"]))
         message = response["choices"][0]["message"]
@@ -1129,6 +1151,7 @@ def run_slice(project: dict, complete=None) -> dict:
         if not calls:
             if user_request_stamp(folder) != request_before:
                 invalidate_checks(state)
+                known_request_stamp = user_request_stamp(folder)
                 messages.append({"role": "user", "content":
                                  "A new user instruction arrived while you were answering. "
                                  "Read .local-ai/USER-REQUESTS.md and apply it before finishing."})
@@ -1238,6 +1261,7 @@ def run_slice(project: dict, complete=None) -> dict:
             save_state(project, state)
         if user_request_stamp(folder) != request_before:
             invalidate_checks(state)
+            known_request_stamp = user_request_stamp(folder)
             messages.append({"role": "user", "content":
                              "A new user instruction arrived during this step. "
                              "Read .local-ai/USER-REQUESTS.md before your next action."})

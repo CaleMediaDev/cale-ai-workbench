@@ -952,6 +952,67 @@ def test_inflight_user_instruction_prevents_early_completion():
         assert len(seen) == 2
 
 
+def test_new_instruction_during_model_call_discards_stale_tool_plan():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        notes = folder / ".local-ai"
+        (notes / "USER-REQUESTS.md").write_text("", encoding="utf-8")
+        (notes / "verify.ps1").write_text("exit 0", encoding="utf-8")
+        native_agent.save_state(item, {"status": "continue", "verify_passed": True,
+                                       "browser_verified": True})
+
+        def complete(_payload):
+            (notes / "USER-REQUESTS.md").write_text("Do not create old.txt", encoding="utf-8")
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "stale-write", "function": {"name": "write_file", "arguments":
+                    '{"path":"old.txt","content":"stale plan"}'}}]}}]}
+
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+            state = native_agent.run_slice(item, complete=complete)
+        assert state["status"] == "continue"
+        assert not (folder / "old.txt").exists()
+        assert state["verify_passed"] is False
+        assert state["browser_verified"] is False
+        assert "before acting" in str(state["messages"])
+
+
+def test_instruction_between_turns_reaches_next_model_call():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        notes = Path(item["folder"]) / ".local-ai"
+        (notes / "USER-REQUESTS.md").write_text("", encoding="utf-8")
+        (notes / "verify.ps1").write_text("exit 0", encoding="utf-8")
+        native_agent.save_state(item, {"status": "continue", "verify_passed": True,
+                                       "browser_verified": True})
+        original_read = native_agent.read_state
+        reads = []
+        seen = []
+
+        def read_with_between_turn_note(project_item):
+            reads.append(1)
+            if len(reads) == 5:
+                (notes / "USER-REQUESTS.md").write_text("Use blue instead", encoding="utf-8")
+            return original_read(project_item)
+
+        def complete(payload):
+            seen.append(copy.deepcopy(payload))
+            return {"choices": [{"message": {
+                "role": "assistant", "tool_calls": [
+                    {"id": f"list-{len(seen)}", "function": {
+                        "name": "list_files", "arguments": "{}"}},
+                ],
+            }}]}
+
+        with (patch.object(native_agent, "read_state", side_effect=read_with_between_turn_note),
+              patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2)):
+            state = native_agent.run_slice(item, complete=complete)
+        assert len(seen) == 2
+        assert "Use blue instead" in str(seen[1]["messages"])
+        assert state["verify_passed"] is False
+        assert state["browser_verified"] is False
+
+
 def test_task_action_ledger_names_files_without_storing_content():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
