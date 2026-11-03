@@ -39,3 +39,21 @@ def test_network_bandwidth_includes_link_load():
     assert system_gauges.network_bandwidth(
         (0, 0), (12_500_000, 2_500_000), 1, 200
     ) == (100, 20, 60)
+
+
+def test_non_windows_sample_returns_all_sensor_fields_as_unavailable(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(system_gauges, "os", SimpleNamespace(name="posix"))
+    assert system_gauges.HardwareSampler().sample() == {
+        "cpu": None,
+        "ram": None,
+        "gpu": None,
+        "drive": None,
+        "drive_free_gb": None,
+        "drive_read_mbps": None,
+        "drive_write_mbps": None,
+        "net": None,
+        "net_down_mbps": None,
+        "net_up_mbps": None,
+    }

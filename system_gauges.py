@@ -162,7 +162,9 @@ class HardwareSampler:
     def sample(self):
         if os.name != "nt":
             return {"cpu": None, "ram": None, "gpu": None,
-                    "drive": None, "drive_free_gb": None, "net": None}
+                    "drive": None, "drive_free_gb": None,
+                    "drive_read_mbps": None, "drive_write_mbps": None,
+                    "net": None, "net_down_mbps": None, "net_up_mbps": None}
         try:
             current = _cpu_times()
             cpu = cpu_percent(self.previous_cpu, current)
