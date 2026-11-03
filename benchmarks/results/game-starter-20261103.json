@@ -1,0 +1,725 @@
+{
+  "scope": "Starter tool development on RTX 3060 12 GB, 128 GB RAM. The first native build had the tool offered but no focused selector; it ignored the tool. Fixed engine checks and subsequent selector trial are separate evidence. Not a pure-model coding improvement or model qualification.",
+  "runs": [
+    {
+      "scenario": "native_game_build",
+      "brief": "Create index.html, a complete offline HTML space shooter, using your project tools.\nBuild a real canvas game with stars, player ship, enemies, bullets, score, lives,\nwaves, game over and Enter restart. Fit small screens. Arrow keys/A-D move,\nSpace shoots. No external assets. Use seconds-based timing at 120 pixels/second.\nCanvas logical size is 600x800, player center starts x=300, half-width=20.\nExpose the SAME live state and functions used for gameplay as window.game:\n{player:{x,y,w,h,invincible},bullets:[],enemies:[],score,lives,wave,playing,\nwaveSpawned,update(dt,keys),reset()}. keys contains ArrowLeft/ArrowRight/KeyA/KeyD/Space\nbooleans. Enemy/bullet objects use centered x,y,w,h and speed, enemy hp defaults1.\nupdate(0,{}) resolves existing collisions. Each killed enemy scores10.\nA player hit removes one life with at least1 second invulnerability. At zero\nlives playing=false. reset() starts play with score0/lives3/wave1/player.x300\nand no bullets. An empty wave advances after waveSpawned=true regardless of\nscore. Only positive-area rectangle overlap counts. Clear keys on blur.\nReturn a complete playable game, not just an API or a picture.\n Save actual files, not JSON in chat. Use task_steps for at least two tiny SQLite units, finish their real checks and create/run a repeatable verifier. Show a visible HUD with score, lives and wave. Test real keyboard movement, shooting and restart, not just text presence. Expose the requested window.game object as the actual live game state, not a separate test implementation. Keep all JavaScript inline in index.html for this single-file game.",
+      "seconds": 199.08,
+      "automatic_step_checks": 0,
+      "status": null,
+      "error": "ToolArgumentError: Invalid arguments for tool task_steps: Schema rule type: expected \"array\"; received JSON string.",
+      "model_calls": 5,
+      "tool_calls": 5,
+      "prompt_tokens": 74419,
+      "completion_tokens": 5787,
+      "tools_used": [
+        "list_files",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "write_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.65
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 2.57
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 28.21
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 8.67
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 70.09
+        }
+      ],
+      "router_call_attempts": 6,
+      "upstream_local_calls": 9,
+      "grade": {
+        "logic": {
+          "live_api": true,
+          "reset": true,
+          "frame_independence": false,
+          "left": false,
+          "right": false,
+          "shooting": false,
+          "score": false,
+          "damage": false,
+          "invulnerability": false,
+          "gameover": false,
+          "wave": false,
+          "drawing": true,
+          "blur": true
+        },
+        "browser": {
+          "checks": {
+            "mobile_fit": false,
+            "canvas_visible": true,
+            "keyboard_moves_actual_player": false,
+            "keyboard_shoots": false,
+            "keyboard_restarts": false
+          },
+          "errors": [],
+          "passed": false
+        },
+        "verifier_passes_correct": false,
+        "verifier_rejects_missing_javascript": false,
+        "steps": {
+          "total": 0,
+          "done": 0,
+          "remaining": 0
+        },
+        "passed": false
+      },
+      "resumed": false,
+      "initial_turns": 0,
+      "initial_steps": {
+        "total": 0,
+        "done": 0,
+        "remaining": 0
+      }
+    },
+    {
+      "scenario": "native_game_build",
+      "brief": "Create index.html, a complete offline HTML space shooter, using your project tools.\nBuild a real canvas game with stars, player ship, enemies, bullets, score, lives,\nwaves, game over and Enter restart. Fit small screens. Arrow keys/A-D move,\nSpace shoots. No external assets. Use seconds-based timing at 120 pixels/second.\nCanvas logical size is 600x800, player center starts x=300, half-width=20.\nExpose the SAME live state and functions used for gameplay as window.game:\n{player:{x,y,w,h,invincible},bullets:[],enemies:[],score,lives,wave,playing,\nwaveSpawned,update(dt,keys),reset()}. keys contains ArrowLeft/ArrowRight/KeyA/KeyD/Space\nbooleans. Enemy/bullet objects use centered x,y,w,h and speed, enemy hp defaults1.\nupdate(0,{}) resolves existing collisions. Each killed enemy scores10.\nA player hit removes one life with at least1 second invulnerability. At zero\nlives playing=false. reset() starts play with score0/lives3/wave1/player.x300\nand no bullets. An empty wave advances after waveSpawned=true regardless of\nscore. Only positive-area rectangle overlap counts. Clear keys on blur.\nReturn a complete playable game, not just an API or a picture.\n Save actual files, not JSON in chat. Use task_steps for at least two tiny SQLite units, finish their real checks and create/run a repeatable verifier. Show a visible HUD with score, lives and wave. Test real keyboard movement, shooting and restart, not just text presence. Expose the requested window.game object as the actual live game state, not a separate test implementation. Keep all JavaScript inline in index.html for this single-file game.",
+      "seconds": 276.94,
+      "automatic_step_checks": 0,
+      "status": null,
+      "error": "ToolArgumentError: Invalid arguments for tool task_steps: Schema rule type: expected \"array\"; received JSON string.",
+      "model_calls": 10,
+      "tool_calls": 10,
+      "prompt_tokens": 138425,
+      "completion_tokens": 4892,
+      "tools_used": [
+        "create_game_starter",
+        "read_file",
+        "edit_file",
+        "edit_file",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "read_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 12.02
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.12
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 15.42
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.95
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.31
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 11.38
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.6
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 13.9
+        },
+        {
+          "model": "cale-local",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 87.69
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-local",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 11.53
+        }
+      ],
+      "router_call_attempts": 11,
+      "upstream_local_calls": 15,
+      "grade": {
+        "logic": {
+          "live_api": true,
+          "reset": true,
+          "frame_independence": true,
+          "left": true,
+          "right": true,
+          "shooting": true,
+          "score": true,
+          "damage": true,
+          "invulnerability": true,
+          "gameover": true,
+          "wave": true,
+          "drawing": true,
+          "blur": true
+        },
+        "browser": {
+          "checks": {
+            "mobile_fit": true,
+            "canvas_visible": true,
+            "keyboard_moves_actual_player": true,
+            "keyboard_shoots": true,
+            "keyboard_restarts": true
+          },
+          "errors": [],
+          "passed": true
+        },
+        "verifier_passes_correct": true,
+        "verifier_rejects_missing_javascript": true,
+        "steps": {
+          "total": 5,
+          "done": 2,
+          "remaining": 3
+        },
+        "passed": false
+      },
+      "resumed": false,
+      "initial_turns": 0,
+      "initial_steps": {
+        "total": 0,
+        "done": 0,
+        "remaining": 0
+      },
+      "development_fixture": "native-game-starter-focused-451"
+    },
+    {
+      "scenario": "native_game_build",
+      "brief": "Create index.html, a complete offline HTML space shooter, using your project tools.\nBuild a real canvas game with stars, player ship, enemies, bullets, score, lives,\nwaves, game over and Enter restart. Fit small screens. Arrow keys/A-D move,\nSpace shoots. No external assets. Use seconds-based timing at 120 pixels/second.\nCanvas logical size is 600x800, player center starts x=300, half-width=20.\nExpose the SAME live state and functions used for gameplay as window.game:\n{player:{x,y,w,h,invincible},bullets:[],enemies:[],score,lives,wave,playing,\nwaveSpawned,update(dt,keys),reset()}. keys contains ArrowLeft/ArrowRight/KeyA/KeyD/Space\nbooleans. Enemy/bullet objects use centered x,y,w,h and speed, enemy hp defaults1.\nupdate(0,{}) resolves existing collisions. Each killed enemy scores10.\nA player hit removes one life with at least1 second invulnerability. At zero\nlives playing=false. reset() starts play with score0/lives3/wave1/player.x300\nand no bullets. An empty wave advances after waveSpawned=true regardless of\nscore. Only positive-area rectangle overlap counts. Clear keys on blur.\nReturn a complete playable game, not just an API or a picture.\n Save actual files, not JSON in chat. Use task_steps for at least two tiny SQLite units, finish their real checks and create/run a repeatable verifier. Show a visible HUD with score, lives and wave. Test real keyboard movement, shooting and restart, not just text presence. Expose the requested window.game object as the actual live game state, not a separate test implementation. Keep all JavaScript inline in index.html for this single-file game.",
+      "seconds": 191.66,
+      "automatic_step_checks": 0,
+      "status": null,
+      "error": "ValueError: Empty inference response",
+      "model_calls": 4,
+      "tool_calls": 4,
+      "prompt_tokens": 50165,
+      "completion_tokens": 3115,
+      "tools_used": [
+        "create_game_starter",
+        "read_file",
+        "write_file",
+        "write_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.45
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 12.0
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 12.35
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.3
+        }
+      ],
+      "router_call_attempts": 6,
+      "upstream_local_calls": 8,
+      "grade": {
+        "logic": {
+          "live_api": true,
+          "reset": true,
+          "frame_independence": true,
+          "left": true,
+          "right": true,
+          "shooting": true,
+          "score": true,
+          "damage": true,
+          "invulnerability": true,
+          "gameover": true,
+          "wave": true,
+          "drawing": true,
+          "blur": true
+        },
+        "browser": {
+          "checks": {
+            "mobile_fit": true,
+            "canvas_visible": true,
+            "keyboard_moves_actual_player": true,
+            "keyboard_shoots": true,
+            "keyboard_restarts": true
+          },
+          "errors": [],
+          "passed": true
+        },
+        "verifier_passes_correct": true,
+        "verifier_rejects_missing_javascript": true,
+        "steps": {
+          "total": 2,
+          "done": 2,
+          "remaining": 0
+        },
+        "passed": true
+      },
+      "resumed": false,
+      "initial_turns": 0,
+      "initial_steps": {
+        "total": 0,
+        "done": 0,
+        "remaining": 0
+      },
+      "development_fixture": "native-game-starter-reviewed-451"
+    },
+    {
+      "scenario": "native_game_build",
+      "brief": "Create index.html, a complete offline HTML space shooter, using your project tools.\nBuild a real canvas game with stars, player ship, enemies, bullets, score, lives,\nwaves, game over and Enter restart. Fit small screens. Arrow keys/A-D move,\nSpace shoots. No external assets. Use seconds-based timing at 120 pixels/second.\nCanvas logical size is 600x800, player center starts x=300, half-width=20.\nExpose the SAME live state and functions used for gameplay as window.game:\n{player:{x,y,w,h,invincible},bullets:[],enemies:[],score,lives,wave,playing,\nwaveSpawned,update(dt,keys),reset()}. keys contains ArrowLeft/ArrowRight/KeyA/KeyD/Space\nbooleans. Enemy/bullet objects use centered x,y,w,h and speed, enemy hp defaults1.\nupdate(0,{}) resolves existing collisions. Each killed enemy scores10.\nA player hit removes one life with at least1 second invulnerability. At zero\nlives playing=false. reset() starts play with score0/lives3/wave1/player.x300\nand no bullets. An empty wave advances after waveSpawned=true regardless of\nscore. Only positive-area rectangle overlap counts. Clear keys on blur.\nReturn a complete playable game, not just an API or a picture.\n Save actual files, not JSON in chat. Use task_steps for at least two tiny SQLite units, finish their real checks and create/run a repeatable verifier. Show a visible HUD with score, lives and wave. Test real keyboard movement, shooting and restart, not just text presence. Expose the requested window.game object as the actual live game state, not a separate test implementation. Keep all JavaScript inline in index.html for this single-file game.",
+      "seconds": 278.77,
+      "automatic_step_checks": 2,
+      "starter_used": true,
+      "starter_review": null,
+      "starter_review_error": "ValueError: Empty inference response",
+      "status": "done",
+      "error": null,
+      "model_calls": 25,
+      "tool_calls": 24,
+      "prompt_tokens": 223227,
+      "completion_tokens": 6599,
+      "tools_used": [
+        "create_game_starter",
+        "write_file",
+        "write_file",
+        "write_file",
+        "list_files",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "edit_file",
+        "read_file",
+        "read_file",
+        "search_project_memory",
+        "read_file",
+        "read_file",
+        "read_file",
+        "list_files",
+        "read_file",
+        "read_file",
+        "run_verifier",
+        "read_file",
+        "read_file",
+        "run_verifier",
+        "edit_file",
+        "edit_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": "quick",
+          "seconds": 14.17
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 16.96
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 10.38
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 5.21
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 2.07
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 1.65
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 1.97
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 6.23
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 5.14
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 2.28
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 3.98
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 4.73
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 1.89
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 1.94
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 1.33
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 5.57
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 2.09
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 2.15
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 3.59
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 4.92
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 1.34
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 1.65
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 11.76
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 10.27
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 11.71
+        }
+      ],
+      "router_call_attempts": 26,
+      "upstream_local_calls": 27,
+      "grade": {
+        "logic": {
+          "live_api": true,
+          "reset": true,
+          "frame_independence": true,
+          "left": true,
+          "right": true,
+          "shooting": true,
+          "score": true,
+          "damage": true,
+          "invulnerability": true,
+          "gameover": true,
+          "wave": true,
+          "drawing": true,
+          "blur": true
+        },
+        "browser": {
+          "checks": {
+            "mobile_fit": true,
+            "canvas_visible": true,
+            "keyboard_moves_actual_player": true,
+            "keyboard_shoots": true,
+            "keyboard_restarts": true
+          },
+          "errors": [],
+          "passed": true
+        },
+        "verifier_passes_correct": true,
+        "verifier_rejects_missing_javascript": true,
+        "steps": {
+          "total": 2,
+          "done": 2,
+          "remaining": 0
+        },
+        "passed": true
+      },
+      "resumed": false,
+      "initial_turns": 0,
+      "initial_steps": {
+        "total": 0,
+        "done": 0,
+        "remaining": 0
+      },
+      "development_fixture": "native-game-starter-fast-452"
+    },
+    {
+      "scenario": "native_game_build",
+      "brief": "Create index.html, a complete offline HTML space shooter, using your project tools.\nBuild a real canvas game with stars, player ship, enemies, bullets, score, lives,\nwaves, game over and Enter restart. Fit small screens. Arrow keys/A-D move,\nSpace shoots. No external assets. Use seconds-based timing at 120 pixels/second.\nCanvas logical size is 600x800, player center starts x=300, half-width=20.\nExpose the SAME live state and functions used for gameplay as window.game:\n{player:{x,y,w,h,invincible},bullets:[],enemies:[],score,lives,wave,playing,\nwaveSpawned,update(dt,keys),reset()}. keys contains ArrowLeft/ArrowRight/KeyA/KeyD/Space\nbooleans. Enemy/bullet objects use centered x,y,w,h and speed, enemy hp defaults1.\nupdate(0,{}) resolves existing collisions. Each killed enemy scores10.\nA player hit removes one life with at least1 second invulnerability. At zero\nlives playing=false. reset() starts play with score0/lives3/wave1/player.x300\nand no bullets. An empty wave advances after waveSpawned=true regardless of\nscore. Only positive-area rectangle overlap counts. Clear keys on blur.\nReturn a complete playable game, not just an API or a picture.\n Save actual files, not JSON in chat. Use task_steps for at least two tiny SQLite units, finish their real checks and create/run a repeatable verifier. Show a visible HUD with score, lives and wave. Test real keyboard movement, shooting and restart, not just text presence. Expose the requested window.game object as the actual live game state, not a separate test implementation. Keep all JavaScript inline in index.html for this single-file game.",
+      "seconds": 67.51,
+      "automatic_step_checks": 2,
+      "starter_used": true,
+      "starter_review": null,
+      "starter_review_error": "ValueError: Invalid starter scope review",
+      "status": "done",
+      "error": null,
+      "model_calls": 7,
+      "tool_calls": 8,
+      "prompt_tokens": 46741,
+      "completion_tokens": 2050,
+      "tools_used": [
+        "create_game_starter",
+        "edit_file",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "edit_file",
+        "read_file",
+        "read_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": "quick",
+          "seconds": 2.73
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": "quick",
+          "seconds": 12.45
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 10.83
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 10.25
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 15.73
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 3.39
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 4.89
+        }
+      ],
+      "router_call_attempts": 7,
+      "upstream_local_calls": 7,
+      "grade": {
+        "logic": {
+          "live_api": true,
+          "reset": true,
+          "frame_independence": true,
+          "left": true,
+          "right": true,
+          "shooting": true,
+          "score": true,
+          "damage": true,
+          "invulnerability": true,
+          "gameover": true,
+          "wave": true,
+          "drawing": true,
+          "blur": true
+        },
+        "browser": {
+          "checks": {
+            "mobile_fit": true,
+            "canvas_visible": true,
+            "keyboard_moves_actual_player": true,
+            "keyboard_shoots": true,
+            "keyboard_restarts": true
+          },
+          "errors": [],
+          "passed": true
+        },
+        "verifier_passes_correct": true,
+        "verifier_rejects_missing_javascript": true,
+        "steps": {
+          "total": 2,
+          "done": 2,
+          "remaining": 0
+        },
+        "passed": true
+      },
+      "resumed": false,
+      "initial_turns": 0,
+      "initial_steps": {
+        "total": 0,
+        "done": 0,
+        "remaining": 0
+      },
+      "development_fixture": "native-game-starter-thinking-452"
+    }
+  ],
+  "interpretation": "Evolving development trials on one PC, not controlled model rankings. Latest 67.51-second run used a factory engine and completed seven local inference calls plus real automatic checks. The bounded review returned invalid schema and normal workflow safely completed. Existing raw-model failures remain failures; no model approval or game ranking was changed."
+}

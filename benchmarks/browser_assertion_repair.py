@@ -46,6 +46,7 @@ def observed_router(stats: dict):
             stats["tools_used"].extend(str(item.get("function", {}).get("name", "")) for item in calls)
             stats["routes"].append({"model": self.last_local_model,
                 "weights": self.last_local_weights, "repair_avoid": kwargs.get("repair_avoid", []),
+                "size_hint": kwargs.get("size_hint"),
                 "seconds": round(time.monotonic() - started, 2)})
             return result
 

@@ -556,6 +556,147 @@ def test_fresh_step_brief_reads_live_bounded_source_not_cached_or_unrelated_file
     assert "Live acceptance source" not in large
 
 
+def test_native_game_starter_is_project_scoped_available_during_steps_and_not_claimed_verified(tmp_path):
+    item = project(tmp_path / "starter-tool")
+    folder = Path(item["folder"])
+    result = json.loads(native_agent.execute_tool(folder, "create_game_starter", {"path": "game.html", "title": "Flight test"}))
+    assert result["path"] == "game.html" and result["tests_run"] is False
+    assert result["suggested_check"]["path"] == "game.html" and len(result["suggested_check"]["cases"]) == 3
+    original = (folder / "game.html").read_bytes()
+    assert native_agent.execute_tool(folder, "create_game_starter", {"path": "game.html"}).startswith("Tool error:")
+    assert (folder / "game.html").read_bytes() == original
+    assert native_agent.execute_tool(folder, "create_game_starter", {"path": "../outside.html"}).startswith("Tool error:")
+    task_context.plan_steps(folder, [{"phase": "Game", "title": "Build", "check_tool": "check_webapp",
+        "check_arguments": result["suggested_check"]}])
+    available = native_agent.step_tools(item, {}, native_agent.TOOLS)
+    assert "create_game_starter" in {tool["function"]["name"] for tool in available}
+    other = project(tmp_path / "starter-state")
+    native_agent.save_state(other, {"status": "continue", "verify_passed": True})
+    response = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "starter", "function": {
+        "name": "create_game_starter", "arguments": json.dumps({"path": "index.html"})}}]}}]}
+    with patch.object(long_tasks, "projects", return_value=[other]), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(other, complete=lambda _: response)
+    assert state["verify_passed"] is False and state["status"] == "continue"
+
+
+def test_focused_game_starter_selects_one_tool_and_saves_real_baseline_checks(tmp_path):
+    item = project(tmp_path / "starter-selector")
+    item["brief"] = "Build a playable offline HTML space shooter in index.html."
+    folder = Path(item["folder"])
+    state = {"status": "running", "turns": 0}
+    native_agent.save_state(item, state)
+    response = {"choices": [{"message": {"tool_calls": [{"id": "build", "type": "function", "function": {
+        "name": "create_game_starter", "arguments": json.dumps({"path": "index.html", "title": "Star Watch"})}}]}}]}
+    seen = []
+    def choose(payload):
+        seen.append(payload)
+        return response
+    messages, state = native_agent.start_game_starter(item, folder, choose, [], state)
+    assert seen[0]["tool_choice"]["function"]["name"] == "create_game_starter"
+    assert len(seen[0]["tools"]) == 1 and (folder / "index.html").is_file()
+    assert state["turns"] == 1 and state["verify_passed"] is False
+    assert task_context.step_status(folder)["remaining"] == 2
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        assert native_agent.advance_checked_steps(item, state, messages)
+    assert task_context.step_status(folder)["done"] == 2 and state["browser_verified"]
+    assert state["verify_passed"] and state["status"] == "running"
+
+
+def test_game_starter_selection_respects_new_instructions_frameworks_and_existing_files(tmp_path):
+    import pytest
+
+    for index, brief in enumerate(("Build a space shooter from scratch in index.html.",
+                                  "Build a React space shooter.", "Write a review of a playable space shooter.",
+                                  "Build a 3D space shooter.", "Build a space shooter without templates.")):
+        item = project(tmp_path / str(index))
+        item["brief"] = brief
+        assert native_agent.game_starter_candidate(item) is None
+    item = project(tmp_path / "selection-race")
+    item["brief"] = "Create an offline space shooter in index.html."
+    folder = Path(item["folder"])
+    native_agent.save_state(item, {"status": "running"})
+    old_request = task_context.request_identity(folder)
+    def change_request(_):
+        (folder / ".local-ai/USER-REQUESTS.md").write_text("Do not make the game now.")
+        return {"choices": [{"message": {"tool_calls": [{"id": "build", "function": {
+            "name": "create_game_starter", "arguments": '{"path":"index.html"}'}}]}}]}
+    native_agent.start_game_starter(item, folder, change_request, [], {"status": "running"})
+    assert not (folder / "index.html").exists() and task_context.step_status(folder)["total"] == 0
+    assert native_agent.game_starter_candidate(item) is None
+    with pytest.raises(ValueError, match="instructions changed"):
+        task_context.plan_steps(folder, [{"phase": "Game", "title": "Old plan", "check_command": "echo check"}], expected_request=old_request)
+    (folder / "index.html").write_text("user's existing game")
+    assert native_agent.game_starter_candidate(item) is None
+
+
+def test_owned_game_verifier_checks_request_and_never_auto_executes_forged_shell(tmp_path):
+    import pytest
+
+    item = project(tmp_path / "owned-game")
+    folder = Path(item["folder"])
+    native_agent.execute_tool(folder, "create_game_starter", {"path": "index.html"})
+    native_agent.prepare_game_verifier(folder, "index.html")
+    assert native_agent.owned_game_verifier(folder)
+    spec = folder / ".local-ai/space-shooter-check.json"
+    original = spec.read_bytes()
+    spec.write_bytes(original + b' ')
+    assert not native_agent.owned_game_verifier(folder)
+    spec.write_bytes(original)
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("A new instruction")
+    assert not native_agent.owned_game_verifier(folder)
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("")
+    verifier = folder / ".local-ai/verify.ps1"
+    verifier.write_text("# Generated by Cale check_game_starter v1\nSet-Content should-not-run.txt bad\nexit 0\n")
+    assert not native_agent.owned_game_verifier(folder)
+    task_context.plan_steps(folder, [{"phase": "Game", "title": "Verify", "check_tool": "run_verifier"}])
+    state = {"status": "running", "turns": 1}
+    native_agent.save_state(item, state)
+    with patch.object(native_agent, "execute_tool") as execute:
+        assert native_agent.advance_checked_steps(item, state, [])
+    execute.assert_not_called()
+    assert not (folder / "should-not-run.txt").exists()
+    native_agent.prepare_game_verifier(folder, "index.html")
+    assert native_agent.owned_game_verifier(folder) and not (folder / "should-not-run.txt").exists()
+    verifier.write_text("# User custom integration\nexit 0\n")
+    with pytest.raises(ValueError, match="Preserve"):
+        native_agent.prepare_game_verifier(folder, "index.html")
+
+
+def test_verified_starter_review_hands_off_only_when_scope_is_clear_and_current(tmp_path):
+    for mode in ("ready", "missing", "new_instruction", "custom_feature"):
+        item = project(tmp_path / mode)
+        item["brief"] = "Build a playable offline HTML space shooter in index.html."
+        folder = Path(item["folder"])
+        (folder / ".local-ai/PLAN.md").write_text(long_tasks.INITIAL_PLAN, encoding="utf-8")
+        (folder / ".local-ai/PROGRESS.md").write_text(long_tasks.INITIAL_PROGRESS, encoding="utf-8")
+        state = {"status": "running", "turns": 0}
+        native_agent.save_state(item, state)
+        response = {"choices": [{"message": {"tool_calls": [{"id": "build", "function": {
+            "name": "create_game_starter", "arguments": '{"path":"index.html"}'}}]}}]}
+        messages, state = native_agent.start_game_starter(item, folder, lambda _: response, [], state)
+        with patch.object(long_tasks, "projects", return_value=[item]):
+            assert native_agent.advance_checked_steps(item, state, messages)
+        assert state["verify_passed"] and state["browser_verified"]
+        calls = []
+        def review(payload):
+            calls.append(payload)
+            if mode == "new_instruction":
+                (folder / ".local-ai/USER-REQUESTS.md").write_text("Change the game first")
+            return {"choices": [{"message": {"content": json.dumps({
+                "missing_features": ["A requested feature needs implementation"] if mode == "missing" else [],
+                "reviewed_requirements": [item["brief"]]})}}]}
+        if mode == "custom_feature":
+            item["brief"] += " Add a boss and 5 lives."
+        handed_off = native_agent.review_verified_game_starter(item, state, messages, review)
+        assert handed_off is (mode == "ready")
+        if mode == "ready":
+            assert state["status"] == "done" and (folder / ".local-ai/PLAN.md").is_file()
+        else:
+            assert state["status"] == "running" and (folder / ".local-ai/PLAN.md").read_text(encoding="utf-8") == long_tasks.INITIAL_PLAN
+        if mode == "custom_feature":
+            assert not calls
+
+
 def test_api_scope_requires_latest_user_provenance_and_expires_when_omitted_work_is_mentioned(tmp_path):
     import pytest
 

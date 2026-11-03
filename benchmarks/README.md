@@ -406,3 +406,7 @@ inputs, another run took 468.86 seconds and exhausted its 24-call budget. Its
 page passed the numerical cases, but the worker did not finish its verifier.
 This remains an end-to-end reliability failure, not a successful benchmark.
 These runs used evolving worker code, so they are not controlled comparisons.
+
+### Reusable game workflow (November 3)
+
+[Retained trials](results/game-starter-20261103.json) include failures and successful native builds. The final new local-only fixture finished in 67.51 seconds with seven model calls, two completed SQLite units, all 13 independent logic checks, five browser/input/layout checks, and a repeatable verifier that rejected removed JavaScript. Its short scope review failed schema validation and normal workflow completed. The preceding evolving trial took 278.77 seconds and 25 calls. This is original starter-engine reuse, not a pure-model benchmark or a controlled speed comparison. No model ranking was promoted. [Playable source](examples/local-space-shooter.html) is the actual successful synthetic fixture. Arbitrary custom game requirements remain outside this result.

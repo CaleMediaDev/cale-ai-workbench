@@ -7,6 +7,129 @@ import pytest
 from design_tools import add_astro_ai_ui, check_color_contrast, luminance
 
 
+def test_space_shooter_is_new_offline_file_with_safe_title_and_no_overwrite(tmp_path):
+    import design_tools
+
+    page = tmp_path / "game.html"
+    title = "__CONFIG__ </title><script>window.injected=true</script>"
+    created = design_tools.create_space_shooter(str(page), title=title)
+    source = page.read_text(encoding="utf-8")
+    assert created["tests_run"] is False and created["bytes"] == len(page.read_bytes())
+    assert "__CONFIG__ &lt;/title&gt;" in source and "<script>window.injected" not in source
+    assert "https://" not in source and "http://" not in source
+    before = page.read_bytes()
+    with pytest.raises(FileExistsError):
+        design_tools.create_space_shooter(str(page))
+    assert page.read_bytes() == before
+    for arguments in ({"title": ""}, {"title": "x" * 81}, {"title": "line\nbreak"}, {"accent": "red"}):
+        target = tmp_path / "invalid.html"
+        with pytest.raises(ValueError):
+            design_tools.create_space_shooter(str(target), **arguments)
+        assert not target.exists()
+    with pytest.raises(ValueError):
+        design_tools.create_space_shooter(str(tmp_path / "game.exe"))
+
+
+def test_space_shooter_actual_engine_passes_logic_and_extra_collision_boundaries(tmp_path):
+    import re
+
+    import design_tools
+    import model_fitness
+
+    page = tmp_path / "game.html"
+    design_tools.create_space_shooter(str(page))
+    source = page.read_text(encoding="utf-8")
+    checks = model_fitness.grade_game_html(source, design_tools.ROOT)
+    assert len(checks) == 13 and all(checks.values())
+    extra = r'''
+const g=window.game,checks={};
+g.reset();g.waveSpawned=false;
+const edgeEnemy={x:100,y:100,w:30,h:30,speed:0,hp:1};
+g.enemies=[edgeEnemy];g.bullets=[{x:117,y:100,w:4,h:16,speed:0}];g.update(0,{});
+checks.edge_has_no_damage=g.score===0&&edgeEnemy.hp===1;
+g.reset();g.waveSpawned=false;
+const victim={x:100,y:100,w:30,h:30,speed:0};g.enemies=[victim];
+g.bullets=[{x:100,y:100,w:4,h:16,speed:0},{x:100,y:100,w:4,h:16,speed:0}];g.update(0,{});
+checks.one_enemy_one_score=g.score===10;
+g.reset();g.waveSpawned=false;g.enemies=[{x:100,y:100,w:30,h:30,speed:0,hp:2}];
+g.bullets=[{x:100,y:100,w:4,h:16,speed:0}];g.update(0,{});
+checks.armored_hit=g.score===0&&g.enemies[0].hp===1;
+g.bullets=[{x:100,y:100,w:4,h:16,speed:0}];g.update(0,{});checks.armored_kill=g.score===10;
+g.reset();g.waveSpawned=false;g.enemies=[{x:g.player.x,y:g.player.y,w:30,h:30,speed:0}];g.update(0,{});
+checks.shield_time=g.player.invincible>=1;g.update(1.3,{});
+g.enemies=[{x:g.player.x,y:g.player.y,w:30,h:30,speed:0}];g.update(0,{});checks.shield_expires=g.lives===1;
+g.reset();g.waveSpawned=false;g.enemies=[{x:100,y:820,w:30,h:30,speed:0}];g.update(0,{});checks.breach_costs_life=g.lives===2;
+g.reset();g.waveSpawned=true;g.score=7;g.enemies=[];g.update(0,{});checks.wave_not_score_modulo=g.wave===2;
+return JSON.stringify(checks);
+'''
+    code = model_fitness.GAME_DOM + "\n".join(re.findall(r"<script\b[^>]*>(.*?)</script>", source, re.S))
+    additional = model_fitness.grade_game_code(code, design_tools.ROOT, extra)
+    assert len(additional) == 8 and all(additional.values())
+
+
+def test_space_shooter_browser_layout_keyboard_touch_pause_and_blur(tmp_path):
+    from playwright.sync_api import sync_playwright
+
+    import design_tools
+
+    page_path = tmp_path / "game.html"
+    design_tools.create_space_shooter(str(page_path))
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        context = browser.new_context(offline=True)
+        page = context.new_page()
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        for width, height in ((375, 812), (375, 600), (1280, 900), (900, 600)):
+            page.set_viewport_size({"width": width, "height": height})
+            page.goto(page_path.as_uri())
+            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth&&document.documentElement.scrollHeight<=innerHeight")
+        page.set_viewport_size({"width": 375, "height": 812})
+        page.click("#restart")
+        before = page.evaluate("game.player.x")
+        right = page.locator("#right").bounding_box()
+        page.mouse.move(right["x"] + right["width"] / 2, right["y"] + right["height"] / 2)
+        page.mouse.down()
+        page.wait_for_timeout(180)
+        page.mouse.up()
+        assert page.evaluate("game.player.x") > before + 5
+        page.click("#pause")
+        before = page.evaluate("game.player.x")
+        page.keyboard.down("ArrowRight")
+        page.wait_for_timeout(100)
+        page.keyboard.up("ArrowRight")
+        assert page.evaluate("game.player.x") == before
+        page.click("#pause")
+        page.keyboard.down("ArrowRight")
+        page.wait_for_timeout(100)
+        page.evaluate("dispatchEvent(new Event('blur'))")
+        before = page.evaluate("game.player.x")
+        page.wait_for_timeout(100)
+        page.keyboard.up("ArrowRight")
+        assert page.evaluate("game.player.x") == before
+        page.keyboard.press("Enter")
+        page.keyboard.down("Space")
+        page.wait_for_timeout(80)
+        assert page.evaluate("game.bullets.length") > 0
+        page.keyboard.up("Space")
+        assert not errors
+        browser.close()
+
+
+def test_default_starter_verifier_tests_actual_browser_physics_and_rejects_changed_mechanics(tmp_path):
+    import design_tools
+
+    page = tmp_path / "game.html"
+    design_tools.create_space_shooter(str(page))
+    source = page.read_text(encoding="utf-8")
+    correct = design_tools.verify_space_shooter(str(page))
+    assert correct["passed"] and len(correct["logic"]) == 18 and correct["browser"]["passed"]
+    assert page.read_text(encoding="utf-8") == source
+    page.write_text(source.replace("this.player.invincible=1.2", "this.player.invincible=0"), encoding="utf-8")
+    broken = design_tools.verify_space_shooter(str(page))
+    assert not broken["passed"] and broken["logic"]["damage"] is False
+
+
 def test_black_and_white_have_maximum_contrast():
     result = check_color_contrast("#000000", "#FFFFFF")
     assert result["ratio"] == 21

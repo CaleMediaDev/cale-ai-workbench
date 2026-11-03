@@ -768,6 +768,7 @@ class Router:
             contexts = {}
             weight_ids = {}
             vision = set()
+            thinking = set()
             aliases = dict.fromkeys(
                 [FAST_MODEL, STANDARD_MAIN_ALIAS,
                  *(item["alias"] for item in CATALOG.values())]
@@ -806,11 +807,14 @@ class Router:
                     contexts[name] = int(configured.group(1))
                     if "vision" in info.get("capabilities", []):
                         vision.add(name)
+                    if "thinking" in info.get("capabilities", []):
+                        thinking.add(name)
                 except Exception:
                     continue
             self.model_cache = available
             self.model_contexts = contexts
             self.model_vision = vision
+            self.model_thinking = thinking
             self.model_speeds = {
                 name: model_fitness.measured_speed(name) for name in available
             }
@@ -894,7 +898,7 @@ class Router:
                 self.last_attempt = now
             return True
 
-    def complete(self, payload, task_id="", *, scope_override=None, cancel=None, repair_avoid=None):
+    def complete(self, payload, task_id="", *, scope_override=None, cancel=None, repair_avoid=None, size_hint=None):
         """Attribute this router request before any provider records its usage."""
         import usage_history
 
@@ -902,16 +906,20 @@ class Router:
         self.last_local_weights = ""
         token = usage_history.CURRENT_TASK.set(task_id)
         try:
-            if repair_avoid is not None:
-                return self._complete(payload, scope_override=scope_override, cancel=cancel, repair_avoid=repair_avoid)
+            if repair_avoid is not None or size_hint is not None:
+                return self._complete(payload, scope_override=scope_override, cancel=cancel,
+                                      repair_avoid=repair_avoid, size_hint=size_hint)
             return (self._complete(payload) if scope_override is None and cancel is None else
                     self._complete(payload, scope_override=scope_override, cancel=cancel))
         finally:
             usage_history.CURRENT_TASK.reset(token)
 
-    def _complete(self, payload, scope_override=None, cancel=None, repair_avoid=None):
+    def _complete(self, payload, scope_override=None, cancel=None, repair_avoid=None, size_hint=None):
         """Return a validated completion from ChatGPT, free cloud, or Ollama."""
         import usage_history
+
+        if size_hint not in {None, "quick", "balanced", "deep"}:
+            raise ValueError("Unknown internal workload size hint")
 
         if payload.get("model") not in (LOCAL_MODEL, LOCAL_MODEL + ":latest"):
             raise ValueError(
@@ -937,7 +945,7 @@ class Router:
         profile = ("main" if scope in ("cloud_only", "free_cloud_only")
                    else local_profile())
         messages = payload.get("messages", [])
-        size = task_size(messages) if profile == "main" else "manual"
+        size = (size_hint or task_size(messages)) if profile == "main" else "manual"
         repaired = repair_messages(messages)
         if repaired is not messages:
             payload = {**payload, "messages": repaired}
@@ -1126,7 +1134,7 @@ class Router:
                 "manual", required_context, needs_vision, include_fallback=True,
             )
             selected = ([chosen] if chosen in verified else
-                        self.local_candidates(task_size(messages), required_context,
+                        self.local_candidates(size_hint or task_size(messages), required_context,
                                               needs_vision))
             if chosen not in verified:
                 record("local", "Saved model is no longer suitable; using an eligible local model.",
@@ -1137,6 +1145,19 @@ class Router:
                 selected, CATALOG, ROOT, getattr(self, "model_weights", {}))
         if profile == "main" and repair_avoid:
             selected = prefer_different_weights(selected, getattr(self, "model_weights", {}), repair_avoid)
+        if size_hint == "quick":
+            # Alias retries over the same weights can reserve a much larger KV
+            # cache without changing a bounded selector/review's answer quality.
+            seen_weights = set()
+            distinct = []
+            for name in selected:
+                identity = getattr(self, "model_weights", {}).get(name)
+                if identity and identity in seen_weights:
+                    continue
+                distinct.append(name)
+                if identity:
+                    seen_weights.add(identity)
+            selected = distinct
         last_error = None
         schema_repair_attempted = False
         for selected_model in selected:
@@ -1144,7 +1165,7 @@ class Router:
             local = dict(payload)
             local.update(model=selected_model, stream=False)
             local.pop("stream_options", None)
-            if local.get("tools"):
+            if local.get("tools") or size_hint == "quick":
                 item = next(
                     (
                         entry
@@ -1153,13 +1174,24 @@ class Router:
                     ),
                     None,
                 )
-                if item and item.get("tool_reasoning_effort"):
-                    local["reasoning_effort"] = item["tool_reasoning_effort"]
+                effort = (item or {}).get("tool_reasoning_effort")
+                if not effort and size_hint == "quick":
+                    identity = getattr(self, "model_weights", {}).get(selected_model)
+                    if identity:
+                        effort = next((entry.get("tool_reasoning_effort") for entry in CATALOG.values()
+                            if entry.get("tool_reasoning_effort") and getattr(self, "model_weights", {}).get(entry["alias"]) == identity), None)
+                if not effort and size_hint == "quick" and selected_model in getattr(self, "model_thinking", set()):
+                    # Ollama advertises thinking support on /api/show; its
+                    # OpenAI compatibility maps "none" to disabled thinking.
+                    effort = "none"
+                if effort:
+                    local["reasoning_effort"] = effort
             try:
                 corrected_schema = False
                 try:
                     result = valid_completion(post(
-                        "http://127.0.0.1:11434/v1/chat/completions", local, timeout=1800), payload)
+                        "http://127.0.0.1:11434/v1/chat/completions", local,
+                        timeout=90 if size_hint == "quick" else 1800), payload)
                 except ToolArgumentError as error:
                     repair = argument_repair_request(local, error)
                     context = getattr(self, "model_contexts", {}).get(selected_model, 0)

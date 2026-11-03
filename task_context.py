@@ -352,7 +352,8 @@ def _validate_steps(steps: list) -> list[tuple]:
     return validated
 
 
-def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None) -> dict:
+def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None,
+               expected_request: str | None = None) -> dict:
     """Atomically add a phase, or replace only the current unit with smaller units.
 
     Completed rows remain intact. BEGIN IMMEDIATE prevents two workers from
@@ -360,10 +361,14 @@ def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None) 
     """
     values = _validate_steps(steps)
     request_hash = request_identity(folder)
+    if expected_request is not None and expected_request != request_hash:
+        raise ValueError("User instructions changed before planning this phase.")
     with project_memory.connection(folder) as conn:
         _schema(conn)
         conn.commit()
         conn.execute("BEGIN IMMEDIATE")
+        if request_identity(folder) != request_hash:
+            raise ValueError("User instructions changed during phase planning.")
         current = _step_status(conn, request_hash)
         if split_id is None:
             if current["remaining"]:

@@ -1353,6 +1353,56 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(free.call_args.args[0], "google")
         local.assert_not_called()
 
+    def test_bounded_review_routes_quick_without_forwarding_private_hint(self):
+        catalog = dict(cloud.CATALOG, fast_review={
+            "alias": "review-fast", "tool_reasoning_effort": "none"})
+        request = dict(REQUEST, response_format={"type": "json_object"})
+        with (patch.object(cloud, "CATALOG", catalog),
+              patch.object(cloud, "task_size", return_value="deep"),
+              patch.object(cloud.routing_mode, "load_scope", return_value="local_only"),
+              patch.object(cloud.Router, "local_candidates", return_value=["review-fast"]) as choose,
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            cloud.Router().complete(request, size_hint="quick")
+        self.assertEqual(choose.call_args.args[0], "quick")
+        body = post.call_args.args[1]
+        self.assertEqual(body["model"], "review-fast")
+        self.assertEqual(body["reasoning_effort"], "none")
+        self.assertNotIn("size_hint", body)
+        self.assertNotIn("_native_workload", body)
+        self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
+
+    def test_bounded_review_honors_manual_model_and_same_weights_reasoning(self):
+        catalog = dict(cloud.CATALOG, selected_review={"alias": "review-alias"},
+                       fast_review={"alias": "review-fast", "tool_reasoning_effort": "none"})
+        with (patch.object(cloud, "CATALOG", catalog),
+              patch.object(cloud, "local_profile", return_value="selected_review"),
+              patch.object(cloud.Router, "local_candidates", return_value=["review-alias"]) as choose,
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            router = cloud.Router()
+            router.model_weights = {"review-alias": "same-weights", "review-fast": "same-weights"}
+            router.complete(REQUEST, size_hint="quick")
+        self.assertEqual(choose.call_args.args[0], "manual")
+        self.assertEqual(post.call_args.args[1]["model"], "review-alias")
+        self.assertEqual(post.call_args.args[1]["reasoning_effort"], "none")
+
+    def test_bounded_review_uses_advertised_thinking_control_and_no_alias_retry(self):
+        with (patch.object(cloud.Router, "local_candidates", return_value=["bounded", "huge-context-alias"]),
+              patch.object(cloud, "post", side_effect=ValueError("empty")) as post):
+            router = cloud.Router()
+            router.model_weights = {"bounded": "same", "huge-context-alias": "same"}
+            router.model_thinking = {"bounded", "huge-context-alias"}
+            with self.assertRaisesRegex(ValueError, "empty"):
+                router.complete(REQUEST, size_hint="quick")
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(post.call_args.args[1]["reasoning_effort"], "none")
+        self.assertEqual(post.call_args.kwargs["timeout"], 90)
+
+    def test_unknown_workload_hint_fails_before_inference(self):
+        with patch.object(cloud, "post") as post:
+            with self.assertRaisesRegex(ValueError, "size hint"):
+                cloud.Router().complete(REQUEST, size_hint="unbounded")
+        post.assert_not_called()
+
     def test_candidate_tool_calls_use_verified_reasoning_setting(self):
         request = dict(
             REQUEST, tools=[{"type": "function", "function": {"name": "multiply"}}]

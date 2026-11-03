@@ -167,6 +167,9 @@ def main() -> int:
             graded = {"passed": False, "error": f"{type(error).__name__}: {str(error)[:500]}"}
     report = {"scenario": "native_game_build", "brief": BRIEF, "seconds": round(elapsed, 2),
               "automatic_step_checks": state.get("automatic_step_checks", 0),
+              "starter_used": bool(native_agent.read_state(project).get("game_starter")),
+              "starter_review": native_agent.read_state(project).get("game_starter_review"),
+              "starter_review_error": native_agent.read_state(project).get("game_starter_review_error"),
               "status": state.get("status"), "error": failure, **stats, "grade": graded,
               "resumed": args.resume, "initial_turns": initial_turns,
               "initial_steps": {key: initial_queue[key] for key in ("total", "done", "remaining")}}
