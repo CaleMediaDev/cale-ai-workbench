@@ -139,6 +139,7 @@ $timer.Add_Tick({
     $log.SelectionStart=$log.Text.Length; $log.ScrollToCaret()
 })
 $install.Add_Click({
+    $install.Text='Installing...'; $install.Enabled=$false
     if($Preview){
         $stage.Text='Downloading your AI models';$percent.Text='42%';$bar.Value=42
         $accounts.Enabled=$true
