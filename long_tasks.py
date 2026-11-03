@@ -2343,6 +2343,10 @@ def remember_task_review(p, action, note=""):
             log.write(time.ctime() + f"\nCould not save task review {p['id']}: {exc}\n")
 
 
+class RequestDeferred(RuntimeError):
+    """Keep an already-authorized UI action queued until it is safe to apply."""
+
+
 def process_requests():
     """Apply queued UI actions to SQLite and the native Hermes board."""
     with database() as conn:
@@ -2441,21 +2445,16 @@ def process_requests():
                         detail=f"{state.title()}. A retiring worker may take up to two minutes to exit. Project files are preserved.",
                     )
             elif action in ("resume", "note"):
-                if p["status"] == "paused" and any(
-                    run.get("started_at") and not run.get("ended_at")
-                    for run in snapshot.get("runs", [])
-                ):
-                    raise ValueError(
-                        "The paused worker is still retiring. Continue after its run ends to avoid overlapping edits."
+                runs = snapshot.get("runs", [])
+                if (p["status"] == "paused" and runs
+                        and not worker_handoff_settled(snapshot)):
+                    waiting = (
+                        "Continue is queued. Cale will resume this task automatically "
+                        "as soon as its previous worker exits."
                     )
-                ended = max(
-                    (r.get("ended_at") or 0 for r in snapshot.get("runs", [])),
-                    default=0,
-                )
-                if p["status"] == "paused" and ended and time.time() - ended < 180:
-                    raise ValueError(
-                        "The paused worker is retiring. Wait up to three minutes before resuming to avoid overlapping edits."
-                    )
+                    if p["detail"] != waiting:
+                        update(p["id"], detail=waiting)
+                    raise RequestDeferred(waiting)
                 if p["status"] == "paused":
                     import music_backend
 
@@ -2507,6 +2506,10 @@ def process_requests():
             else:
                 raise ValueError("Unknown action")
             result, status = "Applied", "done"
+        except RequestDeferred as exc:
+            # This is not a failed control. Leave the same durable row queued;
+            # the monitor will retry it without another click.
+            result, status = str(exc), "pending"
         except Exception as exc:
             result, status = str(exc), "error"
         with database() as conn:

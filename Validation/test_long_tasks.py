@@ -2337,6 +2337,39 @@ class LongTaskTests(unittest.TestCase):
         self.assertIn("Use SQLite", (self.base / "project/.local-ai/USER-REQUESTS.md").read_text())
         self.assertTrue(any(c.args[0] == "unblock" for c in board.call_args_list))
 
+    def test_continue_waits_for_retiring_worker_then_resumes_without_second_click(self):
+        task_module.update(self.pid, card="paused-card", status="paused",
+                           detail="Paused")
+        task_module.request(self.pid, "resume")
+        snapshot = {
+            "task": {"status": "running"},
+            "runs": [{"started_at": time.time() - 30, "ended_at": None}],
+        }
+        with (patch.object(task_module, "board", return_value=snapshot),
+              patch.object(task_module, "worker_handoff_settled",
+                           side_effect=[False, True]) as settled):
+            task_module.process_requests()
+            waiting = self.item()
+            self.assertEqual(waiting["status"], "paused")
+            self.assertIn("Continue is queued", waiting["detail"])
+            with task_module.database() as conn:
+                request = dict(conn.execute(
+                    "SELECT status,result FROM requests ORDER BY id DESC LIMIT 1"
+                ).fetchone())
+            self.assertEqual(request["status"], "pending")
+            self.assertIn("resume this task automatically", request["result"])
+
+            snapshot["runs"][0]["ended_at"] = time.time() - 10
+            task_module.process_requests()
+        self.assertEqual(settled.call_count, 2)
+        self.assertEqual(self.item()["status"], "working")
+        with task_module.database() as conn:
+            request = dict(conn.execute(
+                "SELECT status,result FROM requests ORDER BY id DESC LIMIT 1"
+            ).fetchone())
+        self.assertEqual(request["status"], "done")
+        self.assertEqual(request["result"], "Applied")
+
     def test_goal_turn_budget_rolls_to_new_worker_after_old_run_exits(self):
         task_module.update(self.pid, card="old-card", status="working")
         snapshot = {
@@ -2710,17 +2743,21 @@ class LongTaskTests(unittest.TestCase):
             result = conn.execute(
                 "SELECT status,result FROM requests ORDER BY id DESC LIMIT 1"
             ).fetchone()
-        self.assertEqual(result["status"], "error")
-        self.assertIn("still retiring", result["result"])
+        self.assertEqual(result["status"], "pending")
+        self.assertIn("Continue is queued", result["result"])
 
         retired = {"task": {"status": "blocked"}, "runs": [
             {"status": "blocked", "started_at": 100, "ended_at": 101},
         ]}
         with patch.object(task_module, "board", return_value=retired) as board:
-            task_module.request(self.pid, "resume")
             task_module.process_requests()
         self.assertEqual(self.item()["status"], "working")
         self.assertTrue(any(call.args[0] == "unblock" for call in board.call_args_list))
+        with task_module.database() as conn:
+            result = conn.execute(
+                "SELECT status,result FROM requests ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        self.assertEqual(result["status"], "done")
 
     def test_stop_during_review_migration_is_not_overwritten(self):
         self.verify_script('Write-Output "real check passed"; exit 0')
