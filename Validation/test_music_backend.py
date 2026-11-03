@@ -323,8 +323,8 @@ def test_sparse_vocal_hooks_get_short_lyrics_with_room_for_drops():
 
 
 def test_local_only_song_writes_lyrics_locally_when_global_scope_is_cloud_only():
-    import usage_history
     import cloud_ai
+    import usage_history
 
     good = {"choices": [{"finish_reason": "stop", "message": {
         "content": "[Verse]\n" + "Tahoe water and summer mountains " * 10}}]}
@@ -677,6 +677,36 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
     assert completed["status"] == "complete"
     assert completed["progress"] == 100
     assert completed["result"]["path"] == str(output)
+
+
+def test_explicit_singer_overrides_wrong_instrumental_tool_argument(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    output = tmp_path / "song.mp3"
+    with patch.object(music_backend, "JOBS", jobs), patch.object(
+        music_backend, "_launch_job"
+    ):
+        started = music_backend.start_music_job(
+            "A gritty male rapper performs verses about Bobby's mobile detailing",
+            str(output), instrumental=True)
+        saved = music_backend.music_job_status(started["job_id"])
+        assert saved["instrumental"] is False
+        # A plainly instrumental request still keeps its explicit setting.
+        other = music_backend.start_music_job(
+            "An instrumental track with no vocals, inspired by G-funk",
+            str(tmp_path / "beat.mp3"), instrumental=True)
+        assert music_backend.music_job_status(other["job_id"])["instrumental"] is True
+
+        # Queued jobs from an older release receive the same correction when
+        # their worker starts, before the music engine sees the request.
+        saved["instrumental"] = True
+        music_backend._write_job(started["job_id"], saved)
+        with (patch.object(music_backend, "compose_lyrics", return_value="Bobby shines every ride"),
+              patch.object(music_backend, "generate_music", return_value={"path": str(output)}),
+              patch.object(music_backend, "vocal_evidence", return_value={"passed": True,
+                  "segments": []}), patch("song_video.render", return_value={"path": "video.mp4"})):
+            music_backend._run_job(started["job_id"])
+        assert music_backend.music_job_status(started["job_id"])["status"] == "complete"
+        assert music_backend.music_job_status(started["job_id"])["instrumental"] is False
 
 
 def test_music_job_id_cannot_escape_job_directory():

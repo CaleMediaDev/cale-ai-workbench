@@ -17,6 +17,18 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_standalone_music_render_blocks_source_swap_until_worker_exits(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Toolbox/python/Scripts/python.exe"
+            command = [str(python), str(root / "music_backend.py"),
+                       "--run-job", "a" * 32]
+            worker = MagicMock(info={"exe": str(python), "cmdline": command})
+            with (patch.object(self_update, "ROOT", root),
+                  patch("long_tasks.projects", return_value=[]),
+                  patch("psutil.process_iter", return_value=[worker])):
+                self.assertTrue(self_update.active_tasks())
+
     def test_paused_native_worker_blocks_source_swap_until_process_exits(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

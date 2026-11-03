@@ -854,6 +854,11 @@ def start_music_job(
     """Launch a persistent local job; the agent can continue while it runs."""
     if not prompt.strip() or not 10 <= duration_seconds <= 600:
         raise ValueError("Describe 10 to 600 seconds of music to create.")
+    # Tool-using models have selected instrumental=True for briefs that
+    # explicitly requested a singer or rapper. Honor the request itself so a
+    # wrong tool argument cannot silently remove the entire vocal track.
+    if instrumental and music_style.unambiguous_vocal_song(prompt, lyrics):
+        instrumental = False
     target = Path(output_path).resolve()
     if target.suffix.lower() not in (".wav", ".mp3", ".flac") or target.exists():
         raise ValueError("Choose a new WAV, MP3 or FLAC output file.")
@@ -887,6 +892,11 @@ def _run_job(job_id: str) -> None:
     info = music_job_status(job_id)
     if info.get("status") not in ("queued", "working"):
         return
+    # Also repair queued jobs written by an older version before rendering.
+    if info.get("instrumental") and music_style.unambiguous_vocal_song(
+            info.get("prompt", ""), info.get("lyrics", "")):
+        info["instrumental"] = False
+        _write_job(job_id, info)
     working = {
         **info, "status": "working", "current": "Preparing music locally", "progress": 12,
         "worker_pid": os.getpid(),

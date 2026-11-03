@@ -304,6 +304,14 @@ def active_tasks():
                     and Path(command[1]).resolve() == install / "native_agent.py"
                     and command[2] == "run"):
                 return True
+            # A music render may outlive its parent project row (or be started
+            # directly by a tool). Keep its Python and media scripts in place
+            # until that exact worker exits; stale job JSON alone never blocks.
+            if (executable and len(command) >= 4
+                    and Path(executable).resolve().is_relative_to(install)
+                    and Path(command[1]).resolve() == install / "music_backend.py"
+                    and command[2] == "--run-job"):
+                return True
         except (OSError, psutil.Error):
             continue
     return False
@@ -351,6 +359,7 @@ def pause_projects_for_update(version):
 def retire_update_paused_workers():
     """Stop only managed workers belonging to projects paused for an update."""
     import psutil
+
     from long_tasks import projects
 
     try:
