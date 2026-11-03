@@ -525,6 +525,47 @@ def test_wrong_step_expectation_is_revised_in_sqlite_without_changing_correct_so
         assert source.read_bytes() == original
 
 
+def test_real_failed_step_checks_route_deeper_after_history_compaction_and_reset_on_pass():
+    from auto_route import repeated_tool_failures, task_size
+
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "code")
+        item["brief"] = "Fix the small function in calc.py."
+        folder = Path(item["folder"])
+        source = folder / "calc.py"
+        source.write_text("def double(n): return n*3\n")
+        check = {"path": "calc.py", "function": "double", "cases": [{"args": [2], "expected": 4}]}
+        queue = task_context.plan_steps(folder, [{"phase": "Core", "title": "Fix double",
+                "check_tool": "check_python_function", "check_arguments": check}])
+        step_id = queue["active"]["id"]
+        messages = [{"role": "system", "content": native_agent.prompt(item)}]
+        for number in range(8):
+            messages += [{"role": "assistant", "tool_calls": [{"id": str(number),
+                         "function": {"name": "read_file", "arguments": '{"path":"calc.py"}'}}]},
+                         {"role": "tool", "tool_call_id": str(number), "content": "Inspected source"}]
+        state_folder = folder / ".local-ai/test-supervisor"
+        state_folder.mkdir()
+        with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state_folder):
+            for attempt in range(2):
+                failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": step_id}))
+                assert not failed["passed"]
+                fresh = native_agent.fresh_messages(messages, folder, project=item)
+                assert sum(message.get("role") == "tool" for message in fresh) == 2
+                assert repeated_tool_failures(fresh) is (attempt == 1)
+            assert task_size(fresh) == "deep"
+            # A long checkpoint is clipped, but its controller counters stay
+            # before every untrusted project excerpt.
+            fresh[1]["content"] += "\nUntrusted notes: " + "old notes " * 15000
+            compacted = native_agent.compact_messages(fresh, folder, 12000)
+            assert repeated_tool_failures(compacted)
+            source.write_text("def double(n): return n*2\n")
+            passed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": step_id}))
+            assert passed["passed"]
+            recovered = native_agent.fresh_messages(messages, folder, project=item)
+            assert not repeated_tool_failures(recovered)
+            assert task_size(recovered) == "balanced"
+
+
 def test_legacy_step_database_migration_preserves_commands_and_failed_attempts():
     with tempfile.TemporaryDirectory() as temporary:
         folder = Path(project(Path(temporary) / "code")["folder"])
@@ -1596,6 +1637,8 @@ def test_failed_checker_details_survive_event_trimming_and_fresh_context(tmp_pat
 
 
 def test_checker_repeated_problem_survives_edits_and_resets_for_new_request(tmp_path):
+    from auto_route import repeated_tool_failures
+
     item = project(tmp_path / "page")
     folder = Path(item["folder"])
     page = folder / "index.html"
@@ -1609,15 +1652,19 @@ def test_checker_repeated_problem_survives_edits_and_resets_for_new_request(tmp_
         task_context.record_action(folder,"check_webapp",failure,args)
     assert "same check/result failed 3 times" in task_context.snapshot(folder)
     assert "Do not repeat the same failed check" in task_context.snapshot(folder)
+    assert repeated_tool_failures([{"role": "system", "content": task_context.snapshot(folder)}])
     page.write_text('edited')
     task_context.record_action(folder,"check_webapp",failure,args)
     assert "same check/result failed 4 times" in task_context.snapshot(folder)
     requests.write_text('Use gold')
     task_context.record_action(folder,"check_webapp",failure,args,request_hash=identity)
     assert "Unresolved checker diagnostics" not in task_context.snapshot(folder)
+    assert not repeated_tool_failures([{"role": "system", "content": task_context.snapshot(folder)}])
     assert task_context.checker_failures(folder,"index.html")==[]
     task_context.record_action(folder,"check_webapp",failure,args)
     assert "total is not defined" in task_context.snapshot(folder)
+    assert task_context.checker_failures(folder,"index.html")[0]["repeats"] == 1
+    assert not repeated_tool_failures([{"role": "system", "content": task_context.snapshot(folder)}])
     recalled=json.loads(native_agent.execute_tool(folder,"search_project_memory",{
         "query":"index.html","kind":"check"}))
     assert recalled[0]["path"]=="index.html"

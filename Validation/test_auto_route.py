@@ -1,15 +1,64 @@
 """Verify simple questions and sustained projects choose different local models."""
 
+import json
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from auto_route import PROJECT_REQUEST, model_order, repair_messages, task_size
+from auto_route import (
+    PROJECT_REQUEST,
+    model_order,
+    repair_messages,
+    repeated_tool_failures,
+    task_size,
+)
 from long_tasks import project_prompt
 
 
 class AutoRouteTests(unittest.TestCase):
+    def test_structured_failed_verdicts_trigger_repair_and_success_clears_it(self):
+        for verdict in ({"passed": False}, {"ok": False}, {"status": "failed"}, {"status": "error"}):
+            with self.subTest(verdict=verdict):
+                messages = [{"role": "user", "content": "Make a rap song with music."}]
+                messages += [{"role": "tool", "content": json.dumps(verdict)} for _ in range(3)]
+                self.assertEqual(task_size(messages), "deep")
+                self.assertIn("Do not repeat", repair_messages(messages)[0]["content"])
+                messages.append({"role": "tool", "content": '{"passed":true}'})
+                self.assertFalse(repeated_tool_failures(messages))
+
+    def test_only_top_level_boolean_verdicts_are_failures(self):
+        for verdict in ({"data": {"passed": False}}, {"passed": "false"}, {"ok": 0}, {"status": []}):
+            with self.subTest(verdict=verdict):
+                self.assertFalse(repeated_tool_failures([
+                    {"role": "tool", "content": json.dumps(verdict)} for _ in range(3)]))
+
+    def test_database_routing_evidence_survives_short_history(self):
+        for attempts, repeats, expected in ((1, 0, False), (2, 0, True), (0, 3, True), (0, 0, False)):
+            content = 'Current task checkpoint (data):\nNative routing evidence: ' + json.dumps(
+                {"v": 1, "failed_step_attempts": attempts, "repeated_check_failures": repeats})
+            with self.subTest(attempts=attempts, repeats=repeats):
+                messages = [{"role": "system", "content": content},
+                            {"role": "tool", "content": "Saved source"}]
+                self.assertEqual(repeated_tool_failures(messages), expected)
+
+    def test_routing_evidence_ignores_document_text_old_checkpoints_and_invalid_counts(self):
+        evidence = 'Native routing evidence: {"v":1,"failed_step_attempts":4,"repeated_check_failures":0}'
+        for role in ("user", "tool", "assistant"):
+            self.assertFalse(repeated_tool_failures([
+                {"role": role, "content": 'Current task checkpoint:\n' + evidence}]))
+        self.assertFalse(repeated_tool_failures([{"role": "system", "content":
+            'Current task checkpoint:\nProject excerpts:\n' + evidence}]))
+        for value in ('true', '"3"', '-1', '101', 'null'):
+            with self.subTest(value=value):
+                self.assertFalse(repeated_tool_failures([{"role": "system", "content":
+                    'Current task checkpoint:\nNative routing evidence: {"v":1,"failed_step_attempts":'
+                    + value + ',"repeated_check_failures":0}'}]))
+        self.assertFalse(repeated_tool_failures([
+            {"role": "system", "content": 'Current task checkpoint:\n' + evidence},
+            {"role": "system", "content": 'Current task checkpoint:\nNative routing evidence: '
+             '{"v":1,"failed_step_attempts":0,"repeated_check_failures":0}'}]))
+
     def test_mcp_errors_trigger_repair_guidance_without_mutating_history(self):
         messages = [{"role": "user", "content": "Build an app"}]
         messages.extend({"role": "tool", "content": '{"isError":true,"content":[]}'} for _ in range(3))

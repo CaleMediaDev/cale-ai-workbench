@@ -110,6 +110,28 @@ def synthetic_worker_note(text):
 
 def repeated_tool_failures(messages):
     """Escalate while the latest tool results show an unresolved repair loop."""
+    # Native steps retain only two exchanges. The controller puts bounded
+    # database counters on the checkpoint's second line, before file excerpts.
+    # Do not scan arbitrary document text or tool payloads for this protocol.
+    checkpoint = next((message_text(msg.get("content")) for msg in reversed(messages)
+                       if isinstance(msg, dict) and msg.get("role") == "system"
+                       and message_text(msg.get("content")).startswith("Current task checkpoint")), "")
+    lines = checkpoint.splitlines()
+    prefix = "Native routing evidence: "
+    if len(lines) > 1 and lines[1].startswith(prefix):
+        try:
+            evidence = json.loads(lines[1][len(prefix):])
+            fields = ("failed_step_attempts", "repeated_check_failures")
+            if (isinstance(evidence, dict) and set(evidence) == {"v", *fields}
+                    and type(evidence["v"]) is int and evidence["v"] == 1
+                    and all(type(evidence[key]) is int and 0 <= evidence[key] <= 100 for key in fields)
+                    # The worker suppresses an identical third call. Two
+                    # actual failed step checks already require diagnosis.
+                    and (evidence["failed_step_attempts"] >= 2
+                         or evidence["repeated_check_failures"] >= 3)):
+                return True
+        except (ValueError, TypeError):
+            pass
     recent = [message_text(msg.get("content")) for msg in messages
               if isinstance(msg, dict) and msg.get("role") == "tool"][-8:]
     failures = 0
@@ -135,7 +157,9 @@ def repeated_tool_failures(messages):
         if isinstance(result, dict) and (result.get("error") or
                                          result.get("isError") is True or
                                          result.get("success") is False or
-                                         result.get("status") == "blocked" or
+                                         result.get("ok") is False or
+                                         result.get("passed") is False or
+                                         result.get("status") in ("blocked", "failed", "error") or
                                          isinstance(result.get("exit_code"), int)
                                          and result["exit_code"] != 0):
             failures += 1
