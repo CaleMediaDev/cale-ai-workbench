@@ -637,7 +637,7 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
                         and 1 <= number <= len(supplied_cases)
                         and isinstance(supplied_cases[number-1], dict) and not actual_inputs):
                     inputs = {key: supplied_cases[number-1][key]
-                              for key in ("set", "click", "keys", "wait_ms")
+                              for key in ("reload", "set", "click", "keys", "wait_ms")
                               if supplied_cases[number-1].get(key)}
                 context = " inputs=" + json.dumps(inputs, sort_keys=True)[:240] if inputs or actual_inputs else ""
                 for reason in case.get("failures", [])[:3]:

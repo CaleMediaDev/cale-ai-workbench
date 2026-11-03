@@ -34,6 +34,14 @@ def _element_id(value: str) -> str:
     return value
 
 
+
+def _click_token(value: str) -> str:
+    if (not isinstance(value, str) or not value.strip() or len(value) > 200
+            or value.startswith(("#", ".", "//")) or any(ord(character) < 32 for character in value)):
+        raise ValueError("Use a short element ID or exact button name, not a CSS selector")
+    return value
+
+
 def validate_state_assertions(assertions) -> None:
     """Bound passive observations of an app's exported live data, not JS code."""
     if not isinstance(assertions, dict) or len(assertions) > 20:
@@ -109,7 +117,7 @@ def normalize_spec(spec: dict) -> dict:
     if isinstance(cases, list):
         merged = []
         index = 0
-        actions = {"set", "click", "keys", "wait_ms"}
+        actions = {"reload", "set", "click", "keys", "wait_ms"}
         assertions = {"expect", "visible", "hidden", "mobile_fit", "state"}
         while index < len(cases):
             current = cases[index]
@@ -277,8 +285,10 @@ def validate_spec(folder: Path, spec: dict) -> Path:
         raise ValueError("mobile_fit must be true or false")
     total_wait = 0
     for case in cases:
-        if not isinstance(case, dict) or not set(case).issubset({"set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit", "state"}):
-            raise ValueError("Use set, click, keys, wait_ms, expect, visible, hidden, mobile_fit and state in each case")
+        if not isinstance(case, dict) or not set(case).issubset({"reload", "set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit", "state"}):
+            raise ValueError("Use reload, set, click, keys, wait_ms, expect, visible, hidden, mobile_fit and state in each case")
+        if "reload" in case and type(case["reload"]) is not bool:
+            raise ValueError("reload must be a boolean; it only reloads the current local page")
         validate_state_assertions(case.get("state", {}))
         keys = case.get("keys", [])
         if not isinstance(keys, list) or len(keys) > 20:
@@ -304,9 +314,9 @@ def validate_spec(folder: Path, spec: dict) -> Path:
             raise ValueError("Browser cases may wait at most 10000 milliseconds in total")
         clicks = case.get("click", [])
         if not isinstance(clicks, list) or len(clicks) > 20:
-            raise ValueError("click must be a list of at most 20 element IDs")
+            raise ValueError("click must be a list of at most 20 element IDs or exact button names")
         for element_id in clicks:
-            _element_id(element_id)
+            _click_token(element_id)
         updates, expected = case.get("set", {}), case.get("expect", {})
         if not isinstance(updates, dict) or not isinstance(expected, dict):
             raise ValueError("set and expect must be objects keyed by HTML ID")
@@ -406,13 +416,29 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                 failures = []
                 suggested_hidden = []
                 before = asserted_state(case)
+                if case.get("reload"):
+                    # Same isolated profile and same current page: this tests
+                    # persisted state without adding arbitrary navigation.
+                    page.reload(wait_until="load", timeout=10_000)
                 for element_id, value in case.get("set", {}).items():
                     control = page.locator("#" + element_id)
                     if control.count() != 1:
                         failures.append(f"Missing input #{element_id}")
                     else:
                         try:
-                            control.fill(value, timeout=5_000)
+                            if control.evaluate("el => el.tagName === 'SELECT'"):
+                                # Values are data, never interpolated into JavaScript.
+                                # Wait for async option population; prefer an exact
+                                # value match, then the visible option label.
+                                page.wait_for_function("""({id,value}) => {
+                                    const el=document.getElementById(id);
+                                    return el && el.options && Array.from(el.options).some(
+                                        option => option.value === value || option.label === value);
+                                }""", arg={"id": element_id, "value": value}, timeout=5_000)
+                                by_value = control.evaluate("(el,value) => Array.from(el.options).some(option => option.value === value)", value)
+                                control.select_option(**({"value": value} if by_value else {"label": value}), timeout=5_000)
+                            else:
+                                control.fill(value, timeout=5_000)
                         except PlaywrightError as exc:
                             if (control.get_attribute("type") == "number" and
                                     "Cannot type text into input[type=number]" in str(exc)):
@@ -426,16 +452,19 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                                 )
                             else:
                                 raise
-                # Replay actual user input: fill, click, keys, wait, assertions.
+                # Replay actual user input: reload, fill, click, keys, wait, assertions.
                 for element_id in case.get("click", []):
-                    control = page.locator("#" + element_id)
+                    control = (page.locator("#" + element_id)
+                               if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", element_id) else None)
+                    if control is None or control.count() == 0:
+                        control = page.get_by_role("button", name=element_id, exact=True)
                     if control.count() != 1:
-                        failures.append(f"Missing click target #{element_id}")
+                        failures.append(f"Missing or ambiguous click target {element_id!r}; use a unique ID or exact button name")
                         continue
                     try:
                         control.click(timeout=5_000)
                     except PlaywrightError as exc:
-                        failures.append(f"Could not click #{element_id}: {str(exc)[:200]}")
+                        failures.append(f"Could not click {element_id!r}: {str(exc)[:200]}")
                 for action in case.get("keys", []):
                     key = action["key"]
                     try:
@@ -495,14 +524,28 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                 if (case.get("mobile_fit") or spec.get("mobile_fit")) and not page.evaluate(
                     "document.documentElement.scrollWidth <= window.innerWidth + 1"):
                     failures.append("Page overflows the viewport")
+                if failures and (case.get("click") or case.get("keys")):
+                    # Read validity flags without checkValidity/reportValidity:
+                    # those methods dispatch events and could change the app.
+                    # Observe constraints, not values or localized error text.
+                    invalid = page.evaluate("""() => Array.from(document.querySelectorAll(
+                        'input,select,textarea')).filter(el => el.willValidate && !el.validity.valid)
+                        .slice(0,3).map(el => ({id:(el.id||el.tagName).slice(0,64),
+                            flags:['valueMissing','typeMismatch','patternMismatch','tooLong',
+                                'tooShort','rangeUnderflow','rangeOverflow','stepMismatch',
+                                'badInput','customError'].filter(key => el.validity[key]),
+                            submitValidation:!!el.form && !el.form.noValidate}))""")
+                    if invalid:
+                        failures.insert(1, "Native invalid controls: " + json.dumps(invalid, separators=(",", ":"))[:700]
+                                        + ". Constraints may block submit before its handler; inspect form/invalid handling.")
                 outcome = {"case": number, "passed": not failures, "failures": failures}
                 if failures:
                     outcome["inputs"] = {name: copy.deepcopy(case[name]) for name in
-                                         ("set", "click", "keys", "wait_ms") if name in case}
+                                         ("reload", "set", "click", "keys", "wait_ms") if name in case}
                     if suggested_hidden:
                         outcome["suggested_assertions"] = {"hidden": suggested_hidden}
                 results.append(outcome)
-                actions = [kind for kind in ("set", "click", "keys") if case.get(kind)]
+                actions = [kind for kind in ("reload", "set", "click", "keys") if case.get(kind)]
                 changed = [name for name, value in after.items() if before.get(name) != value]
                 if actions and changed and not failures:
                     interactions.append({"case": number, "actions": actions, "targets": changed})
@@ -542,7 +585,7 @@ def saved_suite(folder: Path, spec: dict, previous: dict | None = None) -> dict:
         # Reusing an input sequence replaces mistaken expectations for that
         # sequence. Other sequences and viewport checks remain independent.
         return json.dumps([normalized.get("path"), normalized.get("viewport_width", 375),
-            [{key: case.get(key, default) for key, default in (("set", {}), ("click", []), ("keys", []), ("wait_ms", 0))}
+            [{key: case.get(key, default) for key, default in (("reload", False), ("set", {}), ("click", []), ("keys", []), ("wait_ms", 0))}
              for case in normalized.get("cases", [])]], sort_keys=True)
     incoming = canonical(spec)
     checks = [canonical(check) for check in checks]
@@ -636,7 +679,7 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
         failures = [case for case in result["cases"] if not case["passed"]][:failures_left]
         for failure in failures:
             case = spec["cases"][failure["case"] - 1]
-            failure["inputs"] = {name: case[name] for name in ("set", "click", "keys", "wait_ms") if name in case}
+            failure["inputs"] = {name: case[name] for name in ("reload", "set", "click", "keys", "wait_ms") if name in case}
             if len(json.dumps(failure["inputs"])) > 2000:
                 failure["inputs"] = {"note": "Read this saved sequence for complete input arguments"}
         failures_left -= len(failures)
@@ -645,7 +688,7 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
         results.append({"path": spec["path"], "viewport_width": spec.get("viewport_width", 375),
                         "passed": result["passed"], "cases": failures,
                         "page_sha256": result["page_sha256"],
-                        "input_case_count": sum(bool(case.get("set") or case.get("click") or case.get("keys"))
+                        "input_case_count": sum(bool(case.get("reload") or case.get("set") or case.get("click") or case.get("keys"))
                                                 for case in spec["cases"]),
                         "interaction_case_count": len(result.get("interactions", [])),
                         "interaction_targets": targets[:4], "interaction_targets_limited": len(targets) > 4,
@@ -698,14 +741,14 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
         raise ValueError("Use the saved case index from the failed checker result")
     supplied = normalize_spec(arguments).get("cases")
     if (not isinstance(supplied, list) or len(supplied) != 1 or not isinstance(supplied[0], dict)
-            or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "state", "set", "click", "keys", "wait_ms"}):
+            or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "state", "reload", "set", "click", "keys", "wait_ms"}):
         raise ValueError("An assertion revision needs one case correcting assertions; saved input actions cannot change")
     old = batch["cases"][number - 1]
     if any(name in supplied[0] and (name not in old or supplied[0][name] != old[name])
-           for name in ("set", "click", "keys", "wait_ms")):
+           for name in ("reload", "set", "click", "keys", "wait_ms")):
         raise ValueError("Assertion revisions cannot change input actions; repeated actions must exactly match the saved case")
     batch["cases"][number - 1] = {**{name: copy.deepcopy(old[name]) for name in
-        ("set", "click", "keys", "wait_ms") if name in old}, **copy.deepcopy(supplied[0])}
+        ("reload", "set", "click", "keys", "wait_ms") if name in old}, **copy.deepcopy(supplied[0])}
     validate_spec(folder, batch)
     return batch, {"saved_sequence": sequence, "saved_case": number,
                    "previous_sha256": digest, "request_hash": saved["request_hash"]}
@@ -822,7 +865,7 @@ def resolve_saved_report(folder: Path, report: dict) -> dict:
         result["path"] = expected
         if any(key in result for key in ("input_case_count", "interaction_case_count")):
             inputs, effects = result.get("input_case_count"), result.get("interaction_case_count")
-            actual_inputs = sum(bool(case.get("set") or case.get("click") or case.get("keys"))
+            actual_inputs = sum(bool(case.get("reload") or case.get("set") or case.get("click") or case.get("keys"))
                                 for case in checks[sequence - 1]["cases"])
             if (type(inputs) is not int or type(effects) is not int
                     or not 0 <= effects <= inputs or inputs != actual_inputs):

@@ -450,3 +450,23 @@ The runs used evolving code and varying generated cases; this is not a general
 speed comparison or model ranking. Saved unit acceptance does not establish
 whole-task correctness. User-authored notes and newer project-root aliases
 retain authority. Generic non-template app construction remains unproven.
+
+### Offline expense app (November 3)
+
+[Retained development trials](results/offline-expense-app-20261103.json) expose
+an incomplete application build from a plain request. This fixture starts with
+no implementation; resumes preserve its app, SQL plan, and original request.
+Development interruptions added reload, dropdown, and exact button-name support
+to the checker. Another run yielded automatically to a live user music worker.
+The earlier exact-label grading timeout was corrected to accept punctuation and
+case variants. A developer supplied an observed native-validation diagnostic;
+this is not an unassisted trial or a controlled speed comparison.
+
+The latest resumed run used 24 local model calls, passed eight observed browser
+checks, then failed reload persistence. Deletion targeting timed out after the
+lost rows; subsequent checks were not reached. No SQL unit was completed and
+there was no passing verifier. Its actual source and reports are retained.
+The independent grader requires 15 browser behaviors, completed SQL units, and
+a verifier rejecting removed JavaScript and two meaningful storage faults.
+Do not treat this failure, unit tests, or successful helper-function fixtures
+as proof that arbitrary full-app building is reliable.

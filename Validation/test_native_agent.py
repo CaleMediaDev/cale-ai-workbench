@@ -416,21 +416,28 @@ def test_automatic_acceptance_caches_failure_across_restart_and_retries_source_o
     native_agent.remember_local_tool_feedback(state, "fixture-local", "", task_context.request_identity(folder), failed=True, recovered=False)
     native_agent.remember_local_tool_feedback(state, "fixture-local", "", task_context.request_identity(folder), failed=True, recovered=False)
     native_agent.save_state(item, state)
-    with patch.object(long_tasks, "projects", return_value=[item]):
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(native_agent, "checker_fingerprint", return_value="before-fix") as checker:
         assert native_agent.advance_checked_steps(item, state, [])
         assert state["automatic_step_checks"] == 1 and task_context.step_status(folder)["done"] == 0
         assert state["local_repair_feedback"]
         state = native_agent.read_state(item)
         assert native_agent.advance_checked_steps(item, state, [])
         assert state["automatic_step_checks"] == 1
+        # A software checker fix retries an unchanged failed unit once; it
+        # never turns the old failure into a pass without running the checker.
+        checker.return_value = "after-fix"
+        assert native_agent.advance_checked_steps(item, state, [])
+        assert state["automatic_step_checks"] == 2 and task_context.step_status(folder)["done"] == 0
+        assert native_agent.advance_checked_steps(item, state, [])
+        assert state["automatic_step_checks"] == 2
         # A revised acceptance identity retries even with unchanged source.
         corrected = {**spec, "cases": [{"args": [2], "expected": 3}]}
         task_context.revise_step(folder, active["id"], [{**step, "check_arguments": corrected}])
         assert native_agent.advance_checked_steps(item, state, [])
-        assert state["automatic_step_checks"] == 2 and task_context.step_status(folder)["done"] == 0
+        assert state["automatic_step_checks"] == 3 and task_context.step_status(folder)["done"] == 0
         source.write_text("function calculate(x){return x+1}")
         assert native_agent.advance_checked_steps(item, state, [])
-    assert state["automatic_step_checks"] == 3 and task_context.step_status(folder)["done"] == 1
+    assert state["automatic_step_checks"] == 4 and task_context.step_status(folder)["done"] == 1
     assert "local_repair_feedback" not in state
 
 
@@ -3655,3 +3662,18 @@ def test_automatic_function_acceptance_planning_can_reason_instead_of_quick_mode
     assert seen[0][0]["reasoning_effort"] == "low"
     assert seen[0][0]["max_tokens"] == 4096
     assert task_context.step_status(item["folder"])["total"] == 1
+
+
+def test_execution_steps_have_a_finite_output_budget_and_keep_the_original_request(tmp_path):
+    item = project(tmp_path / "bounded-execution")
+    item["brief"] = "Work in small steps. " + "Keep the original requirement. " * 80 + "Final requirement: preserve the blue heading."
+    seen = []
+    def call(payload):
+        seen.append(payload)
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "files", "function": {
+            "name": "list_files", "arguments": "{}"}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        native_agent.run_slice(item, complete=call)
+    assert len(seen) == 1
+    assert seen[0]["max_tokens"] == 4096
+    assert "Final requirement: preserve the blue heading." in seen[0]["messages"][0]["content"]

@@ -31,6 +31,42 @@ SPEC = {"path": "index.html", "viewport_width": 375, "cases": [
     {"set": {"bill": "0"}, "visible": ["error"]},
 ]}
 
+
+@pytest.mark.parametrize("novalidate", [False, True])
+def test_failed_submit_reports_native_constraints_without_dispatching_invalid_events(tmp_path, novalidate):
+    source = '''<form id="form" %s><input id="amount" type="number" min="0.01">
+    <button id="add">Add</button></form><p id="error"></p><p id="events">0</p>
+    <script>let n=0;const out=document.getElementById('events');
+    document.addEventListener('invalid',()=>{out.textContent=String(++n)},true);
+    document.getElementById('form').onsubmit=e=>{e.preventDefault()};</script>''' % (
+        "novalidate" if novalidate else "")
+    path = tmp_path / "index.html"
+    path.write_text(source)
+    spec = {"path": "index.html", "cases": [
+        {"set": {"amount": "-5"}, "click": ["add"], "expect": {"error": "positive amount"}},
+        {"expect": {"events": "0" if novalidate else "1"}}]}
+    result = webapp_check.check(tmp_path, spec)
+    assert result["passed"] is False
+    assert result["cases"][1]["passed"] is True  # Observation dispatched no extra invalid event.
+    failures = result["cases"][0]["failures"]
+    assert "expected visible text" in failures[0].lower()
+    assert '"id":"amount"' in failures[1] and '"rangeUnderflow"' in failures[1]
+    assert ('"submitValidation":false' if novalidate else '"submitValidation":true') in failures[1]
+    task_context.record_action(tmp_path, "check_webapp", json.dumps(result), spec)
+    assert "rangeUnderflow" in json.dumps(task_context.checker_failures(tmp_path))
+    assert path.read_text() == source
+
+
+def test_passing_invalid_input_case_does_not_turn_constraint_into_failure(tmp_path):
+    (tmp_path / "index.html").write_text('''<form novalidate>
+        <input id="amount" type="number" min="1"><button id="add">Add</button></form>
+        <p id="error"></p><script>document.querySelector('form').onsubmit=e=>{
+        e.preventDefault();document.getElementById('error').textContent='Invalid amount'};</script>''')
+    result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [
+        {"set": {"amount": "-5"}, "click": ["add"], "expect": {"error": "Invalid amount"}}]})
+    assert result["passed"] is True
+    assert result["cases"][0]["failures"] == []
+
 CANVAS_STATE_PAGE = """<!doctype html><canvas id="canvas"></canvas><script>
 window.game={player:{x:300},bullets:[],playing:true,empty:null,label:'ready'};
 window.addEventListener('keydown',e=>{
@@ -1045,3 +1081,107 @@ def test_unicode_saved_reports_are_ascii_safe_bounded_and_keep_exact_paths(tmp_p
     resolved = webapp_check.resolve_saved_report(tmp_path, json.loads(encoded))
     assert all(check["path"] == name for check in resolved["checks"])
     assert not resolved["passed"] and resolved["checks"][0]["cases"]
+
+
+STORAGE_PAGE = """<!doctype html><label for="note">Note</label><input id="note">
+<button id="save">Save</button><button id="clear">Clear</button><p id="saved"></p><script>
+const field=document.getElementById('note'),output=document.getElementById('saved');
+output.textContent=localStorage.getItem('memo')||'empty';
+document.getElementById('save').onclick=()=>{localStorage.setItem('memo',field.value);output.textContent=field.value;};
+document.getElementById('clear').onclick=()=>{localStorage.removeItem('memo');output.textContent='empty';};
+</script>"""
+
+
+def test_reload_cases_verify_storage_writes_and_deletions_in_saved_verifier(tmp_path):
+    source = tmp_path / "index.html"
+    source.write_text(STORAGE_PAGE, encoding="utf-8")
+    spec = {"path": "index.html", "cases": [
+        {"set": {"note": "first"}, "click": ["save"], "expect": {"saved": "first"}},
+        {"reload": True, "expect": {"saved": "first"}},
+        {"reload": True, "set": {"note": "second"}, "click": ["save"], "expect": {"saved": "second"}},
+        {"reload": True, "expect": {"saved": "second"}},
+        {"click": ["clear"], "expect": {"saved": "empty"}},
+        {"reload": True, "expect": {"saved": "empty"}}]}
+    assert webapp_check.check(tmp_path, spec)["passed"]
+    assert webapp_check.save_verifier(tmp_path, spec, accumulate=True)
+    report = webapp_check.run_saved_checks(tmp_path, tmp_path / ".local-ai/webapp-check.json")
+    assert report["checks"][0]["input_case_count"] == 6
+    assert webapp_check.resolve_saved_report(tmp_path, report)["passed"]
+    def run_saved():
+        with patch.object(long_tasks, "projects", return_value=[{"id": "sample", "folder": str(tmp_path), "brief": "Test storage persistence"}]):
+            return native_agent.execute_tool(tmp_path, "run_verifier", {})
+    assert run_saved().startswith("Exit code: 0\n")
+    for mutation in [STORAGE_PAGE.replace("localStorage.setItem('memo',field.value)", "void 0"),
+                     STORAGE_PAGE.replace("localStorage.removeItem('memo')", "void 0")]:
+        source.write_text(mutation, encoding="utf-8")
+        checked = webapp_check.check(tmp_path, spec)
+        assert not checked["passed"]
+        assert any(case.get("inputs", {}).get("reload") for case in checked["cases"] if not case["passed"])
+        assert run_saved().startswith("Exit code: 1\n")
+    source.write_text(STORAGE_PAGE, encoding="utf-8")
+    assert run_saved().startswith("Exit code: 0\n")
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "true", "https://example.com", {}, []])
+def test_reload_is_a_boolean_not_a_navigation_target(tmp_path, value):
+    (tmp_path / "index.html").write_text(STORAGE_PAGE, encoding="utf-8")
+    with pytest.raises(ValueError, match="reload"):
+        webapp_check.validate_spec(tmp_path, {"path": "index.html", "cases": [{"reload": value, "expect": {"saved": "empty"}}]})
+
+
+def test_reload_sequences_remain_distinct_and_assertion_revision_cannot_remove_reload(tmp_path):
+    import hashlib
+    (tmp_path / "index.html").write_text(STORAGE_PAGE, encoding="utf-8")
+    ordinary = {"path": "index.html", "cases": [{"expect": {"saved": "empty"}}]}
+    reloaded = {"path": "index.html", "cases": [{"reload": True, "expect": {"saved": "empty"}}]}
+    import cloud_ai
+    tool = next(tool for tool in native_agent.TOOLS if tool["function"]["name"] == "check_webapp")
+    response = {"choices": [{"message": {"tool_calls": [{"id": "reload", "function": {
+        "name": "check_webapp", "arguments": json.dumps(reloaded)}}]}}]}
+    assert cloud_ai.valid_completion(response, {"tools": [tool]})
+    suite = webapp_check.saved_suite(tmp_path, ordinary)
+    suite = webapp_check.saved_suite(tmp_path, reloaded, suite)
+    assert len(suite["checks"]) == 2
+    assert webapp_check.save_verifier(tmp_path, reloaded, accumulate=True)
+    path = tmp_path / ".local-ai/webapp-check.json"
+    raw = path.read_bytes()
+    revision = {"path": "index.html", "saved_sequence": 1, "saved_case": 1,
+                "suite_sha256": hashlib.sha256(raw).hexdigest(), "cases": [{"expect": {"saved": "empty"}}]}
+    corrected, _ = webapp_check.prepare_assertion_revision(tmp_path, revision)
+    assert corrected["cases"][0]["reload"] is True
+    with pytest.raises(ValueError, match="input actions"):
+        webapp_check.prepare_assertion_revision(tmp_path, {**revision, "cases": [{"reload": False, "expect": {"saved": "empty"}}]})
+    assert path.read_bytes() == raw
+    folded = webapp_check.normalize_spec({"path": "index.html", "cases": [{"reload": True}, {"expect": {"saved": "empty"}}]})
+    assert folded["cases"] == reloaded["cases"]
+
+
+def test_set_selects_dropdown_by_value_or_visible_label(tmp_path):
+    (tmp_path / "index.html").write_text("""<!doctype html><select id="kind">
+<option value="supplies">Supplies</option><option value="travel">Travel</option></select><p id="chosen"></p>
+<script>const select=document.getElementById('kind'),out=document.getElementById('chosen');
+select.onchange=()=>out.textContent=select.value; select.onchange();</script>""", encoding="utf-8")
+    result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [
+        {"set": {"kind": "travel"}, "expect": {"chosen": "travel"}},
+        {"set": {"kind": "Supplies"}, "expect": {"chosen": "supplies"}}]})
+    assert result["passed"]
+    assert len(result["interactions"]) == 2
+
+
+def test_click_accepts_an_exact_accessible_button_name_without_an_id(tmp_path):
+    (tmp_path / "index.html").write_text("""<button onclick="document.getElementById('result').textContent='added'">Add expense</button><p id="result">empty</p>""")
+    checked = webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"click": ["Add expense"], "expect": {"result": "added"}}]})
+    assert checked["passed"] and checked["interactions"]
+
+
+def test_click_does_not_choose_arbitrarily_between_duplicate_button_names(tmp_path):
+    (tmp_path / "index.html").write_text("""<button onclick="document.getElementById('result').textContent='wrong'">Delete</button><button>Delete</button><p id="result">untouched</p>""")
+    checked = webapp_check.check(tmp_path, {"path": "index.html", "cases": [
+        {"click": ["Delete"], "expect": {"result": "untouched"}}, {"expect": {"result": "untouched"}}]})
+    assert not checked["passed"] and checked["cases"][1]["passed"]
+    assert "ambiguous" in " ".join(checked["cases"][0]["failures"])
+
+
+def test_click_prefers_an_existing_id_over_a_different_button_name(tmp_path):
+    (tmp_path / "index.html").write_text("""<button id="Save" onclick="document.getElementById('result').textContent='id'">Other</button><button onclick="document.getElementById('result').textContent='label'">Save</button><p id="result">untouched</p>""")
+    assert webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"click": ["Save"], "expect": {"result": "id"}}]})["passed"]
