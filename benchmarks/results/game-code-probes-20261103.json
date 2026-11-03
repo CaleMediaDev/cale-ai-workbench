@@ -1,0 +1,149 @@
+{
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 3060",
+    "vram_gb": 12,
+    "ram_gb": 128
+  },
+  "scope": "Local public fixtures only; logic and live-state contract checks, no visual/browser claim",
+  "models": {
+    "gemma4:e4b": {
+      "version": 3,
+      "source": "gemma4:e4b",
+      "weights": "370c2879f17648d337b0ab4e208fdce348e24d1060064e93d7645daafd56d39c",
+      "vram_gb": 12.0,
+      "ram_gb": 128,
+      "updated": 1793697711.0009477,
+      "passed": true,
+      "seconds": 4.363,
+      "build": {
+        "passed": false,
+        "seconds": 37.881,
+        "checks": {
+          "live_api": true,
+          "reset": true,
+          "frame_independence": false,
+          "left": false,
+          "right": false,
+          "shooting": false,
+          "score": false,
+          "damage": false,
+          "invulnerability": false,
+          "gameover": true,
+          "wave": false,
+          "drawing": true,
+          "blur": true
+        },
+        "tokens": 4133
+      },
+      "samples": [
+        {
+          "seconds": 7.16,
+          "checks": {
+            "movement": true,
+            "left": true,
+            "right": true,
+            "still": true,
+            "frame_independence": true,
+            "hit": true,
+            "edge": true,
+            "miss": true,
+            "complete": true,
+            "incomplete": true,
+            "not_spawned": true,
+            "cooldown": true,
+            "cooldown_clamp": true
+          },
+          "tokens": 204,
+          "load_seconds": 5.485
+        },
+        {
+          "seconds": 1.566,
+          "checks": {
+            "movement": true,
+            "left": true,
+            "right": true,
+            "still": true,
+            "frame_independence": true,
+            "hit": true,
+            "edge": true,
+            "miss": true,
+            "complete": true,
+            "incomplete": true,
+            "not_spawned": true,
+            "cooldown": true,
+            "cooldown_clamp": true
+          },
+          "tokens": 210,
+          "load_seconds": 0.014
+        }
+      ]
+    },
+    "qwen3.5:9b": {
+      "version": 3,
+      "source": "qwen3.5:9b",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "vram_gb": 12.0,
+      "ram_gb": 128,
+      "updated": 1793697778.5148318,
+      "passed": true,
+      "seconds": 6.902,
+      "build": {
+        "passed": false,
+        "seconds": 53.502,
+        "checks": {
+          "valid_code": false
+        },
+        "tokens": 2470
+      },
+      "samples": [
+        {
+          "seconds": 8.552,
+          "checks": {
+            "movement": true,
+            "left": true,
+            "right": true,
+            "still": true,
+            "frame_independence": true,
+            "hit": true,
+            "edge": true,
+            "miss": true,
+            "complete": true,
+            "incomplete": true,
+            "not_spawned": true,
+            "cooldown": true,
+            "cooldown_clamp": true
+          },
+          "tokens": 212,
+          "load_seconds": 4.137
+        },
+        {
+          "seconds": 5.251,
+          "checks": {
+            "movement": true,
+            "left": true,
+            "right": true,
+            "still": true,
+            "frame_independence": true,
+            "hit": true,
+            "edge": true,
+            "miss": true,
+            "complete": true,
+            "incomplete": true,
+            "not_spawned": true,
+            "cooldown": true,
+            "cooldown_clamp": true
+          },
+          "tokens": 259,
+          "load_seconds": 0.016
+        }
+      ]
+    }
+  },
+  "additional_tool_checks": {
+    "qwen2.5-coder:7b": "Failed actual multiply tool-call probe; not approved",
+    "qwen2.5-coder:14b": "Failed actual multiply tool-call probe; not approved"
+  },
+  "hardware_excluded": [
+    "qwen3.8:27b"
+  ]
+}

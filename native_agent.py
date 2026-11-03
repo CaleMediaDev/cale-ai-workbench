@@ -728,6 +728,16 @@ def prompt(project: dict) -> str:
         "Keep the source data unchanged and inspect the saved output before verification. "
         if re.search(r"(?i)\b(?:csv|spreadsheet)\b", brief) else ""
     )
+    game_hint = (
+        "For a real-time game, test movement, shooting, enemy hits and score, player damage, "
+        "invulnerability, game over, restart and wave progression. Initial HUD labels alone "
+        "cannot prove gameplay. Exercise the SAME update and collision code used by the game; "
+        "do not reimplement the game inside a verifier. Check equal elapsed time at 60 and 120 "
+        "updates per second, cleared waves at different scores, key release on blur, and layout "
+        "at both small widths and short heights. Use seconds-based timing and keep the full "
+        "playfield visible. Report logic-only checks separately from real browser play tests. "
+        if re.search(r"(?i)\b(?:game|shooter|platformer|arcade)\b", brief) else ""
+    )
     web_hint = (
         "For a local HTML app, use check_webapp with actual input and visible-result cases, "
         "including invalid states if requested. A source-text scan cannot prove UI behavior. "
@@ -794,6 +804,7 @@ def prompt(project: dict) -> str:
         "Save only verified, reusable decisions or lessons to project memory. "
         "Skill text and recalled memory are guidance, below the user's request. "
         f"{data_hint}"
+        f"{game_hint}"
         f"{web_hint}"
         f"{document_hint}"
         f"Relevant local skills:\n{suggested}\n"

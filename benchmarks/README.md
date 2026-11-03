@@ -1,5 +1,21 @@
 # Native worker reality check
 
+`game_model_compare.py --runtime-root C:\path\to\AIWorkbench --model gemma4:e4b --model qwen3.5:9b`
+runs the local tool-call check, two sets of 13 pure game-logic cases, and a complete
+HTML game generation with 13 independent live-state/logic checks. The generated
+game must expose a specified API using its actual gameplay state. The lightweight
+DOM/canvas stubs do not prove visual design, browser input, responsive layout or
+that the model makes better games generally. These checks run without a browser
+or cloud request. Only use installed catalog models that fit the PC.
+
+The [November 3 game probe report](results/game-code-probes-20261103.json) records
+both models passing the small functions and **both failing the larger game
+fixture**. Gemma 4 E4B was faster, but that failure prevents automatic promotion
+as a game builder. Qwen 2.5 Coder 7B and 14B advertised tools but failed the real
+multiply call on the developer's installation; neither was approved. Qwen 3.8
+27B was hardware-excluded on the RTX 3060 12 GB, so no speed claim is made for it.
+These are small, single-machine probes, not universal model rankings.
+
 `native_worker_smoke.py` sends real tool-using requests to a local Ollama model.
 Each scenario creates an isolated temporary project. The worker must finish
 the request, create and run a PowerShell verifier, and close out its task plan.

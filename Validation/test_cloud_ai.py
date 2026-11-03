@@ -579,6 +579,19 @@ class CloudTests(unittest.TestCase):
         self.addCleanup(self.plan.stop)
         self.addCleanup(self.offline.stop)
 
+    def test_native_32k_candidate_only_serves_requests_that_fit(self):
+        self.candidates.stop()
+        alias = "cale-code7"
+        tags = {"models": [{"name": alias+":latest", "size": 5*2**30}]}
+        with (patch.object(cloud, "post", return_value={"capabilities": ["tools"],
+                    "parameters": "num_ctx 32768\n", "details": {"parameter_size": "7.6B"}}),
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+              patch.object(cloud, "candidate_approved", return_value=True),
+              patch.object(cloud, "refresh_catalog")):
+            router = cloud.Router()
+            self.assertEqual(router.local_candidates("quick", required_context=16000), [alias])
+            self.assertEqual(router.local_candidates("quick", required_context=40000), [])
+
     def test_loaded_balanced_model_avoids_unnecessary_model_swap(self):
         self.candidates.stop()
         sizes = {cloud.FAST_MODEL: "9B", cloud.BALANCED_MODEL: "35B",

@@ -40,6 +40,38 @@ CATALOG = {
         "candidate": True,
         "tool_reasoning_effort": "none",
     },
+    "qwen25_code7": {
+        "label": "Qwen 2.5 Coder 7B (coding candidate)",
+        "alias": "cale-code7", "source": "qwen2.5-coder:7b",
+        "download_gb": 5, "ram_gb": 16, "min_vram_gb": 6,
+        "origin": "https://ollama.com/library/qwen2.5-coder",
+        "license": "Apache-2.0", "context": 32768, "context_policy": "fixed",
+        "candidate": True, "coding_probe": True, "tool_reasoning_effort": "none",
+    },
+    "qwen25_code14": {
+        "label": "Qwen 2.5 Coder 14B (coding candidate)",
+        "alias": "cale-code14", "source": "qwen2.5-coder:14b",
+        "download_gb": 9, "ram_gb": 24, "min_vram_gb": 11,
+        "origin": "https://ollama.com/library/qwen2.5-coder",
+        "license": "Apache-2.0", "context": 32768, "context_policy": "fixed",
+        "candidate": True, "coding_probe": True, "tool_reasoning_effort": "none",
+    },
+    "gemma4_edge": {
+        "label": "Gemma 4 E4B (coding candidate)",
+        "alias": "cale-gemma4-edge", "source": "gemma4:e4b",
+        "download_gb": 7, "ram_gb": 24, "min_vram_gb": 8,
+        "origin": "https://ollama.com/library/gemma4",
+        "license": "Apache-2.0", "context": 65536, "context_policy": "fixed",
+        "candidate": True, "coding_probe": True, "tool_reasoning_effort": "none",
+    },
+    "qwen38_code": {
+        "label": "Qwen 3.8 27B (24 GB GPU coding candidate)",
+        "alias": "cale-qwen38-code", "source": "qwen3.8:27b",
+        "download_gb": 18, "ram_gb": 32, "min_vram_gb": 22,
+        "origin": "https://ollama.com/library/qwen3.8",
+        "license": "Apache-2.0", "context": 65536, "context_policy": "fixed",
+        "candidate": True, "coding_probe": True, "tool_reasoning_effort": "none",
+    },
     "qwen35": {
         "label": "Qwen 3.5 35B (balanced local)",
         "alias": "cale-qwen35",
@@ -227,6 +259,10 @@ class SlowModelError(RuntimeError):
     """A real local generation probe found this model too slow for agent work."""
 
 
+class CandidateModelError(RuntimeError):
+    """A model failed actual tools or coding checks; retry after a cooldown."""
+
+
 def probe_tokens_per_second(result):
     """Use Ollama's decode duration, excluding model load and prompt prefill."""
     try:
@@ -302,7 +338,7 @@ def probe_tool_use(alias, reasoning_effort=None):
                     f"Model generated {speed:.1f} tokens/s on this PC; needs at least 5 tokens/s."
                 )
             return True
-    raise RuntimeError(
+    raise CandidateModelError(
         "Model downloaded, but it did not pass the local tool-use check."
     )
 
@@ -494,7 +530,7 @@ def preferred_context(item, info, model):
     It must never make an existing 64K alias unusable merely because Ollama
     omitted optional metadata.
     """
-    minimum = max(64000, item["context"])
+    minimum = max(8192, item["context"])
     if item.get("context_policy") == "fixed":
         return minimum
     import context_window
@@ -535,9 +571,7 @@ def install(profile, progress=print):
         )
     import model_fitness
 
-    if not model_fitness.hardware_allows(
-        item["download_gb"], total_ram_gb(), model_fitness.gpu_vram_gb()
-    ):
+    if not model_fitness.profile_allows(item, total_ram_gb(), model_fitness.gpu_vram_gb()):
         raise ValueError("This model is likely too slow for this PC's GPU. Choose a smaller model.")
     source_was_cached = source_cached(item)
     # The Ollama store can be moved; disk space remains checked by Ollama at download time.
@@ -575,6 +609,11 @@ def install(profile, progress=print):
                 or "tools" not in source_info.get("capabilities", [])):
             raise RuntimeError("Model does not advertise local tool support.")
         probe_tool_use(item["source"], item.get("tool_reasoning_effort"))
+        if item.get("coding_probe"):
+            progress("Testing game coding accuracy and completion time")
+            report = model_fitness.probe_game_coding(item["source"], ROOT)
+            if not report["passed"]:
+                raise CandidateModelError("Model failed the independent game-logic checks; it will not be selected.")
     except Exception:
         if not source_was_cached:
             try:
@@ -795,6 +834,8 @@ def repair_main_alias(ram=None, vram=None, *, alias=None):
     for profile, item in CATALOG.items():
         if profile == "main" or item.get("fallback_only") or item.get("auto") is False:
             continue
+        if item.get("coding_probe") and not model_fitness.game_build_approved(item, ROOT):
+            continue
         alias = item.get("alias", "")
         weight = sizes.get(alias, sizes.get(alias + ":latest", 0))
         if not weight or not model_fitness.suitable(alias, weight, ram, vram):
@@ -935,6 +976,19 @@ def auto_install(status_dir, refresh=True):
 
             ram = total_ram_gb()
             vram = model_fitness.gpu_vram_gb()
+            # Compare new coding candidates to the existing fast model on
+            # this PC. A tiny public-fixture probe runs only while idle.
+            baseline = CATALOG.get("fast")
+            baseline_report = status_dir / "game-coding-baseline.json"
+            try:
+                if (baseline and not alias_update_waits_for_tasks(baseline) and model_ready("fast")
+                        and model_fitness.profile_allows(baseline, ram, vram)):
+                    if not model_fitness.game_probe_current(baseline["source"], ROOT):
+                        save_download_status(baseline_report, "working", "Testing fast-model game coding", 0)
+                        model_fitness.probe_game_coding(baseline["source"], ROOT)
+                    save_download_status(baseline_report, "complete", "Fast model coding comparison checked", 100)
+            except Exception as exc:
+                save_download_status(baseline_report, "error", str(exc)[:180], 0)
             candidates = sorted(
                 (
                     (profile, model)
@@ -947,7 +1001,7 @@ def auto_install(status_dir, refresh=True):
                 path = status_dir / f"optional-model-{profile}.json"
                 if ram + 1 < model["ram_gb"]:
                     continue
-                if not model_fitness.hardware_allows(model["download_gb"], ram, vram):
+                if not model_fitness.profile_allows(model, ram, vram):
                     save_download_status(path, "skipped_hardware",
                                          "This model would be too slow on this PC", 0)
                     continue
@@ -972,7 +1026,7 @@ def auto_install(status_dir, refresh=True):
                     last_probe = float(previous.get("updated") or 0)
                 except (TypeError, ValueError, OverflowError):
                     last_probe = 0
-                if (previous.get("status") == "skipped_slow"
+                if (previous.get("status") in ("skipped_slow", "skipped_incompatible")
                         and previous.get("source") == model.get("source")
                         and previous.get("ram_gb") == round(ram)
                         and previous.get("vram_gb") == round(vram, 1)
@@ -980,6 +1034,11 @@ def auto_install(status_dir, refresh=True):
                     continue  # Recheck after a week or a hardware/model change.
                 try:
                     if model_ready(profile):
+                        if (model.get("coding_probe")
+                                and not alias_update_waits_for_tasks(model)
+                                and not model_fitness.game_probe_current(model["source"], ROOT)):
+                            save_download_status(path, "working", "Checking game coding accuracy and speed", 98)
+                            model_fitness.probe_game_coding(model["source"], ROOT)
                         save_download_status(
                             path, "complete", "Installed and ready to use", 100
                         )
@@ -1040,6 +1099,11 @@ def auto_install(status_dir, refresh=True):
                     )
                 except SlowModelError as exc:
                     save_download_status(path, "skipped_slow", str(exc), 0, {
+                        "source": model.get("source"), "ram_gb": round(ram),
+                        "vram_gb": round(vram, 1),
+                    })
+                except CandidateModelError as exc:
+                    save_download_status(path, "skipped_incompatible", str(exc), 0, {
                         "source": model.get("source"), "ram_gb": round(ram),
                         "vram_gb": round(vram, 1),
                     })

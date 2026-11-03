@@ -4249,6 +4249,26 @@ def gui():
         style="Muted.TLabel", wraplength=720,
     ).pack(anchor="w", pady=(0, 9))
 
+    gpu_card = ttk.Frame(super_page, style="Card.TFrame", padding=(14, 16))
+    gpu_card.pack(fill="x", pady=(0, 13))
+    ttk.Label(gpu_card, text="UPGRADE YOUR WINDOWS PC", style="CardMuted.TLabel",
+              font=("Segoe UI", 9, "bold")).pack(anchor="w")
+    ttk.Label(gpu_card, text="More room for local AI: RTX 3090 · 24 GB",
+              style="Card.TLabel", font=("Segoe UI", 18, "bold")).pack(anchor="w", pady=(3, 7))
+    ttk.Label(gpu_card, text=(
+        "The EVGA GeForce RTX 3090 FTW3 Ultra gives compatible desktop PCs 24 GB of GPU memory. "
+        "That can keep larger coding models on the GPU and reduce slow CPU offloading. "
+        "Cale checks model fit, tools and measured speed on your PC before using a candidate."
+    ), style="Card.TLabel", wraplength=680, justify="left").pack(anchor="w", pady=(0, 10))
+    ttk.Button(gpu_card, text="See the RTX 3090 on Amazon ↗", style="Accent.TButton",
+               command=lambda: webbrowser.open("https://link.amazon/B0eYAxHsv")).pack(anchor="w")
+    ttk.Label(gpu_card, text=(
+        "Graphics card only; installation is required. Check case clearance, power supply, connectors "
+        "and seller warranty before buying. Speed depends on the model and the rest of your PC. "
+        "As an Amazon Associate, Cale Media earns from qualifying purchases."
+    ), style="CardMuted.TLabel", wraplength=680, justify="left",
+              font=("Segoe UI", 9)).pack(anchor="w", pady=(9, 0))
+
     # NVIDIA provides the product photograph as a newsroom media asset. Keep
     # the supplied Amazon link intact so the owner's referral tag survives.
     spark_link = "https://link.amazon/B0j9RBQZ9"

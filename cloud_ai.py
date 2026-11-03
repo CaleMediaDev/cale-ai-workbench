@@ -701,6 +701,7 @@ class Router:
                 weights = {}
             available = {}
             contexts = {}
+            weight_ids = {}
             vision = set()
             aliases = dict.fromkeys(
                 [FAST_MODEL, STANDARD_MAIN_ALIAS,
@@ -713,7 +714,8 @@ class Router:
                 if item and not candidate_approved(item):
                     continue
                 weight = weights.get(name, weights.get(name + ":latest"))
-                if weight is None or not model_fitness.suitable(name, weight, ram, vram):
+                if (weight is None or item and not model_fitness.profile_allows(item, ram, vram)
+                        or not model_fitness.suitable(name, weight, ram, vram)):
                     continue
                 try:
                     info = post(
@@ -729,11 +731,13 @@ class Router:
                         r"(?m)^\s*num_ctx\s+(\d+)\s*$",
                         info.get("parameters", ""),
                     )
-                    if not configured or int(configured.group(1)) < 64000:
+                    minimum_context = (item or {}).get("context", 65536)
+                    if not configured or int(configured.group(1)) < minimum_context:
                         continue
                     label = str(info.get("details", {}).get("parameter_size", ""))
                     match = re.search(r"(\d+(?:\.\d+)?)B", label, re.IGNORECASE)
                     available[name] = float(match.group(1)) if match else 1.0
+                    weight_ids[name] = model_library.weight_blob(info)
                     contexts[name] = int(configured.group(1))
                     if "vision" in info.get("capabilities", []):
                         vision.add(name)
@@ -745,6 +749,7 @@ class Router:
             self.model_speeds = {
                 name: model_fitness.measured_speed(name) for name in available
             }
+            self.model_weights = weight_ids
             self.model_cache_until = time.monotonic() + 60
         balanced_preferred = BALANCED_MODEL
         if size == "balanced":
@@ -1057,6 +1062,10 @@ class Router:
             if chosen not in verified:
                 record("local", "Saved model is no longer suitable; using an eligible local model.",
                        chosen)
+        if profile == "main" and re.search(r"\b(game|shooter|platformer|arcade)\b", str(messages), re.I):
+            import model_fitness
+            selected = model_fitness.rank_game_models(
+                selected, CATALOG, ROOT, getattr(self, "model_weights", {}))
         last_error = None
         for selected_model in selected:
             local = dict(payload)

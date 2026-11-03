@@ -28,6 +28,8 @@ extras = [
     "benchmarks/results/document-auto-20261103.json",
     "benchmarks/native_worker_smoke.py",
     "benchmarks/README.md",
+    "benchmarks/game_model_compare.py",
+    "benchmarks/results/game-code-probes-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",
