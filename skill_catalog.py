@@ -62,6 +62,9 @@ def sync(root: str | Path) -> dict:
         key = relative.as_posix()
         data = source.read_bytes()
         target = destination / relative
+        if target.is_symlink():
+            preserved += 1
+            continue
         if target.exists():
             current = _hash(target.read_bytes())
             if current == _hash(data):
