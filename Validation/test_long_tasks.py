@@ -854,8 +854,9 @@ class LongTaskTests(unittest.TestCase):
         video.write_bytes(b"vocal video")
         task_module.publish_latest_song(folder, old, None)
         task_module.publish_latest_song(folder, vocal, video)
-        self.assertEqual((folder / "00-LATEST-SONG.mp3").read_bytes(), b"sung")
-        self.assertEqual((folder / "00-LATEST-VIDEO.mp4").read_bytes(), b"vocal video")
+        self.assertFalse((folder / "00-LATEST-SONG.mp3").exists())
+        self.assertFalse((folder / "00-LATEST-VIDEO.mp4").exists())
+        self.assertEqual(task_module.latest_song(folder), vocal.resolve())
         self.assertEqual(old.read_bytes(), b"instrumental")
         self.assertEqual((folder / "00-PLAY-THIS.m3u").read_text(
             encoding="utf-8-sig"), "#EXTM3U\nsong-with-vocals.mp3\n")
@@ -877,8 +878,9 @@ class LongTaskTests(unittest.TestCase):
             self.assertTrue(task_module.restore_reviewed_song_aliases(task, job))
             self.assertFalse(task_module.restore_reviewed_song_aliases(task, job))
         self.assertEqual(update.call_count, 1)
-        self.assertEqual((folder / "00-LATEST-SONG.mp3").read_bytes(), b"sung")
-        self.assertEqual((folder / "00-LATEST-VIDEO.mp4").read_bytes(), b"video")
+        self.assertFalse((folder / "00-LATEST-SONG.mp3").exists())
+        self.assertFalse((folder / "00-LATEST-VIDEO.mp4").exists())
+        self.assertEqual(task_module.latest_song(folder), vocal.resolve())
         self.assertEqual(original.read_bytes(), b"instrumental")
 
     def test_no_vocals_feedback_starts_a_vocal_revision(self):

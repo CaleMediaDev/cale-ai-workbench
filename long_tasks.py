@@ -258,36 +258,33 @@ def music_job_id(p):
 
 
 def publish_latest_song(folder: str | Path, audio: Path, video: Path | None) -> None:
-    """Give the current take obvious names while preserving earlier renders.
-
-    A music revision leaves older audio and videos in the task folder. Explorer
-    sorts their generic names ahead of ``song-with-vocals``, so users can play
-    an obsolete instrumental take by mistake. Hard links need no extra disk
-    space on NTFS; copying is a fallback for filesystems that reject them.
-    """
+    """Point a tiny playlist at the current take without duplicating media."""
     directory = Path(folder)
     directory.joinpath("00-PLAY-THIS.m3u").write_text(
         "#EXTM3U\n" + audio.name + "\n", encoding="utf-8-sig",
     )
-    for source, name in ((audio, "00-LATEST-SONG" + audio.suffix),
-                         (video, "00-LATEST-VIDEO.mp4")):
-        alias = directory / name
-        if source is None or not source.is_file():
-            if alias.exists():
-                alias.unlink()
-            continue
-        if alias.exists():
-            if os.path.samefile(alias, source):
+
+
+def latest_song(folder: str | Path) -> Path | None:
+    """Resolve the selected take from the playlist, with legacy fallback."""
+    directory = Path(folder).resolve()
+    try:
+        lines = (directory / "00-PLAY-THIS.m3u").read_text(encoding="utf-8-sig").splitlines()
+        for line in lines:
+            if not line.strip() or line.startswith("#"):
                 continue
-            alias.unlink()
-        try:
-            os.link(source, alias)
-        except OSError:
-            shutil.copy2(source, alias)
+            selected = (directory / line).resolve()
+            if (selected.parent == directory and selected.suffix.lower() in (".mp3", ".wav", ".flac")
+                    and selected.is_file()):
+                return selected
+    except (OSError, ValueError):
+        pass
+    versions = song_versions(directory)
+    return versions[0] if versions else None
 
 
 def restore_reviewed_song_aliases(p: dict, job: dict) -> bool:
-    """Make the finished take obvious after an older install missed its aliases."""
+    """Restore the current-take playlist without creating extra audio files."""
     if job.get("status") != "complete":
         return False
     result = job.get("result") or {}
@@ -299,19 +296,14 @@ def restore_reviewed_song_aliases(p: dict, job: dict) -> bool:
     video = Path(video_path).resolve() if video_path else None
     if video is not None and (not video.is_file() or video.parent != folder):
         video = None
-    alias = folder / ("00-LATEST-SONG" + audio.suffix)
-    video_alias = folder / "00-LATEST-VIDEO.mp4"
     playlist = folder / "00-PLAY-THIS.m3u"
     try:
-        current_audio = alias.is_file() and os.path.samefile(alias, audio)
-        current_video = (video is None or
-                         video_alias.is_file() and os.path.samefile(video_alias, video))
         current_playlist = (playlist.is_file() and
                             playlist.read_text(encoding="utf-8-sig") ==
                             "#EXTM3U\n" + audio.name + "\n")
     except OSError:
-        current_audio = current_video = current_playlist = False
-    if current_audio and current_video and current_playlist:
+        current_playlist = False
+    if current_playlist:
         return False
     publish_latest_song(folder, audio, video)
     update(p["id"], fingerprint=fingerprint(folder))
@@ -5868,14 +5860,7 @@ def gui():
         ).pack(anchor="w")
         if re.search(r"\b(song|music|rap|audio track|dubstep)\b", item["brief"], re.I):
             def play_latest_song():
-                latest = next(
-                    (Path(item["folder"]) / ("00-LATEST-SONG" + suffix)
-                     for suffix in (".mp3", ".wav", ".flac")
-                     if (Path(item["folder"]) / ("00-LATEST-SONG" + suffix)).is_file()),
-                    None,
-                )
-                versions = song_versions(item["folder"])
-                selected = latest or (versions[0] if versions else None)
+                selected = latest_song(item["folder"])
                 if selected:
                     os.startfile(selected)
                 else:
