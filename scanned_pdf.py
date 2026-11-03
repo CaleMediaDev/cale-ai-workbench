@@ -62,8 +62,15 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                     image_path = Path(folder) / "page.png"
                     width, height = page.get_size()
                     scale = min(2, 1800 / max(width, height))
-                    image = page.render(scale=scale).to_pil()
-                    image.save(image_path)
+                    bitmap = page.render(scale=scale)
+                    try:
+                        image = bitmap.to_pil()
+                        try:
+                            image.save(image_path)
+                        finally:
+                            image.close()
+                    finally:
+                        bitmap.close()
                     observed = recognize_image(
                         str(image_path),
                         "Transcribe only text visibly printed on this page. Keep its order. "

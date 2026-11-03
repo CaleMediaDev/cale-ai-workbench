@@ -11,6 +11,43 @@ import toolbox_mcp
 import user_file_memory
 
 
+def test_failed_scan_export_closes_image_resources(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    import pytest
+
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    textpage = Mock()
+    textpage.get_text_range.return_value = ""
+    image = Mock()
+    image.save.side_effect = OSError("image export failed")
+    bitmap = Mock()
+    bitmap.to_pil.return_value = image
+    page = Mock()
+    page.get_textpage.return_value = textpage
+    page.get_size.return_value = (600, 800)
+    page.render.return_value = bitmap
+    document = Mock()
+    document.__len__ = Mock(return_value=1)
+    document.__getitem__ = Mock(return_value=page)
+    recognize = Mock()
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(PdfDocument=Mock(return_value=document)),
+        "media_worker": SimpleNamespace(recognize_image=recognize),
+    }):
+        with pytest.raises(OSError, match="image export failed"):
+            scanned_pdf.read_scanned_pdf(str(pdf))
+
+    image.close.assert_called_once_with()
+    bitmap.close.assert_called_once_with()
+    textpage.close.assert_called_once_with()
+    assert page.close.call_count == 2
+    document.close.assert_called_once_with()
+    recognize.assert_not_called()
+
+
 def test_page_selection_spans_long_document():
     assert scanned_pdf.sampled_pages(1, 6) == [0]
     assert scanned_pdf.sampled_pages(10, 4) == [0, 3, 6, 9]
