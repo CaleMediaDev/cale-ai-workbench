@@ -414,3 +414,23 @@ These runs used evolving worker code, so they are not controlled comparisons.
 ### Requested gameplay values (November 3)
 
 [Retained trials](results/game-request-contract-20261103.json) expose a real false-completion case: a five-life request was marked done while the actual game and default verifier used three. The final fresh local-only build completed in 92.55 seconds / 8 calls, passed all 13 independent logic checks and 5 browser checks, and its saved verifier rejected removed JavaScript and a forced reset to three lives. Earlier correct-artifact/incomplete-worker runs and the word-parser failure are retained. The short review rejected a paraphrased quote; ordinary work completed. [Actual five-life game](examples/five-lives-space-shooter.html) is a starter-derived configuration edit, not evidence of arbitrary game or application coding skill.
+
+
+### Function-by-function repairs (November 3)
+
+[Retained trials](results/function-phases-20261103.json) include failed runs, an
+interrupted GPU-contention run, and an initially passing 13-check result that a
+requirement audit invalidated: zero-area overlaps were not covered. The final
+fresh explicit positive-area trial finished in 250.49 seconds / 17 model calls,
+with worker completion, four completed SQL units, all 17 independent behaviors,
+and a saved verifier rejecting all five deliberate regressions. Actual final
+source, acceptance cases, failures, and the final audit are retained. This
+proves this module-repair fixture only; arbitrary full-app construction remains
+unproven. No model approval or ranking was changed.
+
+The development router refuses new inference while a live music/image worker
+holds a GPU lease in the selected runtime. Source-only benchmark checks are not
+part of an installed app's validation requirements. A reasoned model-generated
+case plan remains a hypothesis; compare expected results against the original
+request and preserve the public input/return shapes. Never damage correct code
+just to satisfy a mistaken expected value.

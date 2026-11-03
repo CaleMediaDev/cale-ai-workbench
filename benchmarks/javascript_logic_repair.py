@@ -32,7 +32,8 @@ movePlayer(x,direction,seconds,width,speed) moves by direction*speed*seconds and
 clamps the player's center to [20,width-20]. Inputs have direction -1..1, width>=40,
 finite numbers and nonnegative seconds. Verify left/right bounds and frame-independent timing.
 overlaps(a,b) takes top-left x,y,w,h rectangles. Only positive-area overlap is true;
-touching edges and separated rectangles are false.
+touching edges and separated rectangles are false. Zero-width or zero-height rectangles
+never overlap, even when wholly inside another rectangle.
 advanceWave(wave,remaining,spawned) adds one only when remaining===0 AND spawned is true.
 tickCooldown(remaining,seconds) subtracts seconds and clamps at zero.
 Use one small SQLite unit per function, four completed units total. Save meaningful
@@ -46,7 +47,20 @@ MUTANTS = {
     "touching_edges": "globalThis.overlaps=(a,b)=>a.x<=b.x+b.w&&a.x+a.w>=b.x&&a.y<=b.y+b.h&&a.y+a.h>=b.y;",
     "unspawned_wave": "globalThis.advanceWave=(w,n,spawned)=>n===0?w+1:w;",
     "negative_cooldown": "globalThis.tickCooldown=(r,dt)=>r-dt;",
+    "zero_area_overlap": "globalThis.overlaps=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;",
 }
+
+
+# The basic model probe omits degenerate rectangles. This repair task explicitly
+# requires positive area, so independently test zero area on either argument.
+CHECKS = model_fitness.GAME_CHECKS.replace("return JSON.stringify(checks);", """
+checks.zero_width_inside = overlaps(r,{x:5,y:5,w:0,h:10}) === false;
+checks.zero_height_inside = overlaps(r,{x:5,y:5,w:10,h:0}) === false;
+checks.zero_width_first = overlaps({x:5,y:5,w:0,h:10},r) === false;
+checks.zero_height_first = overlaps({x:5,y:5,w:10,h:0},r) === false;
+return JSON.stringify(checks);
+""")
+EXPECTED_CHECKS = 17
 
 
 def grade(folder: Path, runtime: Path) -> dict:
@@ -54,7 +68,7 @@ def grade(folder: Path, runtime: Path) -> dict:
     if not source.is_file():
         return {"passed": False, "error": "The requested logic.js was not created"}
     fixed = source.read_bytes()
-    checks = model_fitness.grade_game_code(fixed.decode("utf-8-sig"), runtime)
+    checks = model_fitness.grade_game_code(fixed.decode("utf-8-sig"), runtime, CHECKS)
     result = {"checks": checks, "verifier_passes_correct": False, "mutations": {}}
     verifier = folder / ".local-ai/verify.ps1"
     if verifier.is_file():
@@ -64,8 +78,8 @@ def grade(folder: Path, runtime: Path) -> dict:
                 capture_output=True, timeout=45, check=False).returncode == 0
             for name, replacement in MUTANTS.items():
                 mutant = fixed.decode("utf-8-sig") + "\n" + replacement
-                observed = model_fitness.grade_game_code(mutant, runtime)
-                meaningful = len(observed) == 13 and any(value is False for value in observed.values())
+                observed = model_fitness.grade_game_code(mutant, runtime, CHECKS)
+                meaningful = len(observed) == EXPECTED_CHECKS and any(value is False for value in observed.values())
                 source.write_text(mutant, encoding="utf-8")
                 rejected = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
                     capture_output=True, timeout=45, check=False).returncode != 0
@@ -74,8 +88,8 @@ def grade(folder: Path, runtime: Path) -> dict:
             source.write_bytes(fixed)
     queue = task_context.step_status(folder)
     result["steps"] = {key: queue[key] for key in ("total", "done", "remaining")}
-    result["passed"] = (len(checks) == 13 and all(value is True for value in checks.values())
-        and result["verifier_passes_correct"] and len(result["mutations"]) == 4
+    result["passed"] = (len(checks) == EXPECTED_CHECKS and all(value is True for value in checks.values())
+        and result["verifier_passes_correct"] and len(result["mutations"]) == len(MUTANTS)
         and all(m["valid_behavior_mutation"] and m["verifier_rejected"] for m in result["mutations"].values())
         and queue["total"] >= 4 and queue["remaining"] == 0)
     return result
@@ -133,7 +147,10 @@ def main() -> int:
               "seconds": round(elapsed, 2), **stats, "checkpoint_status": state.get("status"),
               "inference_error": failure, "grade": graded}
     report["run_outcome"] = "passed" if state.get("status") == "done" and graded["passed"] and not failure else "failed"
-    (folder / "benchmark-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    report_path = folder / ("benchmark-resume-report.json" if args.resume else "benchmark-report.json")
+    if report_path.exists():
+        report_path = report_path.with_name(report_path.stem + "-" + str(time.time_ns()) + ".json")
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
     return 0 if report["run_outcome"] == "passed" else 1
 

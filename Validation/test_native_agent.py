@@ -3345,3 +3345,188 @@ def test_ordinary_starter_tool_also_registers_requested_value_completion_gate(tm
     assert state["game_starter"]["path"] == "index.html"
     assert not state["verify_passed"]
     assert "5 starting/reset lives" in native_agent.starter_lives_issue(Path(item["folder"]), item, state)
+
+
+
+def test_focused_function_planning_binds_named_inputs_and_appends_completed_phases(tmp_path):
+    item = project(tmp_path / "phases")
+    item["brief"] = "Repair logic.js.\nsubtract(x,y) returns x-y.\ndouble(x) returns x*2."
+    folder = Path(item["folder"])
+    (folder / "logic.js").write_text("function subtract(x,y){return x-y}\nfunction double(x){return x*2}")
+    state = {"status": "running", "turns": 0}
+    native_agent.save_state(item, state)
+    seen = []
+    def plan(payload):
+        seen.append(payload)
+        first = "subtract(x,y)" in payload["messages"][-1]["content"].split("Plan only")[-1].split("Other APIs")[0]
+        # Deliberately reverse dictionary key order; the checker still gets x,y.
+        cases = [{"inputs": {"y": 2, "x": 7}, "expected": 5}] if first else [{"inputs": {"x": 3}, "expected": 6}]
+        return {"choices": [{"message": {"tool_calls": [{"id": "phase", "function": {
+            "name": "plan_function_step", "arguments": json.dumps({"cases": [{"reason": "Derived from the requested arithmetic", **case} for case in cases]})}}]}}]}
+    messages = []
+    assert native_agent.plan_declared_function_step(item, state, messages, plan)
+    queue = task_context.step_status(folder)
+    assert queue["total"] == 1 and queue["active"]["check_arguments"]["cases"][0]["args"] == [7, 2]
+    assert not native_agent.plan_declared_function_step(item, state, messages, plan)
+    assert "Existing source for interface compatibility ONLY" in seen[0]["messages"][-1]["content"]
+    assert len(seen) == 1  # Active work never gets replanned.
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        assert native_agent.advance_checked_steps(item, state, messages)
+        assert native_agent.plan_declared_function_step(item, state, messages, plan)
+        assert task_context.step_status(folder)["total"] == 2 and task_context.step_status(folder)["done"] == 1
+        assert native_agent.advance_checked_steps(item, state, messages)
+    assert task_context.step_status(folder)["done"] == 2
+    assert not native_agent.plan_declared_function_step(item, state, messages, plan)
+    assert len(seen) == 2 and all(p["_native_workload"] == "function_step_planning" for p in seen)
+    assert all(m["role"] != "tool" or m.get("name") != "plan_function_step" for m in messages)
+
+
+def test_function_planning_preserves_existing_acceptance_and_honors_new_instructions(tmp_path):
+    item = project(tmp_path / "planning-controls")
+    item["brief"] = "Repair logic.js.\nfirst(x) returns x.\nsecond(x) returns x."
+    folder = Path(item["folder"])
+    (folder / "logic.js").write_text("function first(x){return x}\nfunction second(x){return x}")
+    state = {"status": "running"}
+    native_agent.save_state(item, state)
+    task_context.plan_steps(folder, [queue_step("Existing integration", "echo verify")])
+    def call(_):
+        raise AssertionError("Existing plan must be preserved")
+    assert not native_agent.plan_declared_function_step(item, state, [], call)
+    # A separate clean request can be interrupted while a case plan is in flight.
+    other = project(tmp_path / "planning-new-request")
+    other["brief"] = item["brief"]
+    new_folder = Path(other["folder"])
+    native_agent.save_state(other, {"status": "running"})
+    def changed(_):
+        (new_folder / ".local-ai/USER-REQUESTS.md").write_text("Only explain; do not edit files.")
+        return {"choices": [{"message": {"tool_calls": [{"id": "old", "function": {
+            "name": "plan_function_step", "arguments": '{"cases":[{"reason":"Identity preserves x","inputs":{"x":1},"expected":1}]}'}}]}}]}
+    assert not native_agent.plan_declared_function_step(other, {"status": "running"}, [], changed)
+    assert task_context.step_status(new_folder)["total"] == 0
+
+
+def test_invalid_function_plan_falls_back_once_and_dom_modules_use_normal_workflow(tmp_path):
+    item = project(tmp_path / "planning-invalid")
+    item["brief"] = "Repair logic.js.\nfirst(x) returns x.\nsecond(x) returns x."
+    folder = Path(item["folder"])
+    state = {"status": "running"}
+    native_agent.save_state(item, state)
+    calls = []
+    def invalid(payload):
+        calls.append(payload)
+        return {"choices": [{"message": {"content": "I will plan later"}}]}
+    assert not native_agent.plan_declared_function_step(item, state, [], invalid)
+    assert not native_agent.plan_declared_function_step(item, state, [], invalid)
+    assert len(calls) == 1 and not task_context.step_status(folder)["total"]
+    state.pop("function_planning_attempted")
+    (folder / "logic.js").write_text("const button=document.querySelector('button');")
+    assert not native_agent.plan_declared_function_step(item, state, [], invalid)
+    assert len(calls) == 1
+
+
+def test_development_router_defers_live_media_but_ignores_dead_or_reused_pids(tmp_path):
+    import importlib.util
+    import os
+
+    import psutil
+    import pytest
+
+    benchmark = Path(__file__).resolve().parents[1] / "benchmarks/browser_assertion_repair.py"
+    if not benchmark.is_file():
+        pytest.skip("Development benchmark is distributed in source archives, not the runtime manifest")
+    spec = importlib.util.spec_from_file_location("benchmark_media_guard", benchmark)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    root = tmp_path / "runtime"
+    marker = root / "LongTasks" / f"music-gpu-active-{os.getpid()}.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{}")
+    with pytest.raises(RuntimeError, match="active music worker"):
+        module.require_idle_media(root)
+    # An old marker with a PID since reused cannot block development indefinitely.
+    old = psutil.Process().create_time() - 10
+    os.utime(marker, (old, old))
+    module.require_idle_media(root)
+    marker.rename(marker.with_name("image-gpu-active-2147483647.json"))
+    module.require_idle_media(root)
+
+
+def test_python_phase_acceptance_and_pause_during_planning(tmp_path):
+    item = project(tmp_path / "python-phases")
+    item["brief"] = "Repair helpers.py.\ndifference(left,right) returns left-right.\nidentity(value) returns value."
+    folder = Path(item["folder"])
+    (folder / "helpers.py").write_text("def difference(left, right): return left - right\ndef identity(value): return value\n")
+    state = {"status": "running"}
+    native_agent.save_state(item, state)
+    def plan(_):
+        return {"choices": [{"message": {"tool_calls": [{"function": {
+            "name": "plan_function_step", "arguments": json.dumps({"cases": [
+                {"reason": "7 minus 2 equals 5", "inputs": {"right": 2, "left": 7}, "expected": 5}]})}}]}}]}
+    messages = []
+    assert native_agent.plan_declared_function_step(item, state, messages, plan)
+    assert task_context.step_status(folder)["active"]["check_tool"] == "check_python_function"
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        assert native_agent.advance_checked_steps(item, state, messages)
+    assert task_context.step_status(folder)["done"] == 1
+    def paused(payload):
+        native_agent.save_state(item, {**state, "status": "paused"})
+        return {"choices": [{"message": {"tool_calls": [{"function": {
+            "name": "plan_function_step", "arguments": json.dumps({"cases": [
+                {"reason": "Identity preserves 2", "inputs": {"value": 2}, "expected": 2}]})}}]}}]}
+    assert not native_agent.plan_declared_function_step(item, state, messages, paused)
+    assert task_context.step_status(folder)["total"] == 1
+    assert native_agent.read_state(item)["status"] == "paused"
+
+
+def test_sqlite_acceptance_evidence_keeps_mismatch_before_large_source_and_inputs(tmp_path):
+    item = project(tmp_path / "diagnostics")
+    folder = Path(item["folder"])
+    task_context.plan_steps(folder, [queue_step("Check arithmetic", "echo verify")])
+    step = task_context.step_status(folder)["active"]
+    mismatch = "Expected 35, got 30. Check the requested clamp."
+    result = json.dumps({"passed": False, "cases": [{"path": "logic.js", "function": "move",
+        "case": 6, "inputs": {"args": ["x" * 1000]}, "function_signature": "function move" + "x" * 2000,
+        "passed": False, "failures": [mismatch]}]})
+    translated = native_agent.step_exit_result("check_javascript_function", result)
+    # Exercise the actual bounded SQL storage, not merely the formatter output.
+    task_context.record_step_check(folder, step["id"], task_context.request_identity(folder), translated, unchanged=True)
+    evidence = task_context.step_status(folder)["active"]["evidence"]
+    assert mismatch in evidence
+    assert "function move" not in evidence
+    assert native_agent.step_exit_result("check_python_function", '{"passed":true}').startswith("Exit code: 0\n")
+    assert "Acceptance check failed" in native_agent.step_exit_result("check_python_function", "bad json")
+
+
+def test_native_worker_recovers_schema_rejection_without_executing_invalid_call(tmp_path):
+    from jsonschema import ValidationError
+    item = project(tmp_path / "syntax-recovery")
+    seen = []
+    def call(payload):
+        seen.append(payload)
+        if len(seen) == 1:
+            raise cloud_ai.ToolArgumentError("task_steps", ValidationError("wrong type", validator="type", validator_value="array", instance="[]"))
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "read", "type": "function",
+            "function": {"name": "list_files", "arguments": "{}"}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2):
+        state = native_agent.run_slice(item, complete=call)
+    assert len(seen) == 2
+    assert any("No progress was accepted" in m.get("content", "") for m in seen[1]["messages"])
+    assert state["turns"] == 2
+    assert "argument_correction_failures" not in state
+    assert task_context.step_status(item["folder"])["total"] == 0
+
+
+def test_native_schema_recovery_is_bounded_and_honors_stop(tmp_path):
+    import pytest
+    from jsonschema import ValidationError
+    item = project(tmp_path / "syntax-bound")
+    def rejected(_):
+        raise cloud_ai.ToolArgumentError("task_steps", ValidationError("wrong type", validator="type", validator_value="array", instance="[]"))
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 4), pytest.raises(cloud_ai.ToolArgumentError):
+        native_agent.run_slice(item, complete=rejected)
+    assert native_agent.read_state(item)["argument_correction_failures"] == 2
+    other = project(tmp_path / "syntax-stop")
+    def stopped(payload):
+        native_agent.save_state(other, {"status": "stopped"})
+        return rejected(payload)
+    assert native_agent.run_slice(other, complete=stopped)["status"] == "stopped"

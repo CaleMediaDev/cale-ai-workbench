@@ -20,12 +20,28 @@ import task_context
 import webapp_check
 
 
+def require_idle_media(runtime: Path) -> None:
+    """Never let a development inference contend with a live user media worker."""
+    import psutil
+
+    for kind in ("music", "image"):
+        for marker in (runtime / "LongTasks").glob(f"{kind}-gpu-active-*.json"):
+            try:
+                pid = int(marker.stem.rsplit("-", 1)[-1])
+                process = psutil.Process(pid)
+                if process.is_running() and process.create_time() <= marker.stat().st_mtime + 2:
+                    raise RuntimeError(f"Benchmark deferred: active {kind} worker {pid} needs the GPU")
+            except (OSError, ValueError, psutil.Error):
+                continue
+
+
 def observed_router(stats: dict):
     """Observe production routing without replacing native feedback or eligibility."""
     import cloud_ai
 
     class ObservedRouter(cloud_ai.Router):
         def complete(self, payload, task_id="", **kwargs):
+            require_idle_media(model_library.ROOT)
             started = time.monotonic()
             stats["router_call_attempts"] = stats.get("router_call_attempts", 0) + 1
             post = cloud_ai.post

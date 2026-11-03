@@ -1357,7 +1357,7 @@ def run_javascript_checks(folder: Path, spec_path: Path, expected_sha: str) -> d
             elif "raises" in case:
                 failures.append(f"Expected {case['raises']}, but the function returned normally")
             elif "value" not in actual or not python_values_match(actual["value"], case["expected"], spec["tolerance"]):
-                failures.append(f"{actual.get('signature', spec['function'])}: expected {json.dumps(case['expected'])[:160]}, "
+                failures.append(f"Expected {json.dumps(case['expected'])[:160]}, "
                                 f"got {json.dumps(actual.get('value'))[:160]}. Check positional input order and arithmetic against the required API.")
             inputs = {"args": case["args"]}
             if len(json.dumps(inputs)) > 500:
@@ -1945,13 +1945,29 @@ def step_exit_result(kind: str, result: str) -> str:
     """Translate only a registered checker's explicit verdict to queue evidence."""
     if kind not in {"check_python_function", "check_javascript_function", "check_webapp"}:
         return result
+    verdict = None
     try:
         verdict = json.loads(result)
         passed = isinstance(verdict, dict) and verdict.get("passed") is True
     except ValueError:
         passed = False
-    return ("Exit code: 0\nStructured acceptance cases passed" if passed else
-            "Exit code: 1\nAcceptance check failed: " + result[-1600:])
+    if passed:
+        return "Exit code: 0\nStructured acceptance cases passed"
+    # SQLite keeps only 240 characters per error line. Put the actual mismatch
+    # before source previews or large inputs, otherwise a fresh context sees a
+    # failure without the values needed to decide whether code or tests are wrong.
+    diagnostics = []
+    if isinstance(verdict, dict):
+        for case in verdict.get("cases", []) or []:
+            if not isinstance(case, dict) or case.get("passed") is not False:
+                continue
+            for failure in case.get("failures", []) or []:
+                diagnostics.append("Acceptance check failed: " + str(failure)[:170]
+                    + " | " + str(case.get("path", ""))[:80] + ":" + str(case.get("function", ""))[:80]
+                    + " case " + str(case.get("case", "")) + " inputs=" + json.dumps(case.get("inputs", {}))[:300])
+        diagnostics.extend("Acceptance check error: " + str(error)[:400] for error in verdict.get("errors", []) or [])
+    return "Exit code: 1\n" + ("\n".join(diagnostics[:4])[:1600] if diagnostics else
+                                 "Acceptance check failed: " + result[-1600:])
 
 
 def browser_step_effect(folder: Path, arguments: dict, result: str) -> str:
@@ -2478,6 +2494,9 @@ def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: st
         state["verifier_nudged"] = False
 
 
+DECLARED_FUNCTION_PATTERN = r"(?m)^\s*(?:(?:[-*]|\d+[.)])\s+)?`?(?:(?:export\s+)?(?:function|def)\s+)?([A-Za-z_$][\w$]*)\(\s*([A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*|)\s*\)"
+
+
 def declared_function_contract(project: dict, *, scoped: bool = True):
     """Recognize explicit API declaration lines, not arbitrary calls in prose.
 
@@ -2498,8 +2517,7 @@ def declared_function_contract(project: dict, *, scoped: bool = True):
     if len(paths) != 1:
         return None  # Do not guess which module owns ambiguous signatures.
     names = []
-    pattern = r"(?m)^\s*(?:(?:[-*]|\d+[.)])\s+)?`?(?:(?:export\s+)?(?:function|def)\s+)?([A-Za-z_$][\w$]*)\(\s*([A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*|)\s*\)"
-    for match in re.finditer(pattern, text):
+    for match in re.finditer(DECLARED_FUNCTION_PATTERN, text):
         name = match[1]
         if name not in {"if", "while", "for", "switch", "print", "range"} and name not in names:
             names.append(name)
@@ -2545,6 +2563,140 @@ def function_coverage(project: dict) -> dict:
     return {"path": path, "required_functions": required, "covered_functions": sorted(covered & set(required)),
             "missing_functions": [name for name in required if name not in covered], "owned_function_verifier": owned,
             "suite_pinned": pinned}
+
+
+def plan_declared_function_step(project: dict, state: dict, messages: list, call) -> bool:
+    """Ask for named test inputs for one declared API, then save one SQLite unit.
+
+    The model derives expectations from the request, not the implementation.
+    Server-side binding supplies path/function and positional order. Existing
+    user plans/suites are preserved; later phases append only after ours finish.
+    """
+    from jsonschema import ValidationError, validate
+
+    import task_context
+    from cloud_ai import LOCAL_MODEL
+
+    folder = Path(project["folder"])
+    contract = declared_function_contract(project)
+    if not contract:
+        return False
+    path, names = contract
+    target = project_path(folder, path)
+    source = ""
+    if target.is_file():
+        if target.stat().st_size > 500_000:
+            return False
+        source = target.read_text(encoding="utf-8-sig", errors="replace")
+        incompatible = (r"\b(?:async\s+def|from\s+tkinter|import\s+tkinter)\b" if target.suffix.lower() == ".py" else
+                        r"\b(?:import\s|require\s*\(|document\s*\.|window\s*\.|async\s+function|class\s)")
+        if re.search(incompatible, source):
+            return False  # These APIs need their ordinary integration-test workflow.
+    queue = task_context.step_status(folder)
+    if queue["remaining"] or not names:
+        return False
+    request = task_context.request_identity(folder)
+    language = "python" if Path(path).suffix.lower() == ".py" else "javascript"
+    suite = folder / f".local-ai/cale-{language}-checks.json"
+    owner = state.get("function_step_planning") or {}
+    if (suite.exists() or queue["total"]) and owner.get("request") != request:
+        return False  # Do not replace another workflow's acceptance data.
+    verifier = folder / ".local-ai/verify.ps1"
+    if verifier.is_file() and not verifier.read_text(encoding="utf-8-sig").startswith(
+            f"# Generated by Cale check_{language}_function\n"):
+        return False
+    missing = function_coverage(project).get("missing_functions", [])
+    if not missing:
+        return False
+    name = missing[0]
+    attempt = request + ":" + path + ":" + name
+    if attempt in state.get("function_planning_attempted", []):
+        return False
+    followups = folder / ".local-ai/USER-REQUESTS.md"
+    text = str(project["brief"]) + ("\n" + followups.read_text(encoding="utf-8-sig") if followups.is_file() else "")
+    signatures = {tuple(value.strip() for value in match[2].split(",") if value.strip())
+                  for match in re.finditer(DECLARED_FUNCTION_PATTERN, text) if match[1] == name}
+    if len(signatures) != 1:
+        return False
+    parameters = list(signatures.pop())
+    if len(parameters) > 32:
+        return False
+    schema = {"type": "object", "properties": {"cases": {"type": "array", "minItems": 1, "maxItems": 8,
+        "items": {"type": "object", "properties": {
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500,
+                       "description": "Derive this result from the requirement, calculating intermediate values before stating expected."},
+            "inputs": {"type": "object", "properties": {parameter: {} for parameter in parameters},
+                       "required": parameters, "additionalProperties": False},
+            "expected": {}, "raises": {"type": "string", "minLength": 1, "maxLength": 80}},
+            "required": ["reason", "inputs"], "oneOf": [{"required": ["expected"]}, {"required": ["raises"]}],
+            "additionalProperties": False}}}, "required": ["cases"], "additionalProperties": False}
+    stamp = user_request_stamp(folder)
+    def current():
+        return (user_request_stamp(folder) == stamp and task_context.request_identity(folder) == request
+                and read_state(project).get("status") not in {"paused", "stopped", "done"})
+    if not current():
+        return False
+    attempted = state.setdefault("function_planning_attempted", [])
+    attempted.append(attempt)
+    state["function_planning_attempted"] = attempted[-32:]
+    try:
+        response = call({"model": LOCAL_MODEL, "stream": False, "temperature": 0, "max_tokens": 2048,
+            "_native_workload": "function_step_planning",
+            "messages": [{"role": "system", "content": (
+                "Plan meaningful acceptance for ONE requested function. Call plan_function_step once. "
+                "Derive expected values independently from the original requirements below. "
+                "The existing source is provided ONLY to preserve the public input and return-value shapes. "
+                "Do not invent a new object/array return or input format. The implementation is known buggy; "
+                "derive all expected behavior from the original request, never its current output. "
+                "Use named inputs so parameter order cannot be confused. Include normal and boundary cases, "
+                "fractional/time/zero cases when required, and cases that distinguish the stated conditions. "
+                "For each case first give a reason deriving the expected result from the requirement: "
+                "calculate intermediate values and each condition, including signs, bounds, or intervals. "
+                "Then supply inputs and expected consistent with that derivation. Prefer 3-6 compact cases. "
+                "Do not write application code, shell commands, other APIs or a whole-project plan.")},
+                {"role": "user", "content": f"Original request and latest instructions:\n{text}\n"
+                    + f"Plan only {path}:{name}({','.join(parameters)}). Other APIs will get later phases."
+                    + ("\nExisting source for interface compatibility ONLY (known buggy):\n" + source[:6000] if source else "")}],
+            "tools": [{"type": "function", "function": {"name": "plan_function_step",
+                "description": "Save one function's acceptance cases using exact named inputs and expected results.",
+                "parameters": schema}}],
+            "tool_choice": {"type": "function", "function": {"name": "plan_function_step"}}})
+        state["turns"] = int(state.get("turns", 0)) + 1
+        message = response["choices"][0]["message"]
+        calls = message.get("tool_calls") or []
+        if len(calls) != 1 or calls[0].get("function", {}).get("name") != "plan_function_step":
+            raise ValueError("Expected one function-case planning call")
+        arguments = json.loads(calls[0]["function"].get("arguments") or "{}")
+        validate(arguments, schema)
+        cases = [{"args": [case["inputs"][parameter] for parameter in parameters],
+                  **({"raises": case["raises"]} if "raises" in case else {"expected": case["expected"]})}
+                 for case in arguments["cases"]]
+        checker = "check_" + language + "_function"
+        check_arguments = {"path": path, "function": name, "cases": cases}
+        if not current():
+            return False
+        status = task_context.plan_steps(folder, [{"phase": "Function: " + name,
+            "title": "Implement and verify " + name, "check_tool": checker, "check_arguments": check_arguments}],
+            expected_request=request)
+        if not current():
+            return False
+        state["function_step_planning"] = {"request": request, "path": path}
+        state.pop("uncreated_step_plan", None)
+        task_context.record_action(folder, "plan_function_step", json.dumps(status), {**check_arguments, "planning_cases": arguments["cases"]}, request_hash=request)
+        messages.append({"role": "user", "content": "[Automatic function planning; saved task data] "
+            + json.dumps(status) + "\nOne requested function is now the active SQLite step. "
+            "Inspect its real source, implement the requirement, and pass its saved checks. "
+            "If an expectation contradicts the request, revise it with evidence rather than damaging correct code. "
+            "Later APIs will be planned in later phases; this unit is not whole-project completion."})
+        state.update(messages=messages, current="Planned the next function unit: " + name)
+        save_state(project, state)
+        return True
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, TimeoutError, ValidationError) as error:
+        if not current():
+            return False
+        state["function_planning_error"] = f"{type(error).__name__}: {str(error)[:250]}"
+        save_state(project, state)
+        return False  # Ordinary project planning remains available after one failed attempt.
 
 
 def completion_issue(folder: Path, project: dict | None = None,
@@ -3280,13 +3432,15 @@ def run_slice(project: dict, complete=None) -> dict:
     # Keep provider cooldowns and local model discovery across the work slice.
     # Constructing a fresh Router for each turn forces repeated model probes
     # and forgets short-term routing decisions during one task.
+    from cloud_ai import ToolArgumentError
+
     router = Router() if complete is None else None
     def automatic_call(payload):
         avoid = repair_avoid_models(state, task_context.request_identity(folder))
         stage = payload.get("_native_workload")
         payload = {key: value for key, value in payload.items() if key != "_native_workload"}
         options = {"repair_avoid": avoid} if avoid else {}
-        if stage in {"starter_selection", "starter_scope_review"}:
+        if stage in {"starter_selection", "starter_scope_review", "function_step_planning"}:
             options["size_hint"] = "quick"
         return router.complete(payload, project["id"], **options)
     call = complete or automatic_call
@@ -3322,6 +3476,8 @@ def run_slice(project: dict, complete=None) -> dict:
             return latest
         if user_request_stamp(folder) != request_before:
             continue
+        if plan_declared_function_step(project, state, messages, call):
+            continue
         messages = fresh_messages(messages, folder, state, project)
         messages = compact_messages(messages, folder, context_limit)
         planned_request_hash = task_context.request_identity(folder)
@@ -3345,7 +3501,29 @@ def run_slice(project: dict, complete=None) -> dict:
             request["messages"][-1] = {**focus[1], "content": focus[1]["content"]
                                       + "\nArgument schema: " + json.dumps(schema)}
             request["response_format"] = {"type": "json_object"}
-        response = call(request)
+        try:
+            response = call(request)
+        except ToolArgumentError as error:
+            # The router exhausted its schema correction without executing any
+            # tool. Keep the durable project alive for a bounded fresh-context
+            # correction, rather than abandoning valid work over JSON syntax.
+            latest = read_state(project)
+            if latest.get("status") in ("paused", "stopped"):
+                return latest
+            count = int(state.get("argument_correction_failures", 0)) + 1
+            if count > 2:
+                raise
+            state["argument_correction_failures"] = count
+            state["turns"] = int(state.get("turns", 0)) + 1
+            messages.append({"role": "user", "content": (
+                "The last inference was rejected before any tool executed. Correct the tool argument syntax "
+                "using the offered schema; preserve application behavior and the active SQLite unit. "
+                "Validator data: " + json.dumps({"tool": error.tool, "path": error.path, "problem": error.problem})
+                + " Supply actual JSON arrays/objects rather than quoted JSON. No progress was accepted.")})
+            state.update(messages=messages, current="Correcting rejected tool arguments before continuing")
+            save_state(project, state)
+            continue
+        state.pop("argument_correction_failures", None)
         latest = read_state(project)
         if latest.get("status") in ("paused", "stopped"):
             return latest
