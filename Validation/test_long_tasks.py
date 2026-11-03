@@ -558,6 +558,20 @@ class LongTaskTests(unittest.TestCase):
             self.assertEqual(task_module.chat_history()[-1]["content"], message)
             self.assertFalse((Path(folder) / "voice-replay-served.txt").exists())
 
+    def test_voice_gate_explains_replay_without_losing_original_target(self):
+        import chat_assistant
+
+        with tempfile.TemporaryDirectory() as folder, patch.object(task_module, "STATE", Path(folder)):
+            task_module.save_chat("assistant", "Here is the answer you asked for.")
+            message = task_module.record_replay_outcome(
+                20, False, "Cale's own voice is still preparing."
+            )
+            self.assertIn("voice is still preparing", task_module.chat_history()[-1]["content"])
+            self.assertFalse((Path(folder) / "voice-replay-served.txt").exists())
+            self.assertEqual(chat_assistant.spoken_replay_target(
+                "read that aloud", task_module.chat_history()
+            ), "Here is the answer you asked for.")
+
     def test_idle_launch_applies_hermes_source_fix_once(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

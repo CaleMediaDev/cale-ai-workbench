@@ -585,6 +585,15 @@ def speech_ready() -> bool:
         return False
 
 
+def speech_hold_reason(muted: bool = False) -> str:
+    """Explain silence for an explicit read-aloud request without playing audio."""
+    if muted:
+        return "Cale is muted. Click Unmute Cale, then ask again."
+    if not speech_ready():
+        return "Cale's own voice or readiness checks are still preparing. Your reply is saved in chat."
+    return ""
+
+
 def say(message, rate=0, cancel=None, require_clone=False):
     """Speak one short status message through Windows' offline voice."""
     if require_clone and (not speech_ready() or _heavy_gpu_active()):

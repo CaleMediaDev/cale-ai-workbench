@@ -20,6 +20,13 @@ import voice_assistant
 
 
 class VoiceTests(unittest.TestCase):
+    def test_read_aloud_hold_explains_muted_and_preparing_states(self):
+        with patch.object(voice_assistant, "speech_ready", return_value=False):
+            self.assertIn("muted", voice_assistant.speech_hold_reason(True))
+            self.assertIn("still preparing", voice_assistant.speech_hold_reason(False))
+        with patch.object(voice_assistant, "speech_ready", return_value=True):
+            self.assertEqual(voice_assistant.speech_hold_reason(False), "")
+
     def test_clone_only_speech_never_plays_before_readiness(self):
         with (patch.object(voice_assistant, "speech_ready", return_value=False),
               patch.object(voice_assistant, "media_call") as fallback,

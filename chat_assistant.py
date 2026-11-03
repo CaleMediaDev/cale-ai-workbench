@@ -395,7 +395,7 @@ def spoken_replay_target(text: str, history: list[dict]) -> str | None:
         if item.get("role") != "assistant":
             continue
         content = str(item.get("content", ""))
-        if content in {
+        if content.startswith("I couldn't read that aloud yet. ") or content in {
             "Finished reading that aloud.",
             "I couldn't finish reading that aloud. Check Voice status and try again.",
         }:

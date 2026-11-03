@@ -442,12 +442,14 @@ def save_chat(role, content, private=None):
         )
 
 
-def record_replay_outcome(replay_id: int, succeeded: bool) -> str:
+def record_replay_outcome(replay_id: int, succeeded: bool, reason: str = "") -> str:
     """Persist spoken-replay feedback so a completed request is visible later."""
     message = (
         "Finished reading that aloud."
         if succeeded else "I couldn't finish reading that aloud. Check Voice status and try again."
     )
+    if not succeeded and reason:
+        message = "I couldn't read that aloud yet. " + reason
     save_chat("assistant", message)
     if succeeded:
         marker = STATE / "voice-replay-served.txt"
@@ -4444,7 +4446,10 @@ def gui():
         while True:
             rank, _, message, rate, vary, required, replay_id = speech_queue.get()
             try:
-                if voice_muted.is_set() or not voice_assistant.speech_ready():
+                hold = voice_assistant.speech_hold_reason(voice_muted.is_set())
+                if hold:
+                    if replay_id is not None:
+                        voice_events.put(("replay_error", record_replay_outcome(replay_id, False, hold)))
                     if message == voice_assistant.WAKE_ACK:
                         voice_events.put(("wake_ack_done", ""))
                     continue
@@ -4557,7 +4562,10 @@ def gui():
 
     def speak_update(message, rate=0, vary=False, required=(), priority=None, replay_id=None):
         """Queue one audible update without blocking the task screen."""
-        if voice_muted.is_set() or not voice_assistant.speech_ready():
+        hold = voice_assistant.speech_hold_reason(voice_muted.is_set())
+        if hold:
+            if replay_id is not None:
+                voice_events.put(("replay_error", record_replay_outcome(replay_id, False, hold)))
             return
         with speech_lock:
             voice_speaking.set()
