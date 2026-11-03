@@ -299,7 +299,7 @@ def probe_game_coding(source, root):
 
 
 def rank_game_models(ordered, catalog, root, weights=None):
-    """Prefer the fastest fully passing local coding probe when at least two qualify.
+    """Prefer the fastest fully passing local coding probe on this PC.
 
     Preserve the normal order for untested requests and stale hardware results.
     Context, tool support and hardware gates run in the router before this step.
@@ -361,7 +361,7 @@ def rank_game_models(ordered, catalog, root, weights=None):
             for item in catalog.values()
         )
     ]
-    if len(scores) < 2 or "cale-fast" in ordered and "cale-fast" not in scores:
+    if not scores:
         return verified_order
     return sorted(
         verified_order, key=lambda alias: (alias not in scores, scores.get(alias, 0))

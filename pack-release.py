@@ -30,6 +30,7 @@ extras = [
     "benchmarks/README.md",
     "benchmarks/game_model_compare.py",
     "benchmarks/results/game-code-probes-20261103.json",
+    "benchmarks/game-review-20261103.md",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",

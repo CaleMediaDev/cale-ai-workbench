@@ -4,11 +4,14 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+import long_tasks
 import native_agent
 import native_browser
+import task_context
 import webapp_check
 
 PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head>
@@ -26,6 +29,90 @@ SPEC = {"path": "index.html", "viewport_width": 375, "cases": [
     {"set": {"bill": "80"}, "expect": {"answer": "96.00"}},
     {"set": {"bill": "0"}, "visible": ["error"]},
 ]}
+
+
+@pytest.mark.parametrize("plan",["- [x] Build and check the page\n",
+                                 "1. Build and check the page - Verified by browser cases\n"])
+def test_focused_json_check_runs_generated_verifier_and_finishes(tmp_path,plan):
+    (tmp_path/"index.html").write_text(PAGE,encoding="utf-8")
+    notes = tmp_path / ".local-ai"
+    notes.mkdir()
+    (notes/"PLAN.md").write_text(plan)
+    (notes/"PROGRESS.md").write_text('The requested page was built; completing its actual input checks now.')
+    item={"id":"focused-test","folder":str(tmp_path),
+          "brief":"Build a single-file index.html app with an input that updates the total."}
+    native_agent.save_state(item,{"status":"continue","turns":1,"premature_finishes":1})
+    seen=[]
+    def complete(payload):
+        seen.append(payload)
+        assert payload["tools"]==[]
+        assert payload["response_format"]=={"type":"json_object"}
+        return {"choices":[{"message":{"role":"assistant","content":json.dumps(SPEC)}}]}
+    with patch.object(long_tasks,"projects",return_value=[item]):
+        state=native_agent.run_slice(item,complete=complete)
+    assert len(seen)==1
+    assert state["status"]=="done"
+    assert state["verify_passed"] and state["browser_verified"]
+    assert state["focused_check_calls"]==1
+    assert (notes/"verify.ps1").is_file()
+    native_agent.save_state(item,{**state,"status":"continue"})
+    def no_inference(_):
+        raise AssertionError("A fresh owned verifier should recover this handoff without a model call")
+    with patch.object(long_tasks,"projects",return_value=[item]):
+        recovered=native_agent.run_slice(item,complete=no_inference)
+    assert recovered["status"]=="done"
+    assert "recovered verified handoff" in recovered["current"]
+
+
+def test_focused_json_cannot_choose_another_tool_or_run_arbitrary_text(tmp_path):
+    (tmp_path/"index.html").write_text(PAGE,encoding="utf-8")
+    notes = tmp_path / ".local-ai"
+    notes.mkdir()
+    item={"id":"focused-test","folder":str(tmp_path),
+          "brief":"Build a single-file index.html app with an input that updates the total."}
+    native_agent.save_state(item,{"status":"continue","turns":1,"premature_finishes":1})
+    response={"choices":[{"message":{"role":"assistant","content":json.dumps({
+        "tool":"run_command","command":"do something else","path":"index.html","cases":[]})}}]}
+    state=native_agent.run_slice(item,complete=lambda _:response)
+    assert state["status"]=="continue"
+    assert "not valid argument JSON" in state["focused_check_error"]
+    assert not (notes/"verify.ps1").exists()
+    assert native_agent.focused_browser_check(item,state,task_context.request_identity(tmp_path)) is not None
+    state=native_agent.run_slice(item,complete=lambda _:response)
+    assert native_agent.focused_browser_check(item,state,task_context.request_identity(tmp_path)) is None
+
+
+@pytest.mark.parametrize("case",[
+    {"expect":{"answer":""}},
+    {"expect":{"answer":"ok"},"hidden":["answer"]},
+    {"visible":["error"],"hidden":["error"]},
+])
+def test_contradictory_or_vacuous_cases_are_rejected_before_browser_launch(tmp_path,case):
+    (tmp_path/"index.html").write_text(PAGE,encoding="utf-8")
+    with pytest.raises(ValueError):
+        webapp_check.validate_spec(tmp_path,{"path":"index.html","cases":[case]})
+
+
+def test_numeric_equivalence_cases_reject_superficial_decimal_string_validation(tmp_path):
+    page = tmp_path / "index.html"
+    source = '''<input id="people" type="number" value="4"><p id="total"></p><p id="error" hidden>Invalid count</p>
+<script>const people=document.getElementById('people'),out=document.getElementById('total'),error=document.getElementById('error');
+function update(){const raw=people.value,n=Number(raw);const valid=Number.isInteger(n)&&n>0;
+error.hidden=valid;out.hidden=!valid;out.textContent=valid?'$'+(120/n).toFixed(2):'';}
+people.oninput=update;update();</script>'''
+    spec={"path":"index.html","cases":[
+        {"set":{"people":"4.0"},"expect":{"total":"$30.00"}},
+        {"set":{"people":"4e1"},"expect":{"total":"$3.00"}},
+        {"set":{"people":"4.5"},"visible":["error"],"hidden":["total"]},
+    ]}
+    page.write_text(source,encoding="utf-8")
+    assert webapp_check.check(tmp_path,spec)["passed"]
+    superficial=source.replace('n=Number(raw)','n=parseInt(raw,10)').replace(
+        'Number.isInteger(n)&&n>0',"!raw.includes('.')&&n>0")
+    page.write_text(superficial,encoding="utf-8")
+    result=webapp_check.check(tmp_path,spec)
+    assert not result["cases"][0]["passed"] and not result["cases"][1]["passed"]
+    assert result["cases"][2]["passed"]
 
 
 def test_button_calculation_replays_and_rejects_broken_handler(tmp_path):
@@ -192,7 +279,7 @@ def test_browser_check_catches_hidden_error_and_saved_verifier_regression():
                                            encoding="utf-8")
         failure = webapp_check.check(folder, SPEC)
         assert failure["passed"] is False
-        assert "'error' visibility was wrong" in failure["cases"][2]["failures"]
+        assert "'error' visibility was wrong: expected visible, observed hidden or missing" in failure["cases"][2]["failures"]
         assert subprocess.run(command, cwd=folder, capture_output=True,
                               text=True, timeout=30).returncode != 0
 
@@ -266,3 +353,10 @@ def test_failed_text_check_reports_actual_value():
         })
         assert result["passed"] is False
         assert "displayed '$120.00'" in result["cases"][0]["failures"][0]
+
+
+def test_failed_visibility_reports_requested_and_observed_state(tmp_path):
+    (tmp_path/"index.html").write_text('<p id="error" hidden>Invalid</p>')
+    result=webapp_check.check(tmp_path,{"path":"index.html","cases":[{"visible":["error"]}]})
+    message=result["cases"][0]["failures"][0]
+    assert "expected visible" in message and "observed hidden" in message

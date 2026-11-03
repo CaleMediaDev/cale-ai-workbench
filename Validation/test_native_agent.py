@@ -17,6 +17,7 @@ from unittest.mock import patch
 import cloud_ai
 import long_tasks
 import native_agent
+import project_memory
 import task_context
 
 
@@ -1017,6 +1018,145 @@ def test_task_checkpoint_refreshes_after_restart_and_does_not_lose_new_user_mess
         fresh = native_agent.fresh_messages(messages, folder)
         assert "Second milestone" in fresh[1]["content"]
         assert any(entry.get("content") == "Use a larger font" for entry in fresh)
+
+
+def test_failed_checker_details_survive_event_trimming_and_fresh_context(tmp_path):
+    item = project(tmp_path / "page")
+    folder = Path(item["folder"])
+    (folder/"index.html").write_text('<p id="total">wrong</p>')
+    args={"path":"index.html","cases":[{"set":{"bill":"80","tip":"25"},"expect":{"total":"24.00"}}]}
+    failure=json.dumps({"passed":False,"cases":[{"case":1,"passed":False,
+        "failures":["#total displayed 'wrong'; expected '24.00'"]}]})
+    task_context.record_action(folder,"check_webapp",failure,args)
+    for _ in range(105):
+        task_context.record_action(folder,"read_file","private file contents",{"path":"index.html"})
+    fresh=native_agent.fresh_messages([{"role":"system","content":"Original brief"}],folder)
+    assert "#total displayed 'wrong'" in fresh[1]["content"]
+    assert "expected '24.00'" in fresh[1]["content"]
+    assert '"tip": "25"' in fresh[1]["content"]
+    assert "checker case can itself be mistaken" in fresh[1]["content"]
+    assert "private file contents" not in fresh[1]["content"]
+    task_context.record_action(folder,"check_webapp",
+        'Tool error: This exact call failed twice and was skipped.',args)
+    assert "expected '24.00'" in task_context.snapshot(folder)
+    with project_memory.connection(folder) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM task_events").fetchone()[0]==100
+    task_context.record_action(folder,"check_webapp",'{"passed":true}',args)
+    assert "Unresolved checker diagnostics" not in task_context.snapshot(folder)
+
+
+def test_checker_repeated_problem_survives_edits_and_resets_for_new_request(tmp_path):
+    item = project(tmp_path / "page")
+    folder = Path(item["folder"])
+    page = folder / "index.html"
+    page.write_text('old')
+    requests = folder / ".local-ai/USER-REQUESTS.md"
+    requests.write_text('Use blue')
+    args={"path":"index.html"}
+    failure='{"passed":false,"javascript_errors":["total is not defined"]}'
+    identity=task_context.request_identity(folder)
+    for _ in range(3):
+        task_context.record_action(folder,"check_webapp",failure,args)
+    assert "same check/result failed 3 times" in task_context.snapshot(folder)
+    assert "Do not repeat the same failed check" in task_context.snapshot(folder)
+    page.write_text('edited')
+    task_context.record_action(folder,"check_webapp",failure,args)
+    assert "same check/result failed 4 times" in task_context.snapshot(folder)
+    requests.write_text('Use gold')
+    task_context.record_action(folder,"check_webapp",failure,args,request_hash=identity)
+    assert "Unresolved checker diagnostics" not in task_context.snapshot(folder)
+    assert task_context.checker_failures(folder,"index.html")==[]
+    task_context.record_action(folder,"check_webapp",failure,args)
+    assert "total is not defined" in task_context.snapshot(folder)
+    recalled=json.loads(native_agent.execute_tool(folder,"search_project_memory",{
+        "query":"index.html","kind":"check"}))
+    assert recalled[0]["path"]=="index.html"
+    assert "total is not defined" in recalled[0]["details"]
+
+
+def test_document_checker_memory_is_bounded_and_does_not_save_input_documents(tmp_path):
+    item = project(tmp_path / "report")
+    folder = Path(item["folder"])
+    (folder/"summary.md").write_text('Draft')
+    args={"report_path":"summary.md","facts":[{"source_text":"private complete input", "report_text":"final"}]}
+    error="Fact 1: report text was not found.\n"+"x"*5000
+    task_context.record_action(folder,"check_document_report",json.dumps({"passed":False,"errors":[error]}),args)
+    checkpoint=task_context.snapshot(folder)
+    assert "Fact 1: report text was not found" in checkpoint
+    assert "private complete input" not in checkpoint
+    assert "x"*300 not in checkpoint
+    assert "\\n" in checkpoint
+    task_context.record_action(folder,"check_document_report",'{"passed":true}',{"report_path":"../other.md"})
+    assert "Fact 1: report text was not found" in task_context.snapshot(folder)
+
+
+def test_verifier_exit_zero_does_not_overrule_missing_gameplay_evidence(tmp_path):
+    item = project(tmp_path / "game")
+    folder = Path(item["folder"])
+    item["brief"]="Create a simple space shooter game"
+    (folder/"game.html").write_text('<canvas></canvas>')
+    (folder/".local-ai/verify.ps1").write_text('exit 0')
+    fresh=native_agent.fresh_messages([{"role":"system","content":"Build the game"}],folder,
+        {"verify_passed":True},item)
+    assert "completion requirements remain unresolved" in fresh[1]["content"]
+    assert "Run check_webapp" in fresh[1]["content"]
+    assert "Do not recreate files or rerun unchanged checks" not in fresh[1]["content"]
+
+
+def test_edit_whitespace_mismatch_gives_exact_candidate_without_fuzzy_application(tmp_path):
+    page = tmp_path / "code.py"
+    original = "if ready:\n  run()\n"
+    page.write_text(original)
+    import pytest
+    with pytest.raises(ValueError) as failure:
+        native_agent.edit_project_file(tmp_path,"code.py","   run()","   stop()")
+    assert page.read_text()==original
+    hint = str(failure.value).split("exact old_text: ")[1]
+    assert json.loads(hint)=="  run()"
+    native_agent.edit_project_file(tmp_path,"code.py",json.loads(hint),"  stop()")
+    assert page.read_text()=="if ready:\n  stop()\n"
+    page.write_text("if ready:\n  run()\nelse:\n run()\n")
+    with pytest.raises(ValueError, match="found 0"):
+        native_agent.edit_project_file(tmp_path,"code.py","   run()","   stop()")
+
+
+def test_bounded_checker_memory_prioritizes_unresolved_failures(tmp_path):
+    item = project(tmp_path / "project")
+    folder = Path(item["folder"])
+    task_context.record_action(folder,"check_document_report",
+        '{"passed":false,"errors":["Fact 1: report text was not found"]}',{"report_path":"important.md"})
+    for number in range(130):
+        task_context.record_action(folder,"check_document_report",'{"passed":true}',
+            {"report_path":f"passed-{number}.md"})
+    with project_memory.connection(folder) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM task_check_results").fetchone()[0]==128
+    recalled=task_context.checker_failures(folder,"important.md")
+    assert len(recalled)==1 and "Fact 1" in recalled[0]["details"]
+
+
+def test_small_html_repair_focus_restores_other_capabilities_periodically(tmp_path):
+    item = project(tmp_path / "page")
+    folder = Path(item["folder"])
+    (folder/"index.html").write_text('<p id="total">wrong</p>')
+    task_context.record_action(folder,"check_webapp",'{"passed":false,"javascript_errors":["total is not defined"]}',
+        {"path":"index.html"})
+    state={}
+    for _ in range(4):
+        names={tool["function"]["name"] for tool in native_agent.repair_tools(item,state)}
+        assert "edit_file" in names and "check_webapp" in names
+        assert "search_project_memory" not in names
+    assert native_agent.repair_tools(item,state) is native_agent.TOOLS
+    task_context.record_action(folder,"check_webapp",'{"passed":true}',{"path":"index.html"})
+    assert native_agent.repair_tools(item,state) is native_agent.TOOLS
+
+
+def test_checker_validation_error_survives_a_fresh_context(tmp_path):
+    item = project(tmp_path / "page")
+    folder = Path(item["folder"])
+    task_context.record_action(folder,"check_webapp",
+        'Tool error: A case cannot require the same target to be both hidden and visible.',
+        {"path":"index.html"})
+    assert "both hidden and visible" in task_context.snapshot(folder)
 
 
 def test_checkpoint_uses_newest_root_notes_then_returns_to_updated_canonical_files():

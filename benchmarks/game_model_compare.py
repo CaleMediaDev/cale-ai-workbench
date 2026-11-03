@@ -8,6 +8,7 @@ It does not install models, register app tasks, or visually play-test games.
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -44,11 +45,16 @@ def main():
         info = model_library.post("/api/show", {"model": source})
         if info.get("remote_host") or info.get("remote_model"):
             parser.error("Only physically installed local weights can be tested.")
+        started = time.monotonic()
+        stage = "tool_call"
         try:
             model_library.probe_tool_use(source, item.get("tool_reasoning_effort"))
+            stage = "game_logic_and_build"
             reports.append(model_fitness.probe_game_coding(source, root))
         except (OSError, ValueError, RuntimeError) as exc:
-            reports.append({"source": source, "passed": False, "error": str(exc)})
+            reports.append({"source": source, "passed": False, "stage": stage,
+                            "seconds": round(time.monotonic() - started, 3),
+                            "error": str(exc)})
     print(json.dumps(reports, indent=2))
     return (
         0

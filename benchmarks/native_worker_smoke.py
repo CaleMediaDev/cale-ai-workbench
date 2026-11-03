@@ -73,6 +73,39 @@ WEBAPP_BRIEF = (
     "that checks behavior, not just file existence."
 )
 
+WEBAPP_REPAIR_BRIEF = (
+    "Repair the existing index.html tip splitter. Preserve its markup, styling and "
+    "working calculations; make the smallest useful correction. People must be a "
+    "positive whole number: both zero and 4.5 are invalid. An empty bill is invalid. "
+    "Validate numeric values: 4.0 is four people and 4e1 is forty, so both are valid. "
+    "Invalid inputs must show #error and hide #per-person. Keep the labeled number "
+    "inputs bill, tip and people. Defaults 100,20,4 must give $30.00 per person; "
+    "an $80 bill with 20% tip and four people gives $24.00. Fit 375 pixels without "
+    "horizontal scrolling. The browser failure is saved in the project database; "
+    "use the checkpoint diagnostics, repair the cause, and create/run a repeatable "
+    "PowerShell verifier."
+)
+WEBAPP_REPAIR_STARTER = '''<!doctype html><html lang="en"><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tip splitter</title><style>body{margin:20px;font:16px sans-serif}input{max-width:100%;box-sizing:border-box}</style>
+</head><body><h1>Split the bill</h1>
+<label for="bill">Bill</label><input id="bill" type="number" value="100">
+<label for="tip">Tip %</label><input id="tip" type="number" value="20">
+<label for="people">People</label><input id="people" type="number" value="4">
+<p id="per-person"></p><p id="error" role="alert" hidden></p>
+<script>
+const bill=document.getElementById('bill'),tip=document.getElementById('tip');
+const people=document.getElementById('people'),out=document.getElementById('per-person'),error=document.getElementById('error');
+function update(){
+ const amount=Number(bill.value),percent=Number(tip.value),count=parseInt(people.value,10);
+ const valid=bill.value.trim()!==''&&amount>=0&&percent>=0&&count>0;
+ error.hidden=valid;out.hidden=!valid;
+ error.textContent=valid?'':'Use a nonnegative bill and a positive whole number of people.';
+ out.textContent=valid?'$'+(amount*(1+percent/100)/count).toFixed(2):'';
+}
+[bill,tip,people].forEach(input=>input.addEventListener('input',update));update();
+</script></body></html>'''
+
 DOCUMENT_BRIEF = (
     "Read terms.pdf, including its final terms on page 2. Create summary.md "
     "with these four labeled lines: 'Final due date:', 'Net payable:', "
@@ -128,18 +161,29 @@ def write_document_pdf(path: Path) -> None:
 
 def ollama_completion(model: str, timeout: int, stats: dict):
     """Use the same OpenAI-compatible Ollama endpoint as Cale's router."""
+    import model_library
+
+    profile = next((item for item in model_library.CATALOG.values()
+                    if model in (item.get("alias"), item.get("source"))), {})
+    effort = profile.get("tool_reasoning_effort")
+    stats["reasoning_effort"] = effort
 
     def complete(payload: dict) -> dict:
+        local = {
+            "model": model,
+            "messages": payload["messages"],
+            "tools": payload["tools"],
+            "tool_choice": payload.get("tool_choice", "auto"),
+            "stream": False,
+            "temperature": payload.get("temperature", 0.2),
+        }
+        if effort:
+            local["reasoning_effort"] = effort
+        if payload.get("response_format"):
+            local["response_format"] = payload["response_format"]
         request = Request(
             "http://127.0.0.1:11434/v1/chat/completions",
-            data=json.dumps({
-                "model": model,
-                "messages": payload["messages"],
-                "tools": payload["tools"],
-                "tool_choice": payload.get("tool_choice", "auto"),
-                "stream": False,
-                "temperature": payload.get("temperature", 0.2),
-            }).encode("utf-8"),
+            data=json.dumps(local).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
         try:
@@ -347,6 +391,25 @@ def grade_webapp(folder: Path) -> dict:
     return result
 
 
+def grade_webapp_repair(folder: Path) -> dict:
+    """Check repaired behavior and that unrelated markup/style stayed intact."""
+    result = grade_webapp(folder)
+    source = folder / "index.html"
+    def outside_script(value):
+        return re.sub(r"(?is)<script\b[^>]*>.*?</script>", "<script></script>", value).strip()
+    preserved = source.is_file() and outside_script(source.read_text(encoding="utf-8-sig")) == outside_script(WEBAPP_REPAIR_STARTER)
+    result["markup_and_style_preserved"] = preserved
+    import webapp_check
+    numeric = webapp_check.check(folder, {"path":"index.html","cases":[
+        {"set":{"bill":"100","tip":"20","people":"4.0"},"expect":{"per-person":"$30.00"}},
+        {"set":{"people":"4e1"},"expect":{"per-person":"$3.00"}},
+    ]}) if source.is_file() else {"passed":False,"cases":[]}
+    result["integral_decimal_people"] = bool(numeric["cases"] and numeric["cases"][0]["passed"])
+    result["exponent_people_value"] = bool(len(numeric["cases"])>1 and numeric["cases"][1]["passed"])
+    result["passed"] = result["passed"] and preserved and numeric["passed"]
+    return result
+
+
 def grade_document(folder: Path) -> dict:
     """Check final-page extraction, arithmetic, and the saved verifier."""
     output = folder / "summary.md"
@@ -407,7 +470,7 @@ def grade_document(folder: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("temperature", "contacts", "webapp", "document"),
+    parser.add_argument("--scenario", choices=("temperature", "contacts", "webapp", "webapp_repair", "document"),
                         default="temperature")
     parser.add_argument("--model", default="cale-fast")
     parser.add_argument("--auto-route", action="store_true",
@@ -428,7 +491,8 @@ def main() -> int:
             folder.mkdir(parents=True, exist_ok=False)
         (folder / ".local-ai").mkdir()
         brief = {"temperature": TEMPERATURE_BRIEF, "contacts": CONTACTS_BRIEF,
-                 "webapp": WEBAPP_BRIEF, "document": DOCUMENT_BRIEF}[args.scenario]
+                 "webapp": WEBAPP_BRIEF, "webapp_repair": WEBAPP_REPAIR_BRIEF,
+                 "document": DOCUMENT_BRIEF}[args.scenario]
         if args.scenario == "temperature":
             (folder / "temperature.py").write_text(
                 TEMPERATURE_STARTER, encoding="utf-8")
@@ -436,10 +500,22 @@ def main() -> int:
             (folder / "contacts.csv").write_text(CONTACTS_STARTER, encoding="utf-8")
         elif args.scenario == "document":
             write_document_pdf(folder / "terms.pdf")
+        elif args.scenario == "webapp_repair":
+            (folder / "index.html").write_text(WEBAPP_REPAIR_STARTER, encoding="utf-8")
+            import task_context
+            import webapp_check
+
+            cases = {"path": "index.html", "cases": [
+                {"set": {"people": "4.5"}, "visible": ["error"], "hidden": ["per-person"]}]}
+            failed = webapp_check.check(folder, cases)
+            if failed["passed"]:
+                raise RuntimeError("Repair fixture unexpectedly passed its broken fractional case")
+            task_context.record_action(folder, "check_webapp", json.dumps(failed), cases)
         project_instruction = {
             "temperature": "Fix the conversion and verify it.\n",
             "contacts": "Clean the contacts and verify the saved CSV.\n",
             "webapp": "Build the requested offline page and test it.\n",
+            "webapp_repair": "Repair the existing validation bug; preserve working behavior.\n",
             "document": "Read the final document terms and verify the summary.\n",
         }[args.scenario]
         (folder / "AGENTS.md").write_text(project_instruction, encoding="utf-8")
@@ -469,6 +545,7 @@ def main() -> int:
                     state = native_agent.run_slice(project, complete=complete)
                 except Exception as exc:
                     error = f"{type(exc).__name__}: {exc}"
+                    state = native_agent.read_state(project)
                     break
                 if state.get("status") != "continue":
                     break
@@ -482,15 +559,17 @@ def main() -> int:
             "scenario": args.scenario,
             "command_timeout": args.command_timeout,
             "seconds": round(time.monotonic() - started, 2),
-            "worker_status": state.get("status", "error"),
+            "worker_status": "error" if error else state.get("status", "error"),
             "turns": state.get("turns", 0),
             **stats,
             "worker_verified": bool(state.get("verify_passed")),
+            "focused_check_calls": int(state.get("focused_check_calls", 0)),
             "current": state.get("current", ""),
             "completion_issue": native_agent.completion_issue(folder, project, state),
             "grade": {"temperature": grade_temperature,
                       "contacts": grade_contacts,
                       "webapp": grade_webapp,
+                      "webapp_repair": grade_webapp_repair,
                       "document": grade_document}[args.scenario](folder),
             "error": error,
         }

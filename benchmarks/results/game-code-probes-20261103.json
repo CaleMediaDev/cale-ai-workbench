@@ -143,6 +143,9 @@
     "qwen2.5-coder:7b": "Failed actual multiply tool-call probe; not approved",
     "qwen2.5-coder:14b": "Failed actual multiply tool-call probe; not approved"
   },
+  "additional_benchmark_failures": {
+    "qwen3.5:35b": "A subsequent full benchmark ended with a timeout. No complete result was recorded, so it is not a qualified winner. The older runner did not record the failing stage."
+  },
   "hardware_excluded": [
     "qwen3.8:27b"
   ]

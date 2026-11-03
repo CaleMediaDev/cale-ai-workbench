@@ -101,6 +101,12 @@ def validate_spec(folder: Path, spec: dict) -> Path:
                 raise ValueError("visible and hidden must be short lists")
             if any(not isinstance(name, str) or not name or len(name) > 200 for name in ids):
                 raise ValueError("visible and hidden entries must be short IDs or text")
+        if any(not value for value in expected.values()):
+            raise ValueError("expect requires nonempty visible text; an empty substring proves nothing. "
+                             "Use hidden for an output that must not be visible.")
+        if set(case.get("hidden", [])) & (set(expected) | set(case.get("visible", []))):
+            raise ValueError("A case cannot require the same target to be both hidden and visible. "
+                             "Correct the test specification before changing the app.")
         if "mobile_fit" in case and not isinstance(case["mobile_fit"], bool):
             raise ValueError("mobile_fit must be true or false")
         if not expected and not case.get("visible") and not case.get("hidden") and not case.get("mobile_fit"):
@@ -221,7 +227,11 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                 for element_id, text in case.get("expect", {}).items():
                     target = page.locator("#" + element_id)
                     actual = target.inner_text()[:200] if target.count() == 1 else "<missing>"
-                    if target.count() != 1 or not target.is_visible() or text not in actual:
+                    if target.count() != 1:
+                        failures.append(f"Missing expected element #{element_id}")
+                    elif not target.is_visible():
+                        failures.append(f"#{element_id} is hidden; text was {actual!r}. Expected visible text containing {text!r}")
+                    elif text not in actual:
                         failures.append(
                             f"#{element_id} displayed {actual!r}; expected visible text containing {text!r}"
                         )
@@ -230,7 +240,9 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                         target = find_target(token)
                         actual = target.count() > 0 and target.is_visible()
                         if actual != wanted:
-                            failures.append(f"{token!r} visibility was wrong")
+                            failures.append(f"{token!r} visibility was wrong: expected "
+                                            f"{'visible' if wanted else 'hidden'}, observed "
+                                            f"{'visible' if actual else 'hidden or missing'}")
                 if (case.get("mobile_fit") or spec.get("mobile_fit")) and not page.evaluate(
                     "document.documentElement.scrollWidth <= window.innerWidth + 1"):
                     failures.append("Page overflows the viewport")

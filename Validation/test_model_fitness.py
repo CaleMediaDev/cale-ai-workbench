@@ -182,7 +182,9 @@ def test_game_ranking_uses_matching_weights_hardware_quality_and_wall_time():
             records["new:e4b"]["vram_gb"] = 12
             records["old:9b"]["updated"] = time.time() - 31 * 86400
             path.write_text(json.dumps(records))
-            assert rank() == ["cale-fast", "new"]
+            # A qualified candidate need not wait for a failing or stale
+            # baseline to pass before it can become the preferred builder.
+            assert rank() == ["new", "cale-fast"]
 
 
 def test_game_probe_requires_two_complete_independent_passes():
