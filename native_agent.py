@@ -104,7 +104,10 @@ TOOLS = [
                                  'one saved assertion, supply saved_sequence, saved_case and suite_sha256 from '
                                  'its failure, with cases=[one assertion-only case]. Saved input actions and '
                                  'unrelated cases remain intact; original requirements determine the correct '
-                                 'assertion.',
+                                 'assertion. For canvas apps exposing live data, use state assertions such as '
+                                 "state={'game.player.x':{'gt':300},'game.bullets.length':{'gte':1}} after key actions. "
+                                 'Data paths read own plain properties only; no calls, expressions or getters. '
+                                 'These observations do not prove rendering quality.',
                   'parameters': {'type': 'object',
                                  'properties': {'path': {'type': 'string'},
                                                 'viewport_width': {'type': 'integer'},
@@ -128,6 +131,7 @@ TOOLS = [
                                                                                                           'maximum': 2000},
                                                                                               'expect': {'type': 'object',
                                                                                                          'additionalProperties': {'type': 'string'}},
+                                                                                              'state': {'type': 'object'},
                                                                                               'visible': {'type': 'array',
                                                                                                           'items': {'type': 'string'}},
                                                                                               'hidden': {'type': 'array',
@@ -1254,6 +1258,9 @@ def prompt(project: dict) -> str:
         "accumulate and each starts from a fresh page; reuse a sequence to correct its expectations. "
         "An empty expect value asserts cleared DOM text; hidden asserts invisibility even if text remains. "
         "Choose the outcome required by the user. "
+        "For canvas/game data not shown as DOM text, export the actual live state and assert it "
+        "with state={'game.player.x':{'gt':300}} after a Right key action, or "
+        "state={'game.bullets.length':{'gte':1}} after Space. Observe gameplay, not a test-only copy. "
         "To correct a saved assertion, use check_webapp with its assertion_revision_reference and one "
         "assertion-only case; input actions are retained. task_steps revise changes SQLite step checks. "
         "Use real input and result cases before writing a verifier. The tool creates a "
@@ -1622,6 +1629,12 @@ def focused_browser_check(project: dict, state: dict, request_hash: str):
     """
     if not state.get("premature_finishes") or not browser_check_required(project):
         return None
+    import task_context
+
+    # A completion-only prompt must not take away the editing/step tools while
+    # unfinished implementation units still need their saved acceptance checks.
+    if task_context.step_status(Path(project["folder"]))["remaining"]:
+        return None
     page = small_html_page(project)
     if page is None:
         return None
@@ -1644,6 +1657,10 @@ def focused_browser_check(project: dict, state: dict, request_hash: str):
         "test arithmetic and inputs carefully; do not invent expectations. The tool saves "
         "and runs its generated verifier after a passing check. For games, test at least "
         "two changed gameplay targets. Cover the explicit requested boundaries; do not invent "
+        "state assignments: set maps HTML input IDs to strings only. For exported live data use "
+        "case.state, not expect: {\"keys\":[{\"key\":\"ArrowRight\",\"hold_ms\":200}],"
+        "\"state\":{\"game.player.x\":{\"gt\":300}}}. State is read-only; use actual key/click "
+        "controls to change the app. hold_ms is at most 1000 per key. Do not invent "
         "extra requirements for other inputs. Nonempty expect values require visible text; an empty "
         "expect value checks exact cleared text, including hidden elements. Use hidden "
         "for an output that must disappear; never assert it visible too. If the app fails, "
@@ -1748,7 +1765,7 @@ def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
         cases = webapp_check.normalize_spec(arguments).get("cases", [])
         if (verdict.get("passed") is not True or not isinstance(cases, list)
                 or len(cases) < 2
-                or not any(case.get("expect") or case.get("visible") or case.get("hidden")
+                or not any(case.get("expect") or case.get("visible") or case.get("hidden") or case.get("state")
                            for case in cases)):
             return {}
         interactions = verdict.get("interactions", [])
@@ -1762,12 +1779,14 @@ def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
             targets = interaction.get("targets")
             if (type(number) is not int or not 1 <= number <= len(cases)
                     or not isinstance(targets, list) or not targets
-                    or len(targets) > 60 or any(not isinstance(t, str) or len(t) > 220 for t in targets)):
+                    or len(targets) > 80 or any(not isinstance(t, str) or len(t) > 220 for t in targets)):
                 continue
             actions = [kind for kind in ("set", "click", "keys") if cases[number-1].get(kind)]
             allowed = {"text:" + name for name in cases[number-1].get("expect", {})}
             allowed.update("visibility:" + name for field in ("visible", "hidden")
                            for name in cases[number-1].get(field, []))
+            webapp_check.validate_state_assertions(cases[number-1].get("state", {}))
+            allowed.update("state:" + name for name in cases[number-1].get("state", {}))
             if actions and all(target in allowed for target in targets):
                 accepted.append({"case": number, "targets": targets, "actions": actions})
         if not accepted:
@@ -2030,7 +2049,7 @@ def completion_issue(folder: Path, project: dict | None = None,
         if (not state.get("browser_verified") or not state.get("browser_interactions")
                 or current_hash != state.get("browser_checked_hash")):
             return ("Run check_webapp on the saved HTML page with actual input changes, "
-                    "expected visible results, invalid states, and mobile fit. "
+                    "expected visible results or exported live state, invalid states, and mobile fit. "
                     "Fix failures and rerun it after the last page edit.")
         if game_browser_required(project):
             interactions = state.get("browser_interactions") or []
@@ -2042,7 +2061,7 @@ def completion_issue(folder: Path, project: dict | None = None,
                         "to at least two asserted gameplay targets. Test movement, shooting/score "
                         "or damage, and restart as applicable. Starting HUD labels and key presses "
                         "without changed outcomes do not prove gameplay. Use the real game state "
-                        "to drive visible assertions, then rerun the saved verifier.")
+                        "to drive DOM or exported-state assertions, then rerun the saved verifier.")
     if not script.is_file() or not script.read_text(encoding="utf-8-sig", errors="replace").strip():
         return "Create a nonempty .local-ai/verify.ps1 with real checks for this request."
     plan = folder / ".local-ai" / "PLAN.md"

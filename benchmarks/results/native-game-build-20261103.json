@@ -1,0 +1,376 @@
+{
+  "scope": "Two synthetic complete-game worker builds on RTX 3060 12 GB, 128 GB RAM, real automatic local-only routing. Both failed independent grading. Evolving code and different model samples; no controlled performance comparison. The later focused-prompt queue fix has regression coverage but no passing complete-game run.",
+  "runs": [
+    {
+      "scenario": "native_game_build",
+      "brief": "Create index.html, a complete offline HTML space shooter, using your project tools.\nBuild a real canvas game with stars, player ship, enemies, bullets, score, lives,\nwaves, game over and Enter restart. Fit small screens. Arrow keys/A-D move,\nSpace shoots. No external assets. Use seconds-based timing at 120 pixels/second.\nCanvas logical size is 600x800, player center starts x=300, half-width=20.\nExpose the SAME live state and functions used for gameplay as window.game:\n{player:{x,y,w,h,invincible},bullets:[],enemies:[],score,lives,wave,playing,\nwaveSpawned,update(dt,keys),reset()}. keys contains ArrowLeft/ArrowRight/KeyA/KeyD/Space\nbooleans. Enemy/bullet objects use centered x,y,w,h and speed, enemy hp defaults1.\nupdate(0,{}) resolves existing collisions. Each killed enemy scores10.\nA player hit removes one life with at least1 second invulnerability. At zero\nlives playing=false. reset() starts play with score0/lives3/wave1/player.x300\nand no bullets. An empty wave advances after waveSpawned=true regardless of\nscore. Only positive-area rectangle overlap counts. Clear keys on blur.\nReturn a complete playable game, not just an API or a picture.\n Save actual files, not JSON in chat. Use task_steps for at least two tiny SQLite units, finish their real checks and create/run a repeatable verifier. Show a visible HUD with score, lives and wave. Test real keyboard movement, shooting and restart, not just text presence. Expose the requested window.game object as the actual live game state, not a separate test implementation. Keep all JavaScript inline in index.html for this single-file game.",
+      "seconds": 255.36,
+      "status": "continue",
+      "error": null,
+      "model_calls": 24,
+      "tool_calls": 24,
+      "prompt_tokens": 158507,
+      "completion_tokens": 7153,
+      "tools_used": [
+        "task_steps",
+        "task_steps",
+        "write_file",
+        "task_steps",
+        "edit_file",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "check_webapp",
+        "check_webapp",
+        "check_webapp",
+        "edit_file",
+        "write_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.86
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.12
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 62.53
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.54
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 17.1
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.12
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.41
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.42
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.92
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 10.99
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 6.91
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 5.08
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 4.43
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 8.51
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.37
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.69
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.92
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.9
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.04
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.05
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 7.97
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 10.26
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 10.77
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 4.29
+        }
+      ],
+      "grade": {
+        "logic": {
+          "valid_code": false
+        },
+        "browser": {
+          "checks": {
+            "mobile_fit": false,
+            "canvas_visible": true
+          },
+          "errors": [
+            "Error: Page.evaluate: TypeError: window.game.reset is not a function\n    at eval (eval at evaluate (:370:30), <anonymous>:1:13)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:370:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)"
+          ],
+          "passed": false
+        },
+        "verifier_passes_correct": true,
+        "verifier_rejects_missing_javascript": false,
+        "steps": {
+          "total": 4,
+          "done": 1,
+          "remaining": 3
+        },
+        "passed": false
+      },
+      "worker_variant": "before exported-state checks"
+    },
+    {
+      "scenario": "native_game_build",
+      "brief": "Create index.html, a complete offline HTML space shooter, using your project tools.\nBuild a real canvas game with stars, player ship, enemies, bullets, score, lives,\nwaves, game over and Enter restart. Fit small screens. Arrow keys/A-D move,\nSpace shoots. No external assets. Use seconds-based timing at 120 pixels/second.\nCanvas logical size is 600x800, player center starts x=300, half-width=20.\nExpose the SAME live state and functions used for gameplay as window.game:\n{player:{x,y,w,h,invincible},bullets:[],enemies:[],score,lives,wave,playing,\nwaveSpawned,update(dt,keys),reset()}. keys contains ArrowLeft/ArrowRight/KeyA/KeyD/Space\nbooleans. Enemy/bullet objects use centered x,y,w,h and speed, enemy hp defaults1.\nupdate(0,{}) resolves existing collisions. Each killed enemy scores10.\nA player hit removes one life with at least1 second invulnerability. At zero\nlives playing=false. reset() starts play with score0/lives3/wave1/player.x300\nand no bullets. An empty wave advances after waveSpawned=true regardless of\nscore. Only positive-area rectangle overlap counts. Clear keys on blur.\nReturn a complete playable game, not just an API or a picture.\n Save actual files, not JSON in chat. Use task_steps for at least two tiny SQLite units, finish their real checks and create/run a repeatable verifier. Show a visible HUD with score, lives and wave. Test real keyboard movement, shooting and restart, not just text presence. Expose the requested window.game object as the actual live game state, not a separate test implementation. Keep all JavaScript inline in index.html for this single-file game.",
+      "seconds": 230.51,
+      "status": "continue",
+      "error": null,
+      "model_calls": 9,
+      "tool_calls": 6,
+      "prompt_tokens": 66278,
+      "completion_tokens": 9302,
+      "tools_used": [
+        "task_steps",
+        "task_steps",
+        "write_file",
+        "task_steps",
+        "task_steps",
+        "read_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.86
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 10.79
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 86.04
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.33
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.2
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 4.67
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 88.4
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 10.66
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 7.92
+        }
+      ],
+      "grade": {
+        "logic": {
+          "valid_code": false
+        },
+        "browser": {
+          "checks": {
+            "mobile_fit": false,
+            "canvas_visible": true
+          },
+          "errors": [
+            "Error: Page.evaluate: TypeError: window.game.reset is not a function\n    at eval (eval at evaluate (:370:30), <anonymous>:1:13)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:370:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)"
+          ],
+          "passed": false
+        },
+        "verifier_passes_correct": false,
+        "verifier_rejects_missing_javascript": false,
+        "steps": {
+          "total": 6,
+          "done": 0,
+          "remaining": 6
+        },
+        "passed": false
+      },
+      "worker_variant": "with exported-state checks, before unfinished-queue focus fix"
+    }
+  ]
+}

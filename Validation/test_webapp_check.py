@@ -31,6 +31,101 @@ SPEC = {"path": "index.html", "viewport_width": 375, "cases": [
     {"set": {"bill": "0"}, "visible": ["error"]},
 ]}
 
+CANVAS_STATE_PAGE = """<!doctype html><canvas id="canvas"></canvas><script>
+window.game={player:{x:300},bullets:[],playing:true,empty:null,label:'ready'};
+window.addEventListener('keydown',e=>{
+ if(e.code==='ArrowRight')game.player.x+=24;
+ if(e.code==='Space')game.bullets.push({x:game.player.x});
+});</script>"""
+
+
+def test_canvas_live_state_records_real_key_effects_and_rejects_broken_controls(tmp_path):
+    path = tmp_path / "index.html"
+    path.write_text(CANVAS_STATE_PAGE)
+    spec = {"path": "index.html", "cases": [
+        {"state": {"game.player.x": 300, "game.playing": True, "game.empty": None, "game.label": "ready"}},
+        {"keys": [{"key": "ArrowRight"}], "state": {"game.player.x": {"gt": 300, "lte": 324}}},
+        {"keys": [{"key": "Space"}], "state": {"game.bullets.length": {"gte": 1}}}]}
+    result = webapp_check.check(tmp_path, spec)
+    assert result["passed"]
+    assert [item["targets"] for item in result["interactions"]] == [
+        ["state:game.player.x"], ["state:game.bullets.length"]]
+    assert native_agent.browser_check_evidence(tmp_path, spec, json.dumps(result))["browser_verified"]
+    unchanged = webapp_check.check(tmp_path, {"path": "index.html", "cases": [
+        {"keys": [{"key": "Space"}], "state": {"game.player.x": 300}}]})
+    assert unchanged["passed"] and not unchanged["interactions"]
+    assert webapp_check.save_verifier(tmp_path, spec, accumulate=True)
+    path.write_text(CANVAS_STATE_PAGE.replace("game.player.x+=24", "game.player.x+=0"))
+    failed = webapp_check.run_saved_checks(tmp_path, tmp_path / ".local-ai/webapp-check.json")
+    assert not failed["passed"]
+    assert "game.player.x" in str(failed)
+
+
+def test_canvas_state_rejects_missing_accessors_and_incorrect_types_without_calling_getters(tmp_path):
+    source = CANVAS_STATE_PAGE.replace("</script>", """
+Object.defineProperty(game,'trap',{get(){game.player.x=999;return 42}});
+Object.defineProperty(game,'infinite',{value:Infinity});</script>""")
+    (tmp_path / "index.html").write_text(source)
+    spec = {"path": "index.html", "cases": [{"state": {
+        "game.missing": None, "game.trap": 42, "game.playing": 1, "game.infinite": 0}},
+        {"state": {"game.player.x": 300}}]}
+    result = webapp_check.check(tmp_path, spec)
+    assert not result["passed"] and len(result["cases"][0]["failures"]) == 4
+    assert result["cases"][1]["passed"]  # The accessor never ran.
+
+
+@pytest.mark.parametrize("state", [[], {"game.x()": 1}, {"game.__proto__.x": 1},
+    {"game.constructor.name": "Object"}, {"game.player.x": {"gt": True}},
+    {"game.player.x": {"eq": 300}}, {"game.player.x": []},
+    {"game.player.x": float('nan')}, {"game.player.x": {}}, {"game": 1},
+    {"game.player.x": {"gt": 300, "lte": 300}}, {"game.player.x": {"gte": 300, "lt": 200}},
+    {"game.player.x": 10**1000}])
+def test_canvas_state_spec_rejects_expressions_and_unbounded_or_coerced_values(tmp_path, state):
+    (tmp_path / "index.html").write_text(CANVAS_STATE_PAGE)
+    with pytest.raises(ValueError):
+        webapp_check.validate_spec(tmp_path, {"path": "index.html", "cases": [{"state": state}]})
+
+
+def test_saved_canvas_state_assertions_merge_without_dropping_other_targets(tmp_path):
+    (tmp_path / "index.html").write_text(CANVAS_STATE_PAGE)
+    old = webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [{"state": {
+        "game.player.x": 300, "game.bullets.length": 0}}]})
+    merged = webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [{"state": {
+        "game.player.x": {"gte": 300}}}]}, old)
+    assert merged["checks"][0]["cases"][0]["state"] == {
+        "game.player.x": {"gte": 300}, "game.bullets.length": 0}
+
+
+def test_canvas_state_assertions_are_saved_and_executed_as_sqlite_step_checks(tmp_path):
+    (tmp_path / "index.html").write_text(CANVAS_STATE_PAGE)
+    arguments = {"path": "index.html", "cases": [
+        {"keys": [{"key": "ArrowRight"}], "state": {"game.player.x": {"gt": 300}}},
+        {"keys": [{"key": "Space"}], "state": {"game.bullets.length": {"gte": 1}}}]}
+    queue = task_context.plan_steps(tmp_path, [{"phase": "Controls", "title": "Movement and shooting",
+        "check_tool": "check_webapp", "check_arguments": arguments}])
+    step = queue["active"]
+    assert step["check_arguments"] == arguments
+    with patch.object(long_tasks, "projects", return_value=[{"id": "canvas", "folder": str(tmp_path)}]):
+        checked = json.loads(native_agent.execute_tool(tmp_path, "task_steps", {
+            "action": "complete", "step_id": step["id"]}))
+    assert checked["passed"] and checked["done"] == 1
+    assert checked["check_verdict"]["verifier_check_passed"] is True
+    assert {target for item in checked["browser_evidence"]["browser_interactions"]
+            for target in item["targets"]} == {"state:game.player.x", "state:game.bullets.length"}
+
+
+def test_completion_only_browser_prompt_waits_until_sqlite_implementation_units_finish(tmp_path):
+    (tmp_path / "index.html").write_text(CANVAS_STATE_PAGE)
+    item = {"folder": str(tmp_path), "brief": "Build an offline HTML canvas space shooter game"}
+    state = {"premature_finishes": 1}
+    assert native_agent.focused_browser_check(item, state, task_context.request_identity(tmp_path))
+    task_context.plan_steps(tmp_path, [{"phase": "Build", "title": "Implement controls",
+        "check_tool": "check_webapp", "check_arguments": {"path": "index.html", "cases": [
+            {"keys": [{"key": "ArrowRight"}], "state": {"game.player.x": {"gt": 300}}}]}}])
+    assert native_agent.focused_browser_check(item, state, task_context.request_identity(tmp_path)) is None
+    # This only restores the normal tools; unfinished units still block handoff.
+    assert "SQLite step queue" in native_agent.completion_issue(tmp_path, item, state)
+
 
 @pytest.mark.parametrize("plan",["- [x] Build and check the page\n",
                                  "1. Build and check the page - Verified by browser cases\n"])

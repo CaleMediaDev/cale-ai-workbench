@@ -225,6 +225,26 @@ temperature scenario too: it should stay on the ordinary coding path.
 
 ## Recorded automatic local runs
 
+`native_game_build.py --runtime-root C:\path\to\AIWorkbench --keep-folder C:\path\to\new-game`
+asks the full native worker to build an offline space shooter, with automatic
+local-only routing, real candidate approvals and at least two completed SQLite
+units. Independent checks exercise the same 13 live-state game contracts as the
+one-shot model fixture, real browser movement/shooting/restart, mobile width and
+a saved verifier that must reject removed JavaScript. A screenshot is retained
+for manual visual review. This synthetic fixture never opens or changes the
+original user game. A passing fixture is not a general game quality ranking.
+
+The [November 3 native game report](results/native-game-build-20261103.json)
+retains two failed builds: 255.36 s / 24 calls and 230.51 s / 9 calls.
+Both lacked the requested live reset function and overflowed the mobile viewport;
+neither completed its database units. The first verifier also accepted removed
+JavaScript. The second exposed a completion-only checker taking away build tools
+while units remained unfinished; the subsequent queue-aware focus fix has a
+regression test, but no passing full-game result is claimed. Exported-state
+assertions separately have real offline browser, saved-verifier mutation and
+SQLite step integration coverage. These are incomplete game-building results,
+not evidence that Cale now produces reliable whole games.
+
 `browser_assertion_repair.py --auto-route --slices 2 --keep-folder C:\path\to\new-folder`
 uses the production local-only router and native tool-failure feedback rather
 than the fixed-model callback. Its report records each responding model's weight

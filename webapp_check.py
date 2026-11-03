@@ -6,6 +6,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -33,6 +34,65 @@ def _element_id(value: str) -> str:
     return value
 
 
+def validate_state_assertions(assertions) -> None:
+    """Bound passive observations of an app's exported live data, not JS code."""
+    if not isinstance(assertions, dict) or len(assertions) > 20:
+        raise ValueError("state must map at most 20 exported property paths to expected values")
+    for path, expected in assertions.items():
+        if (not isinstance(path, str) or len(path) > 160 or
+                not re.fullmatch(r"[A-Za-z_$][\w$]*(?:\.(?:[A-Za-z_$][\w$]*|[0-9]+)){1,7}", path)
+                or any(part in {"__proto__", "prototype", "constructor"} for part in path.split("."))):
+            raise ValueError("Use a short exported data path such as game.player.x, without calls or prototype access")
+        values = expected.values() if isinstance(expected, dict) else [expected]
+        if isinstance(expected, dict) and (not expected or not set(expected) <= {"gt", "gte", "lt", "lte"}):
+            raise ValueError("state numeric comparisons support gt, gte, lt and lte")
+        for value in values:
+            numeric = (type(value) is int and abs(value) <= 1e308
+                       or type(value) is float and math.isfinite(value))
+            if isinstance(expected, dict) and not numeric:
+                raise ValueError("state comparison bounds must be finite numbers, not booleans")
+            if not (value is None or type(value) is bool or numeric or isinstance(value, str) and len(value) <= 200):
+                raise ValueError("state expectations must be short strings, booleans, null or finite numbers")
+        if isinstance(expected, dict):
+            lower = max((value for key, value in expected.items() if key in {"gt", "gte"}), default=-math.inf)
+            upper = min((value for key, value in expected.items() if key in {"lt", "lte"}), default=math.inf)
+            if lower > upper or lower == upper and (expected.get("gt") == lower or expected.get("lt") == upper):
+                raise ValueError("state comparison bounds contradict each other; correct the case, not the app")
+
+
+def state_matches(actual, expected) -> bool:
+    """Compare typed primitives or finite numerical bounds without coercion."""
+    numeric = type(actual) in (int, float) and math.isfinite(actual)
+    if isinstance(expected, dict):
+        return numeric and all({"gt": lambda: actual > value, "gte": lambda: actual >= value,
+                                "lt": lambda: actual < value, "lte": lambda: actual <= value}[operator]()
+                               for operator, value in expected.items())
+    if type(expected) in (int, float):
+        return numeric and actual == expected
+    return type(actual) is type(expected) and actual == expected
+
+
+def observe_state(page, paths: list[str]) -> dict:
+    """Read only own data descriptors: no getters, function calls or assignments."""
+    if not paths:
+        return {}
+    return page.evaluate("""paths => Object.fromEntries(paths.map(path => {
+      let value = window;
+      for (const part of path.split('.')) {
+        if (value === null || !['object','function'].includes(typeof value))
+          return [path, {error:'missing data property'}];
+        const descriptor = Object.getOwnPropertyDescriptor(value, part);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value'))
+          return [path, {error:'missing property or accessor; export plain live data'}];
+        value = descriptor.value;
+      }
+      if (value === null || typeof value === 'boolean' ||
+          typeof value === 'string' && value.length <= 200 ||
+          typeof value === 'number' && Number.isFinite(value)) return [path, {value}];
+      return [path, {error:'observed value is not a short finite primitive'}];
+    }))""", paths)
+
+
 def normalize_spec(spec: dict) -> dict:
     """Accept a JSON-encoded case list from smaller tool-calling models."""
     if not isinstance(spec, dict):
@@ -50,7 +110,7 @@ def normalize_spec(spec: dict) -> dict:
         merged = []
         index = 0
         actions = {"set", "click", "keys", "wait_ms"}
-        assertions = {"expect", "visible", "hidden", "mobile_fit"}
+        assertions = {"expect", "visible", "hidden", "mobile_fit", "state"}
         while index < len(cases):
             current = cases[index]
             following = cases[index + 1] if index + 1 < len(cases) else None
@@ -217,8 +277,9 @@ def validate_spec(folder: Path, spec: dict) -> Path:
         raise ValueError("mobile_fit must be true or false")
     total_wait = 0
     for case in cases:
-        if not isinstance(case, dict) or not set(case).issubset({"set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit"}):
-            raise ValueError("Use set, click, keys, wait_ms, expect, visible, hidden, and mobile_fit in each case")
+        if not isinstance(case, dict) or not set(case).issubset({"set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit", "state"}):
+            raise ValueError("Use set, click, keys, wait_ms, expect, visible, hidden, mobile_fit and state in each case")
+        validate_state_assertions(case.get("state", {}))
         keys = case.get("keys", [])
         if not isinstance(keys, list) or len(keys) > 20:
             raise ValueError("keys must be a list of at most 20 key actions")
@@ -269,7 +330,7 @@ def validate_spec(folder: Path, spec: dict) -> Path:
                              "Correct the test specification before changing the app.")
         if "mobile_fit" in case and not isinstance(case["mobile_fit"], bool):
             raise ValueError("mobile_fit must be true or false")
-        if not expected and not case.get("visible") and not case.get("hidden") and not case.get("mobile_fit"):
+        if not expected and not case.get("visible") and not case.get("hidden") and not case.get("mobile_fit") and not case.get("state"):
             raise ValueError("Each browser case needs an observable assertion. Put set/click/keys and "
                              "expect/visible/hidden in the same case; correct these test arguments, not the app.")
     return page
@@ -337,6 +398,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                     for token in case.get(field, []):
                         target = find_target(token)
                         observed["visibility:" + token] = target.count() > 0 and target.is_visible()
+                observed.update({"state:" + key: value for key, value in
+                                 observe_state(page, list(case.get("state", {}))).items()})
                 return observed
 
             for number, case in enumerate(spec["cases"], 1):
@@ -386,6 +449,15 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                         failures.append(f"Could not press {key}: {str(exc)[:200]}")
                 if case.get("wait_ms", 0):
                     page.wait_for_timeout(case["wait_ms"])
+                # Reuse this single observation for both assertions and change
+                # evidence; an animated app can advance between JS reads.
+                after = asserted_state(case)
+                for path, expected in case.get("state", {}).items():
+                    observed = after["state:" + path]
+                    if "error" in observed:
+                        failures.append(f"State {path}: {observed['error']}")
+                    elif not state_matches(observed["value"], expected):
+                        failures.append(f"State {path} was {observed['value']!r}; expected {expected!r}")
                 for element_id, text in case.get("expect", {}).items():
                     target = page.locator("#" + element_id)
                     actual = target.inner_text()[:200] if target.count() == 1 else "<missing>"
@@ -426,7 +498,6 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                         outcome["suggested_assertions"] = {"hidden": suggested_hidden}
                 results.append(outcome)
                 actions = [kind for kind in ("set", "click", "keys") if case.get(kind)]
-                after = asserted_state(case)
                 changed = [name for name, value in after.items() if before.get(name) != value]
                 if actions and changed and not failures:
                     interactions.append({"case": number, "actions": actions, "targets": changed})
@@ -477,6 +548,9 @@ def saved_suite(folder: Path, spec: dict, previous: dict | None = None) -> dict:
         for previous_case, new_case in zip(old["cases"], incoming["cases"], strict=True):
             case = {**copy.deepcopy(previous_case), **copy.deepcopy(new_case)}
             expected = {**previous_case.get("expect", {}), **new_case.get("expect", {})}
+            states = {**previous_case.get("state", {}), **new_case.get("state", {})}
+            if states:
+                case["state"] = states
             hidden_now = set(new_case.get("hidden", []))
             for name in hidden_now:
                 if name not in new_case.get("expect", {}) or expected.get(name) != "":
@@ -597,7 +671,7 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
         raise ValueError("Use the saved case index from the failed checker result")
     supplied = normalize_spec(arguments).get("cases")
     if (not isinstance(supplied, list) or len(supplied) != 1 or not isinstance(supplied[0], dict)
-            or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "set", "click", "keys", "wait_ms"}):
+            or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "state", "set", "click", "keys", "wait_ms"}):
         raise ValueError("An assertion revision needs one case correcting assertions; saved input actions cannot change")
     old = batch["cases"][number - 1]
     if any(name in supplied[0] and (name not in old or supplied[0][name] != old[name])

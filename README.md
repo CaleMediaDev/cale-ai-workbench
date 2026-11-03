@@ -19,6 +19,17 @@ respond. This is a repair preference, not a guarantee that another model will
 solve the task or finish faster.
 
 For interactive single-file HTML apps, the native worker can use an offline Chromium check that fills real inputs, inspects visible results and errors, and checks mobile width. A passing check saves a repeatable browser verifier. The worker must rerun the check after changing the page before it can finish. This catches behavior that a source-text scan misses; it does not establish that an entire website is correct or visually polished.
+
+Canvas apps and games can also expose their actual live state for passive checks.
+For example, `check_webapp` can hold ArrowRight and assert
+`state={"game.player.x":{"gt":300}}`, then press Space and assert
+`state={"game.bullets.length":{"gte":1}}`. Exact primitive values and finite
+numeric bounds are supported. The checker reads own plain data properties,
+without calling functions or getters, and records only asserted fields that
+actually changed after input. Cases remain in the repeatable verifier and can
+serve as SQLite step checks. A passing state check does not establish rendering
+quality, complete gameplay correctness or that a separately exposed test copy
+matches the actual game; independent integration checks remain necessary.
 The checker handles letters entered for a number input as the empty value a browser would produce and reports that normalization. A live task browser is closed before the separate offline checker starts, so opening a website earlier in the task does not break local app checks. Rejected local `file://` browser URLs no longer start a browser session. Failed text assertions show the page's actual value to help the worker correct either the page or its test.
 When someone adds instructions to a task, Cale discards the earlier verifier and browser-check results before continuing. The revised work needs fresh checks, even when an earlier version of the task had passed.
 If an instruction arrives while the model is choosing a tool, Cale drops that older tool plan before it runs and reads the new instruction. Instructions arriving between steps are included in the next model call.

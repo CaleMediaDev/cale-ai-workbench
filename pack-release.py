@@ -39,6 +39,8 @@ extras = [
     "benchmarks/browser_assertion_repair.py",
     "benchmarks/results/browser-assertion-repair-20261103.json",
     "benchmarks/results/local-repair-routing-20261103.json",
+    "benchmarks/native_game_build.py",
+    "benchmarks/results/native-game-build-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",
