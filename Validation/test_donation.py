@@ -10,8 +10,8 @@ import sqlite3
 import threading
 import time
 from contextlib import closing
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -295,7 +295,7 @@ def test_upgrade_preserves_existing_chatgpt_only_consent_and_usage(tmp_path):
     assert donation.source_totals(tmp_path) == {"chatgpt": 75}
 
 
-@pytest.mark.parametrize("intensity,limit", [("slow", 1), ("medium", 4), ("full_blast", 12)])
+@pytest.mark.parametrize("intensity,limit", [("slow", 1), ("medium", 4)])
 def test_intensity_caps_remain_durable_across_resources(tmp_path, intensity, limit):
     for number in range(limit):
         assert donation.claim_run(tmp_path, str(number), donation.SOURCES[number % 3], intensity)
@@ -427,3 +427,135 @@ def test_leaderboard_continues_partial_history_without_double_credit(tmp_path):
     with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1061):
         complete = donation.refresh_leaderboard(tmp_path, fetch=pages, force=True)
     assert complete["complete"] and complete["rows"][0]["accepted"] == 1000
+
+
+
+def test_full_blast_has_no_daily_cutoff_even_after_many_resources(tmp_path):
+    for number in range(30):
+        assert donation.claim_run(tmp_path, str(number), donation.SOURCES[number % 3], "full_blast")
+    assert donation.PROFILES["full_blast"]["open"] is None
+    assert donation.PROFILES["full_blast"]["interval"] == 0
+
+
+def test_full_blast_continues_during_foreground_but_stops_for_updates_and_opt_out(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="full_blast")
+    service = donation.Service(tmp_path)
+    with (patch("pc_offline.offline", return_value=False),
+          patch.object(service, "_run") as run):
+        assert service.allowed(busy=True)
+        service.activity()
+        assert not service.cancel.is_set()
+        service.tick(busy=True)
+        service.thread.join(2)
+        run.assert_called_once()
+        service.tick(busy=True)  # Next completed unit can start immediately.
+        service.thread.join(2)
+        assert run.call_count == 2
+        service.tick(suspended=True)
+        assert service.cancel.is_set()
+        assert not service.allowed()
+        service.tick(busy=True, suspended=False)
+        service.thread.join(2)
+        assert run.call_count == 3
+        donation.set_enabled(False, tmp_path)
+        service.tick(busy=True)
+        assert service.cancel.is_set() and not service.allowed(busy=True)
+        assert "Continuous" in donation.intensity_description("full_blast")
+
+
+def test_full_blast_discovers_other_public_areas_without_sensitive_or_duplicate_jobs():
+    tree = {"tree": [{"path": path, "type": "blob", "size": 300} for path in (
+        "quick_calculator.py", "Validation/test_quick_calculator.py",
+        "music_style.py", "Validation/test_music_style.py",
+        "chatgpt_auth.py", "Validation/test_chatgpt_auth.py",
+        "donation.py", "Validation/test_donation.py")], "truncated": False}
+    existing = [{"id": "calculator", "paths": ["quick_calculator.py"]}]
+    with patch.object(donation, "gh_api", return_value=tree):
+        jobs = donation.continuous_jobs(existing, COMMIT["sha"])
+    assert len(jobs) == 2 and jobs[0] == existing[0]
+    assert jobs[1]["paths"] == ["music_style.py", "Validation/test_music_style.py"]
+    assert len(jobs[1]["id"]) <= 60
+
+
+def test_full_blast_gets_past_twelve_runs_and_three_pending_drafts_then_continues(tmp_path):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+                         github_account="donor", sources=["chatgpt"], intensity="full_blast")
+    for number in range(12):
+        run = donation.claim_run(tmp_path, str(number), "chatgpt", "full_blast")
+        donation.finish(tmp_path, run, "no_change")
+    service = donation.Service(tmp_path)
+    def public(path, revision):
+        return json.dumps([JOB]) if path == "donation-tasks.json" else SOURCES[path]
+    calls = []
+    def api(endpoint):
+        calls.append(endpoint)
+        if "search/" in endpoint:
+            return {"total_count": 101, "items": [{"body": "<!-- cale-donation:other -->"}] * (1 if "page=2" in endpoint else 100)}
+        return COMMIT
+    with (patch("pc_offline.offline", return_value=False),
+          patch("github_account.account", return_value="donor"),
+          patch("chatgpt_auth.status", return_value={"sharing": True}),
+          patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT),
+          patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision: jobs),
+          patch.object(donation, "public_file", side_effect=public),
+          patch.object(donation, "gh_api", side_effect=api),
+          patch.object(donation, "complete_donation", return_value={"choices": [{"message": {
+              "content": '{"changes":[]}'}}]}) as inference):
+        service._run(threading.Event())
+    inference.assert_called_once()
+    assert any("page=2" in endpoint for endpoint in calls)
+    assert service.next_attempt == 0
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 13
+
+
+def test_full_blast_retries_failures_without_busy_looping(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="full_blast")
+    service = donation.Service(tmp_path)
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", side_effect=OSError("offline")):
+        service._run(threading.Event())
+        first = service.next_attempt
+        assert first >= time.monotonic() + 55
+        service._run(threading.Event())
+        assert service.next_attempt > first and donation.settings(tmp_path)["enabled"]
+
+
+
+def test_full_blast_keeps_inflight_work_on_activity_but_explicit_stop_cancels(tmp_path):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+                         github_account="donor", sources=["chatgpt"], intensity="full_blast")
+    service = donation.Service(tmp_path)
+    payloads = []
+    def public(path, revision):
+        return json.dumps([JOB]) if path == "donation-tasks.json" else SOURCES[path]
+    def complete(payload, resource, intensity, cancel, on_usage):
+        service.activity()
+        assert not cancel()
+        payloads.append(payload)
+        return RESULT
+    with (patch("pc_offline.offline", return_value=False),
+          patch("github_account.account", return_value="donor"),
+          patch("chatgpt_auth.status", return_value={"sharing": True}),
+          patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT),
+          patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision: jobs),
+          patch.object(donation, "public_file", side_effect=public),
+          patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
+          patch.object(donation, "complete_donation", side_effect=complete),
+          patch.object(donation, "open_proposal", return_value="https://github.com/test/pull/7") as publish):
+        service._run(service.cancel)
+    publish.assert_called_once()
+    assert payloads and service.next_attempt == 0
+    donation.set_enabled(False, tmp_path)
+    service.tick(busy=True)
+    assert service.cancel.is_set()
+
+
+
+def test_continuous_queue_skips_broken_entries_and_normalizes_future_filenames():
+    tree = {"tree": [{"path": path, "type": "blob", "size": 100} for path in
+                     ("Future Tool.py", "Validation/test_Future Tool.py")]}
+    with patch.object(donation, "gh_api", return_value=tree):
+        jobs = donation.continuous_jobs([{"id": "broken", "paths": None},
+                                       {"id": "invalid id", "paths": ["x.py"]}], COMMIT["sha"])
+    assert len(jobs) == 1
+    assert jobs[0]["id"].startswith("review-future-tool-")

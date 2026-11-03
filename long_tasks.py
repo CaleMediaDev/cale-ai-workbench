@@ -6963,10 +6963,10 @@ def gui():
         running = any(
             item["status"] in ("queued", "working", "checking") for item in all_projects
         )
-        donation_service.tick(busy=(running or any(item["status"] == "waiting_for_setup" for item in all_projects)
-                                    or foreground_chat.is_set() or not answer_requests.empty()
-                                    or updating or bool(pending_update)
-                                    or not setup or setup.get("status") != "complete"))
+        donation_service.tick(busy=(running or foreground_chat.is_set() or not answer_requests.empty()),
+                              suspended=(updating or bool(pending_update) or not setup
+                                         or setup.get("status") != "complete"
+                                         or any(item["status"] == "waiting_for_setup" for item in all_projects)))
         donation_controls.refresh()
         upgrading = ollama_runtime.model_download_running() or any(
             state.get("status") in ("working", "waiting")

@@ -77,14 +77,10 @@ class Controls:
         self.chat_button.configure(text="Reconnect ChatGPT" if self.chat_ready else "2. Connect ChatGPT")
         enabled = donation.settings(self.service.root)["enabled"]
         selected = [key for key, variable in self.source_vars.items() if variable.get()]
-        self.enable_button.configure(text="Stop donating" if enabled else "Start donating when idle",
+        self.enable_button.configure(text="Stop donating" if enabled else ("Start donating continuously" if self.intensity.get() == "full_blast" else "Start donating when idle"),
                                      state="normal" if enabled or self.ready_to_start() else "disabled")
         self.state_text.set(("On · " + self.service.message) if enabled else "Off · donations use no AI until you start them.")
-        profile = donation.PROFILES[self.intensity.get()]
-        wait = str(profile["idle"] // 60) + " minutes" if profile["idle"] >= 60 else str(profile["idle"]) + " seconds"
-        attempts = "attempt" if profile["daily"] == 1 else "attempts"
-        drafts = "draft" if profile["open"] == 1 else "drafts"
-        self.intensity_text.set(f"{wait} idle · {profile['daily']} {attempts}/day · up to {profile['open']} open {drafts}")
+        self.intensity_text.set(donation.intensity_description(self.intensity.get()))
         for key, button in self.intensity_buttons.items():
             button.configure(style="SelectedMode.TButton" if key == self.intensity.get() else "Mode.TButton")
         if "chatgpt" in selected:
@@ -107,6 +103,7 @@ class Controls:
         """Resource/intensity changes stop the old grant until explicitly restarted."""
         donation.set_enabled(False, self.service.root, sources=[key for key, value in self.source_vars.items() if value.get()],
                              intensity=self.intensity.get())
+        self.service.cancel.set()
         self.service.activity()
         self.service.next_attempt = 0
         self.refresh()
@@ -120,8 +117,11 @@ class Controls:
                              chatgpt_account=self.fingerprint, github_account=self.login,
                              free_account=self.free_fingerprint,
                              sources=[key for key, value in self.source_vars.items() if value.get()], intensity=self.intensity.get())
+        if enabled:
+            self.service.cancel.set()
         self.service.activity()
-        self.service.message = "Starts when Cale is idle at your chosen intensity." if not enabled else "Off."
+        self.service.next_attempt = 0
+        self.service.message = (("Continuous donations enabled." if self.intensity.get() == "full_blast" else "Starts when Cale is idle at your chosen intensity.") if not enabled else "Off.")
         self.refresh()
 
     def open(self):
@@ -158,7 +158,7 @@ class Controls:
         popup.bind("<MouseWheel>", scroll, add="+")
         ttk.Label(outer, text="Help make Cale better", font=("Segoe UI", 23, "bold")).pack(anchor="w")
         ttk.Label(outer, text=(
-            "Contribute local AI, connected free cloud, or your ChatGPT allowance while you're away. "
+            "Contribute local AI, free cloud, or your ChatGPT allowance while away—or continuously in Full Blast. "
             "Only public Cale source code is used. Proposed improvements go to GitHub "
             "for the owner's review—nothing merges automatically."),
             wraplength=585, justify="left").pack(anchor="w", pady=(10, 14))
@@ -209,8 +209,8 @@ class Controls:
         self.enable_button.pack(anchor="w", ipady=5)
         ttk.Label(outer, textvariable=self.state_text, wraplength=585).pack(anchor="w", pady=(10, 10))
         ttk.Label(outer, text=(
-            "Your tasks and chat always come first. Slow uses smaller local models and longer rests; "
-            "Full Blast allows more work, within your hardware and account limits. "
+            "Slow and Medium pause for your tasks and chat. Slow uses smaller local models and longer rests; "
+            "Full Blast keeps working alongside your tasks, without daily or open-draft cutoffs, within account limits. "
             "A request already in flight may still use tokens. Local mode blocks cloud donations; offline pauses all contributions."),
             style="Muted.TLabel", wraplength=585, justify="left").pack(anchor="w")
         ttk.Label(outer, textvariable=self.counter).pack(anchor="w", pady=(14, 3))
