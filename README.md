@@ -218,3 +218,5 @@ For real local-model tasks rather than mocked component tests, run the opt-in [n
 Please report reproducible bugs and include versions and redacted errors. Do not upload your `Cloud`, `data`, `Projects`, `LongTasks`, or log directories.
 
 Made by [Cale Media — websites and digital marketing](https://calemedia.com/).
+
+<!-- Temporary donation transport validation. -->
