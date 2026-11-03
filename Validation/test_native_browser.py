@@ -147,6 +147,35 @@ def test_native_browser_can_fill_click_read_and_preview():
         server.server_close()
 
 
+def test_snapshot_clears_refs_from_controls_that_become_hidden(tmp_path):
+    pytest.importorskip("playwright")
+    (tmp_path / "controls.html").write_text(
+        '<!doctype html><title>Snapshot refs</title><body>'
+        '<button id="first">First</button>'
+        '<button id="second" onclick="this.textContent=\'Clicked\'">Second</button>'
+        '</body>', encoding="utf-8")
+    try:
+        opened = native_agent.execute_tool(
+            tmp_path, "browser_open_project", {"path": "controls.html"})
+        if opened.startswith("Tool error:") and "Executable doesn't exist" in opened:
+            pytest.skip("Chromium runtime is not installed in this test environment")
+        assert json.loads(opened)["title"] == "Snapshot refs"
+        first = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        assert [item["label"] for item in first["controls"]] == ["First", "Second"]
+        page = native_browser._page(tmp_path)
+        page.locator("#first").evaluate("el => el.style.display = 'none'")
+        second = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        assert [item["label"] for item in second["controls"]] == ["Second"]
+        ref = second["controls"][0]["ref"]
+        assert ref == first["controls"][0]["ref"]
+        assert page.locator("#first").get_attribute("data-cale-ref") is None
+        assert page.locator(f'[data-cale-ref="{ref}"]').count() == 1
+        native_browser.execute(tmp_path, "click", {"ref": ref})
+        assert page.locator("#second").inner_text() == "Clicked"
+    finally:
+        native_browser.close()
+
+
 def test_download_filename_stays_in_project_and_does_not_overwrite(tmp_path):
     first = native_browser._download_target(tmp_path, "../secret.txt")
     assert first.parent == tmp_path / "Downloads"

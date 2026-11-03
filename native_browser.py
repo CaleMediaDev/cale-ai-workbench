@@ -164,6 +164,7 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
         page.mouse.wheel(0, max(-5000, min(5000, int(arguments.get("pixels", 600)))))
     elif action == "snapshot":
         controls = page.evaluate("""() => {
+          document.querySelectorAll('[data-cale-ref]').forEach(el => el.removeAttribute('data-cale-ref'));
           const nodes = [...document.querySelectorAll('a,button,input,textarea,select,[role="button"],[contenteditable="true"]')];
           let n = 0;
           return nodes.filter(el => el.getClientRects().length && !el.closest('[aria-hidden="true"]'))
