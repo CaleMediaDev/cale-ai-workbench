@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -87,6 +88,27 @@ def test_run_command_timeout_stops_child_process_and_returns():
 
         child_pid = int((folder / "child.pid").read_text())
         assert not psutil.pid_exists(child_pid)
+
+
+def test_run_command_accepts_quoted_executable_path_and_shell_operators():
+    if os.name != "nt":
+        return  # This regression concerns cmd.exe quoting on Windows.
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        spaced = folder / "program with spaces"
+        spaced.mkdir()
+        batch = spaced / "hello.cmd"
+        batch.write_text("@echo off\necho quoted path works\n", encoding="utf-8")
+        version = native_agent.execute_tool(
+            folder, "run_command", {"command": f'"{sys.executable}" -V'})
+        quoted = native_agent.execute_tool(
+            folder, "run_command", {"command": f'"{batch}"'})
+        chained = native_agent.execute_tool(
+            folder, "run_command", {"command": "echo first && echo second"})
+    assert version.startswith("Exit code: 0\nPython ")
+    assert quoted.startswith("Exit code: 0\nquoted path works")
+    assert chained.startswith("Exit code: 0")
+    assert "first" in chained and "second" in chained
 
 
 def test_read_file_streams_large_files_and_bounds_one_extremely_long_line():

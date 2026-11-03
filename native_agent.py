@@ -344,8 +344,14 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             if not isinstance(command, str) or not command.strip() or len(command) > 4000:
                 raise ValueError("A short command is required")
             shell = os.environ.get("COMSPEC", "cmd.exe") if os.name == "nt" else "/bin/sh"
+            # Passing the command as an argv element makes Python escape its
+            # quotes for C's argv parser. cmd.exe does not undo that escaping,
+            # so a normal `"C:\\path\\python.exe" -V` command fails. /s strips
+            # the outer pair below and leaves the user's shell syntax intact.
+            invocation = (f'{subprocess.list2cmdline([shell])} /d /s /c "{command}"'
+                          if os.name == "nt" else [shell, "-c", command])
             process = subprocess.Popen(
-                [shell, "/d", "/s", "/c", command] if os.name == "nt" else [shell, "-c", command],
+                invocation,
                 cwd=folder, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, errors="replace",
                 creationflags=0x08000000 if os.name == "nt" else 0,
