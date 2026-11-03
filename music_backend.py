@@ -924,7 +924,8 @@ def recover_music_jobs() -> None:
                 **info, "status": "queued",
                 "current": ("Finishing saved music" if output.is_file()
                             else "Resuming local music"),
-                "progress": 70 if output.is_file() else 10,
+                "progress": ((70 if info.get("make_video") else 90)
+                             if output.is_file() else 10),
                 "recoveries": attempts,
                 "worker_pid": None, "created": time.time(),
             }
@@ -965,6 +966,7 @@ def start_music_job(
 
     estimate = task_eta.music_estimate_seconds(
         JOBS, duration_seconds, bool(instrumental), source_path, reference_mode,
+        bool(make_video),
     )
     started = time.time()
     info = {
@@ -1006,9 +1008,11 @@ def _run_job(job_id: str) -> None:
         _write_job(job_id, working)
 
     def remember_progress(fraction: float) -> None:
-        # The engine's 0..1 fraction covers audio generation only. Leave room
-        # for the separate vocal check and captioned-video render afterward.
-        percent = min(70, max(35, 35 + round(fraction * 35)))
+        # The engine's 0..1 fraction covers audio generation only. An ordinary
+        # song needs room only for its final vocal check. Explicit video jobs
+        # retain the larger video-rendering stage after audio is complete.
+        ceiling = 70 if info.get("make_video") else 90
+        percent = min(ceiling, max(35, 35 + round(fraction * (ceiling - 35))))
         if percent > working["progress"]:
             working["progress"] = percent
             working["current"] = f"Generating music locally · audio {round(fraction * 100)}%"
@@ -1061,7 +1065,7 @@ def _run_job(job_id: str) -> None:
         if needs_vocals:
             if not check or not check.get("passed"):
                 working["current"] = "Checking the vocals"
-                working["progress"] = 75
+                working["progress"] = 75 if info.get("make_video") else 94
                 _write_job(job_id, working)
                 if sparse_vocal_style(info["prompt"]):
                     check = vocal_evidence(result["path"], info["duration_seconds"], lyrics,

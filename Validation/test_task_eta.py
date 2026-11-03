@@ -89,6 +89,29 @@ def test_short_vocal_eta_prefers_similar_songs_over_scaled_long_renders(tmp_path
     assert task_eta.music_estimate_seconds(jobs, 60, False) == 104
 
 
+def test_audio_only_eta_excludes_jobs_that_rendered_a_video(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    for index, elapsed in enumerate((48, 60, 72)):
+        (jobs / f"audio-{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 180, "created": 1000,
+            "finished": 1000 + elapsed, "make_video": False,
+            "result": {"path": "song.mp3"},
+        }), encoding="utf-8")
+    for index, elapsed in enumerate((180, 210, 240)):
+        (jobs / f"video-{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 180, "created": 1000,
+            "finished": 1000 + elapsed, "make_video": True,
+            "result": {"path": "song.mp3", "video": {"path": "song.mp4"}},
+        }), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(jobs, 180, False) == 60
+    assert task_eta.music_estimate_seconds(
+        jobs, 180, False, make_video=True,
+    ) == 210
+
+
 def test_style_reference_eta_excludes_quick_covers_and_legacy_jobs(tmp_path):
     jobs = tmp_path / "music-jobs"
     jobs.mkdir()

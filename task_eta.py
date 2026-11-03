@@ -52,13 +52,16 @@ def total_time(created: float, updated: float, status: str,
 
 def music_estimate_seconds(jobs_dir: Path, duration_seconds: int,
                            instrumental: bool, source_path: str = "",
-                           reference_mode: str = "cover") -> int | None:
+                           reference_mode: str = "cover",
+                           make_video: bool = False) -> int | None:
     """Estimate a local song from recent completed renders on this PC.
 
     The median resists first-use downloads and other unusually slow renders.
     Prefer comparable song lengths. Scaling many long renders down to a short
     request can make its countdown implausibly optimistic, especially when
-    transcription and captioned video have a nearly fixed setup cost.
+    transcription has a nearly fixed setup cost. Audio-only jobs and jobs that
+    explicitly include a video are kept separate because their finish times
+    are not comparable.
     """
     samples = []
     comparable = []
@@ -72,10 +75,13 @@ def music_estimate_seconds(jobs_dir: Path, duration_seconds: int,
             job = json.loads(path.read_text(encoding="utf-8"))
             length = float(job.get("duration_seconds") or 0)
             elapsed = float(job.get("finished") or 0) - float(job.get("requested_at") or job.get("created") or 0)
+            result = job.get("result") if isinstance(job.get("result"), dict) else {}
+            job_made_video = bool(job.get("make_video") or result.get("video"))
             if (job.get("status") != "complete" or not length or
                     bool(job.get("instrumental")) != instrumental or
                     bool(job.get("source_path")) != bool(source_path) or
                     (bool(source_path) and job.get("reference_mode") != reference_mode) or
+                    job_made_video != bool(make_video) or
                     int(job.get("vocal_retry") or 0) > 0 or
                     not 2 <= elapsed <= 3600):
                 continue

@@ -184,12 +184,26 @@ def test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio(tmp_pat
             task_id="a" * 12,
         )
         lyrics = "[Verse]\n" + "Michigan rhythm and lakeside light " * 10
+        progress_updates = []
+
+        def generate_with_progress(*args):
+            args[8](1.0)
+            return {"path": str(output)}
+
+        original_write = music_backend._write_job
+
+        def capture_write(job_id, info):
+            progress_updates.append((info.get("progress"), info.get("current")))
+            original_write(job_id, info)
+
         with patch.object(music_backend, "compose_lyrics", return_value=lyrics) as compose, patch.object(
-            music_backend, "generate_music", return_value={"path": str(output)}
+            music_backend, "generate_music", side_effect=generate_with_progress
         ) as generate, patch.object(
             music_backend, "vocal_evidence", return_value={"passed": True,
                 "recognized_words": 50, "last_vocal_second": 58}
-        ) as check, patch("song_video.render", return_value={
+        ) as check, patch.object(
+            music_backend, "_write_job", side_effect=capture_write
+        ), patch("song_video.render", return_value={
             "path": "song-video.mp4", "captions_path": "song.captions.srt"
         }) as render:
             music_backend._run_job(started["job_id"])
@@ -200,6 +214,8 @@ def test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio(tmp_pat
     assert (tmp_path / "song.lyrics.txt").read_text(encoding="utf-8").strip() == lyrics.strip()
     assert job["status"] == "complete"
     assert job["vocal_check"]["recognized_words"] == 50
+    assert (90, "Generating music locally · audio 100%") in progress_updates
+    assert (94, "Checking the vocals") in progress_updates
     assert "video" not in job["result"]
     render.assert_not_called()
 
@@ -785,7 +801,7 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
             args[8](0.8)
             current = music_backend.music_job_status(started["job_id"])
             assert current["server_task_id"] == "server-task-1"
-            assert current["progress"] == 63
+            assert current["progress"] == 79
             assert "audio 80%" in current["current"]
             return {"path": str(output)}
 
