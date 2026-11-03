@@ -1,5 +1,5 @@
 # Package the exact manifest-defined source, then embed it in the Windows EXE.
-param([string]$Version='0.5.417')
+param([string]$Version='0.5.418')
 $ErrorActionPreference='Stop'
 $project=$PSScriptRoot
 $out=Split-Path $project -Parent
@@ -19,4 +19,13 @@ $python='py.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Could not package release files.' }
 & $csc /nologo /target:winexe /platform:x64 /out:$exe "/win32icon:$(Join-Path $project 'assets/cale-icon.ico')" "/resource:$zip,CaleAI.Bundle.zip" /r:System.Windows.Forms.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll (Join-Path $project 'InstallerBootstrap.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Could not build the Windows installer.' }
-Get-FileHash -Algorithm SHA256 $zip,$exe | Select-Object Path,Hash
+# A beginner's ZIP has one obvious entry point. Keep the source/update archive
+# separate because the updater requires its manifest paths at the ZIP root.
+$installZip=Join-Path $out 'Cale-AI-Workbench-Install.zip'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.IO.Compression
+$bundleStream=[IO.File]::Open($installZip,[IO.FileMode]::Create)
+$bundle=New-Object IO.Compression.ZipArchive($bundleStream,[IO.Compression.ZipArchiveMode]::Create)
+try { [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($bundle,$exe,'Install Cale AI.exe') | Out-Null }
+finally { $bundle.Dispose(); $bundleStream.Dispose() }
+Get-FileHash -Algorithm SHA256 $zip,$exe,$installZip | Select-Object Path,Hash

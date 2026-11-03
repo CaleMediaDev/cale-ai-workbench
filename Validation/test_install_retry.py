@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == "nt", "Windows installer only")
 class InstallRetryTests(unittest.TestCase):
-    def run_fixture(self, backend: str, attempts: int = 3):
+    def run_fixture(self, backend: str, attempts: int = 3, no_launch: bool = False):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             shutil.copy2(ROOT / "Install-Retry.ps1", root / "Install-Retry.ps1")
@@ -21,7 +21,8 @@ class InstallRetryTests(unittest.TestCase):
             result = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                  str(root / "Install-Retry.ps1"), "-Destination", str(root / "App"),
-                 "-MaxAttempts", str(attempts), "-RetryDelaySeconds", "0"],
+                 "-MaxAttempts", str(attempts), "-RetryDelaySeconds", "0",
+                 *(["-NoLaunch"] if no_launch else [])],
                 capture_output=True, text=True, timeout=30,
             )
             return result, (root / "attempts.txt").read_text() if (root / "attempts.txt").exists() else ""
@@ -36,6 +37,16 @@ class InstallRetryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(attempts.count("attempt"), 2)
         self.assertIn("Retrying automatically", result.stdout)
+
+    def test_visual_installer_keeps_app_closed_until_setup_finishes(self):
+        result, _ = self.run_fixture(
+            "param([string]$Destination,[string]$Profile,[switch]$NoLaunch)\n"
+            "if (-not $NoLaunch) { Write-Error 'App would open before setup is ready'; exit 8 }\n"
+            "Write-Output 'App launch deferred'; exit 0\n",
+            no_launch=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("App launch deferred", result.stdout)
 
     def test_permanent_preflight_error_does_not_repeat(self):
         result, attempts = self.run_fixture(

@@ -5,7 +5,8 @@ param(
  [Parameter(Mandatory=$true)][string]$Destination,
  [ValidateSet('auto','large','compact','light')][string]$Profile='auto',
  [ValidateRange(1,5)][int]$MaxAttempts=3,
- [ValidateRange(0,300)][int]$RetryDelaySeconds=15
+ [ValidateRange(0,300)][int]$RetryDelaySeconds=15,
+ [switch]$NoLaunch
 )
 $ErrorActionPreference='Stop'
 $backend=Join-Path $PSScriptRoot 'Install-Backend.ps1'
@@ -18,7 +19,9 @@ for ($attempt=1; $attempt -le $MaxAttempts; $attempt++) {
  # streaming those lines rather than terminating the retry runner itself.
  $ErrorActionPreference='Continue'
  $attemptStarted=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
- & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $backend -Destination $Destination -Profile $Profile 2>&1 | ForEach-Object {
+ $backendArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$backend,'-Destination',$Destination,'-Profile',$Profile)
+ if($NoLaunch){$backendArgs+='-NoLaunch'}
+ & powershell.exe @backendArgs 2>&1 | ForEach-Object {
    $line=[string]$_
    Write-Output $line
    $recent.Add($line)

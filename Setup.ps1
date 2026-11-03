@@ -1,5 +1,7 @@
-# Small, automatic first-run installer UI. Install-Backend.ps1 owns the actual
-# downloads; this window only starts it and shows a readable progress log.
+# Visual first-run installer. The backend owns downloads and writes progress;
+# technical output stays in log files unless the person opens Details.
+param([switch]$Preview,[string]$PreviewImage='')
+if($PreviewImage){$Preview=$true}
 . (Join-Path $PSScriptRoot 'Install-Environment.ps1')
 Initialize-CalePowerShellEnvironment
 Add-Type -AssemblyName System.Windows.Forms
@@ -9,7 +11,9 @@ $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Cale AI Workbench - Install'
 $iconPath=Join-Path $PSScriptRoot 'assets\cale-icon.ico'
 if (Test-Path -LiteralPath $iconPath) { $form.Icon=New-Object Drawing.Icon($iconPath) }
-$form.Size = New-Object Drawing.Size(820,680)
+$form.ClientSize = New-Object Drawing.Size(760,480)
+$form.FormBorderStyle='FixedSingle'; $form.MaximizeBox=$false
+$form.AutoScaleMode='Dpi'
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object Drawing.Font('Segoe UI',10)
 $bg=[Drawing.ColorTranslator]::FromHtml('#0B1020')
@@ -30,55 +34,123 @@ if (Test-Path -LiteralPath $logoPath) {
 }
 $mark.SetBounds(24,20,60,60); $form.Controls.Add($mark)
 $title = New-Object Windows.Forms.Label
-$title.Text = 'CALE  /  AI WORKBENCH'
+$title.Text = 'Install Cale AI'
 $title.Font = New-Object Drawing.Font('Segoe UI',19,[Drawing.FontStyle]::Bold)
 $title.ForeColor=$ink
-$title.SetBounds(96,23,690,40); $form.Controls.Add($title)
+$title.SetBounds(96,23,630,40); $form.Controls.Add($title)
 $info = New-Object Windows.Forms.Label
-$info.Text = "Your AI, your PC. One install for models, tools, browser, voice, and vision. Internet is needed for downloads. By Cale Media - calemedia.com"
+$info.Text = 'Your personal AI, ready on your PC. We will set up the tools and choose models that fit your computer.'
 $info.ForeColor=$muted
-$info.SetBounds(26,96,760,50); $form.Controls.Add($info)
+$info.SetBounds(26,96,708,50); $form.Controls.Add($info)
 $path = New-Object Windows.Forms.TextBox
 $path.Text = Get-CaleInstallDestination
 $path.ReadOnly=$true
 $path.BackColor=$card; $path.ForeColor=$ink; $path.BorderStyle='FixedSingle'
-$path.SetBounds(26,157,758,30); $form.Controls.Add($path)
+$path.Visible=$false
+$footer=New-Object Windows.Forms.Label
+$footer.Text='Cale Media  /  calemedia.com'; $footer.ForeColor=$muted
+$footer.SetBounds(26,438,708,22); $form.Controls.Add($footer)
 $notice = New-Object Windows.Forms.Label
-$notice.Text = 'Setup starts automatically and retries temporary errors. The workbench shows progress in My tasks. After setup, compatible large models download when RAM and storage allow.'
+$notice.Text = 'Click Install to get started. Keep your internet connected during setup. Downloads can take a while.'
 $notice.ForeColor=$muted
-$notice.SetBounds(26,205,758,60); $form.Controls.Add($notice)
+$notice.SetBounds(26,315,708,48); $form.Controls.Add($notice)
+$stage=New-Object Windows.Forms.Label
+$stage.Text='Ready to install'; $stage.Font=New-Object Drawing.Font('Segoe UI',14,[Drawing.FontStyle]::Bold)
+$stage.SetBounds(26,167,650,50); $form.Controls.Add($stage)
+$percent=New-Object Windows.Forms.Label
+$percent.Text=''; $percent.TextAlign='MiddleRight'
+$percent.SetBounds(668,167,66,32); $form.Controls.Add($percent)
+$bar=New-Object Windows.Forms.ProgressBar
+$bar.Minimum=0; $bar.Maximum=100; $bar.Style='Continuous'
+$bar.SetBounds(26,232,708,24); $form.Controls.Add($bar)
 $install = New-Object Windows.Forms.Button
-$install.Text='Retry setup'; $install.SetBounds(26,282,178,42)
+$install.Text='Install'; $install.SetBounds(26,374,190,44)
 $install.FlatStyle='Flat'; $install.FlatAppearance.BorderSize=0; $install.BackColor=$accent; $install.ForeColor=[Drawing.Color]::White
 $form.Controls.Add($install)
 $open = New-Object Windows.Forms.Button
-$open.Text='Open app'; $open.Enabled=$false; $open.SetBounds(216,282,140,42)
+$open.Text='Open Cale AI'; $open.Visible=$false; $open.Enabled=$false; $open.SetBounds(26,374,190,44)
 $open.FlatStyle='Flat'; $open.FlatAppearance.BorderSize=0; $open.BackColor=$card; $open.ForeColor=$ink
 $form.Controls.Add($open)
 $log = New-Object Windows.Forms.TextBox
 $log.Multiline=$true; $log.ReadOnly=$true; $log.ScrollBars='Vertical'
 $log.BackColor=$card; $log.ForeColor=$ink; $log.BorderStyle='None'; $log.Font=New-Object Drawing.Font('Consolas',9)
-$log.SetBounds(26,347,758,278); $form.Controls.Add($log)
+$log.SetBounds(26,492,708,208); $log.Visible=$false; $form.Controls.Add($log)
+$details=New-Object Windows.Forms.Button
+$details.Text='Details'; $details.SetBounds(614,374,120,44)
+$details.FlatStyle='Flat'; $details.ForeColor=$muted; $form.Controls.Add($details)
+$details.Add_Click({
+    $log.Visible=-not $log.Visible
+    if ($log.Visible) { $form.ClientSize=New-Object Drawing.Size(760,724); $details.Text='Hide details'; Update-SetupDetails }
+    else { $form.ClientSize=New-Object Drawing.Size(760,480); $details.Text='Details' }
+})
 $script:taskProcess=$null
 $script:taskLog=Join-Path $env:TEMP ('cale-ai-install-'+[guid]::NewGuid().ToString('N')+'.log')
 $script:taskError=$script:taskLog+'.errors'
+$script:setupStarted=0
+function Update-SetupDetails {
+    $log.Text='Install folder: '+$path.Text+"`r`n`r`n"
+    if(Test-Path -LiteralPath $script:taskLog){$log.AppendText((Get-Content -LiteralPath $script:taskLog -Tail 100)-join "`r`n")}
+    if(Test-Path -LiteralPath $script:taskError){$log.AppendText("`r`n"+(Get-Content -LiteralPath $script:taskError -Tail 25|Out-String))}
+}
 $timer=New-Object Windows.Forms.Timer; $timer.Interval=1000
 $timer.Add_Tick({
-    if (Test-Path -LiteralPath $script:taskLog) { $log.Text=(Get-Content -LiteralPath $script:taskLog -Tail 100) -join "`r`n" }
+    if ($log.Visible) { Update-SetupDetails }
+    $statusPath=Join-Path $path.Text 'LongTasks/install-progress.json'
+    if(Test-Path -LiteralPath $statusPath){
+        try {
+            $state=Get-Content -LiteralPath $statusPath -Raw|ConvertFrom-Json
+            # A prior install's 100% record must not flash Ready during retry.
+            if([double]$state.updated -ge $script:setupStarted){
+                $bar.Style='Continuous'; $bar.Value=[math]::Max(0,[math]::Min(100,[int]$state.percent))
+                $percent.Text=[string]$bar.Value+'%'
+                if($state.status -eq 'working'){$stage.Text=[string]$state.current}
+                else {$stage.Text='Finishing setup and checking everything'}
+            }
+        } catch { } # The next timer tick retries a temporarily busy status file.
+    }
     if ($script:taskProcess -and $script:taskProcess.HasExited) {
         $timer.Stop(); $install.Enabled=$true
-        if ($script:taskProcess.ExitCode -eq 0) { $open.Enabled=$true; $log.AppendText("`r`nReady. The workbench is open. You can close this setup window.") }
-        else { $log.AppendText("`r`nSetup still needs attention after automatic retries. You can click Retry setup after fixing the issue.`r`n"+(Get-Content -LiteralPath $script:taskError -Tail 25 -ErrorAction SilentlyContinue | Out-String)) }
+        $bar.Style='Continuous'
+        if ($script:taskProcess.ExitCode -eq 0) {
+            $bar.Value=100; $percent.Text='100%'; $stage.Text='Cale AI is ready!'
+            $notice.Text='Everything is set up. Open Cale AI and tell him what you want to do.'
+            $install.Visible=$false; $open.Visible=$true; $open.Enabled=$true
+        } else {
+            $stage.Text='Setup needs another try'; $install.Text='Try again'
+            $notice.Text='Your downloads are saved. Click Try again to continue. Details has the setup log if you need help.'
+        }
     }
     $log.SelectionStart=$log.Text.Length; $log.ScrollToCaret()
 })
 $install.Add_Click({
+    if($Preview){$stage.Text='Downloading your AI models';$percent.Text='42%';$bar.Value=42;return}
     $install.Enabled=$false; $open.Enabled=$false
-    $arguments='-NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $PSScriptRoot 'Install-Retry.ps1')+'" -Destination "'+$path.Text+'" -Profile auto'
+    $script:setupStarted=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $stage.Text='Getting your PC ready'; $percent.Text=''; $bar.Value=0; $bar.Style='Marquee'
+    $notice.Text='Cale is setting things up for you. Temporary download problems are retried automatically.'
+    $arguments='-NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $PSScriptRoot 'Install-Retry.ps1')+'" -Destination "'+$path.Text+'" -Profile auto -NoLaunch'
     $script:taskProcess=Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:taskLog -RedirectStandardError $script:taskError
     $log.Text='Starting installation. Large model downloads can take a while. Closing this window leaves installation running.'
     $timer.Start()
 })
 $open.Add_Click({ Start-Process -FilePath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $path.Text 'long_tasks.py')+'"') -WindowStyle Normal })
-$form.Add_Shown({ $install.PerformClick() })
+$form.AcceptButton=$install
+if($PreviewImage){
+    $previewTimer=New-Object Windows.Forms.Timer; $previewTimer.Interval=800
+    $previewTimer.Add_Tick({
+        $previewTimer.Stop()
+        $bitmap=New-Object Drawing.Bitmap($form.Width,$form.Height)
+        $form.DrawToBitmap($bitmap,(New-Object Drawing.Rectangle(0,0,$form.Width,$form.Height)))
+        $bitmap.Save($PreviewImage+'.progress.png'); $bitmap.Dispose()
+        $form.Close()
+    })
+    $form.Add_Shown({
+        $form.Refresh()
+        $bitmap=New-Object Drawing.Bitmap($form.Width,$form.Height)
+        $form.DrawToBitmap($bitmap,(New-Object Drawing.Rectangle(0,0,$form.Width,$form.Height)))
+        $bitmap.Save($PreviewImage); $bitmap.Dispose()
+        $install.PerformClick(); $form.Refresh()
+        $previewTimer.Start()
+    })
+}
 [void]$form.ShowDialog()
