@@ -55,13 +55,13 @@ def _installer_running(progress: dict) -> bool:
                         continue
                     if not installer_pid and actual != script:
                         continue
+                    # Even the installed script can target another install.
+                    # Check its destination for both PID and legacy records.
+                    destination = next((command[position + 1] for position, value in enumerate(command[:-1])
+                                        if value.lower() == "-destination"), None)
+                    if destination and Path(destination.strip('"')).resolve() != ROOT.resolve():
+                        continue
                     if installer_pid:
-                        # A second Cale install can use an extracted script
-                        # with the same name. Its progress is not ours.
-                        destination = next((command[position + 1] for position, value in enumerate(command[:-1])
-                                            if value.lower() == "-destination"), None)
-                        if destination and Path(destination.strip('"')).resolve() != ROOT.resolve():
-                            continue
                         created = process.create_time()
                         started = float(progress.get("installer_started") or 0)
                         updated = float(progress.get("updated") or 0)

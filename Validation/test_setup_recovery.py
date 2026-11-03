@@ -48,6 +48,22 @@ def test_extracted_installer_pid_is_recognized_without_duplicate_repair(tmp_path
         assert not setup_recovery._installer_running(progress)
 
 
+def test_legacy_installer_detection_respects_destination(tmp_path, monkeypatch):
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    worker = MagicMock()
+    command = ["powershell.exe", "-File", str(tmp_path / "Install-Backend.ps1")]
+    progress = {"status": "working", "updated": time.time() - 3600}
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    with patch("psutil.process_iter", return_value=[worker]):
+        worker.cmdline.return_value = command
+        assert setup_recovery._installer_running(progress)
+        worker.cmdline.return_value = command + ["-Destination", str(tmp_path)]
+        assert setup_recovery._installer_running(progress)
+        worker.cmdline.return_value = command + ["-Destination", str(tmp_path / "other-install")]
+        assert not setup_recovery._installer_running(progress)
+        assert setup_recovery._stalled(progress)
+
+
 def test_first_run_retry_process_prevents_duplicate_repair(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
