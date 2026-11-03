@@ -28,9 +28,9 @@ def wants_preview(project):
         "ready_for_review",
     ):
         return False
-    return bool(
-        WEB_WORDS.search(project.get("brief", "") + " " + project.get("title", ""))
-    )
+    brief = project.get("brief") or ""
+    title = project.get("title") or ""
+    return bool(WEB_WORDS.search(brief + " " + title))
 
 
 def safe_loopback_url(value):

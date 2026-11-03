@@ -26,6 +26,23 @@ class ProjectPreviewTests(unittest.TestCase):
             )
         )
 
+    def test_wants_preview_handles_none_fields(self):
+        self.assertFalse(
+            preview.wants_preview(
+                {"status": "working", "title": None, "brief": None}
+            )
+        )
+        self.assertTrue(
+            preview.wants_preview(
+                {"status": "working", "title": "Build app", "brief": None}
+            )
+        )
+        self.assertTrue(
+            preview.wants_preview(
+                {"status": "working", "title": None, "brief": "web app"}
+            )
+        )
+
     def test_only_explicit_loopback_servers_are_allowed(self):
         self.assertEqual(
             preview.safe_loopback_url("http://127.0.0.1:3000/"),
