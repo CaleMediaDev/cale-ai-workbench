@@ -422,6 +422,11 @@ def main() -> int:
                     break
                 if state.get("status") != "continue":
                     break
+        # Native browser tools keep a Sync Playwright driver alive in this
+        # process. Close it before the independent grader starts its own one.
+        import native_browser
+
+        native_browser.close()
         report = {
             "model": args.model,
             "scenario": args.scenario,

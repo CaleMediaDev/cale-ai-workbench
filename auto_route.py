@@ -177,8 +177,19 @@ def task_size(messages):
     all_user_text = "\n".join(users)
     request = all_user_text[-16000:]
     beginning = all_user_text[:16000]
+    # The native worker keeps its original brief in the first system message;
+    # its user message only says to begin. Size from the actual brief rather
+    # than sending a software build to the smallest question-answer model.
+    native_prompt = next((message_text(msg.get("content")) for msg in messages
+                          if isinstance(msg, dict) and msg.get("role") == "system"
+                          and message_text(msg.get("content")).startswith(
+                              "You are Cale's native project worker.")), "")
+    native_brief = (native_prompt.rsplit("\nUser request:\n", 1)[1].strip()
+                    if "\nUser request:\n" in native_prompt else "")
     project = PROJECT_REQUEST.search(beginning) or PROJECT_REQUEST.search(request)
-    if project:
+    if native_brief:
+        intent = native_brief
+    elif project:
         original = project.group(1).strip()
         # The latest saved user follow-ups can turn a small original task into
         # substantial new work. They are part of the worker prompt but live

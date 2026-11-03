@@ -107,6 +107,28 @@ class AutoRouteTests(unittest.TestCase):
                          "How do I create a folder?")
         self.assertEqual(task_size([{"role": "user", "content": prompt}]), "quick")
 
+    def test_native_worker_sizing_reads_its_saved_request(self):
+        import native_agent
+
+        webapp = native_agent.prompt({
+            "id": "native-test", "folder": "C:/Tasks/test",
+            "brief": "Build and test an offline tip-splitter app.",
+        })
+        messages = [{"role": "system", "content": webapp},
+                    {"role": "user", "content": "Begin the task. Inspect saved progress."}]
+        self.assertEqual(task_size(messages), "deep")
+        messages.append({"role": "assistant", "tool_calls": [
+            {"function": {"name": "read_file"}},
+        ]})
+        self.assertEqual(task_size(messages), "balanced")
+
+        question = native_agent.prompt({
+            "id": "native-question", "folder": "C:/Tasks/test",
+            "brief": "How do I create a folder?",
+        })
+        self.assertEqual(task_size([{"role": "system", "content": question},
+                                    {"role": "user", "content": "Begin the task."}]), "quick")
+
     def test_build_and_saved_project_use_deep_tier(self):
         self.assertEqual(
             task_size([{"role": "user", "content": "Build and test a recipe app."}]),
