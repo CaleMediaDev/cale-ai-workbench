@@ -52,6 +52,26 @@ class LongTaskTests(unittest.TestCase):
                 task_module._start_music_project(item, spec)
             self.assertFalse(start.call_args.kwargs["instrumental"])
 
+    def test_attached_reference_reaches_durable_local_music_job(self):
+        import music_backend
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            (folder / ".local-ai").mkdir()
+            reference = folder / "reference.mp4"
+            reference.write_bytes(b"video fixture")
+            item = {"id": "a" * 12, "folder": str(folder),
+                    "brief": "Use this song as a reference and make a three minute version"}
+            spec = {"prompt": "Create a new song in this style", "lyrics": "",
+                    "duration_seconds": 180, "instrumental": False,
+                    "source_path": str(reference), "reference_mode": "style"}
+            with (patch.object(task_module.feedback_learning, "guidance", return_value=""),
+                  patch.object(music_backend, "start_music_job", return_value={"job_id": "reference"}) as start,
+                  patch.object(task_module, "update")):
+                task_module._start_music_project(item, spec)
+            self.assertEqual(start.call_args.kwargs["source_path"], str(reference))
+            self.assertEqual(start.call_args.kwargs["reference_mode"], "style")
+
     def test_completed_misrouted_song_gets_vocal_take_without_deleting_original(self):
         import music_backend
 

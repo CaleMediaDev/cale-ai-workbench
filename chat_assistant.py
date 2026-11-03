@@ -22,6 +22,9 @@ QUICK_FILE_TYPES = {
     ".yml", ".py", ".js", ".ts", ".css", ".png", ".jpg",
     ".jpeg", ".webp", ".bmp", ".gif",
 }
+MUSIC_REFERENCE_TYPES = frozenset({
+    ".wav", ".mp3", ".flac", ".mp4", ".mov", ".m4v", ".webm", ".mkv",
+})
 FOLLOWUP_STATUSES = frozenset({
     "queued", "waiting_for_setup", "working", "checking", "paused",
     "needs_input", "ready_for_review",
@@ -65,7 +68,7 @@ def image_prompt(text: str) -> str | None:
     return match.group(1).strip(" .?!") if match else None
 
 
-def music_request(text: str) -> dict | None:
+def music_request(text: str, *, reference: bool = False) -> dict | None:
     """Recognize a new audio render, including detailed standalone briefs."""
     detailed_brief = bare_song_brief(text)
     value = re.sub(
@@ -102,9 +105,11 @@ def music_request(text: str) -> dict | None:
     if not detailed_brief and not re.search(r"\b(?:song|track|anthem|tune|banger|music|instrumental|jingle|beat|soundtrack|rap)\b", prompt, re.IGNORECASE):
         return None
     if re.search(
-        r"\b(?:cover|remix|edit|change|extend|from this|using this file|"
-        r"music video|this song|song longer|music app|music website|"
-        r"music software|music tool|music player|music studio|song generator)\b",
+        (r"\b(?:music video|music app|music website|music software|music tool|"
+         r"music player|music studio|song generator)\b" if reference else
+         r"\b(?:cover|remix|edit|change|extend|from this|using this file|"
+         r"music video|this song|song longer|music app|music website|"
+         r"music software|music tool|music player|music studio|song generator)\b"),
         prompt, re.IGNORECASE,
     ):
         return None
@@ -180,6 +185,37 @@ def music_request(text: str) -> dict | None:
         return None  # The agent can resolve contradictory instructions.
     return {"prompt": prompt.strip(" .?!"), "lyrics": lyrics,
             "duration_seconds": duration, "instrumental": instrumental}
+
+
+def music_reference_request(text: str, paths: list[str]) -> dict | None:
+    """Recognize one attached track as the source for a new local song."""
+    if (len(paths) != 1 or Path(paths[0]).suffix.casefold() not in MUSIC_REFERENCE_TYPES
+            or re.search(r"\b(?:music video|lyric video|visualizer|captions?)\b", text, re.I)
+            or not re.search(r"\b(?:song|music|track|beat|cover|remix|version)\b", text, re.I)
+            or not re.search(r"\b(?:make|create|generate|produce|compose|extend|cover|remix)\b", text, re.I)
+            or not re.search(r"\b(?:reference|using|use|from|based on|cover|remix|extend|version)\b", text, re.I)):
+        return None
+    # The ordinary parser deliberately leaves file edits to the agent. With
+    # one explicit music reference, use it to parse duration, lyrics and vocals.
+    direction = re.sub(
+        r"^(?:(?:i want (?:cale|you) to|can you|could you|please|have cale)\s+)+",
+        "", text.strip(), flags=re.I,
+    )
+    spec = music_request("Make a song. " + direction, reference=True)
+    if spec is None:
+        return None
+    spec["source_path"] = paths[0]
+    spec["reference_mode"] = (
+        "style" if re.search(r"\b(?:reference|based on|in the style of)\b", text, re.I)
+        else "cover"
+    )
+    direction_without_lyrics = re.split(r"\blyrics\s*:", direction, maxsplit=1, flags=re.I)[0]
+    spec["prompt"] = (
+        "Create a new song in the style of the supplied reference. "
+        if spec["reference_mode"] == "style" else
+        "Create a cover using the supplied recording. "
+    ) + direction_without_lyrics.strip(" .?!")
+    return spec
 
 
 def music_edit_request(command: str) -> bool:
@@ -298,6 +334,8 @@ def route(text: str, active_tasks: list[dict]) -> str:
 
 def route_with_files(text: str, active_tasks: list[dict], paths: list[str]) -> str:
     """Answer small file questions in chat; leave lasting work on the board."""
+    if music_reference_request(text, paths):
+        return "music"
     action = route(text, active_tasks)
     if paths and action == "image":
         return "task"

@@ -858,6 +858,8 @@ def _start_music_project(p: dict, spec: dict) -> None:
             lyrics=spec.get("lyrics", ""),
             duration_seconds=spec["duration_seconds"],
             instrumental=instrumental,
+            source_path=spec.get("source_path", ""),
+            reference_mode=spec.get("reference_mode", "cover"),
             task_id=pid,
         )
     except Exception as exc:
@@ -5417,13 +5419,15 @@ def gui():
                     assistant_reply("I'm making that image locally. Watch its progress in My Tasks.")
                 render_cards()
             elif action == "music":
+                music_spec = (chat_assistant.music_reference_request(raw_value, selected_paths)
+                              or chat_assistant.music_request(raw_value))
                 setup = read_task_status(STATE / "install-progress.json")
                 if setup_blocks_tasks(setup):
                     pid = add_project("", "", value, waiting_for_setup=True,
-                                      pending_media={"kind": "music", "spec": chat_assistant.music_request(raw_value)})
+                                      pending_media={"kind": "music", "spec": music_spec})
                     assistant_reply("I saved your music task. I'll start it after setup finishes.")
                 else:
-                    pid = add_music_project(value, chat_assistant.music_request(raw_value))
+                    pid = add_music_project(value, music_spec)
                     assistant_reply("I'm making that music locally. Watch its progress in My Tasks.")
                 render_cards()
             elif action == "task":

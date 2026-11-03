@@ -398,6 +398,20 @@ def test_direct_song_preserves_explicit_lyrics_and_routes_ambiguous_text_to_agen
     assert chat_assistant.route("Make an instrumental song with lyrics: sing along", []) == "task"
 
 
+def test_attached_video_reference_starts_direct_song_without_hijacking_video_edits():
+    clip = [r"C:\music\reference.mp4"]
+    request = "I want Cale to use this song as a reference and then make a 3 mins version"
+    spec = chat_assistant.music_reference_request(request, clip)
+    assert chat_assistant.route_with_files(request, [], clip) == "music"
+    assert spec["duration_seconds"] == 180
+    assert spec["source_path"] == clip[0]
+    assert spec["reference_mode"] == "style"
+    assert "Cale" not in spec["prompt"]
+    assert chat_assistant.route_with_files("Make a music video from this song", [], clip) == "task"
+    assert chat_assistant.music_reference_request(request, clip + [r"C:\music\other.mp3"]) is None
+    assert chat_assistant.music_reference_request("Make a song about the beach", clip) is None
+
+
 def test_music_edits_reach_agent_tools_instead_of_plain_chat():
     for request in (
         "Turn this melody into MIDI",
