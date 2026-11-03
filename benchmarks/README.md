@@ -1,5 +1,27 @@
 # Native worker reality check
 
+## Named numeric examples and recovery
+
+The [numeric coverage report](results/numeric-coverage-20261103.json) records a
+fresh local 9B app run completing five steps in 304.72 seconds and passing the
+stronger browser/mutation grader. It also records reopening the earlier
+behaviorally correct app whose tests omitted fractional people: the new gate
+identified the missing input; an initial 24-call recovery exhausted its budget,
+then a 22-call continuation finished after browser argument/diagnostic fixes.
+Both recovery stages left the HTML unchanged. The final verifier passed correct
+behavior and rejected fractional-people, blank-bill and changed-total mutations.
+The separate 148.86 and 149.96 second recovery timings exclude development pauses;
+they are not an end-to-end build time or a controlled speed comparison.
+
+The deterministic gate scans explicit invalid numeric examples only when a static
+number input can be identified uniquely. Decimal-equivalent inputs count, but
+numbers merely appearing in expected output do not. It skips ambiguous labels,
+nonnumeric controls, range descriptions and mixed valid/invalid clauses. This
+is input-presence evidence, not proof that every requested feature or assertion
+is covered. Exploratory small-model reviewers produced false missing-case claims
+on complete controls and were not deployed. The production gate adds no inference
+call; 25 scans of one small calculator had a 3.537 ms median on the developer PC.
+
 ## Browser steps and retained coverage
 
 `native_worker_smoke.py --scenario webapp --stepwise --model cale-fast`
@@ -14,7 +36,7 @@ without a verifier. A structured-check run completed three steps in 118.65
 seconds and its app passed all observed behavior checks, but the stronger grader
 found that its saved tests omitted fractional people. A later prompt experiment
 finished in 66.27 seconds while producing that bug and only one step. That
-unproven extra wording was removed. **None qualifies as a complete pass under
+unproven extra wording was removed. **None of those three runs qualifies as a complete pass under
 the stronger grader.** These single runs used evolving code and instructions;
 they do not establish a speedup or broad app-building reliability.
 

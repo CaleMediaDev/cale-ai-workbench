@@ -3,6 +3,7 @@
 import json
 import subprocess
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -83,11 +84,10 @@ def test_focused_json_cannot_choose_another_tool_or_run_arbitrary_text(tmp_path)
 
 
 @pytest.mark.parametrize("case",[
-    {"expect":{"answer":""}},
     {"expect":{"answer":"ok"},"hidden":["answer"]},
     {"visible":["error"],"hidden":["error"]},
 ])
-def test_contradictory_or_vacuous_cases_are_rejected_before_browser_launch(tmp_path,case):
+def test_contradictory_visibility_cases_are_rejected_before_browser_launch(tmp_path,case):
     (tmp_path/"index.html").write_text(PAGE,encoding="utf-8")
     with pytest.raises(ValueError):
         webapp_check.validate_spec(tmp_path,{"path":"index.html","cases":[case]})
@@ -432,6 +432,109 @@ def test_saved_browser_suite_accepts_explicit_empty_optional_fields(tmp_path):
     spec = {"path": "index.html", "cases": [{"set": {}, "click": [], "keys": [],
         "visible": [], "hidden": [], "wait_ms": 0, "expect": {"answer": "120.00"}}]}
     assert webapp_check.save_verifier(tmp_path, spec, accumulate=True)
+    assert webapp_check.run_saved_checks(tmp_path, tmp_path / ".local-ai/webapp-check.json")["passed"]
+
+
+def test_hidden_case_can_correct_prior_empty_text_assertion_without_dropping_other_targets(tmp_path):
+    (tmp_path / "index.html").write_text('<p id="answer" hidden>stale total</p><p id="error">Invalid</p>')
+    old = {"path": "index.html", "cases": [{"expect": {"answer": "", "error": "Invalid"}}]}
+    saved = webapp_check.saved_suite(tmp_path, old)
+    corrected = webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [{"hidden": ["answer"]}]}, saved)
+    case = corrected["checks"][0]["cases"][0]
+    assert case == {"expect": {"error": "Invalid"}, "hidden": ["answer"]}
+    assert webapp_check.check(tmp_path, corrected["checks"][0])["passed"]
+
+
+def test_named_numeric_examples_match_labels_and_decimal_values_without_model_review(tmp_path):
+    (tmp_path / "index.html").write_text('<label for="count">Quantity</label><input id="count" type="number"><p id="error">Invalid</p>')
+    initial = {"path": "index.html", "cases": [{"set": {"count": "0"}, "visible": ["error"]}]}
+    assert webapp_check.save_verifier(tmp_path, initial, accumulate=True)
+    request = "Quantity must be whole: zero and 1.5 are invalid."
+    missing = webapp_check.missing_numeric_boundaries(tmp_path, request)
+    assert [(item["input"], item["value"]) for item in missing] == [("count", "1.5")]
+    assert missing[0]["quote"] in request
+    extra = {"path": "index.html", "cases": [{"set": {"count": "1.5000"}, "visible": ["error"]}]}
+    assert webapp_check.save_verifier(tmp_path, extra, accumulate=True)
+    assert webapp_check.missing_numeric_boundaries(tmp_path, request) == []
+
+
+def test_numeric_example_check_does_not_guess_ambiguous_or_nonnumeric_requirements(tmp_path):
+    (tmp_path / "index.html").write_text('''<label for="bill">Bill amount</label><input id="bill" type="number">
+<label for="tip">Tip amount</label><input id="tip" type="number"><input id="password" type="password"><p id="error">Invalid</p>''')
+    assert webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [{"visible": ["error"]}]}, accumulate=True)
+    assert webapp_check.missing_numeric_boundaries(tmp_path, "Amount zero is invalid.") == []
+    assert webapp_check.missing_numeric_boundaries(tmp_path, "Bill and tip zero are invalid.") == []
+    assert webapp_check.missing_numeric_boundaries(tmp_path, "Password shorter than 8 characters is invalid.") == []
+    assert webapp_check.missing_numeric_boundaries(tmp_path, "A 375 pixel viewport must not be invalid.") == []
+    assert webapp_check.missing_numeric_boundaries(tmp_path, "Bill zero is not invalid; do not reject 0.") == []
+    assert webapp_check.missing_numeric_boundaries(tmp_path, "Bill below 10 is invalid.") == []
+    assert webapp_check.missing_numeric_boundaries(tmp_path, "Bill 0 is valid but 4.5 is invalid.") == []
+    assert webapp_check.missing_numeric_boundaries(tmp_path, "Bill zero is invalid.")[0]["input"] == "bill"
+    (tmp_path / ".local-ai/verify.ps1").write_text('Write-Output "Custom acceptance suite"\nexit 0\n')
+    assert webapp_check.missing_numeric_boundaries(tmp_path, "Bill zero is invalid.") == []
+
+
+def test_missing_numeric_case_blocks_handoff_until_actual_browser_case_is_added(tmp_path):
+    source = PAGE.replace('n>0', 'n>0&&Number.isInteger(n)').replace('<input id="bill"', '<input id="bill" type="number"')
+    (tmp_path / "index.html").write_text(source)
+    item = {"id": "coverage", "folder": str(tmp_path),
+            "brief": "Build an index.html app with a Bill input. Bill zero and 4.5 are invalid."}
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        initial = native_agent.execute_tool(tmp_path, "check_webapp", SPEC)
+        assert json.loads(initial)["passed"]
+        state = {"verify_passed": True, **native_agent.browser_check_evidence(tmp_path, SPEC, initial)}
+        (tmp_path / ".local-ai/PLAN.md").write_text('- [x] Built and verified\n')
+        (tmp_path / ".local-ai/PROGRESS.md").write_text('App built and existing checks passed; checking coverage.')
+        issue = native_agent.completion_issue(tmp_path, item, state)
+        assert '"value": "4.5"' in issue and 'no retained browser test' in issue
+        assert not native_agent.automatic_handoff_ready(tmp_path, item, state)
+        extra = {"path": "index.html", "cases": [{"set": {"bill": "4.5"}, "visible": ["error"], "hidden": ["answer"]}]}
+        assert json.loads(native_agent.execute_tool(tmp_path, "check_webapp", extra))["verifier_check_passed"]
+        assert native_agent.completion_issue(tmp_path, item, state) == ''
+        assert native_agent.automatic_handoff_ready(tmp_path, item, state)
+    assert (tmp_path / "index.html").read_text() == source
+
+
+def test_numeric_boundary_scan_reads_late_followup_and_requires_observed_input(tmp_path):
+    (tmp_path / "index.html").write_text('<label for="age">Age</label><input id="age" type="number"><p id="error">Invalid</p>')
+    assert webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [
+        {"expect": {"error": "-1 is invalid"}}]}, accumulate=True)
+    request = "Earlier details. " * 9000 + "Age -1 and 2e1 are invalid."
+    missing = webapp_check.missing_numeric_boundaries(tmp_path, request)
+    assert {Decimal(item["value"]) for item in missing} == {Decimal(-1), Decimal(20)}
+
+
+def test_browser_setup_then_observation_is_coalesced_without_reordering(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    original = {"path": "index.html", "cases": [
+        {"set": {"bill": "80"}}, {"expect": {"answer": "96.00"}},
+        {"set": {"bill": "0"}}, {"visible": ["error"]}]}
+    normalized = webapp_check.normalize_spec(original)
+    assert len(normalized["cases"]) == 2
+    result = webapp_check.check(tmp_path, original)
+    assert result["passed"] and len(result["cases"]) == 2
+    assert len(original["cases"]) == 4
+    assert webapp_check.save_verifier(tmp_path, original, accumulate=True)
+    assert webapp_check.run_saved_checks(tmp_path, tmp_path / ".local-ai/webapp-check.json")["passed"]
+    for cases in ([{"set": {"bill": "80"}}],
+                  [{"set": {"bill": "80"}}, {"click": ["calculate"]}, {"expect": {"answer": "96.00"}}]):
+        with pytest.raises(ValueError, match="observable assertion"):
+            webapp_check.validate_spec(tmp_path, webapp_check.normalize_spec({"path": "index.html", "cases": cases}))
+
+
+def test_empty_expectation_checks_actual_cleared_text_and_never_passes_vacuously(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    cleared = {"path": "index.html", "cases": [{"set": {"bill": "0"}, "expect": {"answer": ""}, "visible": ["error"]}]}
+    assert webapp_check.check(tmp_path, cleared)["passed"]
+    stale = {"path": "index.html", "cases": [{"expect": {"answer": ""}}]}
+    assert not webapp_check.check(tmp_path, stale)["passed"]
+    assert not webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"expect": {"missing": ""}}]})["passed"]
+    (tmp_path / "index.html").write_text('<p id="answer" hidden>' + ' ' * 500 + 'stale total</p>')
+    assert not webapp_check.check(tmp_path, stale)["passed"]
+    (tmp_path / "index.html").write_text('<p id="answer" hidden>  </p>')
+    both = {"path": "index.html", "cases": [{"expect": {"answer": ""}, "hidden": ["answer"]}]}
+    assert webapp_check.check(tmp_path, both)["passed"]
+    assert webapp_check.save_verifier(tmp_path, both, accumulate=True)
     assert webapp_check.run_saved_checks(tmp_path, tmp_path / ".local-ai/webapp-check.json")["passed"]
 
 
