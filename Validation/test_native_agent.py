@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -167,6 +168,20 @@ def test_transform_csv_cleans_rows_without_changing_source():
         verify_command = {"command": "powershell -File .local-ai/verify.ps1"}
         assert native_agent.execute_tool(folder, "run_command", verify_command).startswith(
             "Exit code: 0\n")
+        helper = folder / ".local-ai" / "verify-transform-csv.py"
+        assert helper.is_file()
+        prior_hash = hashlib.sha256((folder / "cleaned_contacts.csv").read_bytes()).hexdigest().upper()
+        wrong_row = "name,phone,city\nWrong Name,5175550101,Lansing\n"
+        (folder / "cleaned_contacts.csv").write_text(wrong_row, encoding="utf-8")
+        # Even if the expected output hash is updated, the separate check
+        # must reject rows that violate the saved transform rules.
+        new_hash = hashlib.sha256((folder / "cleaned_contacts.csv").read_bytes()).hexdigest().upper()
+        helper.write_text(helper.read_text(encoding="utf-8").replace(prior_hash, new_hash),
+                          encoding="utf-8")
+        semantic_result = subprocess.run([sys.executable, str(helper)],
+                                         capture_output=True, text=True)
+        assert semantic_result.returncode != 0
+        assert "do not match" in semantic_result.stderr
         (folder / "cleaned_contacts.csv").write_text("corrupted", encoding="utf-8")
         assert native_agent.execute_tool(folder, "run_command", verify_command).startswith(
             "Exit code: 1\n")
@@ -809,6 +824,19 @@ def test_task_action_ledger_names_files_without_storing_content():
         summary = task_context.snapshot(folder)
         assert "read_file src/page.py: Completed" in summary
         assert "secret document text" not in summary
+
+
+def test_csv_action_ledger_keeps_counts_without_private_rows():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "table")
+        folder = Path(item["folder"])
+        task_context.record_action(folder, "transform_csv", json.dumps({
+            "output": "cleaned.csv", "kept": 3, "dropped_invalid": 1,
+            "dropped_duplicate": 2, "preview": [{"name": "private person"}],
+        }), {"output_path": "cleaned.csv"})
+        summary = task_context.snapshot(folder)
+        assert "transform_csv cleaned.csv (3 kept, 1 invalid, 2 duplicate): Completed" in summary
+        assert "private person" not in summary
 
 
 def test_task_action_ledger_marks_structured_failures_without_error_details():

@@ -190,6 +190,15 @@ def record_action(folder: str | Path, tool: str, result: str, arguments: dict | 
                 subject = candidate.relative_to(root).as_posix()[:180]
         except (OSError, ValueError):
             pass  # A bad tool path must not prevent checkpointing its result.
+    if tool == "transform_csv" and outcome == "Completed" and subject:
+        try:
+            counts = json.loads(result)
+            subject += (f" ({int(counts['kept'])} kept, "
+                        f"{int(counts['dropped_invalid'])} invalid, "
+                        f"{int(counts['dropped_duplicate'])} duplicate)")
+        except (ValueError, TypeError, KeyError):
+            pass
+        subject = subject[:180]
     with project_memory.connection(folder) as conn:
         _schema(conn)
         conn.execute("INSERT INTO task_events(tool,outcome,created,subject) VALUES(?,?,?,?)",

@@ -281,6 +281,59 @@ def transform_project_csv(folder: Path, arguments: dict) -> str:
         target_name = str(target.relative_to(folder)).replace("\\", "/")
         source_hash = hashlib.sha256(source.read_bytes()).hexdigest().upper()
         output_hash = hashlib.sha256(target.read_bytes()).hexdigest().upper()
+        rules = json.dumps({"source": source_name, "output": target_name,
+                            "fields": fields, "transforms": transforms,
+                            "lengths": lengths, "unique_by": unique_by,
+                            "source_hash": source_hash, "output_hash": output_hash},
+                           ensure_ascii=True)
+        # Keep the check independent of the tool's in-memory result. It
+        # re-parses both saved files and recomputes every requested row.
+        semantic_check = (
+            "import csv\nimport hashlib\nimport json\nfrom pathlib import Path\n\n"
+            f"rules = json.loads({rules!r})\n"
+            "root = Path(__file__).resolve().parents[1]\n"
+            "source = root / rules['source']\n"
+            "output = root / rules['output']\n"
+            "for path, key in ((source, 'source_hash'), (output, 'output_hash')):\n"
+            "    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest().upper() != rules[key]:\n"
+            "        raise SystemExit(f'{path.name} changed or is missing; rerun transform_csv')\n"
+            "with source.open(encoding='utf-8-sig', newline='') as stream:\n"
+            "    reader = csv.DictReader(stream, strict=True)\n"
+            "    if reader.fieldnames != rules['fields']:\n"
+            "        raise SystemExit('Source CSV columns changed')\n"
+            "    original = list(reader)\n"
+            "with output.open(encoding='utf-8-sig', newline='') as stream:\n"
+            "    reader = csv.DictReader(stream, strict=True)\n"
+            "    if reader.fieldnames != rules['fields']:\n"
+            "        raise SystemExit('Output CSV columns are wrong')\n"
+            "    actual = list(reader)\n"
+            "expected = []\nseen = set()\n"
+            "for row in original:\n"
+            "    if None in row or any(value is None for value in row.values()):\n"
+            "        raise SystemExit('Source CSV has a malformed row')\n"
+            "    clean = dict(row)\n"
+            "    for column, action in rules['transforms'].items():\n"
+            "        value = clean[column]\n"
+            "        if action == 'trim': value = value.strip()\n"
+            "        elif action == 'title': value = value.strip().title()\n"
+            "        elif action == 'upper': value = value.strip().upper()\n"
+            "        elif action == 'lower': value = value.strip().lower()\n"
+            "        elif action == 'digits': value = ''.join(char for char in value if '0' <= char <= '9')\n"
+            "        clean[column] = value\n"
+            "    if any(len(clean[column]) != length for column, length in rules['lengths'].items()):\n"
+            "        continue\n"
+            "    key = tuple(clean[column] for column in rules['unique_by'])\n"
+            "    if rules['unique_by'] and key in seen: continue\n"
+            "    seen.add(key)\n    expected.append(clean)\n"
+            "if actual != expected:\n"
+            "    raise SystemExit('Output CSV rows do not match the source and transform rules')\n"
+            "print(f'CSV verified: {len(expected)} rows match source and transform rules')\n"
+        )
+        verifier.parent.mkdir(parents=True, exist_ok=True)
+        helper = verifier.with_name("verify-transform-csv.py")
+        helper_stage = helper.with_suffix(".py.native-tmp")
+        helper_stage.write_text(semantic_check, encoding="utf-8")
+        os.replace(helper_stage, helper)
         script = (
             marker + "\n$ErrorActionPreference = 'Stop'\n"
             "$root = Split-Path -Parent $PSScriptRoot\n"
@@ -295,9 +348,12 @@ def transform_project_csv(folder: Path, arguments: dict) -> str:
             f"if ((Get-ContentHash $source) -ne '{source_hash}') {{ throw 'Source CSV changed; rerun transform_csv.' }}\n"
             f"if ((Get-ContentHash $output) -ne '{output_hash}') {{ throw 'Cleaned CSV changed; review and rerun transform_csv.' }}\n"
             f"if (@(Import-Csv -LiteralPath $output).Count -ne {kept}) {{ throw 'Unexpected output row count.' }}\n"
+            f"$python = {literal(sys.executable)}\n"
+            "if (-not (Test-Path -LiteralPath $python)) { $python = (Get-Command python -ErrorAction Stop).Source }\n"
+            f"& $python (Join-Path $PSScriptRoot {literal(helper.name)})\n"
+            "if ($LASTEXITCODE -ne 0) { throw 'CSV semantic check failed.' }\n"
             "Write-Output 'CSV output and source checks passed.'\n"
         )
-        verifier.parent.mkdir(parents=True, exist_ok=True)
         staged = verifier.with_suffix(".ps1.native-tmp")
         staged.write_text(script, encoding="utf-8-sig")
         os.replace(staged, verifier)
@@ -541,6 +597,7 @@ def prompt(project: dict) -> str:
                  + brief[-2850:])
     data_hint = (
         "For common CSV cleanup, use transform_csv with explicit transforms, exact_lengths, and unique_by. "
+        "It writes a repeatable source, output, and semantic verifier; run that verifier after inspecting its output instead of replacing it. "
         "For other tabular work, use a real parser such as Python's csv module in a saved script. "
         "Do not split CSV rows with regular expressions or shell string replacement. "
         "Keep the source data unchanged and inspect the saved output before verification. "
