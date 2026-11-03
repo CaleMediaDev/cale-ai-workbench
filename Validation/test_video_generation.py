@@ -88,6 +88,30 @@ def test_missing_nvidia_driver_reports_hardware_requirement(tmp_path):
             video_generation._hardware_ready(tmp_path / "clip.mp4")
 
 
+def test_worker_launch_failure_persists_failed_status(tmp_path):
+    jobs = tmp_path / "jobs"
+    with patch.object(video_generation, "JOBS", jobs), patch.object(
+        video_generation, "_hardware_ready"
+    ), patch.object(
+        video_generation.subprocess, "Popen",
+        side_effect=FileNotFoundError("worker executable missing"),
+    ):
+        with pytest.raises(FileNotFoundError, match="worker executable missing"):
+            video_generation.start_video_job(
+                "A calm forest in the rain", str(tmp_path / "clip.mp4")
+            )
+        records = list(jobs.glob("*.json"))
+        assert len(records) == 1
+        stored = json.loads(records[0].read_text(encoding="utf-8"))
+        assert stored["state"] == "failed"
+        assert "worker_pid" not in stored
+        status = video_generation.video_job_status(stored["job_id"])
+        assert status["state"] == "failed"
+        assert status["error"] == "FileNotFoundError: worker executable missing"
+        assert status["log_path"] == str(jobs / f"{stored['job_id']}.log")
+        assert status["progress_percent"] is None
+
+
 def test_video_status_reports_latest_sampler_progress(tmp_path):
     job_id = "a" * 32
     with patch.object(video_generation, "JOBS", tmp_path):

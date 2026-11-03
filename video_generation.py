@@ -128,10 +128,14 @@ def start_video_job(prompt: str, output_path: str, image_path: str = "",
                "seconds": float(seconds), "layout": layout}
     _write(job_id, state="queued", **payload)
     log = JOBS / f"{job_id}.log"
-    with log.open("wb") as stream:
-        proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "worker", job_id],
-                                cwd=str(ROOT), stdin=subprocess.DEVNULL, stdout=stream,
-                                stderr=subprocess.STDOUT, creationflags=HIDE)
+    try:
+        with log.open("wb") as stream:
+            proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "worker", job_id],
+                                    cwd=str(ROOT), stdin=subprocess.DEVNULL, stdout=stream,
+                                    stderr=subprocess.STDOUT, creationflags=HIDE)
+    except OSError as exc:
+        _write(job_id, state="failed", error=f"{type(exc).__name__}: {exc}", log_path=str(log))
+        raise
     return _write(job_id, state="starting", worker_pid=proc.pid, log_path=str(log))
 
 
