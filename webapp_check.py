@@ -54,9 +54,32 @@ def validate_spec(folder: Path, spec: dict) -> Path:
         raise ValueError("Viewport width must be 320 to 1920 pixels")
     if "mobile_fit" in spec and not isinstance(spec["mobile_fit"], bool):
         raise ValueError("mobile_fit must be true or false")
+    total_wait = 0
     for case in cases:
-        if not isinstance(case, dict) or not set(case).issubset({"set", "click", "expect", "visible", "hidden", "mobile_fit"}):
-            raise ValueError("Use set, click, expect, visible, hidden, and mobile_fit in each case")
+        if not isinstance(case, dict) or not set(case).issubset({"set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit"}):
+            raise ValueError("Use set, click, keys, wait_ms, expect, visible, hidden, and mobile_fit in each case")
+        keys = case.get("keys", [])
+        if not isinstance(keys, list) or len(keys) > 20:
+            raise ValueError("keys must be a list of at most 20 key actions")
+        for action in keys:
+            if not isinstance(action, dict) or not set(action).issubset({"key", "hold_ms"}):
+                raise ValueError("Each key action needs key and optional hold_ms")
+            key = action.get("key")
+            if not isinstance(key, str) or not (
+                    re.fullmatch(r"[A-Za-z0-9]", key) or key in {
+                        "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space",
+                        "Enter", "Escape", "Tab", "Backspace", "Home", "End", "PageUp", "PageDown"}):
+                raise ValueError("Use a single letter, digit, or supported navigation key")
+            duration = action.get("hold_ms", 0)
+            if isinstance(duration, bool) or not isinstance(duration, int) or not 0 <= duration <= 1000:
+                raise ValueError("hold_ms must be 0 to 1000 milliseconds")
+            total_wait += duration
+        delay = case.get("wait_ms", 0)
+        if isinstance(delay, bool) or not isinstance(delay, int) or not 0 <= delay <= 2000:
+            raise ValueError("wait_ms must be 0 to 2000 milliseconds")
+        total_wait += delay
+        if total_wait > 10_000:
+            raise ValueError("Browser cases may wait at most 10000 milliseconds in total")
         clicks = case.get("click", [])
         if not isinstance(clicks, list) or len(clicks) > 20:
             raise ValueError("click must be a list of at most 20 element IDs")
@@ -143,8 +166,7 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                                 )
                             else:
                                 raise
-                # Apply actions in a fixed, replayable order: fill, click, then
-                # assert. A button-driven app must be tested through its UI.
+                # Replay actual user input: fill, click, keys, wait, assertions.
                 for element_id in case.get("click", []):
                     control = page.locator("#" + element_id)
                     if control.count() != 1:
@@ -154,6 +176,19 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                         control.click(timeout=5_000)
                     except PlaywrightError as exc:
                         failures.append(f"Could not click #{element_id}: {str(exc)[:200]}")
+                for action in case.get("keys", []):
+                    key = action["key"]
+                    try:
+                        page.keyboard.down(key)
+                        try:
+                            if action.get("hold_ms", 0):
+                                page.wait_for_timeout(action["hold_ms"])
+                        finally:
+                            page.keyboard.up(key)
+                    except PlaywrightError as exc:
+                        failures.append(f"Could not press {key}: {str(exc)[:200]}")
+                if case.get("wait_ms", 0):
+                    page.wait_for_timeout(case["wait_ms"])
                 for element_id, text in case.get("expect", {}).items():
                     target = page.locator("#" + element_id)
                     actual = target.inner_text()[:200] if target.count() == 1 else "<missing>"

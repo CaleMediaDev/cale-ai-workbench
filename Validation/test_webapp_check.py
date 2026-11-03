@@ -50,6 +50,66 @@ def test_button_calculation_replays_and_rejects_broken_handler(tmp_path):
     assert not webapp_check.check(tmp_path, saved)["passed"]
 
 
+def test_keyboard_game_checks_replay_saved_verifier_and_detect_broken_controls(tmp_path):
+    pytest.importorskip("playwright")
+    source = '''<!doctype html><html><body>
+<p id="position">center</p><p id="shots">0</p><p id="held">released</p>
+<button id="restart">Restart</button><script>
+let shots=0, held=false;
+const position=document.getElementById('position'), status=document.getElementById('held');
+addEventListener('keydown', e=>{
+  if(e.key==='ArrowRight'){held=true;status.textContent='held';}
+  if(e.code==='Space')document.getElementById('shots').textContent=String(++shots);
+});
+setInterval(()=>{if(held)position.textContent='right';},30);
+addEventListener('keyup',()=>{held=false;status.textContent='released';});
+document.getElementById('restart').onclick=()=>{
+ shots=0;position.textContent='center';document.getElementById('shots').textContent='0';
+};</script></body></html>'''
+    page = tmp_path / "game.html"
+    page.write_text(source, encoding="utf-8")
+    spec = {"path": "game.html", "cases": [
+        {"keys": [{"key": "ArrowRight", "hold_ms": 150}, {"key": "Space"}],
+         "wait_ms": 50, "expect": {"position": "right", "shots": "1", "held": "released"}},
+        {"click": ["restart"], "expect": {"position": "center", "shots": "0"}},
+    ]}
+    assert webapp_check.check(tmp_path, spec)["passed"]
+    assert webapp_check.save_verifier(tmp_path, spec)
+    saved = json.loads((tmp_path / ".local-ai/webapp-check.json").read_text())
+    assert saved == spec
+    assert webapp_check.check(tmp_path, saved)["passed"]
+    # A real input regression must fail the exact persisted test.
+    page.write_text(source.replace("e.key==='ArrowRight'", "e.key==='ArrowLeft'"), encoding="utf-8")
+    result = webapp_check.check(tmp_path, saved)
+    assert not result["passed"]
+    assert any("position" in message for message in result["cases"][0]["failures"])
+
+
+@pytest.mark.parametrize("changes", [
+    {"keys": "ArrowRight"}, {"keys": [{}]}, {"keys": [{"key": "Control+L"}]},
+    {"keys": [{"key": "a", "hold_ms": True}]},
+    {"keys": [{"key": "a", "hold_ms": 1001}]},
+    {"keys": [{"key": "a", "hold_ms": -1}]},
+    {"keys": [{"key": "a", "extra": "ignored"}]},
+    {"wait_ms": 2001}, {"wait_ms": True}, {"wait_ms": -1},
+    {"keys": [{"key": "a", "hold_ms": 1000}] * 11},
+])
+def test_keyboard_checks_reject_invalid_or_excessive_actions(tmp_path, changes):
+    (tmp_path / "index.html").write_text(PAGE, encoding="utf-8")
+    with pytest.raises(ValueError):
+        webapp_check.validate_spec(tmp_path, {
+            "path": "index.html", "cases": [{"visible": ["answer"], **changes}],
+        })
+
+
+def test_keyboard_only_case_still_needs_an_observable_assertion(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE, encoding="utf-8")
+    with pytest.raises(ValueError, match="observable assertion"):
+        webapp_check.validate_spec(tmp_path, {
+            "path": "index.html", "cases": [{"keys": [{"key": "Space"}]}],
+        })
+
+
 def test_click_spec_requires_bounded_ids_and_an_assertion(tmp_path):
     (tmp_path / "index.html").write_text(PAGE, encoding="utf-8")
     for clicks in ("calculate", ["#calculate"], ["a"] * 21):
