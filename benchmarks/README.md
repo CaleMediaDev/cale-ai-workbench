@@ -42,6 +42,15 @@ to account for model variation and record cold and warm model timings separately
 Expand the suite to media work and more varied documents before using it to
 make general reliability claims.
 
+On November 3, 2026, a fresh webapp run with the local `cale-main-64k`
+model completed in 333.4 seconds, using nine model calls and twelve tool
+calls. Every independent check passed, including fractional people, blank
+bill, mobile width, and rejection of deliberately broken JavaScript. This
+followed a worker instruction change requiring separate cases for every
+explicit example and boundary in the request. The earlier run had omitted
+the fractional case and failed the independent grader. This single run used
+a fixed model; it does not establish repeatability or automatic routing quality.
+
 The contacts scenario exercises the guarded CSV startup route. Its report
 includes that model call and checks the saved result independently. Run the
 temperature scenario too: it should stay on the ordinary coding path.

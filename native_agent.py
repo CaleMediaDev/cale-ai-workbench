@@ -636,6 +636,11 @@ def prompt(project: dict) -> str:
     web_hint = (
         "For a local HTML app, use check_webapp with actual input and visible-result cases, "
         "including invalid states if requested. A source-text scan cannot prove UI behavior. "
+        "Before testing, list every explicit input/output example and boundary condition "
+        "from the user's request in PLAN.md. Give each its own browser case; one invalid "
+        "case does not cover other invalid values. Test blank values separately from zero, "
+        "and fractional values separately when a count must be a whole number. Do not "
+        "silently round or truncate invalid counts. Check that invalid input hides stale results. "
         "The tool can save a repeatable browser verifier; preserve it and run it after edits. "
         if re.search(r"(?i)\b(?:website|web app|html|webpage)\b", brief) else ""
     )
