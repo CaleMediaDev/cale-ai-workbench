@@ -414,6 +414,24 @@ def test_attached_video_reference_starts_direct_song_without_hijacking_video_edi
     assert chat_assistant.route_with_files(
         "Make a 3 minute song using this recording as a reference", [], phone_audio,
     ) == "music"
+    assert chat_assistant.route_with_files(
+        "I want a three-minute version of this song", [], phone_audio,
+    ) == "music"
+    assert chat_assistant.music_reference_request(
+        "Can you turn this recording into a two-minute song?", phone_audio,
+    )["duration_seconds"] == 120
+    assert chat_assistant.music_reference_request(
+        "I want to know how to make a song using this recording", phone_audio,
+    ) is None
+
+
+def test_spoken_song_durations_keep_the_requested_length():
+    for request, seconds in (
+        ("Make a three-minute song", 180),
+        ("Make a one minute thirty second song", 90),
+        ("Make a forty-five second jingle", 45),
+    ):
+        assert chat_assistant.music_request(request)["duration_seconds"] == seconds
 
 
 def test_music_edits_reach_agent_tools_instead_of_plain_chat():

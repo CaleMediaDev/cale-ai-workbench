@@ -26,6 +26,12 @@ MUSIC_REFERENCE_TYPES = frozenset({
     ".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus",
     ".mp4", ".mov", ".m4v", ".webm", ".mkv",
 })
+DURATION_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40,
+    "forty-five": 45, "fifty": 50, "sixty": 60, "ninety": 90,
+}
 FOLLOWUP_STATUSES = frozenset({
     "queued", "waiting_for_setup", "working", "checking", "paused",
     "needs_input", "ready_for_review",
@@ -114,14 +120,20 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
         prompt, re.IGNORECASE,
     ):
         return None
-    clock = re.search(r"\b(\d{1,2}):([0-5]\d)\b", prompt)
+    duration_text = re.sub(
+        r"\b(" + "|".join(sorted(DURATION_WORDS, key=len, reverse=True))
+        + r")(?=\s*(?:-|\s)\s*(?:minutes?|mins?|min|seconds?|secs?|sec|s)\b)",
+        lambda match: str(DURATION_WORDS[match.group(1).casefold()]),
+        prompt, flags=re.I,
+    )
+    clock = re.search(r"\b(\d{1,2}):([0-5]\d)\b", duration_text)
     combined = re.search(
         r"\b(\d+)\s*(?:minutes?|mins?|min)\s*(?:and\s*)?"
-        r"(\d+)\s*(?:seconds?|secs?|sec|s)\b", prompt, re.IGNORECASE,
+        r"(\d+)\s*(?:seconds?|secs?|sec|s)\b", duration_text, re.IGNORECASE,
     )
     single_candidates = re.finditer(
         r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|minutes?|mins?|min|s)\b",
-        prompt, re.IGNORECASE,
+        duration_text, re.IGNORECASE,
     )
     # In a style brief, "1990s" and "2000s" are decades, not seconds.
     def decade_style(match: re.Match[str]) -> bool:
@@ -132,8 +144,8 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
             return True
         if not re.fullmatch(r"(?:[6-9]0|00)", number):
             return False
-        before = prompt[max(0, match.start() - 12):match.start()]
-        after = prompt[match.end():match.end() + 30]
+        before = duration_text[max(0, match.start() - 12):match.start()]
+        after = duration_text[match.end():match.end() + 30]
         return bool(re.search(r"\b(?:the|late|early|mid)\s*$", before, re.I)
                     or re.match(
                         r"\s*(?:-\s*)?(?:style|era|vibe|music|pop|rock|techno|"
@@ -191,10 +203,12 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
 def music_reference_request(text: str, paths: list[str]) -> dict | None:
     """Recognize one attached track as the source for a new local song."""
     if (len(paths) != 1 or Path(paths[0]).suffix.casefold() not in MUSIC_REFERENCE_TYPES
+            or re.match(r"^\s*(?:how|what|why|when|where|is|are|can i|could i|should i|do i)\b", text, re.I)
+            or re.search(r"\b(?:want|need|like) to (?:know|learn|ask|understand)\b", text, re.I)
             or re.search(r"\b(?:music video|lyric video|visualizer|captions?)\b", text, re.I)
             or not re.search(r"\b(?:song|music|track|beat|cover|remix|version)\b", text, re.I)
-            or not re.search(r"\b(?:make|create|generate|produce|compose|extend|cover|remix)\b", text, re.I)
-            or not re.search(r"\b(?:reference|using|use|from|based on|cover|remix|extend|version)\b", text, re.I)):
+            or not re.search(r"\b(?:make|create|generate|produce|compose|extend|cover|remix|turn|want|need)\b|\bi'd like\b", text, re.I)
+            or not re.search(r"\b(?:reference|using|use|from|based on|cover|remix|extend|version|into)\b", text, re.I)):
         return None
     # The ordinary parser deliberately leaves file edits to the agent. With
     # one explicit music reference, use it to parse duration, lyrics and vocals.
