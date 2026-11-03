@@ -768,14 +768,22 @@ class LongTaskTests(unittest.TestCase):
         self.engine.start()
         self.state = patch.object(task_module, "STATE", self.base / "state")
         self.state.start()
+        # Self-check runs inside a real installation too. No fixture may
+        # accidentally dispatch a task to its authenticated, live board.
+        self.live_board = patch.object(task_module, "hermes", side_effect=AssertionError(
+            "Mock the board boundary; validation must never launch a real agent"))
+        self.live_board_mock = self.live_board.start()
         self.pid = task_module.add_project(
             "fixture", str(self.base / "project"), "Build and test a working fixture"
         )
 
     def tearDown(self):
+        stray_calls = self.live_board_mock.call_args_list
+        self.live_board.stop()
         self.state.stop()
         self.engine.stop()
         self.temp.cleanup()
+        self.assertEqual(stray_calls, [], "Unmocked calls reached the real board boundary")
 
     def item(self):
         return task_module.projects()[0]
@@ -1420,6 +1428,7 @@ class LongTaskTests(unittest.TestCase):
         self.assertFalse((Path(item["folder"]) / ".local-ai/pending-media.json").exists())
 
     def test_music_start_failure_keeps_request_and_retries_automatically(self):
+        task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"
         progress.write_text('{"status":"complete"}', encoding="utf-8")
         spec = {"prompt": "Michigan rap", "lyrics": "", "duration_seconds": 180,
@@ -1445,6 +1454,7 @@ class LongTaskTests(unittest.TestCase):
         self.assertFalse(pending.exists())
 
     def test_image_start_failure_keeps_request_and_retries_automatically(self):
+        task_module.update(self.pid, status="paused")
         progress = task_module.STATE / "install-progress.json"
         progress.write_text('{"status":"complete"}', encoding="utf-8")
         import quick_image
