@@ -129,6 +129,7 @@ def main() -> int:
         except Exception as error:
             graded = {"passed": False, "error": f"{type(error).__name__}: {str(error)[:500]}"}
     report = {"scenario": "javascript_logic_repair", "scope": __doc__, "brief": BRIEF, "resumed": args.resume,
+              "automatic_step_checks": state.get("automatic_step_checks", 0),
               "seconds": round(elapsed, 2), **stats, "checkpoint_status": state.get("status"),
               "inference_error": failure, "grade": graded}
     report["run_outcome"] = "passed" if state.get("status") == "done" and graded["passed"] and not failure else "failed"

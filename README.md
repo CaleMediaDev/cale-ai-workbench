@@ -251,6 +251,19 @@ Passing a component verifier while SQLite steps remain no longer triggers the
 worker's overall-plan completion reminder. The worker must continue the queue;
 project handoff still requires all steps and suitable whole-project checks.
 
+After work begins, the native runner can check saved Python, JavaScript and
+offline browser acceptance automatically before the next inference request.
+It uses the same checker and SQLite commit path as `task_steps complete`, advances
+at most eight units per pass, and stops at a failed check or missing source.
+An unchanged failure is not automatically repeated across worker restarts;
+source, acceptance, request or retained-suite changes allow another attempt.
+Pause/Stop, task removal, new instructions, acceptance revisions and source
+changes during checking prevent stale progress from being committed. Automatic
+browser checks retain the input-effect and page-evidence requirements. Shell and
+custom integration commands remain explicit tool actions. These checks reduce
+bookkeeping inference; they do not create acceptance cases or prove test coverage
+of requirements the model omitted.
+
 The model still chooses its tests. The retained local JavaScript repair trial
 failed to complete its four steps, despite partial code repairs. Passing the
 checker implementation's regression suite is not proof of reliable game

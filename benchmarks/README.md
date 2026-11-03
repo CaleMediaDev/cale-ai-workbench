@@ -37,6 +37,23 @@ changed to preserve generated function-suite files and direct revisions through
 the checksum-bound checker API. That protection has regression-test evidence,
 not another live-model success claim.
 
+The [automatic-step report](results/automatic-steps-20261103.json) resumes that
+same saved checkpoint with the automatic acceptance runner. It took 91.61
+seconds / 11 local inference calls; the runner executed three structured checks
+without inference and all five saved units finished. The independent grader
+passed all 13 helper behaviors, the saved verifier passed correct source, and
+all four deliberately broken implementations were rejected. This proves
+recovery of this small module's checking/bookkeeping from an already-correct
+source checkpoint. It is not a fresh build, a complete game or a controlled
+speed comparison. Earlier failed attempts remain in the preceding reports.
+
+A fresh trial from the original broken module took 539.44 seconds / 24 calls.
+It planned and finished only one unit, missed the unspawned-wave behavior, and
+its verifier rejected only the movement mutant. Three automatic attempts checked
+that unit, but this did not provide the missing phase plan or coverage. It is
+retained as a failed end-to-end build. The runner automates execution of selected
+acceptance; it does not fix a model's incomplete plan or infer omitted tests.
+
 ## Saved browser assertion repair
 
 `browser_assertion_repair.py --model cale-gemma4-edge --keep-folder C:\path\to\new-folder`

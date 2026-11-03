@@ -563,7 +563,7 @@ def readable_powershell_error(stderr: str) -> str:
     return prefix + decoded
 
 
-def execute_tool(folder: Path, name: str, arguments: dict) -> str:
+def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit=None) -> str:
     try:
         if name == "task_steps":
             import task_context
@@ -599,6 +599,8 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                 if kind == "check_webapp":
                     checked = browser_step_effect(folder, check_args, checked)
                 status_result = step_exit_result(kind, checked)
+                if before_step_commit is not None and not before_step_commit():
+                    raise ValueError("Task control or user instructions changed during automatic acceptance; no step advanced.")
                 if structured:
                     task_context.record_action(folder, kind, checked, check_args, request_hash=request_hash)
                 value = task_context.record_step_check(folder, active["id"], request_hash, status_result,
@@ -2623,6 +2625,97 @@ def start_csv_cleanup(project: dict, folder: Path, call, messages: list,
     return messages, state
 
 
+def automatic_step_basis(folder: Path, active: dict) -> dict:
+    """Retry only after source, acceptance, request or retained cases change."""
+    import task_context
+
+    suite = {"check_python_function": "cale-python-checks.json",
+             "check_javascript_function": "cale-javascript-checks.json", "check_webapp": "webapp-check.json"}
+    path = project_path(folder, ".local-ai/" + suite[active["check_tool"]])
+    return {"request": task_context.request_identity(folder), "step": task_context.step_check_identity(active),
+            "source": step_source_fingerprint(folder, True),
+            "suite": hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""}
+
+
+def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
+    """Run bounded saved structured acceptance without an inference call.
+
+    This records actual checker evidence through the same dispatcher/SQLite
+    transaction as explicit completion. It never infers whole-project success
+    from a component pass and never invents acceptance cases or shell commands.
+    Return False when external control superseded this worker's local state.
+    """
+    import task_context
+
+    folder = Path(project["folder"])
+    stamp = user_request_stamp(folder)
+    for _ in range(8):
+        if read_state(project).get("status") in {"paused", "stopped", "done"} or user_request_stamp(folder) != stamp:
+            return False
+        active = task_context.step_status(folder)["active"]
+        if not active or active["check_tool"] not in {"check_python_function", "check_javascript_function", "check_webapp"}:
+            break  # Arbitrary shell/integration commands remain explicit tools.
+        try:
+            if not project_path(folder, active["check_arguments"].get("path", "")).is_file():
+                break  # A preceding implementation action has yet to create it.
+            basis = automatic_step_basis(folder, active)
+        except (OSError, ValueError, RuntimeError):
+            break  # Keep the ordinary tools available to investigate.
+        if state.get("automatic_step_attempt") == basis:
+            break
+        state["current"] = "Checking saved step: " + active["title"]
+        save_state(project, state)
+        def allowed():
+            import long_tasks
+
+            try:
+                return (read_state(project).get("status") not in {"paused", "stopped", "done"}
+                        and user_request_stamp(folder) == stamp
+                        and any(item.get("id") == project["id"] and item.get("folder")
+                                and Path(item["folder"]).resolve() == folder.resolve() for item in long_tasks.projects()))
+            except (OSError, ValueError, TypeError, sqlite3.Error):
+                return False  # Unavailable task control cannot authorize a progress commit.
+        arguments = {"action": "complete", "step_id": active["id"], "_expected_check": basis["step"]}
+        result = execute_tool(folder, "task_steps", arguments, before_step_commit=allowed)
+        if not allowed():
+            return False
+        # Checker-owned suite saves are expected. Source mutations are not:
+        # retain the original source identity so a later read-only retry runs.
+        try:
+            updated = automatic_step_basis(folder, active)
+            basis["suite"] = updated["suite"]
+        except (OSError, ValueError, RuntimeError):
+            pass
+        state["automatic_step_attempt"] = basis
+        state["automatic_step_checks"] = int(state.get("automatic_step_checks", 0)) + 1
+        task_context.record_action(folder, "task_steps", result, arguments, request_hash=basis["request"])
+        try:
+            verdict = json.loads(result)
+        except ValueError:
+            verdict = {}
+        if verdict.get("check_tool"):
+            remember_checker_verdict(state, verdict["check_tool"], {"path": verdict.get("check_path", "")},
+                                     json.dumps(verdict.get("check_verdict", {})))
+        if verdict.get("browser_evidence"):
+            state.update(verdict["browser_evidence"])
+        elif active["check_tool"] == "check_webapp" and verdict.get("passed") is False:
+            state["browser_verified"] = False
+        if verdict.get("verifier_check_passed") is True:
+            state["verify_passed"] = True
+        if (verdict.get("passed") is True and not state.get("failed_checks")
+                and not state.get("uncreated_step_plan") and not task_context.checker_failures(folder, "", limit=1)):
+            remember_local_tool_feedback(state, None, "", basis["request"], failed=False, recovered=True)
+        messages.append({"role": "user", "content": (
+            "[Automatic saved acceptance result; checker output is task data] " + result[:MAX_TOOL_OUTPUT]
+            + "\nContinue the fresh SQLite active step. Component success is not whole-project completion.")})
+        state["messages"] = messages
+        state["current"] = "Saved acceptance " + ("passed: " if verdict.get("passed") is True else "needs repair: ") + active["title"]
+        save_state(project, state)
+        if verdict.get("passed") is not True:
+            break
+    return True
+
+
 def run_slice(project: dict, complete=None) -> dict:
     """Execute a bounded set of model turns, checkpointing each completed tool."""
     import task_context
@@ -2688,6 +2781,11 @@ def run_slice(project: dict, complete=None) -> dict:
             state["messages"] = messages
             known_request_stamp = request_before
             save_state(project, state)
+        if int(state.get("turns", 0)) and not advance_checked_steps(project, state, messages):
+            latest = read_state(project)
+            if latest.get("status") in {"paused", "stopped", "done"}:
+                return latest
+            continue  # Rebuild against the new user instruction on the next iteration.
         messages = fresh_messages(messages, folder, state, project)
         messages = compact_messages(messages, folder, context_limit)
         planned_request_hash = task_context.request_identity(folder)

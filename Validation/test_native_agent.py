@@ -382,6 +382,113 @@ def test_worker_preserves_owned_function_suite_and_directs_case_revision(tmp_pat
         "path": ".local-ai/cale-python-checks.json"})
 
 
+def test_automatic_acceptance_advances_real_steps_without_inference_or_handoff(tmp_path):
+    item = project(tmp_path / "automatic-steps")
+    folder = Path(item["folder"])
+    (folder / "logic.js").write_text("function first(x){return x+1}\nfunction second(x){return x*2}")
+    specs = [{"path": "logic.js", "function": name, "cases": [{"args": [2], "expected": expected}]}
+             for name, expected in (("first", 3), ("second", 4))]
+    task_context.plan_steps(folder, [{"phase": "Logic", "title": spec["function"],
+        "check_tool": "check_javascript_function", "check_arguments": spec} for spec in specs])
+    state = {"status": "running", "turns": 1}
+    native_agent.save_state(item, state)
+    messages = []
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        assert native_agent.advance_checked_steps(item, state, messages)
+    assert task_context.step_status(folder)["done"] == 2
+    assert state["turns"] == 1 and state["automatic_step_checks"] == 2
+    assert state["verify_passed"] and state["status"] == "running" and len(messages) == 2
+    # The accumulated verifier must still test the earlier function.
+    (folder / "logic.js").write_text("function first(x){return 0}\nfunction second(x){return x*2}")
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        assert native_agent.execute_tool(folder, "run_verifier", {}).startswith("Exit code: 1")
+
+
+def test_automatic_acceptance_caches_failure_across_restart_and_retries_source_or_check_changes(tmp_path):
+    item = project(tmp_path / "automatic-retry")
+    folder = Path(item["folder"])
+    source = folder / "logic.js"
+    source.write_text("function calculate(x){return x}")
+    spec = {"path": "logic.js", "function": "calculate", "cases": [{"args": [2], "expected": 4}]}
+    step = {"phase": "Logic", "title": "Calculate", "check_tool": "check_javascript_function", "check_arguments": spec}
+    active = task_context.plan_steps(folder, [step])["active"]
+    state = {"status": "running", "turns": 1}
+    native_agent.remember_local_tool_feedback(state, "fixture-local", "", task_context.request_identity(folder), failed=True, recovered=False)
+    native_agent.remember_local_tool_feedback(state, "fixture-local", "", task_context.request_identity(folder), failed=True, recovered=False)
+    native_agent.save_state(item, state)
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        assert native_agent.advance_checked_steps(item, state, [])
+        assert state["automatic_step_checks"] == 1 and task_context.step_status(folder)["done"] == 0
+        assert state["local_repair_feedback"]
+        state = native_agent.read_state(item)
+        assert native_agent.advance_checked_steps(item, state, [])
+        assert state["automatic_step_checks"] == 1
+        # A revised acceptance identity retries even with unchanged source.
+        corrected = {**spec, "cases": [{"args": [2], "expected": 3}]}
+        task_context.revise_step(folder, active["id"], [{**step, "check_arguments": corrected}])
+        assert native_agent.advance_checked_steps(item, state, [])
+        assert state["automatic_step_checks"] == 2 and task_context.step_status(folder)["done"] == 0
+        source.write_text("function calculate(x){return x+1}")
+        assert native_agent.advance_checked_steps(item, state, [])
+    assert state["automatic_step_checks"] == 3 and task_context.step_status(folder)["done"] == 1
+    assert "local_repair_feedback" not in state
+
+
+def test_automatic_acceptance_does_not_commit_control_request_source_or_acceptance_races(tmp_path):
+    for race in ("pause", "delete", "request", "source", "acceptance"):
+        item = project(tmp_path / ("automatic-race-" + race))
+        folder = Path(item["folder"])
+        source = folder / "logic.js"
+        source.write_text("function calculate(x){return x}")
+        spec = {"path": "logic.js", "function": "calculate", "cases": [{"args": [2], "expected": 2}]}
+        step = {"phase": "Logic", "title": "Calculate", "check_tool": "check_javascript_function", "check_arguments": spec}
+        active = task_context.plan_steps(folder, [step])["active"]
+        state = {"status": "running", "turns": 1}
+        native_agent.save_state(item, state)
+        execute = native_agent.execute_tool
+        registered = [item]
+        def intervene(root, name, arguments, **kwargs):
+            if name == "task_steps":
+                allowed = kwargs["before_step_commit"]
+                def commit():
+                    if race == "pause":
+                        native_agent.save_state(item, {**state, "status": "paused"})
+                    elif race == "delete":
+                        registered.clear()
+                    elif race == "request":
+                        (folder / ".local-ai/USER-REQUESTS.md").write_text("New instruction")
+                    elif race == "source":
+                        source.write_text("function calculate(x){return 999}")
+                    else:
+                        task_context.revise_step(folder, active["id"], [{**step, "check_arguments": {
+                            **spec, "cases": [{"args": [2], "expected": 3}]}}])
+                    return allowed()
+                kwargs["before_step_commit"] = commit
+            return execute(root, name, arguments, **kwargs)
+        with patch.object(long_tasks, "projects", return_value=registered), patch.object(native_agent, "execute_tool", side_effect=intervene):
+            result = native_agent.advance_checked_steps(item, state, [])
+        assert task_context.step_status(folder)["done"] == 0
+        if race in {"pause", "delete", "request"}:
+            assert result is False
+        if race == "pause":
+            assert native_agent.read_state(item)["status"] == "paused"
+
+
+def test_automatic_acceptance_waits_for_source_and_leaves_shell_checks_explicit(tmp_path):
+    for name, step in (("missing", {"phase": "Logic", "title": "Not created", "check_tool": "check_javascript_function",
+        "check_arguments": {"path": "missing.js", "function": "calculate", "cases": [{"args": [2], "expected": 2}]}}),
+        ("shell", {"phase": "Integration", "title": "Explicit command", "check_command": "echo check"})):
+        item = project(tmp_path / name)
+        folder = Path(item["folder"])
+        task_context.plan_steps(folder, [step])
+        state = {"status": "running", "turns": 1}
+        native_agent.save_state(item, state)
+        with patch.object(native_agent, "execute_tool") as execute:
+            assert native_agent.advance_checked_steps(item, state, [])
+        execute.assert_not_called()
+        assert task_context.step_status(folder)["done"] == 0
+
+
 def test_javascript_formats_execute_current_source_and_generate_repeatable_verifiers(tmp_path):
     formats = [("js", "function calculate(x){return x*2}", "calculate"),
         ("js", "const calculate=x=>x*2", "calculate"),

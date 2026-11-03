@@ -151,6 +151,30 @@ def test_unchanged_hud_cannot_complete_input_step_but_static_scaffolding_can(tmp
             assert "Input-step coverage failed" in task_context.snapshot(folder)
 
 
+def test_automatic_browser_steps_preserve_input_effect_and_real_browser_evidence(tmp_path):
+    for name, html, cases, passes in (
+        ("weak", '<p id="score">0</p>', [{"keys": [{"key": "ArrowRight"}], "expect": {"score": "0"}}], False),
+        ("real", PAGE, [{"set": {"bill": "200"}, "expect": {"answer": "240.00"}},
+                        {"set": {"bill": "50"}, "expect": {"answer": "60.00"}}], True),
+    ):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "index.html").write_text(html)
+        item = {"id": "automatic-browser", "folder": str(folder)}
+        task_context.plan_steps(folder, [{"phase": "Input", "title": "Verify behavior", "check_tool": "check_webapp",
+            "check_arguments": {"path": "index.html", "cases": cases}}])
+        state = {"status": "running", "turns": 1}
+        native_agent.save_state(item, state)
+        with patch.object(long_tasks, "projects", return_value=[item]):
+            assert native_agent.advance_checked_steps(item, state, [])
+        assert task_context.step_status(folder)["done"] == (1 if passes else 0)
+        if passes:
+            assert state["browser_verified"] and state["browser_interactions"] and state["verify_passed"]
+        else:
+            assert state["browser_verified"] is False and state["verify_passed"] is False
+            assert "Input-step coverage failed" in task_context.snapshot(folder)
+
+
 def test_invariant_input_step_can_use_fresh_same_page_saved_positive_control(tmp_path):
     (tmp_path / "index.html").write_text(PAGE)
     item = {"id": "positive", "folder": str(tmp_path)}

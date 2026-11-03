@@ -1,0 +1,379 @@
+{
+  "scope": "Synthetic pure-module fixture. Resumed prior failed checkpoint whose four source functions already passed independent behavior grading; not a fresh build, full game, controlled speed comparison or general reliability estimate.",
+  "app_version": "0.5.449-development",
+  "prior_evidence": "javascript-logic-recovery-20261103.json",
+  "runs": [
+    {
+      "scenario": "javascript_logic_repair",
+      "scope": "Repair real JS game helpers through local tools, then independently grade them.\n\nThis is a pure-module fixture, not a complete playable game or visual benchmark.\nNo cloud account, original user project, model installation or app task is used.\n",
+      "brief": "Repair logic.js, the actual plain-script module loaded by a browser game.\nPreserve its four top-level function APIs and plain function-declaration format:\nmovePlayer(x,direction,seconds,width,speed) moves by direction*speed*seconds and\nclamps the player's center to [20,width-20]. Inputs have direction -1..1, width>=40,\nfinite numbers and nonnegative seconds. Verify left/right bounds and frame-independent timing.\noverlaps(a,b) takes top-left x,y,w,h rectangles. Only positive-area overlap is true;\ntouching edges and separated rectangles are false.\nadvanceWave(wave,remaining,spawned) adds one only when remaining===0 AND spawned is true.\ntickCooldown(remaining,seconds) subtracts seconds and clamps at zero.\nUse one small SQLite unit per function, four completed units total. Save meaningful\ncheck_javascript_function input/expected acceptance cases in each unit, including\nthe explicit boundaries above. Run the accumulated read-only verifier. No PowerShell\ntest code is needed. Do not create a test-only copy or change the public APIs.\nKeep PLAN.md and PROGRESS.md accurate. This request is for the helper module only.\n",
+      "resumed": true,
+      "seconds": 91.61,
+      "model_calls": 11,
+      "tool_calls": 10,
+      "prompt_tokens": 87672,
+      "completion_tokens": 1386,
+      "tools_used": [
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "edit_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 16.0
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.88
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.82
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.49
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.22
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.99
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.59
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.88
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 10.61
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.93
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.21
+        }
+      ],
+      "router_call_attempts": 11,
+      "upstream_local_calls": 11,
+      "checkpoint_status": "done",
+      "inference_error": null,
+      "grade": {
+        "checks": {
+          "movement": true,
+          "left": true,
+          "right": true,
+          "still": true,
+          "frame_independence": true,
+          "hit": true,
+          "edge": true,
+          "miss": true,
+          "complete": true,
+          "incomplete": true,
+          "not_spawned": true,
+          "cooldown": true,
+          "cooldown_clamp": true
+        },
+        "verifier_passes_correct": true,
+        "mutations": {
+          "frame_time": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "touching_edges": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "unspawned_wave": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "negative_cooldown": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          }
+        },
+        "steps": {
+          "total": 5,
+          "done": 5,
+          "remaining": 0
+        },
+        "passed": true
+      },
+      "run_outcome": "passed",
+      "automatic_step_checks": 3,
+      "checkpoint_turns": 59
+    },
+    {
+      "scenario": "javascript_logic_repair",
+      "scope": "Repair real JS game helpers through local tools, then independently grade them.\n\nThis is a pure-module fixture, not a complete playable game or visual benchmark.\nNo cloud account, original user project, model installation or app task is used.\n",
+      "brief": "Repair logic.js, the actual plain-script module loaded by a browser game.\nPreserve its four top-level function APIs and plain function-declaration format:\nmovePlayer(x,direction,seconds,width,speed) moves by direction*speed*seconds and\nclamps the player's center to [20,width-20]. Inputs have direction -1..1, width>=40,\nfinite numbers and nonnegative seconds. Verify left/right bounds and frame-independent timing.\noverlaps(a,b) takes top-left x,y,w,h rectangles. Only positive-area overlap is true;\ntouching edges and separated rectangles are false.\nadvanceWave(wave,remaining,spawned) adds one only when remaining===0 AND spawned is true.\ntickCooldown(remaining,seconds) subtracts seconds and clamps at zero.\nUse one small SQLite unit per function, four completed units total. Save meaningful\ncheck_javascript_function input/expected acceptance cases in each unit, including\nthe explicit boundaries above. Run the accumulated read-only verifier. No PowerShell\ntest code is needed. Do not create a test-only copy or change the public APIs.\nKeep PLAN.md and PROGRESS.md accurate. This request is for the helper module only.\n",
+      "resumed": false,
+      "automatic_step_checks": 3,
+      "seconds": 539.44,
+      "model_calls": 24,
+      "tool_calls": 24,
+      "prompt_tokens": 191046,
+      "completion_tokens": 5356,
+      "tools_used": [
+        "list_files",
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "edit_file",
+        "task_steps",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "write_file",
+        "read_file",
+        "edit_file",
+        "edit_file",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "list_files",
+        "read_file",
+        "run_verifier",
+        "read_file",
+        "read_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 13.09
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 10.35
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 11.13
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 54.25
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 37.73
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 45.21
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 118.74
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 37.66
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 39.2
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 15.41
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.11
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.86
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.71
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.27
+        },
+        {
+          "model": "cale-local",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 53.29
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 17.74
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.19
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 13.93
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.56
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.69
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.55
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 1.55
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 3.3
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.45
+        }
+      ],
+      "router_call_attempts": 24,
+      "upstream_local_calls": 26,
+      "checkpoint_status": "continue",
+      "inference_error": null,
+      "grade": {
+        "checks": {
+          "movement": true,
+          "left": true,
+          "right": true,
+          "still": true,
+          "frame_independence": true,
+          "hit": true,
+          "edge": true,
+          "miss": true,
+          "complete": true,
+          "incomplete": true,
+          "not_spawned": false,
+          "cooldown": true,
+          "cooldown_clamp": true
+        },
+        "verifier_passes_correct": true,
+        "mutations": {
+          "frame_time": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "touching_edges": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": false
+          },
+          "unspawned_wave": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": false
+          },
+          "negative_cooldown": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": false
+          }
+        },
+        "steps": {
+          "total": 1,
+          "done": 1,
+          "remaining": 0
+        },
+        "passed": false
+      },
+      "run_outcome": "failed"
+    }
+  ],
+  "development_note": "Final task-registry error handling and verified-progress routing-feedback reset were added after these trials started; covered separately by regression tests. Fresh trial ran alongside regression tests. No controlled speed or causality claim."
+}
