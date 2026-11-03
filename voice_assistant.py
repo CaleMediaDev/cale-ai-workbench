@@ -563,8 +563,32 @@ def microphone_status():
     return media_call("microphone_status")
 
 
-def say(message, rate=0, cancel=None):
+def speech_ready() -> bool:
+    """Cale stays silent until setup, his clone, and current checks pass."""
+    import cale_voice
+
+    def state(name):
+        try:
+            return json.loads((ROOT / "LongTasks" / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    try:
+        version = (ROOT / ".cale-ai-install").read_text(encoding="utf-8").strip()
+        checks = state("self-check.json")
+        probes = state("readiness-probes.json")
+        return bool(version and state("install-progress.json").get("status") == "complete"
+                    and cale_voice.ready() and checks.get("version") == version
+                    and checks.get("status") == "passed" and probes.get("version") == version
+                    and probes.get("voice", {}).get("ok"))
+    except (OSError, TypeError, AttributeError):
+        return False
+
+
+def say(message, rate=0, cancel=None, require_clone=False):
     """Speak one short status message through Windows' offline voice."""
+    if require_clone and (not speech_ready() or _heavy_gpu_active()):
+        raise RuntimeError("Cale is staying quiet until his own voice and checks are ready.")
     bundled_name = {
         WAKE_ACK: "cale-wake-ack.wav",
         REPLAY_ACK: "cale-reading-ack.wav",
@@ -606,9 +630,13 @@ def say(message, rate=0, cancel=None):
                         pass  # The spoken reply worked even if caching failed.
                 return result
             except (OSError, RuntimeError, ValueError):
+                if require_clone:
+                    raise  # Never substitute a different voice for Cale.
                 # Keep spoken updates available if the clone worker exits or
                 # a particular phrase cannot be synthesized.
                 pass
+        if require_clone:
+            raise RuntimeError("Cale's own voice is unavailable; chat remains available.")
         result = media_call(
             "speak",
             text=str(message)[:280],

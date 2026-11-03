@@ -20,6 +20,53 @@ import voice_assistant
 
 
 class VoiceTests(unittest.TestCase):
+    def test_clone_only_speech_never_plays_before_readiness(self):
+        with (patch.object(voice_assistant, "speech_ready", return_value=False),
+              patch.object(voice_assistant, "media_call") as fallback,
+              patch.object(voice_assistant, "_play_file") as play,
+              patch.object(cale_voice, "speak") as clone):
+            with self.assertRaisesRegex(RuntimeError, "staying quiet"):
+                voice_assistant.say(voice_assistant.WAKE_ACK, require_clone=True)
+        fallback.assert_not_called()
+        play.assert_not_called()
+        clone.assert_not_called()
+
+    def test_clone_only_speech_never_falls_back_after_clone_failure(self):
+        with (patch.object(voice_assistant, "speech_ready", return_value=True),
+              patch.object(voice_assistant, "_heavy_gpu_active", return_value=False),
+              patch.object(cale_voice, "ready", return_value=True),
+              patch.object(cale_voice, "speak", side_effect=RuntimeError("clone failed")),
+              patch.object(voice_assistant, "media_call") as fallback):
+            with self.assertRaisesRegex(RuntimeError, "clone failed"):
+                voice_assistant.say("Your task is ready", require_clone=True)
+        fallback.assert_not_called()
+
+    def test_speech_readiness_requires_current_setup_clone_and_checks(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            state = root / "LongTasks"
+            state.mkdir()
+            version = "Cale AI Workbench 0.5.421"
+            (root / ".cale-ai-install").write_text(version)
+            records = {
+                "install-progress.json": {"status": "complete"},
+                "self-check.json": {"version": version, "status": "passed"},
+                "readiness-probes.json": {"version": version, "voice": {"ok": True}},
+            }
+            for name, record in records.items():
+                (state / name).write_text(json.dumps(record))
+            with (patch.object(voice_assistant, "ROOT", root),
+                  patch.object(cale_voice, "ready", return_value=True)):
+                self.assertTrue(voice_assistant.speech_ready())
+                for name in records:
+                    original = (state / name).read_text()
+                    (state / name).write_text('{}')
+                    self.assertFalse(voice_assistant.speech_ready(), name)
+                    (state / name).write_text(original)
+            with (patch.object(voice_assistant, "ROOT", root),
+                  patch.object(cale_voice, "ready", return_value=False)):
+                self.assertFalse(voice_assistant.speech_ready())
+
     def test_mute_interrupts_current_spoken_reply_without_muting_microphone(self):
         import queue
 

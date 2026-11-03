@@ -3665,7 +3665,8 @@ def gui():
     style.configure(
         "Accent.TButton", background=accent, foreground="white", padding=(18, 11)
     )
-    style.map("Accent.TButton", background=[("active", "#8797ff")])
+    style.map("Accent.TButton", background=[("disabled", "#26334d"), ("active", "#8797ff")],
+              foreground=[("disabled", "#b7c8e6")])
     style.configure("Danger.TButton", background="#a94358", foreground="white")
     style.map("Danger.TButton", background=[("active", "#c15367")])
     style.configure("Mode.TButton", padding=(7, 4), font=("Segoe UI", 9, "bold"))
@@ -4289,7 +4290,7 @@ def gui():
 
     voice_speaking = threading.Event()
     talk_chat_row = ttk.Frame(main_page)
-    talk_chat_row.pack(fill="x", pady=(0, 5))
+    talk_chat_row.pack(fill="x", pady=(4, 18))
     title_row = ttk.Frame(talk_chat_row)
     title_row.pack(side="left", anchor="n", padx=(0, 14))
     title_copy = ttk.Frame(title_row)
@@ -4319,6 +4320,11 @@ def gui():
     )
     camera_preview.pack(fill="both", expand=True)
     ttk.Label(camera_scene, text="YOU  •  LOCAL WEBCAM", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+    companion_controls = ttk.Frame(title_copy)
+    companion_controls.pack(fill="x", pady=(10, 0))
+    speech_status = tk.StringVar(value="Preparing your voice · Cale is quiet")
+    ttk.Label(title_copy, textvariable=speech_status, style="Muted.TLabel",
+              wraplength=510).pack(anchor="w", pady=(8, 0))
 
     def clear_camera_preview():
         camera_preview.configure(image="", text="Your camera\nTurn it on to join Cale")
@@ -4431,14 +4437,14 @@ def gui():
     def next_speech_sequence():
         speech_sequence[0] += 1
         return speech_sequence[0]
-    voice_label = tk.StringVar(value="Voice ready · Ctrl+Alt+Space")
+    voice_label = tk.StringVar(value="Preparing Cale's voice · chat is available")
 
     def speech_worker():
         """Speak queued updates one at a time, after microphone clips finish."""
         while True:
             rank, _, message, rate, vary, required, replay_id = speech_queue.get()
             try:
-                if voice_muted.is_set():
+                if voice_muted.is_set() or not voice_assistant.speech_ready():
                     if message == voice_assistant.WAKE_ACK:
                         voice_events.put(("wake_ack_done", ""))
                     continue
@@ -4478,6 +4484,7 @@ def gui():
                         cancel=voice_assistant.SpeechCancel(
                             mic_turn_requested, speech_queue, rank, voice_muted
                         ),
+                        require_clone=True,
                     )
                     if mic_turn_requested.is_set() and index < len(chunks):
                         remainder = " ".join(chunks[index:])
@@ -4550,7 +4557,7 @@ def gui():
 
     def speak_update(message, rate=0, vary=False, required=(), priority=None, replay_id=None):
         """Queue one audible update without blocking the task screen."""
-        if voice_muted.is_set():
+        if voice_muted.is_set() or not voice_assistant.speech_ready():
             return
         with speech_lock:
             voice_speaking.set()
@@ -4585,7 +4592,7 @@ def gui():
     def introduce_if_ready(setup):
         """Explain the app once, after the installer and natural voice are ready."""
         nonlocal introduction_queued
-        if (introduction_queued or voice_muted.is_set()
+        if (introduction_queued or voice_muted.is_set() or not voice_assistant.speech_ready()
                 or (setup and setup.get("status") != "complete")):
             return
         voice_ready = (
@@ -4794,11 +4801,11 @@ def gui():
             voice_label.set("Cale's voice is muted. Chat and microphone still work.")
 
     mute_button = ttk.Button(
-        title_row, text="🔇  Unmute Cale" if voice_muted.is_set() else "🔊  Mute Cale",
+        companion_controls, text="🔇  Unmute Cale" if voice_muted.is_set() else "🔊  Mute Cale",
         command=toggle_voice_mute,
     )
     mute_button.pack(side="right", padx=(0, 8), pady=(8, 0))
-    mic_button = ttk.Button(title_row, text="🎤  Mic Off", command=toggle_listening)
+    mic_button = ttk.Button(companion_controls, text="🎤  Mic Off", command=toggle_listening)
     mic_button.pack(side="right", padx=(0, 8), pady=(8, 0))
     presence = tk.Canvas(
         header, width=148, height=46, background=bg,
@@ -5065,10 +5072,10 @@ def gui():
             status.set("Camera greeting turned off.")
 
     camera_button = ttk.Button(
-        title_copy, text="📷  Camera On" if greeting_until[0] > time.time()
+        companion_controls, text="📷  Camera On" if greeting_until[0] > time.time()
         else "📷  Camera Off", command=toggle_camera_greeting,
     )
-    camera_button.pack(anchor="w", pady=(8, 0))
+    camera_button.pack(side="left", padx=(6, 0))
     if greeting_until[0] > time.time():
         start_camera_greeting()
     window.bind("<Control-Alt-space>", lambda _: record_voice())
@@ -5076,12 +5083,12 @@ def gui():
               wraplength=310).pack(
         anchor="w", pady=(8, 2)
     )
-    chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=12)
+    chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=18)
     chat_panel.pack(side="left", fill="both", expand=True)
     chat_heading = ttk.Frame(chat_panel, style="Card.TFrame")
     chat_heading.pack(fill="x", pady=(0, 5))
-    ttk.Label(chat_heading, text="Chat with Cale", style="Card.TLabel",
-              font=("Segoe UI", 12, "bold")).pack(side="left")
+    ttk.Label(chat_heading, text="What shall we make?", style="Card.TLabel",
+              font=("Segoe UI", 18, "bold")).pack(side="left")
     readiness_text = tk.StringVar(value="")
     readiness_label = ttk.Label(
         chat_panel, textvariable=readiness_text, style="CardMuted.TLabel",
@@ -5119,7 +5126,7 @@ def gui():
         )
         button.pack(side="left", padx=(4, 0))
         mode_buttons[mode] = button
-    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=142)
+    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=180)
     conversation_frame.pack(fill="both", expand=True)
     conversation_frame.pack_propagate(False)
     conversation = tk.Text(
@@ -5563,8 +5570,8 @@ def gui():
 
     window.after(350, poll_chat)
     task_heading = ttk.Frame(main_page)
-    task_heading.pack(fill="x", pady=(0, 5))
-    ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 17, "bold")).pack(side="left")
+    task_heading.pack(fill="x", pady=(0, 12))
+    ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 20, "bold")).pack(side="left")
     chatgpt_usage = ttk.Label(task_heading, text="", style="Muted.TLabel")
     chatgpt_usage.pack(side="right", padx=(0, 12))
     usage_window = tk.Toplevel(window)
@@ -6159,6 +6166,7 @@ def gui():
             step_width = (usable - gap * (step_count - 1)) / step_count
             active = round(value * step_count / 100)
             state = gauge.task_state
+            finished = state in ("accepted", "ready_for_review", "finished", "complete")
             for index in range(step_count):
                 x = 1 + index * (step_width + gap)
                 if index < active:
@@ -6177,8 +6185,10 @@ def gui():
                         ))
                 else:
                     fill = "#2b3853"
-                gauge.create_rectangle(x, 2, x + step_width, 16,
+                gauge.create_rectangle(x, 2, x + step_width, 9 if finished else 16,
                                        fill=fill, outline="")
+            if finished:
+                return
             for value_label in (0, 25, 50, 75, 100):
                 x = 3 + (width - 6) * value_label / 100
                 gauge.create_text(x, 25, text=str(value_label), fill="#788bab",
@@ -6190,13 +6200,15 @@ def gui():
         gauge.task_state = ""
         gauge.bind("<Configure>", draw_gauge)
         current_var = tk.StringVar(value="")
-        ttk.Label(
+        current_label = ttk.Label(
             panel, textvariable=current_var, style="CardMuted.TLabel", wraplength=900
-        ).pack(anchor="w")
+        )
+        current_label.pack(anchor="w")
         eta_var = tk.StringVar(value="")
-        ttk.Label(
+        eta_label = ttk.Label(
             panel, textvariable=eta_var, style="CardMuted.TLabel", wraplength=900
-        ).pack(anchor="w", pady=(3, 0))
+        )
+        eta_label.pack(anchor="w", pady=(3, 0))
         return {
             "panel": panel,
             "name": name,
@@ -6207,12 +6219,18 @@ def gui():
             "draw_gauge": draw_gauge,
             "current": current_var,
             "eta": eta_var,
+            "current_label": current_label,
+            "eta_label": eta_label,
         }
 
     def update_progress_card(card_info, percent, current, state=""):
         percent = max(0, min(100, int(percent)))
         set_text(card_info["percent"], f"{percent}%")
         set_text(card_info["current"], current)
+        if state.lower().replace(" ", "_") in ("accepted", "ready_for_review", "finished", "complete"):
+            card_info["gauge"].configure(height=12)
+        else:
+            card_info["gauge"].configure(height=34)
         set_text(card_info["state"], state)
         gauge = card_info["gauge"]
         if gauge.percent != percent or gauge.task_state != state.lower().replace(" ", "_"):
@@ -6476,6 +6494,13 @@ def gui():
                 if image_job_id(item) and item["status"] == "working"
                 else task_eta.countdown(STATE / "projects.db", pid, percent, item["status"]),
             )
+            for key in ("current", "eta"):
+                label = card_info[key + "_label"]
+                if card_info[key].get():
+                    if not label.winfo_manager():
+                        label.pack(anchor="w", before=card_info["controls"], pady=(3, 0))
+                elif label.winfo_manager():
+                    label.pack_forget()
             update_task_controls(card_info, item)
 
     def update_side_preview(all_projects):
@@ -6723,6 +6748,11 @@ def gui():
     def refresh():
         nonlocal idle_since, idle_slot, setup_spoken_step, voice_upgrade_queued
         setup = read_task_status(STATE / "install-progress.json")
+        speech_status.set(
+            "Your voice is ready" if voice_assistant.speech_ready() else
+            "Running final checks · Cale is quiet" if cale_voice.ready() else
+            "Preparing your voice · Cale is quiet"
+        )
         refresh_readiness()
         introduce_if_ready(setup)
         check = read_task_status(STATE / "self-check.json")
@@ -6744,13 +6774,13 @@ def gui():
         voice_folder = ROOT / "Media/models/natural_voice"
         if (
             not voice_upgrade_queued
-            and not voice_muted.is_set()
+            and not voice_muted.is_set() and voice_assistant.speech_ready()
             and (voice_folder / "kokoro-v1.0.int8.onnx").is_file()
             and (voice_folder / "voices-v1.0.bin").is_file()
         ):
             voice_upgrade_queued = True
             speak_update(
-                "Oh my God, that's better. I finally sound like I had a cup of coffee!"
+                "My own voice is ready. That's more like it."
             )
         if setup:
             current_step = str(setup.get("current", ""))
