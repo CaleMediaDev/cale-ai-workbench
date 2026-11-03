@@ -9,6 +9,7 @@ import struct
 import subprocess
 import wave
 from contextlib import nullcontext
+from pathlib import Path
 from unittest.mock import patch
 
 import imageio_ffmpeg
@@ -199,8 +200,8 @@ def test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio(tmp_pat
     assert (tmp_path / "song.lyrics.txt").read_text(encoding="utf-8").strip() == lyrics.strip()
     assert job["status"] == "complete"
     assert job["vocal_check"]["recognized_words"] == 50
-    assert job["result"]["video"]["path"] == "song-video.mp4"
-    assert render.call_args.kwargs["lyrics"] == lyrics
+    assert "video" not in job["result"]
+    render.assert_not_called()
 
 
 def test_sparse_vocal_chops_do_not_trigger_lyric_or_singing_checks(tmp_path):
@@ -225,7 +226,7 @@ def test_sparse_vocal_chops_do_not_trigger_lyric_or_singing_checks(tmp_path):
     compose.assert_not_called()
     check.assert_not_called()
     assert generate.call_args.args[2] == ""
-    assert render.call_args.kwargs["lyrics"] == ""
+    render.assert_not_called()
     assert job["status"] == "complete"
     assert job["vocal_check"] is None
 
@@ -835,6 +836,31 @@ def test_music_job_id_cannot_escape_job_directory():
         music_backend.music_job_status("../outside")
 
 
+def test_job_status_write_retries_windows_file_lock_with_unique_temp_files(tmp_path):
+    job_id = "f" * 32
+    original_replace = music_backend.os.replace
+    sources = []
+    failures = 0
+
+    def briefly_locked(source, destination):
+        nonlocal failures
+        sources.append(Path(source))
+        if failures < 2:
+            failures += 1
+            raise PermissionError(5, "Access is denied", str(destination))
+        return original_replace(source, destination)
+
+    with (patch.object(music_backend, "JOBS", tmp_path),
+          patch.object(music_backend.os, "replace", side_effect=briefly_locked)):
+        music_backend._write_job(job_id, {"job_id": job_id, "status": "working"})
+        music_backend._write_job(job_id, {"job_id": job_id, "status": "complete"})
+        assert music_backend.music_job_status(job_id)["status"] == "complete"
+    assert len(sources) == 4
+    assert sources[0] == sources[1] == sources[2]
+    assert sources[3] != sources[0]
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_stop_music_job_marks_only_the_selected_job_and_skips_later_worker(tmp_path):
     jobs = tmp_path / "jobs"
     jobs.mkdir()
@@ -1051,7 +1077,8 @@ def test_failed_video_retries_saved_audio_without_generating_song_again(tmp_path
         music_backend, "_launch_job"
     ):
         started = music_backend.start_music_job(
-            "instrumental beach guitar", str(output), instrumental=True
+            "instrumental beach guitar", str(output), instrumental=True,
+            make_video=True,
         )
         def generate(*_args):
             output.write_bytes(b"preserved audio")
@@ -1092,7 +1119,7 @@ def test_video_retry_stops_after_three_failures_without_losing_audio(tmp_path):
         "job_id": job_id, "status": "working", "created": 0,
         "output_path": str(output), "instrumental": True,
         "duration_seconds": 30, "prompt": "beach music", "lyrics": "",
-        "source_path": "",
+        "source_path": "", "make_video": True,
     }))
     with patch.object(music_backend, "JOBS", jobs), patch.object(
         music_backend, "_worker_running", return_value=False

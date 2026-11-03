@@ -473,9 +473,26 @@ def _job_path(job_id: str) -> Path:
 def _write_job(job_id: str, info: dict) -> None:
     path = _job_path(job_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporary, path)
+    # A worker and the supervisor can update the same job at nearly the same
+    # time. They must not overwrite one shared .tmp file. Windows can also
+    # briefly lock a JSON file while a reader or scanner has it open.
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=job_id + "-", suffix=".tmp", dir=path.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(info, stream, ensure_ascii=False)
+        for attempt in range(7):
+            try:
+                os.replace(temporary, path)
+                return
+            except PermissionError:
+                if attempt == 6:
+                    raise
+                time.sleep(min(0.05 * 2**attempt, 1.0))
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def music_job_status(job_id: str) -> dict:
@@ -922,6 +939,7 @@ def start_music_job(
     instrumental: bool = False, source_path: str = "", task_id: str = "",
     vocal_retry: int = 0,
     reference_mode: str = "cover",
+    make_video: bool = False,
 ) -> dict:
     """Launch a persistent local job; the agent can continue while it runs."""
     if not prompt.strip() or not 10 <= duration_seconds <= 600:
@@ -954,6 +972,7 @@ def start_music_job(
         "prompt": prompt, "output_path": str(target), "lyrics": lyrics,
         "duration_seconds": duration_seconds, "instrumental": bool(instrumental),
         "source_path": source_path, "reference_mode": reference_mode,
+        "make_video": bool(make_video),
         "task_id": task_id, "created": started,
         "requested_at": started, "estimated_seconds": estimate,
         "vocal_retry": int(vocal_retry),
@@ -1055,25 +1074,29 @@ def _run_job(job_id: str) -> None:
                     "The audio is saved; retry or provide your own lyrics."
                 )
         working["vocal_check"] = check
-        import song_video
+        video = None
+        if info.get("make_video"):
+            import song_video
 
-        working["current"] = "Making a video with captions"
-        working["progress"] = 88
-        _write_job(job_id, working)
-        try:
-            video = song_video.render(
-                result["path"], segments=(check or {}).get("segments", []),
-                lyrics=lyrics, title=info["prompt"],
-                instrumental=bool(info["instrumental"]),
-                duration=info["duration_seconds"],
-            )
-        except Exception as exc:
-            _retry_captioned_video(job_id, working, exc)
-            return
+            working["current"] = "Making a video with captions"
+            working["progress"] = 88
+            _write_job(job_id, working)
+            try:
+                video = song_video.render(
+                    result["path"], segments=(check or {}).get("segments", []),
+                    lyrics=lyrics, title=info["prompt"],
+                    instrumental=bool(info["instrumental"]),
+                    duration=info["duration_seconds"],
+                )
+            except Exception as exc:
+                _retry_captioned_video(job_id, working, exc)
+                return
         _write_job(job_id, {
-            **working, "status": "complete", "current": "Music and captioned video are ready",
+            **working, "status": "complete",
+            "current": "Music and captioned video are ready" if video else "Music is ready",
             "progress": 100,
-            "result": {**result, "video": video}, "vocal_check": check,
+            "result": {**result, **({"video": video} if video else {})},
+            "vocal_check": check,
             "finished": time.time(),
         })
     except Exception as exc:
