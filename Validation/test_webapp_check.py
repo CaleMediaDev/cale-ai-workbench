@@ -28,6 +28,41 @@ SPEC = {"path": "index.html", "viewport_width": 375, "cases": [
 ]}
 
 
+def test_button_calculation_replays_and_rejects_broken_handler(tmp_path):
+    pytest.importorskip("playwright")
+    page = PAGE.replace(
+        "bill.addEventListener('input',update); update();",
+        "document.getElementById('calculate').addEventListener('click',update); update();",
+    ).replace('<p id="answer">', '<button id="calculate">Calculate</button><p id="answer">')
+    (tmp_path / "index.html").write_text(page, encoding="utf-8")
+    spec = {"path": "index.html", "cases": [
+        {"set": {"bill": "80"}, "click": ["calculate"], "expect": {"answer": "96.00"}},
+        {"set": {"bill": "0"}, "click": ["calculate"], "visible": ["error"]},
+    ]}
+    assert webapp_check.check(tmp_path, spec)["passed"]
+    assert webapp_check.save_verifier(tmp_path, spec)
+    saved = json.loads((tmp_path / ".local-ai/webapp-check.json").read_text())
+    assert webapp_check.check(tmp_path, saved)["passed"]
+    (tmp_path / "index.html").write_text(
+        page.replace(".addEventListener('click',update)", ".addEventListener('click',()=>{})"),
+        encoding="utf-8",
+    )
+    assert not webapp_check.check(tmp_path, saved)["passed"]
+
+
+def test_click_spec_requires_bounded_ids_and_an_assertion(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE, encoding="utf-8")
+    for clicks in ("calculate", ["#calculate"], ["a"] * 21):
+        with pytest.raises(ValueError):
+            webapp_check.validate_spec(tmp_path, {
+                "path": "index.html", "cases": [{"click": clicks, "visible": ["answer"]}],
+            })
+    with pytest.raises(ValueError, match="observable assertion"):
+        webapp_check.validate_spec(tmp_path, {
+            "path": "index.html", "cases": [{"click": ["calculate"]}],
+        })
+
+
 def test_browser_check_catches_hidden_error_and_saved_verifier_regression():
     pytest.importorskip("playwright")
     with tempfile.TemporaryDirectory() as temporary:

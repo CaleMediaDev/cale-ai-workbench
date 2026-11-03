@@ -55,8 +55,13 @@ def validate_spec(folder: Path, spec: dict) -> Path:
     if "mobile_fit" in spec and not isinstance(spec["mobile_fit"], bool):
         raise ValueError("mobile_fit must be true or false")
     for case in cases:
-        if not isinstance(case, dict) or not set(case).issubset({"set", "expect", "visible", "hidden", "mobile_fit"}):
-            raise ValueError("Use set, expect, visible, hidden, and mobile_fit in each case")
+        if not isinstance(case, dict) or not set(case).issubset({"set", "click", "expect", "visible", "hidden", "mobile_fit"}):
+            raise ValueError("Use set, click, expect, visible, hidden, and mobile_fit in each case")
+        clicks = case.get("click", [])
+        if not isinstance(clicks, list) or len(clicks) > 20:
+            raise ValueError("click must be a list of at most 20 element IDs")
+        for element_id in clicks:
+            _element_id(element_id)
         updates, expected = case.get("set", {}), case.get("expect", {})
         if not isinstance(updates, dict) or not isinstance(expected, dict):
             raise ValueError("set and expect must be objects keyed by HTML ID")
@@ -138,6 +143,17 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                                 )
                             else:
                                 raise
+                # Apply actions in a fixed, replayable order: fill, click, then
+                # assert. A button-driven app must be tested through its UI.
+                for element_id in case.get("click", []):
+                    control = page.locator("#" + element_id)
+                    if control.count() != 1:
+                        failures.append(f"Missing click target #{element_id}")
+                        continue
+                    try:
+                        control.click(timeout=5_000)
+                    except PlaywrightError as exc:
+                        failures.append(f"Could not click #{element_id}: {str(exc)[:200]}")
                 for element_id, text in case.get("expect", {}).items():
                     target = page.locator("#" + element_id)
                     actual = target.inner_text()[:200] if target.count() == 1 else "<missing>"
