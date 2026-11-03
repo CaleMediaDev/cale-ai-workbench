@@ -826,9 +826,21 @@ def add_project(title, folder, brief, waiting_for_setup=False, pending_media=Non
 def add_music_project(request_text: str, spec: dict, folder: str = "") -> str:
     """Start simple music directly, with a normal task folder and task card."""
 
-    pid = add_project("", folder, request_text, waiting_for_setup=True)
+    pid = add_project(
+        "", folder, request_text, waiting_for_setup=True,
+        pending_media={"kind": "music", "spec": spec},
+    )
     p = next(item for item in projects() if item["id"] == pid)
-    _start_music_project(p, spec)
+    try:
+        _start_music_project(p, spec)
+    except Exception as exc:
+        # The saved media request lets the supervisor retry after a transient
+        # process, runtime, or antivirus failure without asking for the prompt
+        # again. A later repeated failure receives the normal durable backoff.
+        update(
+            pid, status="waiting_for_setup",
+            detail="Music startup will retry automatically: " + str(exc)[:240],
+        )
     return pid
 
 
@@ -843,30 +855,27 @@ def _start_music_project(p: dict, spec: dict) -> None:
         "# Plan\n\n- [ ] Render the requested song locally.\n- [ ] Check that the audio file exists and opens.\n",
         encoding="utf-8",
     )
-    try:
-        learned = feedback_learning.guidance(
-            STATE, "music", p["brief"], exclude_task_id=pid
-        )
-        direction = music_style.learned_directions(learned, spec["prompt"])
-        prompt = spec["prompt"] + (". " + direction if direction else "")
-        instrumental = bool(spec["instrumental"])
-        if instrumental and music_style.unambiguous_vocal_song(
-                p["brief"], spec.get("lyrics", "")):
-            instrumental = False
-        job = music_backend.start_music_job(
-            prompt, str(folder / "song.mp3"),
-            lyrics=spec.get("lyrics", ""),
-            duration_seconds=spec["duration_seconds"],
-            instrumental=instrumental,
-            source_path=spec.get("source_path", ""),
-            reference_mode=spec.get("reference_mode", "cover"),
-            task_id=pid,
-        )
-    except Exception as exc:
-        update(pid, status="needs_input", detail=f"Local music could not start: {exc}")
-        raise
+    learned = feedback_learning.guidance(
+        STATE, "music", p["brief"], exclude_task_id=pid
+    )
+    direction = music_style.learned_directions(learned, spec["prompt"])
+    prompt = spec["prompt"] + (". " + direction if direction else "")
+    instrumental = bool(spec["instrumental"])
+    if instrumental and music_style.unambiguous_vocal_song(
+            p["brief"], spec.get("lyrics", "")):
+        instrumental = False
+    job = music_backend.start_music_job(
+        prompt, str(folder / "song.mp3"),
+        lyrics=spec.get("lyrics", ""),
+        duration_seconds=spec["duration_seconds"],
+        instrumental=instrumental,
+        source_path=spec.get("source_path", ""),
+        reference_mode=spec.get("reference_mode", "cover"),
+        task_id=pid,
+    )
     update(pid, card="music-job:" + job["job_id"], status="working",
            detail="Starting local music render")
+    (folder / ".local-ai" / "pending-media.json").unlink(missing_ok=True)
 
 
 def recover_blocked_music_project(p: dict) -> bool:
@@ -1114,9 +1123,18 @@ def retry_music_after_sdk_repair(p: dict, job: dict) -> bool:
 def add_image_project(request_text: str, prompt: str, folder: str = "") -> str:
     """Keep a quick local image request in My Tasks across app restarts."""
 
-    pid = add_project("", folder, request_text, waiting_for_setup=True)
+    pid = add_project(
+        "", folder, request_text, waiting_for_setup=True,
+        pending_media={"kind": "image", "prompt": prompt},
+    )
     p = next(item for item in projects() if item["id"] == pid)
-    _start_image_project(p, prompt)
+    try:
+        _start_image_project(p, prompt)
+    except Exception as exc:
+        update(
+            pid, status="waiting_for_setup",
+            detail="Image startup will retry automatically: " + str(exc)[:240],
+        )
     return pid
 
 
@@ -1130,17 +1148,14 @@ def _start_image_project(p: dict, prompt: str) -> None:
         "# Plan\n\n- [ ] Generate the requested image locally.\n- [ ] Check that the PNG has decodable pixels.\n",
         encoding="utf-8",
     )
-    try:
-        learned = feedback_learning.guidance(
-            STATE, "image", p["brief"], exclude_task_id=pid
-        )
-        visual_prompt = prompt + (". " + learned.replace("\n- ", "; ") if learned else "")
-        job = quick_image.start_image_job(ROOT, visual_prompt, str(target))
-    except Exception as exc:
-        update(pid, status="needs_input", detail=f"Local image could not start: {exc}")
-        raise
+    learned = feedback_learning.guidance(
+        STATE, "image", p["brief"], exclude_task_id=pid
+    )
+    visual_prompt = prompt + (". " + learned.replace("\n- ", "; ") if learned else "")
+    job = quick_image.start_image_job(ROOT, visual_prompt, str(target))
     update(pid, card="image-job:" + job["job_id"], status="working",
            detail="Starting local image render")
+    (target.parent / ".local-ai" / "pending-media.json").unlink(missing_ok=True)
 
 
 def project_prompt(p, extra=""):
@@ -2884,7 +2899,6 @@ def advance_project(p):
                 _start_image_project(p, media["prompt"])
             else:
                 raise ValueError("Unknown saved media task type")
-            pending.unlink()
             return
         update(p["id"], status="queued", detail="Setup finished. Getting ready.")
         p["status"] = "queued"

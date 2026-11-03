@@ -1403,6 +1403,54 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(item["status"], "working")
         self.assertFalse((Path(item["folder"]) / ".local-ai/pending-media.json").exists())
 
+    def test_music_start_failure_keeps_request_and_retries_automatically(self):
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text('{"status":"complete"}', encoding="utf-8")
+        spec = {"prompt": "Michigan rap", "lyrics": "", "duration_seconds": 180,
+                "instrumental": False}
+        import music_backend
+        with patch.object(
+            music_backend, "start_music_job",
+            side_effect=[OSError("temporary process failure"), {"job_id": "song-retry"}],
+        ) as start:
+            pid = task_module.add_music_project(
+                "Make a 3 minute rap song", spec, str(self.base / "music-start-retry")
+            )
+            waiting = next(p for p in task_module.projects() if p["id"] == pid)
+            pending = Path(waiting["folder"]) / ".local-ai/pending-media.json"
+            self.assertEqual(waiting["status"], "waiting_for_setup")
+            self.assertIn("retry automatically", waiting["detail"])
+            self.assertTrue(pending.is_file())
+            task_module.tick()
+        recovered = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(start.call_count, 2)
+        self.assertEqual(recovered["card"], "music-job:song-retry")
+        self.assertEqual(recovered["status"], "working")
+        self.assertFalse(pending.exists())
+
+    def test_image_start_failure_keeps_request_and_retries_automatically(self):
+        progress = task_module.STATE / "install-progress.json"
+        progress.write_text('{"status":"complete"}', encoding="utf-8")
+        import quick_image
+        with patch.object(
+            quick_image, "start_image_job",
+            side_effect=[OSError("temporary process failure"), {"job_id": "image-retry"}],
+        ) as start:
+            pid = task_module.add_image_project(
+                "Make a beach image", "a calm beach", str(self.base / "image-start-retry")
+            )
+            waiting = next(p for p in task_module.projects() if p["id"] == pid)
+            pending = Path(waiting["folder"]) / ".local-ai/pending-media.json"
+            self.assertEqual(waiting["status"], "waiting_for_setup")
+            self.assertIn("retry automatically", waiting["detail"])
+            self.assertTrue(pending.is_file())
+            task_module.tick()
+        recovered = next(p for p in task_module.projects() if p["id"] == pid)
+        self.assertEqual(start.call_count, 2)
+        self.assertEqual(recovered["card"], "image-job:image-retry")
+        self.assertEqual(recovered["status"], "working")
+        self.assertFalse(pending.exists())
+
     def test_direct_music_card_uses_worker_stage_progress(self):
         import music_backend
 
