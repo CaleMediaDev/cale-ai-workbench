@@ -1108,6 +1108,23 @@ def test_task_action_ledger_marks_structured_failures_without_error_details():
         assert task_context.action_outcome("call_local_tool", '{"status":[]}') == "Completed"
 
 
+def test_checker_memory_requires_explicit_pass_and_preserves_failed_file_identity():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "page")["folder"])
+        for tool, arguments in (("check_webapp", {"path": "index.html"}),
+                                ("check_document_report", {"report_path": "summary.md"})):
+            task_context.record_action(folder, tool, json.dumps({
+                "ok": True, "passed": False, "detail": "private report or page text",
+            }), arguments)
+            assert task_context.action_outcome(tool, '{"passed":true}') == "Completed"
+            for invalid in ('{"ok":true}', '{"passed":"true"}', '[]', '{"passed":'):
+                assert task_context.action_outcome(tool, invalid) == "Failed"
+        summary = task_context.snapshot(folder)
+        assert "check_webapp index.html: Failed" in summary
+        assert "check_document_report summary.md: Failed" in summary
+        assert "private report" not in summary
+
+
 def test_repeated_identical_tool_failure_prompts_a_different_approach():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
@@ -1131,6 +1148,30 @@ def test_repeated_identical_tool_failure_prompts_a_different_approach():
         assert len(seen) == 3
         assert "Do not retry it unchanged" in str(seen[2]["messages"])
         assert "read_file missing.txt: Failed" in task_context.snapshot(folder)
+
+
+def test_repeated_failed_browser_verdict_reaches_worker_repair_guidance():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / ".local-ai/verify.ps1").write_text("exit 0")
+        native_agent.save_state(item, {"status": "continue", "verify_passed": True})
+        responses = iter([
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": call_id, "function": {"name": "check_webapp", "arguments":
+                    '{"path":"index.html","cases":[{"expect":{"total":"24.00"}}]}'},
+            }]}}]} for call_id in ("browser-1", "browser-2")
+        ] + [{"choices": [{"message": {"role": "assistant", "content": "Finished"}}]}])
+        seen = []
+
+        def complete(payload):
+            seen.append(copy.deepcopy(payload))
+            return next(responses)
+
+        with patch.object(native_agent, "execute_tool", return_value='{"ok":true,"passed":false}'):
+            native_agent.run_slice(item, complete=complete)
+        assert "Do not retry it unchanged" in str(seen[2]["messages"])
+        assert "check_webapp index.html: Failed" in task_context.snapshot(folder)
 
 
 def test_third_identical_failed_tool_call_is_not_executed_again():

@@ -154,6 +154,14 @@ def action_outcome(tool: str, result: str) -> str:
     """Distinguish structured tool failures without saving their private text."""
     if result.startswith("Tool error:"):
         return "Failed"
+    if tool in {"check_webapp", "check_document_report"}:
+        # Running the checker successfully is different from its assertions
+        # passing. Only an explicit true verdict is evidence of completion.
+        try:
+            verdict = json.loads(result)
+        except (ValueError, TypeError):
+            return "Failed"
+        return "Completed" if isinstance(verdict, dict) and verdict.get("passed") is True else "Failed"
     exit_code = re.search(r"^Exit code:\s*(-?\d+)", result)
     if exit_code:
         return "Completed" if exit_code.group(1) == "0" else "Failed (exit " + exit_code.group(1) + ")"
@@ -181,8 +189,11 @@ def record_action(folder: str | Path, tool: str, result: str, arguments: dict | 
     outcome = action_outcome(tool, result)
     subject = ""
     if tool in {"read_file", "write_file", "edit_file", "list_files",
-                "inspect_project_file", "transform_csv"} and isinstance(arguments, dict):
-        raw = str(arguments.get("output_path" if tool == "transform_csv" else "path") or "")
+                "inspect_project_file", "transform_csv", "check_webapp",
+                "check_document_report"} and isinstance(arguments, dict):
+        path_key = ("output_path" if tool == "transform_csv" else
+                    "report_path" if tool == "check_document_report" else "path")
+        raw = str(arguments.get(path_key) or "")
         root = Path(folder).resolve()
         try:
             candidate = (root / raw).resolve()
