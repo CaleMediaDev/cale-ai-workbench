@@ -895,6 +895,131 @@ class LongTaskTests(unittest.TestCase):
         self.assertEqual(output.read_bytes(), b"saved song")
         self.assertEqual(video.read_bytes(), b"saved branded video")
 
+    def test_real_song_pipeline_repairs_missing_video_without_any_new_ai_or_audio(self):
+        import hashlib
+
+        import imageio_ffmpeg
+
+        import music_backend
+        import song_video
+
+        with (patch.object(music_backend, "JOBS", self.base / "music-jobs"),
+              patch.object(music_backend, "_launch_job") as launch,
+              patch.object(music_backend, "generate_music", side_effect=AssertionError("Audio must be reused")),
+              patch.object(music_backend, "compose_lyrics", side_effect=AssertionError("No AI needed for video repair"))):
+            pid = task_module.add_music_project("make a 10-second instrumental",
+                {"prompt": "instrumental", "duration_seconds": 10, "instrumental": True},
+                str(self.base / "pipeline-song"))
+            item = next(p for p in task_module.projects() if p["id"] == pid)
+            job_id = task_module.music_job_id(item)
+            output = Path(item["folder"]) / "song.mp3"
+            subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
+                            "-f", "lavfi", "-i", "sine=frequency=220:duration=10", str(output)],
+                           check=True, capture_output=True)
+            digest = hashlib.sha256(output.read_bytes()).hexdigest()
+            music_backend._run_job(job_id)
+            task_module.advance_project(item)
+            complete = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(complete["status"], "ready_for_review")
+            job = music_backend.music_job_status(job_id)
+            video = Path(job["result"]["video"]["path"])
+            self.assertTrue(song_video._video_playable(video))
+            video.unlink()
+            task_module.advance_project(complete)  # Observe changed project files.
+            task_module.advance_project(next(p for p in task_module.projects() if p["id"] == pid))
+            repairing = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(repairing["status"], "working")
+            self.assertTrue(music_backend.music_job_status(job_id)["video_repair_only"])
+            self.assertEqual(launch.call_count, 2)
+            task_module.advance_project(repairing)
+            self.assertEqual(launch.call_count, 2)  # Repeated polling cannot duplicate workers.
+            music_backend._run_job(job_id)
+            task_module.advance_project(next(p for p in task_module.projects() if p["id"] == pid))
+            recovered = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(recovered["status"], "ready_for_review")
+            self.assertEqual(task_module.task_progress(recovered)[0], 100)
+            self.assertEqual(hashlib.sha256(output.read_bytes()).hexdigest(), digest)
+            repaired = music_backend.music_job_status(job_id)
+            self.assertTrue(song_video._video_playable(Path(repaired["result"]["video"]["path"])))
+            self.assertEqual(repaired["result"]["video"]["source_sha256"], digest)
+            # Corrupted completed exports are detected by their stored hash.
+            damaged = Path(repaired["result"]["video"]["path"])
+            damaged.write_bytes(b"damaged video")
+            task_module.advance_project(recovered)
+            task_module.advance_project(next(p for p in task_module.projects() if p["id"] == pid))
+            self.assertTrue(music_backend.music_job_status(job_id)["video_repair_only"])
+            music_backend._run_job(job_id)
+            task_module.advance_project(next(p for p in task_module.projects() if p["id"] == pid))
+            final = next(p for p in task_module.projects() if p["id"] == pid)
+            self.assertEqual(final["status"], "ready_for_review")
+            last = music_backend.music_job_status(job_id)
+            self.assertNotEqual(last["result"]["video"]["path"], str(damaged))
+            self.assertTrue(song_video._video_playable(Path(last["result"]["video"]["path"])))
+            self.assertEqual(damaged.read_bytes(), b"damaged video")
+            self.assertEqual(hashlib.sha256(output.read_bytes()).hexdigest(), digest)
+            shared = song_video.render_branded(str(output))
+            self.assertTrue(shared["reused"])
+            self.assertEqual(shared["path"], last["result"]["video"]["path"])
+
+    def test_retry_after_video_failure_never_restarts_music_generation(self):
+        with patch("music_backend.start_music_job", return_value={"job_id": "c" * 32}):
+            pid = task_module.add_music_project("make an instrumental",
+                {"prompt": "piano", "duration_seconds": 10, "instrumental": True},
+                str(self.base / "video-retry-only"))
+        task_module.update(pid, status="needs_input", detail="The song video failed after three tries")
+        item = next(p for p in task_module.projects() if p["id"] == pid)
+        job = {"status": "error", "make_video": True, "video_retries": 3,
+               "output_path": str(Path(item["folder"]) / "song.mp3")}
+        with (patch("music_backend.music_job_status", return_value=job),
+              patch("music_backend.repair_saved_music_video", return_value=True) as repair,
+              patch("music_backend.start_music_job", side_effect=AssertionError("No new song"))):
+            message = task_module.process_music_request(item, "resume", "")
+        self.assertEqual(repair.call_args.args, ("c" * 32,))
+        self.assertTrue(repair.call_args.kwargs["retry"])
+        self.assertTrue(repair.call_args.kwargs["can_queue"]())
+        self.assertIn("original song preserved", message)
+        self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["card"], item["card"])
+
+    def test_retry_missing_completed_video_after_automatic_limit_reuses_same_job(self):
+        with patch("music_backend.start_music_job", return_value={"job_id": "d" * 32}):
+            pid = task_module.add_music_project("make an instrumental",
+                {"prompt": "piano", "duration_seconds": 10, "instrumental": True},
+                str(self.base / "completed-video-retry"))
+        task_module.update(pid, status="needs_input", detail="The song is saved, but its video file is missing.")
+        item = next(p for p in task_module.projects() if p["id"] == pid)
+        job = {"status": "complete", "completed_video_repairs": 3,
+               "result": {"video": {"kind": "branded_song_video", "path": str(self.base / "missing.mp4")}}}
+        with (patch("music_backend.music_job_status", return_value=job),
+              patch("music_backend.repair_saved_music_video", return_value=True) as repair,
+              patch("music_backend.start_music_job", side_effect=AssertionError("No new song"))):
+            self.assertIn("original song preserved", task_module.process_music_request(item, "resume", ""))
+        self.assertEqual(repair.call_args.args, ("d" * 32,))
+        self.assertTrue(repair.call_args.kwargs["retry"])
+
+    def test_project_stop_during_completed_video_repair_preserves_board_control(self):
+        import music_backend
+        import song_video
+
+        with patch.object(music_backend, "_launch_job") as launch, patch.object(music_backend, "JOBS", self.base / "repair-jobs"):
+            pid = task_module.add_music_project("make an instrumental",
+                {"prompt": "piano", "duration_seconds": 10, "instrumental": True},
+                str(self.base / "repair-stopped-project"))
+            item = next(p for p in task_module.projects() if p["id"] == pid)
+            job_id = task_module.music_job_id(item)
+            source = Path(item["folder"]) / "song.mp3"
+            source.write_bytes(b"saved audio")
+            music_backend._write_job(job_id, {**music_backend.music_job_status(job_id), "status": "complete",
+                "result": {"path": str(source), "video": {"kind": "branded_song_video",
+                    "path": str(source.with_name("song-facebook.mp4"))}}})
+            original = song_video._digest
+            def stop_project(path):
+                task_module.update(pid, status="stopped", detail="Music stopped")
+                return original(path)
+            with patch.object(song_video, "_digest", side_effect=stop_project):
+                task_module.advance_project(item)
+            self.assertEqual(next(p for p in task_module.projects() if p["id"] == pid)["status"], "stopped")
+            self.assertEqual(launch.call_count, 1)  # Initial job only; no repair worker.
+
     def test_video_validation_preserves_legacy_caption_requirements(self):
         video = self.base / "captioned.mp4"
         video.write_bytes(b"video")

@@ -873,6 +873,82 @@ def _worker_running(job_id: str, info: dict) -> bool:
         return True  # Never launch a duplicate when ownership is uncertain.
 
 
+def repair_saved_music_video(job_id: str, *, retry: bool = False, can_queue=None) -> bool:
+    """Keep transient filesystem/record failures retryable without new audio."""
+    try:
+        return _queue_saved_music_video(job_id, retry=retry, can_queue=can_queue)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
+def _queue_saved_music_video(job_id: str, *, retry: bool = False, can_queue=None) -> bool:
+    """Queue only a damaged branded export, keeping the original audio pinned.
+
+    A nonblocking per-job OS lock prevents UI/supervisor races from launching
+    duplicate repairs. Failed process launches leave the durable queue intact
+    for normal worker recovery. A persistent failure gets at most three repairs.
+    """
+    import msvcrt
+
+    import song_video
+
+    path = _job_path(job_id)
+    if not path.is_file():
+        return False
+    with path.with_suffix(".video-repair.lock").open("a+b") as handle:
+        if handle.seek(0, os.SEEK_END) == 0:
+            handle.write(b"0")
+            handle.flush()
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        try:
+            info = music_job_status(job_id)
+            retry_failed = (retry and info.get("status") == "error"
+                            and (info.get("video_repair_only") is True
+                                 or (info.get("make_video") and int(info.get("video_retries", 0)) > 0)))
+            if (info.get("status") != "complete" and not retry_failed) or _worker_running(job_id, info):
+                return False
+            result = info.get("result") or {}
+            video = result.get("video") or {}
+            if retry_failed and not video:
+                audio_path = Path(info["output_path"])
+                video = {"path": str(audio_path.with_name(audio_path.stem + "-facebook.mp4")), "kind": "branded_song_video"}
+            if video.get("kind") != "branded_song_video" or (song_video.branded_export_matches(video) and not retry_failed):
+                return False
+            source = Path(info["output_path"]).resolve()
+            if not source.is_file() or source != Path(result.get("path", "")).resolve():
+                return False
+            if Path(video.get("path", "")).resolve().parent != source.parent:
+                return False
+            digest = song_video._digest(source)
+            receipt = song_video._saved_record(Path(video["path"])) or {}
+            expected = video.get("source_sha256") or receipt.get("source_sha256")
+            if expected and expected != digest:
+                return False  # Changed audio needs its own review, not stale vocal evidence.
+            attempts = 1 if retry else int(info.get("completed_video_repairs", 0)) + 1
+            if attempts > 3:
+                return False
+            if (can_queue is not None and not can_queue()) or music_job_status(job_id) != info:
+                return False  # Pause/Stop or another writer won during hashing.
+            queued = {**info, "status": "queued", "current": "Repairing saved song video; audio preserved",
+                      "progress": 88, "created": time.time(), "worker_pid": None,
+                      "make_video": True, "video_repair_only": True, "video_repair_source_sha256": digest,
+                      "completed_video_repairs": attempts, "recoveries": 0, "video_retries": 0}
+            queued.pop("finished", None)
+            _write_job(job_id, queued)
+            try:
+                _launch_job(job_id)
+            except (OSError, RuntimeError):
+                pass  # Normal recovery retries this queued job without regenerating audio.
+            return True
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 def _retry_captioned_video(job_id: str, info: dict, error: Exception) -> None:
     """Keep the saved audio and retry only the video after a transient failure."""
     attempts = int(info.get("video_retries", 0)) + 1
@@ -993,13 +1069,15 @@ def _run_job(job_id: str) -> None:
     if info.get("status") not in ("queued", "working"):
         return
     # Also repair queued jobs written by an older version before rendering.
-    if info.get("instrumental") and music_style.unambiguous_vocal_song(
+    repair_only = info.get("video_repair_only") is True
+    if not repair_only and info.get("instrumental") and music_style.unambiguous_vocal_song(
             info.get("prompt", ""), info.get("lyrics", "")):
         info["instrumental"] = False
         _write_job(job_id, info)
     working = {
-        **info, "status": "working", "current": "Preparing music locally", "progress": 12,
-        "worker_pid": os.getpid(),
+        **info, "status": "working",
+        "current": "Repairing saved song video; audio preserved" if repair_only else "Preparing music locally",
+        "progress": 88 if repair_only else 12, "worker_pid": os.getpid(),
     }
     _write_job(job_id, working)
 
@@ -1022,11 +1100,17 @@ def _run_job(job_id: str) -> None:
 
     attribution = usage_history.CURRENT_TASK.set(info.get("task_id", ""))
     try:
+        if repair_only:
+            import song_video
+            pinned = info.get("video_repair_source_sha256")
+            audio = Path(info["output_path"])
+            if not pinned or not audio.is_file() or song_video._digest(audio) != pinned:
+                raise ValueError("The saved audio changed during video repair; no audio was regenerated.")
         lyrics = info["lyrics"]
         needs_vocals = (not info["source_path"] or info.get("reference_mode") == "style") and music_style.requires_sustained_vocals(
             info["prompt"], info.get("lyrics", ""), info["instrumental"]
         )
-        if needs_vocals and not lyrics.strip():
+        if needs_vocals and not repair_only and not lyrics.strip():
             working["current"] = "Writing lyrics locally"
             working["progress"] = 20
             _write_job(job_id, working)
@@ -1041,6 +1125,8 @@ def _run_job(job_id: str) -> None:
         if saved_audio.is_file() and audio_file_ok(saved_audio):
             result = info.get("result") or {"path": str(saved_audio), "model": "ACE-Step 1.5"}
         else:
+            if repair_only:
+                raise ValueError("The saved audio could not be decoded; video repair cannot regenerate it.")
             working["current"] = "Generating music locally"
             working["progress"] = 35
             _write_job(job_id, working)
@@ -1052,7 +1138,7 @@ def _run_job(job_id: str) -> None:
             )
         working["result"] = result
         _write_job(job_id, working)
-        if info.get("reference_mode") == "style":
+        if not repair_only and info.get("reference_mode") == "style":
             rendered_seconds = audio_duration_seconds(result["path"])
             if (rendered_seconds is None or
                     abs(rendered_seconds - info["duration_seconds"]) >
@@ -1062,7 +1148,7 @@ def _run_job(job_id: str) -> None:
                     "the requested song length. The audio is saved for review."
                 )
         check = info.get("vocal_check")
-        if needs_vocals:
+        if needs_vocals and not repair_only:
             if not check or not check.get("passed"):
                 working["current"] = "Checking the vocals"
                 working["progress"] = 75 if info.get("make_video") else 94
@@ -1091,6 +1177,7 @@ def _run_job(job_id: str) -> None:
                     lyrics=lyrics, title=info["prompt"],
                     instrumental=bool(info["instrumental"]),
                     duration=info["duration_seconds"],
+                    **({"expected_source_sha256": info["video_repair_source_sha256"]} if repair_only else {}),
                 )
             except Exception as exc:
                 _retry_captioned_video(job_id, working, exc)
@@ -1101,6 +1188,7 @@ def _run_job(job_id: str) -> None:
             "progress": 100,
             "result": {**result, **({"video": video} if video else {})},
             "vocal_check": check,
+            "video_repair_only": False,
             "finished": time.time(),
         })
     except Exception as exc:

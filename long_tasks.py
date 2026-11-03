@@ -323,6 +323,24 @@ def task_usage_labels(p, tokens, source_totals):
     return f"Tokens: {tokens:,}", "AI used: " + (sources or "waiting for first response")
 
 
+MUSIC_VIDEO_REPAIR_DETAILS = frozenset({
+    "The song is saved, but its captioned video needs repair.",
+    "The song is saved, but its video file is missing.",
+    "The song is saved, but its video needs repair.",
+})
+
+
+def music_video_repair_allowed(task_id, job_id):
+    """A late repair cannot revive a stopped/deleted/replaced task card."""
+    try:
+        with database() as conn:
+            row = conn.execute("SELECT status,card FROM projects WHERE id=?", (task_id,)).fetchone()
+        return bool(row and row[0] in {"working", "queued", "checking", "needs_input"}
+                    and row[1] == "music-job:" + job_id)
+    except sqlite3.Error:
+        return False
+
+
 def completed_music_video_issue(job):
     """Branded song videos need no SRT; legacy captioned videos still do."""
     video = (job.get("result") or {}).get("video") or {}
@@ -330,6 +348,10 @@ def completed_music_video_issue(job):
         return ""
     if not isinstance(video, dict) or not video.get("path") or not Path(video["path"]).is_file():
         return "The song is saved, but its video file is missing."
+    if video.get("kind") == "branded_song_video":
+        import song_video
+        if not song_video.branded_export_matches(video):
+            return "The song is saved, but its video needs repair."
     captions = video.get("captions_path")
     if (video.get("kind") != "branded_song_video" or captions) and (not captions or not Path(captions).is_file()):
         return "The song is saved, but its captioned video needs repair."
@@ -2296,6 +2318,24 @@ def process_music_request(p, action, note):
         return "Music resumed"
     if action == "resume" and p["status"] == "needs_input":
         previous = music_backend.music_job_status(job_id)
+        video_failure = (previous.get("video_repair_only") is True
+                         or (previous.get("make_video") and int(previous.get("video_retries", 0)) > 0))
+        if previous.get("status") == "complete" and p.get("detail") in MUSIC_VIDEO_REPAIR_DETAILS:
+            if not completed_music_video_issue(previous):
+                advance_project(p)
+                return "Saved music and video are ready; no song was regenerated"
+            if ((previous.get("result") or {}).get("video") or {}).get("kind") != "branded_song_video":
+                raise ValueError("Check the saved video and captions; the original song is preserved.")
+            video_failure = True
+        if video_failure:
+            if not music_backend.repair_saved_music_video(job_id, retry=True,
+                    can_queue=lambda: music_video_repair_allowed(p["id"], job_id)):
+                if not music_video_repair_allowed(p["id"], job_id):
+                    return "Task controls changed; original song preserved"
+                raise ValueError("The saved audio or video changed; check its files before retrying the video. No song was regenerated.")
+            if music_video_repair_allowed(p["id"], job_id):
+                update(p["id"], status="working", detail="Retrying saved song video; audio preserved")
+            return "Video repair resumed; original song preserved"
         output = Path(previous["output_path"])
         if output.exists():
             # Keep a failed render for diagnosis; retries get a new name.
@@ -2827,10 +2867,20 @@ def advance_project(p):
         import music_style
 
         job = music_backend.music_job_status(job_id)
+        repair_details = MUSIC_VIDEO_REPAIR_DETAILS
+        if (job.get("status") == "complete" and (p["status"] != "needs_input" or p.get("detail") in repair_details)
+                and ((job.get("result") or {}).get("video") or {}).get("kind") == "branded_song_video"
+                and completed_music_video_issue(job)):
+            queued = music_backend.repair_saved_music_video(job_id,
+                can_queue=lambda: music_video_repair_allowed(p["id"], job_id))
+            if not music_video_repair_allowed(p["id"], job_id):
+                return
+            if queued:
+                update(p["id"], status="working", detail="Repairing saved song video; audio preserved")
+                return
         if p["status"] == "needs_input":
             repaired_video = (job.get("status") == "complete" and (job.get("result") or {}).get("video")
-                              and p.get("detail") in {"The song is saved, but its captioned video needs repair.",
-                                                       "The song is saved, but its video file is missing."}
+                              and p.get("detail") in repair_details
                               and not completed_music_video_issue(job))
             if not repaired_video and not media_job_restarted(p, job):
                 return

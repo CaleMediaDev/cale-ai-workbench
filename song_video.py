@@ -220,6 +220,9 @@ def _render_branded(source_path: str, **_caption_options) -> dict:
     if source.suffix.lower() not in {".mp3", ".wav", ".flac", ".m4a", ".ogg"}:
         raise ValueError("Choose a saved song audio file.")
     source_hash = _digest(source)
+    expected_source = _caption_options.get("expected_source_sha256")
+    if expected_source is not None and expected_source != source_hash:
+        raise ValueError("The saved audio changed before video repair; no audio was regenerated.")
     video = source.with_name(source.stem + "-facebook.mp4")
     receipt = _saved_record(video)
     if (video.is_file() and receipt
@@ -227,7 +230,8 @@ def _render_branded(source_path: str, **_caption_options) -> dict:
             and receipt.get("cover_sha256") == BRANDED_COVER_SHA256
             and receipt.get("video_sha256") == _digest(video)
             and _video_playable(video)):
-        return {"path": str(video), "kind": "branded_song_video", "reused": True}
+        return {"path": str(video), "kind": "branded_song_video", "reused": True,
+                    "source_sha256": source_hash, "video_sha256": receipt["video_sha256"]}
     # Keep any prior output intact. A changed song gets a distinct file rather
     # than silently replacing an export the user may already have shared.
     number = 2
@@ -239,7 +243,8 @@ def _render_branded(source_path: str, **_caption_options) -> dict:
                 and receipt.get("cover_sha256") == BRANDED_COVER_SHA256
                 and receipt.get("video_sha256") == _digest(video)
                 and _video_playable(video)):
-            return {"path": str(video), "kind": "branded_song_video", "reused": True}
+            return {"path": str(video), "kind": "branded_song_video", "reused": True,
+                    "source_sha256": source_hash, "video_sha256": receipt["video_sha256"]}
         number += 1
     artwork = base64.b64decode(BRANDED_COVER_BASE64, validate=True)
     if hashlib.sha256(artwork).hexdigest() != BRANDED_COVER_SHA256:
@@ -270,7 +275,8 @@ def _render_branded(source_path: str, **_caption_options) -> dict:
     temporary_record = _render_record(video).with_suffix(".tmp")
     temporary_record.write_text(json.dumps(record), encoding="utf-8")
     os.replace(temporary_record, _render_record(video))
-    return {"path": str(video), "kind": "branded_song_video", "reused": False}
+    return {"path": str(video), "kind": "branded_song_video", "reused": False,
+            "source_sha256": source_hash, "video_sha256": record["video_sha256"]}
 
 
 
@@ -307,3 +313,16 @@ def render_branded(source_path: str, **caption_options) -> dict:
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+
+def branded_export_matches(info: dict) -> bool:
+    """Detect changed exports using current receipts or older render sidecars."""
+    try:
+        path = Path(info["path"])
+        if not path.is_file():
+            return False
+        expected = info.get("video_sha256") or (_saved_record(path) or {}).get("video_sha256")
+        return not expected or expected == _digest(path)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False

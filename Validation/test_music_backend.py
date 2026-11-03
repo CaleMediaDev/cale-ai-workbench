@@ -1188,3 +1188,99 @@ def test_agent_music_job_is_attributed_and_task_controls_only_its_renders(tmp_pa
         with patch.object(music_backend, "resume_music_job") as resume:
             assert music_backend.resume_project_jobs(task_id, project) == 1
             resume.assert_called_once_with("2" * 32)
+
+
+
+def test_video_repair_pins_audio_and_never_regenerates_after_it_changes(tmp_path):
+    import hashlib
+
+    job_id = "d" * 32
+    audio = tmp_path / "song.mp3"
+    audio.write_bytes(b"original audio")
+    info = {"job_id": job_id, "status": "complete", "output_path": str(audio),
+            "prompt": "instrumental", "instrumental": True, "lyrics": "", "source_path": "",
+            "duration_seconds": 10, "make_video": True,
+            "result": {"path": str(audio), "video": {"kind": "branded_song_video",
+                "path": str(tmp_path / "song-facebook.mp4"),
+                "source_sha256": hashlib.sha256(audio.read_bytes()).hexdigest()}}}
+    with (patch.object(music_backend, "JOBS", tmp_path / "jobs"),
+          patch.object(music_backend, "_launch_job") as launch,
+          patch.object(music_backend, "generate_music", side_effect=AssertionError("No new audio")),
+          patch.object(music_backend, "compose_lyrics", side_effect=AssertionError("No new lyrics"))):
+        music_backend._write_job(job_id, info)
+        assert music_backend.repair_saved_music_video(job_id)
+        assert not music_backend.repair_saved_music_video(job_id)
+        launch.assert_called_once()
+        audio.write_bytes(b"owner edited the audio")
+        music_backend._run_job(job_id)
+        failed = music_backend.music_job_status(job_id)
+    assert failed["status"] == "error" and "audio changed" in failed["current"]
+    assert audio.read_bytes() == b"owner edited the audio"
+
+
+def test_stop_during_video_repair_request_cannot_be_overwritten(tmp_path):
+    import song_video
+
+    job_id = "e" * 32
+    audio = tmp_path / "song.mp3"
+    audio.write_bytes(b"saved audio")
+    info = {"job_id": job_id, "status": "complete", "output_path": str(audio),
+            "result": {"path": str(audio), "video": {"kind": "branded_song_video",
+                "path": str(tmp_path / "missing.mp4")}}}
+    def stopped_during_hash(_):
+        music_backend._write_job(job_id, {**info, "status": "stopped"})
+        return "a" * 64
+    with (patch.object(music_backend, "JOBS", tmp_path / "jobs"),
+          patch.object(music_backend, "_launch_job") as launch,
+          patch.object(song_video, "_digest", side_effect=stopped_during_hash)):
+        music_backend._write_job(job_id, info)
+        assert not music_backend.repair_saved_music_video(job_id)
+        assert music_backend.music_job_status(job_id)["status"] == "stopped"
+    launch.assert_not_called()
+
+
+
+def test_video_repair_budget_can_be_explicitly_retried_without_new_song(tmp_path):
+    job_id = "f" * 32
+    audio = tmp_path / "song.mp3"
+    audio.write_bytes(b"preserved audio")
+    info = {"job_id": job_id, "status": "complete", "output_path": str(audio),
+            "completed_video_repairs": 3,
+            "result": {"path": str(audio), "video": {"kind": "branded_song_video",
+                "path": str(tmp_path / "song-facebook.mp4")}}}
+    with (patch.object(music_backend, "JOBS", tmp_path / "jobs"),
+          patch.object(music_backend, "_launch_job") as launch):
+        music_backend._write_job(job_id, info)
+        assert not music_backend.repair_saved_music_video(job_id)
+        assert music_backend.repair_saved_music_video(job_id, retry=True)
+        resumed = music_backend.music_job_status(job_id)
+    launch.assert_called_once()
+    assert resumed["status"] == "queued" and resumed["video_repair_only"]
+    assert resumed["completed_video_repairs"] == 1 and audio.read_bytes() == b"preserved audio"
+
+
+
+def test_vocal_song_video_repair_does_not_recompose_or_retranscribe(tmp_path):
+    import hashlib
+
+    job_id = "1" * 32
+    audio = tmp_path / "vocal.mp3"
+    audio.write_bytes(b"approved vocal audio")
+    digest = hashlib.sha256(audio.read_bytes()).hexdigest()
+    info = {"job_id": job_id, "status": "queued", "output_path": str(audio),
+            "prompt": "Rap with clear lead vocals", "instrumental": False, "lyrics": "", "source_path": "",
+            "duration_seconds": 180, "make_video": True, "video_repair_only": True,
+            "video_repair_source_sha256": digest, "vocal_check": {"passed": True},
+            "result": {"path": str(audio), "model": "ACE-Step 1.5"}}
+    with (patch.object(music_backend, "JOBS", tmp_path / "jobs"),
+          patch.object(music_backend, "audio_file_ok", return_value=True),
+          patch.object(music_backend, "generate_music", side_effect=AssertionError("No new music")),
+          patch.object(music_backend, "compose_lyrics", side_effect=AssertionError("No new lyrics")),
+          patch.object(music_backend, "vocal_evidence", side_effect=AssertionError("No new ASR")),
+          patch("song_video.render_branded", return_value={"path": str(tmp_path / "video.mp4")}) as render):
+        music_backend._write_job(job_id, info)
+        music_backend._run_job(job_id)
+        done = music_backend.music_job_status(job_id)
+    assert done["status"] == "complete" and done["vocal_check"]["passed"]
+    assert render.call_args.kwargs["expected_source_sha256"] == digest
+    assert audio.read_bytes() == b"approved vocal audio"
