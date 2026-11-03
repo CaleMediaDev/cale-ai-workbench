@@ -52,6 +52,7 @@ Toolbox\python\Scripts\python.exe benchmarks\native_worker_smoke.py --scenario c
 Toolbox\python\Scripts\python.exe benchmarks\native_worker_smoke.py --scenario webapp --model cale-fast
 Toolbox\python\Scripts\python.exe benchmarks\native_worker_smoke.py --scenario document --model cale-fast
 Toolbox\python\Scripts\python.exe benchmarks\native_worker_smoke.py --scenario webapp_repair --model cale-fast
+Toolbox\python\Scripts\python.exe benchmarks\native_worker_smoke.py --scenario temperature --stepwise --prepared-checks --model cale-fast
 ```
 
 The script makes no cloud requests and does not register a task in the app. It
@@ -59,6 +60,19 @@ prints JSON containing elapsed time, model and tool calls, reported token use,
 worker status, and independent checks. Exit code 0 means the worker reported
 completion **and** the independent checks passed. Exit code 1 means either
 condition failed. The task files are deleted after the run.
+
+`--stepwise` additionally requires at least two completed SQLite units. For the
+temperature fixture, `--prepared-checks` supplies a known read-only verifier
+before model execution. That variant isolates repairing and advancing steps
+from authoring a verifier; it does not prove that the model writes good tests.
+The grader requires a verifier to pass the correct code and reject the old bug.
+
+The [November 3 small-step report](results/small-steps-20261103.json) records
+a local 9B run finishing two SQLite units in 50.85 seconds and 13 model calls.
+The supplied verifier was preserved, passed the repaired function, and rejected
+the original bug. An earlier run without supplied checks fixed the function
+but got stuck authoring its verifier. This supports the tested step orchestration,
+not a claim that small models can reliably write tests or complete entire apps.
 
 Use `--keep-folder C:\path\to\new-folder` to inspect the task files after a
 run. `--command-timeout 10` helps diagnose a generated command that waits for

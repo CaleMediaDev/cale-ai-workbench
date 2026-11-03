@@ -1,0 +1,35 @@
+{
+  "scope": "Single-machine synthetic Python repair, local inference only. Known read-only verifier supplied before execution; no claim about autonomous test authoring or complete-game quality.",
+  "hardware": {"gpu": "RTX 3060", "vram_gb": 12, "ram_gb": 128},
+  "final_run": {
+    "app_version": "0.5.435 development",
+    "model": "cale-fast (Qwen 3.5 9B)",
+    "reasoning_effort": "none",
+    "prepared_checks": true,
+    "seconds": 50.85,
+    "model_calls": 13,
+    "tool_calls": 13,
+    "prompt_tokens": 63937,
+    "completion_tokens": 1276,
+    "status": "done",
+    "steps": {"total": 2, "done": 2, "remaining": 0},
+    "checks": {
+      "freezing": true,
+      "boiling": true,
+      "negative": true,
+      "fractional": true,
+      "verifier_passes_correct": true,
+      "verifier_rejects_regression": true,
+      "supplied_verifier_preserved": true
+    }
+  },
+  "earlier_development_runs": [
+    {"prepared_checks": false, "seconds": 267.47, "model_calls": 24,
+     "status": "continue", "steps_done": 1, "steps_total": 2,
+     "finding": "Conversion repaired, but model-written PowerShell verifier remained broken; no success claim."},
+    {"prepared_checks": true, "seconds": 98.51, "model_calls": 24,
+     "status": "continue", "steps_done": 1, "steps_total": 2,
+     "finding": "Correct work and verifier, but model omitted the explicit step-complete call. Motivated automatic acceptance-command recognition."}
+  ],
+  "limitations": "Worker code evolved between these runs. This is not a controlled speed comparison, repeatability score, or a benchmark against other agents. The test is a small function repair with two units, not a full application."
+}

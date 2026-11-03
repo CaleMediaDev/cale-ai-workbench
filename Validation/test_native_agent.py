@@ -27,6 +27,233 @@ def project(folder):
     return {"id": "sample", "folder": str(folder), "brief": "Make a working page"}
 
 
+def queue_step(title, command, phase="Core"):
+    return {"phase": phase, "title": title, "check_command": command}
+
+
+def test_step_queue_checks_real_work_and_resumes_in_another_process():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "game")["folder"])
+        (folder / "check.py").write_text(
+            "import pathlib,sys\nsource=pathlib.Path('engine.py').read_text()\n"
+            "assert ('def score' if sys.argv[1]=='score' else 'def next_wave') in source\n")
+        check = f'"{sys.executable}" check.py '
+        queued = task_context.plan_steps(folder, [
+            queue_step("Add scoring", check + "score"),
+            queue_step("Add wave progression", check + "wave", "Waves")])
+        first_id = queued["active"]["id"]
+        failed = json.loads(native_agent.execute_tool(folder, "task_steps", {
+            "action": "complete", "step_id": first_id}))
+        assert not failed["passed"] and failed["done"] == 0
+        assert failed["active"]["attempts"] == 1
+        (folder / "engine.py").write_text("def score(kills): return kills * 10\n")
+        passed = json.loads(native_agent.execute_tool(folder, "task_steps", {
+            "action": "complete", "step_id": first_id}))
+        assert passed["passed"] and passed["done"] == 1
+        assert passed["active"]["phase"] == "Waves"
+        # A fresh interpreter must resume the database queue, not chat history.
+        script = ("import sys,json;sys.path.insert(0,sys.argv[1]);import task_context;"
+                  "print(json.dumps(task_context.step_status(sys.argv[2])))")
+        resumed = json.loads(subprocess.check_output(
+            [sys.executable, "-c", script, str(native_agent.ROOT), str(folder)], text=True))
+        assert resumed["active"]["id"] == passed["active"]["id"]
+        assert resumed["done"] == 1
+        (folder / "engine.py").write_text(
+            "def score(kills): return kills * 10\ndef next_wave(wave): return wave + 1\n")
+        final = json.loads(native_agent.execute_tool(folder, "task_steps", {
+            "action": "complete", "step_id": resumed["active"]["id"]}))
+        assert final["passed"] and final["remaining"] == 0 and final["done"] == 2
+        assert "nonempty" in native_agent.completion_issue(folder)
+
+
+def test_step_queue_cannot_skip_work_or_overwrite_an_unfinished_phase():
+    import pytest
+
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "page")["folder"])
+        (folder / "check.py").write_text("from pathlib import Path;Path('ran').touch()")
+        queue = task_context.plan_steps(folder, [queue_step("First", f'"{sys.executable}" check.py'),
+                                                queue_step("Second", "exit 0")])
+        wrong = native_agent.execute_tool(folder, "task_steps", {
+            "action": "complete", "step_id": queue["active"]["id"] + 1})
+        assert wrong.startswith("Tool error:") and not (folder / "ran").exists()
+        with pytest.raises(ValueError, match="Finish the active batch"):
+            task_context.plan_steps(folder, [queue_step("Overwrite", "exit 0")])
+        assert "unfinished work" in native_agent.completion_issue(folder, state={"verify_passed": True})
+
+
+def test_step_check_cannot_create_the_output_it_claims_to_verify():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "page")["folder"])
+        (folder / "check.py").write_text("from pathlib import Path;Path('output.txt').write_text('fake')")
+        queue = task_context.plan_steps(folder, [queue_step("Build output", f'"{sys.executable}" check.py')])
+        result = json.loads(native_agent.execute_tool(folder, "task_steps", {
+            "action": "complete", "step_id": queue["active"]["id"]}))
+        assert result["passed"] is False and result["done"] == 0
+        assert "changed during check" in result["active"]["evidence"]
+
+
+def test_split_keeps_completed_work_and_runs_children_before_later_work():
+    import pytest
+
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "page")["folder"])
+        queue = task_context.plan_steps(folder, [queue_step("Done", "exit 0"),
+            queue_step("Too broad", "exit 0"), queue_step("Integration", "exit 0")])
+        request_hash = task_context.request_identity(folder)
+        queue = task_context.record_step_check(folder, queue["active"]["id"], request_hash,
+                                               "Exit code: 0\n", unchanged=True)
+        original = queue["active"]["id"]
+        split = task_context.plan_steps(folder, [queue_step("Part A", "exit 0"),
+            queue_step("Part B", "exit 0")], split_id=original)
+        assert split["done"] == 1 and split["remaining"] == 3 and split["total"] == 4
+        assert split["active"]["title"] == "Part A"
+        with pytest.raises(ValueError, match="Only the current"):
+            task_context.plan_steps(folder, [queue_step("No", "exit 0"),
+                queue_step("No2", "exit 0")], split_id=original)
+        for title in ("Part A", "Part B", "Integration"):
+            assert split["active"]["title"] == title
+            split = task_context.record_step_check(folder, split["active"]["id"], request_hash,
+                                                   "Exit code: 0\n", unchanged=True)
+        assert split["done"] == 4 and split["remaining"] == 0
+
+
+def test_new_instructions_isolate_old_queue_and_reject_late_check():
+    import pytest
+
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "page")["folder"])
+        queue = task_context.plan_steps(folder, [queue_step("Old", "exit 0")])
+        old_hash = task_context.request_identity(folder)
+        (folder / ".local-ai/USER-REQUESTS.md").write_text("Make the new requested version")
+        assert task_context.step_status(folder)["total"] == 0
+        with pytest.raises(ValueError, match="instructions changed"):
+            task_context.record_step_check(folder, queue["active"]["id"], old_hash,
+                                           "Exit code: 0\n", unchanged=True)
+        fresh = task_context.plan_steps(folder, [queue_step("New", "exit 0")])
+        assert fresh["active"]["title"] == "New" and fresh["done"] == 0
+
+
+def test_queue_snapshot_uses_current_unit_and_short_recent_conversation():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "page")["folder"])
+        task_context.plan_steps(folder, [queue_step("Implement collisions", "exit 0", "Combat")])
+        (folder / ".local-ai/PLAN.md").write_text("Roadmap " * 2000)
+        messages = [{"role": "system", "content": "Original request and rules"},
+                    {"role": "user", "content": "Keep the original requirements"}]
+        for number in range(8):
+            messages += [{"role": "assistant", "content": f"Old turn {number}"}]
+        fresh = native_agent.fresh_messages(messages, folder)
+        assert fresh[0]["content"] == "Original request and rules"
+        assert "Implement collisions" in fresh[1]["content"]
+        assert "Small-step execution queue" in fresh[1]["content"]
+        assert len(fresh[1]["content"]) < 3000
+        assert len(fresh) == 5 and "Old turn 5" not in str(fresh)
+
+
+def test_step_check_history_excludes_private_stdout_and_failures_are_not_success():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "page")["folder"])
+        queue = task_context.plan_steps(folder, [queue_step("Check", "exit 0")])
+        result = task_context.record_step_check(folder, queue["active"]["id"],
+            task_context.request_identity(folder), "Exit code: 9\nprivate document words", unchanged=True)
+        assert not result["passed"]
+        assert "private document words" not in task_context.snapshot(folder)
+        assert task_context.action_outcome("task_steps", json.dumps(result)) == "Failed"
+        assert task_context.action_outcome("task_steps", json.dumps(queue)) == "Completed"
+
+
+def test_planning_boundary_blocks_later_stale_actions_in_same_model_response():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        response = {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "plan", "function": {"name": "task_steps", "arguments": json.dumps({
+                "action": "plan", "steps": [queue_step("First tiny change", "exit 0")]})}},
+            {"id": "stale-write", "function": {"name": "write_file", "arguments": json.dumps({
+                "path": "stale.txt", "content": "Should not run before reading the fresh unit"})}},
+        ]}}]}
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+            state = native_agent.run_slice(item, complete=lambda _: response)
+        assert not (folder / "stale.txt").exists()
+        assert task_context.step_status(folder)["remaining"] == 1
+        replies = [message for message in state["messages"] if message.get("role") == "tool"]
+        assert [message["tool_call_id"] for message in replies] == ["plan", "stale-write"]
+        assert "queue advanced" in replies[-1]["content"]
+
+
+def test_step_tool_focus_restores_specialists_periodically_and_after_phase():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        task_context.plan_steps(item["folder"], [queue_step("Tiny component", "exit 0")])
+        state = {}
+        for _ in range(4):
+            names = {tool["function"]["name"] for tool in native_agent.step_tools(item, state, native_agent.TOOLS)}
+            assert {"task_steps", "run_command", "write_file"} <= names
+            assert "discover_local_tools" not in names
+        assert native_agent.step_tools(item, state, native_agent.TOOLS) is native_agent.TOOLS
+        queue = task_context.step_status(item["folder"])
+        task_context.record_step_check(item["folder"], queue["active"]["id"],
+            task_context.request_identity(item["folder"]), "Exit code: 0\n", unchanged=True)
+        assert native_agent.step_tools(item, state, native_agent.TOOLS) is native_agent.TOOLS
+
+
+def test_revise_repairs_an_active_check_without_erasing_failed_attempts():
+    import pytest
+
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "page")["folder"])
+        queue = task_context.plan_steps(folder, [queue_step("Behavior check", "exit 3")])
+        step_id = queue["active"]["id"]
+        failed = json.loads(native_agent.execute_tool(folder, "task_steps", {
+            "action": "complete", "step_id": step_id}))
+        assert not failed["passed"] and failed["active"]["attempts"] == 1
+        fixed = json.loads(native_agent.execute_tool(folder, "task_steps", {
+            "action": "revise", "step_id": step_id,
+            "steps": [queue_step("Behavior check", "exit 0")]}))
+        assert fixed["done"] == 0 and fixed["active"]["attempts"] == 1
+        assert "not yet passed" in fixed["active"]["evidence"]
+        passed = json.loads(native_agent.execute_tool(folder, "task_steps", {
+            "action": "complete", "step_id": step_id}))
+        assert passed["passed"] and passed["done"] == 1
+        with pytest.raises(ValueError, match="Only the current"):
+            task_context.revise_step(folder, step_id, [queue_step("Cannot undo success", "exit 9")])
+
+
+def test_running_saved_check_auto_advances_and_stops_stale_batch_actions():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / "check.py").write_text("from pathlib import Path;assert Path('output.txt').read_text()=='ready'")
+        (folder / "output.txt").write_text("ready")
+        command = f'"{sys.executable}" check.py'
+        task_context.plan_steps(folder, [queue_step("Check output", command), queue_step("Next", "exit 0")])
+        response = {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "check", "function": {"name": "run_command", "arguments": json.dumps({"command": command})}},
+            {"id": "stale", "function": {"name": "write_file", "arguments": json.dumps({
+                "path": "should-not-exist", "content": "stale second action"})}},
+        ]}}]}
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+            state = native_agent.run_slice(item, complete=lambda _: response)
+        queue = task_context.step_status(folder)
+        assert queue["done"] == 1 and queue["active"]["title"] == "Next"
+        assert not (folder / "should-not-exist").exists()
+        assert "SQLite step progress" in str(state["messages"])
+        assert native_agent.step_check_context(folder, "run_command", {"command": "echo unrelated"}) is None
+
+
+def test_saved_verifier_check_recognizes_direct_supervisor_equivalent():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(project(Path(temporary) / "page")["folder"])
+        task_context.plan_steps(folder, [queue_step("Boundary cases",
+            "powershell -NoProfile -File .local-ai/verify.ps1")])
+        assert native_agent.step_check_context(folder, "run_verifier", {})
+        assert native_agent.step_check_context(folder, "run_command", {
+            "command": "powershell -NonInteractive -File .local-ai/verify.ps1"})
+        assert native_agent.step_check_context(folder, "run_command", {
+            "command": "powershell -File other.ps1"}) is None
+
+
 def test_native_worker_writes_files_and_checkpoints_tool_results():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

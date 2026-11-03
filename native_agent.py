@@ -33,6 +33,20 @@ MAX_READ_LINE = 4000
 PROJECT_COMMAND_TIMEOUT = 90
 
 TOOLS = [
+    {"type": "function", "function": {
+        "name": "task_steps",
+        "description": "Durable SQLite queue for small steps and phases. Plan 2-6 tiny steps for the next phase; each needs a short read-only check_command. Work only on the active step. complete runs its saved check and advances only on exit 0 with unchanged project files. split replaces the active step with smaller ones. revise fixes its mistaken command using steps=[one corrected step]; retain behavioral coverage. status resumes progress. A completed batch is not whole-project verification.",
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["plan", "status", "complete", "split", "revise"]},
+            "step_id": {"type": "integer"},
+            "steps": {"type": "array", "minItems": 1, "maxItems": 8, "items": {
+                "type": "object", "properties": {
+                    "phase": {"type": "string", "maxLength": 100},
+                    "title": {"type": "string", "maxLength": 240},
+                    "check_command": {"type": "string", "maxLength": 2000},
+                    "shell": {"type": "string", "enum": ["default", "powershell"]}},
+                "required": ["phase", "title", "check_command"], "additionalProperties": False}}},
+            "required": ["action"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 project file. Use start_line and max_lines for large files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "max_lines": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "inspect_project_file", "description": "Read a local PDF, DOCX, XLSX, PPTX, image, or text file in this task folder, including browser downloads. Ask a question for relevant excerpts, or paginate with start_char. Extracted text is cached locally by file contents.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "question": {"type": "string"}, "start_char": {"type": "integer"}, "max_chars": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
@@ -435,6 +449,38 @@ def readable_powershell_error(stderr: str) -> str:
 
 def execute_tool(folder: Path, name: str, arguments: dict) -> str:
     try:
+        if name == "task_steps":
+            import task_context
+
+            action = arguments["action"]
+            if action == "status":
+                value = task_context.step_status(folder)
+            elif action in {"plan", "split"}:
+                if action == "split" and type(arguments.get("step_id")) is not int:
+                    raise ValueError("Supply the active step_id to split.")
+                value = task_context.plan_steps(folder, arguments.get("steps"),
+                    split_id=arguments["step_id"] if action == "split" else None)
+            elif action == "revise":
+                if type(arguments.get("step_id")) is not int:
+                    raise ValueError("Supply the active step_id to revise.")
+                value = task_context.revise_step(folder, arguments["step_id"], arguments.get("steps"))
+            elif action == "complete":
+                import long_tasks
+
+                request_hash = task_context.request_identity(folder)
+                active = task_context.step_status(folder)["active"]
+                if (not active or type(arguments.get("step_id")) is not int
+                        or active["id"] != arguments["step_id"]):
+                    raise ValueError("Supply the current active step_id; steps cannot be skipped.")
+                before = long_tasks.fingerprint(folder)
+                checked = execute_tool(folder, "run_command", {
+                    "command": active["check_command"], "shell": active["shell"]})
+                value = task_context.record_step_check(folder, active["id"], request_hash, checked,
+                    unchanged=long_tasks.fingerprint(folder) == before)
+                value["check_output"] = checked[-2500:]
+            else:
+                raise ValueError("Choose plan, status, complete, split or revise.")
+            return json.dumps(value, ensure_ascii=False)
         if name == "list_files":
             target = project_path(folder, arguments.get("path") or ".")
             if not target.is_dir():
@@ -828,10 +874,18 @@ def prompt(project: dict) -> str:
         "when it changed, its excerpt is abbreviated, or you need its full exact contents. "
         "Use edit_file for a small change to an existing source file; use write_file when creating or replacing a whole file. "
         "Maintain .local-ai/PLAN.md as a checked milestone list and .local-ai/PROGRESS.md with current work and real checks. "
+        "For multi-step building or repair, first use task_steps action=plan to save 2-6 tiny steps "
+        "for the next phase in SQLite. Each step changes one behavior or component and names "
+        "a short read-only check_command. Do not ask a small model to build the whole app at once. "
+        "Build the minimal working skeleton, then one feature, then its edge cases, then integration. "
+        "Work on the active step only. Use task_steps action=complete to run its check before "
+        "advancing; use split if it needs several unrelated edits. After a batch, plan the next "
+        "phase from the original requirements. Keep PLAN.md as the overall roadmap. "
         f"{verification_hint}"
         "The verifier must only inspect files; it must not create, overwrite, or repair the requested output. "
         "Use noninteractive commands. Never invoke a program that waits for stdin; put test code in a file and run that file. "
         "run_command defaults to cmd.exe on Windows and /bin/sh elsewhere. Set shell=powershell for PowerShell syntax; do not send bare cmdlets to cmd.exe. "
+        f"Available Python interpreter: {sys.executable}. Quote its path in commands; use & before a quoted executable in PowerShell. "
         "If the job is not complete, use a tool or explain the exact next step in PROGRESS.md. "
         "Do not claim finished with missing features. The supervisor independently reruns verify.ps1. "
         "Use search_capabilities for relevant installed skills and tools; read only skills that help this task. "
@@ -1006,7 +1060,10 @@ def fresh_messages(messages: list, folder: Path, state: dict | None = None,
         current = [item]
     if current:
         groups.append(current)
-    chosen = groups[-RECENT_WORK_GROUPS:]
+    # The current DB unit replaces older step conversations, not the original
+    # request, architecture notes, failed checks or project files.
+    queue = task_context.step_status(folder)
+    chosen = groups[-(2 if queue["total"] else RECENT_WORK_GROUPS):]
     # User steering is also written to USER-REQUESTS.md, but preserve the
     # latest message verbatim in case a crash precedes that file write.
     latest_user = next((group for group in reversed(groups) if group[0].get("role") == "user"), None)
@@ -1042,8 +1099,49 @@ def repair_tools(project: dict, state: dict):
         state["repair_focus_turns"] = 0
         return TOOLS
     state["repair_focus_turns"] = count + 1
-    names = {"list_files", "read_file", "edit_file", "write_file", "search_text", "check_webapp", "run_verifier"}
+    names = {"list_files", "read_file", "edit_file", "write_file", "search_text", "check_webapp", "run_verifier", "task_steps"}
     return [tool for tool in TOOLS if tool["function"]["name"] in names]
+
+
+def step_tools(project: dict, state: dict, available: list) -> list:
+    """Keep routine steps small without permanently hiding specialist tools."""
+    import task_context
+
+    queue = task_context.step_status(project["folder"])
+    if not queue["remaining"]:
+        state["step_focus_turns"] = 0
+        return available
+    count = int(state.get("step_focus_turns", 0))
+    if count >= 4:
+        state["step_focus_turns"] = 0
+        return available
+    state["step_focus_turns"] = count + 1
+    core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text",
+            "run_command", "run_verifier", "check_webapp", "check_document_report",
+            "inspect_project_file", "transform_csv"}
+    return [tool for tool in available if tool["function"]["name"] in core]
+
+
+def step_check_context(folder: Path, name: str, arguments: dict):
+    """Recognize the active acceptance check even without a bookkeeping call."""
+    if name not in {"run_command", "run_verifier"}:
+        return None
+    import long_tasks
+    import task_context
+
+    active = task_context.step_status(folder)["active"]
+    if not active:
+        return None
+    saved = active["check_command"].strip()
+    command = str(arguments.get("command", "")).strip()
+    equivalent_verifier = is_verifier_invocation(saved) and (
+        name == "run_verifier" or name == "run_command" and is_verifier_invocation(command))
+    exact = (name == "run_command" and command == saved
+             and arguments.get("shell", "default") == active["shell"])
+    if not (exact or equivalent_verifier):
+        return None
+    return {"step_id": active["id"], "request_hash": task_context.request_identity(folder),
+            "fingerprint": long_tasks.fingerprint(folder)}
 
 
 def focused_browser_check(project: dict, state: dict, request_hash: str):
@@ -1281,6 +1379,12 @@ def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: st
 def completion_issue(folder: Path, project: dict | None = None,
                      state: dict | None = None) -> str:
     """Catch a premature handoff before the costly independent review starts."""
+    import task_context
+
+    queue = task_context.step_status(folder)
+    if queue["remaining"]:
+        return ("The SQLite step queue still has unfinished work. Complete or split the active "
+                "step with task_steps; its actual acceptance check must pass before advancing.")
     script = folder / ".local-ai" / "verify.ps1"
     if state and state.get("failed_checks"):
         return ("These structured checks failed and must pass again before completion: "
@@ -1545,12 +1649,12 @@ def run_slice(project: dict, complete=None) -> dict:
         import task_context
         planned_request_hash = task_context.request_identity(folder)
         focus = focused_browser_check(project, state, planned_request_hash)
-        available_tools = repair_tools(project, state)
+        available_tools = step_tools(project, state, repair_tools(project, state))
         call_messages = [*messages, focus[1]] if focus else messages
         if not focus and len(available_tools) < len(TOOLS):
             call_messages = [*messages, {"role": "user", "content": (
-                "A concrete HTML check failed. Its inputs and actual diagnostics are already "
-                "in the checkpoint. Make the targeted source/test correction and run the check. "
+                "Use the current checkpoint's active step and any checker diagnostics. "
+                "Make the small source/test correction and run its acceptance check. "
                 "Avoid searching for another copy of the same error or saving unverified lessons. "
                 "Other discovery tools return periodically if the repair needs them."
             )}]
@@ -1665,6 +1769,7 @@ def run_slice(project: dict, complete=None) -> dict:
             save_state(project, state)
             return state
         read_cycle_notice = False
+        step_boundary = False
         for item in calls:
             state["premature_finishes"] = 0
             latest = read_state(project)
@@ -1673,6 +1778,8 @@ def run_slice(project: dict, complete=None) -> dict:
             function = item.get("function") or {}
             args = {}
             signature = ""
+            step_check = None
+            queue_result = None
             try:
                 args = json.loads(function.get("arguments") or "{}")
                 if not isinstance(args, dict):
@@ -1690,14 +1797,27 @@ def run_slice(project: dict, complete=None) -> dict:
                     project, state, function.get("name", ""), args)
                 verifier_issue = verifier_issue or browser_verifier_write_issue(
                     folder, project, function.get("name", ""), args)
-                if verifier_issue:
+                if step_boundary:
+                    result = ("Tool error: The step queue advanced earlier in this response. "
+                              "Read the fresh active step in the next turn before doing more work.")
+                elif verifier_issue:
                     result = "Tool error: " + verifier_issue
                 elif (state.get("last_failed_tool") == signature
                         and int(state.get("same_tool_failures", 0)) >= 2):
                     result = ("Tool error: This exact call failed twice and was skipped. "
                               "Inspect the earlier error or change the method or arguments.")
                 else:
+                    step_check = step_check_context(folder, function.get("name", ""), args)
                     result = execute_tool(folder, function.get("name", ""), args)
+                    if step_check:
+                        import long_tasks
+                        import task_context
+
+                        queue_result = task_context.record_step_check(folder, step_check["step_id"],
+                            step_check["request_hash"], result,
+                            unchanged=long_tasks.fingerprint(folder) == step_check["fingerprint"])
+                        step_boundary = queue_result["passed"]
+                        result += "\nSQLite step progress: " + json.dumps(queue_result, ensure_ascii=False)
             except ValueError as exc:
                 result = f"Tool error: {exc}"
             messages.append({"role": "tool", "tool_call_id": item.get("id", ""),
@@ -1707,6 +1827,9 @@ def run_slice(project: dict, complete=None) -> dict:
             task_context.record_action(folder, function.get("name", ""), result, args,
                                        request_hash=planned_request_hash)
             outcome = task_context.action_outcome(function.get("name", ""), result)
+            if function.get("name") == "task_steps" and outcome == "Completed":
+                step_boundary = args.get("action") in {"plan", "split", "revise"} or (
+                    args.get("action") == "complete" and json.loads(result).get("passed") is True)
             read_cycle_notice = remember_read_cycle(
                 state, function.get("name", ""), args, result, outcome) or read_cycle_notice
             remember_checker_verdict(state, function.get("name", ""), args, result)
@@ -1766,6 +1889,12 @@ def run_slice(project: dict, complete=None) -> dict:
                 state["failure_nudged"] = False
             state["messages"] = messages
             state["current"] = f"{function.get('name', 'tool')}: {result[:150]}"
+            if queue_result or function.get("name") == "task_steps" and outcome == "Completed":
+                queue = queue_result or json.loads(result)
+                active = queue.get("active")
+                state["current"] = (f"Phase: {active['phase']} · {queue['done']}/{queue['total']} steps checked · "
+                                    + active["title"] if active else
+                                    f"Phase checked: {queue['done']}/{queue['total']} steps; checking the full request")
             save_state(project, state)
         if read_cycle_notice:
             # Keep all tool replies together before inserting guidance; a

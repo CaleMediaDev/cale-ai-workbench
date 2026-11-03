@@ -247,9 +247,15 @@ def grade_temperature(folder: Path) -> dict:
     # A verifier that only returns exit 0 should not count. Restore the
     # original broken function temporarily and demand a failing verification.
     result["verifier_catches_regression"] = False
-    if script.is_file() and all(result["cases"].values()):
+    result["verifier_passes_correct"] = False
+    cases_pass = len(result["cases"]) == 4 and all(result["cases"].values())
+    if script.is_file() and cases_pass:
         fixed = source.read_bytes()
         try:
+            command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(script)]
+            correct = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
+                                     capture_output=True, text=True, timeout=30, check=False)
+            result["verifier_passes_correct"] = correct.returncode == 0
             source.write_text(TEMPERATURE_STARTER, encoding="utf-8")
             checked = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(script)],
@@ -261,8 +267,8 @@ def grade_temperature(folder: Path) -> dict:
             result["verifier_error"] = f"{type(exc).__name__}: {exc}"
         finally:
             source.write_bytes(fixed)
-    result["passed"] = (result["verifier_present"] and all(result["cases"].values())
-                        and result["verifier_catches_regression"])
+    result["passed"] = (result["verifier_present"] and cases_pass
+                        and result["verifier_passes_correct"] and result["verifier_catches_regression"])
     return result
 
 
@@ -473,6 +479,10 @@ def main() -> int:
     parser.add_argument("--scenario", choices=("temperature", "contacts", "webapp", "webapp_repair", "document"),
                         default="temperature")
     parser.add_argument("--model", default="cale-fast")
+    parser.add_argument("--stepwise", action="store_true",
+                        help="Require the model to use and finish at least two SQLite steps")
+    parser.add_argument("--prepared-checks", action="store_true",
+                        help="Temperature-only: supply a known read-only verifier to isolate execution from test authoring")
     parser.add_argument("--auto-route", action="store_true",
                         help="Use Cale's real local model router; cloud access is disabled")
     parser.add_argument("--call-timeout", type=int, default=120)
@@ -481,6 +491,8 @@ def main() -> int:
     parser.add_argument("--slices", type=int, default=2)
     parser.add_argument("--keep-folder", help="Preserve task files here for debugging (must not exist)")
     args = parser.parse_args()
+    if args.prepared_checks and args.scenario != "temperature":
+        parser.error("--prepared-checks currently supports only temperature")
     native_agent.PROJECT_COMMAND_TIMEOUT = args.command_timeout
     started = time.monotonic()
     context = (nullcontext(Path(args.keep_folder).resolve()) if args.keep_folder
@@ -493,6 +505,23 @@ def main() -> int:
         brief = {"temperature": TEMPERATURE_BRIEF, "contacts": CONTACTS_BRIEF,
                  "webapp": WEBAPP_BRIEF, "webapp_repair": WEBAPP_REPAIR_BRIEF,
                  "document": DOCUMENT_BRIEF}[args.scenario]
+        if args.stepwise:
+            brief += (" Use task_steps to plan and complete at least two tiny steps in the local "
+                      "SQLite queue. Repair/build the core first, then boundary checks. Finish each "
+                      "step using its actual read-only acceptance command; do not skip the queue.")
+        if args.prepared_checks:
+            brief += (" A read-only .local-ai/verify.ps1 is already provided. Preserve it and use "
+                      "powershell -NoProfile -File .local-ai/verify.ps1 for each step's check_command. "
+                      "It covers freezing, boiling, negative and fractional temperatures. "
+                      "First repair the function, then verify all boundaries; do not rewrite the verifier.")
+            (folder / ".local-ai/check_temperature.py").write_text(
+                "import runpy\nf=runpy.run_path('temperature.py')['to_celsius']\n"
+                "for value,target in [(32,0),(212,100),(-40,-40),(98.6,37)]:\n"
+                "    assert abs(f(value)-target)<1e-8,(value,f(value),target)\n", encoding="utf-8")
+            python = sys.executable.replace("'", "''")
+            (folder / ".local-ai/verify.ps1").write_text(
+                f"$ErrorActionPreference='Stop'\n& '{python}' .local-ai/check_temperature.py\nexit $LASTEXITCODE\n",
+                encoding="utf-8-sig")
         if args.scenario == "temperature":
             (folder / "temperature.py").write_text(
                 TEMPERATURE_STARTER, encoding="utf-8")
@@ -558,6 +587,7 @@ def main() -> int:
             "model": "automatic-local" if args.auto_route else args.model,
             "scenario": args.scenario,
             "command_timeout": args.command_timeout,
+            "prepared_checks": args.prepared_checks,
             "seconds": round(time.monotonic() - started, 2),
             "worker_status": "error" if error else state.get("status", "error"),
             "turns": state.get("turns", 0),
@@ -573,6 +603,14 @@ def main() -> int:
                       "document": grade_document}[args.scenario](folder),
             "error": error,
         }
+        if args.stepwise:
+            import task_context
+
+            queue = task_context.step_status(folder)
+            report["step_queue"] = {key: queue[key] for key in ("total", "done", "remaining")}
+            report["grade"]["step_queue_completed"] = queue["total"] >= 2 and queue["remaining"] == 0
+            report["grade"]["passed"] = (report["grade"]["passed"]
+                                          and report["grade"]["step_queue_completed"])
         if args.keep_folder:
             (folder / "benchmark-report.json").write_text(
                 json.dumps(report, indent=2), encoding="utf-8")
