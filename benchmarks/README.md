@@ -234,6 +234,11 @@ a saved verifier that must reject removed JavaScript. A screenshot is retained
 for manual visual review. This synthetic fixture never opens or changes the
 original user game. A passing fixture is not a general game quality ranking.
 
+`--resume` continues only this fixture with the same brief and preserves the
+original report; one separate `benchmark-resume-report.json` records the new
+calls, initial step counts and initial worker turn count. It rejects an unrelated
+project or an existing resume report rather than overwriting the evidence.
+
 The [November 3 native game report](results/native-game-build-20261103.json)
 retains two failed builds: 255.36 s / 24 calls and 230.51 s / 9 calls.
 Both lacked the requested live reset function and overflowed the mobile viewport;
@@ -244,6 +249,12 @@ regression test, but no passing full-game result is claimed. Exported-state
 assertions separately have real offline browser, saved-verifier mutation and
 SQLite step integration coverage. These are incomplete game-building results,
 not evidence that Cale now produces reliable whole games.
+
+A continuation of the second checkpoint under the step-binding changes took
+another 340.90 s / 24 calls and completed one of its six units. Mobile width
+passed, but the requested exported game API was missing and the verifier still
+accepted removed JavaScript. This is retained as another failed end-to-end
+result; partial unit progress does not qualify a game model or complete the app.
 
 `browser_assertion_repair.py --auto-route --slices 2 --keep-folder C:\path\to\new-folder`
 uses the production local-only router and native tool-failure feedback rather

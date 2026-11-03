@@ -632,6 +632,126 @@ def test_local_repair_feedback_survives_reads_restart_aliases_and_resets_on_veri
     assert "local_repair_feedback" not in copied
 
 
+def test_native_bare_step_completion_runs_real_check_and_never_advances_second_unit_in_batch(tmp_path):
+    item = project(tmp_path / "current-step")
+    folder = Path(item["folder"])
+    queue = task_context.plan_steps(folder, [
+        {"phase": "Build", "title": "First unit", "check_command": "exit 0"},
+        {"phase": "Build", "title": "Second unit", "check_command": "exit 0"}])
+    first = queue["active"]["id"]
+    def complete(payload):
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": str(i), "function": {"name": "task_steps", "arguments": '{"action":"complete"}'}}
+            for i in range(2)]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(item, complete=complete)
+    queue = task_context.step_status(folder)
+    assert queue["done"] == 1 and queue["remaining"] == 1 and queue["active"]["id"] != first
+    replies = [message["content"] for message in state["messages"] if message.get("role") == "tool"]
+    assert json.loads(replies[0])["checked_step_id"] == first
+    assert "step queue advanced" in replies[1]
+    # Direct/public dispatch still requires a deliberate target ID.
+    assert native_agent.execute_tool(folder, "task_steps", {"action": "complete"}).startswith("Tool error:")
+
+
+def test_native_bare_step_completion_cannot_pass_failed_check_or_correct_wrong_explicit_id(tmp_path):
+    for suffix, args in [("failed", {"action": "complete"}), ("wrong-id", {"action": "complete", "step_id": 999})]:
+        item = project(tmp_path / suffix)
+        folder = Path(item["folder"])
+        task_context.plan_steps(folder, [{"phase": "Build", "title": "Failing check", "check_command": "exit 7"}])
+        def complete(payload):
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": suffix,
+                "function": {"name": "task_steps", "arguments": json.dumps(args)}}]}}]}
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+            state = native_agent.run_slice(item, complete=complete)
+        queue = task_context.step_status(folder)
+        assert queue["done"] == 0 and queue["remaining"] == 1
+        assert queue["active"]["attempts"] == (1 if suffix == "failed" else 0)
+        reply = next(message["content"] for message in reversed(state["messages"]) if message.get("role") == "tool")
+        assert not json.loads(reply)["passed"] if suffix == "failed" else "step_id" in reply
+
+
+def test_bare_step_binding_rejects_revised_acceptance_and_new_requests(tmp_path):
+    import pytest
+
+    folder = Path(project(tmp_path / "binding")["folder"])
+    original = {"phase": "Build", "title": "First", "check_command": "exit 0"}
+    active = task_context.plan_steps(folder, [original])["active"]
+    request = task_context.request_identity(folder)
+    bound = native_agent.bind_step_completion(folder, {"action": "complete"}, active, request)
+    task_context.revise_step(folder, active["id"], [{**original, "check_command": "exit 9"}])
+    with pytest.raises(ValueError, match="acceptance check changed"):
+        native_agent.bind_step_completion(folder, {"action": "complete"}, active, request)
+    rejected = native_agent.execute_tool(folder, "task_steps", bound)
+    assert "acceptance check changed" in rejected
+    assert task_context.step_status(folder)["active"]["attempts"] == 0
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("New instructions")
+    with pytest.raises(ValueError, match="unchanged active step"):
+        native_agent.bind_step_completion(folder, {"action": "complete"}, active, request)
+
+
+def test_step_acceptance_revised_during_check_cannot_receive_older_success(tmp_path):
+    folder = Path(project(tmp_path / "racing-check")["folder"])
+    original = {"phase": "Build", "title": "First", "check_command": "exit 0"}
+    active = task_context.plan_steps(folder, [original])["active"]
+    dispatch = native_agent.execute_tool
+    def revise_while_running(folder, name, arguments):
+        if name == "run_command":
+            task_context.revise_step(folder, active["id"], [{**original, "check_command": "exit 9"}])
+            return "Exit code: 0\nOld acceptance passed"
+        return dispatch(folder, name, arguments)
+    with patch.object(native_agent, "execute_tool", side_effect=revise_while_running):
+        result = native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]})
+    assert "acceptance check changed while it ran" in result
+    queue = task_context.step_status(folder)
+    assert queue["done"] == 0 and queue["active"]["attempts"] == 0
+    assert queue["active"]["check_command"] == "exit 9"
+
+
+def test_native_bare_step_accepts_a_source_edit_but_rejects_acceptance_revision_during_inference(tmp_path):
+    for revised in (False, True):
+        item = project(tmp_path / ("revised" if revised else "source-edit"))
+        folder = Path(item["folder"])
+        step = {"phase": "Build", "title": "Write greeting", "check_command": "findstr /x World hello.txt"}
+        active = task_context.plan_steps(folder, [step])["active"]
+        def complete(payload):
+            if revised:
+                task_context.revise_step(folder, active["id"], [{**step, "check_command": "exit 9"}])
+            calls = [{"id": "write", "function": {"name": "write_file", "arguments":
+                json.dumps({"path": "hello.txt", "content": "World\n"})}},
+                {"id": "check", "function": {"name": "task_steps", "arguments": '{"action":"complete"}'}}]
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": calls}}]}
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+            state = native_agent.run_slice(item, complete=complete)
+        queue = task_context.step_status(folder)
+        assert queue["done"] == (0 if revised else 1)
+        assert (folder / "hello.txt").read_text() == "World\n"
+        if revised:
+            assert queue["active"]["attempts"] == 0
+            assert "acceptance check changed" in state["messages"][-1]["content"]
+
+
+def test_auto_recorded_acceptance_cannot_advance_a_check_revised_during_execution(tmp_path):
+    item = project(tmp_path / "auto-check-race")
+    folder = Path(item["folder"])
+    step = {"phase": "Build", "title": "First", "check_command": "exit 0"}
+    active = task_context.plan_steps(folder, [step])["active"]
+    def complete(payload):
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "check",
+            "function": {"name": "run_command", "arguments": '{"command":"exit 0"}'}}]}}]}
+    dispatch = native_agent.execute_tool
+    def revise(folder, name, arguments):
+        if name == "run_command":
+            task_context.revise_step(folder, active["id"], [{**step, "check_command": "exit 9"}])
+            return "Exit code: 0\nOld check passed"
+        return dispatch(folder, name, arguments)
+    with (patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1),
+          patch.object(native_agent, "execute_tool", side_effect=revise)):
+        state = native_agent.run_slice(item, complete=complete)
+    assert task_context.step_status(folder)["done"] == 0
+    assert "acceptance check changed while it ran" in state["messages"][-1]["content"]
+
+
 def test_native_local_repair_feedback_changes_next_router_call_across_slices(tmp_path):
     item = project(tmp_path / "routing")
     folder = Path(item["folder"])

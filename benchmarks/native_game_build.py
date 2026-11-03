@@ -117,20 +117,31 @@ def main() -> int:
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--keep-folder", type=Path, required=True)
     parser.add_argument("--slices", type=int, default=2)
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume this fixture's saved worker and queue; retain its original report")
     args = parser.parse_args()
     runtime = args.runtime_root.resolve(strict=True)
     if not (runtime / "LongTasks/model-approvals.json").is_file():
         parser.error("Use an installed runtime with actual model tool-probe approvals")
     folder = args.keep_folder.resolve()
-    folder.mkdir(parents=True, exist_ok=False)
     notes = folder / ".local-ai"
-    notes.mkdir()
-    (folder / "AGENTS.md").write_text("Build and verify the whole requested game using real tool calls.")
-    (notes / "USER-REQUESTS.md").write_text("")
-    (notes / "PLAN.md").write_text(long_tasks.INITIAL_PLAN)
-    (notes / "PROGRESS.md").write_text(long_tasks.INITIAL_PROGRESS)
-    long_tasks.save_original_request(folder, "benchmark", BRIEF)
+    if args.resume:
+        original = json.loads((folder / "benchmark-report.json").read_text())
+        if original.get("scenario") != "native_game_build" or original.get("brief") != BRIEF:
+            parser.error("Resume only this synthetic fixture with the same complete brief")
+        if (folder / "benchmark-resume-report.json").exists():
+            parser.error("A resume report already exists; preserve it before another run")
+    else:
+        folder.mkdir(parents=True, exist_ok=False)
+        notes.mkdir()
+        (folder / "AGENTS.md").write_text("Build and verify the whole requested game using real tool calls.")
+        (notes / "USER-REQUESTS.md").write_text("")
+        (notes / "PLAN.md").write_text(long_tasks.INITIAL_PLAN)
+        (notes / "PROGRESS.md").write_text(long_tasks.INITIAL_PROGRESS)
+        long_tasks.save_original_request(folder, "benchmark", BRIEF)
     project = {"id": "benchmark", "folder": str(folder), "brief": BRIEF}
+    initial_queue = task_context.step_status(folder)
+    initial_turns = native_agent.read_state(project).get("turns", 0)
     stats = {"model_calls": 0, "tool_calls": 0, "prompt_tokens": 0,
              "completion_tokens": 0, "tools_used": [], "routes": []}
     router = observed_router(stats)
@@ -155,8 +166,11 @@ def main() -> int:
         except Exception as error:
             graded = {"passed": False, "error": f"{type(error).__name__}: {str(error)[:500]}"}
     report = {"scenario": "native_game_build", "brief": BRIEF, "seconds": round(elapsed, 2),
-              "status": state.get("status"), "error": failure, **stats, "grade": graded}
-    (folder / "benchmark-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+              "status": state.get("status"), "error": failure, **stats, "grade": graded,
+              "resumed": args.resume, "initial_turns": initial_turns,
+              "initial_steps": {key: initial_queue[key] for key in ("total", "done", "remaining")}}
+    report_path = folder / ("benchmark-resume-report.json" if args.resume else "benchmark-report.json")
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
     return 0 if state.get("status") == "done" and graded["passed"] and not failure else 1
 

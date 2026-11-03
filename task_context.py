@@ -365,8 +365,15 @@ def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None) 
         return _step_status(conn, request_hash)
 
 
+def step_check_identity(step: dict) -> str:
+    """Bind a check to its unit and acceptance data, excluding mutable evidence."""
+    fields = ("id", "phase", "title", "check_tool", "check_arguments", "check_command", "shell")
+    raw = json.dumps({key: step.get(key) for key in fields}, sort_keys=True, allow_nan=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def record_step_check(folder: str | Path, step_id: int, request_hash: str,
-                      result: str, *, unchanged: bool) -> dict:
+                      result: str, *, unchanged: bool, expected_check: str | None = None) -> dict:
     """Commit an actual command result only to the same request and active step.
 
     A short successful check proves only the selected step's acceptance test;
@@ -381,6 +388,8 @@ def record_step_check(folder: str | Path, step_id: int, request_hash: str,
         current = _step_status(conn, request_hash)
         if not current["active"] or current["active"]["id"] != step_id:
             raise ValueError("That step is no longer active; no progress was advanced.")
+        if expected_check is not None and step_check_identity(current["active"]) != expected_check:
+            raise ValueError("The acceptance check changed while it ran; no progress was advanced. Run the revised check.")
         passed = result.startswith("Exit code: 0\n") and unchanged
         # Keep bounded error diagnostics, not a complete command transcript.
         # Plain document/test stdout is omitted. Quotes in the snapshot keep

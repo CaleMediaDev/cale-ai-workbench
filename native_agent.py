@@ -53,6 +53,8 @@ TOOLS = [
                                  'check_command. complete runs the saved acceptance check and advances only on '
                                  'success without source changes. split makes smaller steps; revise corrects the '
                                  'active check with steps=[one corrected step]. status resumes progress. A '
+                                 'native worker may use {action:complete} without step_id to check the exact '
+                                 'active unit shown in its current checkpoint; changed units/checks are rejected. '
                                  'completed batch is not whole-project verification.',
                   'parameters': {'type': 'object',
                                  'properties': {'action': {'type': 'string',
@@ -562,6 +564,9 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                         or active["id"] != arguments["step_id"]):
                     current = f" {active['id']} ({active['title']})" if active else " (there is no unfinished step)"
                     raise ValueError("Supply the current active step_id" + current + "; steps cannot be skipped.")
+                expected_check = task_context.step_check_identity(active)
+                if arguments.get("_expected_check", expected_check) != expected_check:
+                    raise ValueError("The active acceptance check changed after planning; read the fresh checkpoint")
                 kind = active["check_tool"]
                 check_args = (active["check_arguments"] if kind != "run_command" else
                               {"command": active["check_command"], "shell": active["shell"]})
@@ -572,7 +577,9 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                 if structured:
                     task_context.record_action(folder, kind, checked, check_args, request_hash=request_hash)
                 value = task_context.record_step_check(folder, active["id"], request_hash, status_result,
-                    unchanged=step_source_fingerprint(folder, structured) == before)
+                    unchanged=step_source_fingerprint(folder, structured) == before, expected_check=expected_check)
+                value["checked_step_id"] = active["id"]
+                value["check_sha256"] = expected_check
                 value["check_output"] = checked[-2500:]
                 value["check_tool"] = kind
                 if structured:
@@ -1558,6 +1565,27 @@ def step_source_fingerprint(folder: Path, structured: bool = False):
             long_tasks.fingerprint(folder))
 
 
+def bind_step_completion(folder: Path, arguments: dict, planned_step: dict | None,
+                         request_hash: str) -> dict:
+    """Resolve only the native worker's bare completion against its seen unit.
+
+    The public dispatcher still requires an explicit ID. A newer unit or a
+    revised acceptance check cannot be substituted while inference was running.
+    Source edits remain allowed: the existing checker must validate them.
+    """
+    if arguments != {"action": "complete"}:
+        return arguments
+    import task_context
+
+    if not planned_step or request_hash != task_context.request_identity(folder):
+        raise ValueError("No unchanged active step was shown for this completion; read the fresh checkpoint")
+    active = task_context.step_status(folder)["active"]
+    if not active or task_context.step_check_identity(active) != task_context.step_check_identity(planned_step):
+        raise ValueError("The active step or its acceptance check changed; read the fresh checkpoint before completing it")
+    return {"action": "complete", "step_id": planned_step["id"],
+            "_expected_check": task_context.step_check_identity(planned_step)}
+
+
 def step_exit_result(kind: str, result: str) -> str:
     """Translate only a registered checker's explicit verdict to queue evidence."""
     if kind not in {"check_python_function", "check_webapp"}:
@@ -1618,7 +1646,8 @@ def step_check_context(folder: Path, name: str, arguments: dict):
         if not (exact or equivalent_verifier):
             return None
     return {"step_id": active["id"], "request_hash": task_context.request_identity(folder),
-            "fingerprint": step_source_fingerprint(folder, structured), "structured": structured}
+            "fingerprint": step_source_fingerprint(folder, structured), "structured": structured,
+            "check_sha256": task_context.step_check_identity(active)}
 
 
 def focused_browser_check(project: dict, state: dict, request_hash: str):
@@ -2319,6 +2348,7 @@ def run_slice(project: dict, complete=None) -> dict:
         messages = fresh_messages(messages, folder, state, project)
         messages = compact_messages(messages, folder, context_limit)
         planned_request_hash = task_context.request_identity(folder)
+        planned_step = task_context.step_status(folder)["active"]
         focus = focused_browser_check(project, state, planned_request_hash)
         available_tools = step_tools(project, state, repair_tools(project, state))
         call_messages = [*messages, focus[1]] if focus else messages
@@ -2460,6 +2490,8 @@ def run_slice(project: dict, complete=None) -> dict:
                 if function.get("name") not in allowed_names:
                     raise ValueError("That tool is not available in this focused turn. Use the offered "
                                      "repair/check tools; full discovery tools return periodically.")
+                if function.get("name") == "task_steps" and not step_boundary:
+                    args = bind_step_completion(folder, args, planned_step, planned_request_hash)
                 signature = hashlib.sha256((
                     str(function.get("name") or "") + "\0" +
                     json.dumps(args, sort_keys=True, ensure_ascii=False)
@@ -2487,7 +2519,8 @@ def run_slice(project: dict, complete=None) -> dict:
 
                         queue_result = task_context.record_step_check(folder, step_check["step_id"],
                             step_check["request_hash"], step_exit_result(function.get("name", ""), result),
-                            unchanged=step_source_fingerprint(folder, step_check["structured"]) == step_check["fingerprint"])
+                            unchanged=step_source_fingerprint(folder, step_check["structured"]) == step_check["fingerprint"],
+                            expected_check=step_check["check_sha256"])
                         step_boundary = queue_result["passed"]
                         queue_result = compact_step_progress(queue_result)
                         if step_check["structured"]:

@@ -18,6 +18,17 @@ remain authoritative. Deferred models remain fallbacks when alternatives cannot
 respond. This is a repair preference, not a guarantee that another model will
 solve the task or finish faster.
 
+The native worker can check its current SQLite unit with
+`task_steps {"action":"complete"}`. Cale binds that shorthand to the exact
+unit and acceptance check shown before inference; explicit wrong IDs and
+changed units/checks are rejected. Source edits are allowed, but the saved
+acceptance check must actually pass with unchanged project files during the
+check. Completing one unit prevents further actions from that same response
+from advancing the next unit. Both explicit completion and automatically
+recognized checks commit progress only if the acceptance identity is still
+current, preventing an older result from completing a revised check. Direct
+tool dispatch outside the native worker still requires an explicit step ID.
+
 For interactive single-file HTML apps, the native worker can use an offline Chromium check that fills real inputs, inspects visible results and errors, and checks mobile width. A passing check saves a repeatable browser verifier. The worker must rerun the check after changing the page before it can finish. This catches behavior that a source-text scan misses; it does not establish that an entire website is correct or visually polished.
 
 Canvas apps and games can also expose their actual live state for passive checks.
