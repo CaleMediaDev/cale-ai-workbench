@@ -1,6 +1,7 @@
 """Behavior checks for Cale's native, restartable project worker."""
 
 import copy
+import csv
 import hashlib
 import json
 import os
@@ -109,6 +110,102 @@ def test_run_command_accepts_quoted_executable_path_and_shell_operators():
     assert quoted.startswith("Exit code: 0\nquoted path works")
     assert chained.startswith("Exit code: 0")
     assert "first" in chained and "second" in chained
+
+
+def test_legacy_verifier_command_rejects_output_changes():
+    """A verifier cannot pass by silently regenerating the requested file."""
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        notes = folder / ".local-ai"
+        notes.mkdir()
+        output = folder / "result.txt"
+        output.write_text("before", encoding="utf-8")
+        verifier = notes / "verify.ps1"
+        verifier.write_text(
+            "Set-Content -Path result.txt -Value after\nexit 0\n", encoding="utf-8")
+        changed = native_agent.execute_tool(
+            folder, "run_command", {"command": "powershell -File .local-ai/verify.ps1"})
+        assert changed.startswith("Exit code: 1\nProject files changed")
+        assert output.read_text(encoding="utf-8").strip() == "after"
+        verifier.write_text(
+            "if ((Get-Content result.txt) -ne 'after') { exit 1 }\nexit 0\n",
+            encoding="utf-8")
+        checked = native_agent.execute_tool(
+            folder, "run_command", {"command": "powershell -File .local-ai/verify.ps1"})
+        assert checked.startswith("Exit code: 0\n")
+
+
+def test_csv_task_prompt_recommends_a_parser_and_read_only_verifier():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "table")
+        item["brief"] = "Clean a CSV file"
+        instruction = native_agent.prompt(item)
+        assert "use transform_csv" in instruction
+        assert "Python's csv module" in instruction
+        assert "verifier must only inspect files" in instruction
+
+
+def test_transform_csv_cleans_rows_without_changing_source():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        source = folder / "contacts.csv"
+        original = ("name,phone,city\n"
+                    '"  avery LEE  ","(517) 555-0101"," lansing "\n'
+                    '"Avery Lee","5175550101","Lansing"\n'
+                    '"Sam Patel","bad","Ann Arbor"\n')
+        source.write_text(original, encoding="utf-8")
+        result = native_agent.execute_tool(folder, "transform_csv", {
+            "input_path": "contacts.csv", "output_path": "cleaned_contacts.csv",
+            "transforms": {"name": "title", "phone": "digits", "city": "title"},
+            "exact_lengths": {"phone": 10}, "unique_by": ["phone"],
+        })
+        assert json.loads(result)["kept"] == 1
+        with (folder / "cleaned_contacts.csv").open(newline="", encoding="utf-8") as stream:
+            assert list(csv.DictReader(stream)) == [
+                {"name": "Avery Lee", "phone": "5175550101", "city": "Lansing"}]
+        assert source.read_text(encoding="utf-8") == original
+        verify_command = {"command": "powershell -File .local-ai/verify.ps1"}
+        assert native_agent.execute_tool(folder, "run_command", verify_command).startswith(
+            "Exit code: 0\n")
+        (folder / "cleaned_contacts.csv").write_text("corrupted", encoding="utf-8")
+        assert native_agent.execute_tool(folder, "run_command", verify_command).startswith(
+            "Exit code: 1\n")
+
+
+def test_transform_csv_failure_preserves_existing_output():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        (folder / "contacts.csv").write_text("name,phone\nAvery,123,extra\n", encoding="utf-8")
+        output = folder / "cleaned_contacts.csv"
+        output.write_text("saved result", encoding="utf-8")
+        result = native_agent.execute_tool(folder, "transform_csv", {
+            "input_path": "contacts.csv", "output_path": "cleaned_contacts.csv",
+            "transforms": {"phone": "digits"},
+        })
+        assert result.startswith("Tool error: ValueError: CSV row 1")
+        assert output.read_text(encoding="utf-8") == "saved result"
+
+
+def test_transform_csv_verifier_handles_nested_paths_and_preserves_custom_check():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        source = folder / "data" / "team's.csv"
+        source.parent.mkdir()
+        source.write_text("name,phone\navery,517-555-0101\n", encoding="utf-8-sig")
+        arguments = {
+            "input_path": "data/team's.csv",
+            "output_path": "results/cleaned's.csv",
+            "transforms": {"name": "title", "phone": "digits"},
+            "exact_lengths": {"phone": 10},
+        }
+        result = native_agent.execute_tool(folder, "transform_csv", arguments)
+        assert json.loads(result)["kept"] == 1
+        verifier = folder / ".local-ai" / "verify.ps1"
+        assert native_agent.execute_tool(folder, "run_command", {
+            "command": "powershell -File .local-ai/verify.ps1"}).startswith("Exit code: 0\n")
+        verifier.write_text("Write-Output 'my custom check'\nexit 0\n", encoding="utf-8")
+        native_agent.execute_tool(folder, "transform_csv", arguments)
+        assert verifier.read_text(encoding="utf-8") == "Write-Output 'my custom check'\nexit 0\n"
 
 
 def test_read_file_streams_large_files_and_bounds_one_extremely_long_line():

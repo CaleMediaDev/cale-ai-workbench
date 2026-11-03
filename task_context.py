@@ -180,8 +180,9 @@ def record_action(folder: str | Path, tool: str, result: str, arguments: dict | 
     # Tool output can contain private file contents or web text. Keep status only.
     outcome = action_outcome(tool, result)
     subject = ""
-    if tool in {"read_file", "write_file", "edit_file", "list_files", "inspect_project_file"} and isinstance(arguments, dict):
-        raw = str(arguments.get("path") or "")
+    if tool in {"read_file", "write_file", "edit_file", "list_files",
+                "inspect_project_file", "transform_csv"} and isinstance(arguments, dict):
+        raw = str(arguments.get("output_path" if tool == "transform_csv" else "path") or "")
         root = Path(folder).resolve()
         try:
             candidate = (root / raw).resolve()

@@ -6,6 +6,8 @@ Created by [Cale Media](https://calemedia.com/). New general tasks use Cale's na
 
 The native worker saves each model/tool step, resumes after a crash, keeps a project plan and progress file, and can run the project's verification script through a direct contained tool before handoff. The supervisor independently reruns that script before marking work finished. It can search public webpages, edit project files, run commands, and discover Cale's installed local image, audio, video, camera, memory, and training tools. Existing Hermes tasks retain their board history during this migration. The supervisor stores worker process identity separately from the step checkpoint, so a worker that saves an early result cannot have it overwritten during startup. The installer still includes Hermes for that recovery path and for capabilities that have not moved to the native worker yet; signed-in Chrome/DevTools sessions remain one such gap. No OpenClaw runtime or source code is bundled.
 
+For common CSV cleanup, the native worker has a project-contained `transform_csv` tool that uses a real CSV parser for trimming, case changes, phone digit cleanup, row filtering, and deduplication. It preserves the source and creates a read-only verifier when the task has none. A verifier that changes project output cannot pass the worker's legacy command check.
+
 Skills and tool descriptions are also indexed in a local SQLite FTS5 database (`LongTasks/capabilities.sqlite3`). Setup builds it before opening the desktop; launch and the supervisor refresh it automatically, including locally edited skills. The native worker can search that catalog and load a relevant skill without scanning every Markdown file on each task. The index is rebuildable from the installed files and tool registrations; it contains no account keys or project documents. The readiness checklist queries the database and offers automatic repair if it fails. Large optional model weights still download according to the PC's available resources, so a capability appears as ready only after its runtime or model has actually passed its check.
 
 ## Install
@@ -187,7 +189,7 @@ Start with [the architecture guide](ARCHITECTURE.md) and [contribution guide](CO
 
 After installation, run `Toolbox/python/Scripts/python.exe Validation/test_cloud_ai.py` and `Toolbox/python/Scripts/python.exe Validation/test_long_tasks.py` from the installation directory. Tests cover real process termination, recovery state, stale verification, OAuth callback validation, free-only routing and fallback. They do not require a cloud account.
 
-For a real local-model task rather than mocked component tests, run the opt-in [native worker benchmark](benchmarks/README.md). Its separate grader checks the result and whether the worker's verifier catches the original bug. It covers one small coding task, so it is not an overall comparison with other agents.
+For real local-model tasks rather than mocked component tests, run the opt-in [native worker benchmark](benchmarks/README.md). Its separate graders check a coding repair and a CSV cleanup, including whether each worker-written verifier detects a regression. These small tasks are not an overall comparison with other agents.
 
 Please report reproducible bugs and include versions and redacted errors. Do not upload your `Cloud`, `data`, `Projects`, `LongTasks`, or log directories.
 
