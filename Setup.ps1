@@ -71,6 +71,18 @@ $open = New-Object Windows.Forms.Button
 $open.Text='Open Cale AI'; $open.Visible=$false; $open.Enabled=$false; $open.SetBounds(26,374,190,44)
 $open.FlatStyle='Flat'; $open.FlatAppearance.BorderSize=0; $open.BackColor=$card; $open.ForeColor=$ink
 $form.Controls.Add($open)
+$accounts=New-Object Windows.Forms.Button
+$accounts.Text='Connect accounts'; $accounts.Enabled=$false
+$accounts.SetBounds(234,374,190,44); $accounts.FlatStyle='Flat'
+$accounts.FlatAppearance.BorderSize=0; $accounts.BackColor=$card; $accounts.ForeColor=$ink
+$form.Controls.Add($accounts)
+$accounts.Add_Click({
+    if($Preview){return}
+    $stateFolder=Join-Path $path.Text 'LongTasks'
+    [IO.Directory]::CreateDirectory($stateFolder) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $stateFolder 'open-supercharge'),'setup')
+    Start-Process -FilePath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $path.Text 'long_tasks.py')+'"') -WindowStyle Normal
+})
 $log = New-Object Windows.Forms.TextBox
 $log.Multiline=$true; $log.ReadOnly=$true; $log.ScrollBars='Vertical'
 $log.BackColor=$card; $log.ForeColor=$ink; $log.BorderStyle='None'; $log.Font=New-Object Drawing.Font('Consolas',9)
@@ -105,6 +117,10 @@ $timer.Add_Tick({
                 $percent.Text=[string]$bar.Value+'%'
                 if($state.status -eq 'working'){$stage.Text=[string]$state.current}
                 else {$stage.Text='Finishing setup and checking everything'}
+                if([int]$state.percent -ge 38 -and (Test-Path -LiteralPath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe'))){
+                    $accounts.Enabled=$true
+                    $notice.Text='While downloads continue, you can connect ChatGPT or other accounts. This is optional; Cale also works locally.'
+                }
             }
         } catch { } # The next timer tick retries a temporarily busy status file.
     }
@@ -123,7 +139,12 @@ $timer.Add_Tick({
     $log.SelectionStart=$log.Text.Length; $log.ScrollToCaret()
 })
 $install.Add_Click({
-    if($Preview){$stage.Text='Downloading your AI models';$percent.Text='42%';$bar.Value=42;return}
+    if($Preview){
+        $stage.Text='Downloading your AI models';$percent.Text='42%';$bar.Value=42
+        $accounts.Enabled=$true
+        $notice.Text='While downloads continue, you can connect ChatGPT or other accounts. This is optional; Cale also works locally.'
+        return
+    }
     $install.Enabled=$false; $open.Enabled=$false
     $script:setupStarted=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     $stage.Text='Getting your PC ready'; $percent.Text=''; $bar.Value=0; $bar.Style='Marquee'

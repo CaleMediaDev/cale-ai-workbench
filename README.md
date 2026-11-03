@@ -23,6 +23,7 @@ Skills and tool descriptions are also indexed in a local SQLite FTS5 database (`
 
 1. Download `Cale-AI-Workbench-Install.zip`, extract it, and open the single **Install Cale AI.exe** inside. You can also download `Cale-AI-Workbench-Setup.exe` directly.
 2. Click **Install**. Watch the progress bar as Cale sets up your PC, then click **Open Cale AI** when it is ready. Technical logs are tucked under **Details**.
+   Once the basic app tools are ready, **Connect accounts** becomes available. You can connect ChatGPT, OpenRouter, or another supported provider while the model downloads continue. Accounts are optional and use your own sign-in or API key.
 3. Type into the chat. Simple questions get a local answer; requests to build or research something become saved tasks with progress shown below the chat. Finished task cards have **Reuse prompt**, which restores the original request to the chat editor for changes before sending. Cale can search older user chat messages locally when a new question refers to a detail beyond the recent conversation. No account is needed for the default experience.
 
 **Model activity** opens from the top of My tasks, so a long task list never hides the graph. It separates models by provider and shows the ChatGPT token total recorded by Cale beside the button. These are provider-reported tokens for calls made inside Cale, not the account-wide ChatGPT plan balance; calls whose provider omits usage cannot be counted as tokens.

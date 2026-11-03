@@ -6865,6 +6865,15 @@ def gui():
     def poll():
         nonlocal pending_update, updating, update_ready_at, manual_update_requested, update_pause_started_at
         refresh()
+        # Setup may open account connections while large model downloads keep
+        # running. A marker also reaches an already-open single-instance GUI.
+        connection_request = STATE / "open-supercharge"
+        if connection_request.is_file():
+            try:
+                connection_request.unlink()
+                show_super()
+            except OSError:
+                pass  # Retry next tick when the marker is briefly locked.
         if (time.monotonic() - getattr(window, "resume_update_checked_at", 0) > 15
                 and not getattr(window, "resume_update_checking", False)):
             window.resume_update_checked_at = time.monotonic()
