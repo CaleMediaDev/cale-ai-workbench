@@ -961,6 +961,39 @@ class CloudTests(unittest.TestCase):
         paid.assert_not_called()
         local.assert_called()
 
+    def test_local_task_restriction_overrides_every_global_scope_even_on_failure(self):
+        # Use the real per-task DB lookup, including Cloud only: a mock of
+        # task_route under the default Both mode missed this precedence bug.
+        (cloud.ROOT / "LongTasks").mkdir()
+        task_id = "a" * 12
+        with sqlite3.connect(cloud.ROOT / "LongTasks/projects.db") as conn:
+            conn.execute("CREATE TABLE projects(id TEXT, ai_route TEXT)")
+            conn.execute("INSERT INTO projects VALUES (?,?)", (task_id, "local_only"))
+        conn.close()
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        for scope in cloud.routing_mode.SCOPES:
+            for unavailable in (False, True):
+                with self.subTest(scope=scope, unavailable=unavailable):
+                    cloud.routing_mode.save_scope(cloud.STATE, scope)
+                    cloud.routing_mode.save(cloud.STATE, "floor_it")
+                    def local_only(url, *_args, **_kwargs):
+                        self.assertTrue(url.startswith("http://127.0.0.1:11434/"), url)
+                        if unavailable:
+                            raise OSError("local model unavailable")
+                        return ANSWER
+                    with (patch("chatgpt_auth.status", return_value={"enabled": True}),
+                          patch("chatgpt_auth.complete") as paid,
+                          patch.object(cloud_providers, "complete") as free,
+                          patch.object(cloud, "post", side_effect=local_only) as local):
+                        if unavailable:
+                            with self.assertRaisesRegex(OSError, "local model unavailable"):
+                                cloud.Router().complete(REQUEST, task_id=task_id)
+                        else:
+                            self.assertEqual(cloud.Router().complete(REQUEST, task_id=task_id), ANSWER)
+                    local.assert_called()
+                    paid.assert_not_called()
+                    free.assert_not_called()
+
     def test_floor_it_chooses_fastest_eligible_connected_route(self):
         cloud.routing_mode.save(cloud.STATE, "floor_it")
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)

@@ -113,6 +113,48 @@ def test_run_command_accepts_quoted_executable_path_and_shell_operators():
     assert "first" in chained and "second" in chained
 
 
+def test_powershell_commands_preserve_literals_pipelines_and_project_directory():
+    if os.name != "nt":
+        return
+    with tempfile.TemporaryDirectory(prefix="Cale command space ") as temporary:
+        folder = Path(temporary)
+        (folder / "source.txt").write_text("source", encoding="utf-8")
+        with patch.dict(os.environ, {"PSModulePath": str(folder / "missing-modules")}):
+            result = native_agent.execute_tool(folder, "run_command", {
+                "shell": "powershell",
+                "command": "$value='literal $value | café'; Write-Output $value; "
+                           "Get-FileHash -LiteralPath 'source.txt' | Select-Object -ExpandProperty Hash",
+            })
+        assert result.startswith("Exit code: 0\n"), result
+        assert "literal $value | café" in result
+        assert hashlib.sha256(b"source").hexdigest().upper() in result
+
+
+def test_powershell_cmdlet_errors_and_native_exit_codes_are_failures():
+    if os.name != "nt":
+        return
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        missing = native_agent.execute_tool(folder, "run_command", {
+            "shell": "powershell", "command": "Get-Item 'does-not-exist.txt'; Set-Content 'false-success.txt' 'bad'"})
+        assert missing.startswith("Exit code: 1\n"), missing
+        assert not (folder / "false-success.txt").exists()
+        assert "#< CLIXML" not in missing
+        failed = native_agent.execute_tool(folder, "run_command", {
+            "shell": "powershell",
+            "command": "& '" + sys.executable.replace("'", "''") + "' -c 'import sys; sys.exit(7)'"})
+        assert failed.startswith("Exit code: 7\n"), failed
+
+
+def test_run_command_rejects_unknown_shell_before_execution():
+    with tempfile.TemporaryDirectory() as temporary:
+        with patch.object(native_agent.subprocess, "Popen") as launch:
+            result = native_agent.execute_tool(Path(temporary), "run_command", {
+                "shell": "unknown", "command": "echo hello"})
+        assert result.startswith("Tool error: ValueError: Choose shell"), result
+        launch.assert_not_called()
+
+
 def test_legacy_verifier_command_rejects_output_changes():
     """A verifier cannot pass by silently regenerating the requested file."""
     with tempfile.TemporaryDirectory() as temporary:

@@ -844,10 +844,10 @@ class Router:
             )
         scope = routing_mode.load_scope(STATE)
         disconnected = pc_offline.offline()
-        # The PC-wide offline switch has priority over a saved cloud choice.
-        # Conversely, Cloud only must override an older manual local-model
-        # selection. Neither control should silently ignore the visible mode.
-        if disconnected:
+        # Offline and an explicit per-task local restriction take priority
+        # over every global mode, including Cloud/Free cloud only. Resolve
+        # this before selecting a profile or loading cloud credentials.
+        if disconnected or task_route(usage_history.CURRENT_TASK.get()) == "local_only":
             scope = "local_only"
         profile = ("main" if scope in ("cloud_only", "free_cloud_only")
                    else local_profile())
@@ -858,9 +858,7 @@ class Router:
             payload = {**payload, "messages": repaired}
         cloud_only = profile == "main" and scope in ("cloud_only", "free_cloud_only")
         free_cloud_only = profile == "main" and scope == "free_cloud_only"
-        offline_mode = (disconnected or scope == "local_only" or
-                        (scope == "both" and task_route(
-                            usage_history.CURRENT_TASK.get()) == "local_only"))
+        offline_mode = scope == "local_only"
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         mode = routing_mode.load(STATE) if profile == "main" else routing_mode.DEFAULT
         reason = "Cloud is not connected."
