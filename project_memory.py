@@ -109,7 +109,7 @@ def save(folder: str | Path, kind: str, title: str, body: str,
         identifier = memory_id or uuid.uuid4().hex
         if memory_id:
             existing = conn.execute("SELECT kind FROM memories WHERE id=?", (identifier,)).fetchone()
-            if existing is None or existing["kind"] == "file":
+            if existing is None or existing["kind"] in {"file", "document"}:
                 raise ValueError("Only an existing saved memory can be updated.")
         _put(conn, identifier, kind, title, body, tags, source)
     return {"id": identifier, "kind": kind, "title": title, "source_path": source}

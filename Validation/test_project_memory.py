@@ -78,6 +78,22 @@ class ProjectMemoryTests(unittest.TestCase):
         source.unlink()
         self.assertFalse(memory.search(self.folder, "budget"))
 
+    def test_save_cannot_overwrite_an_indexed_document_chunk(self):
+        source = self.folder / "manual.pdf"
+        source.write_bytes(b"document bytes")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        memory.index_document_text(self.folder, source, "distinctive zebra passage", digest)
+        identifier = "document:manual.pdf:1"
+        original = memory.get(self.folder, identifier)
+
+        with self.assertRaisesRegex(ValueError, "Only an existing saved memory"):
+            memory.save(self.folder, "note", "Replacement", "Unrelated content",
+                        memory_id=identifier)
+
+        self.assertEqual(memory.get(self.folder, identifier), original)
+        found = memory.search(self.folder, "distinctive zebra", kind="document")
+        self.assertEqual([row["id"] for row in found], [identifier])
+
     def test_document_chunks_are_searchable_and_source_checked(self):
         source = self.folder / "manual.pdf"
         source.write_bytes(b"first document bytes")
