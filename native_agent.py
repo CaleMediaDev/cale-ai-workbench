@@ -419,8 +419,12 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             result["ok"] = result["passed"]
             return json.dumps(result, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "check_webapp":
+            # The task browser keeps a Playwright sync event loop alive. The
+            # independent offline checker needs its own fresh event loop.
+            import native_browser
             import webapp_check
 
+            native_browser.close()
             result = webapp_check.check(folder, arguments, screenshot=True)
             if result["passed"]:
                 result["verifier_saved"] = webapp_check.save_verifier(folder, arguments)
@@ -652,7 +656,10 @@ def prompt(project: dict) -> str:
         "For this interactive single-file HTML app, build the page, then call check_webapp "
         "with real input and result cases before writing a verifier. That tool creates a "
         "repeatable .local-ai/verify.ps1 when its cases pass. Fix failed cases, rerun the "
-        "browser check after edits, and then run the saved verifier. "
+        "browser check after edits, and then run the saved verifier. Keep any required "
+        "number input types: browsers reject letters in them, and check_webapp tests "
+        "that as an empty value. Use check_webapp for local HTML; browser_open only "
+        "accepts http(s) URLs. "
         if browser_check_required(project) else
         "For this local document report, inspect the source and write the report. "
         "Then call check_document_report with exact source-to-report facts and "
@@ -1327,8 +1334,19 @@ def run_slice(project: dict, complete=None) -> dict:
                 except (ValueError, TypeError, AttributeError):
                     state["document_checker_passed"] = False
             if function.get("name") == "check_webapp":
-                state["browser_verified"] = False
-                state.update(browser_check_evidence(folder, args, result))
+                evidence = browser_check_evidence(folder, args, result)
+                if evidence:
+                    state.update(evidence)
+                else:
+                    try:
+                        verdict = json.loads(result)
+                    except (ValueError, TypeError):
+                        verdict = {}
+                    # A failed browser assertion invalidates earlier evidence.
+                    # A malformed or unavailable tool call does not erase a
+                    # passing check of the same unchanged page.
+                    if verdict.get("passed") is False:
+                        state["browser_verified"] = False
             if verifier_command_passed(function.get("name", ""), args, outcome):
                 state["verify_passed"] = True
             elif function.get("name") in {"run_command", "run_verifier", "call_local_tool"}:

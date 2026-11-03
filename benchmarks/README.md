@@ -9,7 +9,8 @@ Separate graders check the output and whether the verifier catches a regression:
 - `contacts` cleans and deduplicates a CSV, then checks its exact rows and
   whether the verifier rejects an invalid phone number.
 - `webapp` builds an interactive, offline HTML tip splitter. Playwright checks
-  its labels, calculations, error state, and mobile width, then breaks its
+  its number input types, calculations, invalid and fractional people counts,
+  blank bill state, and mobile width, then breaks its
   JavaScript to ensure the saved verifier rejects the regression.
 - `document` reads a two-page PDF whose first page is a superseded draft.
   The grader checks final-page facts, a calculated net amount, and whether

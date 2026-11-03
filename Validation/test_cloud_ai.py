@@ -524,6 +524,14 @@ class CloudTests(unittest.TestCase):
         self.candidates.start()
         self.loaded = patch.object(cloud, "loaded_local_models", return_value=[])
         self.loaded.start()
+        # Routing tests must not inherit live speed samples from this PC.
+        # Benchmark runs can retire a slow model while this suite is running.
+        self.model_speed = patch("model_fitness.measured_speed", return_value=None)
+        self.model_speed.start()
+        self.ram = patch("model_library.total_ram_gb", return_value=128)
+        self.ram.start()
+        self.vram = patch("model_fitness.gpu_vram_gb", return_value=12)
+        self.vram.start()
         # An installed Workbench may have a real ChatGPT connection and an
         # offline switch. Never let tests route to that account or inherit its
         # machine state: the fake upstreams must be the only possible routes.
@@ -537,6 +545,9 @@ class CloudTests(unittest.TestCase):
         self.addCleanup(self.routing_db.stop)
         self.addCleanup(self.candidates.stop)
         self.addCleanup(self.loaded.stop)
+        self.addCleanup(self.model_speed.stop)
+        self.addCleanup(self.ram.stop)
+        self.addCleanup(self.vram.stop)
         self.addCleanup(self.plan.stop)
         self.addCleanup(self.offline.stop)
 
@@ -1168,6 +1179,10 @@ class CloudTests(unittest.TestCase):
             "alias": "cale-qwen36", "source": "qwen3.6:35b", "candidate": True,
         })
         sizes = {cloud.BALANCED_MODEL: "34.7B", "cale-qwen36": "35.5B"}
+        tags = {"models": [
+            {"name": alias + ":latest", "size": 22 * 2**30}
+            for alias in sizes
+        ]}
 
         def show(_url, payload, **_kwargs):
             if payload["model"] not in sizes:
@@ -1179,11 +1194,13 @@ class CloudTests(unittest.TestCase):
         with (patch.object(cloud, "CATALOG", catalog),
               patch.object(cloud, "refresh_catalog"),
               patch.object(cloud, "candidate_approved", return_value=True),
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
               patch.object(cloud, "post", side_effect=show)):
             self.assertEqual(cloud.Router().local_candidates("balanced")[0], "cale-qwen36")
         with (patch.object(cloud, "CATALOG", catalog),
               patch.object(cloud, "refresh_catalog"),
               patch.object(cloud, "candidate_approved", side_effect=lambda item: not item.get("candidate")),
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
               patch.object(cloud, "post", side_effect=show)):
             self.assertEqual(cloud.Router().local_candidates("balanced")[0], cloud.BALANCED_MODEL)
 

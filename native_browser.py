@@ -92,12 +92,13 @@ atexit.register(close)
 
 def execute(folder: Path, action: str, arguments: dict) -> str:
     """Operate only this task's browser; refs are assigned by the last snapshot."""
-    page = _page(folder)
     if action == "open":
         url = str(arguments["url"])
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Use a full http:// or https:// URL")
+    page = _page(folder)
+    if action == "open":
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
     elif action == "click":
         _control(page, str(arguments["ref"])).click(timeout=10000)

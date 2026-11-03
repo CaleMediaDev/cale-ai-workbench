@@ -1,11 +1,14 @@
 """Browser checks must exercise visible behavior and remain repeatable."""
 
+import json
 import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
 
+import native_agent
+import native_browser
 import webapp_check
 
 PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head>
@@ -72,3 +75,46 @@ def test_browser_check_accepts_json_cases_and_visible_text():
             '[{"set":{"bill":"80"},"expect":{"answer":"96.00"},'
             '"visible":["$96.00"]}]'), "mobile_fit": True}
         assert webapp_check.check(folder, spec)["passed"] is True
+
+
+def test_invalid_letters_keep_required_number_input_and_check_empty_state():
+    pytest.importorskip("playwright")
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        (folder / "index.html").write_text(
+            PAGE.replace('<input id="bill"', '<input type="number" id="bill"'),
+            encoding="utf-8",
+        )
+        spec = {"path": "index.html", "cases": [
+            {"set": {"bill": "abc"}, "visible": ["error"], "hidden": ["answer"]},
+        ]}
+        result = webapp_check.check(folder, spec)
+        assert result["passed"] is True
+        assert result["normalized_inputs"] == [
+            "#bill: 'abc' cannot be typed into a number input; tested empty instead"
+        ]
+
+
+def test_offline_check_works_after_task_browser_was_opened():
+    pytest.importorskip("playwright")
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        (folder / "index.html").write_text(PAGE, encoding="utf-8")
+        try:
+            native_browser._page(folder)
+            result = native_agent.execute_tool(folder, "check_webapp", SPEC)
+            assert json.loads(result)["passed"] is True
+        finally:
+            native_browser.close()
+
+
+def test_failed_text_check_reports_actual_value():
+    pytest.importorskip("playwright")
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        (folder / "index.html").write_text(PAGE, encoding="utf-8")
+        result = webapp_check.check(folder, {
+            "path": "index.html", "cases": [{"expect": {"answer": "$120.00 each"}}],
+        })
+        assert result["passed"] is False
+        assert "displayed '$120.00'" in result["cases"][0]["failures"][0]

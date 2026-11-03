@@ -6,11 +6,18 @@ from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
+from unittest.mock import patch
 
 import pytest
 
 import native_agent
 import native_browser
+
+
+def test_rejected_file_url_does_not_start_a_browser(tmp_path):
+    with patch.object(native_browser, "_page", side_effect=AssertionError("browser started")):
+        with pytest.raises(ValueError, match="full http"):
+            native_browser.execute(tmp_path, "open", {"url": "file:///tmp/page.html"})
 
 
 class Page(BaseHTTPRequestHandler):

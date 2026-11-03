@@ -81,12 +81,13 @@ def validate_spec(folder: Path, spec: dict) -> Path:
 
 def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
     """Exercise a local page offline and report each actual browser assertion."""
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
     spec = normalize_spec(spec)
     page_path = validate_spec(folder, spec)
     results = []
     errors = []
+    normalized_inputs = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         try:
@@ -122,11 +123,28 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                     if control.count() != 1:
                         failures.append(f"Missing input #{element_id}")
                     else:
-                        control.fill(value, timeout=5_000)
+                        try:
+                            control.fill(value, timeout=5_000)
+                        except PlaywrightError as exc:
+                            if (control.get_attribute("type") == "number" and
+                                    "Cannot type text into input[type=number]" in str(exc)):
+                                # A real browser rejects letters in a number
+                                # field. Test the resulting empty value rather
+                                # than encouraging the agent to change the
+                                # required input type just to satisfy a test.
+                                control.fill("", timeout=5_000)
+                                normalized_inputs.append(
+                                    f"#{element_id}: {value!r} cannot be typed into a number input; tested empty instead"
+                                )
+                            else:
+                                raise
                 for element_id, text in case.get("expect", {}).items():
                     target = page.locator("#" + element_id)
-                    if target.count() != 1 or not target.is_visible() or text not in target.inner_text():
-                        failures.append(f"#{element_id} did not visibly contain {text!r}")
+                    actual = target.inner_text()[:200] if target.count() == 1 else "<missing>"
+                    if target.count() != 1 or not target.is_visible() or text not in actual:
+                        failures.append(
+                            f"#{element_id} displayed {actual!r}; expected visible text containing {text!r}"
+                        )
                 for field, wanted in (("visible", True), ("hidden", False)):
                     for token in case.get(field, []):
                         target = find_target(token)
@@ -144,7 +162,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
         finally:
             browser.close()
     return {"passed": all(item["passed"] for item in results) and not errors,
-            "cases": results, "javascript_errors": errors}
+            "cases": results, "javascript_errors": errors,
+            "normalized_inputs": normalized_inputs}
 
 
 def save_verifier(folder: Path, spec: dict) -> bool:

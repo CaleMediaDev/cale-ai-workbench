@@ -66,8 +66,9 @@ WEBAPP_BRIEF = (
     "ID per-person and any validation message in an element with ID error. "
     "Update immediately when inputs change: a $100 bill with 20% tip split "
     "four ways is $30.00 each; an $80 bill with the same tip and people is "
-    "$24.00 each. Zero people or invalid numbers must show an error and must "
-    "not leave a stale total visible. Fit a 375-pixel mobile viewport without "
+    "$24.00 each. People must be a positive whole number: zero and 4.5 are "
+    "invalid. An empty bill is invalid too. Invalid inputs must show an error "
+    "and must not leave a stale total visible. Fit a 375-pixel mobile viewport without "
     "horizontal scrolling. Create and run a repeatable PowerShell verifier "
     "that checks behavior, not just file existence."
 )
@@ -264,8 +265,10 @@ def grade_webapp(folder: Path) -> dict:
     html = folder / "index.html"
     verifier = folder / ".local-ai" / "verify.ps1"
     result = {"page_present": html.is_file(), "verifier_present": verifier.is_file(),
-              "labels": False, "default_total": False, "changed_total": False,
-              "invalid_people": False, "mobile_fits": False,
+              "labels": False, "number_inputs": False, "default_total": False,
+              "changed_total": False, "invalid_people": False,
+              "invalid_blank_bill": False, "invalid_fractional_people": False,
+              "mobile_fits": False,
               "verifier_passes_correct": False, "verifier_rejects_broken_app": False}
     if not html.is_file():
         result["passed"] = False
@@ -283,6 +286,10 @@ def grade_webapp(folder: Path) -> dict:
                 result["labels"] = all(control.count() == 1 and control.evaluate(
                     "el => !!(el.labels && el.labels.length) || !!el.getAttribute('aria-label')"
                 ) for control in inputs)
+                result["number_inputs"] = all(
+                    control.count() == 1 and control.get_attribute("type") == "number"
+                    for control in inputs
+                )
                 total = page.locator("#per-person")
                 result["default_total"] = (total.count() == 1 and total.is_visible()
                                            and "30.00" in total.inner_text())
@@ -294,6 +301,18 @@ def grade_webapp(folder: Path) -> dict:
                                             and bool(error.inner_text().strip())
                                             and (not total.is_visible()
                                                  or "24.00" not in total.inner_text()))
+                inputs[2].fill("4")
+                inputs[0].fill("")
+                result["invalid_blank_bill"] = (
+                    error.is_visible() and bool(error.inner_text().strip())
+                    and (not total.is_visible() or not total.inner_text().strip())
+                )
+                inputs[0].fill("100")
+                inputs[2].fill("4.5")
+                result["invalid_fractional_people"] = (
+                    error.is_visible() and bool(error.inner_text().strip())
+                    and (not total.is_visible() or not total.inner_text().strip())
+                )
                 result["mobile_fits"] = page.evaluate(
                     "document.documentElement.scrollWidth <= window.innerWidth + 1")
             finally:
@@ -301,7 +320,9 @@ def grade_webapp(folder: Path) -> dict:
     except Exception as exc:
         result["browser_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
     if verifier.is_file() and all(result[key] for key in (
-            "labels", "default_total", "changed_total", "invalid_people", "mobile_fits")):
+            "labels", "number_inputs", "default_total", "changed_total",
+            "invalid_people", "invalid_blank_bill", "invalid_fractional_people",
+            "mobile_fits")):
         command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(verifier)]
         try:
             checked = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
