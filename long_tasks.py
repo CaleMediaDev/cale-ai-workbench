@@ -3925,126 +3925,144 @@ def gui():
     )
     ttk.Label(
         super_page,
-        text="Give your local AI more room to think, or connect optional online help.",
+        text="Connect an account for extra AI help. Everything here is optional.",
         font=("Segoe UI", 14),
         style="Muted.TLabel",
     ).pack(anchor="w", pady=(5, 12))
 
-    # NVIDIA provides the product photograph as a newsroom media asset. Keep
-    # the supplied Amazon link intact so the owner's referral tag survives.
-    spark_link = "https://link.amazon/B0j9RBQZ9"
-    spark_card = ttk.Frame(super_page, style="Card.TFrame", padding=(14, 13))
-    spark_card.pack(fill="x", pady=(0, 13))
-    spark_photo = ROOT / "assets/dgx-spark-nvidia.jpg"
-    if spark_photo.is_file():
-        with Image.open(spark_photo) as source:
-            crop = source.crop((1260, 650, 1720, 930))
-            crop.thumbnail((300, 190), Image.Resampling.LANCZOS)
-            window.spark_image = ImageTk.PhotoImage(crop)
-        tk.Label(
-            spark_card, image=window.spark_image, bg=card, borderwidth=0,
-        ).pack(side="left", padx=(0, 18), anchor="n")
-    spark_copy = ttk.Frame(spark_card, style="Card.TFrame")
-    spark_copy.pack(side="left", fill="x", expand=True)
-    ttk.Label(
-        spark_copy, text="LOCAL AI HARDWARE PICK", style="CardMuted.TLabel",
-        font=("Segoe UI", 9, "bold"),
-    ).pack(anchor="w")
-    ttk.Label(
-        spark_copy, text="Buy a local supercomputer", style="Card.TLabel",
-        font=("Segoe UI", 20, "bold"),
-    ).pack(anchor="w", pady=(1, 6))
-    ttk.Label(
-        spark_copy,
-        text=(
-            "Own the compute. NVIDIA DGX Spark packs 128 GB of unified memory "
-            "into a desktop AI computer, giving massive local models room to run. "
-            "NVIDIA rates supported FP4 models up to 200B parameters. Build, "
-            "create and experiment without metered cloud tokens for work you run locally."
-        ),
-        style="Card.TLabel", wraplength=430, justify="left",
-    ).pack(anchor="w", pady=(0, 8))
-    ttk.Button(
-        spark_copy, text="Explore DGX Spark on Amazon ↗",
-        command=lambda: webbrowser.open(spark_link), style="Accent.TButton",
-    ).pack(anchor="w")
-    ttk.Label(
-        spark_copy,
-        text=(
-            "DGX Spark uses Linux/Arm; this Workbench installer currently runs on Windows x64. "
-            "As an Amazon Associate, Cale Media earns from qualifying purchases."
-        ),
-        style="CardMuted.TLabel", wraplength=430, justify="left",
-        font=("Segoe UI", 9),
-    ).pack(anchor="w", pady=(8, 0))
-    ttk.Label(
-        super_page, text="Product photo courtesy of NVIDIA.",
-        style="Muted.TLabel", font=("Segoe UI", 8),
-    ).pack(anchor="w", pady=(0, 8))
-    ttk.Label(
-        super_page, text="Your projects on GitHub", font=("Segoe UI", 18, "bold")
-    ).pack(anchor="w", pady=(2, 4))
-    github_text = tk.StringVar(
-        value="Connect your own GitHub account to save projects online."
+    # Put the two easiest account connections first. Less common connections
+    # stay collapsed so a new user does not start with a wall of API settings.
+    chat_section = ttk.Frame(super_page, style="Card.TFrame", padding=18)
+    chat_section.pack(fill="x", pady=(4, 14))
+    router_section = ttk.Frame(super_page, style="Card.TFrame", padding=18)
+    router_section.pack(fill="x", pady=(0, 14))
+    optional_section = ttk.Frame(super_page, padding=(8, 12))
+
+    def toggle_connections():
+        if optional_section.winfo_manager():
+            optional_section.pack_forget()
+            more_connections.configure(text="More connections  +")
+        else:
+            optional_section.pack(fill="x", before=spark_card, pady=(0, 16))
+            more_connections.configure(text="Fewer connections  −")
+
+    more_connections = ttk.Button(
+        super_page, text="More connections  +", command=toggle_connections,
     )
-    github_events = queue.Queue()
+    more_connections.pack(anchor="w", pady=(0, 16))
 
-    def connect_github():
-        try:
-            github_account.connect()
-            github_text.set(
-                "Finish the GitHub approval in the browser. The sign-in window shows the code if needed."
-            )
-        except Exception as exc:
-            github_text.set(str(exc))
+    ttk.Label(
+        chat_section, text="ChatGPT", font=("Segoe UI", 18, "bold"), style="Card.TLabel"
+    ).pack(anchor="w")
+    ttk.Label(
+        chat_section,
+        text="Use your existing plan for extra AI help. Connecting alone does not use your ChatGPT/Codex allowance.",
+        style="CardMuted.TLabel",
+        wraplength=720,
+    ).pack(anchor="w", pady=(4, 9))
+    chat_events = queue.Queue()
+    chat_text = tk.StringVar(value="Not connected.")
 
-    github_button = ttk.Button(
-        super_page,
-        text="Connect GitHub",
-        command=connect_github,
+    def connect_chatgpt():
+        chat_button.configure(state="disabled")
+        chat_text.set("Finish signing in and approving the connection in your browser.")
+
+        def worker():
+            try:
+                result = chatgpt_auth.connect()
+                message = "Connected as " + (result["email"] or "your ChatGPT account")
+                if not result["sharing"]:
+                    message += ". ChatGPT plan use was not approved."
+                chat_events.put(message)
+            except Exception as exc:
+                chat_events.put("Connection not finished: " + str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    chat_button = ttk.Button(
+        chat_section,
+        text="Continue with ChatGPT",
+        command=connect_chatgpt,
         style="Accent.TButton",
     )
-    github_button.pack(anchor="w", ipadx=43, ipady=4)
+    chat_button.pack(anchor="w", ipadx=36, ipady=4)
     ttk.Label(
-        super_page, textvariable=github_text, style="Muted.TLabel", wraplength=720
-    ).pack(anchor="w", pady=(6, 2))
-    ttk.Label(
-        super_page,
-        text="Save code in your repositories. Publish suitable static sites with GitHub Pages.",
-        style="Muted.TLabel",
-        wraplength=720,
-    ).pack(anchor="w", pady=(0, 8))
+        chat_section, textvariable=chat_text, style="CardMuted.TLabel", wraplength=720
+    ).pack(anchor="w", pady=(8, 4))
 
-    def connect_chrome():
+    def toggle_chatgpt():
+        current = chatgpt_auth.status()
+        if not current["enabled"] and not messagebox.askyesno(
+            "Use ChatGPT plan",
+            "Use your shared ChatGPT/Codex allowance for this app's tasks? OpenRouter and local AI remain available.",
+            parent=window,
+        ):
+            return
         try:
-            code = chrome_connector.pairing_code()
-            window.clipboard_clear()
-            window.clipboard_append(code)
-            webbrowser.open(chrome_connector.STORE_URL)
-            messagebox.showinfo(
-                "Connect Chrome",
-                "Chrome's extension page is open. Click Add to Chrome, open its side panel, "
-                "and paste this code (already copied):\n\n"
-                + code
-                + "\n\nThen choose the task and the tabs Cale may use.",
-                parent=window,
-            )
+            chatgpt_auth.set_enabled(not current["enabled"])
+            refresh_chatgpt()
         except Exception as exc:
-            messagebox.showerror("Connect Chrome", str(exc), parent=window)
+            messagebox.showerror("ChatGPT plan", str(exc), parent=window)
 
+    use_chat_button = ttk.Button(
+        chat_section, text="Use my ChatGPT plan for tasks", command=toggle_chatgpt
+    )
+    use_chat_button.pack(anchor="w", pady=(4, 0))
     ttk.Button(
-        super_page, text="Connect my Chrome tabs", command=connect_chrome
-    ).pack(anchor="w", pady=(0, 3))
-    ttk.Label(
-        super_page,
-        text="Chrome will ask you to approve its extension and choose which tabs Cale may use.",
-        style="Muted.TLabel", wraplength=720,
-    ).pack(anchor="w", pady=(0, 9))
-    ttk.Label(super_page, text="More AI help", font=("Segoe UI", 18, "bold")).pack(
+        chat_section,
+        text="Manage ChatGPT usage",
+        command=lambda: webbrowser.open("https://chatgpt.com/settings/usage"),
+    ).pack(anchor="w", pady=(4, 0))
+
+    def disconnect_chatgpt():
+        chat_button.configure(state="disabled")
+
+        def worker():
+            try:
+                chatgpt_auth.disconnect()
+                chat_events.put("ChatGPT disconnected. Your local AI still works.")
+            except Exception as exc:
+                chat_events.put(str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    chat_disconnect_button = ttk.Button(
+        chat_section, text="Disconnect ChatGPT", command=disconnect_chatgpt
+    )
+
+    def refresh_chatgpt():
+        state = chatgpt_auth.status()
+        if state["connected"]:
+            chat_button.configure(text="ChatGPT connected", state="disabled")
+        elif chat_button.cget("text") == "ChatGPT connected":
+            chat_button.configure(text="Continue with ChatGPT", state="normal")
+        use_chat_button.configure(
+            state="normal" if state["sharing"] else "disabled",
+            text="Stop using my ChatGPT plan"
+            if state["enabled"]
+            else "Use my ChatGPT plan for tasks",
+        )
+        if state["connected"] and not chat_disconnect_button.winfo_manager():
+            chat_disconnect_button.pack(anchor="w", pady=(4, 0))
+        elif not state["connected"] and chat_disconnect_button.winfo_manager():
+            chat_disconnect_button.pack_forget()
+        if state["connected"] and not chat_text.get().startswith(
+            ("Connection not finished", "Finish signing")
+        ):
+            chat_text.set(
+                "Connected as "
+                + (state["email"] or "your ChatGPT account")
+                + (
+                    ". Using your ChatGPT plan for tasks."
+                    if state["enabled"]
+                    else ". Plan usage is off."
+                )
+            )
+    ttk.Label(router_section, text="OpenRouter", font=("Segoe UI", 18, "bold"), style="Card.TLabel").pack(
         anchor="w", pady=(2, 8)
     )
     cloud_events = queue.Queue()
-    cloud_text = tk.StringVar(value="Your local AI still works without this.")
+    cloud_text = tk.StringVar(value="Optional free cloud models, with your own account.")
 
     def connect():
         connect_button.configure(state="disabled")
@@ -4063,14 +4081,14 @@ def gui():
         threading.Thread(target=worker, daemon=True).start()
 
     connect_button = ttk.Button(
-        super_page,
-        text="Connect to OpenRouter",
+        router_section,
+        text="Connect OpenRouter",
         command=connect,
         style="Accent.TButton",
     )
     connect_button.pack(anchor="w", ipadx=38, ipady=4)
     ttk.Label(
-        super_page, textvariable=cloud_text, style="Muted.TLabel", wraplength=680
+        router_section, textvariable=cloud_text, style="CardMuted.TLabel", wraplength=680
     ).pack(anchor="w", pady=(8, 2))
 
     def disconnect_cloud():
@@ -4078,33 +4096,30 @@ def gui():
         cloud_text.set("Disconnected. Your local AI still works.")
 
     disconnect_button = ttk.Button(
-        super_page, text="Disconnect account", command=disconnect_cloud
+        router_section, text="Disconnect account", command=disconnect_cloud
     )
     router_note = ttk.Label(
-        super_page,
+        router_section,
         text="OpenRouter uses free models only. Your local AI takes over if it is unavailable.",
-        style="Muted.TLabel",
+        style="CardMuted.TLabel",
         wraplength=680,
     )
     router_note.pack(anchor="w", pady=(4, 15))
+
     ttk.Label(
-        super_page, text="More free-plan accounts", font=("Segoe UI", 18, "bold")
+        optional_section, text="Other AI providers", font=("Segoe UI", 18, "bold")
     ).pack(anchor="w", pady=(0, 5))
     ttk.Label(
-        super_page,
-        text=("Optional: connect your own provider account. Cale may send task text and tool results "
-              "there when it is faster. Confirm your account is on its free plan first; "
-              "a paid account key can still incur charges. Hugging Face includes only a tiny monthly "
-              "credit, so Cale allows at most two calls there each month. Cerebras now offers only "
-              "one-time trial credit, so Cale no longer uses it automatically. NVIDIA's free hosted "
-              "endpoints are for prototyping. Go offline to keep all work on this PC."),
+        optional_section,
+        text=("Bring your own API key. Check your provider\'s plan and limits first; "
+              "a paid key can incur charges. Use Local mode to keep task data on your PC."),
         style="Muted.TLabel", wraplength=720,
     ).pack(anchor="w", pady=(0, 7))
     saved_provider_keys = credentials().get("provider_keys") or {}
     provider_names = {spec["name"]: code for code, spec in cloud_providers.PROVIDERS.items()
                       if spec.get("free_eligible", True) or code in saved_provider_keys}
     provider_name = tk.StringVar(value="Groq")
-    provider_row = ttk.Frame(super_page)
+    provider_row = ttk.Frame(optional_section)
     provider_row.pack(anchor="w", fill="x")
     ttk.Combobox(provider_row, textvariable=provider_name, state="readonly", width=25,
                  values=list(provider_names)).pack(side="left", padx=(0, 8))
@@ -4112,7 +4127,7 @@ def gui():
                command=lambda: webbrowser.open(cloud_providers.PROVIDERS[
                    provider_names[provider_name.get()]]["signup"])).pack(side="left")
     cloudflare_account = tk.StringVar()
-    account_row = ttk.Frame(super_page)
+    account_row = ttk.Frame(optional_section)
     ttk.Label(account_row, text="Cloudflare account ID:").pack(side="left", padx=(0, 7))
     ttk.Entry(account_row, textvariable=cloudflare_account, width=35).pack(side="left")
 
@@ -4124,10 +4139,11 @@ def gui():
 
     provider_name.trace_add("write", update_account_field)
     provider_key = tk.StringVar()
-    ttk.Entry(super_page, textvariable=provider_key, show="•", width=54).pack(
+    ttk.Label(optional_section, text="API key", style="Muted.TLabel").pack(anchor="w", pady=(6, 0))
+    ttk.Entry(optional_section, textvariable=provider_key, show="•", width=54).pack(
         anchor="w", pady=(6, 3))
     free_plan = tk.BooleanVar(value=False)
-    ttk.Checkbutton(super_page, text="I checked that this account uses the provider's free plan or credits",
+    ttk.Checkbutton(optional_section, text="I checked that this account uses the provider's free plan or credits",
                     variable=free_plan).pack(anchor="w")
     connected_providers = credentials().get("provider_keys") or {}
     connected_names = [cloud_providers.PROVIDERS[code]["name"] for code in connected_providers
@@ -4153,116 +4169,123 @@ def gui():
         disconnect_provider(code)
         provider_status.set(f"{provider_name.get()} disconnected.")
 
-    provider_buttons = ttk.Frame(super_page)
+    provider_buttons = ttk.Frame(optional_section)
     provider_buttons.pack(anchor="w", pady=(5, 0))
     ttk.Button(provider_buttons, text="Connect account", command=save_cloud_provider,
                style="Accent.TButton").pack(side="left", padx=(0, 7))
     ttk.Button(provider_buttons, text="Disconnect", command=remove_cloud_provider).pack(side="left")
-    ttk.Label(super_page, textvariable=provider_status, style="Muted.TLabel",
+    ttk.Label(optional_section, textvariable=provider_status, style="Muted.TLabel",
               wraplength=720).pack(anchor="w", pady=(4, 13))
+
     ttk.Label(
-        super_page, text="Or use your ChatGPT account", font=("Segoe UI", 18, "bold")
-    ).pack(anchor="w")
-    ttk.Label(
-        super_page,
-        text="ChatGPT plan use shares your ChatGPT and Codex allowance. Connecting alone will not use it.",
-        style="Muted.TLabel",
-        wraplength=720,
-    ).pack(anchor="w", pady=(4, 9))
-    chat_events = queue.Queue()
-    chat_text = tk.StringVar(value="Not connected.")
+        optional_section, text="Your projects on GitHub", font=("Segoe UI", 18, "bold")
+    ).pack(anchor="w", pady=(2, 4))
+    github_text = tk.StringVar(
+        value="Connect your own GitHub account to save projects online."
+    )
+    github_events = queue.Queue()
 
-    def connect_chatgpt():
-        chat_button.configure(state="disabled")
-        chat_text.set("Finish signing in and approving the connection in your browser.")
+    def connect_github():
+        try:
+            github_account.connect()
+            github_text.set(
+                "Finish the GitHub approval in the browser. The sign-in window shows the code if needed."
+            )
+        except Exception as exc:
+            github_text.set(str(exc))
 
-        def worker():
-            try:
-                result = chatgpt_auth.connect()
-                message = "Connected as " + (result["email"] or "your ChatGPT account")
-                if not result["sharing"]:
-                    message += ". ChatGPT plan use was not approved."
-                chat_events.put(message)
-            except Exception as exc:
-                chat_events.put("Connection not finished: " + str(exc))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    chat_button = ttk.Button(
-        super_page,
-        text="Continue with ChatGPT",
-        command=connect_chatgpt,
+    github_button = ttk.Button(
+        optional_section,
+        text="Connect GitHub",
+        command=connect_github,
         style="Accent.TButton",
     )
-    chat_button.pack(anchor="w", ipadx=36, ipady=4)
+    github_button.pack(anchor="w", ipadx=43, ipady=4)
     ttk.Label(
-        super_page, textvariable=chat_text, style="Muted.TLabel", wraplength=720
-    ).pack(anchor="w", pady=(8, 4))
+        optional_section, textvariable=github_text, style="Muted.TLabel", wraplength=720
+    ).pack(anchor="w", pady=(6, 2))
+    ttk.Label(
+        optional_section,
+        text="Save code in your repositories. Publish suitable static sites with GitHub Pages.",
+        style="Muted.TLabel",
+        wraplength=720,
+    ).pack(anchor="w", pady=(0, 8))
 
-    def toggle_chatgpt():
-        current = chatgpt_auth.status()
-        if not current["enabled"] and not messagebox.askyesno(
-            "Use ChatGPT plan",
-            "Use your shared ChatGPT/Codex allowance for this app's tasks? OpenRouter and local AI remain available.",
-            parent=window,
-        ):
-            return
+    def connect_chrome():
         try:
-            chatgpt_auth.set_enabled(not current["enabled"])
-            refresh_chatgpt()
-        except Exception as exc:
-            messagebox.showerror("ChatGPT plan", str(exc), parent=window)
-
-    use_chat_button = ttk.Button(
-        super_page, text="Use my ChatGPT plan for tasks", command=toggle_chatgpt
-    )
-    use_chat_button.pack(anchor="w", pady=(4, 0))
-    ttk.Button(
-        super_page,
-        text="Manage ChatGPT usage",
-        command=lambda: webbrowser.open("https://chatgpt.com/settings/usage"),
-    ).pack(anchor="w", pady=(4, 0))
-
-    def disconnect_chatgpt():
-        chat_button.configure(state="disabled")
-
-        def worker():
-            try:
-                chatgpt_auth.disconnect()
-                chat_events.put("ChatGPT disconnected. Your local AI still works.")
-            except Exception as exc:
-                chat_events.put(str(exc))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    chat_disconnect_button = ttk.Button(
-        super_page, text="Disconnect ChatGPT", command=disconnect_chatgpt
-    )
-
-    def refresh_chatgpt():
-        state = chatgpt_auth.status()
-        use_chat_button.configure(
-            state="normal" if state["sharing"] else "disabled",
-            text="Stop using my ChatGPT plan"
-            if state["enabled"]
-            else "Use my ChatGPT plan for tasks",
-        )
-        if state["connected"] and not chat_disconnect_button.winfo_manager():
-            chat_disconnect_button.pack(anchor="w", pady=(4, 0))
-        elif not state["connected"] and chat_disconnect_button.winfo_manager():
-            chat_disconnect_button.pack_forget()
-        if state["connected"] and not chat_text.get().startswith(
-            ("Connection not finished", "Finish signing")
-        ):
-            chat_text.set(
-                "Connected as "
-                + (state["email"] or "your ChatGPT account")
-                + (
-                    ". Using your ChatGPT plan for tasks."
-                    if state["enabled"]
-                    else ". Plan usage is off."
-                )
+            code = chrome_connector.pairing_code()
+            window.clipboard_clear()
+            window.clipboard_append(code)
+            webbrowser.open(chrome_connector.STORE_URL)
+            messagebox.showinfo(
+                "Connect Chrome",
+                "Chrome's extension page is open. Click Add to Chrome, open its side panel, "
+                "and paste this code (already copied):\n\n"
+                + code
+                + "\n\nThen choose the task and the tabs Cale may use.",
+                parent=window,
             )
+        except Exception as exc:
+            messagebox.showerror("Connect Chrome", str(exc), parent=window)
+
+    ttk.Button(
+        optional_section, text="Connect my Chrome tabs", command=connect_chrome
+    ).pack(anchor="w", pady=(0, 3))
+    ttk.Label(
+        optional_section,
+        text="Chrome will ask you to approve its extension and choose which tabs Cale may use.",
+        style="Muted.TLabel", wraplength=720,
+    ).pack(anchor="w", pady=(0, 9))
+
+    # NVIDIA provides the product photograph as a newsroom media asset. Keep
+    # the supplied Amazon link intact so the owner's referral tag survives.
+    spark_link = "https://link.amazon/B0j9RBQZ9"
+    spark_card = ttk.Frame(super_page, style="Card.TFrame", padding=(14, 13))
+    spark_card.pack(fill="x", pady=(0, 13))
+    spark_photo = ROOT / "assets/dgx-spark-nvidia.jpg"
+    if spark_photo.is_file():
+        with Image.open(spark_photo) as source:
+            crop = source.crop((1260, 650, 1720, 930))
+            crop.thumbnail((180, 115), Image.Resampling.LANCZOS)
+            window.spark_image = ImageTk.PhotoImage(crop)
+        tk.Label(
+            spark_card, image=window.spark_image, bg=card, borderwidth=0,
+        ).pack(side="left", padx=(0, 18), anchor="n")
+    spark_copy = ttk.Frame(spark_card, style="Card.TFrame")
+    spark_copy.pack(side="left", fill="x", expand=True)
+    ttk.Label(
+        spark_copy, text="LOCAL AI HARDWARE PICK", style="CardMuted.TLabel",
+        font=("Segoe UI", 9, "bold"),
+    ).pack(anchor="w")
+    ttk.Label(
+        spark_copy, text="Want more local AI power?", style="Card.TLabel",
+        font=("Segoe UI", 18, "bold"),
+    ).pack(anchor="w", pady=(1, 6))
+    ttk.Label(
+        spark_copy,
+        text=(
+            "Explore a dedicated computer for larger local models and AI workflows. "
+            "Check the hardware and software requirements before buying."
+        ),
+        style="Card.TLabel", wraplength=430, justify="left",
+    ).pack(anchor="w", pady=(0, 8))
+    ttk.Button(
+        spark_copy, text="Explore DGX Spark on Amazon ↗",
+        command=lambda: webbrowser.open(spark_link), style="Accent.TButton",
+    ).pack(anchor="w")
+    ttk.Label(
+        spark_copy,
+        text=(
+            "DGX Spark uses Linux/Arm; this Workbench installer currently runs on Windows x64. "
+            "As an Amazon Associate, Cale Media earns from qualifying purchases."
+        ),
+        style="CardMuted.TLabel", wraplength=430, justify="left",
+        font=("Segoe UI", 9),
+    ).pack(anchor="w", pady=(8, 0))
+    ttk.Label(
+        super_page, text="Product photo courtesy of NVIDIA.",
+        style="Muted.TLabel", font=("Segoe UI", 8),
+    ).pack(anchor="w", pady=(0, 8))
 
     voice_speaking = threading.Event()
     talk_chat_row = ttk.Frame(main_page)
@@ -6754,12 +6777,16 @@ def gui():
         refresh_chatgpt()
         connected = cloud_status()["connected"]
         if connected:
+            connect_button.configure(text="OpenRouter connected", state="disabled")
             if not cloud_text.get().startswith("Connected"):
                 cloud_text.set("Connected. Free online AI is ready when available.")
             if not disconnect_button.winfo_manager():
                 disconnect_button.pack(anchor="w", before=router_note, pady=(4, 0))
-        elif disconnect_button.winfo_manager():
-            disconnect_button.pack_forget()
+        else:
+            if connect_button.cget("text") == "OpenRouter connected":
+                connect_button.configure(text="Connect OpenRouter", state="normal")
+            if disconnect_button.winfo_manager():
+                disconnect_button.pack_forget()
         render_cards()
         all_projects = projects()
         update_side_preview(all_projects)
