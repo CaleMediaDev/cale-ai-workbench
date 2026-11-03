@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -128,12 +129,15 @@ def project_only_route(folder: Path):
 
 def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
     """Exercise a local page offline and report each actual browser assertion."""
-    from playwright.sync_api import Error as PlaywrightError, sync_playwright
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import sync_playwright
 
     spec = normalize_spec(spec)
     page_path = validate_spec(folder, spec)
+    page_hash = hashlib.sha256(page_path.read_bytes()).hexdigest()
     results = []
     errors = []
+    interactions = []
     normalized_inputs = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
@@ -151,8 +155,26 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                         return by_id
                 return page.get_by_text(token, exact=False).first
 
+            def asserted_state(case):
+                # Observe only targets asserted by this case. An animated
+                # starfield or the input's own value is not gameplay evidence.
+                observed = {}
+                for element_id in case.get("expect", {}):
+                    target = page.locator("#" + element_id)
+                    exists = target.count() == 1
+                    observed["text:" + element_id] = (
+                        exists, exists and target.is_visible(),
+                        target.inner_text()[:200] if exists else "",
+                    )
+                for field in ("visible", "hidden"):
+                    for token in case.get(field, []):
+                        target = find_target(token)
+                        observed["visibility:" + token] = target.count() > 0 and target.is_visible()
+                return observed
+
             for number, case in enumerate(spec["cases"], 1):
                 failures = []
+                before = asserted_state(case)
                 for element_id, value in case.get("set", {}).items():
                     control = page.locator("#" + element_id)
                     if control.count() != 1:
@@ -213,14 +235,22 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                     "document.documentElement.scrollWidth <= window.innerWidth + 1"):
                     failures.append("Page overflows the viewport")
                 results.append({"case": number, "passed": not failures, "failures": failures})
+                actions = [kind for kind in ("set", "click", "keys") if case.get(kind)]
+                after = asserted_state(case)
+                changed = [name for name, value in after.items() if before.get(name) != value]
+                if actions and changed and not failures:
+                    interactions.append({"case": number, "actions": actions, "targets": changed})
             if screenshot:
                 destination = folder / ".local-ai" / "browser.png"
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(destination), timeout=8_000)
         finally:
             browser.close()
+    if hashlib.sha256(page_path.read_bytes()).hexdigest() != page_hash:
+        errors.append("HTML source changed while the browser check was running; rerun the check.")
     return {"passed": all(item["passed"] for item in results) and not errors,
             "cases": results, "javascript_errors": errors,
+            "page_sha256": page_hash, "interactions": interactions,
             "normalized_inputs": normalized_inputs}
 
 

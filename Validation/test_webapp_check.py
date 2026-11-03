@@ -50,6 +50,32 @@ def test_button_calculation_replays_and_rejects_broken_handler(tmp_path):
     assert not webapp_check.check(tmp_path, saved)["passed"]
 
 
+def test_pressed_keys_with_unchanged_hud_do_not_prove_interaction(tmp_path):
+    (tmp_path/"game.html").write_text('<p id="score">SCORE: 0</p><p id="lives">3</p>')
+    spec={"path":"game.html","cases":[
+        {"keys":[{"key":"Space"}],"expect":{"score":"0"}},
+        {"keys":[{"key":"ArrowRight"}],"expect":{"lives":"3"}}]}
+    result=webapp_check.check(tmp_path,spec)
+    assert result["passed"] is True
+    assert result["interactions"]==[]
+    assert native_agent.browser_check_evidence(tmp_path,spec,json.dumps(result))=={}
+
+
+def test_real_input_effect_is_reported_and_a_noop_is_not(tmp_path):
+    (tmp_path/"index.html").write_text(PAGE,encoding="utf-8")
+    result=webapp_check.check(tmp_path,SPEC)
+    assert result["passed"]
+    assert {i["case"] for i in result["interactions"]}=={2,3}
+    assert "text:answer" in result["interactions"][0]["targets"]
+    assert "visibility:error" in result["interactions"][1]["targets"]
+    assert native_agent.browser_check_evidence(tmp_path,SPEC,json.dumps(result))["browser_verified"]
+    noop={"path":"index.html","cases":[
+        {"set":{"bill":"100"},"expect":{"answer":"120.00"}},
+        {"set":{"bill":"100"},"expect":{"answer":"120.00"}}]}
+    result=webapp_check.check(tmp_path,noop)
+    assert result["passed"] and not result["interactions"]
+
+
 def test_keyboard_game_checks_replay_saved_verifier_and_detect_broken_controls(tmp_path):
     pytest.importorskip("playwright")
     source = '''<!doctype html><html><body>
@@ -73,16 +99,43 @@ document.getElementById('restart').onclick=()=>{
          "wait_ms": 50, "expect": {"position": "right", "shots": "1", "held": "released"}},
         {"click": ["restart"], "expect": {"position": "center", "shots": "0"}},
     ]}
-    assert webapp_check.check(tmp_path, spec)["passed"]
+    checked = webapp_check.check(tmp_path, spec)
+    assert checked["passed"]
+    evidence = native_agent.browser_check_evidence(tmp_path, spec, json.dumps(checked))
+    assert len(evidence["browser_interactions"]) == 2
     assert webapp_check.save_verifier(tmp_path, spec)
+    (tmp_path / ".local-ai/PLAN.md").write_text("- [x] Built and tested\n")
+    item = {"folder": str(tmp_path), "brief": "Create a simple keyboard shooter game"}
+    state = {"verify_passed": True, **evidence}
+    assert native_agent.completion_issue(tmp_path, item, state) == ""
     saved = json.loads((tmp_path / ".local-ai/webapp-check.json").read_text())
     assert saved == spec
     assert webapp_check.check(tmp_path, saved)["passed"]
     # A real input regression must fail the exact persisted test.
     page.write_text(source.replace("e.key==='ArrowRight'", "e.key==='ArrowLeft'"), encoding="utf-8")
+    assert "Run check_webapp" in native_agent.completion_issue(tmp_path, item, state)
     result = webapp_check.check(tmp_path, saved)
     assert not result["passed"]
     assert any("position" in message for message in result["cases"][0]["failures"])
+
+
+def test_page_changed_during_check_cannot_get_passing_evidence(tmp_path, monkeypatch):
+    page=tmp_path/"index.html"
+    page.write_text(PAGE,encoding="utf-8")
+    original=Path.read_bytes
+    reads=0
+    def read_bytes(path):
+        nonlocal reads
+        data=original(path)
+        if path==page:
+            reads+=1
+            if reads>1:
+                return data+b'<!-- changed during check -->'
+        return data
+    monkeypatch.setattr(Path,"read_bytes",read_bytes)
+    result=webapp_check.check(tmp_path,SPEC)
+    assert not result["passed"]
+    assert any("changed while" in message for message in result["javascript_errors"])
 
 
 @pytest.mark.parametrize("changes", [

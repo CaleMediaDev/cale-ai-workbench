@@ -479,6 +479,13 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
 
             native_browser.close()
             result = webapp_check.check(folder, arguments, screenshot=True)
+            result["interaction_proven"] = bool(result.get("interactions"))
+            if result["passed"] and not result["interaction_proven"]:
+                result["note"] = (
+                    "Display assertions passed, but no asserted outcome changed after input. "
+                    "This does not verify interaction or gameplay. Add input cases with changed "
+                    "text or visibility in the actual game/app state."
+                )
             if result["passed"]:
                 result["verifier_saved"] = webapp_check.save_verifier(folder, arguments)
             result["ok"] = result["passed"]
@@ -735,7 +742,10 @@ def prompt(project: dict) -> str:
         "do not reimplement the game inside a verifier. Check equal elapsed time at 60 and 120 "
         "updates per second, cleared waves at different scores, key release on blur, and layout "
         "at both small widths and short heights. Use seconds-based timing and keep the full "
-        "playfield visible. Report logic-only checks separately from real browser play tests. "
+        "playfield visible. For an HTML game, run check_webapp with at least two input cases "
+        "that produce observed changes in at least two asserted gameplay targets. A key press "
+        "followed by the same starting label does not count. Report logic-only checks separately "
+        "from real browser play tests. "
         if re.search(r"(?i)\b(?:game|shooter|platformer|arcade)\b", brief) else ""
     )
     web_hint = (
@@ -1020,10 +1030,22 @@ def requested_root_files(brief: str) -> list[str]:
     return found[:10]
 
 
+def game_browser_required(project: dict | None) -> bool:
+    """Recognize a playable HTML game without treating game documents as apps."""
+    brief = str((project or {}).get("brief") or "")
+    if (not re.search(r"(?i)\b(?:game|shooter|platformer|arcade)\b", brief)
+            or not re.search(r"(?i)\b(?:build|make|create|code|develop|implement|playable|interactive)\b", brief)
+            or re.search(r"(?i)\b(?:review|summary|article|lyrics|design document)\b", brief)):
+        return False
+    folder = Path((project or {}).get("folder") or ".")
+    return folder.is_dir() and any(path.is_file() for pattern in ("*.html", "*.htm")
+                                  for path in folder.glob(pattern))
+
+
 def browser_check_required(project: dict | None) -> bool:
     """Require live interaction checks for explicitly single-file HTML apps."""
     brief = str((project or {}).get("brief") or "")
-    return bool(re.search(r"(?i)\b(?:index\.html|single.file\s+html)\b", brief)
+    return game_browser_required(project) or bool(re.search(r"(?i)\b(?:index\.html|single.file\s+html)\b", brief)
                 and re.search(r"(?i)\b(?:inputs?|buttons?|forms?|click|calculat\w*|update)\b", brief))
 
 
@@ -1035,13 +1057,37 @@ def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
         verdict = json.loads(result)
         cases = webapp_check.normalize_spec(arguments).get("cases", [])
         if (verdict.get("passed") is not True or not isinstance(cases, list)
-                or len(cases) < 2 or not any(case.get("set") for case in cases)
+                or len(cases) < 2
                 or not any(case.get("expect") or case.get("visible") or case.get("hidden")
                            for case in cases)):
             return {}
+        interactions = verdict.get("interactions", [])
+        if not isinstance(interactions, list):
+            return {}
+        accepted = []
+        for interaction in interactions:
+            if not isinstance(interaction, dict):
+                continue
+            number = interaction.get("case")
+            targets = interaction.get("targets")
+            if (type(number) is not int or not 1 <= number <= len(cases)
+                    or not isinstance(targets, list) or not targets
+                    or len(targets) > 60 or any(not isinstance(t, str) or len(t) > 220 for t in targets)):
+                continue
+            actions = [kind for kind in ("set", "click", "keys") if cases[number-1].get(kind)]
+            allowed = {"text:" + name for name in cases[number-1].get("expect", {})}
+            allowed.update("visibility:" + name for field in ("visible", "hidden")
+                           for name in cases[number-1].get(field, []))
+            if actions and all(target in allowed for target in targets):
+                accepted.append({"case": number, "targets": targets, "actions": actions})
+        if not accepted:
+            return {}  # Actions without observed consequences are not interaction checks.
         page = project_path(folder, arguments["path"])
+        current_hash = hashlib.sha256(page.read_bytes()).hexdigest()
+        if verdict.get("page_sha256") != current_hash:
+            return {}
         return {"browser_verified": True, "browser_checked_path": arguments["path"],
-                "browser_checked_hash": hashlib.sha256(page.read_bytes()).hexdigest()}
+                "browser_checked_hash": current_hash, "browser_interactions": accepted}
     except (ValueError, TypeError, KeyError, AttributeError, OSError):
         return {}
 
@@ -1098,6 +1144,7 @@ def invalidate_checks(state: dict) -> None:
     """A new user instruction makes old acceptance evidence stale."""
     state["verify_passed"] = False
     state["browser_verified"] = False
+    state.pop("browser_interactions", None)
     state["document_checker_attempted"] = False
     state["document_checker_passed"] = False
     state["verifier_nudged"] = False
@@ -1147,10 +1194,22 @@ def completion_issue(folder: Path, project: dict | None = None,
             current_hash = hashlib.sha256(project_path(folder, checked).read_bytes()).hexdigest()
         except (OSError, ValueError):
             current_hash = ""
-        if not state.get("browser_verified") or current_hash != state.get("browser_checked_hash"):
+        if (not state.get("browser_verified") or not state.get("browser_interactions")
+                or current_hash != state.get("browser_checked_hash")):
             return ("Run check_webapp on the saved HTML page with actual input changes, "
                     "expected visible results, invalid states, and mobile fit. "
                     "Fix failures and rerun it after the last page edit.")
+        if game_browser_required(project):
+            interactions = state.get("browser_interactions") or []
+            tested_cases = {item.get("case") for item in interactions if isinstance(item, dict)}
+            targets = {target.partition(":")[2] for item in interactions if isinstance(item, dict)
+                       for target in item.get("targets", []) if isinstance(target, str)}
+            if len(tested_cases) < 2 or len(targets) < 2:
+                return ("The HTML game needs at least two passing input cases with observed changes "
+                        "to at least two asserted gameplay targets. Test movement, shooting/score "
+                        "or damage, and restart as applicable. Starting HUD labels and key presses "
+                        "without changed outcomes do not prove gameplay. Use the real game state "
+                        "to drive visible assertions, then rerun the saved verifier.")
     if not script.is_file() or not script.read_text(encoding="utf-8-sig", errors="replace").strip():
         return "Create a nonempty .local-ai/verify.ps1 with real checks for this request."
     plan = folder / ".local-ai" / "PLAN.md"

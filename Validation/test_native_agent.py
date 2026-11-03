@@ -376,7 +376,8 @@ def test_interactive_html_completion_requires_fresh_browser_check():
         state = {"verify_passed": True}
         assert "Run check_webapp" in native_agent.completion_issue(folder, item, state)
         state.update(browser_verified=True, browser_checked_path="index.html",
-                     browser_checked_hash=hashlib.sha256(page.read_bytes()).hexdigest())
+                     browser_checked_hash=hashlib.sha256(page.read_bytes()).hexdigest(),
+                     browser_interactions=[{"case": 1, "targets": ["text:total"], "actions": ["set"]}])
         assert native_agent.completion_issue(folder, item, state) == ""
         page.write_text(page.read_text(encoding="utf-8") + "<!-- changed -->", encoding="utf-8")
         assert "Run check_webapp" in native_agent.completion_issue(folder, item, state)
@@ -425,10 +426,50 @@ def test_browser_check_evidence_accepts_json_encoded_cases():
             '[{"set":{"bill":"80"},"expect":{"total":"24.00"}},'
             '{"set":{"bill":"0"},"visible":["error"]}]')}
         evidence = native_agent.browser_check_evidence(
-            folder, arguments, '{"passed":true}')
+            folder, arguments, json.dumps({"passed": True,
+                "page_sha256": hashlib.sha256(page.read_bytes()).hexdigest(),
+                "interactions": [{"case": 1, "actions": ["set"], "targets": ["text:total"]}]}))
         assert evidence["browser_verified"] is True
         assert evidence["browser_checked_hash"] == hashlib.sha256(page.read_bytes()).hexdigest()
         assert native_agent.browser_check_evidence(folder, arguments, '{"passed":false}') == {}
+
+
+def test_html_game_cannot_finish_with_static_hud_or_input_only_claims(tmp_path):
+    item = project(tmp_path / "game")
+    item["brief"] = "Make a simple space shooter game"
+    folder=Path(item["folder"])
+    page=folder/"game.html"
+    page.write_text('<canvas></canvas><p id="score">0</p><p id="position">center</p>')
+    (folder/".local-ai/verify.ps1").write_text("exit 0")
+    (folder/".local-ai/PLAN.md").write_text("- [x] Built\n")
+    assert native_agent.game_browser_required(item)
+    state={"verify_passed": True, "browser_verified": True, "browser_checked_path": "game.html",
+           "browser_checked_hash": hashlib.sha256(page.read_bytes()).hexdigest()}
+    assert "Run check_webapp" in native_agent.completion_issue(folder,item,state)
+    state["browser_interactions"]=[{"case":1,"targets":["text:score"],"actions":["keys"]}]
+    assert "at least two" in native_agent.completion_issue(folder,item,state)
+    state["browser_interactions"].append({"case":2,"targets":["visibility:score"],"actions":["click"]})
+    assert "at least two" in native_agent.completion_issue(folder,item,state)
+    state["browser_interactions"][1]["targets"]=["text:position"]
+    assert native_agent.completion_issue(folder,item,state)==""
+    item["brief"]="Write a game design document"
+    assert not native_agent.game_browser_required(item)
+
+
+def test_browser_evidence_requires_measured_changes_matching_current_page(tmp_path):
+    page = tmp_path / "game.html"
+    page.write_text('<p id="score">0</p>')
+    arguments={"path":"game.html","cases":[
+        {"keys":[{"key":"Space"}],"expect":{"score":"0"}},
+        {"keys":[{"key":"Enter"}],"expect":{"score":"0"}}]}
+    verdict={"passed":True,"page_sha256":hashlib.sha256(page.read_bytes()).hexdigest(),"interactions":[]}
+    assert native_agent.browser_check_evidence(tmp_path,arguments,json.dumps(verdict))=={}
+    verdict["interactions"]=[{"case":1,"targets":["text:other"],"actions":["keys"]}]
+    assert native_agent.browser_check_evidence(tmp_path,arguments,json.dumps(verdict))=={}
+    verdict["interactions"][0]["targets"]=["text:score"]
+    assert native_agent.browser_check_evidence(tmp_path,arguments,json.dumps(verdict))["browser_verified"]
+    page.write_text('<p id="score">broken</p>')
+    assert native_agent.browser_check_evidence(tmp_path,arguments,json.dumps(verdict))=={}
 
 
 def test_new_instruction_invalidates_saved_browser_and_verifier_checks():
