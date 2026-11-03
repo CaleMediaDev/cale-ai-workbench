@@ -13,7 +13,7 @@ Separate graders check the output and whether the verifier catches a regression:
   JavaScript to ensure the saved verifier rejects the regression.
 - `document` reads a two-page PDF whose first page is a superseded draft.
   The grader checks final-page facts, a calculated net amount, and whether
-  the saved verifier rejects a wrong total.
+  the saved verifier rejects a wrong total or changed source PDF.
 
 Run on Windows after installing Cale and its fast model:
 

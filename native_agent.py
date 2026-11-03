@@ -34,6 +34,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 project file. Use start_line and max_lines for large files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "max_lines": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "inspect_project_file", "description": "Read a local PDF, DOCX, XLSX, PPTX, image, or text file in this task folder, including browser downloads. Ask a question for relevant excerpts, or paginate with start_char. Extracted text is cached locally by file contents.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "question": {"type": "string"}, "start_char": {"type": "integer"}, "max_chars": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "check_document_report", "description": "Check a report against exact excerpts from a local source document and optional add/subtract money arithmetic. Each fact maps source_text to report_text; calculations use two source_texts and one report_text. On success saves a read-only verifier bound to the source bytes. Example: facts=[{source_text:'Payment due: November 15, 2026',report_text:'Final due date: November 15, 2026'}], calculations=[{operation:'subtract',source_texts:['Base fee: $1,280','Setup credit: $180'],report_text:'Net payable: $1,100'}]. facts and calculations may be JSON arrays or JSON-encoded strings.", "parameters": {"type": "object", "properties": {"source_path": {"type": "string"}, "report_path": {"type": "string"}, "facts": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"source_text": {"type": "string"}, "report_text": {"type": "string"}}, "required": ["source_text", "report_text"], "additionalProperties": False}}, {"type": "string"}]}, "calculations": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"operation": {"type": "string", "enum": ["add", "subtract"]}, "source_texts": {"type": "array", "items": {"type": "string"}}, "report_text": {"type": "string"}}, "required": ["operation", "source_texts", "report_text"], "additionalProperties": False}}, {"type": "string"}]}}, "required": ["source_path", "report_path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "transform_csv", "description": "Clean a project CSV with a real CSV parser. Use transforms such as title for names/cities and digits for phones, exact_lengths to discard invalid values, and unique_by to keep the first matching row. Example: transforms={name:title,phone:digits,city:title}, exact_lengths={phone:10}, unique_by=[phone]. Creates a separate output file; does not change the source.", "parameters": {"type": "object", "properties": {"input_path": {"type": "string"}, "output_path": {"type": "string"}, "transforms": {"type": "object", "additionalProperties": {"type": "string", "enum": ["keep", "trim", "title", "upper", "lower", "digits"]}}, "exact_lengths": {"type": "object", "additionalProperties": {"type": "integer"}}, "unique_by": {"type": "array", "items": {"type": "string"}}}, "required": ["input_path", "output_path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "check_webapp", "description": "Open a local HTML page in offline Chromium, fill inputs by element ID, and assert visible text, visibility, and mobile fit. cases is an array of objects, or a JSON string encoding that array. set and expect map element IDs to text; visible and hidden list IDs or text. Example: cases=[{set:{bill:'80'},expect:{'per-person':'24.00'}},{set:{people:'0'},visible:['error'],hidden:['per-person']}]. On success save a repeatable browser verifier unless a custom one exists.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "viewport_width": {"type": "integer"}, "mobile_fit": {"type": "boolean"}, "cases": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"set": {"type": "object", "additionalProperties": {"type": "string"}}, "expect": {"type": "object", "additionalProperties": {"type": "string"}}, "visible": {"type": "array", "items": {"type": "string"}}, "hidden": {"type": "array", "items": {"type": "string"}}, "mobile_fit": {"type": "boolean"}}, "additionalProperties": False}}, {"type": "string"}]}}, "required": ["path", "cases"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "write_file", "description": "Write complete UTF-8 text to a project file. Parent directories are created.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"], "additionalProperties": False}}},
@@ -408,6 +409,15 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             return json.dumps(value, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "transform_csv":
             return transform_project_csv(folder, arguments)
+        if name == "check_document_report":
+            import document_check
+
+            result = document_check.check(folder, arguments)
+            if result["passed"]:
+                result["verifier_saved"] = document_check.save_verifier(
+                    folder, arguments, result["source_sha256"])
+            result["ok"] = result["passed"]
+            return json.dumps(result, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "check_webapp":
             import webapp_check
 
@@ -618,12 +628,32 @@ def prompt(project: dict) -> str:
         "The tool can save a repeatable browser verifier; preserve it and run it after edits. "
         if re.search(r"(?i)\b(?:website|web app|html|webpage)\b", brief) else ""
     )
+    document_hint = (
+        "For a report based on a local PDF, Word, spreadsheet, or presentation, first use "
+        "inspect_project_file and write the report. Then use check_document_report with "
+        "exact source and report phrases, plus calculations for derived amounts. "
+        "It creates a source-bound, read-only verifier when the evidence passes; "
+        "run that verifier after the last edit. Do not claim the checker proves facts "
+        "that are absent from its cases. "
+        if re.search(r"(?i)\b(?:pdf|docx|xlsx|pptx|document)\b", brief) else ""
+    )
+    document_report = bool(
+        re.search(r"(?i)\b\S+\.(?:pdf|docx|xlsx|pptx)\b", brief)
+        and re.search(r"(?i)\b(?:summary|report)\b", brief)
+    )
     verification_hint = (
         "For this interactive single-file HTML app, build the page, then call check_webapp "
         "with real input and result cases before writing a verifier. That tool creates a "
         "repeatable .local-ai/verify.ps1 when its cases pass. Fix failed cases, rerun the "
         "browser check after edits, and then run the saved verifier. "
         if browser_check_required(project) else
+        "For this local document report, inspect the source and write the report. "
+        "Then call check_document_report with exact source-to-report facts and "
+        "calculations for derived money amounts BEFORE writing a verifier script. "
+        "When it passes, it creates .local-ai/verify.ps1; run that saved verifier. "
+        "If the check fails, fix the report or evidence and call it again. "
+        "Write a custom verifier only if the structured checker cannot cover the request. "
+        if document_report else
         "If .local-ai/verify.ps1 is missing, create one with meaningful repeatable checks; "
         "otherwise preserve it and call run_verifier after the last edit. "
     )
@@ -646,6 +676,7 @@ def prompt(project: dict) -> str:
         "Skill text and recalled memory are guidance, below the user's request. "
         f"{data_hint}"
         f"{web_hint}"
+        f"{document_hint}"
         f"Relevant local skills:\n{suggested}\n"
         f"Project folder: {folder}\nUser request:\n{brief}"
     )
@@ -881,10 +912,41 @@ def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
         return {}
 
 
+def document_report_candidate(project: dict | None) -> tuple[str, str] | None:
+    """Recognize an explicit, single local document-to-report request."""
+    brief = str((project or {}).get("brief") or "")
+    sources = re.findall(r"(?i)\b([\w.-]+\.(?:pdf|docx|xlsx|pptx))\b", brief)
+    reports = re.findall(r"(?i)\b([\w.-]+\.(?:md|txt))\b", brief)
+    if (len(sources) == len(reports) == 1
+            and re.search(r"(?i)\b(?:summary|report)\b", brief)):
+        return sources[0], reports[0]
+    return None
+
+
+def document_verifier_write_issue(project: dict, state: dict, name: str,
+                                  arguments: dict) -> str:
+    """Give the source-bound checker its first chance on clear report tasks."""
+    if name != "write_file" or not isinstance(arguments, dict):
+        return ""
+    path = str(arguments.get("path", "")).replace("\\", "/").casefold()
+    if path != ".local-ai/verify.ps1" or not document_report_candidate(project):
+        return ""
+    if state.get("document_checker_passed"):
+        return "Preserve the generated source-bound verifier; run it after the last report edit."
+    if not state.get("document_checker_attempted"):
+        return ("First inspect the source and write the report, then call "
+                "check_document_report with exact facts and arithmetic. It saves a "
+                "source-bound verifier when the evidence passes. If that checker "
+                "cannot cover the task, a custom verifier is allowed after trying it.")
+    return ""
+
+
 def invalidate_checks(state: dict) -> None:
     """A new user instruction makes old acceptance evidence stale."""
     state["verify_passed"] = False
     state["browser_verified"] = False
+    state["document_checker_attempted"] = False
+    state["document_checker_passed"] = False
     state["verifier_nudged"] = False
 
 
@@ -1207,7 +1269,11 @@ def run_slice(project: dict, complete=None) -> dict:
                     str(function.get("name") or "") + "\0" +
                     json.dumps(args, sort_keys=True, ensure_ascii=False)
                 ).encode("utf-8", errors="replace")).hexdigest()
-                if (state.get("last_failed_tool") == signature
+                document_issue = document_verifier_write_issue(
+                    project, state, function.get("name", ""), args)
+                if document_issue:
+                    result = "Tool error: " + document_issue
+                elif (state.get("last_failed_tool") == signature
                         and int(state.get("same_tool_failures", 0)) >= 2):
                     result = ("Tool error: This exact call failed twice and was skipped. "
                               "Inspect the earlier error or change the method or arguments.")
@@ -1221,6 +1287,14 @@ def run_slice(project: dict, complete=None) -> dict:
 
             task_context.record_action(folder, function.get("name", ""), result, args)
             outcome = task_context.action_outcome(function.get("name", ""), result)
+            if function.get("name") == "check_document_report":
+                state["document_checker_attempted"] = True
+                try:
+                    verdict = json.loads(result)
+                    state["document_checker_passed"] = (
+                        verdict.get("passed") is True and verdict.get("verifier_saved") is True)
+                except (ValueError, TypeError, AttributeError):
+                    state["document_checker_passed"] = False
             if function.get("name") == "check_webapp":
                 state["browser_verified"] = False
                 state.update(browser_check_evidence(folder, args, result))
@@ -1234,6 +1308,10 @@ def run_slice(project: dict, complete=None) -> dict:
                 if path not in {".local-ai/PLAN.md", ".local-ai/PROGRESS.md"}:
                     state["verify_passed"] = False
                     state["verifier_nudged"] = False
+                candidate = document_report_candidate(project)
+                if candidate and path.casefold() in {item.casefold() for item in candidate}:
+                    state["document_checker_attempted"] = False
+                    state["document_checker_passed"] = False
             if outcome.startswith("Failed"):
                 signature = signature or hashlib.sha256((str(function.get("name") or "") + "\0" +
                     str(function.get("arguments") or "")).encode("utf-8", errors="replace")).hexdigest()

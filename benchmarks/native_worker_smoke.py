@@ -311,7 +311,8 @@ def grade_document(folder: Path) -> dict:
     result = {"summary_present": output.is_file(), "verifier_present": verifier.is_file(),
               "final_due_date": False, "net_payable": False, "support_phone": False,
               "draft_superseded": False, "verifier_passes_correct": False,
-              "verifier_rejects_wrong_total": False}
+              "verifier_rejects_wrong_total": False,
+              "verifier_rejects_changed_source": False}
     if not output.is_file():
         result["passed"] = False
         return result
@@ -342,6 +343,18 @@ def grade_document(folder: Path) -> dict:
                     result["verifier_rejects_wrong_total"] = rejected.returncode != 0
                 finally:
                     output.write_bytes(original)
+            source = folder / "terms.pdf"
+            source_bytes = source.read_bytes()
+            altered_source = source_bytes.replace(b"Base fee: $1,280", b"Base fee: $1,290", 1)
+            if altered_source != source_bytes:
+                try:
+                    source.write_bytes(altered_source)
+                    rejected_source = subprocess.run(
+                        command, cwd=folder, stdin=subprocess.DEVNULL,
+                        capture_output=True, text=True, timeout=45, check=False)
+                    result["verifier_rejects_changed_source"] = rejected_source.returncode != 0
+                finally:
+                    source.write_bytes(source_bytes)
         except (OSError, subprocess.TimeoutExpired) as exc:
             result["verifier_error"] = f"{type(exc).__name__}: {exc}"
     result["passed"] = all(value for key, value in result.items()
