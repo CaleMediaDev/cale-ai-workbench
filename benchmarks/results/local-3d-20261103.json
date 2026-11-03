@@ -1,0 +1,33 @@
+{
+  "scope": "Actual local exports on one Windows PC, not a comparison of all 3D foundation models or a quality benchmark.",
+  "hardware": {"gpu": "NVIDIA RTX 3060", "vram_gb": 12, "ram_gb": 128},
+  "neural_model": {
+    "name": "TripoSR", "source": "https://github.com/VAST-AI-Research/TripoSR",
+    "commit": "107cefdc244c39106fa830359024f6a2f1c78871",
+    "weights_revision": "5b521936b01fbe1890f6f9baed0254ab6351c04a",
+    "weights_sha256": "429e2c6b22a0923967459de24d67f05962b235f79cde6b032aa7ed2ffcd970ee",
+    "resolution": 128, "extraction_chunk_size": 4096,
+    "surface_extraction": "scikit-image on CPU; neural generation on CUDA",
+    "appearance": "vertex colors"
+  },
+  "runs": [
+    {"input": "official chair example", "engine": "TripoSR", "includes_first_setup": true,
+     "seconds": 167.03, "vertices": 10210, "triangles": 20420, "bytes": 409416,
+     "export": "GLB", "reload_passed": true},
+    {"input": "official chair example", "engine": "TripoSR", "includes_first_setup": false,
+     "seconds": 17.0, "vertices": 10210, "triangles": 20420, "bytes": 409416,
+     "export": "GLB", "reload_passed": true,
+     "sha256": "1317c0be595ad544a9dafa8e8e9c97f011001bdf4e58d63a0d174adccf642d13"},
+    {"input": "text prompt: stylized blue spaceship with orange engines", "engine": "local image maker then TripoSR",
+     "includes_reference_generation": true, "seconds": 47.79,
+     "vertices": 10952, "triangles": 21900, "bytes": 439052, "export": "GLB",
+     "reload_passed": true, "preview_saved": true,
+     "sha256": "807c2e4edf18064bfd13306a8f105b0b590c1ba3569cb942a0ce4adefbc10c6a"},
+    {"input": "five primitive spaceship parts", "engine": "trimesh CPU",
+     "seconds": 3.43, "vertices": 336, "triangles": 652, "export": "GLB", "reload_passed": true},
+    {"input": "colored box", "engine": "trimesh CPU", "seconds": 2.42,
+     "vertices": 8, "triangles": 12, "export": "OBJ", "reload_passed": true}
+  ],
+  "additional_checks": ["STL export and reload", "software mesh preview rendering", "output checksum validation"],
+  "limitations": "Draft geometry can be rough or differ from a prompt, especially through an approximate generated reference. Mesh validity is not artistic quality, printability or game readiness. No UV/PBR bake, rigging or animation is provided. Timings are individual runs; code evolved during development."
+}

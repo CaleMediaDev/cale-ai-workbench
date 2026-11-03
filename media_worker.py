@@ -1,14 +1,17 @@
-"""Local image, speech and bounded video/camera tools; JSON in and JSON out."""
+"""Local image, speech, camera tools and durable 3D jobs; JSON in and JSON out."""
 
 import base64
 import hashlib
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import threading
 import time
-from contextlib import contextmanager
+import uuid
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -713,8 +716,566 @@ def serve_microphone(parent_pid: int) -> None:
         print(json.dumps(result), flush=True)
 
 
+# 3D jobs use a separate Python environment. Their dependencies never replace
+# the working speech, image, music or agent packages in this installation.
+TRIPOSR_COMMIT = "107cefdc244c39106fa830359024f6a2f1c78871"
+TRIPOSR_REVISION = "5b521936b01fbe1890f6f9baed0254ab6351c04a"
+U2NETP_SHA256 = "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8"
+THREE_FILES = {
+    "config.yaml": (f"https://huggingface.co/stabilityai/TripoSR/resolve/{TRIPOSR_REVISION}/config.yaml",
+                    "74ca708ce086bf68e97709ea6b3d91f14717921c04691e84043f0eb8fcc68e62"),
+    "model.ckpt": (f"https://huggingface.co/stabilityai/TripoSR/resolve/{TRIPOSR_REVISION}/model.ckpt",
+                   "429e2c6b22a0923967459de24d67f05962b235f79cde6b032aa7ed2ffcd970ee"),
+    "dino-config.json": ("https://huggingface.co/facebook/dino-vitb16/resolve/f205d5d8e640a89a2b8ef0369670dfc37cc07fc2/config.json",
+                         "b87c0270b97db085fd82cf114a761fd0f62ae7914fbd407c752a2260646b689c"),
+}
+_three_state_lock = threading.RLock()
+
+
+def three_home():
+    """The override supports isolated developer tests; normal jobs stay in Media."""
+    return Path(os.environ.get("CALE_3D_HOME", str(MEDIA / "3d"))).resolve()
+
+
+def three_job_path(job_id):
+    if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):
+        raise ValueError("Invalid 3D job ID.")
+    return three_home() / "jobs" / (job_id + ".json")
+
+
+@contextmanager
+def _three_record_lock(path):
+    """Serialize progress and cancellation across both processes and threads."""
+    import msvcrt
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _three_state_lock, path.with_suffix(".lock").open("a+b") as handle:
+        if handle.seek(0, os.SEEK_END) == 0:
+            handle.write(b"0")
+            handle.flush()
+        for _ in range(200):
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                time.sleep(.025)
+        else:
+            raise TimeoutError("3D progress record is busy.")
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def three_write(job_id, **changes):
+    path = three_job_path(job_id)
+    with _three_record_lock(path):
+        value = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"job_id": job_id}
+        if value.get("state") == "cancelled":
+            return value  # A late download/render callback cannot resurrect it.
+        value.update(changes, updated_at=time.time())
+        temporary = path.with_suffix(f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, path)
+        return value
+
+
+def validate_3d_objects(objects):
+    """Accept a bounded declarative scene, never generated Python or shell code."""
+    import math
+
+    if not isinstance(objects, list) or not 1 <= len(objects) <= 64:
+        raise ValueError("Use 1 to 64 box, sphere, cylinder or cone objects.")
+    validated = []
+    for item in objects:
+        if not isinstance(item, dict) or set(item) - {"type", "size", "position", "rotation", "color"}:
+            raise ValueError("Objects support type, size, position, rotation and color only.")
+        kind = item.get("type")
+        if kind not in {"box", "sphere", "cylinder", "cone"}:
+            raise ValueError("Choose box, sphere, cylinder or cone.")
+        value = {"type": kind}
+        for field, default, low, high in (("size", [1, 1, 1], .001, 1000),
+                                          ("position", [0, 0, 0], -10000, 10000),
+                                          ("rotation", [0, 0, 0], -360, 360)):
+            vector = item.get(field, default)
+            if (not isinstance(vector, list) or len(vector) != 3
+                    or any(type(x) not in (int, float) or not math.isfinite(x) or not low <= x <= high for x in vector)):
+                raise ValueError(f"{field} needs three finite numbers in [{low}, {high}].")
+            value[field] = vector
+        color = item.get("color", [70, 160, 230, 255])
+        if not isinstance(color, list) or len(color) != 4 or any(type(x) is not int or not 0 <= x <= 255 for x in color):
+            raise ValueError("color needs four integer RGBA values from 0 to 255.")
+        value["color"] = color
+        validated.append(value)
+    return validated
+
+
+def three_hardware(neural=True):
+    """A single GPU must fit; two small cards do not become one large card."""
+    if not neural:
+        return {"device": "cpu"}
+    import psutil
+
+    if psutil.virtual_memory().total < 16 * 1024**3:
+        raise RuntimeError("Image-to-3D needs 16 GB RAM; use CPU scene geometry on smaller PCs.")
+    try:
+        result = subprocess.run(["nvidia-smi", "--query-gpu=index,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=12, check=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        cards = [tuple(map(int, line.split(","))) for line in result.stdout.splitlines() if line.strip()]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        cards = []
+    eligible = [(index, total) for index, total in cards if total >= 6000]
+    if not eligible:
+        raise RuntimeError("Image-to-3D needs one NVIDIA GPU with at least 6 GB VRAM. Use build_3d_scene for CPU geometry.")
+    index, total = max(eligible, key=lambda item: item[1])
+    return {"device": "cuda", "gpu_index": index, "vram_mb": total}
+
+
+def start_3d_job(output_path, image_path="", prompt="", objects=None, resolution=128):
+    """Return immediately; install/download/generate progress lives in a job record."""
+    from PIL import Image
+
+    output = Path(output_path).expanduser().resolve()
+    if output.suffix.lower() not in {".glb", ".obj", ".stl"} or output.exists():
+        raise ValueError("Choose a new GLB, OBJ or STL output filename.")
+    if type(resolution) is not int or resolution not in {128, 192, 256}:
+        raise ValueError("resolution must be 128, 192 or 256.")
+    if not isinstance(prompt, str) or len(prompt) > 2000:
+        raise ValueError("Use a prompt of at most 2000 characters.")
+    scene = validate_3d_objects(objects) if objects is not None else None
+    if scene is not None and (image_path or prompt.strip()):
+        raise ValueError("Use either scene objects or image/prompt generation.")
+    source = ""
+    if image_path:
+        image = Path(image_path).expanduser().resolve(strict=True)
+        if not image.is_file() or image.stat().st_size > 20_000_000:
+            raise ValueError("Choose a local image under 20 MB.")
+        with Image.open(image) as opened:
+            if opened.width * opened.height > 16_000_000:
+                raise ValueError("Use an image with at most 16 million pixels.")
+            opened.verify()
+        source = str(image)
+    if scene is None and not source and len(prompt.strip()) < 5:
+        raise ValueError("Supply an image, a descriptive prompt, or scene objects.")
+    hardware = three_hardware(scene is None)
+    home = three_home()
+    existing = home
+    while not existing.exists():
+        existing = existing.parent
+    if shutil.disk_usage(existing).free < (12 if scene is None else 1) * 1024**3:
+        raise RuntimeError("3D setup needs 12 GB free for neural generation, or 1 GB for CPU geometry.")
+    job_id = uuid.uuid4().hex
+    import music_backend
+
+    task_id = music_backend.project_for_output(str(output))
+    three_write(job_id, state="queued", progress_percent=0, engine="TripoSR" if scene is None else "trimesh",
+        output_path=str(output), image_path=source, prompt=prompt.strip(), objects=scene,
+        resolution=resolution, hardware=hardware, task_id=task_id)
+    log = home / "jobs" / (job_id + ".log")
+    with log.open("wb") as stream:
+        proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--3d-job", job_id],
+            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # The child also writes its identity; the parent must not reset a state
+    # which the child has already advanced past queued.
+    return {"job_id": job_id, "state": "queued", "worker_pid": proc.pid, "log_path": str(log)}
+
+
+def three_job_status(job_id):
+    import psutil
+
+    path = three_job_path(job_id)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if value["state"] == "complete":
+        output = Path(value["output_path"])
+        if (not output.is_file() or _three_digest(output) != value.get("mesh", {}).get("sha256")):
+            value = three_write(job_id, state="failed", error="The exported 3D file is missing or changed since validation.")
+    if value["state"] not in {"complete", "failed", "cancelled"} and value.get("worker_pid"):
+        try:
+            process = psutil.Process(value["worker_pid"])
+            alive = _owns_3d_process(process, job_id, value["worker_started"])
+        except psutil.Error:
+            alive = False
+        if not alive:
+            value = three_write(job_id, state="failed", error="3D worker exited unexpectedly; inspect the job log.")
+    return {key: value[key] for key in ("job_id", "state", "engine", "progress_percent", "detail",
+        "output_path", "error", "mesh", "seconds", "updated_at") if key in value}
+
+
+def _owns_3d_process(process, job_id, started):
+    command = process.cmdline()
+    return (abs(process.create_time() - started) < .01 and len(command) >= 4
+            and Path(command[1]).resolve() == Path(__file__).resolve()
+            and command[2:4] == ["--3d-job", job_id])
+
+
+def cancel_3d_job(job_id):
+    """Stop only this exact job's process tree, never a reused PID."""
+    import psutil
+
+    value = json.loads(three_job_path(job_id).read_text(encoding="utf-8"))
+    if value["state"] in {"complete", "failed", "cancelled"}:
+        return three_job_status(job_id)
+    if value.get("worker_pid"):
+        try:
+            process = psutil.Process(value["worker_pid"])
+            if not _owns_3d_process(process, job_id, value["worker_started"]):
+                raise ValueError("The recorded process no longer belongs to this 3D job.")
+            # Save cancellation before terminating; this can also be called by
+            # the worker's own task-stop watcher, which terminates this process.
+            three_write(job_id, state="cancelled", detail="3D generation cancelled")
+            children = process.children(recursive=True)
+            for child in reversed(children):
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            process.terminate()
+            _, alive = psutil.wait_procs(children + [process], timeout=5)
+            for child in alive:
+                child.kill()
+        except psutil.NoSuchProcess:
+            pass
+    three_write(job_id, state="cancelled", detail="3D generation cancelled")
+    return three_job_status(job_id)
+
+
+def three_task_stopped(task_id):
+    """Respect the owning task's Pause/Stop without scanning unrelated tasks."""
+    import sqlite3
+
+    if not isinstance(task_id, str) or not re.fullmatch(r"[a-f0-9]{12}", task_id):
+        return False
+    database = ROOT / "LongTasks/projects.db"
+    if not database.is_file():
+        return True  # An attributed task disappeared; anonymous jobs use no ID.
+    try:
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=1) as connection:
+            row = connection.execute("SELECT status FROM projects WHERE id=?", (task_id,)).fetchone()
+        return not row or row[0] in {"paused", "stopped"}
+    except (OSError, sqlite3.Error):
+        return False
+
+
+def install_3d_runtime(job_id, neural):
+    """Install compiler-free pinned dependencies in an isolated Python 3.11."""
+    import music_backend
+
+    home = three_home()
+    python = home / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    marker = home / ("neural-ready-v1" if neural else "geometry-ready-v1")
+    if marker.is_file() and python.is_file():
+        return python
+    import pc_offline
+
+    if pc_offline.offline():
+        raise RuntimeError("This 3D runtime is not installed yet. Connect once to download it before working offline.")
+    env = os.environ.copy()
+    env.update(UV_PYTHON_INSTALL_DIR=str(home / "python"), UV_CACHE_DIR=str(home / "uv-cache"),
+               U2NET_HOME=str(home / "background"))
+    uv = music_backend._tool("uv")
+    hide = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    three_write(job_id, state="installing", progress_percent=5, detail="Installing the local 3D runtime")
+    home.mkdir(parents=True, exist_ok=True)
+    if not python.is_file():
+        subprocess.run([uv, "venv", str(home / ".venv"), "--python", "3.11"],
+            env=env, check=True, timeout=600, creationflags=hide)
+    packages = ["numpy==1.26.4", "trimesh==4.6.8", "Pillow==10.4.0"]
+    if neural:
+        subprocess.run([uv, "pip", "install", "--python", str(python), "torch==2.6.0",
+                        "--index-url", "https://download.pytorch.org/whl/cu124"],
+            env=env, check=True, timeout=3600, creationflags=hide)
+        packages += ["transformers==4.35.2", "omegaconf==2.3.0", "einops==0.7.0",
+                     "rembg==2.0.57", "onnxruntime==1.20.1",
+                     "opencv-python-headless==4.10.0.84", "scikit-image==0.24.0",
+                     "scipy==1.14.1", "imageio==2.36.1"]
+    subprocess.run([uv, "pip", "install", "--python", str(python), *packages],
+        env=env, check=True, timeout=3600, creationflags=hide)
+    if neural:
+        import video_generation
+
+        source = home / "TripoSR"
+        git = video_generation._git_executable(ROOT)
+        if not (source / ".git").is_dir():
+            subprocess.run([git, "init", str(source)], check=True, timeout=60, creationflags=hide)
+            subprocess.run([git, "-C", str(source), "remote", "add", "origin",
+                "https://github.com/VAST-AI-Research/TripoSR.git"], check=True, timeout=60, creationflags=hide)
+        subprocess.run([git, "-C", str(source), "fetch", "--depth", "1", "origin", TRIPOSR_COMMIT],
+            check=True, timeout=600, creationflags=hide)
+        subprocess.run([git, "-C", str(source), "checkout", "--detach", TRIPOSR_COMMIT],
+            check=True, timeout=60, creationflags=hide)
+        models = home / "models"
+        models.mkdir(exist_ok=True)
+        for name, (url, expected) in THREE_FILES.items():
+            target = models / name
+            if target.is_file() and _three_digest(target) == expected:
+                continue
+            three_write(job_id, state="downloading", progress_percent=20,
+                        detail="Downloading verified TripoSR weights: " + name)
+            temporary = target.with_suffix(".partial")
+            digest = hashlib.sha256()
+            with urlopen(Request(url, headers={"User-Agent": "Cale-AI-Workbench"}), timeout=90) as response, temporary.open("wb") as output:
+                total = int(response.headers.get("Content-Length") or 0)
+                received = 0
+                report_at = time.monotonic()
+                while chunk := response.read(1024 * 1024):
+                    received += len(chunk)
+                    if received > 2_000_000_000:
+                        raise RuntimeError("3D model download exceeded its size limit.")
+                    output.write(chunk)
+                    digest.update(chunk)
+                    if time.monotonic() - report_at >= 2:
+                        three_write(job_id, progress_percent=20 + min(35, int(35 * received / total)) if total else None,
+                                    detail=f"Downloading {name}: {received // 1048576} MB")
+                        report_at = time.monotonic()
+            if digest.hexdigest() != expected:
+                temporary.unlink(missing_ok=True)
+                raise RuntimeError("3D model checksum mismatch: " + name)
+            os.replace(temporary, target)
+        # rembg verifies its official u2netp download before caching it. This
+        # small background model does not require the separately licensed Bria model.
+        three_write(job_id, state="installing", progress_percent=55, detail="Preparing the local background remover")
+        subprocess.run([str(python), "-c", "import rembg;rembg.new_session('u2netp')"],
+            env=env, check=True, timeout=600, creationflags=hide)
+        if _three_digest(home / "background/u2netp.onnx") != U2NETP_SHA256:
+            raise RuntimeError("Background-removal model checksum mismatch.")
+        (home / "CALE-3D-NOTICE.txt").write_text(
+            "TripoSR source and model: MIT, Tripo AI and Stability AI. See TripoSR/LICENSE.\n"
+            "Cale uses a scikit-image CPU marching-cubes adapter instead of compiling torchmcubes.\n"
+            "Outputs use vertex colors, not baked UV/PBR textures.\n", encoding="utf-8")
+    subprocess.run([uv, "pip", "check", "--python", str(python)], env=env, check=True, timeout=60, creationflags=hide)
+    marker.write_text(TRIPOSR_COMMIT if neural else "trimesh-4.6.8", encoding="ascii")
+    return python
+
+
+def _three_digest(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def render_3d_preview(mesh, path):
+    """Render an honest mesh thumbnail in software, without OpenGL or a cloud API."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    vertices = np.asarray(mesh.vertices, dtype=float).copy()
+    vertices -= (vertices.min(axis=0) + vertices.max(axis=0)) / 2
+    forward = np.array([2., -3., 1.8])
+    forward /= np.linalg.norm(forward)
+    right = np.cross([0., 0., 1.], forward)
+    right /= np.linalg.norm(right)
+    up = np.cross(forward, right)
+    coordinates = vertices @ np.array([right, up, forward]).T
+    extent = max(float(np.ptp(vertices, axis=0).max()), .001)
+    projected = coordinates[:, :2] / (extent * 3 - coordinates[:, 2:])
+    span = max(float(np.ptp(projected, axis=0).max()), .001)
+    projected -= (projected.min(axis=0) + projected.max(axis=0)) / 2
+    pixels = projected * (1200 / span) * np.array([1, -1]) + [768, 768]
+    triangles = np.asarray(mesh.faces)
+    depth = coordinates[triangles, 2].mean(axis=1)
+    colors = np.asarray(mesh.visual.to_color().vertex_colors) if hasattr(mesh.visual, "to_color") else np.asarray(mesh.visual.vertex_colors)
+    light = np.array([.4, -.6, .7])
+    light /= np.linalg.norm(light)
+    shades = .35 + .65 * np.abs(np.asarray(mesh.face_normals) @ light)
+    image = Image.new("RGB", (1536, 1536), (13, 20, 34))
+    draw = ImageDraw.Draw(image)
+    for face in np.argsort(depth):
+        color = np.clip(colors[triangles[face], :3].mean(axis=0) * shades[face], 0, 255).astype(int)
+        draw.polygon([tuple(point) for point in pixels[triangles[face]]], fill=tuple(map(int, color)))
+    image.resize((768, 768), Image.Resampling.LANCZOS).save(path)
+
+
+def infer_3d(job_id):
+    """Run in the isolated environment; never contact an inference service."""
+    import numpy as np
+    import trimesh
+
+    value = json.loads(three_job_path(job_id).read_text(encoding="utf-8"))
+    objects = value.get("objects")
+    if objects is not None:
+        scene = trimesh.Scene()
+        for index, item in enumerate(validate_3d_objects(objects)):
+            makers = {"box": lambda: trimesh.creation.box(),
+                      "sphere": lambda: trimesh.creation.icosphere(subdivisions=2, radius=.5),
+                      "cylinder": lambda: trimesh.creation.cylinder(radius=.5, height=1, sections=32),
+                      "cone": lambda: trimesh.creation.cone(radius=.5, height=1, sections=32)}
+            mesh = makers[item["type"]]()
+            mesh.apply_scale(item["size"])
+            mesh.apply_transform(trimesh.transformations.euler_matrix(*np.deg2rad(item["rotation"])))
+            mesh.apply_translation(item["position"])
+            mesh.visual.vertex_colors = item["color"]
+            scene.add_geometry(mesh, node_name=f"{item['type']}-{index}")
+        mesh = trimesh.util.concatenate(list(scene.geometry.values()))
+    else:
+        import types
+
+        import huggingface_hub
+        import rembg
+        import torch
+        from omegaconf import OmegaConf
+        from PIL import Image
+        from skimage.measure import marching_cubes
+
+        # The upstream helper flips z/y/x after extraction. Match torchmcubes'
+        # coordinate convention, so that flip produces scikit-image's xyz.
+        def cpu_marching(level, threshold):
+            vertices, faces, _, _ = marching_cubes(level.detach().cpu().numpy(), level=threshold)
+            return torch.from_numpy(vertices[:, [2, 1, 0]].copy()), torch.from_numpy(faces.astype(np.int64))
+        adapter = types.ModuleType("torchmcubes")
+        adapter.marching_cubes = cpu_marching
+        sys.modules["torchmcubes"] = adapter
+        home = three_home()
+        for name, (_, expected) in THREE_FILES.items():
+            if _three_digest(home / "models" / name) != expected:
+                raise RuntimeError("Installed 3D model checksum mismatch: " + name)
+        if _three_digest(home / "background/u2netp.onnx") != U2NETP_SHA256:
+            raise RuntimeError("Installed background-removal model checksum mismatch.")
+        def offline_config(repo_id, filename, **_):
+            if repo_id != "facebook/dino-vitb16" or filename != "config.json":
+                raise RuntimeError("Unexpected network model dependency blocked.")
+            return str(home / "models/dino-config.json")
+        huggingface_hub.hf_hub_download = offline_config
+        sys.path.insert(0, str(home / "TripoSR"))
+        from tsr.system import TSR
+        from tsr.utils import resize_foreground
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("The 3D PyTorch runtime cannot use CUDA; check the NVIDIA driver.")
+        if torch.cuda.mem_get_info()[0] < 5.5 * 1024**3:
+            raise RuntimeError("3D generation needs 5.5 GB currently free VRAM; another application is using the GPU.")
+        image = Image.open(value["image_path"]).convert("RGBA")
+        if image.getextrema()[3][0] == 255:
+            image = rembg.remove(image, session=rembg.new_session("u2netp"))
+        image = resize_foreground(image, .85)
+        pixels = np.asarray(image).astype(np.float32) / 255
+        image = Image.fromarray(((pixels[:, :, :3] * pixels[:, :, 3:] + .5 * (1 - pixels[:, :, 3:])) * 255).astype(np.uint8))
+        config = OmegaConf.load(home / "models/config.yaml")
+        OmegaConf.resolve(config)
+        model = TSR(config)
+        model.load_state_dict(torch.load(home / "models/model.ckpt", map_location="cpu", weights_only=True))
+        model.eval().to("cuda")
+        model.renderer.set_chunk_size(4096)
+        with torch.inference_mode():
+            codes = model([image], device="cuda")
+            mesh = model.extract_mesh(codes, has_vertex_color=True, resolution=value["resolution"])[0]
+    mesh.update_faces(mesh.nondegenerate_faces())
+    mesh.remove_unreferenced_vertices()
+    if len(mesh.vertices) < 4 or len(mesh.faces) < 4 or not np.isfinite(mesh.vertices).all():
+        raise RuntimeError("3D generation produced empty or invalid geometry.")
+    target = Path(value["output_path"])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Exclusive publication avoids overwriting a file created after the job began.
+    payload = mesh.export(file_type=target.suffix[1:])
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    with target.open("xb") as output:
+        output.write(payload)
+    # STL stores independent triangles; welding equal vertices on reload is
+    # necessary before interpreting its watertightness/topology statistics.
+    reloaded = trimesh.load(str(target), force="mesh", process=True)
+    if len(reloaded.faces) < 4 or not np.isfinite(reloaded.vertices).all():
+        raise RuntimeError("The exported 3D model could not be reloaded and validated.")
+    preview = three_home() / "jobs" / (job_id + "-preview.png")
+    render_3d_preview(reloaded, preview)
+    return {"vertices": int(len(reloaded.vertices)), "triangles": int(len(reloaded.faces)),
+            "watertight": bool(reloaded.is_watertight), "bounds": reloaded.bounds.tolist(),
+            "bytes": target.stat().st_size, "sha256": _three_digest(target),
+            "preview_path": str(preview),
+            "appearance": "vertex colors" if target.suffix.lower() != ".stl" else "geometry only",
+            "note": "Inspect shape and topology before using in a game or 3D printing; no rigging or UV/PBR texture bake is provided."}
+
+
+def run_3d_job(job_id):
+    """Own the long setup and worker lifetime outside the LLM's context window."""
+    global ROOT
+
+    import psutil
+
+    import music_backend
+
+    # A development checkout may test against an installed runtime's 3D home.
+    # Keep its tools, voice lease and reference-image runtime in that install.
+    runtime_root = three_home().parent.parent
+    if (runtime_root / "Toolbox").is_dir():
+        ROOT = runtime_root
+        music_backend.ROOT = ROOT
+        music_backend.ENGINE = ROOT / "Media/music/ACE-Step-1.5"
+        import cale_voice
+
+        cale_voice.ROOT = ROOT
+    started = time.monotonic()
+    if json.loads(three_job_path(job_id).read_text(encoding="utf-8"))["state"] == "cancelled":
+        return
+    three_write(job_id, worker_pid=os.getpid(), worker_started=psutil.Process().create_time())
+    if json.loads(three_job_path(job_id).read_text(encoding="utf-8"))["state"] == "cancelled":
+        return
+    finished = threading.Event()
+
+    def follow_task():
+        while not finished.wait(2):
+            current = json.loads(three_job_path(job_id).read_text(encoding="utf-8"))
+            if current["state"] in {"complete", "failed", "cancelled"}:
+                return
+            if three_task_stopped(current.get("task_id")):
+                cancel_3d_job(job_id)
+                return
+
+    threading.Thread(target=follow_task, daemon=True).start()
+    try:
+        # Share the existing setup lock to keep dependency installers serialized.
+        with music_backend._setup_lock():
+            value = json.loads(three_job_path(job_id).read_text(encoding="utf-8"))
+            python = install_3d_runtime(job_id, value["objects"] is None)
+        if value["objects"] is None and not value["image_path"]:
+            import quick_image
+
+            three_write(job_id, state="reference", progress_percent=60, detail="Drawing a local reference image")
+            reference = three_home() / "jobs" / (job_id + "-reference.png")
+            quick_image.generate(ROOT, value["prompt"] + ", single isolated object, plain background, three-quarter view", str(reference))
+            three_write(job_id, image_path=str(reference))
+        env = os.environ.copy()
+        env.update(CALE_3D_HOME=str(three_home()), HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1",
+                   U2NET_HOME=str(three_home() / "background"), OMP_NUM_THREADS="4")
+        if value["objects"] is None:
+            env["CUDA_VISIBLE_DEVICES"] = str(value["hardware"]["gpu_index"])
+        three_write(job_id, state="generating", progress_percent=70, detail="Building and validating the 3D mesh locally")
+        with _image_gpu_lease() if value["objects"] is None else nullcontext():
+            if value["objects"] is None:
+                unload_local_models()
+            completed = subprocess.run([str(python), str(Path(__file__).resolve()), "--3d-infer", job_id],
+                env=env, cwd=ROOT, capture_output=True, text=True, errors="replace", timeout=900,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if completed.returncode:
+            raise RuntimeError((completed.stderr or completed.stdout)[-1600:])
+        mesh = json.loads(completed.stdout.splitlines()[-1])
+        if "error" in mesh:
+            raise RuntimeError(mesh["error"])
+        if json.loads(three_job_path(job_id).read_text(encoding="utf-8"))["state"] == "cancelled":
+            return
+        three_write(job_id, state="complete", progress_percent=100, mesh=mesh,
+                    seconds=round(time.monotonic() - started, 2), detail="3D model exported and reloaded successfully")
+    except Exception as error:
+        if json.loads(three_job_path(job_id).read_text(encoding="utf-8"))["state"] != "cancelled":
+            three_write(job_id, state="failed", error=str(error)[-1800:], detail="3D generation did not finish")
+        raise
+    finally:
+        finished.set()
+
+
 if __name__ == "__main__":
     try:
+        if "--3d-job" in sys.argv:
+            run_3d_job(sys.argv[-1])
+            sys.exit(0)
+        if "--3d-infer" in sys.argv:
+            print(json.dumps(infer_3d(sys.argv[-1])))
+            sys.exit(0)
         if "--voice-server" in sys.argv:
             serve_microphone(int(sys.argv[sys.argv.index("--voice-server") + 1]))
             sys.exit(0)

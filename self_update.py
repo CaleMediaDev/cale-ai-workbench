@@ -312,6 +312,11 @@ def active_tasks():
                     and Path(command[1]).resolve() == install / "music_backend.py"
                     and command[2] == "--run-job"):
                 return True
+            if (executable and len(command) >= 4
+                    and Path(executable).resolve().is_relative_to(install)
+                    and Path(command[1]).resolve() == install / "media_worker.py"
+                    and command[2] in {"--3d-job", "--3d-infer"}):
+                return True
         except (OSError, psutil.Error):
             continue
     return False

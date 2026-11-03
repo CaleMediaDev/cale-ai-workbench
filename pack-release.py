@@ -32,6 +32,7 @@ extras = [
     "benchmarks/results/game-code-probes-20261103.json",
     "benchmarks/game-review-20261103.md",
     "benchmarks/results/small-steps-20261103.json",
+    "benchmarks/results/local-3d-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",

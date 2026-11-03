@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import re
-import music_style
 import subprocess
 import time
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+
+import music_style
 
 TASK_VERBS = (
     "build", "make", "create", "develop", "design", "write", "research",
@@ -334,7 +335,7 @@ def route(text: str, active_tasks: list[dict]) -> str:
         deliverable = re.search(
             r"\b(?:website|site|app|application|program|software|logo|design|"
             r"image|picture|report|plan|tool|game|database|spreadsheet|script|"
-            r"dashboard|extension|plugin|document|video|presentation)\b",
+            r"dashboard|extension|plugin|document|video|presentation|3d\s+(?:model|asset)|mesh)\b",
             desired.group(1),
         )
         if deliverable and not re.search(

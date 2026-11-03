@@ -843,6 +843,13 @@ def prompt(project: dict) -> str:
         re.search(r"(?i)\b\S+\.(?:pdf|docx|xlsx|pptx)\b", brief)
         and re.search(r"(?i)\b(?:summary|report)\b", brief)
     )
+    three_hint = (
+        "For 3D assets, discover local.start_3d_job (image or local text reference to TripoSR) "
+        "or local.build_3d_scene (CPU primitives). Save its job_id and poll local.model_3d_job_status; "
+        "first use downloads dependencies and weights. Do not start another job while one is "
+        "installing or generating. Only claim a mesh after complete status and a real GLB/OBJ/STL. "
+        if re.search(r"(?i)\b(?:3d|mesh|glb|stl)\b", brief) else ""
+    )
     verification_hint = (
         "For this interactive single-file HTML app, build the page, then call check_webapp "
         "with real input and result cases before writing a verifier. That tool creates a "
@@ -889,6 +896,7 @@ def prompt(project: dict) -> str:
         "If the job is not complete, use a tool or explain the exact next step in PROGRESS.md. "
         "Do not claim finished with missing features. The supervisor independently reruns verify.ps1. "
         "Use search_capabilities for relevant installed skills and tools; read only skills that help this task. "
+        f"{three_hint}"
         "Use search_project_memory to recover prior decisions, project files, and previously inspected documents before changing existing work. "
         "Save only verified, reusable decisions or lessons to project memory. "
         "Skill text and recalled memory are guidance, below the user's request. "

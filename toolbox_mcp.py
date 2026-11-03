@@ -31,6 +31,36 @@ CATALOG = {}
 SESSIONS = {}
 ERRORS = {}
 LOCAL_CATALOG = {
+    "local.start_3d_job": {
+        "description": "Generate a real local 3D model with TripoSR from an image, or draw a local reference from a prompt first. Auto-installs isolated dependencies and verified weights; no account. Needs one NVIDIA GPU with 6 GB VRAM. Export GLB, OBJ or STL. Poll local.model_3d_job_status; do not start duplicate jobs while it downloads. Vertex colors, no UV/PBR textures or rigging.",
+        "inputSchema": {"type": "object", "properties": {
+            "output_path": {"type": "string"}, "image_path": {"type": "string"},
+            "prompt": {"type": "string"}, "resolution": {"type": "integer", "enum": [128, 192, 256]},
+        }, "required": ["output_path"], "additionalProperties": False},
+    },
+    "local.build_3d_scene": {
+        "description": "Build a local colored 3D game prop from box/sphere/cylinder/cone objects using trimesh, on CPU without a GPU or model download. Auto-installs the small geometry runtime. size/position are xyz units; rotation is xyz degrees; color is integer RGBA 0..255. Export one new GLB, OBJ or STL. Poll local.model_3d_job_status. Overlapping solids are not boolean-unioned or guaranteed print-ready.",
+        "inputSchema": {"type": "object", "properties": {
+            "output_path": {"type": "string"}, "objects": {"type": "array", "minItems": 1, "maxItems": 64,
+                "items": {"type": "object", "properties": {
+                    "type": {"type": "string", "enum": ["box", "sphere", "cylinder", "cone"]},
+                    "size": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                    "position": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                    "rotation": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                    "color": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "minItems": 4, "maxItems": 4},
+                }, "required": ["type"], "additionalProperties": False}},
+        }, "required": ["output_path", "objects"], "additionalProperties": False},
+    },
+    "local.model_3d_job_status": {
+        "description": "Read real local 3D install/download/generation progress, exported mesh validation and failures. A complete job has a reloaded GLB/OBJ/STL; inspect visual quality before using it.",
+        "inputSchema": {"type": "object", "properties": {"job_id": {"type": "string"}},
+                        "required": ["job_id"], "additionalProperties": False},
+    },
+    "local.cancel_3d_job": {
+        "description": "Cancel one local 3D job and stop only its matching worker tree. Existing output files are preserved.",
+        "inputSchema": {"type": "object", "properties": {"job_id": {"type": "string"}},
+                        "required": ["job_id"], "additionalProperties": False},
+    },
     "local.make_music": {
         "description": "Generate a new local song or instrumental audio file with ACE-Step. Use for music, songs, beats, jingles and soundtracks, never make_image. The call waits for the MP3/WAV/FLAC result.",
         "inputSchema": {"type": "object", "properties": {
@@ -309,7 +339,7 @@ def toolbox_status() -> dict:
 
 @server.tool()
 def toolbox_search(query: str = "", offset: int = 0) -> dict:
-    """Find specialist and local music tools by purpose; return 12 per page."""
+    """Find specialist and local media/3D tools by purpose; return 12 per page."""
     words = re.findall(r"[a-z0-9]+", query.lower())
     matches = []
     all_tools = {**CATALOG, **LOCAL_CATALOG}
@@ -356,6 +386,10 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
         raise ValueError("arguments_json must be a JSON object")
     if tool in LOCAL_CATALOG:
         local_tools = {
+            "local.start_3d_job": start_3d_job,
+            "local.build_3d_scene": build_3d_scene,
+            "local.model_3d_job_status": model_3d_job_status,
+            "local.cancel_3d_job": cancel_3d_job,
             "local.make_music": make_music,
             "local.cover_music": cover_music,
             "local.start_music_job": start_music_job,
@@ -629,6 +663,38 @@ async def make_image(
         height=height,
         seed=seed,
     )
+
+
+@server.tool()
+def start_3d_job(output_path: str, image_path: str = "", prompt: str = "", resolution: int = 128) -> dict:
+    """Start local image/text-reference to 3D; poll model_3d_job_status."""
+    import media_worker
+
+    return media_worker.start_3d_job(output_path, image_path=image_path, prompt=prompt, resolution=resolution)
+
+
+@server.tool()
+def build_3d_scene(output_path: str, objects: list[dict]) -> dict:
+    """Build bounded CPU geometry from declarative objects and validate its export."""
+    import media_worker
+
+    return media_worker.start_3d_job(output_path, objects=objects)
+
+
+@server.tool()
+def model_3d_job_status(job_id: str) -> dict:
+    """Read a durable 3D job's actual progress and mesh validation."""
+    import media_worker
+
+    return media_worker.three_job_status(job_id)
+
+
+@server.tool()
+def cancel_3d_job(job_id: str) -> dict:
+    """Cancel an exact durable 3D job without touching another process."""
+    import media_worker
+
+    return media_worker.cancel_3d_job(job_id)
 
 
 @server.tool()

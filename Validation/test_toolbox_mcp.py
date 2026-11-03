@@ -10,6 +10,21 @@ from unittest.mock import patch
 import toolbox_mcp
 
 
+def test_3d_generation_and_cpu_geometry_are_discoverable_and_callable():
+    found = toolbox_mcp.toolbox_search("3d model mesh")
+    names = {item["name"] for item in found["tools"]}
+    assert {"local.start_3d_job", "local.build_3d_scene", "local.model_3d_job_status"} <= names
+    with patch.object(toolbox_mcp, "start_3d_job", return_value={"job_id": "job"}) as start:
+        result = asyncio.run(toolbox_mcp.toolbox_call("local.start_3d_job",
+            json.dumps({"output_path": "ship.glb", "image_path": "ship.png"})))
+    assert result["job_id"] == "job"
+    start.assert_called_once_with(output_path="ship.glb", image_path="ship.png")
+    with patch.object(toolbox_mcp, "build_3d_scene", return_value={"job_id": "cpu"}):
+        result = asyncio.run(toolbox_mcp.toolbox_call("local.build_3d_scene",
+            json.dumps({"output_path": "ship.glb", "objects": [{"type": "box"}]})))
+    assert result["job_id"] == "cpu"
+
+
 def test_project_checks_use_only_registered_task_folder(tmp_path):
     folder = tmp_path / "project"
     folder.mkdir()

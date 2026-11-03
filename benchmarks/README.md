@@ -1,5 +1,23 @@
 # Native worker reality check
 
+## Local 3D integration checks
+
+The [November 3 3D report](results/local-3d-20261103.json) records actual local
+exports on an RTX 3060 12 GB / 128 GB RAM PC. TripoSR generated and reloaded a
+20,420-triangle chair GLB in 17 seconds with its runtime and weights installed;
+first setup plus generation took 167 seconds. A text prompt through the local
+image maker and TripoSR took 47.79 seconds. CPU primitive geometry exported to
+GLB, OBJ and STL. Software previews were rendered and visually inspected.
+
+TripoSR was selected for its tested Windows compatibility, small-GPU fit and
+MIT-licensed local code/weights. This is not a global quality ranking. The
+official TRELLIS.2 requirements call for Linux and at least 24 GB GPU memory;
+that backend is not installed or claimed to work by this release. Neural assets
+are rough vertex-colored drafts; validity checks do not prove faithful shape,
+production topology, printable solids, textures or rigging.
+
+## Native worker fixtures
+
 `game_model_compare.py --runtime-root C:\path\to\AIWorkbench --model gemma4:e4b --model qwen3.5:9b`
 runs the local tool-call check, two sets of 13 pure game-logic cases, and a complete
 HTML game generation with 13 independent live-state/logic checks. The generated

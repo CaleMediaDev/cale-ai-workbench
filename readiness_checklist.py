@@ -18,9 +18,9 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 
-import ffmpeg_runtime
-import core_tool_health
 import capability_index
+import core_tool_health
+import ffmpeg_runtime
 
 
 def _json(path: Path) -> dict:
@@ -44,7 +44,7 @@ def _item(label: str, state: str, detail: str, essential: bool = False) -> dict:
     return {"label": label, "state": state, "detail": detail, "essential": essential}
 
 
-def _successful_job(folder: Path, status_key: str, *, min_bytes: int = 100) -> bool:
+def _successful_job(folder: Path, status_key: str, *, min_bytes: int = 100, engine: str = "") -> bool:
     """A completed job with a saved deliverable is evidence of real local use.
 
     Only the newest 100 small job records are examined. The output itself is
@@ -58,6 +58,8 @@ def _successful_job(folder: Path, status_key: str, *, min_bytes: int = 100) -> b
     for path in records:
         job = _json(path)
         if job.get(status_key) != "complete":
+            continue
+        if engine and job.get("engine") != engine:
             continue
         output = job.get("output_path")
         if not isinstance(output, str) or not output:
@@ -416,6 +418,11 @@ def snapshot(root: Path = ROOT) -> dict:
                       "Rendered a video successfully on this PC" if video_verified else
                       "Model ready; Cale verifies it automatically on the first video"
                       if video_ready else "Large video model installs on first use if this PC qualifies"))
+    for engine, label, detail in (("trimesh", "3D scene builder", "CPU geometry tools install on first use"),
+                                   ("TripoSR", "Image-to-3D", "TripoSR installs on first use with 6 GB NVIDIA VRAM and 16 GB RAM")):
+        three_verified = _successful_job(media / "3d/jobs", "state", min_bytes=100, engine=engine)
+        rows.append(_item(label, "ready" if three_verified else "on_demand",
+                          "Exported and reloaded a local 3D mesh successfully" if three_verified else detail))
 
     checked = self_check.get("version") == version and bool(version)
     check_state = (self_check.get("status", "working") if checked else "working")

@@ -12,8 +12,19 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import readiness_checklist
 import file_catalog
+import readiness_checklist
+
+
+def test_cpu_mesh_success_does_not_claim_neural_3d_is_tested(tmp_path):
+    output = tmp_path / "mesh.glb"
+    output.write_bytes(b"x" * 200)
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "cpu.json").write_text(json.dumps({"state": "complete", "engine": "trimesh",
+                                             "output_path": str(output)}))
+    assert readiness_checklist._successful_job(jobs, "state", engine="trimesh")
+    assert not readiness_checklist._successful_job(jobs, "state", engine="TripoSR")
 
 
 def test_checklist_distinguishes_installed_optional_tools_from_checked_core(tmp_path):

@@ -17,6 +17,18 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_live_3d_worker_blocks_update_but_another_install_does_not(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Toolbox/python/Scripts/python.exe"
+            command = [str(python), str(root / "media_worker.py"), "--3d-job", "a" * 32]
+            worker = MagicMock(info={"exe": str(python), "cmdline": command})
+            with patch.object(self_update, "ROOT", root), patch("long_tasks.projects", return_value=[]), \
+                 patch("psutil.process_iter", return_value=[worker]):
+                self.assertTrue(self_update.active_tasks())
+                worker.info["cmdline"][1] = str(root.parent / "another-install/media_worker.py")
+                self.assertFalse(self_update.active_tasks())
+
     def test_standalone_music_render_blocks_source_swap_until_worker_exits(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

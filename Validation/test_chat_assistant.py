@@ -8,6 +8,12 @@ import pytest
 import chat_assistant
 
 
+def test_3d_asset_requests_create_work_instead_of_an_empty_chat_promise():
+    assert chat_assistant.route("I want a 3D model of a spaceship", []) == "task"
+    assert chat_assistant.route("Create a 3D asset of a chair", []) == "task"
+    assert chat_assistant.route("What is 3D model generation?", []) == "answer"
+
+
 @pytest.fixture(autouse=True)
 def isolate_chat_scope_from_installed_user_settings(tmp_path):
     """Chat routing tests must not inherit the user's live cloud toggle."""
