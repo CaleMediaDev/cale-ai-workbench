@@ -6,8 +6,8 @@ This module never sends prompts or input images to a cloud generation service.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import random
 import re
@@ -19,7 +19,6 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import imageio_ffmpeg

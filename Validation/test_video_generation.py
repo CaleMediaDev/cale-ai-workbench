@@ -1,11 +1,12 @@
 """Validate the local ComfyUI job contract without a multi-gigabyte download."""
 
-import json
 import hashlib
+import json
 import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -109,6 +110,34 @@ def test_worker_launch_failure_persists_failed_status(tmp_path):
         assert status["state"] == "failed"
         assert status["error"] == "FileNotFoundError: worker executable missing"
         assert status["log_path"] == str(jobs / f"{stored['job_id']}.log")
+        assert status["progress_percent"] is None
+
+
+
+def test_worker_log_failure_is_visible_and_preserves_request(tmp_path):
+    jobs = tmp_path / "jobs"
+    original_open = Path.open
+
+    def open_file(path, *args, **kwargs):
+        if path.parent == jobs and path.suffix == ".log":
+            raise PermissionError("worker log denied")
+        return original_open(path, *args, **kwargs)
+
+    with patch.object(video_generation, "JOBS", jobs), patch.object(
+        video_generation, "_hardware_ready"
+    ), patch.object(video_generation.subprocess, "Popen") as launch, patch.object(
+        Path, "open", open_file
+    ):
+        with pytest.raises(PermissionError, match="worker log denied"):
+            video_generation.start_video_job("A calm forest", str(tmp_path / "clip.mp4"))
+        launch.assert_not_called()
+        stored = json.loads(next(jobs.glob("*.json")).read_text(encoding="utf-8"))
+        assert stored["prompt"] == "A calm forest"
+        assert stored["output_path"] == str((tmp_path / "clip.mp4").resolve())
+        assert "worker_pid" not in stored
+        status = video_generation.video_job_status(stored["job_id"])
+        assert status["state"] == "failed"
+        assert status["error"] == "PermissionError: worker log denied"
         assert status["progress_percent"] is None
 
 
