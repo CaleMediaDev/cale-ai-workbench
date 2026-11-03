@@ -200,6 +200,8 @@ def hold_image_job(root: Path, job_id: str, *, paused: bool = False) -> dict:
                 worker.wait(timeout=5)
         except (psutil.NoSuchProcess, psutil.ZombieProcess):
             pass
+        except psutil.AccessDenied as exc:
+            raise RuntimeError("Permission denied stopping the image worker.") from exc
         except psutil.TimeoutExpired as exc:
             raise RuntimeError("The image worker has not stopped yet. Try again shortly.") from exc
     info = image_job_status(root, job_id)

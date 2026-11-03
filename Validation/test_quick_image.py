@@ -94,3 +94,21 @@ def test_image_job_pause_and_resume_reuse_same_id(tmp_path):
         launch.assert_not_called()
         assert quick_image.resume_image_job(tmp_path, job_id)["status"] == "queued"
         launch.assert_called_once_with(tmp_path, job_id)
+
+
+def test_hold_image_job_handles_access_denied(tmp_path):
+    import psutil
+
+    job_id = "b" * 32
+    quick_image._write_job(tmp_path, job_id, {
+        "job_id": job_id, "status": "working", "current": "Generating",
+        "prompt": "a dog", "output_path": str(tmp_path / "dog.png"),
+        "worker_pid": 12345,
+    })
+    with patch.object(quick_image, "_worker_running", return_value=True), \
+         patch("psutil.Process", side_effect=psutil.AccessDenied("denied")):
+        try:
+            quick_image.hold_image_job(tmp_path, job_id)
+            assert False, "Expected RuntimeError"
+        except RuntimeError as e:
+            assert "Permission denied" in str(e)
