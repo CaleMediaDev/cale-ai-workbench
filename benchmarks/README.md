@@ -32,3 +32,7 @@ machine, model, starting files, acceptance checks, and time limit. Repeat runs
 to account for model variation and record cold and warm model timings separately.
 Expand the suite to browser, document, and media work before using it to
 make general reliability claims.
+
+The contacts scenario exercises the guarded CSV startup route. Its report
+includes that model call and checks the saved result independently. Run the
+temperature scenario too: it should stay on the ordinary coding path.

@@ -69,8 +69,9 @@ def ollama_completion(model: str, timeout: int, stats: dict):
                 "model": model,
                 "messages": payload["messages"],
                 "tools": payload["tools"],
+                "tool_choice": payload.get("tool_choice", "auto"),
                 "stream": False,
-                "temperature": 0.2,
+                "temperature": payload.get("temperature", 0.2),
             }).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )

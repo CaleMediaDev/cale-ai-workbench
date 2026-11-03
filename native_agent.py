@@ -898,6 +898,114 @@ def user_request_stamp(folder: Path) -> tuple[int, int] | None:
         return None
 
 
+def csv_cleanup_candidate(project: dict, folder: Path) -> tuple[str, str] | None:
+    """Find a simple CSV cleanup request suited to the contained parser tool."""
+    followups = folder / ".local-ai" / "USER-REQUESTS.md"
+    if followups.is_file() and followups.stat().st_size:
+        return None  # The saved follow-up may change the original request.
+    brief = str(project.get("brief") or "")
+    match = re.search(
+        r"(?i)\bcreate\s+([\w.-]+\.csv)\s+from\s+([\w.-]+\.csv)\b", brief)
+    if not match or not re.search(
+        r"(?i)\b(?:clean|normalize|trim|title.case|deduplicat|duplicate)\b", brief
+    ) or re.search(r"(?i)\b(?:join|merge|aggregate|group|sum|average|sort|pivot)\b", brief):
+        return None
+    output_name, input_name = match.groups()
+    try:
+        source = project_path(folder, input_name)
+        output = project_path(folder, output_name)
+    except ValueError:
+        return None
+    if (source == output or not source.is_file() or output.exists()
+            or source.stat().st_size > 10_000_000):
+        return None
+    instructions = folder / "AGENTS.md"
+    if instructions.is_file():
+        content = instructions.read_text(encoding="utf-8-sig", errors="replace")[:4000]
+        if re.search(r"(?i)\b(?:do not|never|must|only|without)\b", content):
+            return None  # Let the general worker interpret custom constraints.
+    return output_name, input_name
+
+
+def start_csv_cleanup(project: dict, folder: Path, call, messages: list,
+                      state: dict) -> tuple[list, dict]:
+    """Ask for one structured CSV call before the general agent improvises code."""
+    candidate = csv_cleanup_candidate(project, folder)
+    if not candidate:
+        return messages, state
+    output_name, input_name = candidate
+    source = project_path(folder, input_name)
+    instructions = folder / "AGENTS.md"
+    instruction_text = (instructions.read_text(encoding="utf-8-sig", errors="replace")[:4000]
+                        if instructions.is_file() else "")
+    with source.open(encoding="utf-8-sig", errors="replace") as stream:
+        preview = stream.read(4000)
+    request_stamp = user_request_stamp(folder)
+    from cloud_ai import LOCAL_MODEL
+
+    payload = {
+        "model": LOCAL_MODEL,
+        "messages": [
+            {"role": "system", "content": (
+                "You are a CSV cleanup tool selector. Call transform_csv exactly once with "
+                "the user's requested transforms, validation, and deduplication. "
+                "Use column names from the input header. Preserve the source. "
+                "Do not write code or invent operations outside the tool schema.")},
+            {"role": "user", "content": (
+                f"Request: {project['brief']}\nInput path: {input_name}\n"
+                f"Output path: {output_name}\nProject instructions: {instruction_text}\n"
+                f"Input preview:\n{preview}")},
+        ],
+        "tools": [next(tool for tool in TOOLS
+                       if tool["function"]["name"] == "transform_csv")],
+        "tool_choice": {"type": "function", "function": {"name": "transform_csv"}},
+        "stream": False, "temperature": 0,
+    }
+    try:
+        response = call(payload)
+    except (OSError, RuntimeError, ValueError, KeyError, TimeoutError):
+        return messages, state  # Ordinary worker can still try another route.
+    if user_request_stamp(folder) != request_stamp:
+        return messages, state  # A new user instruction supersedes this call.
+    if "error" in response:
+        return messages, state
+    calls = response.get("choices", [{}])[0].get("message", {}).get("tool_calls") or []
+    if len(calls) != 1 or calls[0].get("function", {}).get("name") != "transform_csv":
+        return messages, state
+    try:
+        arguments = json.loads(calls[0]["function"].get("arguments") or "{}")
+        if (not isinstance(arguments, dict)
+                or arguments.get("input_path") != input_name
+                or arguments.get("output_path") != output_name):
+            return messages, state
+    except (TypeError, ValueError):
+        return messages, state
+    result = execute_tool(folder, "transform_csv", arguments)
+    if result.startswith("Tool error:"):
+        return messages, state
+    verification = execute_tool(folder, "run_command", {
+        "command": "powershell -File .local-ai/verify.ps1"})
+    import task_context
+
+    task_context.record_action(folder, "transform_csv", result, arguments)
+    task_context.record_action(folder, "run_command", verification)
+    message = {"role": "assistant", "content": "", "tool_calls": calls}
+    messages.extend([message, {"role": "tool", "tool_call_id": calls[0].get("id", ""),
+                              "name": "transform_csv", "content": result},
+                     {"role": "user", "content": (
+                         f"The structured CSV tool wrote {output_name}. Its saved verifier "
+                         f"returned: {verification[:800]}. Inspect the output against the "
+                         "request. If it is correct, update PLAN.md and PROGRESS.md and "
+                         "hand off. Keep the generated verifier and do not write another "
+                         "transformer unless you find a specific mismatch.")}])
+    state["verify_passed"] = verification.startswith("Exit code: 0\n")
+    state["turns"] = int(state.get("turns", 0)) + 1
+    state["messages"] = messages
+    state["current"] = f"Structured CSV cleanup saved {output_name}"
+    save_state(project, state)
+    return messages, state
+
+
 def run_slice(project: dict, complete=None) -> dict:
     """Execute a bounded set of model turns, checkpointing each completed tool."""
     from cloud_ai import LOCAL_MODEL, Router
@@ -924,6 +1032,8 @@ def run_slice(project: dict, complete=None) -> dict:
     context_limit = configured_context(ROOT)
     state.update(status="running", started=state.get("started") or time.time())
     save_state(project, state)
+    if not int(state.get("turns", 0)):
+        messages, state = start_csv_cleanup(project, folder, call, messages, state)
     for _ in range(MAX_TURNS_PER_SLICE):
         latest = read_state(project)
         if latest.get("status") in ("paused", "stopped"):

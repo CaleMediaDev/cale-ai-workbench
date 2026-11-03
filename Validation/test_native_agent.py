@@ -223,6 +223,77 @@ def test_transform_csv_verifier_handles_nested_paths_and_preserves_custom_check(
         assert verifier.read_text(encoding="utf-8") == "Write-Output 'my custom check'\nexit 0\n"
 
 
+def test_simple_csv_request_uses_structured_tool_before_general_worker():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "table")
+        folder = Path(item["folder"])
+        item["brief"] = ("Create cleaned.csv from contacts.csv. Trim and title-case "
+                         "names and cities, normalize phones to 10 digits, and "
+                         "keep the first duplicate phone.")
+        (folder / "contacts.csv").write_text(
+            "name,phone,city\navery lee,(517) 555-0101,lansing\n",
+            encoding="utf-8")
+        calls = []
+
+        def complete(payload):
+            calls.append(payload)
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "csv-1", "function": {"name": "transform_csv", "arguments": json.dumps({
+                    "input_path": "contacts.csv", "output_path": "cleaned.csv",
+                    "transforms": {"name": "title", "phone": "digits", "city": "title"},
+                    "exact_lengths": {"phone": 10}, "unique_by": ["phone"],
+                })}}]}}]}
+
+        messages, state = native_agent.start_csv_cleanup(
+            item, folder, complete, [], {"turns": 0})
+        assert len(calls) == 1
+        assert [tool["function"]["name"] for tool in calls[0]["tools"]] == ["transform_csv"]
+        assert state["verify_passed"] is True
+        assert state["turns"] == 1
+        assert "verifier returned: Exit code: 0" in messages[-1]["content"]
+        assert "Avery Lee,5175550101,Lansing" in (
+            folder / "cleaned.csv").read_text(encoding="utf-8")
+
+
+def test_csv_fast_path_skips_unsupported_or_existing_work():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "table")
+        folder = Path(item["folder"])
+        (folder / "source.csv").write_text("name\nAvery\n", encoding="utf-8")
+        item["brief"] = "Create output.csv from source.csv and sort by name."
+        assert native_agent.csv_cleanup_candidate(item, folder) is None
+        item["brief"] = "Create output.csv from source.csv and clean the names."
+        assert native_agent.csv_cleanup_candidate(item, folder) == (
+            "output.csv", "source.csv")
+        (folder / "output.csv").write_text("existing", encoding="utf-8")
+        assert native_agent.csv_cleanup_candidate(item, folder) is None
+        (folder / "output.csv").unlink()
+        (folder / "AGENTS.md").write_text("Never change files.\n", encoding="utf-8")
+        assert native_agent.csv_cleanup_candidate(item, folder) is None
+        (folder / "AGENTS.md").unlink()
+        (folder / ".local-ai/USER-REQUESTS.md").write_text(
+            "Actually, sort the result.\n", encoding="utf-8")
+        assert native_agent.csv_cleanup_candidate(item, folder) is None
+
+
+def test_csv_fast_path_provider_failure_returns_to_general_worker():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "table")
+        folder = Path(item["folder"])
+        item["brief"] = "Create output.csv from source.csv and clean the names."
+        (folder / "source.csv").write_text("name\navery\n", encoding="utf-8")
+        messages = [{"role": "user", "content": "Begin"}]
+
+        def fail(_payload):
+            raise RuntimeError("Provider unavailable")
+
+        result_messages, state = native_agent.start_csv_cleanup(
+            item, folder, fail, messages, {"turns": 0})
+        assert result_messages == messages
+        assert state["turns"] == 0
+        assert not (folder / "output.csv").exists()
+
+
 def test_read_file_streams_large_files_and_bounds_one_extremely_long_line():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
