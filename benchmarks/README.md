@@ -225,6 +225,24 @@ temperature scenario too: it should stay on the ordinary coding path.
 
 ## Recorded automatic local runs
 
+`browser_assertion_repair.py --auto-route --runtime-root C:\path\to\AIWorkbench --input-step --keep-folder C:\path\to\new-folder`
+starts with a correct calculator and two prepared SQLite units. The first unit
+only checks an unchanged error label after input. The worker must repair its
+acceptance coverage, preserve the app bytes, finish both units and produce a
+verifier that rejects both incorrect arithmetic and broken invalid-state handling.
+The [input-step report](results/input-step-coverage-20261103.json) retains an initial
+schema-error interruption (its inference/token counters were unavailable), and
+a second run passing all independent checks in 88.21 s / 12 validated router
+responses / 12 actual upstream calls. This is a verification-repair fixture,
+not an app build or proof of full-game reliability.
+
+Automatic fixture counters now distinguish validated `model_calls` from all
+`router_call_attempts` and `upstream_local_calls`, including schema retries and
+fallback attempts. Token totals include usage returned by rejected upstream
+responses too; a timed-out response may not supply usage. Inference exceptions
+produce a failed run report rather than losing already collected evidence. A
+checkpoint's saved `status` does not indicate that its CLI process remains live.
+
 `step_argument_format.py --output C:\path\to\new-report.json` compares three
 seeded local Qwen calls per schema, preserving the tools and exact required
 acceptance cases in the report. The [November 3 format report](results/step-argument-format-20261103.json)

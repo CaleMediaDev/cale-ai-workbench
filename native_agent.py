@@ -56,7 +56,10 @@ TOOLS = [
                                  'array, never a quoted or escaped string. status resumes progress. A '
                                  'native worker may use {action:complete} without step_id to check the exact '
                                  'active unit shown in its current checkpoint; changed units/checks are rejected. '
-                                 'completed batch is not whole-project verification.',
+                                 'completed batch is not whole-project verification. Browser steps with input '
+                                 'actions need an observed effect; invariant-only cases can use a freshly '
+                                 'rerun same-page, matching-target positive control from the saved suite. Static scaffolding '
+                                 'checks need no input action.',
                   'parameters': {'type': 'object',
                                  'properties': {'action': {'type': 'string',
                                                            'enum': ['plan',
@@ -573,6 +576,8 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                 structured = kind in {"check_python_function", "check_webapp"}
                 before = step_source_fingerprint(folder, structured)
                 checked = execute_tool(folder, kind, check_args)
+                if kind == "check_webapp":
+                    checked = browser_step_effect(folder, check_args, checked)
                 status_result = step_exit_result(kind, checked)
                 if structured:
                     task_context.record_action(folder, kind, checked, check_args, request_hash=request_hash)
@@ -593,6 +598,8 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                                    ("case", "path", "function", "saved_sequence", "inputs", "failures") if key in case}
                                   for case in verdict.get("cases", []) if case.get("passed") is False][:2],
                         "errors": verdict.get("errors", [])[:2]}
+                    if kind == "check_webapp":
+                        value["check_summary"]["input_effect_proven"] = verdict.get("step_input_effect_proven")
                     value["check_path"] = check_args.get("path", "")
                     value["verifier_check_passed"] = value["passed"] and verdict.get("verifier_check_passed") is True
                     if kind == "check_webapp":
@@ -711,8 +718,17 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                             report_error = str(error)
                             report = None
                             result["verifier_check_passed"] = False
+                    if report and report.get("passed") is not True:
+                        result["verifier_check_passed"] = False
                     if result["verifier_check_passed"] and report:
                         result["verified_paths"] = report.get("verified_paths", [])
+                        result["retained_interaction_coverage"] = [
+                            {**{key: check[key] for key in ("path", "page_sha256", "interaction_case_count")},
+                             "matched_targets": sorted(set(check.get("interaction_targets", []))
+                                                       & webapp_check.assertion_targets(arguments))}
+                            for check in report["checks"] if check.get("passed") is True
+                            and type(check.get("interaction_case_count")) is int
+                            and check["interaction_case_count"] > 0]
                     if not result["verifier_check_passed"]:
                         result["passed"] = False
                         result["errors"] = ["Retained browser checks failed; inspect their saved sequence/case and correct the actual cause."]
@@ -1597,6 +1613,60 @@ def step_exit_result(kind: str, result: str) -> str:
         passed = False
     return ("Exit code: 0\nStructured acceptance cases passed" if passed else
             "Exit code: 1\nAcceptance check failed: " + result[-1600:])
+
+
+def browser_step_effect(folder: Path, arguments: dict, result: str) -> str:
+    """Input acceptance needs a current observed effect, not just static labels.
+
+    A retained positive control may cover a matching invariant target, but only
+    after the owned verifier reruns it against these same HTML bytes.
+    """
+    import webapp_check
+
+    try:
+        cases = webapp_check.normalize_spec(arguments)["cases"]
+        verdict = json.loads(result)
+        if verdict.get("passed") is not True or not any(
+                case.get("set") or case.get("click") or case.get("keys") for case in cases):
+            return result
+        path = project_path(folder, arguments["path"])
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        targets = webapp_check.assertion_targets(arguments)
+        if verdict.get("page_sha256") == digest and verdict.get("interactions"):
+            verdict["step_input_effect_proven"] = True
+            return webapp_check.serialize_result(verdict, MAX_TOOL_OUTPUT)
+        for retained in verdict.get("retained_interaction_coverage", []):
+            try:
+                same_page = isinstance(retained, dict) and project_path(folder, retained.get("path", "")) == path
+            except (ValueError, OSError):
+                continue
+            if (same_page and retained.get("page_sha256") == digest
+                    and type(retained.get("interaction_case_count")) is int
+                    and retained["interaction_case_count"] > 0
+                    and isinstance(retained.get("matched_targets"), list)
+                    and set(retained["matched_targets"]) & targets):
+                verdict["step_input_effect_proven"] = True
+                verdict["note"] = "Invariant cases are supported by a freshly replayed positive input control for a matching assertion target in this same HTML."
+                return webapp_check.serialize_result(verdict, MAX_TOOL_OUTPUT)
+        verdict["assertions_passed"] = True
+        verdict["step_input_effect_proven"] = False
+        verdict["passed"] = verdict["ok"] = False
+        verdict.setdefault("errors", []).append(
+            "Input-step coverage failed: add a required DOM or exported-state change, or a freshly "
+            "replayed positive control for the same assertion target and HTML. All asserted values "
+            "stayed unchanged after input. Keep valid invariant cases; static HUD labels do not "
+            "prove movement or other input behavior. "
+            "Do not change correct application behavior merely to force a visual change.")
+        return webapp_check.serialize_result(verdict, MAX_TOOL_OUTPUT)
+    except (ValueError, TypeError, KeyError, AttributeError, OSError):
+        try:
+            verdict = json.loads(result)
+        except (ValueError, TypeError):
+            return result
+        if isinstance(verdict, dict) and verdict.get("passed") is True:
+            return json.dumps({"passed": False, "ok": False, "step_input_effect_proven": False,
+                "errors": ["Input-step coverage metadata could not be validated; rerun the actual browser check."]})
+        return result  # Preserve the checker's existing syntax/failure diagnostics.
 
 
 def compact_step_progress(queue: dict) -> dict:
@@ -2517,6 +2587,8 @@ def run_slice(project: dict, complete=None) -> dict:
                     if step_check:
                         import task_context
 
+                        if function.get("name") == "check_webapp":
+                            result = browser_step_effect(folder, args, result)
                         queue_result = task_context.record_step_check(folder, step_check["step_id"],
                             step_check["request_hash"], step_exit_result(function.get("name", ""), result),
                             unchanged=step_source_fingerprint(folder, step_check["structured"]) == step_check["fingerprint"],

@@ -127,6 +127,131 @@ def test_completion_only_browser_prompt_waits_until_sqlite_implementation_units_
     assert "SQLite step queue" in native_agent.completion_issue(tmp_path, item, state)
 
 
+def complete_browser_unit(folder, arguments):
+    queue = task_context.plan_steps(folder, [{"phase": "Controls", "title": "Check input behavior",
+        "check_tool": "check_webapp", "check_arguments": arguments}])
+    with patch.object(long_tasks, "projects", return_value=[{"id": "coverage", "folder": str(folder)}]):
+        result = native_agent.execute_tool(folder, "task_steps", {
+            "action": "complete", "step_id": queue["active"]["id"]})
+    return json.loads(result)
+
+
+def test_unchanged_hud_cannot_complete_input_step_but_static_scaffolding_can(tmp_path):
+    for name, actions in (("behavior", {"keys": [{"key": "ArrowRight"}]}), ("scaffold", {})):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "index.html").write_text('<p id="score">0</p>')
+        result = complete_browser_unit(folder, {"path": "index.html", "cases": [
+            {**actions, "expect": {"score": "0"}}]})
+        assert result["passed"] is (not actions)
+        assert result["done"] == (0 if actions else 1)
+        if actions:
+            assert result["check_summary"]["input_effect_proven"] is False
+            assert "Input-step coverage failed" in result["check_summary"]["errors"][0]
+            assert "Input-step coverage failed" in task_context.snapshot(folder)
+
+
+def test_invariant_input_step_can_use_fresh_same_page_saved_positive_control(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    item = {"id": "positive", "folder": str(tmp_path)}
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        seeded = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", SPEC))
+    assert seeded["passed"] and seeded["interactions"]
+    invariant = {"path": "index.html", "cases": [{"set": {"bill": "100"}, "expect": {"answer": "120.00"}}]}
+    result = complete_browser_unit(tmp_path, invariant)
+    assert result["passed"] and result["done"] == 1
+    assert result["check_summary"]["input_effect_proven"] is True
+
+
+def test_another_pages_positive_control_cannot_cover_static_input_checks(tmp_path):
+    (tmp_path / "other.html").write_text(PAGE)
+    (tmp_path / "index.html").write_text('<p id="score">0</p>')
+    with patch.object(long_tasks, "projects", return_value=[{"id": "other", "folder": str(tmp_path)}]):
+        seed = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", {**SPEC, "path": "other.html"}))
+    assert seed["passed"]
+    weak = {"path": "index.html", "cases": [{"keys": [{"key": "ArrowRight"}], "expect": {"score": "0"}}]}
+    result = complete_browser_unit(tmp_path, weak)
+    assert not result["passed"] and result["done"] == 0
+
+
+def test_unrelated_target_on_same_page_cannot_cover_weak_movement_check(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE + '<p id="score">0</p>')
+    with patch.object(long_tasks, "projects", return_value=[{"id": "mixed", "folder": str(tmp_path)}]):
+        seed = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", SPEC))
+    assert seed["passed"] and seed["interactions"]
+    weak = {"path": "index.html", "cases": [{"keys": [{"key": "ArrowRight"}], "expect": {"score": "0"}}]}
+    result = complete_browser_unit(tmp_path, weak)
+    assert not result["passed"] and result["done"] == 0
+
+
+def test_stale_or_malformed_retained_coverage_does_not_pass_input_step(tmp_path):
+    import hashlib
+
+    path = tmp_path / "index.html"
+    path.write_text('<p id="score">0</p>')
+    old = hashlib.sha256(path.read_bytes()).hexdigest()
+    path.write_text(path.read_text() + '<!-- changed -->')
+    result = {"passed": True, "page_sha256": old, "interactions": [], "cases": [],
+        "retained_interaction_coverage": [{"path": "../outside.html", "interaction_case_count": 1},
+            {"path": "index.html", "page_sha256": old, "interaction_case_count": 1}]}
+    args = {"path": "index.html", "cases": [{"keys": [{"key": "ArrowRight"}], "expect": {"score": "0"}}]}
+    assert not json.loads(native_agent.browser_step_effect(tmp_path, args, json.dumps(result)))["passed"]
+
+
+def test_direct_checker_cannot_auto_advance_weak_input_acceptance(tmp_path):
+    (tmp_path / "index.html").write_text('<p id="score">0</p>')
+    args = {"path": "index.html", "cases": [{"keys": [{"key": "ArrowRight"}], "expect": {"score": "0"}}]}
+    task_context.plan_steps(tmp_path, [{"phase": "Controls", "title": "Movement",
+        "check_tool": "check_webapp", "check_arguments": args}])
+    item = {"id": "direct", "folder": str(tmp_path), "brief": "Build an offline HTML game"}
+    response = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "check", "function": {
+        "name": "check_webapp", "arguments": json.dumps(args)}}]}}]}
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(item, complete=lambda _: response)
+    assert task_context.step_status(tmp_path)["done"] == 0
+    assert state["failed_checks"] and not state.get("browser_verified")
+
+
+def test_saved_interaction_receipt_rejects_impossible_counts_and_changed_html(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    webapp_check.save_verifier(tmp_path, SPEC, accumulate=True)
+    spec = tmp_path / ".local-ai/webapp-check.json"
+    report = webapp_check.run_saved_checks(tmp_path, spec)
+    assert report["passed"] and webapp_check.resolve_saved_report(tmp_path, report)["passed"]
+    report["checks"][0]["input_case_count"] += 1
+    with pytest.raises(ValueError, match="interaction counts"):
+        webapp_check.resolve_saved_report(tmp_path, report)
+    report["checks"][0]["input_case_count"] -= 1
+    target = report["checks"][0]["interaction_targets"]
+    report["checks"][0]["interaction_targets"] = ["state:unrelated.x"]
+    with pytest.raises(ValueError, match="interaction targets"):
+        webapp_check.resolve_saved_report(tmp_path, report)
+    report["checks"][0]["interaction_targets"] = target
+    (tmp_path / "index.html").write_text(PAGE + '<!-- changed -->')
+    with pytest.raises(ValueError, match="HTML changed"):
+        webapp_check.resolve_saved_report(tmp_path, report)
+
+
+def test_saved_sequences_cannot_combine_interactions_from_different_html_versions(tmp_path):
+    path = tmp_path / "index.html"
+    path.write_text(PAGE)
+    webapp_check.save_verifier(tmp_path, SPEC, accumulate=True)
+    webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [
+        {"set": {"bill": "50"}, "expect": {"answer": "60.00"}}]}, accumulate=True)
+    original = webapp_check.check
+    calls = 0
+    def edit_between(folder, spec):
+        nonlocal calls
+        if calls:
+            path.write_text(PAGE + '<!-- changed between sequences -->')
+        calls += 1
+        return original(folder, spec)
+    with patch.object(webapp_check, "check", side_effect=edit_between):
+        report = webapp_check.run_saved_checks(tmp_path, tmp_path / ".local-ai/webapp-check.json")
+    assert not report["passed"]
+    assert "HTML source changed between saved sequences" in report["errors"][0]
+
+
 @pytest.mark.parametrize("plan",["- [x] Build and check the page\n",
                                  "1. Build and check the page - Verified by browser cases\n"])
 def test_focused_json_check_runs_generated_verifier_and_finishes(tmp_path,plan):

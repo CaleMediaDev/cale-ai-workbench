@@ -27,13 +27,23 @@ def observed_router(stats: dict):
     class ObservedRouter(cloud_ai.Router):
         def complete(self, payload, task_id="", **kwargs):
             started = time.monotonic()
-            result = super().complete(payload, task_id, **kwargs)
+            stats["router_call_attempts"] = stats.get("router_call_attempts", 0) + 1
+            post = cloud_ai.post
+            def observed_post(url, body, *args, **options):
+                inference = url.endswith("/v1/chat/completions")
+                if inference:
+                    stats["upstream_local_calls"] = stats.get("upstream_local_calls", 0) + 1
+                response = post(url, body, *args, **options)
+                if inference:
+                    for name in ("prompt_tokens", "completion_tokens"):
+                        stats[name] += int((response.get("usage") or {}).get(name) or 0)
+                return response
+            with patch.object(cloud_ai, "post", side_effect=observed_post):
+                result = super().complete(payload, task_id, **kwargs)
             stats["model_calls"] += 1
             calls = result.get("choices", [{}])[0].get("message", {}).get("tool_calls") or []
             stats["tool_calls"] += len(calls)
             stats["tools_used"].extend(str(item.get("function", {}).get("name", "")) for item in calls)
-            for name in ("prompt_tokens", "completion_tokens"):
-                stats[name] += int((result.get("usage") or {}).get(name) or 0)
             stats["routes"].append({"model": self.last_local_model,
                 "weights": self.last_local_weights, "repair_avoid": kwargs.get("repair_avoid", []),
                 "seconds": round(time.monotonic() - started, 2)})
@@ -59,7 +69,7 @@ BAD = {"path": "index.html", "cases": [
     {"set": {"bill": "0"}, "expect": {"answer": "", "error": "Invalid"}}]}
 
 
-def grade(folder: Path, source_sha256: str) -> dict:
+def grade(folder: Path, source_sha256: str, *, calculation_mutation: bool = False) -> dict:
     source = folder / "index.html"
     fixed = source.read_bytes()
     actual = webapp_check.check(folder, {"path": "index.html", "cases": [
@@ -78,6 +88,12 @@ def grade(folder: Path, source_sha256: str) -> dict:
         rejected = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
                                   capture_output=True, timeout=45, check=False)
         result["verifier_rejects_invalid_state_regression"] = rejected.returncode != 0
+        if calculation_mutation:
+            path = folder / "index.html"
+            path.write_bytes(fixed.replace(b'n*1.2', b'n*1.1'))
+            rejected = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
+                                      capture_output=True, timeout=45, check=False)
+            result["verifier_rejects_wrong_calculation"] = rejected.returncode != 0
     finally:
         source.write_bytes(fixed)
     result["passed"] = all(result.values())
@@ -93,6 +109,8 @@ def main() -> int:
                         help="Read candidate tool-probe approvals from an installed runtime")
     parser.add_argument("--slices", type=int, default=2)
     parser.add_argument("--keep-folder")
+    parser.add_argument("--input-step", action="store_true",
+                        help="Repair a prepared input acceptance unit that only observes an unchanged error label")
     args = parser.parse_args()
     if args.runtime_root and not (args.runtime_root / "LongTasks/model-approvals.json").is_file():
         parser.error("Runtime root must contain actual candidate model approvals")
@@ -107,17 +125,26 @@ def main() -> int:
             folder.mkdir(parents=True, exist_ok=False)
         notes = folder / ".local-ai"
         notes.mkdir()
+        brief = (
+            "The existing calculator HTML is correct. Preserve its source bytes. Its current SQLite "
+            "input step is weak: it sets Bill to 80 but only checks that error stays hidden. That "
+            "does not establish the required calculated answer $96.00. Correct the acceptance cases "
+            "or add a positive control while preserving valid invariant checks. Use real browser input "
+            "and the actual saved outputs. Bill 100 must produce $120.00, Bill 80 must produce $96.00; "
+            "zero is invalid, showing error and hiding answer. Two SQLite steps are already prepared; "
+            "repair and complete both and run the retained verifier. Do not edit the working HTML."
+            if args.input_step else BRIEF)
         (folder / "index.html").write_text(PAGE, encoding="utf-8", newline="")
         source_sha256 = hashlib.sha256((folder / "index.html").read_bytes()).hexdigest()
         (folder / "AGENTS.md").write_text("Preserve the correct HTML. Fix only the erroneous saved browser assertion.")
         (notes / "USER-REQUESTS.md").write_text("")
         (notes / "PLAN.md").write_text(worker.long_tasks.INITIAL_PLAN)
         (notes / "PROGRESS.md").write_text(worker.long_tasks.INITIAL_PROGRESS)
-        worker.long_tasks.save_original_request(folder, "benchmark", BRIEF)
-        project = {"id": "benchmark", "folder": str(folder), "brief": BRIEF}
+        worker.long_tasks.save_original_request(folder, "benchmark", brief)
+        project = {"id": "benchmark", "folder": str(folder), "brief": brief}
         stats = {"model_calls": 0, "tool_calls": 0, "tools_used": [], "prompt_tokens": 0, "completion_tokens": 0,
                  "assertion_revision_attempts": 0, "successful_assertion_revisions": 0,
-                 "step_tool_errors": [], "revision_errors": []}
+                 "step_tool_errors": [], "revision_errors": [], "step_revisions": 0}
         stats["routes"] = []
         # Keep the native worker's automatic call path intact. A callback would
         # bypass its feedback recorder and fail to exercise this feature.
@@ -129,6 +156,8 @@ def main() -> int:
         execute = worker.native_agent.execute_tool
         def observed_execute(folder, name, arguments):
             result = execute(folder, name, arguments)
+            if name == "task_steps" and arguments.get("action") == "revise":
+                stats["step_revisions"] += 1
             if name == "task_steps" and task_context.action_outcome(name, result).startswith("Failed"):
                 stats["step_tool_errors"] = (stats["step_tool_errors"] + [result[:400]])[-8:]
             if name == "check_webapp" and "saved_sequence" in arguments:
@@ -147,30 +176,48 @@ def main() -> int:
                 # Reuse actual tool-probe approvals, never invent an approval to
                 # force a desired model into the eligible candidates.
                 stack.enter_context(patch.object(model_library, "ROOT", args.runtime_root.resolve()))
-            webapp_check.save_verifier(folder, BAD, accumulate=True)
-            seed_args = {"path": "index.html", "cases": [{"set": {"bill": "50"}, "expect": {"answer": "60.00"}}]}
-            seeded = worker.native_agent.execute_tool(folder, "check_webapp", seed_args)
+            if args.input_step:
+                weak = {"path": "index.html", "cases": [{"set": {"bill": "80"}, "hidden": ["error"]}]}
+                queue = task_context.plan_steps(folder, [
+                    {"phase": "Calculation", "title": "Verify changed Bill total", "check_tool": "check_webapp", "check_arguments": weak},
+                    {"phase": "Boundary", "title": "Verify invalid zero", "check_tool": "check_webapp", "check_arguments": {
+                        "path": "index.html", "cases": [{"set": {"bill": "0"}, "visible": ["error"], "hidden": ["answer"]}]}}])
+                seed_args = {"action": "complete", "step_id": queue["active"]["id"]}
+                seeded = worker.native_agent.execute_tool(folder, "task_steps", seed_args)
+                task_context.record_action(folder, "task_steps", seeded, seed_args)
+            else:
+                webapp_check.save_verifier(folder, BAD, accumulate=True)
+                seed_args = {"path": "index.html", "cases": [{"set": {"bill": "50"}, "expect": {"answer": "60.00"}}]}
+                seeded = worker.native_agent.execute_tool(folder, "check_webapp", seed_args)
+                task_context.record_action(folder, "check_webapp", seeded, seed_args)
             if json.loads(seeded)["passed"]:
-                raise RuntimeError("The overstrict fixture did not fail")
-            task_context.record_action(folder, "check_webapp", seeded, seed_args)
-            for _ in range(args.slices):
-                state = worker.native_agent.run_slice(project, complete=complete)
-                if state.get("status") != "continue":
-                    break
+                raise RuntimeError("The incorrect acceptance fixture did not fail")
+            failure = None
+            try:
+                for _ in range(args.slices):
+                    state = worker.native_agent.run_slice(project, complete=complete)
+                    if state.get("status") != "continue":
+                        break
+            except Exception as error:
+                failure = f"{type(error).__name__}: {str(error)[:600]}"
+                state = worker.native_agent.read_state(project)
         native_browser.close()
         elapsed = time.monotonic() - started
-        result = grade(folder, source_sha256)
+        result = grade(folder, source_sha256, calculation_mutation=args.input_step)
         queue = task_context.step_status(folder)
         result["steps_completed"] = queue["total"] >= 2 and queue["remaining"] == 0
         result["passed"] = result["passed"] and result["steps_completed"]
-        report = {"scenario": "saved_browser_assertion_repair", "model": "automatic_local" if args.auto_route else args.model,
+        report = {"scenario": "weak_input_step_repair" if args.input_step else "saved_browser_assertion_repair",
+                  "prepared_steps": args.input_step, "model": "automatic_local" if args.auto_route else args.model,
                   "seconds_including_seed_check": round(elapsed, 2), **stats,
-                  "status": state["status"], "grade": result,
+                  "status": state["status"], "checkpoint_status": state["status"],
+                  "run_outcome": "passed" if state["status"] == "done" and result["passed"] and not failure else "failed",
+                  "inference_error": failure, "grade": result,
                   "steps": {key: queue[key] for key in ("total", "done", "remaining")}}
         if args.keep_folder:
             (folder / "benchmark-report.json").write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
-        return 0 if state["status"] == "done" and result["passed"] else 1
+        return 0 if state["status"] == "done" and result["passed"] and not failure else 1
 
 
 if __name__ == "__main__":

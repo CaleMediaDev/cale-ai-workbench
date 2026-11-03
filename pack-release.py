@@ -45,6 +45,7 @@ extras = [
     "benchmarks/results/step-argument-format-20261103.json",
     "benchmarks/results/router-schema-repair-20261103.json",
     "benchmarks/results/router-schema-repair-typed-20261103.json",
+    "benchmarks/results/input-step-coverage-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",

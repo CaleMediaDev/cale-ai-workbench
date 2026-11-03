@@ -1,0 +1,155 @@
+{
+  "scope": "Two synthetic local-only acceptance-repair attempts on RTX 3060 12 GB, 128 GB RAM. Two steps were supplied. First interrupted on schema validation, before counters could be preserved. Second used matching-target positive-control receipts. Different evolving code; not a controlled speed comparison or complete-game test.",
+  "app_version": "0.5.446",
+  "runs": [
+    {
+      "scenario": "weak_input_step_repair",
+      "prepared_steps": true,
+      "status": "running",
+      "validated_worker_turns": 1,
+      "statistics_unavailable": "The first fixture aborted before its in-memory inference counters could be saved. API-attempt and token counts are unknown.",
+      "inference_error": "ToolArgumentError: task_steps.steps expected array, received string; CLI process exited 1.",
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": true,
+        "verifier_rejects_invalid_state_regression": false,
+        "verifier_rejects_wrong_calculation": false,
+        "passed": false,
+        "steps_completed": false
+      },
+      "steps": {
+        "total": 2,
+        "done": 0,
+        "remaining": 2
+      },
+      "checkpoint_status": "running",
+      "run_outcome": "failed"
+    },
+    {
+      "scenario": "weak_input_step_repair",
+      "prepared_steps": true,
+      "model": "automatic_local",
+      "seconds_including_seed_check": 88.21,
+      "model_calls": 12,
+      "tool_calls": 11,
+      "tools_used": [
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "list_files",
+        "task_steps",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "edit_file"
+      ],
+      "prompt_tokens": 70060,
+      "completion_tokens": 1776,
+      "assertion_revision_attempts": 0,
+      "successful_assertion_revisions": 0,
+      "step_tool_errors": [
+        "{\"passed\": false, \"total\": 2, \"done\": 0, \"remaining\": 2, \"active\": {\"id\": 1, \"phase\": \"Calculation\", \"title\": \"Verify changed Bill total\", \"status\": \"active\", \"attempts\": 1, \"evidence\": \"Check failed; inspect its returned output and fix the active step: Acceptance check failed: ged text or visibility in the actual game/app state.\\\", \\\"verifier_saved\\\": true, \\\"verifier_check_passed\\\": true, \\\"veri",
+        "Tool error: ValueError: Supply the active step_id to revise."
+      ],
+      "revision_errors": [],
+      "step_revisions": 2,
+      "routes": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 10.27
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.01
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.26
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 3.84
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.95
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.21
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.86
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.8
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.95
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 11.21
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 11.66
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.16
+        }
+      ],
+      "router_call_attempts": 12,
+      "upstream_local_calls": 12,
+      "status": "done",
+      "inference_error": null,
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": true,
+        "verifier_rejects_invalid_state_regression": true,
+        "verifier_rejects_wrong_calculation": true,
+        "passed": true,
+        "steps_completed": true
+      },
+      "steps": {
+        "total": 2,
+        "done": 2,
+        "remaining": 0
+      },
+      "checkpoint_status": "done",
+      "run_outcome": "passed"
+    }
+  ]
+}

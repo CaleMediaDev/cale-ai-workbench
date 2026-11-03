@@ -588,6 +588,14 @@ def saved_suite(folder: Path, spec: dict, previous: dict | None = None) -> dict:
     return suite
 
 
+def assertion_targets(spec: dict) -> set[str]:
+    """Identify the exact observable fields used by a browser specification."""
+    return {target for case in normalize_spec(spec)["cases"] for target in (
+        ["text:" + name for name in case.get("expect", {})]
+        + ["visibility:" + name for field in ("visible", "hidden") for name in case.get(field, [])]
+        + ["state:" + name for name in case.get("state", {})])}
+
+
 def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = None) -> dict:
     """Replay request-bound sequences separately and reject changed test data."""
     import task_context
@@ -616,6 +624,7 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
         raise ValueError("Saved browser suite contains duplicate sequences")
     results = []
     failures_left = 4
+    requested_targets = assertion_targets(checks[-1])
     for spec in checks:
         spec = normalize_spec(spec)
         result = check(folder, spec)
@@ -626,18 +635,31 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
             if len(json.dumps(failure["inputs"])) > 2000:
                 failure["inputs"] = {"note": "Read this saved sequence for complete input arguments"}
         failures_left -= len(failures)
+        targets = sorted({name for effect in result.get("interactions", []) for name in effect["targets"]},
+                         key=lambda name: (name not in requested_targets, name))
         results.append({"path": spec["path"], "viewport_width": spec.get("viewport_width", 375),
                         "passed": result["passed"], "cases": failures,
+                        "page_sha256": result["page_sha256"],
+                        "input_case_count": sum(bool(case.get("set") or case.get("click") or case.get("keys"))
+                                                for case in spec["cases"]),
+                        "interaction_case_count": len(result.get("interactions", [])),
+                        "interaction_targets": targets[:4], "interaction_targets_limited": len(targets) > 4,
                         "case_count": result["case_count"], "failed_case_count": result["failed_case_count"],
                         "javascript_errors": result["javascript_errors"][:3]})
     unchanged = (spec_file.read_bytes() == raw
                  and saved["request_hash"] == task_context.request_identity(folder))
-    passed = all(result["passed"] for result in results) and unchanged
+    try:
+        sources_unchanged = all(hashlib.sha256(_project_file(folder, result["path"]).read_bytes()).hexdigest()
+                                == result["page_sha256"] for result in results)
+    except (OSError, ValueError):
+        sources_unchanged = False
+    passed = all(result["passed"] for result in results) and unchanged and sources_unchanged
     return {"passed": passed, "suite_sha256": digest,
             "verified_paths": sorted({spec["path"] for spec in checks}) if passed else [],
             "case_count": sum(result["case_count"] for result in results),
             "failed_case_count": sum(result["failed_case_count"] for result in results),
-            "checks": results, "errors": [] if unchanged else ["Saved cases or user instructions changed during verification"]}
+            "checks": results, "errors": ([] if unchanged else ["Saved cases or user instructions changed during verification"])
+                + ([] if sources_unchanged else ["HTML source changed between saved sequences; rerun the verifier"])}
 
 
 def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dict]:
@@ -755,6 +777,12 @@ def serialize_saved_report(result: dict, limit: int = 10000) -> str:
                 case["inputs"] = {"note": "Use the saved sequence/case reference for exact inputs"}
         encoded = json.dumps(value, ensure_ascii=True)
     if len(encoded) > limit:
+        for check_result in value.get("checks", []):
+            if len(check_result.get("interaction_targets", [])) > 1:
+                check_result["interaction_targets"] = check_result["interaction_targets"][:1]
+                check_result["interaction_targets_limited"] = True
+        encoded = json.dumps(value, ensure_ascii=True)
+    if len(encoded) > limit:
         raise ValueError("Saved browser diagnostics exceed the bounded report size")
     return encoded
 
@@ -787,6 +815,22 @@ def resolve_saved_report(folder: Path, report: dict) -> dict:
         if not report.get("paths_in_spec") and result.get("path") != expected:
             raise ValueError("Saved browser report paths changed")
         result["path"] = expected
+        if any(key in result for key in ("input_case_count", "interaction_case_count")):
+            inputs, effects = result.get("input_case_count"), result.get("interaction_case_count")
+            actual_inputs = sum(bool(case.get("set") or case.get("click") or case.get("keys"))
+                                for case in checks[sequence - 1]["cases"])
+            if (type(inputs) is not int or type(effects) is not int
+                    or not 0 <= effects <= inputs or inputs != actual_inputs):
+                raise ValueError("Saved browser interaction counts are invalid")
+            targets = result.get("interaction_targets", [])
+            if (not isinstance(targets, list) or len(targets) > 4
+                    or any(not isinstance(target, str) or len(target) > 220 for target in targets)
+                    or not set(targets) <= assertion_targets(checks[sequence - 1])
+                    or effects == 0 and targets):
+                raise ValueError("Saved browser interaction targets do not match their checked assertions")
+            current = hashlib.sha256(_project_file(folder, expected).read_bytes()).hexdigest()
+            if result.get("page_sha256") != current:
+                raise ValueError("HTML changed after saved interaction checks; rerun the verifier")
     if report.get("passed") is True:
         if any(result.get("passed") is not True for result in resolved["checks"]):
             raise ValueError("Saved browser report has contradictory verdicts")

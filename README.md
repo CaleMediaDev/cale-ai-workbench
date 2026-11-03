@@ -41,6 +41,15 @@ cancellation, and is capped at 4,096 output tokens and 120 seconds. It does not
 add retries to cloud routes or change account permissions. Syntax-broken outer
 JSON and unavailable tool names continue through the existing fallback path.
 
+Structured browser steps that send input must establish an observed effect;
+unchanged score labels cannot by themselves complete a movement unit. An
+invariant-only sequence can use a freshly replayed positive control for a
+matching assertion target in the same HTML. Static scaffolding checks need no
+input effect. The saved-suite receipt binds input counts and changed targets to
+its test data, user instructions and page bytes, and rejects HTML changes between
+sequences. This is a coverage check, not proof that the cases cover the whole
+request or that their expectations are correct.
+
 For interactive single-file HTML apps, the native worker can use an offline Chromium check that fills real inputs, inspects visible results and errors, and checks mobile width. A passing check saves a repeatable browser verifier. The worker must rerun the check after changing the page before it can finish. This catches behavior that a source-text scan misses; it does not establish that an entire website is correct or visually polished.
 
 Canvas apps and games can also expose their actual live state for passive checks.
