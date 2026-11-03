@@ -6,13 +6,14 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import cloud_ai
 import long_tasks
 import native_agent
-import cloud_ai
 import task_context
 
 
@@ -31,13 +32,61 @@ def test_native_worker_writes_files_and_checkpoints_tool_results():
                 "tool_calls": [{"id": "write-1", "type": "function", "function": {
                     "name": "write_file", "arguments": '{"path":"index.html","content":"<h1>Ready</h1>"}'
                 }}]}}]},
+            {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+                "id": "check-1", "type": "function", "function": {
+                    "name": "run_command",
+                    "arguments": '{"command":"powershell -File .local-ai/verify.ps1"}',
+                },
+            }]}}]},
             {"choices": [{"message": {"role": "assistant", "content": "Page is ready."}}]},
         ])
-        state = native_agent.run_slice(item, complete=lambda _: next(responses))
+        original = native_agent.execute_tool
+
+        def tool(root, name, args):
+            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args)
+
+        with patch.object(native_agent, "execute_tool", side_effect=tool):
+            state = native_agent.run_slice(item, complete=lambda _: next(responses))
         assert state["status"] == "done"
         assert (Path(item["folder"]) / "index.html").read_text() == "<h1>Ready</h1>"
         assert any(message.get("tool_call_id") == "write-1" for message in state["messages"])
         assert native_agent.read_state(item)["status"] == "done"
+
+
+def test_worker_cannot_finish_before_its_verifier_passes():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / ".local-ai/verify.ps1").write_text("exit 0")
+        (folder / ".local-ai/PLAN.md").write_text("# Plan\n\n- [x] Repair the page\n")
+        responses = iter([
+            {"choices": [{"message": {"role": "assistant", "content": "Finished."}}]},
+            {"choices": [{"message": {"role": "assistant", "content": "Finished."}}]},
+        ])
+        state = native_agent.run_slice(item, complete=lambda _: next(responses))
+        assert state["status"] == "continue"
+        assert not state.get("verify_passed")
+        assert "A created verifier is not evidence" in state["messages"][-1]["content"]
+
+
+def test_run_command_timeout_stops_child_process_and_returns():
+    """A shell child must not hold the worker's output pipes open forever."""
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        (folder / "hang.py").write_text(
+            "import os, time\n"
+            "open('child.pid', 'w').write(str(os.getpid()))\n"
+            "time.sleep(30)\n", encoding="utf-8")
+        started = time.monotonic()
+        with patch.object(native_agent, "PROJECT_COMMAND_TIMEOUT", 1):
+            result = native_agent.execute_tool(
+                folder, "run_command", {"command": "python hang.py"})
+        assert "timed out after 1 seconds" in result
+        assert time.monotonic() - started < 8
+        import psutil
+
+        child_pid = int((folder / "child.pid").read_text())
+        assert not psutil.pid_exists(child_pid)
 
 
 def test_read_file_streams_large_files_and_bounds_one_extremely_long_line():

@@ -187,6 +187,8 @@ Start with [the architecture guide](ARCHITECTURE.md) and [contribution guide](CO
 
 After installation, run `Toolbox/python/Scripts/python.exe Validation/test_cloud_ai.py` and `Toolbox/python/Scripts/python.exe Validation/test_long_tasks.py` from the installation directory. Tests cover real process termination, recovery state, stale verification, OAuth callback validation, free-only routing and fallback. They do not require a cloud account.
 
+For a real local-model task rather than mocked component tests, run the opt-in [native worker benchmark](benchmarks/README.md). Its separate grader checks the result and whether the worker's verifier catches the original bug. It covers one small coding task, so it is not an overall comparison with other agents.
+
 Please report reproducible bugs and include versions and redacted errors. Do not upload your `Cloud`, `data`, `Projects`, `LongTasks`, or log directories.
 
 Made by [Cale Media — websites and digital marketing](https://calemedia.com/).

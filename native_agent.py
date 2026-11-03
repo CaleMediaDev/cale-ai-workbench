@@ -7,8 +7,8 @@ crash resumes from disk instead of asking the model to repeat completed edits.
 
 from __future__ import annotations
 
-import copy
 import codecs
+import copy
 import hashlib
 import json
 import os
@@ -27,6 +27,7 @@ MAX_TURNS_PER_SLICE = 12
 MAX_TOOL_OUTPUT = 16_000
 RECENT_WORK_GROUPS = 4
 MAX_READ_LINE = 4000
+PROJECT_COMMAND_TIMEOUT = 90
 
 TOOLS = [
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
@@ -313,6 +314,7 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                 kind="tool", limit=20), ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "call_local_tool":
             import asyncio
+
             import native_specialists
             import toolbox_mcp
 
@@ -342,17 +344,47 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
             if not isinstance(command, str) or not command.strip() or len(command) > 4000:
                 raise ValueError("A short command is required")
             shell = os.environ.get("COMSPEC", "cmd.exe") if os.name == "nt" else "/bin/sh"
-            result = subprocess.run([shell, "/d", "/s", "/c", command] if os.name == "nt" else [shell, "-c", command],
-                                    cwd=folder, capture_output=True, text=True, errors="replace",
-                                    timeout=90, creationflags=0x08000000 if os.name == "nt" else 0)
-            if result.returncode == 0:
+            process = subprocess.Popen(
+                [shell, "/d", "/s", "/c", command] if os.name == "nt" else [shell, "-c", command],
+                cwd=folder, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, errors="replace",
+                creationflags=0x08000000 if os.name == "nt" else 0,
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=PROJECT_COMMAND_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                # A shell can leave its children holding stdout open. Killing
+                # only cmd.exe then makes subprocess.run hang while draining
+                # those inherited pipes, sometimes forever.
+                import psutil
+
+                try:
+                    descendants = psutil.Process(process.pid).children(recursive=True)
+                except psutil.Error:
+                    descendants = []
+                for child in reversed(descendants):
+                    try:
+                        child.kill()
+                    except psutil.Error:
+                        pass
+                if process.poll() is None:
+                    process.kill()
+                try:
+                    process.communicate(timeout=3)
+                except subprocess.TimeoutExpired:
+                    for stream in (process.stdout, process.stderr):
+                        if stream:
+                            stream.close()
+                return (f"Tool error: Command timed out after {PROJECT_COMMAND_TIMEOUT} seconds. "
+                        "Its child processes were stopped; use a noninteractive command.")
+            if process.returncode == 0:
                 try:
                     import project_memory
 
                     project_memory.index(folder, include_code=True)
                 except (OSError, ValueError, sqlite3.Error):
                     pass
-            return f"Exit code: {result.returncode}\n{(result.stdout + result.stderr)[-MAX_TOOL_OUTPUT:]}"
+            return f"Exit code: {process.returncode}\n{(stdout + stderr)[-MAX_TOOL_OUTPUT:]}"
         raise ValueError(f"Unknown tool: {name}")
     except Exception as exc:
         return f"Tool error: {type(exc).__name__}: {exc}"
@@ -381,6 +413,7 @@ def prompt(project: dict) -> str:
         "Use edit_file for a small change to an existing source file; use write_file when creating or replacing a whole file. "
         "Maintain .local-ai/PLAN.md as a checked milestone list and .local-ai/PROGRESS.md with current work and real checks. "
         "Create .local-ai/verify.ps1 containing meaningful repeatable checks for the result; call run_verifier after the last edit before saying finished. "
+        "Use noninteractive commands. Never invoke a program that waits for stdin; put test code in a file and run that file. "
         "If the job is not complete, use a tool or explain the exact next step in PROGRESS.md. "
         "Do not claim finished with missing features. The supervisor independently reruns verify.ps1. "
         "Use search_capabilities for relevant installed skills and tools; read only skills that help this task. "
@@ -412,7 +445,8 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
     limit = context_limit or configured_context()
     reserve = min(8192, max(1024, limit // 4))
     budget = max(1024, limit - reserve)
-    estimate = lambda items, tools: estimated_input_tokens({"messages": items, "tools": tools})
+    def estimate(items, tools):
+        return estimated_input_tokens({"messages": items, "tools": tools})
     if estimate(messages, TOOLS) <= budget:
         return messages
     checkpoint = next((item for item in messages[1:]
@@ -613,6 +647,9 @@ def completion_issue(folder: Path, project: dict | None = None,
                     "Mark only proven milestones complete; work on any genuinely unfinished ones. "
                     "Do not recreate files or rerun unchanged checks.")
         return "PLAN.md still has unchecked milestones. Finish and verify them, then update the plan before handoff."
+    if state is not None and plan.is_file() and not state.get("verify_passed"):
+        return ("Run .local-ai/verify.ps1 with run_verifier after the last edit. "
+                "A created verifier is not evidence that it passed.")
     return ""
 
 
@@ -867,6 +904,7 @@ def process_alive(state: dict) -> bool:
 
 def start_worker(project: dict) -> dict:
     import psutil
+
     import long_tasks
 
     state = read_state(project)
