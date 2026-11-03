@@ -315,3 +315,18 @@ def test_cancelled_3d_job_cannot_be_resurrected_by_late_render_progress(tmp_path
     media_worker.three_write(job_id, state="cancelled")
     media_worker.three_write(job_id, state="complete", progress_percent=100)
     assert media_worker.three_job_status(job_id)["state"] == "cancelled"
+
+
+
+def test_game_checker_matches_requested_lives_and_rejects_default_regression(tmp_path):
+    import design_tools
+
+    path = tmp_path / "index.html"
+    design_tools.create_space_shooter(str(path))
+    assert not design_tools.verify_space_shooter(str(path), 5)["passed"]
+    original = path.read_text(encoding="utf-8")
+    path.write_text(original.replace("lives:3", "lives:5").replace("this.lives=3", "this.lives=5"), encoding="utf-8")
+    report = design_tools.verify_space_shooter(str(path), 5)
+    assert report["passed"] and report["starting_lives"] == 5
+    assert len(report["logic"]) == 18
+    assert not design_tools.verify_space_shooter(str(path), 3)["passed"]

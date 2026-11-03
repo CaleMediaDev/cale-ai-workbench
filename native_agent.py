@@ -42,7 +42,7 @@ TOOLS = [
             "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {
         "name": "check_game_starter",
-        "description": "Verify the current HTML space-shooter starter's DEFAULT contract in real offline browsers: 600x800 logical field, 120 px/s player, 3 lives, 10 points per enemy, timing, collisions, waves, HUD, physical controls and reset. Saves and runs a request-bound verifier. Not for other genres or deliberately changed physics; those need appropriate custom integration tests. Never repairs or overwrites game source. Preserves custom verifiers.",
+        "description": "Verify the current HTML space-shooter starter's DEFAULT contract in real offline browsers: 600x800 logical field, 120 px/s player, requested numeric starting lives (default 3), 10 points per enemy, timing, collisions, waves, HUD, physical controls and reset. Saves and runs a request-bound verifier. Not for other genres or deliberately changed physics; those need appropriate custom integration tests. Never repairs or overwrites game source. Preserves custom verifiers.",
         "parameters": {"type": "object", "properties": {"path": {"type": "string"}},
                        "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {
@@ -1513,7 +1513,7 @@ def prompt(project: dict) -> str:
         "For a new standalone HTML space shooter, create_game_starter supplies a reusable offline engine "
         "and suggested real browser checks. Use it when consistent with the request; do not use a starter "
         "when the user forbids reuse or requires a different framework. Customize and test the actual page "
-        "instead of recreating its working engine. check_game_starter verifies the default engine's actual "
+        "instead of recreating its working engine. check_game_starter verifies the engine with the requested starting lives and otherwise default actual "
         "browser physics and controls without writing shell tests. Its default contract is 600x800, "
         "120 px/s, 3 lives and 10 points per enemy. Deliberate physics changes need custom integration checks. "
         "The starter does not finish missing requested features. "
@@ -2569,6 +2569,9 @@ def completion_issue(folder: Path, project: dict | None = None,
             if not (folder / name).is_file():
                 return (f"The user explicitly requested {name} in the project root, but it is missing. "
                         "File-tool paths are relative to the project folder. Fix the output and its verifier.")
+    life_issue = starter_lives_issue(folder, project, state)
+    if life_issue:
+        return life_issue
     if state is not None and browser_check_required(project):
         checked = str(state.get("browser_checked_path") or "")
         try:
@@ -2814,8 +2817,81 @@ def owned_game_verifier(folder: Path) -> bool:
         return False
 
 
-def prepare_game_verifier(folder: Path, path: str, expected_request: str | None = None) -> None:
-    """Save only a known default-component check; preserve all custom suites."""
+def requested_game_lives(project: dict, folder: Path) -> int | None:
+    """Read a simple explicit player-life setting; refuse conflicting counts.
+
+    This is a typed setting extractor, not a general requirements interpreter.
+    Numeric counts in later user instructions override the original count.
+    Ambiguous/out-of-range settings must use the ordinary custom workflow.
+    """
+    texts = [str(project.get("brief", ""))]
+    followups = folder / ".local-ai/USER-REQUESTS.md"
+    if followups.is_file():
+        texts.append(followups.read_text(encoding="utf-8-sig", errors="replace"))
+    selected = 3
+    words = {word: index for index, word in enumerate(("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+              "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"), 1)}
+    count = r"-?\d+|" + "|".join(words)
+    for text in texts:
+        matches = re.finditer(rf"(?i)(?<!\w)({count})\s+(?:(?:starting|initial|player)\s+)?(?:life|lives)\b|\b(?:life|lives)\s*(?:(?:[:=]|to)\s*)?({count})\b", text)
+        tokens = []
+        for match in matches:
+            # Damage rules ("a hit removes one life") are not starting lives.
+            prefix = text[max(0, match.start() - 60):match.start()]
+            if match[1] and re.search(r"(?i)\b(?:removes?|loses?|lost|deducts?|costs?|subtracts?|penalty of|takes? away)\s+(?:exactly\s+)?$", prefix):
+                continue
+            tokens.append((match[1] or match[2]).lower())
+        values = {words[value] if value in words else int(value) for value in tokens}
+        if len(values) > 1 or any(not 1 <= value <= 99 for value in values):
+            return None
+        if values:
+            selected = values.pop()
+    return selected
+
+
+def starter_lives_issue(folder: Path, project: dict | None, state: dict | None) -> str:
+    """Actual starting/reset state must match the request, even with a stale verifier.
+
+    Cache source/request-bound evidence so repeated handoff attempts do not
+    launch browsers again until source or instructions change.
+    """
+    if not project or not state or not state.get("game_starter"):
+        return ""
+    lives = requested_game_lives(project, folder)
+    if lives is None:
+        return ""  # The ordinary custom integration workflow must interpret complex requirements.
+    import task_context
+    import webapp_check
+
+    try:
+        target = project_path(folder, state["game_starter"]["path"])
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        identity = task_context.request_identity(folder)
+        key = {"source": digest, "request": identity, "lives": lives}
+        evidence = state.get("starter_lives_evidence") or {}
+        if evidence.get("key") != key:
+            report = webapp_check.check(folder, {"path": target.relative_to(folder).as_posix(), "cases": [
+                {"state": {"game.lives": lives}, "expect": {"lives": str(lives)}},
+                {"keys": [{"key": "Enter"}], "state": {"game.lives": lives}, "expect": {"lives": str(lives)}}]})
+            passed = (report.get("passed") is True and report.get("page_sha256") == digest
+                      and hashlib.sha256(target.read_bytes()).hexdigest() == digest
+                      and task_context.request_identity(folder) == identity)
+            evidence = {"key": key, "passed": passed, "report": report}
+            state["starter_lives_evidence"] = evidence
+            task_context.record_action(folder, "starter_requested_lives", json.dumps(evidence), {"path": str(target), "starting_lives": lives})
+        if not evidence.get("passed"):
+            return (f"The user requested {lives} starting/reset lives, but the actual game/HUD did not pass those checks. "
+                    "Edit the real game, then rerun the requested-value verifier; prose and a default starter pass are insufficient. "
+                    + json.dumps(evidence.get("report", {}))[:1800])
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return "Could not verify requested game lives: " + str(error)[:300]
+    return ""
+
+
+def prepare_game_verifier(folder: Path, path: str, expected_request: str | None = None,
+                          project: dict | None = None) -> None:
+    """Save a known component check with requested lives; preserve custom suites."""
+    import long_tasks
     import task_context
 
     target = project_path(folder, path)
@@ -2830,7 +2906,16 @@ def prepare_game_verifier(folder: Path, path: str, expected_request: str | None 
         raise ValueError("Preserve the existing custom/component verifier; use its integration workflow for this game.")
     spec = project_path(folder, ".local-ai/space-shooter-check.json")
     spec.parent.mkdir(exist_ok=True)
-    spec.write_text(json.dumps({"version": 1, "path": target.relative_to(folder).as_posix(), "request_hash": request}), encoding="utf-8")
+    if project is None:
+        project = next((item for item in long_tasks.projects() if Path(item["folder"]).resolve() == folder.resolve()), None)
+    if project is None:
+        originals = list((folder / ".local-ai").glob("ORIGINAL-REQUEST-*.md"))
+        project = {"brief": originals[0].read_text(encoding="utf-8-sig") if len(originals) == 1 else ""}
+    lives = requested_game_lives(project, folder)
+    if lives is None:
+        raise ValueError("Conflicting or unsupported starting lives need custom integration checks.")
+    spec.write_text(json.dumps({"version": 2, "path": target.relative_to(folder).as_posix(),
+                                "request_hash": request, "starting_lives": lives}), encoding="utf-8")
     script = game_verifier_script(folder)
     if task_context.request_identity(folder) != request:
         raise ValueError("User instructions changed during starter verification setup.")
@@ -2877,7 +2962,8 @@ def start_game_starter(project: dict, folder: Path, call, messages: list, state:
     from cloud_ai import LOCAL_MODEL
 
     path = game_starter_candidate(project)
-    if not path:
+    lives = requested_game_lives(project, folder)
+    if not path or lives is None:
         return messages, state
     stamp, request_hash = user_request_stamp(folder), task_context.request_identity(folder)
     tool = next(tool for tool in TOOLS if tool["function"]["name"] == "create_game_starter")
@@ -2909,12 +2995,14 @@ def start_game_starter(project: dict, folder: Path, call, messages: list, state:
         return messages, state
     created = json.loads(result)
     check = created["suggested_check"]
+    import design_tools
+    check["cases"] = design_tools.space_shooter_cases(lives)
     phases = [{"phase": "Starter controls", "title": "Verify baseline keyboard movement, fire and restart",
                "check_tool": "check_webapp", "check_arguments": check},
               {"phase": "Starter mechanics", "title": "Verify default timing, damage, collisions and waves in the actual browser",
                "check_tool": "run_verifier"}]
     try:
-        prepare_game_verifier(folder, path, expected_request=request_hash)
+        prepare_game_verifier(folder, path, expected_request=request_hash, project=project)
         queue = task_context.plan_steps(folder, phases, expected_request=request_hash)
         task_context.record_action(folder, "task_steps", json.dumps(queue), {"action": "plan"}, request_hash=request_hash)
     except (OSError, ValueError, sqlite3.Error) as error:
@@ -2940,9 +3028,9 @@ def start_game_starter(project: dict, folder: Path, call, messages: list, state:
 
 
 def review_verified_game_starter(project: dict, state: dict, messages: list, call) -> bool:
-    """Review a proven unchanged baseline without asking for engine/test code.
+    """Review a proven starter-derived game without asking for engine/test code.
 
-    A missing feature, unclear review, custom plan or changed source returns to
+    A missing feature, unclear review or stale source evidence returns to
     the normal tool workflow. The model review is a scope judgment, not a proof
     of arbitrary natural-language requirements or a substitute for live tests.
     """
@@ -2953,43 +3041,67 @@ def review_verified_game_starter(project: dict, state: dict, messages: list, cal
     folder = Path(project["folder"])
     starter = state.get("game_starter") or {}
     request = task_context.request_identity(folder)
-    review_key = request + ":" + str(starter.get("source_sha256", ""))
+    if not starter:
+        return False
+    try:
+        source = project_path(folder, starter["path"])
+        source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    review_key = request + ":" + source_hash
     queue = task_context.step_status(folder)
     if (not starter or starter.get("request_hash") != request or state.get("game_starter_reviewed") == review_key
             or queue["total"] != 2 or queue["remaining"] or not state.get("verify_passed")
             or not state.get("browser_verified") or not owned_game_verifier(folder)):
         return False
-    source = project_path(folder, starter["path"])
     plan, progress = folder / ".local-ai/PLAN.md", folder / ".local-ai/PROGRESS.md"
     before = [p.read_bytes() if p.is_file() else b"" for p in (plan, progress)]
-    if (hashlib.sha256(source.read_bytes()).hexdigest() != starter["source_sha256"]
-            or before[0].decode("utf-8-sig").replace("\r\n", "\n").strip() not in {"", long_tasks.INITIAL_PLAN.replace("\r\n", "\n").strip()}
-            or before[1].decode("utf-8-sig").replace("\r\n", "\n").strip() not in {"", long_tasks.INITIAL_PROGRESS.replace("\r\n", "\n").strip()}):
+    pristine = (before[0].decode("utf-8-sig").replace("\r\n", "\n").strip() in {"", long_tasks.INITIAL_PLAN.replace("\r\n", "\n").strip()}
+                and before[1].decode("utf-8-sig").replace("\r\n", "\n").strip() in {"", long_tasks.INITIAL_PROGRESS.replace("\r\n", "\n").strip()})
+    if state.get("browser_checked_hash") != source_hash:
+        return False
+    lives = requested_game_lives(project, folder)
+    contract = json.loads((folder / ".local-ai/space-shooter-check.json").read_text(encoding="utf-8"))
+    if lives is None or contract.get("starting_lives", 3) != lives:
+        return False
+    if not pristine and completion_issue(folder, project, state):
         return False
     followups = folder / ".local-ai/USER-REQUESTS.md"
     request_text = str(project["brief"]) + ("\n" + followups.read_text(encoding="utf-8-sig") if followups.is_file() else "")
     if re.search(r"(?i)\b(?:boss(?:es)?|multiplayer|upgrades?|power.?ups?|music|sound|leaderboard|high.?score|upload|logo|photo|attached|vertical|wasd|unlimited)\b", request_text):
         return False  # These require real customization; do not rubber-stamp the starter.
-    life_counts = re.findall(r"(?i)\b(\d+)\s+lives\b|\blives\s*[:=]?\s*(\d+)\b", request_text)
     speeds = re.findall(r"(?i)\b(\d+(?:\.\d+)?)\s*(?:pixels|px)\s*(?:/|per\s+)(?:s|sec|second)\b", request_text)
     sizes = re.findall(r"\b(\d{2,4})\s*[x×]\s*(\d{2,4})\b", request_text)
-    if (any(int(left or right) != 3 for left, right in life_counts) or any(float(value) != 120 for value in speeds)
+    if (any(float(value) != 120 for value in speeds)
             or any((int(width), int(height)) != (600, 800) for width, height in sizes)):
         return False
     try:
         response = call({"model": LOCAL_MODEL, "max_tokens": 1024, "stream": False, "temperature": 0, "_native_workload": "starter_scope_review",
-            "tool_choice": "none", "tools": [], "response_format": {"type": "json_object"},
+            "tool_choice": {"type": "function", "function": {"name": "review_game_requirements"}},
+            "tools": [{"type": "function", "function": {"name": "review_game_requirements",
+                "description": "Record missing features and exact requirement quotes after reviewing actual verification evidence.",
+                "parameters": {"type": "object", "properties": {
+                    "missing_features": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 500}},
+                    "reviewed_requirements": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 500}}},
+                    "required": ["missing_features", "reviewed_requirements"], "additionalProperties": False}}}],
             "messages": [{"role": "system", "content": (
                 "Review the user's entire request against a verified reusable space-shooter baseline. "
-                "Do not write code, tools or tests. Return JSON with exactly missing_features (array of strings) "
+                "Do not write code or tests. Call review_game_requirements with missing_features (array of strings) "
                 "and reviewed_requirements (array of short EXACT quotes from the request). "
                 "If anything requested is missing or uncertain, list it. An empty missing_features list "
-                "means the unchanged baseline already meets this request. Never waive a requirement.")},
+                "means the verified actual game already meets this request. Never waive a requirement.")},
                 {"role": "user", "content": request_text + "\nVerified actual-page baseline: " + json.dumps({
-                    **starter, "logic_browser_checks": 18, "physical_input_checks": 3,
-                    "features": "Inline offline HTML canvas with stars, player ship, enemies, bullets, score/lives/waves HUD, game over, Enter/button restart, keyboard arrows/A-D/Space, touch controls, pause, clear keys on blur; 600x800 logical size, 120px/s, player half-width20, 3 lives, 10 points per enemy, hp default1, strict positive overlap, 1.2s invulnerability, wave progression independent of score, live window.game update/reset API; responsive layout; no external assets or audio."})}]})
+                    **starter, "current_source_sha256": source_hash, "starting_lives": lives, "logic_browser_checks": 18, "physical_input_checks": 3,
+                    "features": f"Inline offline HTML canvas with stars, player ship, enemies, bullets, score/lives/waves HUD, game over, Enter/button restart, keyboard arrows/A-D/Space, touch controls, pause, clear keys on blur; 600x800 logical size, 120px/s, player half-width20, {lives} lives, 10 points per enemy, hp default1, strict positive overlap, 1.2s invulnerability, wave progression independent of score, live window.game update/reset API; responsive layout; no external assets or audio."})}]})
         state["turns"] = int(state.get("turns", 0)) + 1
-        review = json.loads(response["choices"][0]["message"].get("content") or "")
+        message = response["choices"][0]["message"]
+        calls = message.get("tool_calls") or []
+        if calls:
+            if len(calls) != 1 or calls[0].get("function", {}).get("name") != "review_game_requirements":
+                raise ValueError("Invalid requirement review tool")
+            review = json.loads(calls[0]["function"]["arguments"])
+        else:
+            review = json.loads(message.get("content") or "")
         if (not isinstance(review, dict) or set(review) != {"missing_features", "reviewed_requirements"}
                 or not isinstance(review["missing_features"], list) or len(review["missing_features"]) > 16
                 or not isinstance(review["reviewed_requirements"], list) or not 1 <= len(review["reviewed_requirements"]) <= 16
@@ -3004,7 +3116,7 @@ def review_verified_game_starter(project: dict, state: dict, messages: list, cal
         return False
     latest = read_state(project)
     if (latest.get("status") in {"paused", "stopped", "done"} or task_context.request_identity(folder) != request
-            or hashlib.sha256(source.read_bytes()).hexdigest() != starter["source_sha256"]
+            or hashlib.sha256(source.read_bytes()).hexdigest() != source_hash
             or [p.read_bytes() if p.is_file() else b"" for p in (plan, progress)] != before):
         return False
     state["game_starter_reviewed"] = review_key
@@ -3013,8 +3125,10 @@ def review_verified_game_starter(project: dict, state: dict, messages: list, cal
         messages.append({"role": "user", "content": "Starter scope review found missing work: " + json.dumps(review["missing_features"])
                          + ". Implement and verify those requirements with the normal tools before finishing."})
         return False
-    plan.write_text("# Plan\n\n- [x] Create reusable offline game baseline\n- [x] Verify actual keyboard controls, fire and restart\n- [x] Verify default timing, collisions, damage, waves and HUD in browser\n- [x] Review original requirements; no missing features reported\n", encoding="utf-8")
-    progress.write_text("# Progress\n\nThe actual unchanged starter passed its saved browser verifier and both SQLite units. "
+    if pristine:
+        plan.write_text("# Plan\n\n- [x] Create and customize reusable offline game\n- [x] Verify actual keyboard controls, fire and restart\n- [x] Verify requested lives and default timing, collisions, damage, waves and HUD in browser\n- [x] Review original requirements; no missing features reported\n", encoding="utf-8")
+    progress.write_text(("# Progress\n\n" if pristine else before[1].decode("utf-8-sig") + "\n\n")
+                        + "The actual starter-derived game passed its saved browser verifier and both SQLite units. "
                         "The local scope review reported no missing features. This is a starter-assisted build, not a claim "
                         "that the model wrote or verified arbitrary game code.\n\nReviewed requirements:\n"
                         + json.dumps(review["reviewed_requirements"], ensure_ascii=False) + "\n", encoding="utf-8")
@@ -3403,6 +3517,12 @@ def run_slice(project: dict, complete=None) -> dict:
             task_context.record_action(folder, function.get("name", ""), result, args,
                                        request_hash=planned_request_hash)
             outcome = task_context.action_outcome(function.get("name", ""), result)
+            if function.get("name") == "create_game_starter" and outcome == "Completed":
+                created = json.loads(result)
+                state["game_starter"] = {"path": created["path"], "source_sha256": created["sha256"],
+                                         "request_hash": planned_request_hash,
+                                         "title": args.get("title", "Nebula Guard"),
+                                         "accent": args.get("accent", "#57E6C2")}
             if function.get("name") == "task_steps":
                 queue_now = task_context.step_status(folder)
                 if queue_now["total"]:

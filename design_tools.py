@@ -275,15 +275,15 @@ def create_space_shooter(path: str, title: str = "Nebula Guard", accent: str = "
             "suggested_cases": space_shooter_cases()}
 
 
-def space_shooter_cases() -> list[dict]:
+def space_shooter_cases(starting_lives: int = 3) -> list[dict]:
     """Physical keyboard checks on the same live state used by the renderer."""
     return [
         {"keys": [{"key": "ArrowRight", "hold_ms": 200}], "state": {"game.player.x": {"gt": 305}}},
         {"keys": [{"key": "Space", "hold_ms": 60}], "state": {"game.bullets.length": {"gte": 1}}},
-        {"keys": [{"key": "Enter"}], "state": {"game.score": 0, "game.lives": 3, "game.wave": 1}}]
+        {"keys": [{"key": "Enter"}], "state": {"game.score": 0, "game.lives": starting_lives, "game.wave": 1}}]
 
 
-def verify_space_shooter(path: str) -> dict:
+def verify_space_shooter(path: str, starting_lives: int = 3) -> dict:
     """Check the default starter contract on the actual page, offline.
 
     Deterministic simulation checks freeze animation scheduling in one browser
@@ -294,6 +294,8 @@ def verify_space_shooter(path: str) -> dict:
 
     import webapp_check
 
+    if type(starting_lives) is not int or not 1 <= starting_lives <= 99:
+        raise ValueError("Starting lives must be an integer from 1 to 99.")
     target = Path(path).resolve(strict=True)
     if target.suffix.lower() != ".html" or target.stat().st_size > 100_000:
         raise ValueError("Use an HTML starter file under 100 KB.")
@@ -308,10 +310,10 @@ def verify_space_shooter(path: str) -> dict:
             page.on("pageerror", lambda error: errors.append(str(error)[:240]))
             page.add_init_script("window.requestAnimationFrame=()=>0;window.cancelAnimationFrame=()=>{};")
             page.goto(target.as_uri(), wait_until="load", timeout=15_000)
-            logic = page.evaluate(r'''()=>{
+            logic = page.evaluate(r'''startingLives=>{
 const g=window.game,c={};c.live_api=!!g&&typeof g.update==='function'&&typeof g.reset==='function';
 if(!c.live_api)return c;
-g.reset();c.reset=g.playing&&g.lives===3&&g.score===0&&g.wave===1&&g.player.x===300&&g.bullets.length===0;
+g.reset();c.reset=g.playing&&g.lives===startingLives&&g.score===0&&g.wave===1&&g.player.x===300&&g.bullets.length===0;
 g.player.x=140;for(let i=0;i<24;i++)g.update(1/24,{ArrowRight:true});const slow=g.player.x;
 g.reset();g.player.x=140;for(let i=0;i<144;i++)g.update(1/144,{ArrowRight:true});
 c.elapsed_movement=Math.abs(slow-260)<1e-5&&Math.abs(slow-g.player.x)<1e-5;
@@ -325,27 +327,27 @@ g.reset();g.waveSpawned=false;const noHp=enemy();delete noHp.hp;g.enemies=[noHp]
 g.reset();g.waveSpawned=false;const armored=enemy(2);g.enemies=[armored];g.bullets=[bullet()];g.update(0,{});c.armored_hp=g.score===0&&armored.hp===1;
 g.reset();g.waveSpawned=false;const edge=enemy();g.enemies=[edge];g.bullets=[bullet(117)];g.update(0,{});c.touching_edges=g.score===0&&edge.hp===1;
 const hit=()=>{g.enemies=[{x:g.player.x,y:g.player.y,w:30,h:30,speed:0,hp:1}];g.update(0,{});};
-g.reset();g.waveSpawned=false;hit();c.damage=g.lives===2&&g.player.invincible>=1;
-hit();c.invulnerability=g.lives===2;g.update(1.3,{});hit();c.shield_expires=g.lives===1;
+g.reset();g.waveSpawned=false;hit();c.damage=g.lives===Math.max(0,startingLives-1)&&g.player.invincible>=1;
+hit();c.invulnerability=g.lives===Math.max(0,startingLives-1);g.update(1.3,{});hit();c.shield_expires=g.lives===Math.max(0,startingLives-2);
 g.reset();g.lives=1;g.waveSpawned=false;hit();c.gameover=g.lives===0&&!g.playing;
 g.reset();g.score=7;g.waveSpawned=true;g.enemies=[];g.update(0,{});c.wave_after_clear=g.wave===2;
 g.reset();g.waveSpawned=false;g.enemies=[];g.update(0,{});c.initial_wave=g.wave===1;
 g.reset();g.waveSpawned=false;g.enemies=[enemy()];g.bullets=[bullet()];g.update(0,{});
 c.hud_matches_state=['score','lives','wave'].every(id=>document.getElementById(id)?.textContent.trim()===String(g[id]));
-g.score=100;g.lives=0;g.playing=false;g.reset();c.restart_after_changes=g.playing&&g.score===0&&g.lives===3&&g.bullets.length===0;
-return c;}''')
+g.score=100;g.lives=0;g.playing=false;g.reset();c.restart_after_changes=g.playing&&g.score===0&&g.lives===startingLives&&g.bullets.length===0;
+return c;}''', starting_lives)
         except Exception as error:
             errors.append(str(error)[:400])
         finally:
             browser.close()
-    browser_checks = webapp_check.check(target.parent, {"path": target.name, "mobile_fit": True, "cases": space_shooter_cases()})
+    browser_checks = webapp_check.check(target.parent, {"path": target.name, "mobile_fit": True, "cases": space_shooter_cases(starting_lives)})
     if target.read_bytes() != before:
         errors.append("Game source changed while checking; rerun read-only verification.")
     failed = [name for name, passed in logic.items() if passed is not True]
     if failed:
         errors.append("Default starter behavior failed: " + ", ".join(failed))
     return {"passed": len(logic) == 18 and not failed and not errors and browser_checks["passed"],
-            "contract": "cale-space-shooter-v1-defaults", "logic": logic, "browser": browser_checks,
+            "contract": "cale-space-shooter-v2-requested-lives", "starting_lives": starting_lives, "logic": logic, "browser": browser_checks,
             "source_sha256": hashlib.sha256(before).hexdigest(), "errors": errors[:8]}
 
 
@@ -362,7 +364,10 @@ def load_space_shooter_spec(folder: Path, spec_path: Path, digest: str) -> dict:
     if not re.fullmatch(r"[a-f0-9]{64}", digest) or hashlib.sha256(raw).hexdigest() != digest:
         raise ValueError("Starter acceptance spec changed; regenerate it through check_game_starter.")
     spec = json.loads(raw)
-    if (not isinstance(spec, dict) or set(spec) != {"version", "path", "request_hash"} or type(spec["version"]) is not int or spec["version"] != 1
+    if (not isinstance(spec, dict) or type(spec.get("version")) is not int
+            or not ((spec["version"] == 1 and set(spec) == {"version", "path", "request_hash"})
+                    or (spec["version"] == 2 and set(spec) == {"version", "path", "request_hash", "starting_lives"}
+                        and type(spec["starting_lives"]) is int and 1 <= spec["starting_lives"] <= 99))
             or not isinstance(spec["path"], str) or not 1 <= len(spec["path"]) <= 512):
         raise ValueError("Invalid starter acceptance contract.")
     if spec["request_hash"] != task_context.request_identity(folder):
@@ -381,7 +386,7 @@ if __name__ == "__main__":
             folder = Path(sys.argv[2]).resolve()
             spec_path = Path(sys.argv[3]).resolve()
             spec = load_space_shooter_spec(folder, spec_path, sys.argv[4])
-            result = verify_space_shooter(str(folder / spec["path"]))
+            result = verify_space_shooter(str(folder / spec["path"]), spec.get("starting_lives", 3))
             load_space_shooter_spec(folder, spec_path, sys.argv[4])
         except Exception as error:
             result = {"passed": False, "errors": [f"{type(error).__name__}: {str(error)[:400]}"]}

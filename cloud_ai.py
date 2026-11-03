@@ -390,6 +390,10 @@ def cloud_payload(payload):
     return result
 
 
+class EmptyInferenceResponse(ValueError):
+    """No user answer, refusal or tool action was returned; nothing may execute."""
+
+
 class ToolArgumentError(ValueError):
     """An offered tool's decoded arguments failed its declared JSON schema."""
 
@@ -439,7 +443,7 @@ def valid_completion(result, request=None):
     if (not message.get("content") and not message.get("tool_calls")
             and not message.get("refusal")
             and result["choices"][0].get("finish_reason") != "content_filter"):
-        raise ValueError("Empty inference response")
+        raise EmptyInferenceResponse("Empty inference response")
     offered = {
         tool["function"].get("name"): tool["function"].get("parameters")
         for tool in (request or {}).get("tools", [])
@@ -1160,7 +1164,11 @@ class Router:
             selected = distinct
         last_error = None
         schema_repair_attempted = False
+        empty_weights = set()
         for selected_model in selected:
+            identity = getattr(self, "model_weights", {}).get(selected_model)
+            if identity and identity in empty_weights:
+                continue
             check_cancel()
             local = dict(payload)
             local.update(model=selected_model, stream=False)
@@ -1188,10 +1196,26 @@ class Router:
                     local["reasoning_effort"] = effort
             try:
                 corrected_schema = False
+                recovered_empty = False
                 try:
                     result = valid_completion(post(
                         "http://127.0.0.1:11434/v1/chat/completions", local,
                         timeout=90 if size_hint == "quick" else 1800), payload)
+                except EmptyInferenceResponse:
+                    # A thinking-only/truncated local answer cannot advance the
+                    # worker. Retry once without thinking on advertised thinking
+                    # models; never execute empty output or move to a bigger KV
+                    # alias over the same weights after this attempt fails.
+                    if (selected_model not in getattr(self, "model_thinking", set())
+                            or local.get("reasoning_effort") == "none"):
+                        raise
+                    if identity:
+                        empty_weights.add(identity)
+                    retry = {**local, "reasoning_effort": "none"}
+                    check_cancel()
+                    result = valid_completion(post(
+                        "http://127.0.0.1:11434/v1/chat/completions", retry, timeout=120), payload)
+                    recovered_empty = True
                 except ToolArgumentError as error:
                     repair = argument_repair_request(local, error)
                     context = getattr(self, "model_contexts", {}).get(selected_model, 0)
@@ -1206,6 +1230,7 @@ class Router:
                     "local",
                     ("Repair retry after tool failures; " if repair_avoid and profile == "main" else "")
                     + ("Corrected local tool arguments; " if corrected_schema else "")
+                    + ("Recovered empty local response; " if recovered_empty else "")
                     + f"Auto scale: {size}; local model responded.",
                     selected_model,
                 )

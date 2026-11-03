@@ -1397,6 +1397,38 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(post.call_args.args[1]["reasoning_effort"], "none")
         self.assertEqual(post.call_args.kwargs["timeout"], 90)
 
+    def test_empty_thinking_response_retries_once_without_accepting_unvalidated_output(self):
+        empty = {"choices": [{"message": {"role": "assistant", "content": "", "reasoning": "unfinished"},
+                              "finish_reason": "length"}]}
+        with patch.object(cloud, "post", side_effect=[empty, ANSWER]) as post:
+            router = cloud.Router()
+            router.model_thinking = {cloud.LOCAL_MODEL}
+            self.assertEqual(router.complete(REQUEST), ANSWER)
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(post.call_args.args[1]["reasoning_effort"], "none")
+        self.assertEqual(post.call_args.kwargs["timeout"], 120)
+
+    def test_empty_response_retry_still_rejects_malformed_tool_arguments(self):
+        empty = {"choices": [{"message": {"content": ""}}]}
+        with patch.object(cloud, "post", side_effect=[empty, argument_reply("not an array")]) as post:
+            router = cloud.Router()
+            router.model_thinking = {cloud.LOCAL_MODEL}
+            with self.assertRaises(cloud.ToolArgumentError):
+                router.complete(ARGUMENT_REQUEST)
+        self.assertEqual(post.call_count, 2)
+
+    def test_failed_empty_response_recovery_does_not_retry_same_weights_larger_alias(self):
+        empty = {"choices": [{"message": {"content": ""}}]}
+        with (patch.object(cloud.Router, "local_candidates", return_value=["primary", "large-context"]),
+              patch.object(cloud, "post", return_value=empty) as post):
+            router = cloud.Router()
+            router.model_thinking = {"primary", "large-context"}
+            router.model_weights = {"primary": "same-weights", "large-context": "same-weights"}
+            with self.assertRaises(cloud.EmptyInferenceResponse):
+                router.complete(REQUEST)
+        self.assertEqual(post.call_count, 2)
+        self.assertTrue(all(call.args[1]["model"] == "primary" for call in post.call_args_list))
+
     def test_unknown_workload_hint_fails_before_inference(self):
         with patch.object(cloud, "post") as post:
             with self.assertRaisesRegex(ValueError, "size hint"):

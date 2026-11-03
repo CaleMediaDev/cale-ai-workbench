@@ -3256,3 +3256,92 @@ def test_native_pause_and_resume_never_touch_hermes_board():
             item = next(p for p in long_tasks.projects() if p["id"] == task_id)
             assert item["status"] == "working"
             assert "Use larger text" in (base / "page/.local-ai/USER-REQUESTS.md").read_text()
+
+
+
+def test_requested_game_lives_followups_override_and_conflicts_are_not_guessed(tmp_path):
+    item = project(tmp_path / "requested-lives")
+    folder = Path(item["folder"])
+    item["brief"] = "Build a space shooter. reset starts with score0/lives5/wave1."
+    assert native_agent.requested_game_lives(item, folder) == 5
+    item["brief"] = "A hit removes one life. Build a game with five starting lives."
+    assert native_agent.requested_game_lives(item, folder) == 5
+    item["brief"] = "Build a game with one life."
+    assert native_agent.requested_game_lives(item, folder) == 1
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("Start and restart with 7 lives.")
+    assert native_agent.requested_game_lives(item, folder) == 7
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("Start with 3 lives and 5 lives.")
+    assert native_agent.requested_game_lives(item, folder) is None
+
+
+def test_real_lives_gate_rejects_false_complete_with_default_verifier_and_prose(tmp_path):
+    import design_tools
+
+    item = project(tmp_path / "five-lives")
+    item["brief"] = "Build an offline space shooter with 5 lives on start and restart."
+    folder = Path(item["folder"])
+    design_tools.create_space_shooter(str(folder / "index.html"))
+    state = {"game_starter": {"path": "index.html"}, "verify_passed": True}
+    # Even a claimed verifier pass and checked prose cannot pass the live gate.
+    (folder / ".local-ai/PLAN.md").write_text("# Plan\n- [x] Five lives verified.")
+    (folder / ".local-ai/PROGRESS.md").write_text("# Progress\nComplete with lives=5.")
+    assert "5 starting/reset lives" in native_agent.starter_lives_issue(folder, item, state)
+    assert "5 starting/reset lives" in native_agent.completion_issue(folder, item, state)
+    with patch("webapp_check.check", side_effect=AssertionError("Unchanged failed source was rechecked")):
+        assert native_agent.starter_lives_issue(folder, item, state)
+    source = (folder / "index.html").read_text(encoding="utf-8")
+    (folder / "index.html").write_text(source.replace("lives:3", "lives:5").replace("this.lives=3", "this.lives=5"), encoding="utf-8")
+    assert native_agent.starter_lives_issue(folder, item, state) == ""
+    with patch("webapp_check.check", side_effect=AssertionError("Unchanged passing source was rechecked")):
+        assert native_agent.starter_lives_issue(folder, item, state) == ""
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("Change starting lives to 7.")
+    assert "7 starting/reset lives" in native_agent.starter_lives_issue(folder, item, state)
+    native_agent.prepare_game_verifier(folder, "index.html", project=item)
+    spec = json.loads((folder / ".local-ai/space-shooter-check.json").read_text())
+    assert spec["version"] == 2 and spec["starting_lives"] == 7
+
+
+
+def test_verified_custom_lives_uses_bounded_review_and_preserves_completed_plan(tmp_path):
+    item = project(tmp_path / "custom-review")
+    item["brief"] = "Build a playable offline HTML space shooter in index.html with 5 lives."
+    folder = Path(item["folder"])
+    (folder / ".local-ai/PLAN.md").write_text(long_tasks.INITIAL_PLAN, encoding="utf-8")
+    (folder / ".local-ai/PROGRESS.md").write_text(long_tasks.INITIAL_PROGRESS, encoding="utf-8")
+    state = {"status": "running", "turns": 0}
+    native_agent.save_state(item, state)
+    response = {"choices": [{"message": {"tool_calls": [{"id": "build", "function": {
+        "name": "create_game_starter", "arguments": '{"path":"index.html"}'}}]}}]}
+    messages, state = native_agent.start_game_starter(item, folder, lambda _: response, [], state)
+    path = folder / "index.html"
+    source = path.read_text(encoding="utf-8")
+    path.write_text(source.replace("this.lives=3", "this.lives=5"), encoding="utf-8")
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        assert native_agent.advance_checked_steps(item, state, messages)
+    assert task_context.step_status(folder)["done"] == 2 and state["verify_passed"]
+    plan = "# Plan\n- [x] Implement five lives and retain the game controls.\n"
+    (folder / ".local-ai/PLAN.md").write_text(plan, encoding="utf-8")
+    (folder / ".local-ai/PROGRESS.md").write_text("# Progress\nRequested game verified.\n", encoding="utf-8")
+    seen = []
+    def review(payload):
+        seen.append(payload)
+        return {"choices": [{"message": {"tool_calls": [{"function": {
+            "name": "review_game_requirements", "arguments": json.dumps({
+                "missing_features": [], "reviewed_requirements": ["5 lives", "offline HTML space shooter"]})}}]}}]}
+    assert native_agent.review_verified_game_starter(item, state, messages, review)
+    assert state["status"] == "done"
+    assert seen[0]["tool_choice"]["function"]["name"] == "review_game_requirements"
+    assert (folder / ".local-ai/PLAN.md").read_text(encoding="utf-8") == plan
+
+
+
+def test_ordinary_starter_tool_also_registers_requested_value_completion_gate(tmp_path):
+    item = project(tmp_path / "ordinary-starter")
+    item["brief"] = "Create a game starter component with 5 lives."
+    response = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "starter", "function": {
+        "name": "create_game_starter", "arguments": '{"path":"index.html"}'}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(item, complete=lambda _: response)
+    assert state["game_starter"]["path"] == "index.html"
+    assert not state["verify_passed"]
+    assert "5 starting/reset lives" in native_agent.starter_lives_issue(Path(item["folder"]), item, state)

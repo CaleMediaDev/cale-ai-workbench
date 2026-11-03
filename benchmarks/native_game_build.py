@@ -37,6 +37,9 @@ BRIEF = model_fitness.GAME_BUILD_BRIEF.replace(
 )
 
 
+STARTING_LIVES = 3
+
+
 def grade_browser(folder: Path) -> dict:
     """Check actual keyboard input and layout on the new fixture, offline."""
     from playwright.sync_api import sync_playwright
@@ -68,7 +71,7 @@ def grade_browser(folder: Path) -> dict:
             page.keyboard.up("Space")
             page.evaluate("window.game.lives=0;window.game.playing=false")
             page.keyboard.press("Enter")
-            result["keyboard_restarts"] = page.evaluate("window.game.playing&&window.game.lives===3&&window.game.score===0")
+            result["keyboard_restarts"] = page.evaluate(f"window.game.playing&&window.game.lives==={STARTING_LIVES}&&window.game.score===0")
             page.screenshot(path=str(folder / "independent-mobile.png"))
         except Exception as error:
             errors.append(f"{type(error).__name__}: {str(error)[:400]}")
@@ -83,7 +86,13 @@ def grade(folder: Path, runtime: Path) -> dict:
     if not path.is_file():
         return {"passed": False, "errors": ["index.html was not created"]}
     fixed = path.read_bytes()
-    logic = model_fitness.grade_game_html(fixed.decode("utf-8-sig"), runtime)
+    if STARTING_LIVES == 3:
+        logic = model_fitness.grade_game_html(fixed.decode("utf-8-sig"), runtime)
+    else:
+        scripts = re.findall(r"<script\b[^>]*>(.*?)</script>", fixed.decode("utf-8-sig"), re.I | re.S)
+        checks = model_fitness.GAME_BUILD_CHECKS.replace("g.lives===3", f"g.lives==={STARTING_LIVES}").replace(
+            "g.lives===2", f"g.lives==={STARTING_LIVES - 1}")
+        logic = model_fitness.grade_game_code(model_fitness.GAME_DOM + "\n".join(scripts), runtime, checks)
     browser = grade_browser(folder)
     result = {"logic": logic, "browser": browser, "verifier_passes_correct": False,
               "verifier_rejects_missing_javascript": False}
@@ -99,6 +108,12 @@ def grade(folder: Path, runtime: Path) -> dict:
             rejected = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
                                       capture_output=True, timeout=45, check=False)
             result["verifier_rejects_missing_javascript"] = rejected.returncode != 0
+            if STARTING_LIVES != 3:
+                regression = "<script>const priorReset=window.game.reset;window.game.reset=function(){priorReset.call(this);this.lives=3;};</script>"
+                path.write_text(fixed.decode("utf-8-sig") + regression, encoding="utf-8")
+                rejected = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
+                                          capture_output=True, timeout=45, check=False)
+                result["verifier_rejects_wrong_lives"] = rejected.returncode != 0
         except subprocess.SubprocessError as error:
             result["verifier_error"] = str(error)[:300]
         finally:
@@ -108,18 +123,25 @@ def grade(folder: Path, runtime: Path) -> dict:
     result["passed"] = (len(logic) == 13 and all(value is True for value in logic.values())
                         and browser["passed"] and result["verifier_passes_correct"]
                         and result["verifier_rejects_missing_javascript"]
+                        and (STARTING_LIVES == 3 or result.get("verifier_rejects_wrong_lives") is True)
                         and queue["total"] >= 2 and queue["remaining"] == 0)
     return result
 
 
 def main() -> int:
+    global BRIEF, STARTING_LIVES
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--keep-folder", type=Path, required=True)
     parser.add_argument("--slices", type=int, default=2)
+    parser.add_argument("--lives", type=int, choices=(3, 5), default=3,
+                        help="Exercise a non-default gameplay requirement, with independent matching checks")
     parser.add_argument("--resume", action="store_true",
                         help="Resume this fixture's saved worker and queue; retain its original report")
     args = parser.parse_args()
+    STARTING_LIVES = args.lives
+    if STARTING_LIVES != 3:
+        BRIEF = BRIEF.replace("lives3", f"lives{STARTING_LIVES}") + f" Start and restart with exactly {STARTING_LIVES} lives, including the visible HUD."
     runtime = args.runtime_root.resolve(strict=True)
     if not (runtime / "LongTasks/model-approvals.json").is_file():
         parser.error("Use an installed runtime with actual model tool-probe approvals")
@@ -165,7 +187,7 @@ def main() -> int:
             graded = grade(folder, runtime)
         except Exception as error:
             graded = {"passed": False, "error": f"{type(error).__name__}: {str(error)[:500]}"}
-    report = {"scenario": "native_game_build", "brief": BRIEF, "seconds": round(elapsed, 2),
+    report = {"scenario": "native_game_build", "brief": BRIEF, "starting_lives": STARTING_LIVES, "seconds": round(elapsed, 2),
               "automatic_step_checks": state.get("automatic_step_checks", 0),
               "starter_used": bool(native_agent.read_state(project).get("game_starter")),
               "starter_review": native_agent.read_state(project).get("game_starter_review"),

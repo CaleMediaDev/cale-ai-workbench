@@ -53,6 +53,8 @@ extras = [
     "benchmarks/results/api-coverage-20261103.json",
     "benchmarks/results/game-starter-20261103.json",
     "benchmarks/examples/local-space-shooter.html",
+    "benchmarks/examples/five-lives-space-shooter.html",
+    "benchmarks/results/game-request-contract-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",
