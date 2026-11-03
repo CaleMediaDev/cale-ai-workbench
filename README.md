@@ -193,7 +193,7 @@ Start with [the architecture guide](ARCHITECTURE.md) and [contribution guide](CO
 
 After installation, run `Toolbox/python/Scripts/python.exe Validation/test_cloud_ai.py` and `Toolbox/python/Scripts/python.exe Validation/test_long_tasks.py` from the installation directory. Tests cover real process termination, recovery state, stale verification, OAuth callback validation, free-only routing and fallback. They do not require a cloud account.
 
-For real local-model tasks rather than mocked component tests, run the opt-in [native worker benchmark](benchmarks/README.md). Its separate graders check a coding repair, a CSV cleanup, and an interactive HTML app, including whether each verifier detects a regression. These small tasks are not an overall comparison with other agents.
+For real local-model tasks rather than mocked component tests, run the opt-in [native worker benchmark](benchmarks/README.md). Its separate graders check a coding repair, a CSV cleanup, an interactive HTML app, and a two-page PDF with superseded draft terms. They also challenge each saved verifier with a regression. These small tasks are not an overall comparison with other agents.
 
 Please report reproducible bugs and include versions and redacted errors. Do not upload your `Cloud`, `data`, `Projects`, `LongTasks`, or log directories.
 

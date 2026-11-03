@@ -72,6 +72,58 @@ WEBAPP_BRIEF = (
     "that checks behavior, not just file existence."
 )
 
+DOCUMENT_BRIEF = (
+    "Read terms.pdf, including its final terms on page 2. Create summary.md "
+    "with these four labeled lines: 'Final due date:', 'Net payable:', "
+    "'Support phone:', and 'Draft status:'. Use the exact written date and "
+    "phone format from the final page. Compute net payable as the final base "
+    "fee minus the setup credit, formatted with a dollar sign and comma. "
+    "State that the page 1 draft is superseded. Do not use its older date, "
+    "fee, or phone as the current terms. Create and run a meaningful, read-only "
+    "PowerShell verifier that checks the summary against the final terms."
+)
+
+DOCUMENT_PAGES = [
+    ["PAGE 1 - SUPERSEDED DRAFT", "Payment due: October 15, 2026",
+     "Base fee: $980", "Setup credit: $0", "Support phone: 517-555-0100",
+     "This draft is superseded by the signed final terms on page 2."],
+    ["PAGE 2 - SIGNED FINAL TERMS", "Payment due: November 15, 2026",
+     "Base fee: $1,280", "Setup credit: $180", "Support phone: 517-555-0142",
+     "These final terms replace the page 1 draft."],
+]
+
+
+def write_document_pdf(path: Path) -> None:
+    """Build a small two-page text PDF without a benchmark-only dependency."""
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 7 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>",
+    ]
+    for page in DOCUMENT_PAGES:
+        lines = [line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+                 for line in page]
+        drawing = ("BT /F1 12 Tf 72 720 Td " +
+                   " ".join(f"({line}) Tj 0 -22 Td" for line in lines) + " ET").encode("ascii")
+        objects.append(b"<< /Length " + str(len(drawing)).encode("ascii") +
+                       b" >>\nstream\n" + drawing + b"\nendstream")
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode("ascii") + obj + b"\nendobj\n")
+    cross_reference = len(data)
+    data.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode("ascii"))
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    data.extend(f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n"
+                f"startxref\n{cross_reference}\n%%EOF\n".encode("ascii"))
+    path.write_bytes(data)
+
 
 def ollama_completion(model: str, timeout: int, stats: dict):
     """Use the same OpenAI-compatible Ollama endpoint as Cale's router."""
@@ -252,9 +304,54 @@ def grade_webapp(folder: Path) -> dict:
     return result
 
 
+def grade_document(folder: Path) -> dict:
+    """Check final-page extraction, arithmetic, and the saved verifier."""
+    output = folder / "summary.md"
+    verifier = folder / ".local-ai" / "verify.ps1"
+    result = {"summary_present": output.is_file(), "verifier_present": verifier.is_file(),
+              "final_due_date": False, "net_payable": False, "support_phone": False,
+              "draft_superseded": False, "verifier_passes_correct": False,
+              "verifier_rejects_wrong_total": False}
+    if not output.is_file():
+        result["passed"] = False
+        return result
+    summary = output.read_text(encoding="utf-8-sig", errors="replace")
+    result["final_due_date"] = bool(re.search(
+        r"(?im)^\s*Final due date:\s*November 15, 2026\s*$", summary))
+    result["net_payable"] = bool(re.search(
+        r"(?im)^\s*Net payable:\s*\$1,100(?:\.00)?\s*$", summary))
+    result["support_phone"] = bool(re.search(
+        r"(?im)^\s*Support phone:\s*517-555-0142\s*$", summary))
+    result["draft_superseded"] = bool(re.search(
+        r"(?im)^\s*Draft status:\s*.*superseded", summary))
+    if verifier.is_file() and all(result[key] for key in (
+            "final_due_date", "net_payable", "support_phone", "draft_superseded")):
+        command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(verifier)]
+        try:
+            checked = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
+                                     capture_output=True, text=True, timeout=45, check=False)
+            result["verifier_passes_correct"] = checked.returncode == 0
+            original = output.read_bytes()
+            damaged = original.replace(b"$1,100", b"$9,999", 1)
+            if damaged != original:
+                try:
+                    output.write_bytes(damaged)
+                    rejected = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
+                                              capture_output=True, text=True, timeout=45,
+                                              check=False)
+                    result["verifier_rejects_wrong_total"] = rejected.returncode != 0
+                finally:
+                    output.write_bytes(original)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            result["verifier_error"] = f"{type(exc).__name__}: {exc}"
+    result["passed"] = all(value for key, value in result.items()
+                           if key != "verifier_error")
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("temperature", "contacts", "webapp"),
+    parser.add_argument("--scenario", choices=("temperature", "contacts", "webapp", "document"),
                         default="temperature")
     parser.add_argument("--model", default="cale-fast")
     parser.add_argument("--call-timeout", type=int, default=120)
@@ -273,16 +370,19 @@ def main() -> int:
             folder.mkdir(parents=True, exist_ok=False)
         (folder / ".local-ai").mkdir()
         brief = {"temperature": TEMPERATURE_BRIEF, "contacts": CONTACTS_BRIEF,
-                 "webapp": WEBAPP_BRIEF}[args.scenario]
+                 "webapp": WEBAPP_BRIEF, "document": DOCUMENT_BRIEF}[args.scenario]
         if args.scenario == "temperature":
             (folder / "temperature.py").write_text(
                 TEMPERATURE_STARTER, encoding="utf-8")
         elif args.scenario == "contacts":
             (folder / "contacts.csv").write_text(CONTACTS_STARTER, encoding="utf-8")
+        elif args.scenario == "document":
+            write_document_pdf(folder / "terms.pdf")
         project_instruction = {
             "temperature": "Fix the conversion and verify it.\n",
             "contacts": "Clean the contacts and verify the saved CSV.\n",
             "webapp": "Build the requested offline page and test it.\n",
+            "document": "Read the final document terms and verify the summary.\n",
         }[args.scenario]
         (folder / "AGENTS.md").write_text(project_instruction, encoding="utf-8")
         (folder / ".local-ai" / "USER-REQUESTS.md").write_text("", encoding="utf-8")
@@ -322,7 +422,8 @@ def main() -> int:
             "completion_issue": native_agent.completion_issue(folder, project, state),
             "grade": {"temperature": grade_temperature,
                       "contacts": grade_contacts,
-                      "webapp": grade_webapp}[args.scenario](folder),
+                      "webapp": grade_webapp,
+                      "document": grade_document}[args.scenario](folder),
             "error": error,
         }
         if args.keep_folder:

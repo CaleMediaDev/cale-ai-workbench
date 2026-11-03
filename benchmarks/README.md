@@ -11,6 +11,9 @@ Separate graders check the output and whether the verifier catches a regression:
 - `webapp` builds an interactive, offline HTML tip splitter. Playwright checks
   its labels, calculations, error state, and mobile width, then breaks its
   JavaScript to ensure the saved verifier rejects the regression.
+- `document` reads a two-page PDF whose first page is a superseded draft.
+  The grader checks final-page facts, a calculated net amount, and whether
+  the saved verifier rejects a wrong total.
 
 Run on Windows after installing Cale and its fast model:
 
@@ -18,6 +21,7 @@ Run on Windows after installing Cale and its fast model:
 Toolbox\python\Scripts\python.exe benchmarks\native_worker_smoke.py --model cale-fast
 Toolbox\python\Scripts\python.exe benchmarks\native_worker_smoke.py --scenario contacts --model cale-fast
 Toolbox\python\Scripts\python.exe benchmarks\native_worker_smoke.py --scenario webapp --model cale-fast
+Toolbox\python\Scripts\python.exe benchmarks\native_worker_smoke.py --scenario document --model cale-fast
 ```
 
 The script makes no cloud requests and does not register a task in the app. It
@@ -30,11 +34,11 @@ Use `--keep-folder C:\path\to\new-folder` to inspect the task files after a
 run. `--command-timeout 10` helps diagnose a generated command that waits for
 input; the default 90 seconds matches the production worker.
 
-These are three small tasks, not a claim that Cale is better than Hermes,
+These are four small tasks, not a claim that Cale is better than Hermes,
 OpenClaw, OpenHands, or another assistant. For a fair comparison, use the same
 machine, model, starting files, acceptance checks, and time limit. Repeat runs
 to account for model variation and record cold and warm model timings separately.
-Expand the suite to document and media work before using it to
+Expand the suite to media work and more varied documents before using it to
 make general reliability claims.
 
 The contacts scenario exercises the guarded CSV startup route. Its report
