@@ -1,0 +1,20 @@
+[
+  {
+    "id": "checkpoint-recovery",
+    "title": "Improve saved task checkpoint recovery",
+    "instructions": "Inspect checkpoint document selection, freshness, and next-step extraction. Propose one real bug fix with a regression test if a gap can be demonstrated. Preserve privacy and existing storage compatibility.",
+    "paths": ["task_context.py", "Validation/test_donation_regressions.py"]
+  },
+  {
+    "id": "calculator-correctness",
+    "title": "Improve calculator correctness",
+    "instructions": "Inspect arithmetic parsing and edge cases. Propose one demonstrable correctness fix with a regression test. Preserve bounded execution and do not expand allowed Python evaluation.",
+    "paths": ["quick_calculator.py", "Validation/test_donation_regressions.py"]
+  },
+  {
+    "id": "task-time-estimates",
+    "title": "Improve task time estimates",
+    "instructions": "Inspect elapsed time and countdown handling across pause, resume, completion, and bad or missing timestamps. Propose one demonstrated bug fix with a focused regression test.",
+    "paths": ["task_eta.py", "Validation/test_donation_regressions.py"]
+  }
+]

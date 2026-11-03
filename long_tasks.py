@@ -3590,6 +3590,8 @@ def gui():
     import avatar_video
     import chat_assistant
     import chatgpt_auth
+    import donation
+    import donation_ui
     import cloud_providers
     import file_chat
     import github_account
@@ -3599,6 +3601,7 @@ def gui():
     import readiness_checklist
     import self_update
     import voice_assistant
+    donation_service = donation.Service(ROOT)
     from cloud_ai import (
         connect_account,
         credentials,
@@ -3699,6 +3702,8 @@ def gui():
     outer.place(x=0, y=0, width=1120, height=window.winfo_height())
     header = ttk.Frame(outer)
     header.pack(fill="x", pady=(0, 8))
+    header_status = ttk.Frame(outer)
+    header_status.pack(fill="x", pady=(0, 4))
     logo_path = ROOT / "assets/cale-logo.png"
     if logo_path.is_file():
         with Image.open(logo_path) as logo_source:
@@ -3887,11 +3892,17 @@ def gui():
         header, text="🚀  Supercharge my AI", command=show_super, style="Accent.TButton"
     )
     rocket.pack(side="right")
+    donation_controls = donation_ui.Controls(
+        header, window, donation_service, lambda: connect_github(), lambda: connect_chatgpt())
+    window.bind_all("<KeyPress>", lambda _: donation_service.activity(), add="+")
+    window.bind_all("<ButtonPress>", lambda _: donation_service.activity(), add="+")
+    window.bind_all("<MouseWheel>", lambda _: donation_service.activity(), add="+")
+    window.bind_all("<Motion>", lambda _: donation_service.activity(), add="+")
     # A separate top row keeps all four route choices visible on 1280px screens
     # without hiding the version or the Ready checklist in the brand header.
     provider_scope = tk.StringVar(value=routing_mode.load_scope(ROOT / "Cloud"))
-    scope_frame = ttk.Frame(outer)
-    scope_frame.pack(anchor="e", before=gauge_row, pady=(0, 4))
+    scope_frame = ttk.Frame(header_status)
+    scope_frame.pack(side="right", pady=(0, 4))
     scope_buttons = {}
 
     def choose_scope(scope):
@@ -4814,13 +4825,13 @@ def gui():
     mic_button = ttk.Button(companion_controls, text="🎤  Mic Off", command=toggle_listening)
     mic_button.pack(side="right", padx=(0, 8), pady=(8, 0))
     presence = tk.Canvas(
-        header, width=148, height=46, background=bg,
+        header_status, width=148, height=46, background=bg,
         highlightthickness=0, borderwidth=0,
     )
     presence.pack(side="left", padx=(8, 0))
     installed_version = self_update.current_version()
     ttk.Label(
-        header,
+        header_status,
         text=("v" + ".".join(map(str, installed_version)))
         if any(installed_version) else "Setting up",
         style="Muted.TLabel",
@@ -4954,7 +4965,7 @@ def gui():
 
         check_again()
 
-    ttk.Button(header, text="✓  Ready checklist", command=show_readiness_checklist,
+    ttk.Button(header_status, text="✓  Ready checklist", command=show_readiness_checklist,
                style="Mode.TButton").pack(side="left", padx=(0, 6))
 
     def update_now():
@@ -4969,7 +4980,7 @@ def gui():
         )
 
     update_button = ttk.Button(
-        header, text="Update now", style="Mode.TButton", command=update_now,
+        header_status, text="Update now", style="Mode.TButton", command=update_now,
     )
     presence_phase = [0]
     presence_mode = ["ready"]
@@ -5307,6 +5318,7 @@ def gui():
         show_chat("assistant", "Hi! Ask me anything, or tell me what you'd like me to build.")
     pending_followup = None
     answer_requests = queue.Queue()
+    foreground_chat = threading.Event()
     index_requests = queue.Queue()
     try:
         remembered = user_file_memory.remembered_roots(STATE)
@@ -5350,6 +5362,8 @@ def gui():
         """Keep local model calls in order and avoid competing for the same GPU."""
         while True:
             question, context, paths, kind = answer_requests.get()
+            foreground_chat.set()
+            donation_service.activity()
             private_answer = bool(
                 paths or kind == "visitor"
                 or chat_assistant.FILE_MEMORY_REFERENCE.search(question)
@@ -5378,11 +5392,14 @@ def gui():
                 conversation_events.put({"diagnostic": "chat", "detail": str(exc)})
                 conversation_events.put({"answer": "I couldn't answer that yet: " + str(exc),
                                          "private": private_answer})
+            finally:
+                foreground_chat.clear()
 
     threading.Thread(target=answer_worker, daemon=True).start()
 
     def submit_chat_text(value=None):
         nonlocal pending_followup
+        donation_service.activity()
         ready, explanation = first_launch_readiness(STATE)
         if not ready:
             readiness_text.set(explanation)
@@ -6879,6 +6896,11 @@ def gui():
         running = any(
             item["status"] in ("queued", "working", "checking") for item in all_projects
         )
+        donation_service.tick(busy=(running or any(item["status"] == "waiting_for_setup" for item in all_projects)
+                                    or foreground_chat.is_set() or not answer_requests.empty()
+                                    or updating or bool(pending_update)
+                                    or not setup or setup.get("status") != "complete"))
+        donation_controls.refresh()
         upgrading = ollama_runtime.model_download_running() or any(
             state.get("status") in ("working", "waiting")
             for state in (voice_setup, ollama_setup)

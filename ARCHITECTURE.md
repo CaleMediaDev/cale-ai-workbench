@@ -17,6 +17,8 @@ Ollama model store                         ↓
 
 ## Where to start
 
+Idle contributions are a separate GUI-owned service in `donation.py`, with header/dialog controls in `donation_ui.py`. It runs while the desktop is open and idle, using explicit consent bound to the contributor's ChatGPT and GitHub profiles. It fetches the public `donation-tasks.json` queue and source blobs at a pinned upstream revision, asks for exact edits without model tools, syntax-checks them in memory, and submits only a new branch/draft PR. It never executes generated code or merges changes. Reported usage is recorded transactionally in `LongTasks/donations.db`, independently of normal task routing. Foreground activity, active tasks, setup, updates, and privacy modes cancel further contribution work.
+
 | File | Responsibility |
 | --- | --- |
 | `Setup.ps1` | Simple Windows installer window. Starts setup automatically and shows the log. |

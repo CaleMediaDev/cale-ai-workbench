@@ -300,11 +300,31 @@ def disconnect():
         save({})
 
 
-def access_token():
+def account_fingerprint():
+    """Identify a verified local profile for consent binding, without its secrets."""
+    try:
+        subject = str(load().get("subject") or "")
+    except (OSError, ValueError):
+        return ""
+    return hashlib.sha256(subject.encode()).hexdigest() if subject else ""
+
+
+def access_token(purpose="chat"):
     """Refresh an opted-in token shortly before expiry."""
     with LOCK:
         value = load()
-        if not value.get("enabled") or "chatgpt.tokens.use.direct" not in value.get(
+        allowed = bool(value.get("enabled"))
+        if purpose == "donation":
+            import donation
+
+            consent = donation.settings(ROOT)
+            subject = str(value.get("subject") or "")
+            fingerprint = hashlib.sha256(subject.encode()).hexdigest() if subject else ""
+            allowed = bool(consent["enabled"] and fingerprint and
+                           consent.get("chatgpt_account") == fingerprint)
+        elif purpose != "chat":
+            allowed = False
+        if not allowed or "chatgpt.tokens.use.direct" not in value.get(
             "scopes", []
         ):
             raise ValueError("ChatGPT plan use is not enabled.")
@@ -505,9 +525,11 @@ def response_to_completion(response):
     }
 
 
-def complete(completion, size="deep"):
+def complete(completion, size="deep", purpose="chat", cancel=None, on_usage=None):
     """Stream a plan request and return only after response.completed arrives."""
-    token = access_token()
+    if cancel and cancel():
+        raise InterruptedError("ChatGPT request cancelled before starting")
+    token = access_token() if purpose == "chat" else access_token(purpose=purpose)
     models = available_models(token)
     model = choose_model(models, size)
     payload = response_payload(completion, model)
@@ -532,6 +554,8 @@ def complete(completion, size="deep"):
             event = json.loads(body)
             if event.get("type") == "response.completed":
                 final = event.get("response")
+            elif cancel and cancel():
+                raise InterruptedError("ChatGPT request cancelled by foreground activity")
             elif event.get("type") == "response.output_item.done":
                 # ChatGPT plan streaming can leave response.completed.output empty.
                 # Completed items carry both answer text and tool calls.
@@ -553,4 +577,10 @@ def complete(completion, size="deep"):
         raise RuntimeError("ChatGPT stream ended before completion.")
     if not final.get("output") and streamed_output:
         final["output"] = [streamed_output[index] for index in sorted(streamed_output)]
+    if on_usage and final.get("usage"):
+        usage = final["usage"]
+        on_usage({"model": final.get("model", ""), "usage": {
+            "prompt_tokens": usage.get("input_tokens", 0),
+            "completion_tokens": usage.get("output_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0)}})
     return response_to_completion(final)

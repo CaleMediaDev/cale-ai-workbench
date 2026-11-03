@@ -17,6 +17,16 @@ For common CSV cleanup, the native worker has a project-contained `transform_csv
 
 Skills and tool descriptions are also indexed in a local SQLite FTS5 database (`LongTasks/capabilities.sqlite3`). Setup builds it before opening the desktop; launch and the supervisor refresh it automatically, including locally edited skills. The native worker can search that catalog and load a relevant skill without scanning every Markdown file on each task. The index is rebuildable from the installed files and tool registrations; it contains no account keys or project documents. The readiness checklist queries the database and offers automatic repair if it fails. Large optional model weights still download according to the PC's available resources, so a capability appears as ready only after its runtime or model has actually passed its check.
 
+## Donate idle ChatGPT time
+
+The header's **Donate my ChatGPT** button opens a short connection flow: connect GitHub, connect ChatGPT and approve plan permission, then choose **Start donating when idle**. This uses the contributor's ChatGPT plan allowance or available credits. It is off by default and has its own permission, separate from using ChatGPT for normal tasks. Consent is bound to those accounts; a different account requires a fresh opt-in. **Stop donating** cancels further background work. Local-only, free-cloud-only, offline mode, installation, active tasks, and chat take priority. Keep the desktop open or minimized for idle contributions.
+
+After two minutes without activity in Cale, a donor can contribute one AI proposal attempt per 24 hours. The worker reads `donation-tasks.json` and its approved source files from an exact commit of the public Cale repository. It never includes user documents, private projects, chat history, or credentials in the model prompt. It applies bounded exact text edits in memory and parses Python syntax without executing generated code. Production changes must include a regression-test edit. A proposal goes to a new branch in the contributor's GitHub fork (or a separate branch for the repository owner) and becomes a **draft pull request** in CaleMediaDev/cale-ai-workbench. The automation never changes `main`, approves changes, merges, or releases. The owner reviews the code and runs relevant tests before accepting it.
+
+**Total tokens donated** is this installation's persistent sum of ChatGPT-reported input and output usage, including reviews that produce no change or proposals that fail validation. It does not estimate partial requests for which the provider reports no usage. Returning to Cale cancels further work, although a request already in flight may still consume allowance. Only one open donation PR per contributor is requested at a time. The local ledger is `LongTasks/donations.db`; credentials remain in their existing per-user protected stores.
+
+Maintainers can change the public task list to direct contributions and use **View contributions on GitHub** to review drafts. These proposals have passed exact-edit and Python-syntax validation only; donor PCs do not run generated tests or code.
+
 ## Install
 
 **[Download Cale AI for Windows](https://github.com/CaleMediaDev/cale-ai-workbench/releases/latest/download/Cale-AI-Workbench-Install.zip)**
