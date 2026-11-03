@@ -38,3 +38,18 @@ def test_issue_message_is_bounded_and_categories_are_validated(tmp_path):
         pass
     else:
         raise AssertionError("Invalid category should be rejected")
+
+
+def test_backward_clock_starts_a_new_reportable_episode(tmp_path):
+    assert not diagnostics.record(tmp_path, "camera", "unavailable", now=10000)
+    assert diagnostics.record(tmp_path, "camera", "unavailable", now=10010)
+
+    # Persisted wall-clock timestamps may be ahead after a clock correction.
+    assert not diagnostics.record(tmp_path, "camera", "disconnected", now=10)
+    issue = diagnostics.issues(tmp_path)[0]
+    assert issue["first_seen"] == 10
+    assert issue["last_seen"] == 10
+    assert issue["count"] == 1
+    assert issue["reported"] == 0
+    assert diagnostics.record(tmp_path, "camera", "disconnected", now=20)
+    assert not diagnostics.record(tmp_path, "camera", "disconnected", now=30)
