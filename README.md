@@ -36,6 +36,8 @@ For a requested song longer than a supplied audio clip, Cale uploads that clip a
 
 Music references can also be MP4, MOV, M4V, WebM, or MKV videos with an audio track. Cale extracts the audio locally into a temporary WAV for the music engine and removes that temporary copy after upload. The video frames are not sent to the music engine, and a video without readable audio returns a clear error.
 
+Phone recordings and other compressed audio in M4A, AAC, OGG, or OPUS format can also be used as references. Cale converts those files locally to a temporary WAV for upload; the original remains untouched.
+
 In the main chat, attach one supported audio or video clip and ask Cale to use it as a reference, cover, remix, or longer version of a song. Cale starts a durable local music task directly and keeps the requested length, lyrics, and vocal preference. Requests for a music video, captions, or edits involving multiple files still use the general task agent.
 
 The installer downloads the runtime, tools, browser, image/voice models, and model files. It creates a desktop shortcut with the Cale Media logo, which also appears on the app window and taskbar. No Python, Git, Node, terminal commands, or API keys need to be installed manually. The ZIP alternative contains `Install.cmd` with the same setup screen.

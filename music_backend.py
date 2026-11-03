@@ -35,6 +35,7 @@ BASE = "http://127.0.0.1:8001"
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 JOBS = ROOT / "LongTasks" / "music-jobs"
 AUDIO_REFERENCES = frozenset({".wav", ".mp3", ".flac"})
+TRANSCODE_AUDIO_REFERENCES = frozenset({".m4a", ".aac", ".ogg", ".opus"})
 VIDEO_REFERENCES = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv"})
 
 
@@ -183,7 +184,7 @@ def _upload_cover(request: dict, source: Path, field: str = "src_audio") -> dict
 
 
 def _upload_reference_media(request: dict, source: Path, field: str) -> dict:
-    """Extract a video's audio only for the local upload, without altering it."""
+    """Convert compressed audio or a video's track for the local music API."""
     if source.suffix.lower() in AUDIO_REFERENCES:
         return _upload_cover(request, source, field)
     import imageio_ffmpeg
@@ -200,9 +201,9 @@ def _upload_reference_media(request: dict, source: Path, field: str) -> dict:
                 capture_output=True, text=True, timeout=300, creationflags=HIDE,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise RuntimeError("Could not read the video reference's audio track") from exc
+            raise RuntimeError("Could not read the reference's audio track") from exc
         if result.returncode or not audio.is_file() or audio.stat().st_size <= 44:
-            raise RuntimeError("The video reference has no readable audio track: "
+            raise RuntimeError("The reference has no readable audio track: "
                                + result.stderr[-180:])
         return _upload_cover(request, audio, field)
 
@@ -343,7 +344,7 @@ def _generate_music(
         raise ValueError("Output already exists. Choose a new filename.")
     source = Path(source_path).resolve() if source_path else None
     if source and (not source.is_file() or source.suffix.lower() not in
-                   AUDIO_REFERENCES | VIDEO_REFERENCES):
+                   AUDIO_REFERENCES | TRANSCODE_AUDIO_REFERENCES | VIDEO_REFERENCES):
         raise ValueError("Choose an existing WAV, MP3, FLAC, MP4, MOV, M4V, WebM or MKV reference.")
     reference_mode = effective_reference_mode(source, duration_seconds, reference_mode)
     lm_ready = start_server()
@@ -934,7 +935,8 @@ def start_music_job(
     if target.suffix.lower() not in (".wav", ".mp3", ".flac") or target.exists():
         raise ValueError("Choose a new WAV, MP3 or FLAC output file.")
     if source_path and (not Path(source_path).resolve().is_file() or
-                        Path(source_path).suffix.lower() not in AUDIO_REFERENCES | VIDEO_REFERENCES):
+                        Path(source_path).suffix.lower() not in
+                        AUDIO_REFERENCES | TRANSCODE_AUDIO_REFERENCES | VIDEO_REFERENCES):
         raise ValueError("Choose an existing audio or video reference file.")
     reference_mode = effective_reference_mode(
         Path(source_path).resolve() if source_path else None,

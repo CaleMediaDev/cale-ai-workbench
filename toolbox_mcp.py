@@ -40,7 +40,7 @@ LOCAL_CATALOG = {
         }, "required": ["prompt", "output_path"]},
     },
     "local.start_music_job": {
-        "description": "Start durable local music from a prompt or selected audio/video reference (WAV, MP3, FLAC, MP4, MOV, M4V, WebM, MKV). When a different duration is requested, use reference_mode=style for a full-length new song. Check local.music_job_status.",
+        "description": "Start durable local music from a prompt or selected audio/video reference (WAV, MP3, FLAC, M4A, AAC, OGG, OPUS, MP4, MOV, M4V, WebM, MKV). When a different duration is requested, use reference_mode=style for a full-length new song. Check local.music_job_status.",
         "inputSchema": {"type": "object", "properties": {
             "prompt": {"type": "string"}, "output_path": {"type": "string"},
             "lyrics": {"type": "string"}, "duration_seconds": {"type": "integer"},

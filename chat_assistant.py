@@ -23,7 +23,8 @@ QUICK_FILE_TYPES = {
     ".jpeg", ".webp", ".bmp", ".gif",
 }
 MUSIC_REFERENCE_TYPES = frozenset({
-    ".wav", ".mp3", ".flac", ".mp4", ".mov", ".m4v", ".webm", ".mkv",
+    ".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus",
+    ".mp4", ".mov", ".m4v", ".webm", ".mkv",
 })
 FOLLOWUP_STATUSES = frozenset({
     "queued", "waiting_for_setup", "working", "checking", "paused",

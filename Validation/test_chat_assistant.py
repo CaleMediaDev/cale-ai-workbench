@@ -410,6 +410,10 @@ def test_attached_video_reference_starts_direct_song_without_hijacking_video_edi
     assert chat_assistant.route_with_files("Make a music video from this song", [], clip) == "task"
     assert chat_assistant.music_reference_request(request, clip + [r"C:\music\other.mp3"]) is None
     assert chat_assistant.music_reference_request("Make a song about the beach", clip) is None
+    phone_audio = [r"C:\music\voice-note.m4a"]
+    assert chat_assistant.route_with_files(
+        "Make a 3 minute song using this recording as a reference", [], phone_audio,
+    ) == "music"
 
 
 def test_music_edits_reach_agent_tools_instead_of_plain_chat():
