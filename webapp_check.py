@@ -107,6 +107,25 @@ def validate_spec(folder: Path, spec: dict) -> Path:
     return page
 
 
+def project_only_route(folder: Path):
+    """Restrict a local preview/check to project files and inline resources."""
+    root = folder.resolve()
+
+    def handle(route):
+        parsed = urlparse(route.request.url)
+        if parsed.scheme == "file":
+            local = Path(url2pathname(parsed.path)).resolve()
+            if local.is_relative_to(root):
+                route.continue_()
+                return
+        elif parsed.scheme in {"data", "blob", "about"}:
+            route.continue_()
+            return
+        route.abort()
+
+    return handle
+
+
 def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
     """Exercise a local page offline and report each actual browser assertion."""
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
@@ -121,19 +140,7 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
         try:
             context = browser.new_context(offline=True, viewport={
                 "width": spec.get("viewport_width", 375), "height": 812})
-            def project_only(route):
-                parsed = urlparse(route.request.url)
-                if parsed.scheme == "file":
-                    local = Path(url2pathname(parsed.path)).resolve()
-                    if local.is_relative_to(folder.resolve()):
-                        route.continue_()
-                        return
-                elif parsed.scheme in {"data", "blob", "about"}:
-                    route.continue_()
-                    return
-                route.abort()
-
-            context.route("**/*", project_only)
+            context.route("**/*", project_only_route(folder))
             page = context.new_page()
             page.on("pageerror", lambda error: errors.append(str(error)[:300]))
             page.goto(page_path.as_uri(), wait_until="load", timeout=15_000)

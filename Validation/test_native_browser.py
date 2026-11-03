@@ -20,6 +20,57 @@ def test_rejected_file_url_does_not_start_a_browser(tmp_path):
             native_browser.execute(tmp_path, "open", {"url": "file:///tmp/page.html"})
 
 
+def test_local_project_open_rejects_escape_before_browser_launch(tmp_path):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    (tmp_path / "outside.html").write_text("outside", encoding="utf-8")
+    (folder / "notes.txt").write_text("not HTML", encoding="utf-8")
+    with patch.object(native_browser, "_page", side_effect=AssertionError("browser started")):
+        for path in ("../outside.html", str(tmp_path / "outside.html"), "notes.txt", "missing.html"):
+            with pytest.raises(ValueError):
+                native_browser.execute(folder, "open_project", {"path": path})
+
+
+def test_local_project_preview_is_offline_interactive_and_separate_from_online_profile(tmp_path):
+    pytest.importorskip("playwright")
+    requests = []
+
+    class CountedPage(Page):
+        def do_GET(self):
+            requests.append(self.path)
+            super().do_GET()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), CountedPage)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/"
+        native_browser.execute(tmp_path, "open", {"url": url})
+        online_page = native_browser._page(tmp_path)
+        (tmp_path / "game.html").write_text(
+            '<!doctype html><title>Local arcade</title><body>'
+            '<button onclick="document.getElementById(\'score\').textContent=\'1\'">Fire</button>'
+            '<p id="score">0</p>'
+            f'<script src="{url}should-be-blocked"></script></body>', encoding="utf-8")
+        result = json.loads(native_agent.execute_tool(tmp_path, "browser_open_project", {"path": "game.html"}))
+        assert result["title"] == "Local arcade"
+        offline_page = native_browser._page(tmp_path)
+        assert offline_page is not online_page
+        assert "/should-be-blocked" not in requests
+        snapshot = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        fire = next(item["ref"] for item in snapshot["controls"] if item["label"] == "Fire")
+        native_browser.execute(tmp_path, "click", {"ref": fire})
+        assert offline_page.locator("#score").inner_text() == "1"
+        assert (tmp_path / ".local-ai/browser.png").is_file()
+        assert (tmp_path / ".local-ai/project-browser-profile").is_dir()
+        native_browser.execute(tmp_path, "open", {"url": url})
+        assert native_browser._page(tmp_path) is online_page
+    finally:
+        native_browser.close()
+        server.shutdown()
+        server.server_close()
+
+
 class Page(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/download":

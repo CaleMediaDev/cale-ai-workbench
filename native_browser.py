@@ -18,6 +18,7 @@ import project_memory
 
 _PLAYWRIGHT = None
 _CONTEXTS = {}
+_ACTIVE_LOCAL = {}
 MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
 
@@ -44,20 +45,27 @@ def _download_target(folder: Path, filename: str) -> Path:
     return target
 
 
-def _page(folder: Path):
+def _page(folder: Path, local: bool | None = None):
     global _PLAYWRIGHT
-    key = str(folder.resolve())
+    root = str(folder.resolve())
+    local = _ACTIVE_LOCAL.get(root, False) if local is None else local
+    key = (root, local)
     if key not in _CONTEXTS:
         from playwright.sync_api import sync_playwright
 
         if _PLAYWRIGHT is None:
             _PLAYWRIGHT = sync_playwright().start()
-        profile = folder / ".local-ai" / "browser-profile"
+        profile = folder / ".local-ai" / ("project-browser-profile" if local else "browser-profile")
         profile.mkdir(parents=True, exist_ok=True)
         context = _PLAYWRIGHT.chromium.launch_persistent_context(
-            str(profile), headless=True, accept_downloads=True,
+            str(profile), headless=True, accept_downloads=True, offline=local,
         )
+        if local:
+            from webapp_check import project_only_route
+
+            context.route("**/*", project_only_route(folder))
         _CONTEXTS[key] = context
+    _ACTIVE_LOCAL[root] = local
     context = _CONTEXTS[key]
     return context.pages[-1] if context.pages else context.new_page()
 
@@ -79,6 +87,7 @@ def close() -> None:
         except Exception:
             pass
     _CONTEXTS.clear()
+    _ACTIVE_LOCAL.clear()
     if _PLAYWRIGHT is not None:
         try:
             _PLAYWRIGHT.stop()
@@ -97,9 +106,16 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Use a full http:// or https:// URL")
-    page = _page(folder)
+    elif action == "open_project":
+        from webapp_check import _project_file
+
+        # Validate before launching Chromium or changing the active context.
+        url = _project_file(folder, arguments.get("path")).as_uri()
+    page = _page(folder, local=action == "open_project") if action in {"open", "open_project"} else _page(folder)
     if action == "open":
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    elif action == "open_project":
+        page.goto(url, wait_until="load", timeout=15000)
     elif action == "click":
         _control(page, str(arguments["ref"])).click(timeout=10000)
     elif action == "type":
