@@ -90,10 +90,29 @@ class Controls:
             return
         self.popup = popup = tk.Toplevel(self.window)
         popup.title("Donate my ChatGPT")
-        popup.geometry("650x590")
-        popup.minsize(620, 570)
-        outer = ttk.Frame(popup, padding=24)
-        outer.pack(fill="both", expand=True)
+        popup.geometry(f"700x{min(720, popup.winfo_screenheight() - 100)}")
+        popup.minsize(620, 540)
+        # The installed desktop uses larger fonts/padding than a plain Tk
+        # preview. Keep the review link visible and let short screens scroll.
+        footer = ttk.Frame(popup, padding=(24, 10, 24, 16))
+        footer.pack(side="bottom", fill="x")
+        ttk.Button(footer, text="View contributions on GitHub ↗",
+                   command=lambda: webbrowser.open(donation.REVIEW_URL)).pack(anchor="w")
+        canvas = tk.Canvas(popup, highlightthickness=0, borderwidth=0,
+                           background=ttk.Style(popup).lookup("TFrame", "background"))
+        scrollbar = ttk.Scrollbar(popup, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(fill="both", expand=True)
+        outer = ttk.Frame(canvas, padding=24)
+        content = canvas.create_window((0, 0), window=outer, anchor="nw")
+        outer.bind("<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(content, width=event.width))
+        def scroll(event):
+            self.service.activity()
+            canvas.yview_scroll(-3 if event.delta > 0 else 3, "units")
+            return "break"
+        popup.bind("<MouseWheel>", scroll, add="+")
         ttk.Label(outer, text="Help make Cale better", font=("Segoe UI", 23, "bold")).pack(anchor="w")
         ttk.Label(outer, text=(
             "Let Cale use your ChatGPT/Codex allowance or available credits while you're away. "
@@ -121,7 +140,5 @@ class Controls:
         ttk.Label(outer, textvariable=self.counter).pack(anchor="w", pady=(14, 3))
         ttk.Label(outer, text="Counts reported input and output tokens, including reviews with no code change.",
                   style="Muted.TLabel", wraplength=585).pack(anchor="w")
-        ttk.Button(outer, text="View contributions on GitHub ↗",
-                   command=lambda: webbrowser.open(donation.REVIEW_URL)).pack(anchor="w", pady=(14, 0))
         self.checked_at = 0
         self.refresh()
