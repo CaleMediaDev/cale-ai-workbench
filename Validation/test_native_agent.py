@@ -1231,6 +1231,60 @@ def test_checker_memory_requires_explicit_pass_and_preserves_failed_file_identit
         assert "private report" not in summary
 
 
+def test_repeated_unchanged_read_batches_get_guidance_after_complete_tool_replies():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / "game.js").write_text("// code\n" * 460, encoding="utf-8")
+        seen = []
+
+        def complete(payload):
+            seen.append(copy.deepcopy(payload))
+            number = len(seen)
+            calls = [{"id": f"read-{number}-{line}", "type": "function", "function": {
+                "name": "read_file", "arguments": json.dumps({"path": "game.js", "start_line": line})}}
+                for line in (1, 151, 301)] if number < 3 else [{
+                    "id": "list-after-guidance", "type": "function", "function": {
+                        "name": "list_files", "arguments": "{}"}}]
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": calls}}]}
+
+        original = native_agent.execute_tool
+        executed_reads = []
+        def execute(root, name, args):
+            if name == "read_file":
+                executed_reads.append(args)
+            return original(root, name, args)
+
+        with (patch.object(native_agent, "MAX_TURNS_PER_SLICE", 3),
+              patch.object(native_agent, "execute_tool", side_effect=execute)):
+            state = native_agent.run_slice(item, complete=complete)
+        assert state["status"] == "continue"
+        assert len(executed_reads) == 6  # Guidance never denies a legitimate read.
+        messages = seen[2]["messages"]
+        notice = next(index for index, message in enumerate(messages)
+                      if "Several unchanged file sections" in str(message.get("content", "")))
+        assert [message["role"] for message in messages[notice - 3:notice]] == ["tool"] * 3
+        assert state["read_cycle_nudged"]
+        assert all(len(digest) == 64 for digest in state["recent_read_hashes"])
+
+
+def test_read_cycle_ignores_new_content_and_resets_after_source_edit_or_user_change():
+    state = {}
+    args = {"path": "game.js", "start_line": 1}
+    for number in range(5):
+        assert not native_agent.remember_read_cycle(state, "read_file", args, f"Changed {number}", "Completed")
+    for _ in range(2):
+        assert not native_agent.remember_read_cycle(state, "read_file", args, "Changed 4", "Completed")
+    assert native_agent.remember_read_cycle(state, "read_file", args, "Changed 4", "Completed")
+    native_agent.remember_read_cycle(state, "write_file", {"path": ".local-ai/PROGRESS.md"}, "Saved", "Completed")
+    assert state["read_cycle_nudged"]
+    native_agent.remember_read_cycle(state, "edit_file", args, "Saved", "Completed")
+    assert "recent_read_hashes" not in state
+    assert not native_agent.remember_read_cycle(state, "read_file", args, "Changed 4", "Completed")
+    native_agent.invalidate_checks(state)
+    assert "recent_read_hashes" not in state
+
+
 def test_repeated_identical_tool_failure_prompts_a_different_approach():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

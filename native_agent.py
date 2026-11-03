@@ -368,6 +368,33 @@ def transform_project_csv(folder: Path, arguments: dict) -> str:
                        "verifier": str(verifier.relative_to(folder))})
 
 
+def remember_read_cycle(state: dict, tool: str, arguments: dict, result: str, outcome: str) -> bool:
+    """Notice repeated unchanged excerpts without blocking legitimate rereads.
+
+    Hashes survive worker slices without copying source text into another
+    cache. A real source edit clears the observation window; plan/progress
+    notes alone should not disguise an inspection loop.
+    """
+    if outcome != "Completed":
+        return False
+    if tool in {"write_file", "edit_file", "transform_csv"}:
+        path = str(arguments.get("path") or arguments.get("output_path") or "").replace("\\", "/")
+        if path not in {"PLAN.md", "PROGRESS.md", ".local-ai/PLAN.md", ".local-ai/PROGRESS.md"}:
+            state.pop("recent_read_hashes", None)
+            state.pop("read_cycle_nudged", None)
+        return False
+    if tool != "read_file":
+        return False
+    digest = hashlib.sha256((json.dumps(arguments, sort_keys=True) + "\0" + result).encode(
+        "utf-8", errors="replace")).hexdigest()
+    history = (state.get("recent_read_hashes") or [])[-23:] + [digest]
+    state["recent_read_hashes"] = history
+    if len(history) - len(set(history)) >= 3 and not state.get("read_cycle_nudged"):
+        state["read_cycle_nudged"] = True
+        return True
+    return False
+
+
 def readable_powershell_error(stderr: str) -> str:
     """Decode parser errors serialized before the script's catch block runs."""
     marker = "#< CLIXML"
@@ -1061,6 +1088,8 @@ def invalidate_checks(state: dict) -> None:
     state["document_checker_passed"] = False
     state["verifier_nudged"] = False
     state.pop("failed_checks", None)
+    state.pop("recent_read_hashes", None)
+    state.pop("read_cycle_nudged", None)
 
 
 def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: str) -> None:
@@ -1392,6 +1421,7 @@ def run_slice(project: dict, complete=None) -> dict:
             state["answer"] = str(message.get("content") or "")
             save_state(project, state)
             return state
+        read_cycle_notice = False
         for item in calls:
             state["premature_finishes"] = 0
             latest = read_state(project)
@@ -1428,6 +1458,8 @@ def run_slice(project: dict, complete=None) -> dict:
 
             task_context.record_action(folder, function.get("name", ""), result, args)
             outcome = task_context.action_outcome(function.get("name", ""), result)
+            read_cycle_notice = remember_read_cycle(
+                state, function.get("name", ""), args, result, outcome) or read_cycle_notice
             remember_checker_verdict(state, function.get("name", ""), args, result)
             if function.get("name") == "check_document_report":
                 state["document_checker_attempted"] = True
@@ -1480,6 +1512,16 @@ def run_slice(project: dict, complete=None) -> dict:
                 state["failure_nudged"] = False
             state["messages"] = messages
             state["current"] = f"{function.get('name', 'tool')}: {result[:150]}"
+            save_state(project, state)
+        if read_cycle_notice:
+            # Keep all tool replies together before inserting guidance; a
+            # user message between replies breaks provider tool-call formats.
+            messages.append({"role": "user", "content":
+                             "Several unchanged file sections have been read more than once. "
+                             "Use the saved checkpoint and latest excerpts to take the next concrete "
+                             "edit or behavior-check step. Read only specific missing lines if needed; "
+                             "avoid restarting a full source inspection."})
+            state["messages"] = messages
             save_state(project, state)
         if (int(state.get("same_tool_failures", 0)) >= 2
                 and not state.get("failure_nudged")):
