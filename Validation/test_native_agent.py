@@ -146,6 +146,25 @@ def test_powershell_cmdlet_errors_and_native_exit_codes_are_failures():
         assert failed.startswith("Exit code: 7\n"), failed
 
 
+def test_powershell_parser_errors_are_readable_and_explain_shell_mismatch():
+    if os.name != "nt":
+        return
+    with tempfile.TemporaryDirectory() as temporary:
+        result = native_agent.execute_tool(Path(temporary), "run_command", {
+            "shell": "powershell", "command": "Write-Output first && Write-Output second"})
+        assert result.startswith("Exit code: 1\n"), result
+        assert "not a valid statement separator" in result
+        assert "#< CLIXML" not in result
+        assert "_x000D_" not in result
+        assert "semicolons instead of &&" in result
+
+
+def test_partial_powershell_error_xml_is_preserved_instead_of_hidden():
+    output = "#< CLIXML\n<Objs><S S='Error'>incomplete"
+    assert native_agent.readable_powershell_error(output) == output
+    assert native_agent.readable_powershell_error("ordinary stderr") == "ordinary stderr"
+
+
 def test_run_command_rejects_unknown_shell_before_execution():
     with tempfile.TemporaryDirectory() as temporary:
         with patch.object(native_agent.subprocess, "Popen") as launch:

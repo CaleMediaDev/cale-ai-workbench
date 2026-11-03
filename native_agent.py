@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -63,7 +64,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "discover_local_tools", "description": "Search the fast local SQLite catalog for image, music, video, reverse-engineering, and browser diagnostic tools. Returns exact names and argument schemas; specialist services start on first call.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "call_local_tool", "description": "Call an exact local specialist tool after discover_local_tools. Give its required arguments as a JSON object.", "parameters": {"type": "object", "properties": {"tool": {"type": "string"}, "arguments": {"type": "object"}}, "required": ["tool", "arguments"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "run_verifier", "description": "Run this project's saved .local-ai/verify.ps1 in a contained process. Returns the real check result and a short log; use after the last source edit.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "run_command", "description": "Run a noninteractive project command with a 90-second limit. Default shell is cmd.exe on Windows, /bin/sh elsewhere. For PowerShell cmdlets, variables, pipelines, or scripts, set shell to powershell. Returns exit code and output.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}, "shell": {"type": "string", "enum": ["default", "powershell"]}}, "required": ["command"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "run_command", "description": "Run a noninteractive project command with a 90-second limit. Default shell is cmd.exe on Windows, /bin/sh elsewhere. For PowerShell cmdlets, variables, pipelines, or scripts, set shell to powershell (Windows PowerShell 5.1 on Windows). Do not mix cmd syntax such as cd /d or && into PowerShell; use Set-Location and semicolons. Foreground servers time out; use browser_open_project for local HTML previews. Returns exit code and output.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}, "shell": {"type": "string", "enum": ["default", "powershell"]}}, "required": ["command"], "additionalProperties": False}}},
 ]
 
 
@@ -367,6 +368,26 @@ def transform_project_csv(folder: Path, arguments: dict) -> str:
                        "verifier": str(verifier.relative_to(folder))})
 
 
+def readable_powershell_error(stderr: str) -> str:
+    """Decode parser errors serialized before the script's catch block runs."""
+    marker = "#< CLIXML"
+    if marker not in stderr:
+        return stderr
+    prefix, encoded = stderr.split(marker, 1)
+    try:
+        root = ET.fromstring(encoded.strip())
+    except ET.ParseError:
+        return stderr  # Preserve diagnostics when a shell emitted partial XML.
+    messages = [node.text or "" for node in root.iter()
+                if node.tag.rsplit("}", 1)[-1] == "S"
+                and node.attrib.get("S") in {"Error", "Warning"}]
+    if not messages:
+        return stderr
+    decoded = "".join(messages)
+    decoded = re.sub(r"_x([0-9A-Fa-f]{4})_", lambda match: chr(int(match[1], 16)), decoded)
+    return prefix + decoded
+
+
 def execute_tool(folder: Path, name: str, arguments: dict) -> str:
     try:
         if name == "list_files":
@@ -625,6 +646,13 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                             stream.close()
                 return (f"Tool error: Command timed out after {PROJECT_COMMAND_TIMEOUT} seconds. "
                         "Its child processes were stopped; use a noninteractive command.")
+            if selected_shell == "powershell":
+                stderr = readable_powershell_error(stderr)
+                if (process.returncode and os.name == "nt" and "&&" in command
+                        and "not a valid statement separator" in stderr):
+                    stderr += ("\nUse PowerShell 5.1 syntax: semicolons instead of &&, "
+                               "and Set-Location instead of cd /d. For a local HTML app, "
+                               "use browser_open_project; no web server is needed.\n")
             if process.returncode == 0:
                 if checking and long_tasks.fingerprint(folder) != before_check:
                     return ("Exit code: 1\nProject files changed during verification. "

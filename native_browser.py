@@ -105,7 +105,8 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
         url = str(arguments["url"])
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("Use a full http:// or https:// URL")
+            raise ValueError("Use a full http:// or https:// URL. For a local HTML app, "
+                             "use browser_open_project with a relative HTML path; no server is needed.")
     elif action == "open_project":
         from webapp_check import _project_file
 
