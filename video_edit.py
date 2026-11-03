@@ -79,7 +79,17 @@ def edit_video(source_path: str, output_path: str, start_seconds: float = 0,
     if filters:
         args += ["-vf", ",".join(filters)]
     if rate != 1:
-        args += ["-af", f"atempo={rate:g}"]
+        # atempo only accepts 0.5-2.0; chain multiple filters for wider range
+        tempo_filters = []
+        remaining = rate
+        while remaining > 2.0:
+            tempo_filters.append("atempo=2.0")
+            remaining /= 2.0
+        while remaining < 0.5:
+            tempo_filters.append("atempo=0.5")
+            remaining /= 0.5
+        tempo_filters.append(f"atempo={remaining:g}")
+        args += ["-af", ",".join(tempo_filters)]
     args += ["-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
              "-crf", "21", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart"]
     return {**_run(args, output), "edit": "trim/layout/speed", "source": str(source)}

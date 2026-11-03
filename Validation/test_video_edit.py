@@ -46,3 +46,21 @@ def test_agent_can_trim_join_and_replace_soundtrack(tmp_path):
     assert first.exists() and second.exists()
     with pytest.raises(ValueError):
         video_edit.edit_video(str(first), str(first))
+
+
+def test_edit_video_extreme_speed_chains_atempo(tmp_path):
+    """Speed 0.25 and 4.0 should work by chaining atempo filters."""
+    clip = tmp_path / "clip.mp4"
+    _clip(clip, "green")
+    slow = tmp_path / "slow.mp4"
+    fast = tmp_path / "fast.mp4"
+    # 0.25x requires atempo=0.5,atempo=0.5
+    video_edit.edit_video(str(clip), str(slow), duration_seconds=0.3, speed=0.25)
+    assert slow.stat().st_size > 1000
+    # 4.0x requires atempo=2.0,atempo=2.0
+    video_edit.edit_video(str(clip), str(fast), duration_seconds=0.3, speed=4.0)
+    assert fast.stat().st_size > 1000
+    for path in (slow, fast):
+        probe = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(path)],
+                               capture_output=True, text=True)
+        assert "Audio:" in probe.stderr
