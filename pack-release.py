@@ -1,12 +1,16 @@
 """Create the source and installer payload from the explicit install manifest."""
 
 import json
+import re
 import sys
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 root = Path(sys.argv[1]).resolve()
 destination = Path(sys.argv[2]).resolve()
+version = sys.argv[3] if len(sys.argv) > 3 else ""
+if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+    raise ValueError("Pass the release version as the third argument (for example 0.5.419)")
 manifest = json.loads((root / "install-files.json").read_text(encoding="utf-8"))
 # The installed app runs this suite as its background self-check. A forgotten
 # test would make that check look green while exercising less than development.
@@ -33,5 +37,17 @@ with ZipFile(destination, "w", ZIP_DEFLATED, compresslevel=9) as archive:
         path = (root / name).resolve(strict=True)
         if not path.is_relative_to(root) or not path.is_file():
             raise ValueError(f"Invalid release path: {name}")
-        archive.write(path, name)
+        if name == "Install-Backend.ps1":
+            # Stamp the package, not the working tree. The version supplied to
+            # build-release.ps1 is authoritative even when the source is older.
+            backend, count = re.subn(
+                r"(?m)^\$ReleaseVersion='[^'\r\n]*'",
+                "$ReleaseVersion='" + version + "'",
+                path.read_text(encoding="utf-8"),
+            )
+            if count != 1:
+                raise ValueError("Installer must declare exactly one ReleaseVersion")
+            archive.writestr(name, backend)
+        else:
+            archive.write(path, name)
 print(f"Packed {len(names)} source files in {destination}")
