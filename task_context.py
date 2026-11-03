@@ -225,7 +225,7 @@ def snapshot(folder: str | Path) -> str:
         lines.append("Work only on the active step. Make one small source change, run its check "
                      "with task_steps action=complete, then continue from the fresh checkpoint. "
                      "Use split if it is too broad. Completing a batch is not completing the whole request.")
-        if queue["active"] and queue["active"]["check_tool"] == "check_python_function":
+        if queue["active"] and queue["active"]["check_tool"] in {"check_python_function", "check_webapp"}:
             lines.append("SQLite check_arguments above are authoritative for this step. If a case contradicts "
                          "the original requirement, revise the active step through task_steps action=revise, "
                          "preserving its other cases. Editing the generated JSON suite does not revise the step.")
@@ -289,8 +289,8 @@ def _validate_steps(steps: list) -> list[tuple]:
                 raise ValueError("Use a short check_command, or prefer structured check_tool/check_arguments.")
             arguments = {}
         else:
-            if tool not in {"check_python_function", "run_verifier"} or "check_command" in step or "shell" in step:
-                raise ValueError("Structured steps support check_python_function or run_verifier; omit shell/check_command.")
+            if tool not in {"check_python_function", "check_webapp", "run_verifier"} or "check_command" in step or "shell" in step:
+                raise ValueError("Structured steps support check_python_function, check_webapp or run_verifier; omit shell/check_command.")
             arguments = step.get("check_arguments", {})
             if not isinstance(arguments, dict):
                 raise ValueError("check_arguments must be a JSON object.")
@@ -602,3 +602,18 @@ def record_action(folder: str | Path, tool: str, result: str, arguments: dict | 
                 signature=excluded.signature, updated=excluded.updated""", (*diagnostic, time.time()))
             conn.execute("""DELETE FROM task_check_results WHERE rowid NOT IN
                 (SELECT rowid FROM task_check_results ORDER BY passed ASC,updated DESC,rowid DESC LIMIT 128)""")
+        if tool == "check_webapp":
+            try:
+                verdict = json.loads(result)
+                verified = verdict.get("verified_paths", [])
+                if (verdict.get("passed") is True and verdict.get("verifier_check_passed") is True
+                        and isinstance(verified, list) and len(verified) <= 8):
+                    identity = request_hash or request_identity(folder)
+                    for name in verified:
+                        if not isinstance(name, str) or Path(name).is_absolute():
+                            continue
+                        path = (Path(folder) / name).resolve().relative_to(Path(folder).resolve()).as_posix().casefold()
+                        conn.execute("""UPDATE task_check_results SET passed=1,details='',repeats=1,updated=?
+                            WHERE checker='check_webapp' AND path=? AND request_hash=?""", (time.time(), path, identity))
+            except (ValueError, TypeError, AttributeError, OSError):
+                pass  # Bad or stale result metadata must not clear unrelated failures.

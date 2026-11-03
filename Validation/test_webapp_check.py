@@ -337,10 +337,148 @@ def test_offline_check_works_after_task_browser_was_opened():
         (folder / "index.html").write_text(PAGE, encoding="utf-8")
         try:
             native_browser._page(folder)
-            result = native_agent.execute_tool(folder, "check_webapp", SPEC)
+            with patch.object(long_tasks, "projects", return_value=[{"id": "browser-check", "folder": str(folder)}]):
+                result = native_agent.execute_tool(folder, "check_webapp", SPEC)
             assert json.loads(result)["passed"] is True
         finally:
             native_browser.close()
+
+
+def test_retained_browser_sequences_use_fresh_state_and_reject_earlier_regression(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    first = {"path": "index.html", "cases": [{"set": {"bill": "80"}, "expect": {"answer": "96.00"}}]}
+    second = {"path": "index.html", "cases": [{"expect": {"answer": "120.00"}}]}
+    assert webapp_check.save_verifier(tmp_path, first, accumulate=True)
+    assert webapp_check.save_verifier(tmp_path, second, accumulate=True)
+    saved = tmp_path / ".local-ai/webapp-check.json"
+    result = webapp_check.run_saved_checks(tmp_path, saved)
+    assert result["passed"] and len(result["checks"]) == 2
+    # The newest default-only check still passes; the earlier changed input
+    # must remain part of the saved proof rather than being overwritten.
+    (tmp_path / "index.html").write_text(PAGE.replace("n*1.2", "n===80?1:n*1.2"))
+    assert webapp_check.check(tmp_path, second)["passed"]
+    assert not webapp_check.run_saved_checks(tmp_path, saved)["passed"]
+
+
+def test_browser_suite_corrects_same_sequence_and_rejects_tampering_or_new_request(tmp_path):
+    import hashlib
+
+    (tmp_path / "index.html").write_text(PAGE)
+    wrong = {"path": "./index.html", "cases": [{"set": {"bill": "80"}, "expect": {"answer": "wrong"}}]}
+    right = {"path": "index.html", "cases": [{"set": {"bill": "80"}, "expect": {"answer": "96.00"}}]}
+    assert webapp_check.save_verifier(tmp_path, wrong, accumulate=True)
+    assert webapp_check.save_verifier(tmp_path, right, accumulate=True)
+    path = tmp_path / ".local-ai/webapp-check.json"
+    saved = json.loads(path.read_text())
+    assert len(saved["checks"]) == 1 and saved["checks"][0] == right
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert webapp_check.run_saved_checks(tmp_path, path, digest)["passed"]
+    path.write_text(path.read_text() + " ")
+    with pytest.raises(ValueError, match="cases changed"):
+        webapp_check.run_saved_checks(tmp_path, path, digest)
+    (tmp_path / ".local-ai/USER-REQUESTS.md").write_text("Use the revised requirements")
+    with pytest.raises(ValueError, match="instructions changed"):
+        webapp_check.run_saved_checks(tmp_path, path)
+    assert webapp_check.save_verifier(tmp_path, SPEC, accumulate=True)
+    assert len(json.loads(path.read_text())["checks"]) == 1
+
+
+def test_browser_steps_plan_before_source_and_propagate_real_interaction_evidence(tmp_path):
+    item = {"id": "web-step", "folder": str(tmp_path), "brief": "Build an index.html input calculator"}
+    queue = task_context.plan_steps(tmp_path, [{"phase": "Core", "title": "Implement calculation",
+        "check_tool": "check_webapp", "check_arguments": SPEC}])
+    (tmp_path / "index.html").write_text(PAGE)
+    response = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "step", "function": {
+        "name": "task_steps", "arguments": json.dumps({"action": "complete", "step_id": queue["active"]["id"]})}}]}}]}
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(item, complete=lambda _: response)
+    assert task_context.step_status(tmp_path)["done"] == 1
+    assert state["browser_verified"] and state["browser_interactions"] and state["verify_passed"]
+    assert not state["failed_checks"]
+
+
+def test_browser_suite_size_limits_and_tool_syntax_errors_are_explicit(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    with pytest.raises(ValueError, match="Malformed tool argument"):
+        webapp_check.normalize_spec({"path": "index.html", "cases": '[{\\"set\\":{}}]]'})
+    with pytest.raises(ValueError, match="sibling lists"):
+        webapp_check.validate_spec(tmp_path, {"path": "index.html", "cases": [{"expect": {"visible": ["error"]}}]})
+    previous = None
+    for number in range(8):
+        spec = {"path": "index.html", "cases": [{"set": {"bill": str(number + 1)}, "visible": ["answer"]}]}
+        previous = webapp_check.saved_suite(tmp_path, spec, previous)
+    with pytest.raises(ValueError, match="at most 8"):
+        webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [{"set": {"bill": "20"}, "visible": ["answer"]}]}, previous)
+
+
+def test_same_input_sequence_retains_other_assertions_and_allows_explicit_corrections(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    old = {"path": "index.html", "cases": [{"expect": {"answer": "wrong"}, "hidden": ["error"]}]}
+    saved = webapp_check.saved_suite(tmp_path, old)
+    saved = webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [{"mobile_fit": True}]}, saved)
+    case = saved["checks"][0]["cases"][0]
+    assert case == {"expect": {"answer": "wrong"}, "hidden": ["error"], "mobile_fit": True}
+    saved = webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [{"expect": {"answer": "120.00"}}]}, saved)
+    case = saved["checks"][0]["cases"][0]
+    assert case["expect"]["answer"] == "120.00" and case["hidden"] == ["error"] and case["mobile_fit"]
+    saved = webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [{"visible": ["error"]}]}, saved)
+    case = saved["checks"][0]["cases"][0]
+    assert "hidden" not in case and case["visible"] == ["error"] and case["expect"]["answer"] == "120.00"
+    assert old["cases"][0]["expect"]["answer"] == "wrong"  # Caller data was not mutated.
+
+
+def test_saved_browser_suite_accepts_explicit_empty_optional_fields(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    spec = {"path": "index.html", "cases": [{"set": {}, "click": [], "keys": [],
+        "visible": [], "hidden": [], "wait_ms": 0, "expect": {"answer": "120.00"}}]}
+    assert webapp_check.save_verifier(tmp_path, spec, accumulate=True)
+    assert webapp_check.run_saved_checks(tmp_path, tmp_path / ".local-ai/webapp-check.json")["passed"]
+
+
+def test_multi_page_saved_checks_catch_old_failures_and_clear_only_verified_paths(tmp_path):
+    for name in ("first.html", "second.html", "unrelated.html"):
+        (tmp_path / name).write_text(PAGE)
+    item = {"id": "multi-page", "folder": str(tmp_path)}
+    first = {**SPEC, "path": "first.html"}
+    second = {**SPEC, "path": "second.html"}
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        assert json.loads(native_agent.execute_tool(tmp_path, "check_webapp", first))["passed"]
+        assert json.loads(native_agent.execute_tool(tmp_path, "check_webapp", second))["passed"]
+        (tmp_path / "first.html").write_text(PAGE.replace("n*1.2", "n*2"))
+        failed = native_agent.execute_tool(tmp_path, "check_webapp", first)
+        task_context.record_action(tmp_path, "check_webapp", failed, first)
+        assert not json.loads(failed)["passed"]
+        # The current page is fine, but its previously checked sibling is not.
+        assert not json.loads(native_agent.execute_tool(tmp_path, "check_webapp", second))["passed"]
+        (tmp_path / "first.html").write_text(PAGE)
+        passed = native_agent.execute_tool(tmp_path, "check_webapp", second)
+    verdict = json.loads(passed)
+    assert verdict["passed"] and verdict["verified_paths"] == ["first.html", "second.html"]
+    task_context.record_action(tmp_path, "check_webapp", '{"passed":false}', {"path": "unrelated.html"})
+    task_context.record_action(tmp_path, "check_webapp", passed, second)
+    assert [row["path"] for row in task_context.checker_failures(tmp_path, "")] == ["unrelated.html"]
+    state = {}
+    native_agent.remember_checker_verdict(state, "check_webapp", first, failed)
+    native_agent.remember_checker_verdict(state, "check_webapp", {"path": "unrelated.html"}, '{"passed":false}')
+    native_agent.remember_checker_verdict(state, "check_webapp", second, passed)
+    assert list(state["failed_checks"].values()) == ["check_webapp unrelated.html"]
+
+
+def test_direct_browser_step_check_advances_once_with_valid_json_and_keeps_source(tmp_path):
+    item = {"id": "direct-web", "folder": str(tmp_path), "brief": "Build an index.html input calculator"}
+    (tmp_path / "index.html").write_text(PAGE)
+    original = (tmp_path / "index.html").read_bytes()
+    task_context.plan_steps(tmp_path, [{"phase": "Core", "title": "Calculate",
+        "check_tool": "check_webapp", "check_arguments": SPEC},
+        {"phase": "Integration", "title": "Final check", "check_tool": "run_verifier"}])
+    response = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "check", "function": {
+        "name": "check_webapp", "arguments": json.dumps(SPEC)}}]}}]}
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        state = native_agent.run_slice(item, complete=lambda _: response)
+    assert task_context.step_status(tmp_path)["done"] == 1
+    reply = next(message for message in state["messages"] if message.get("role") == "tool")
+    assert json.loads(reply["content"])["step_progress"]["done"] == 1
+    assert (tmp_path / "index.html").read_bytes() == original
 
 
 def test_failed_text_check_reports_actual_value():

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -38,7 +40,9 @@ def normalize_spec(spec: dict) -> dict:
         try:
             result["cases"] = json.loads(result["cases"])
         except ValueError as exc:
-            raise ValueError("cases must be a JSON array of browser cases") from exc
+            raise ValueError('Malformed tool argument: cases must be an actual JSON array, for example '
+                             '[{"set":{"bill":"80"},"expect":{"answer":"96.00"}}]. '
+                             'Do not double-escape it or change the HTML to fix tool syntax.') from exc
     return result
 
 
@@ -94,7 +98,9 @@ def validate_spec(folder: Path, spec: dict) -> Path:
         for name, value in [*updates.items(), *expected.items()]:
             _element_id(name)
             if not isinstance(value, str) or len(value) > 200:
-                raise ValueError("Browser values and expected text must be short strings")
+                raise ValueError("Browser values and expected text must be short strings. "
+                                 "visible/hidden are sibling lists beside expect, not entries inside expect. "
+                                 "Correct the tool arguments before changing the app.")
         for field in ("visible", "hidden"):
             ids = case.get(field, [])
             if not isinstance(ids, list) or len(ids) > 20:
@@ -266,19 +272,148 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
             "normalized_inputs": normalized_inputs}
 
 
-def save_verifier(folder: Path, spec: dict) -> bool:
+def saved_suite(folder: Path, spec: dict, previous: dict | None = None) -> dict:
+    """Retain independent browser sequences, not concatenated stateful cases."""
+    import task_context
+
+    identity = task_context.request_identity(folder)
+    checks = []
+    if (isinstance(previous, dict) and previous.get("suite_version") == 1
+            and previous.get("request_hash") == identity):
+        checks = previous.get("checks", [])
+        if not isinstance(checks, list):
+            raise ValueError("Saved browser checks must be an array")
+    def canonical(value):
+        normalized = normalize_spec(value)
+        page = validate_spec(folder, normalized)
+        normalized["path"] = page.relative_to(folder.resolve()).as_posix()
+        return normalized
+    def batch_key(value):
+        normalized = canonical(value)
+        # Reusing an input sequence replaces mistaken expectations for that
+        # sequence. Other sequences and viewport checks remain independent.
+        return json.dumps([normalized.get("path"), normalized.get("viewport_width", 375),
+            [{key: case.get(key, default) for key, default in (("set", {}), ("click", []), ("keys", []), ("wait_ms", 0))}
+             for case in normalized.get("cases", [])]], sort_keys=True)
+    incoming = canonical(spec)
+    checks = [canonical(check) for check in checks]
+    old = next((check for check in checks if batch_key(check) == batch_key(incoming)), None)
+    if old:
+        merged = {**copy.deepcopy(old), **copy.deepcopy(incoming)}
+        merged["cases"] = []
+        for previous_case, new_case in zip(old["cases"], incoming["cases"], strict=True):
+            case = {**copy.deepcopy(previous_case), **copy.deepcopy(new_case)}
+            expected = {**previous_case.get("expect", {}), **new_case.get("expect", {})}
+            hidden_now = set(new_case.get("hidden", []))
+            for name in hidden_now:
+                expected.pop(name, None)
+            if expected:
+                case["expect"] = expected
+            else:
+                case.pop("expect", None)
+            visible_now = set(new_case.get("visible", [])) | set(new_case.get("expect", {}))
+            for field, opposite in (("visible", hidden_now), ("hidden", visible_now)):
+                targets = [target for target in dict.fromkeys(
+                    previous_case.get(field, []) + new_case.get(field, [])) if target not in opposite]
+                if targets:
+                    case[field] = targets
+                else:
+                    case.pop(field, None)
+            merged["cases"].append(case)
+        incoming = merged
+    checks = [check for check in checks if batch_key(check) != batch_key(incoming)] + [incoming]
+    if len({batch_key(check) for check in checks}) != len(checks):
+        raise ValueError("Saved browser sequences must be unique")
+    if len(checks) > 8 or sum(len(check["cases"]) for check in checks) > 24:
+        raise ValueError("Use at most 8 browser sequences and 24 retained cases; consolidate a complete integration check")
+    wait = 0
+    for check in checks:
+        validate_spec(folder, check)
+        for case in check["cases"]:
+            wait += case.get("wait_ms", 0) + sum(key.get("hold_ms", 0) for key in case.get("keys", []))
+    if wait > 10000:
+        raise ValueError("All retained browser sequences may wait at most 10000 milliseconds")
+    suite = {"suite_version": 1, "request_hash": identity, "checks": checks}
+    if len(json.dumps(suite, allow_nan=False).encode("utf-8")) > 64000:
+        raise ValueError("Saved browser checks must be under 64 KB")
+    return suite
+
+
+def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = None) -> dict:
+    """Replay request-bound sequences separately and reject changed test data."""
+    import task_context
+
+    raw = spec_file.read_bytes()
+    if len(raw) > 64000:
+        raise ValueError("Saved browser checks must be under 64 KB")
+    digest = hashlib.sha256(raw).hexdigest()
+    if expected_sha is not None and digest != expected_sha:
+        raise ValueError("Saved browser cases changed; rerun check_webapp")
+    saved = json.loads(raw)
+    if not isinstance(saved, dict):
+        raise ValueError("Saved browser checks must be an object")
+    if "suite_version" not in saved:
+        return check(folder, saved)  # Existing generated scripts remain usable.
+    if (saved.get("suite_version") != 1 or set(saved) != {"suite_version", "request_hash", "checks"}
+            or saved.get("request_hash") != task_context.request_identity(folder)):
+        raise ValueError("Browser check instructions changed; rerun check_webapp")
+    checks = saved.get("checks")
+    if not isinstance(checks, list) or not checks:
+        raise ValueError("Saved browser suite needs real cases")
+    # Validate the whole suite before executing any page, including its total
+    # size/wait limits. Every sequence opens a fresh offline browser context.
+    normalized = saved_suite(folder, checks[-1], saved)
+    if len(normalized["checks"]) != len(checks):
+        raise ValueError("Saved browser suite contains duplicate sequences")
+    results = []
+    failures_left = 4
+    for spec in checks:
+        result = check(folder, spec)
+        failures = [case for case in result["cases"] if not case["passed"]][:failures_left]
+        failures_left -= len(failures)
+        results.append({"path": spec["path"], "viewport_width": spec.get("viewport_width", 375),
+                        "passed": result["passed"], "cases": failures,
+                        "javascript_errors": result["javascript_errors"][:3]})
+    unchanged = (spec_file.read_bytes() == raw
+                 and saved["request_hash"] == task_context.request_identity(folder))
+    passed = all(result["passed"] for result in results) and unchanged
+    return {"passed": passed, "verified_paths": sorted({spec["path"] for spec in checks}) if passed else [],
+            "checks": results, "errors": [] if unchanged else ["Saved cases or user instructions changed during verification"]}
+
+
+def save_verifier(folder: Path, spec: dict, *, accumulate: bool = False) -> bool:
     """Seed a read-only project verifier, preserving a custom existing check."""
     spec = normalize_spec(spec)
     validate_spec(folder, spec)
-    notes = folder / ".local-ai"
+    folder = folder.resolve()
+    notes = (folder / ".local-ai").resolve()
+    if not notes.is_relative_to(folder):
+        raise ValueError("Browser checks must stay inside this project")
     notes.mkdir(parents=True, exist_ok=True)
     verifier = notes / "verify.ps1"
+    if verifier.is_symlink():
+        raise ValueError("The verifier must be a regular project file")
     marker = "# Generated by Cale check_webapp"
     existing = verifier.read_text(encoding="utf-8-sig") if verifier.is_file() else ""
     if existing and not existing.startswith(marker):
         return False
     spec_path = notes / "webapp-check.json"
-    spec_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
+    if spec_path.is_symlink():
+        raise ValueError("The check specification must be a regular project file")
+    if accumulate:
+        previous = None
+        if spec_path.is_file():
+            if spec_path.stat().st_size > 64000:
+                raise ValueError("Saved browser checks must be under 64 KB")
+            previous = json.loads(spec_path.read_text(encoding="utf-8"))
+        spec = saved_suite(folder, spec, previous)
+    raw = json.dumps(spec, indent=2, allow_nan=False).encode("utf-8")
+    if len(raw) > 64000:
+        raise ValueError("Saved browser checks must be under 64 KB")
+    staged = spec_path.with_suffix(".tmp")
+    staged.write_bytes(raw)
+    os.replace(staged, spec_path)
+    attestation = " --spec-sha256 " + hashlib.sha256(raw).hexdigest() if accumulate else ""
     def literal(value: str) -> str:
         return "'" + value.replace("'", "''") + "'"
     script = (
@@ -287,10 +422,12 @@ def save_verifier(folder: Path, spec: dict) -> bool:
         "if (-not (Test-Path -LiteralPath $python)) { $python = (Get-Command python -ErrorAction Stop).Source }\n"
         f"& $python {literal(str(Path(__file__).resolve()))} --folder "
         "(Split-Path -Parent $PSScriptRoot) --spec "
-        "(Join-Path $PSScriptRoot 'webapp-check.json')\n"
+        "(Join-Path $PSScriptRoot 'webapp-check.json')" + attestation + "\n"
         "if ($LASTEXITCODE -ne 0) { exit 1 }\n"
     )
-    verifier.write_text(script, encoding="utf-8-sig")
+    staged = verifier.with_suffix(".tmp")
+    staged.write_text(script, encoding="utf-8-sig")
+    os.replace(staged, verifier)
     return True
 
 
@@ -298,12 +435,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--folder", type=Path, required=True)
     parser.add_argument("--spec", type=Path, required=True)
+    parser.add_argument("--spec-sha256")
     args = parser.parse_args()
     folder = args.folder.resolve()
     spec_file = args.spec.resolve()
     if not spec_file.is_relative_to(folder / ".local-ai"):
         raise ValueError("Browser check spec must be in this project's .local-ai folder")
-    result = check(folder, json.loads(spec_file.read_text(encoding="utf-8")))
+    result = run_saved_checks(folder, spec_file, args.spec_sha256)
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result["passed"] else 1
 

@@ -391,7 +391,8 @@ def grade_webapp(folder: Path) -> dict:
               "changed_total": False, "invalid_people": False,
               "invalid_blank_bill": False, "invalid_fractional_people": False,
               "mobile_fits": False,
-              "verifier_passes_correct": False, "verifier_rejects_broken_app": False}
+              "verifier_passes_correct": False, "verifier_rejects_broken_app": False,
+              "verifier_rejects_case_regressions": False}
     if not html.is_file():
         result["passed"] = False
         return result
@@ -462,6 +463,29 @@ def grade_webapp(folder: Path) -> dict:
                     result["verifier_rejects_broken_app"] = rejected.returncode != 0
                 finally:
                     html.write_bytes(original)
+            # Alter one actual input read, keeping defaults and other
+            # handlers intact. Removing every script alone cannot establish
+            # that the saved verifier covers fractional/blank boundaries.
+            regressions = {}
+            for name, element, old, replacement in (
+                    ("fractional_people", "people", "4.5", "4"),
+                    ("blank_bill", "bill", "", "100"),
+                    ("changed_bill_total", "bill", "80", "100")):
+                override = ("<script>(()=>{const d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');"
+                    "Object.defineProperty(HTMLInputElement.prototype,'value',{configurable:true,"
+                    "get(){const v=d.get.call(this);return this.id===" + json.dumps(element)
+                    + "&&v===" + json.dumps(old) + "?" + json.dumps(replacement)
+                    + ":v},set:d.set});})();</script>").encode("utf-8")
+                mutated = re.sub(rb"(?is)<script\b", lambda match: override + match.group(), original, count=1)
+                try:
+                    html.write_bytes(mutated)
+                    rejected = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
+                        capture_output=True, text=True, timeout=45, check=False)
+                    regressions[name] = mutated != original and rejected.returncode != 0
+                finally:
+                    html.write_bytes(original)
+            result["verifier_case_regressions"] = regressions
+            result["verifier_rejects_case_regressions"] = len(regressions) == 3 and all(regressions.values())
         except (OSError, subprocess.TimeoutExpired) as exc:
             result["verifier_error"] = f"{type(exc).__name__}: {exc}"
     result["passed"] = all(value for key, value in result.items()
@@ -580,7 +604,8 @@ def main() -> int:
         if args.stepwise:
             brief += (" Use task_steps to plan and complete at least two tiny steps in the local "
                       "SQLite queue. Repair/build the core first, then boundary checks. Finish each "
-                      "step using its actual read-only acceptance command; do not skip the queue.")
+                      "step using its actual read-only acceptance check; prefer check_tool/check_arguments "
+                      "when available and do not skip the queue.")
         if args.prepared_checks:
             brief += (" A read-only .local-ai/verify.ps1 is already provided. Preserve it and use "
                       "powershell -NoProfile -File .local-ai/verify.ps1 for each step's check_command. "

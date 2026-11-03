@@ -46,7 +46,7 @@ TOOLS = [
             "required": ["path", "function", "cases"], "additionalProperties": False}}},
     {"type": "function", "function": {
         "name": "task_steps",
-        "description": "Durable SQLite queue for small phases. Plan 2-6 tiny steps. Prefer check_tool='check_python_function' with check_arguments={path,function,cases}, or check_tool='run_verifier'. Other work can use a read-only check_command. complete runs the saved acceptance test and advances only if it passes without changing project source. split makes smaller steps; revise corrects the active check with steps=[one corrected step]. status resumes progress. A completed batch is not whole-project verification.",
+        "description": "Durable SQLite queue for small phases. Plan 2-6 tiny steps. Use check_tool='check_python_function' with check_arguments={path,function,cases}, or check_tool='check_webapp' with check_arguments={path,cases} for HTML apps. Use check_tool='run_verifier' for integration. Other work can use a read-only check_command. complete runs the saved acceptance check and advances only on success without source changes. split makes smaller steps; revise corrects the active check with steps=[one corrected step]. status resumes progress. A completed batch is not whole-project verification.",
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string", "enum": ["plan", "status", "complete", "split", "revise"]},
             "step_id": {"type": "integer"},
@@ -56,7 +56,7 @@ TOOLS = [
                     "title": {"type": "string", "maxLength": 240},
                     "check_command": {"type": "string", "maxLength": 2000},
                     "shell": {"type": "string", "enum": ["default", "powershell"]},
-                    "check_tool": {"type": "string", "enum": ["check_python_function", "run_verifier"]},
+                    "check_tool": {"type": "string", "enum": ["check_python_function", "check_webapp", "run_verifier"]},
                     "check_arguments": {"type": "object"}},
                 "required": ["phase", "title"], "additionalProperties": False}}},
             "required": ["action"], "additionalProperties": False}}},
@@ -487,7 +487,7 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                 kind = active["check_tool"]
                 check_args = (active["check_arguments"] if kind != "run_command" else
                               {"command": active["check_command"], "shell": active["shell"]})
-                structured = kind == "check_python_function"
+                structured = kind in {"check_python_function", "check_webapp"}
                 before = step_source_fingerprint(folder, structured)
                 checked = execute_tool(folder, kind, check_args)
                 status_result = step_exit_result(kind, checked)
@@ -503,13 +503,18 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                     except ValueError:
                         verdict = {}
                     value["check_verdict"] = {"passed": value["passed"]}
+                    value["check_path"] = check_args.get("path", "")
                     value["verifier_check_passed"] = value["passed"] and verdict.get("verifier_check_passed") is True
+                    if kind == "check_webapp":
+                        value["browser_evidence"] = browser_check_evidence(folder, check_args, checked) if value["passed"] else {}
+                        value["check_verdict"].update({"verifier_check_passed": value["verifier_check_passed"],
+                                                     "verified_paths": verdict.get("verified_paths", [])})
                     if not value["passed"]:
                         value["next_action"] = (
                             "Compare the failed case with the original requirement. Fix source if it is wrong. "
                             "If the expected value is wrong, use task_steps action=revise with step_id="
                             f"{active['id']} and steps=[one corrected step including all its acceptance cases]. "
-                            "Then complete that step again. Editing cale-python-checks.json does not revise "
+                            "Then complete that step again. Editing generated checker JSON does not revise "
                             "the acceptance cases saved in SQLite.")
                 elif kind == "run_verifier":
                     value["verifier_check_passed"] = value["passed"]
@@ -586,11 +591,25 @@ def execute_tool(folder: Path, name: str, arguments: dict) -> str:
                     "text or visibility in the actual game/app state."
                 )
             if result["passed"]:
-                result["verifier_saved"] = webapp_check.save_verifier(folder, arguments)
+                result["verifier_saved"] = webapp_check.save_verifier(folder, arguments, accumulate=True)
                 if result["verifier_saved"]:
                     verification = execute_tool(folder, "run_verifier", {})
                     result["verifier_check_passed"] = verification.startswith("Exit code: 0\n")
                     result["verification"] = verification[-1200:]
+                    if result["verifier_check_passed"]:
+                        # The supervisor appends its own exit-code footer.
+                        # Read the checker's JSON line, not that final footer.
+                        for line in reversed(verification.splitlines()):
+                            try:
+                                verified = json.loads(line)
+                                if isinstance(verified, dict) and verified.get("passed") is True:
+                                    result["verified_paths"] = verified.get("verified_paths", [])
+                                    break
+                            except ValueError:
+                                continue
+                    if not result["verifier_check_passed"]:
+                        result["passed"] = False
+                        result["errors"] = ["Retained browser checks failed: " + verification[-1200:]]
             result["ok"] = result["passed"]
             return json.dumps(result, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "write_file":
@@ -1102,7 +1121,10 @@ def prompt(project: dict) -> str:
     )
     verification_hint = (
         "For this interactive single-file HTML app, build the page, then call check_webapp "
-        "with real input and result cases before writing a verifier. That tool creates a "
+        "or save check_tool='check_webapp' and check_arguments={path,cases} in each SQLite step. "
+        "cases is a JSON array; visible/hidden are siblings beside expect. Saved input sequences "
+        "accumulate and each starts from a fresh page; reuse a sequence to correct its expectations. "
+        "Use real input and result cases before writing a verifier. The tool creates a "
         "repeatable .local-ai/verify.ps1 when its cases pass. Fix failed cases, rerun the "
         "browser check after edits, and then run the saved verifier. Keep any required "
         "number input types: browsers reject letters in them, and check_webapp tests "
@@ -1136,7 +1158,8 @@ def prompt(project: dict) -> str:
         "Maintain .local-ai/PLAN.md as a checked milestone list and .local-ai/PROGRESS.md with current work and real checks. "
         "For multi-step work, use task_steps action=plan for 2-6 tiny steps in SQLite. "
         "Each changes one behavior with a read-only check. For Python prefer "
-        "check_tool='check_python_function' with check_arguments; otherwise use check_command. "
+        "check_tool='check_python_function'; for HTML use check_tool='check_webapp', both with check_arguments. "
+        "Use check_command for other checks. "
         "Retain earlier test cases as you add steps. "
         "Build the minimal working skeleton, then one feature, then its edge cases, then integration. "
         "Work on the active step only. Use task_steps action=complete to run its check before "
@@ -1395,7 +1418,7 @@ def step_source_fingerprint(folder: Path, structured: bool = False):
 
 def step_exit_result(kind: str, result: str) -> str:
     """Translate only a registered checker's explicit verdict to queue evidence."""
-    if kind != "check_python_function":
+    if kind not in {"check_python_function", "check_webapp"}:
         return result
     try:
         verdict = json.loads(result)
@@ -1417,17 +1440,29 @@ def compact_step_progress(queue: dict) -> dict:
 
 def step_check_context(folder: Path, name: str, arguments: dict):
     """Recognize the active acceptance check even without a bookkeeping call."""
-    if name not in {"run_command", "run_verifier", "check_python_function"}:
+    if name not in {"run_command", "run_verifier", "check_python_function", "check_webapp"}:
         return None
     import task_context
 
     active = task_context.step_status(folder)["active"]
     if not active:
         return None
-    structured = active["check_tool"] == "check_python_function"
+    structured = active["check_tool"] in {"check_python_function", "check_webapp"}
     if structured:
         try:
-            if name != active["check_tool"] or normalize_python_check(folder, arguments) != normalize_python_check(folder, active["check_arguments"]):
+            if name != active["check_tool"]:
+                return None
+            if name == "check_python_function":
+                same = normalize_python_check(folder, arguments) == normalize_python_check(folder, active["check_arguments"])
+            else:
+                import webapp_check
+
+                def canonical(spec):
+                    value = webapp_check.normalize_spec(spec)
+                    webapp_check.validate_spec(folder, value)
+                    return {"viewport_width": 375, "mobile_fit": False, **value}
+                same = canonical(arguments) == canonical(active["check_arguments"])
+            if not same:
                 return None
         except (OSError, ValueError, SyntaxError):
             return None
@@ -1741,6 +1776,13 @@ def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: st
     failed = state.setdefault("failed_checks", {})
     if verdict["passed"]:
         failed.pop(key, None)
+        if tool == "check_webapp" and verdict.get("verifier_check_passed") is True:
+            verified = verdict.get("verified_paths", [])
+            if isinstance(verified, list) and len(verified) <= 8:
+                for checked_path in verified:
+                    if isinstance(checked_path, str):
+                        normalized = os.path.normcase(os.path.normpath(checked_path)).replace("\\", "/")
+                        failed.pop("check_webapp:" + normalized, None)
     else:
         failed[key] = tool + " " + path
         state["verify_passed"] = False
@@ -2220,8 +2262,13 @@ def run_slice(project: dict, complete=None) -> dict:
             if function.get("name") == "task_steps" and args.get("action") == "complete":
                 try:
                     step_result = json.loads(result)
-                    if step_result.get("check_tool") == "check_python_function":
-                        remember_checker_verdict(state, "check_python_function", {}, json.dumps(step_result["check_verdict"]))
+                    if step_result.get("check_tool") in {"check_python_function", "check_webapp"}:
+                        remember_checker_verdict(state, step_result["check_tool"], {"path": step_result.get("check_path", "")}, json.dumps(step_result["check_verdict"]))
+                    if step_result.get("check_tool") == "check_webapp":
+                        if step_result.get("browser_evidence"):
+                            state.update(step_result["browser_evidence"])
+                        elif step_result.get("passed") is False:
+                            state["browser_verified"] = False
                     if step_result.get("verifier_check_passed") is True:
                         state["verify_passed"] = True
                 except (ValueError, KeyError, AttributeError):

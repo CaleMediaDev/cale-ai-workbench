@@ -1,5 +1,29 @@
 # Native worker reality check
 
+## Browser steps and retained coverage
+
+`native_worker_smoke.py --scenario webapp --stepwise --model cale-fast`
+builds a fresh calculator using database steps and independent offline browser
+grading. The grader requires the saved verifier to reject removal of JavaScript
+and targeted input-read regressions for changed totals, blank bills and fractional
+people. It restores the generated source bytes after each mutation.
+
+The [November 3 browser-step report](results/webapp-steps-20261103.json)
+records three local 9B runs. The baseline exhausted 36 calls in 428.15 seconds
+without a verifier. A structured-check run completed three steps in 118.65
+seconds and its app passed all observed behavior checks, but the stronger grader
+found that its saved tests omitted fractional people. A later prompt experiment
+finished in 66.27 seconds while producing that bug and only one step. That
+unproven extra wording was removed. **None qualifies as a complete pass under
+the stronger grader.** These single runs used evolving code and instructions;
+they do not establish a speedup or broad app-building reliability.
+
+Validation separately proves request-bound browser sequences survive later
+checks, start with fresh state, retain independent assertions for identical
+inputs, detect earlier-page regressions, and clear only actually verified page
+diagnostics. The small model still needs better requirement-coverage reasoning;
+storage and replay cannot supply cases it never writes.
+
 ## Structured Python acceptance checks
 
 Run `native_worker_smoke.py --scenario shipping --stepwise --model cale-fast`

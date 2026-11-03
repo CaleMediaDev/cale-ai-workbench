@@ -34,6 +34,7 @@ extras = [
     "benchmarks/results/small-steps-20261103.json",
     "benchmarks/results/local-3d-20261103.json",
     "benchmarks/results/typed-python-checks-20261103.json",
+    "benchmarks/results/webapp-steps-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",
