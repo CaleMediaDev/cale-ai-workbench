@@ -607,5 +607,239 @@
   "next_investigations": [
     "Repair actual persistence and deletion behavior without weakening user requirements.",
     "Make native split-step shorthand resolve safely against the exact seen active unit; latest trial omitted step_id."
-  ]
+  ],
+  "developments_v462": {
+    "trial": {
+      "scenario": "offline_expense_app",
+      "brief": "Create index.html, a complete single-file offline expense log for a small business.\nUse no accounts, external libraries, fonts, or network requests. Make it readable on a phone.\nThe form has accessible labels Description, Amount, and Category. Category choices are\nSupplies, Travel, Meals, and Other. Its button says Add expense. Show an expense table\nwith Description, Amount, Category, and a Delete button on each expense row.\nShow Total: $0.00 initially; display dollars with two decimal places and keep the total\ncorrect after adding and deleting entries. Reject a blank description, zero or negative\namount, and nonnumeric amounts, showing an accessible inline error with role=alert.\nDescriptions are plain text even when they contain HTML characters. Save entries on\nthis computer with localStorage. Reloading must preserve added entries and deletions.\nBuild actual working files using small SQLite steps for form validation, the expense\ntable/totals, and persistence. Save and run a repeatable verifier that exercises real\nform input and checks persistence across page reload. Keep PLAN.md and PROGRESS.md accurate.\n",
+      "seconds": 416.88,
+      "model_calls": 12,
+      "tool_calls": 12,
+      "prompt_tokens": 149026,
+      "completion_tokens": 7622,
+      "tools_used": [
+        "edit_file",
+        "task_steps",
+        "edit_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "edit_file",
+        "task_steps",
+        "task_steps",
+        "edit_file",
+        "task_steps",
+        "check_webapp"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "size_hint": null,
+          "seconds": 19.08
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 10.94
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 12.6
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 12.3
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 18.31
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 14.1
+        },
+        {
+          "model": "cale-local",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 80.12
+        },
+        {
+          "model": "cale-local",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 121.82
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 23.15
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 8.71
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 38.91
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "size_hint": null,
+          "seconds": 10.91
+        }
+      ],
+      "router_call_attempts": 12,
+      "upstream_local_calls": 18,
+      "resumed": true,
+      "initial_turns": 57,
+      "initial_source_sha256": "c1c7fd85c7f0ac161dd7df40b64ec7a2c391dff955ccc445fce81713ae3846e3",
+      "checkpoint_status": "continue",
+      "inference_error": null,
+      "grade": {
+        "browser": {
+          "checks": {
+            "requested_category_choices": true,
+            "initial_empty": true,
+            "reject_blank": true,
+            "reject_negative": true,
+            "reject_zero": true,
+            "reject_nonnumeric": true,
+            "adds_two_and_totals": true,
+            "category_visible": true,
+            "reload_keeps_entries": true,
+            "delete_updates_total": false,
+            "reload_keeps_deletion": false,
+            "description_plain_text": true,
+            "decimal_totals": false,
+            "mobile_fit": true,
+            "no_remote_requests": true
+          },
+          "errors": [],
+          "remote_requests": [],
+          "passed": false
+        },
+        "verifier_passes_correct": false,
+        "verifier_rejects_missing_javascript": true,
+        "persistence_mutations": {
+          "storage_writes": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          },
+          "deletion_persistence": {
+            "valid_behavior_mutation": true,
+            "verifier_rejected": true
+          }
+        },
+        "verifier_passes_restored": false,
+        "steps": {
+          "total": 5,
+          "done": 3,
+          "remaining": 2
+        },
+        "passed": false
+      },
+      "run_outcome": "failed",
+      "diagnostic_assistance": {
+        "source_sha256": "d87dbdf5dc06f0f4d78dfe963ecb6faa6cdc9e16dd74bb4fdc8483d09713b25d",
+        "observation": {
+          "invalid": [
+            {
+              "id": "amount",
+              "message": "Value must be greater than or equal to 0.01."
+            }
+          ],
+          "submits": 0
+        },
+        "origin": "Independent developer browser inspection; diagnostic feedback, not an unassisted trial.",
+        "feedback_recorded": true
+      }
+    },
+    "source": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Expense Log</title>\n  <style>\n    * { box-sizing: border-box; }\n    body { font-family: system-ui, sans-serif; margin: 20px; line-height: 1.5; }\n    h1 { color: #333; }\n    .form-group { margin-bottom: 15px; }\n    label { display: block; margin-bottom: 5px; font-weight: bold; }\n    input, select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }\n    button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; }\n    button:hover { background: #0056b3; }\n    table { width: 100%; border-collapse: collapse; margin-top: 20px; }\n    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }\n    th { background: #f5f5f5; }\n    .delete-btn { background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }\n    .error { color: #dc3545; font-size: 14px; margin-top: 5px; display: none; }\n    .error.visible { display: block; }\n    .total { margin-top: 20px; font-size: 18px; font-weight: bold; }\n    @media (max-width: 600px) { table, th, td { display: block; width: 100%; } th { display: none; } tr { margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; padding: 10px; } }\n  </style>\n</head>\n<body>\n  <h1>Expense Log</h1>\n  <form id=\"f\">\n    <div class=\"form-group\"><label for=\"description\">Description:</label><input type=\"text\" id=\"description\" name=\"description\"></div>\n    <span class=\"error\" id=\"error\" role=\"alert\" aria-live=\"polite\"></span>\n    <div class=\"form-group\"><label for=\"amount\">Amount:</label><input type=\"number\" id=\"amount\" name=\"amount\" step=\"0.01\" placeholder=\"e.g., 25.50\"></div>\n    <div class=\"form-group\"><label for=\"category\">Category:</label><select id=\"category\" name=\"category\"><option value=\"\">Select</option><option value=\"Supplies\">Supplies</option><option value=\"Travel\">Travel</option><option value=\"Meals\">Meals</option><option value=\"Other\">Other</option></select></div>\n    <button type=\"submit\">Add expense</button>\n  </form>\n  <table id=\"tbl\"><thead><tr><th>Description</th><th>Amount</th><th>Category</th><th>Action</th></tr></thead><tbody id=\"tbody\"></tbody></table>\n  <div class=\"total\">Total: $<span id=\"tot\">0.00</span></div>\n  <script>\n    (function() {\n      const S = 'expenses';\n      let data = JSON.parse(localStorage.getItem(S) || '[]');\n      function render() {\n        const t = document.getElementById('tbody');\n        t.innerHTML = '';\n        data.forEach((e, i) => {\n          const r = document.createElement('tr');\n          r.innerHTML = '<td>' + escape(e.description) + '</td><td>$' + e.amount.toFixed(2) + '</td><td>' + e.category + '</td><td><button class=\"del\" data-i=\"' + i + '\">Delete</button></td>';\n          t.appendChild(r);\n        });\n        const sum = data.reduce((s, x) => s + x.amount, 0);\n        document.getElementById('tot').textContent = sum.toFixed(2);\n      }\n      function escape(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }\n      document.getElementById('f').onsubmit = function(ev) {\n        ev.preventDefault();\n        const errorEl = document.getElementById('error');\n        const desc = document.getElementById('description').value.trim();\n        const amt = parseFloat(document.getElementById('amount').value);\n        const cat = document.getElementById('category').value;\n        \n        // Clear any previous error first\n        errorEl.className = 'error';\n        errorEl.textContent = '';\n        \n        if (!desc) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Description cannot be blank'; \n          return; \n        }\n        if (isNaN(amt)) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Amount must be numeric'; \n          return; \n        }\n        if (amt <= 0) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Amount must be positive'; \n          return; \n        }\n        if (!cat) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Please select a category'; \n          return; \n        }\n        \n        // All validation passed - add the expense\n        data.push({ description: desc, amount: amt, category: cat });\n        localStorage.setItem(S, JSON.stringify(data));\n        render();\n      };\n      document.querySelectorAll('.del').forEach(b => b.onclick = function() {\n        const i = parseInt(this.getAttribute('data-i'));\n        data.splice(i, 1);\n        localStorage.setItem(S, JSON.stringify(data));\n        render();\n      });\n      render();\n    })();\n  </script>\n</body>\n</html>\n",
+    "source_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+    "interpretation": [
+      "Resumed assisted evolving-code trial, not a fresh unassisted build or controlled speed comparison.",
+      "Three SQL units completed; all 15 independent browser checks ran, with 12 passing. Deletion, persisted deletion, and the subsequent decimal-total check failed. The baseline saved verifier failed; rejecting mutations earns no verifier correctness credit.",
+      "This process included the initial shorthand fix but started before the durable one-time-revision guard and fitting-context alias fix; do not attribute those later fixes to this run.",
+      "The route log includes two slow calls through cale-local over the same physical weights as cale-main-64k. Different prompts/retries prevent a controlled latency comparison.",
+      "No general app-building completion or model ranking claim."
+    ],
+    "fitting_alias_probe": {
+      "scenario": "fitting_context_alias_probe",
+      "scope": "local_only",
+      "seconds": 1.07,
+      "selected_model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "reply": "READY",
+      "models": [
+        {
+          "name": "cale-main-64k:latest",
+          "model": "cale-main-64k:latest",
+          "size": 7682517892,
+          "digest": "e6277755cf356522ccdc11be2a29dabe649c31889e10a46258b81c050fa19143",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "9.0B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-11-03T18:56:15.7849054-05:00",
+          "size_vram": 7682517892,
+          "context_length": 65536,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    "observed_large_alias": {
+      "model": "cale-local",
+      "weight_blob": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "context_length": 262144,
+      "size": 16798439174,
+      "size_vram": 9469920541
+    },
+    "probe_limits": "One local READY response confirms eligible alias choice and memory allocation only. It does not measure app-building speed or quality. Initial probe invocations failed request-policy validation before inference; the retained successful probe uses a process-local local_only scope without changing user settings.",
+    "validation": {
+      "native_and_memory_tests_passed": 193,
+      "routing_tests_passed": 119,
+      "routing_subtests_passed": 13,
+      "ruff": "passed"
+    }
+  }
 }

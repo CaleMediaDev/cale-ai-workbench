@@ -470,3 +470,17 @@ The independent grader requires 15 browser behaviors, completed SQL units, and
 a verifier rejecting removed JavaScript and two meaningful storage faults.
 Do not treat this failure, unit tests, or successful helper-function fixtures
 as proof that arbitrary full-app building is reliable.
+
+The retained `developments_v462` section continues the same assisted fixture:
+12 more local calls took 416.88 seconds and completed three of five SQL units.
+Twelve of 15 browser checks passed, including reload of additions; deletion,
+deletion persistence, and the later decimal total failed. The baseline saved
+verifier failed, so its rejection of mutations earns no correctness credit.
+This process predated the final replay guard and alias-selection changes.
+
+Inspection found 64K and 262K aliases over identical physical weights. A later
+local routing probe selected the eligible 64K alias and returned `READY` in
+1.07 seconds, with 7.68 GB total/GPU allocation. The observed 262K allocation
+was 16.80 GB total and 9.47 GB on GPU. This confirms route/memory behavior only,
+not a controlled speed or app-quality comparison. Larger eligible windows and
+manual choices remain available.

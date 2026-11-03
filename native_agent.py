@@ -85,8 +85,10 @@ TOOLS = [
                                  'success without source changes. split makes smaller steps; revise corrects the '
                                  'active check with steps=[one corrected step]. steps must be an actual JSON '
                                  'array, never a quoted or escaped string. status resumes progress. A '
-                                 'native worker may use {action:complete} without step_id to check the exact '
-                                 'active unit shown in its current checkpoint; changed units/checks are rejected. '
+                                 'native worker may omit step_id for complete, split or revise to target its '
+                                 'shown active unit; changed units/checks are rejected. '
+                                 'Store full repeatable cases in steps; saved_case/saved_sequence/suite_sha256 '
+                                 'are one-time checker arguments. '
                                  'completed batch is not whole-project verification. Browser steps with input '
                                  'actions need an observed effect; invariant-only cases can use a freshly '
                                  'rerun same-page, matching-target positive control from the saved suite. Static scaffolding '
@@ -597,11 +599,13 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                 if action == "split" and type(arguments.get("step_id")) is not int:
                     raise ValueError("Supply the active step_id to split.")
                 value = task_context.plan_steps(folder, arguments.get("steps"),
-                    split_id=arguments["step_id"] if action == "split" else None)
+                    split_id=arguments["step_id"] if action == "split" else None,
+                    expected_request=arguments.get("_expected_request"), expected_check=arguments.get("_expected_check"))
             elif action == "revise":
                 if type(arguments.get("step_id")) is not int:
                     raise ValueError("Supply the active step_id to revise.")
-                value = task_context.revise_step(folder, arguments["step_id"], arguments.get("steps"))
+                value = task_context.revise_step(folder, arguments["step_id"], arguments.get("steps"),
+                    expected_request=arguments.get("_expected_request"), expected_check=arguments.get("_expected_check"))
             elif action == "scope":
                 import long_tasks
 
@@ -615,6 +619,9 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     arguments.get("scope_operation"), arguments.get("function_names"), arguments.get("instruction_quote"))
                 value = {"scope_saved": True, "function_coverage": function_coverage(project)}
             elif action == "complete":
+                if "steps" in arguments:
+                    raise ValueError("complete only runs the saved acceptance check; it cannot change steps. "
+                                     "Use action=revise with steps=[one corrected step], then complete it.")
                 request_hash = task_context.request_identity(folder)
                 active = task_context.step_status(folder)["active"]
                 if (not active or type(arguments.get("step_id")) is not int
@@ -627,6 +634,9 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                 kind = active["check_tool"]
                 check_args = (active["check_arguments"] if kind != "run_command" else
                               {"command": active["check_command"], "shell": active["shell"]})
+                # Older releases accepted suite-revision references in browser
+                # steps. Reject their replay before any checker mutates a suite.
+                task_context.validate_repeatable_check(kind, check_args)
                 structured = kind in {"check_python_function", "check_javascript_function", "check_webapp"}
                 before = step_source_fingerprint(folder, structured)
                 if arguments.get("_automatic_game") is True:
@@ -1944,13 +1954,16 @@ def step_source_fingerprint(folder: Path, structured: bool = False):
 
 def bind_step_completion(folder: Path, arguments: dict, planned_step: dict | None,
                          request_hash: str) -> dict:
-    """Resolve only the native worker's bare completion against its seen unit.
+    """Resolve native shorthand operations against the exact unit it saw.
 
     The public dispatcher still requires an explicit ID. A newer unit or a
     revised acceptance check cannot be substituted while inference was running.
     Source edits remain allowed: the existing checker must validate them.
     """
-    if arguments != {"action": "complete"}:
+    action = arguments.get("action")
+    shorthand = (arguments == {"action": "complete"} or
+                 action in {"split", "revise"} and set(arguments) == {"action", "steps"})
+    if not shorthand:
         return arguments
     import task_context
 
@@ -1959,8 +1972,13 @@ def bind_step_completion(folder: Path, arguments: dict, planned_step: dict | Non
     active = task_context.step_status(folder)["active"]
     if not active or task_context.step_check_identity(active) != task_context.step_check_identity(planned_step):
         raise ValueError("The active step or its acceptance check changed; read the fresh checkpoint before completing it")
-    return {"action": "complete", "step_id": planned_step["id"],
-            "_expected_check": task_context.step_check_identity(planned_step)}
+    bound = {**arguments, "step_id": planned_step["id"],
+             "_expected_check": task_context.step_check_identity(planned_step)}
+    if action != "complete":
+        # The SQL mutation repeats these comparisons while holding its write
+        # transaction: a change after binding must not overwrite newer work.
+        bound["_expected_request"] = request_hash
+    return bound
 
 
 def step_exit_result(kind: str, result: str) -> str:

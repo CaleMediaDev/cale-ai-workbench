@@ -1375,6 +1375,119 @@ def test_bare_step_binding_rejects_revised_acceptance_and_new_requests(tmp_path)
         native_agent.bind_step_completion(folder, {"action": "complete"}, active, request)
 
 
+def test_native_split_and_revise_shorthand_preserve_completed_and_later_units(tmp_path):
+    for action in ("split", "revise"):
+        item = project(tmp_path / action)
+        folder = Path(item["folder"])
+        first = {"phase": "Build", "title": "Done", "check_command": "exit 0"}
+        queue = task_context.plan_steps(folder, [first, {**first, "title": "Current"}, {**first, "title": "Later"}])
+        task_context.record_step_check(folder, queue["active"]["id"], task_context.request_identity(folder),
+                                       "Exit code: 0\n", unchanged=True)
+        children = [{**first, "title": "Small one", "check_command": "exit 3"}]
+        if action == "split":
+            children.append({**first, "title": "Small two", "check_command": "exit 4"})
+        def complete(payload):
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+                {"id": "queue", "function": {"name": "task_steps", "arguments": json.dumps({"action": action, "steps": children})}},
+                {"id": "stale-write", "function": {"name": "write_file", "arguments": '{"path":"stale.txt","content":"wrong step"}'}}]}}]}
+        with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+            state = native_agent.run_slice(item, complete=complete)
+        queue = task_context.step_status(folder)
+        assert queue["done"] == 1 and queue["active"]["title"] == "Small one"
+        assert queue["remaining"] == len(children) + 1 and queue["active"]["attempts"] == 0
+        assert not (folder / "stale.txt").exists()
+        assert "queue advanced" in state["messages"][-1]["content"]
+        with project_memory.connection(folder) as conn:
+            later = conn.execute("SELECT title,status FROM task_steps WHERE title='Later'").fetchone()
+            assert tuple(later) == ("Later", "pending")
+
+
+def test_shorthand_queue_mutations_recheck_seen_state_inside_sql_transaction(tmp_path):
+    import pytest
+
+    for action in ("split", "revise"):
+        for race in ("check", "request", "advance"):
+            folder = Path(project(tmp_path / (action + race))["folder"])
+            step = {"phase": "Build", "title": "Original", "check_command": "exit 0"}
+            active = task_context.plan_steps(folder, [step, {**step, "title": "Later"}])["active"]
+            request = task_context.request_identity(folder)
+            children = [{**step, "title": "Replacement"}]
+            if action == "split":
+                children.append({**step, "title": "Replacement two"})
+            args = {"action": action, "steps": children}
+            bound = native_agent.bind_step_completion(folder, args, active, request)
+            if race == "check":
+                task_context.revise_step(folder, active["id"], [{**step, "check_command": "exit 9"}])
+            elif race == "request":
+                (folder / ".local-ai/USER-REQUESTS.md").write_text("Changed instructions")
+            else:
+                task_context.record_step_check(folder, active["id"], request, "Exit code: 0\n", unchanged=True)
+            with pytest.raises(ValueError):
+                native_agent.bind_step_completion(folder, args, active, request)
+            rejected = native_agent.execute_tool(folder, "task_steps", bound)
+            assert rejected.startswith("Tool error:")
+            with project_memory.connection(folder) as conn:
+                assert conn.execute("SELECT COUNT(*) FROM task_steps WHERE title LIKE 'Replacement%'").fetchone()[0] == 0
+                if race == "check":
+                    assert conn.execute("SELECT check_command FROM task_steps WHERE id=?", (active["id"],)).fetchone()[0] == "exit 9"
+                else:
+                    assert conn.execute("SELECT title FROM task_steps WHERE id=?", (active["id"],)).fetchone()[0] == "Original"
+
+
+def test_queue_shorthand_does_not_retarget_explicit_ids_or_public_dispatch(tmp_path):
+    folder = Path(project(tmp_path / "strict-queue")["folder"])
+    step = {"phase": "Build", "title": "Original", "check_command": "exit 0"}
+    active = task_context.plan_steps(folder, [step])["active"]
+    request = task_context.request_identity(folder)
+    for action in ("split", "revise"):
+        children = [step, step] if action == "split" else [step]
+        wrong = {"action": action, "steps": children, "step_id": active["id"] + 100}
+        assert native_agent.bind_step_completion(folder, wrong, active, request) == wrong
+        assert native_agent.execute_tool(folder, "task_steps", wrong).startswith("Tool error:")
+        assert "step_id" in native_agent.execute_tool(folder, "task_steps", {"action": action, "steps": children})
+    assert task_context.step_status(folder)["active"]["title"] == "Original"
+
+
+def test_browser_suite_revision_cannot_be_stored_or_replayed_as_step_acceptance(tmp_path):
+    import pytest
+
+    folder = Path(project(tmp_path / "revision-replay")["folder"])
+    args = {"path": "index.html", "cases": [{"expect": {"error": "Numeric"}}]}
+    step = {"phase": "Build", "title": "Validation", "check_tool": "check_webapp", "check_arguments": args}
+    active = task_context.plan_steps(folder, [step])["active"]
+    for key, value in (("saved_case", 1), ("saved_sequence", 1), ("suite_sha256", "a" * 64)):
+        revised = {**step, "check_arguments": {**args, key: value}}
+        with pytest.raises(ValueError, match="one-time checker action"):
+            task_context.revise_step(folder, active["id"], [revised])
+        assert task_context.step_status(folder)["active"]["check_arguments"] == args
+    # Simulate a record saved by an earlier release. Completion must not
+    # dispatch its one-time assertion mutation or count it as an attempted check.
+    legacy = {**args, "saved_sequence": 1, "saved_case": 1, "suite_sha256": "a" * 64}
+    with project_memory.connection(folder) as conn:
+        conn.execute("UPDATE task_steps SET check_arguments=? WHERE id=?", (json.dumps(legacy), active["id"]))
+    dispatch = native_agent.execute_tool
+    called = []
+    def observed(folder, name, arguments):
+        called.append(name)
+        return dispatch(folder, name, arguments)
+    with patch.object(native_agent, "execute_tool", side_effect=observed):
+        result = native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]})
+    assert "one-time checker action" in result
+    assert called == ["task_steps"]
+    assert task_context.step_status(folder)["active"]["attempts"] == 0
+
+
+def test_complete_cannot_silently_ignore_replacement_steps(tmp_path):
+    folder = Path(project(tmp_path / "complete-with-replacement")["folder"])
+    step = {"phase": "Build", "title": "Failing", "check_command": "exit 9"}
+    active = task_context.plan_steps(folder, [step])["active"]
+    result = native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"],
+        "steps": [{**step, "check_command": "exit 0"}]})
+    assert "Use action=revise" in result
+    assert task_context.step_status(folder)["active"]["attempts"] == 0
+    assert task_context.step_status(folder)["active"]["check_command"] == "exit 9"
+
+
 def test_step_acceptance_revised_during_check_cannot_receive_older_success(tmp_path):
     folder = Path(project(tmp_path / "racing-check")["folder"])
     original = {"phase": "Build", "title": "First", "check_command": "exit 0"}

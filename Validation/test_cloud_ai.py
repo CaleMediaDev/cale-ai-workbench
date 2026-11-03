@@ -1371,6 +1371,43 @@ class CloudTests(unittest.TestCase):
         self.assertNotIn("_native_workload", body)
         self.assertTrue(post.call_args.args[0].startswith("http://127.0.0.1:11434/"))
 
+    def test_normal_work_uses_smaller_fitting_alias_and_distinct_weights_on_failure(self):
+        with (patch.object(cloud.Router, "local_candidates", return_value=["giant-window", "other-model", "fitting-window"]),
+              patch.object(cloud, "post", side_effect=[ValueError("inference failed"), ANSWER]) as post):
+            router = cloud.Router()
+            router.model_weights = {"giant-window": "same", "fitting-window": "same", "other-model": "different"}
+            router.model_contexts = {"giant-window": 262144, "fitting-window": 65536, "other-model": 65536}
+            self.assertEqual(router.complete(REQUEST), ANSWER)
+        self.assertEqual([call.args[1]["model"] for call in post.call_args_list], ["fitting-window", "other-model"])
+        self.assertEqual(post.call_args_list[0].args[1]["messages"], REQUEST["messages"])
+        self.assertNotIn("reasoning_effort", post.call_args_list[0].args[1])
+
+    def test_large_request_keeps_larger_eligible_window_and_full_input(self):
+        request = {**REQUEST, "messages": [{"role": "user", "content": "large document " * 30000}]}
+        def candidates(size, required_context, *args):
+            self.assertGreater(required_context, 65536)
+            return ["giant-window"]  # The small alias cannot fit this request.
+        with (patch.object(cloud.Router, "local_candidates", side_effect=candidates),
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            router = cloud.Router()
+            router.model_weights = {"giant-window": "same", "fitting-window": "same"}
+            router.model_contexts = {"giant-window": 262144, "fitting-window": 65536}
+            self.assertEqual(router.complete(request), ANSWER)
+        self.assertEqual(post.call_args.args[1]["model"], "giant-window")
+        self.assertEqual(post.call_args.args[1]["messages"], request["messages"])
+
+    def test_explicit_large_context_model_is_not_replaced_by_automatic_alias_choice(self):
+        catalog = dict(cloud.CATALOG, manual_window={"alias": "giant-window"})
+        with (patch.object(cloud, "CATALOG", catalog),
+              patch.object(cloud, "local_profile", return_value="manual_window"),
+              patch.object(cloud.Router, "local_candidates", return_value=["giant-window", "fitting-window"]),
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            router = cloud.Router()
+            router.model_weights = {"giant-window": "same", "fitting-window": "same"}
+            router.model_contexts = {"giant-window": 262144, "fitting-window": 65536}
+            self.assertEqual(router.complete(REQUEST), ANSWER)
+        self.assertEqual(post.call_args.args[1]["model"], "giant-window")
+
     def test_bounded_review_honors_manual_model_and_same_weights_reasoning(self):
         catalog = dict(cloud.CATALOG, selected_review={"alias": "review-alias"},
                        fast_review={"alias": "review-fast", "tool_reasoning_effort": "none"})

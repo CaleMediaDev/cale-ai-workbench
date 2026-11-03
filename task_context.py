@@ -279,6 +279,15 @@ def step_status(folder: str | Path) -> dict:
         return _step_status(conn, request_identity(folder))
 
 
+def validate_repeatable_check(tool: str, arguments: dict) -> None:
+    """A durable acceptance check cannot replay a one-time suite mutation."""
+    if tool in {"check_python_function", "check_javascript_function", "check_webapp"} and any(
+            key in arguments for key in ("saved_case", "saved_sequence", "suite_sha256")):
+        raise ValueError("Saved-case revision is a one-time checker action, not repeatable step acceptance. "
+                         "Correct the saved suite through its checker first; then revise this SQLite step "
+                         "with complete input/assertion cases and no saved_case, saved_sequence or suite_sha256.")
+
+
 def _validate_steps(steps: list) -> list[tuple]:
     if isinstance(steps, str):
         if len(steps) > 64000:
@@ -323,10 +332,7 @@ def _validate_steps(steps: list) -> list[tuple]:
             arguments = step.get("check_arguments", {})
             if not isinstance(arguments, dict):
                 raise ValueError("check_arguments must be a JSON object.")
-            if tool in {"check_python_function", "check_javascript_function"} and (
-                    "saved_case" in arguments or "suite_sha256" in arguments):
-                raise ValueError("Saved-case revision is a one-time checker action, not repeatable step acceptance. "
-                                 "Revise the saved case through the function checker first; store corrected cases in this step.")
+            validate_repeatable_check(tool, arguments)
             # Use the worker's published schema, without running the check or
             # requiring a source file which an earlier step has yet to build.
             from jsonschema import ValidationError, validate
@@ -353,7 +359,7 @@ def _validate_steps(steps: list) -> list[tuple]:
 
 
 def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None,
-               expected_request: str | None = None) -> dict:
+               expected_request: str | None = None, expected_check: str | None = None) -> dict:
     """Atomically add a phase, or replace only the current unit with smaller units.
 
     Completed rows remain intact. BEGIN IMMEDIATE prevents two workers from
@@ -378,6 +384,8 @@ def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None,
         else:
             if not current["active"] or current["active"]["id"] != split_id:
                 raise ValueError("Only the current active step can be split.")
+            if expected_check is not None and step_check_identity(current["active"]) != expected_check:
+                raise ValueError("The active acceptance check changed before splitting; read the fresh checkpoint.")
             if len(values) < 2:
                 raise ValueError("Split into at least two smaller steps.")
             position = conn.execute("SELECT position FROM task_steps WHERE id=?", (split_id,)).fetchone()[0]
@@ -439,7 +447,8 @@ def record_step_check(folder: str | Path, step_id: int, request_hash: str,
         return {"passed": passed, **_step_status(conn, request_hash)}
 
 
-def revise_step(folder: str | Path, step_id: int, steps: list) -> dict:
+def revise_step(folder: str | Path, step_id: int, steps: list, *,
+                expected_request: str | None = None, expected_check: str | None = None) -> dict:
     """Repair one mistaken acceptance command without discarding progress."""
     values = _validate_steps(steps)
     if len(values) != 1:
@@ -449,9 +458,13 @@ def revise_step(folder: str | Path, step_id: int, steps: list) -> dict:
         conn.commit()
         conn.execute("BEGIN IMMEDIATE")
         request_hash = request_identity(folder)
+        if expected_request is not None and expected_request != request_hash:
+            raise ValueError("User instructions changed before revising; read the fresh checkpoint.")
         queue = _step_status(conn, request_hash)
         if not queue["active"] or queue["active"]["id"] != step_id:
             raise ValueError("Only the current active step can be revised.")
+        if expected_check is not None and step_check_identity(queue["active"]) != expected_check:
+            raise ValueError("The active acceptance check changed before revising; read the fresh checkpoint.")
         phase, title, check, shell, tool, arguments = values[0]
         conn.execute("""UPDATE task_steps SET phase=?,title=?,check_command=?,shell=?,check_tool=?,check_arguments=?,
             evidence='Acceptance check revised; not yet passed',updated=? WHERE id=?""",

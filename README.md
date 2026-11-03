@@ -190,6 +190,22 @@ diagnostics, never grounds to pass an assertion or remove a requested constraint
 Browser checks can reload the same isolated page to test persistence, select a
 dropdown by value or label, and click a unique exact button name when no ID is
 available. Ambiguous buttons still fail instead of selecting one arbitrarily.
+
+The native worker can omit `step_id` when completing, splitting, or revising
+the active unit shown in its checkpoint. The inferred ID is bound to the exact
+request and acceptance check it saw; SQL split/revise transactions reject newer
+work instead of overwriting it. Direct public tool calls still require IDs.
+Completing a step runs its saved check and rejects replacement `steps`; changing
+acceptance requires `revise`. One-time saved-suite revision references cannot
+be stored as repeatable acceptance. Older steps containing those references
+must be revised to complete input/assertion cases before they can execute.
+
+Automatic local routing groups eligible aliases by their physical model weights
+and chooses the smallest configured window that already fits the request. This
+avoids allocating a huge context or retrying identical weights through another
+alias for a small step. Larger requests retain eligible larger windows; explicit
+manual model choices are respected. This changes memory allocation and retry
+selection, not the model's native context limit or the user's input.
 - Small single-page HTML repairs temporarily expose core file/edit/check tools, with full discovery restored every fifth repair turn. If a model claims completion without the required browser evidence, Cale can request schema-validated checker-argument JSON instead of relying on a dropped function call. Invalid argument plans receive a bounded correction opportunity; ordinary chat text is never executed. Empty or contradictory visible/hidden assertions are rejected before browser work. A successful check runs only its newly generated verifier automatically; custom verifiers are preserved. Verified numbered plans are accepted alongside checked Markdown milestones. A recovered, verified small HTML task can rerun its owned verifier and finish without another inference call.
 - Small-step execution uses an indexed SQLite queue in each project's existing local memory database. Workers are instructed to plan 2–6 small units for the next phase, implement the active unit, and run its saved read-only acceptance command before advancing. A batch has at most eight units. Running the saved command directly, or its equivalent supervisor verifier, also advances the step automatically on a successful check with unchanged project files. Failed checks stay active; oversized units can be split and mistaken check commands revised without erasing completed work. Each call receives the active unit, counts and two recent successes, shorter roadmap excerpts and two recent conversation groups. Routine turns expose a smaller tool set, with specialist discovery restored periodically. New user instructions isolate the old queue, and unfinished units block final handoff. SQLite ships with Python, so there is no database service to install. Step checks are model-chosen tests; their exit codes do not replace independent whole-project, browser or regression checks, or guarantee that a small model can solve every unit.
 - Create local 3D draft assets with [TripoSR](https://github.com/VAST-AI-Research/TripoSR) from an image, or have the installed local image maker draw a reference from a prompt. `local.start_3d_job` installs an isolated, pinned Python environment and checksum-verified weights on first use. Its conservative hardware gates require one NVIDIA GPU with 6 GB VRAM, 16 GB RAM and 12 GB free runtime storage. `local.build_3d_scene` builds colored props from boxes, spheres, cylinders and cones on CPU, using [trimesh](https://github.com/mikedh/trimesh). Both paths export one selected GLB, OBJ or STL, reload and validate the mesh, hash the output, and save a software-rendered PNG preview. Agents poll durable progress, inspect previews and cancel exact jobs; registered task Pause/Stop also cancels its 3D worker. The readiness checklist tracks CPU geometry and neural image-to-3D separately. Downloads need internet once; generation uses local inference and requires no account. Assets use vertex colors and need artistic/topology review before production; rigging and UV/PBR texture baking are outside this workflow.

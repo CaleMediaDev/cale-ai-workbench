@@ -58,6 +58,30 @@ LOCK = threading.RLock()
 POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 
+def fitting_weight_aliases(candidates, weights, contexts):
+    """Use the smallest eligible window per physical model, preserving tier order.
+
+    Candidates already passed context/capability checks. Bigger windows remain
+    available for bigger requests; an alias over the same weights is not a new
+    reasoning strategy. Unknown identities stay independent.
+    """
+    selected, positions = [], {}
+    for name in candidates:
+        identity = weights.get(name)
+        if not isinstance(identity, str) or not identity:
+            selected.append(name)
+            continue
+        if identity not in positions:
+            positions[identity] = len(selected)
+            selected.append(name)
+            continue
+        index = positions[identity]
+        current, other = contexts.get(selected[index], 0), contexts.get(name, 0)
+        if isinstance(current, int) and isinstance(other, int) and 0 < other < current:
+            selected[index] = name
+    return selected
+
+
 def task_route(task_id: str) -> str:
     """Read a task's provider choice at request time, so a running task can switch."""
     if not re.fullmatch(r"[a-f0-9]{12}", task_id or ""):
@@ -1149,7 +1173,10 @@ class Router:
                 selected, CATALOG, ROOT, getattr(self, "model_weights", {}))
         if profile == "main" and repair_avoid:
             selected = prefer_different_weights(selected, getattr(self, "model_weights", {}), repair_avoid)
-        if size_hint == "quick":
+        if profile == "main":
+            selected = fitting_weight_aliases(selected, getattr(self, "model_weights", {}),
+                                             getattr(self, "model_contexts", {}))
+        elif size_hint == "quick":
             # Alias retries over the same weights can reserve a much larger KV
             # cache without changing a bounded selector/review's answer quality.
             seen_weights = set()
