@@ -1161,7 +1161,7 @@ def test_repeated_failed_browser_verdict_reaches_worker_repair_guidance():
                 "id": call_id, "function": {"name": "check_webapp", "arguments":
                     '{"path":"index.html","cases":[{"expect":{"total":"24.00"}}]}'},
             }]}}]} for call_id in ("browser-1", "browser-2")
-        ] + [{"choices": [{"message": {"role": "assistant", "content": "Finished"}}]}])
+        ] + [{"choices": [{"message": {"role": "assistant", "content": "Finished"}}]}] * 2)
         seen = []
 
         def complete(payload):
@@ -1169,9 +1169,28 @@ def test_repeated_failed_browser_verdict_reaches_worker_repair_guidance():
             return next(responses)
 
         with patch.object(native_agent, "execute_tool", return_value='{"ok":true,"passed":false}'):
-            native_agent.run_slice(item, complete=complete)
+            state = native_agent.run_slice(item, complete=complete)
+        assert state["status"] == "continue"
+        assert state["verify_passed"] is False
         assert "Do not retry it unchanged" in str(seen[2]["messages"])
         assert "check_webapp index.html: Failed" in task_context.snapshot(folder)
+
+
+def test_failed_check_survives_restart_and_old_verifier_pass_until_same_file_passes():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        (folder / ".local-ai/verify.ps1").write_text("exit 0")
+        state = {"verify_passed": True}
+        native_agent.remember_checker_verdict(state, "check_webapp", {"path": "index.html"}, '{"passed":false}')
+        native_agent.save_state(item, state)
+        recovered = native_agent.read_state(item)
+        recovered["verify_passed"] = True  # An older script still exits zero.
+        assert "index.html" in native_agent.completion_issue(folder, item, recovered)
+        native_agent.remember_checker_verdict(recovered, "check_webapp", {"path": "other.html"}, '{"passed":true}')
+        assert "index.html" in native_agent.completion_issue(folder, item, recovered)
+        native_agent.remember_checker_verdict(recovered, "check_webapp", {"path": "./index.html"}, '{"passed":true}')
+        assert not recovered["failed_checks"]
 
 
 def test_third_identical_failed_tool_call_is_not_executed_again():

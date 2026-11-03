@@ -834,7 +834,10 @@ def fresh_messages(messages: list, folder: Path, state: dict | None = None) -> l
     import task_context
 
     checkpoint = task_context.snapshot(folder)
-    if state and state.get("verify_passed"):
+    if state and state.get("failed_checks"):
+        checkpoint += ("\nUnresolved failed checks: " + ", ".join(state["failed_checks"].values())
+                       + ". Repair the cause and rerun those checks before finishing.")
+    elif state and state.get("verify_passed"):
         checkpoint += ("\nThe saved verifier PASSED since the last source change. "
                        "Do not recreate files or rerun unchanged checks. "
                        "Update PLAN.md and PROGRESS.md from that evidence; work only on genuinely unfinished milestones.")
@@ -989,12 +992,39 @@ def invalidate_checks(state: dict) -> None:
     state["document_checker_attempted"] = False
     state["document_checker_passed"] = False
     state["verifier_nudged"] = False
+    state.pop("failed_checks", None)
+
+
+def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: str) -> None:
+    """A failed assertion stays pending until that file's checker passes."""
+    if tool not in {"check_webapp", "check_document_report"}:
+        return
+    try:
+        verdict = json.loads(result)
+    except (ValueError, TypeError):
+        return
+    if not isinstance(verdict, dict) or type(verdict.get("passed")) is not bool:
+        return
+    path = str(arguments.get("report_path" if tool == "check_document_report" else "path") or "")
+    path = os.path.normcase(os.path.normpath(path)).replace("\\", "/")
+    key = tool + ":" + path
+    failed = state.setdefault("failed_checks", {})
+    if verdict["passed"]:
+        failed.pop(key, None)
+    else:
+        failed[key] = tool + " " + path
+        state["verify_passed"] = False
+        state["verifier_nudged"] = False
 
 
 def completion_issue(folder: Path, project: dict | None = None,
                      state: dict | None = None) -> str:
     """Catch a premature handoff before the costly independent review starts."""
     script = folder / ".local-ai" / "verify.ps1"
+    if state and state.get("failed_checks"):
+        return ("These structured checks failed and must pass again before completion: "
+                + ", ".join(state["failed_checks"].values())
+                + ". Fix their assertions; an older verifier pass does not resolve them.")
     if project:
         for name in requested_root_files(str(project.get("brief", ""))):
             if not (folder / name).is_file():
@@ -1330,6 +1360,7 @@ def run_slice(project: dict, complete=None) -> dict:
 
             task_context.record_action(folder, function.get("name", ""), result, args)
             outcome = task_context.action_outcome(function.get("name", ""), result)
+            remember_checker_verdict(state, function.get("name", ""), args, result)
             if function.get("name") == "check_document_report":
                 state["document_checker_attempted"] = True
                 try:
