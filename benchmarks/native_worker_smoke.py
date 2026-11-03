@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -57,6 +58,19 @@ EXPECTED_CONTACTS = [
     {"name": "Jordan Kim", "phone": "5175550102", "city": "Detroit"},
     {"name": "Sam Patel", "phone": "5175550103", "city": "Ann Arbor"},
 ]
+
+WEBAPP_BRIEF = (
+    "Build a single-file index.html tip splitter that works offline. Give "
+    "the three labeled number inputs the IDs bill, tip, and people, with "
+    "defaults 100, 20, and 4. Show the per-person total in an element with "
+    "ID per-person and any validation message in an element with ID error. "
+    "Update immediately when inputs change: a $100 bill with 20% tip split "
+    "four ways is $30.00 each; an $80 bill with the same tip and people is "
+    "$24.00 each. Zero people or invalid numbers must show an error and must "
+    "not leave a stale total visible. Fit a 375-pixel mobile viewport without "
+    "horizontal scrolling. Create and run a repeatable PowerShell verifier "
+    "that checks behavior, not just file existence."
+)
 
 
 def ollama_completion(model: str, timeout: int, stats: dict):
@@ -171,9 +185,76 @@ def grade_contacts(folder: Path) -> dict:
     return result
 
 
+def grade_webapp(folder: Path) -> dict:
+    """Exercise the saved app in an offline browser and challenge its verifier."""
+    html = folder / "index.html"
+    verifier = folder / ".local-ai" / "verify.ps1"
+    result = {"page_present": html.is_file(), "verifier_present": verifier.is_file(),
+              "labels": False, "default_total": False, "changed_total": False,
+              "invalid_people": False, "mobile_fits": False,
+              "verifier_passes_correct": False, "verifier_rejects_broken_app": False}
+    if not html.is_file():
+        result["passed"] = False
+        return result
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(offline=True, viewport={"width": 375, "height": 812})
+                page = context.new_page()
+                page.goto(html.as_uri(), wait_until="load", timeout=15_000)
+                inputs = [page.locator("#" + name) for name in ("bill", "tip", "people")]
+                result["labels"] = all(control.count() == 1 and control.evaluate(
+                    "el => !!(el.labels && el.labels.length) || !!el.getAttribute('aria-label')"
+                ) for control in inputs)
+                total = page.locator("#per-person")
+                result["default_total"] = (total.count() == 1 and total.is_visible()
+                                           and "30.00" in total.inner_text())
+                inputs[0].fill("80")
+                result["changed_total"] = total.is_visible() and "24.00" in total.inner_text()
+                inputs[2].fill("0")
+                error = page.locator("#error")
+                result["invalid_people"] = (error.count() == 1 and error.is_visible()
+                                            and bool(error.inner_text().strip())
+                                            and (not total.is_visible()
+                                                 or "24.00" not in total.inner_text()))
+                result["mobile_fits"] = page.evaluate(
+                    "document.documentElement.scrollWidth <= window.innerWidth + 1")
+            finally:
+                browser.close()
+    except Exception as exc:
+        result["browser_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
+    if verifier.is_file() and all(result[key] for key in (
+            "labels", "default_total", "changed_total", "invalid_people", "mobile_fits")):
+        command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(verifier)]
+        try:
+            checked = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL,
+                                     capture_output=True, text=True, timeout=45, check=False)
+            result["verifier_passes_correct"] = checked.returncode == 0
+            original = html.read_bytes()
+            broken = re.sub(rb"(?is)<script\b[^>]*>.*?</script>", b"<script></script>",
+                            original, count=1)
+            if broken != original:
+                try:
+                    html.write_bytes(broken)
+                    rejected = subprocess.run(
+                        command, cwd=folder, stdin=subprocess.DEVNULL,
+                        capture_output=True, text=True, timeout=45, check=False)
+                    result["verifier_rejects_broken_app"] = rejected.returncode != 0
+                finally:
+                    html.write_bytes(original)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            result["verifier_error"] = f"{type(exc).__name__}: {exc}"
+    result["passed"] = all(value for key, value in result.items()
+                           if key not in {"browser_error", "verifier_error"})
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("temperature", "contacts"),
+    parser.add_argument("--scenario", choices=("temperature", "contacts", "webapp"),
                         default="temperature")
     parser.add_argument("--model", default="cale-fast")
     parser.add_argument("--call-timeout", type=int, default=120)
@@ -191,17 +272,18 @@ def main() -> int:
         if args.keep_folder:
             folder.mkdir(parents=True, exist_ok=False)
         (folder / ".local-ai").mkdir()
-        brief = TEMPERATURE_BRIEF if args.scenario == "temperature" else CONTACTS_BRIEF
+        brief = {"temperature": TEMPERATURE_BRIEF, "contacts": CONTACTS_BRIEF,
+                 "webapp": WEBAPP_BRIEF}[args.scenario]
         if args.scenario == "temperature":
             (folder / "temperature.py").write_text(
                 TEMPERATURE_STARTER, encoding="utf-8")
-        else:
+        elif args.scenario == "contacts":
             (folder / "contacts.csv").write_text(CONTACTS_STARTER, encoding="utf-8")
-        project_instruction = (
-            "Fix the conversion and verify it.\n"
-            if args.scenario == "temperature"
-            else "Clean the contacts and verify the saved CSV.\n"
-        )
+        project_instruction = {
+            "temperature": "Fix the conversion and verify it.\n",
+            "contacts": "Clean the contacts and verify the saved CSV.\n",
+            "webapp": "Build the requested offline page and test it.\n",
+        }[args.scenario]
         (folder / "AGENTS.md").write_text(project_instruction, encoding="utf-8")
         (folder / ".local-ai" / "USER-REQUESTS.md").write_text("", encoding="utf-8")
         (folder / ".local-ai" / "PLAN.md").write_text(
@@ -238,8 +320,9 @@ def main() -> int:
             "worker_verified": bool(state.get("verify_passed")),
             "current": state.get("current", ""),
             "completion_issue": native_agent.completion_issue(folder, project, state),
-            "grade": (grade_temperature(folder) if args.scenario == "temperature"
-                      else grade_contacts(folder)),
+            "grade": {"temperature": grade_temperature,
+                      "contacts": grade_contacts,
+                      "webapp": grade_webapp}[args.scenario](folder),
             "error": error,
         }
         if args.keep_folder:

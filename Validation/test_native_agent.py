@@ -294,6 +294,40 @@ def test_csv_fast_path_provider_failure_returns_to_general_worker():
         assert not (folder / "output.csv").exists()
 
 
+def test_interactive_html_completion_requires_fresh_browser_check():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        item["brief"] = "Build a single-file index.html app with an input that updates a total."
+        assert "call check_webapp" in native_agent.prompt(item)
+        page = folder / "index.html"
+        page.write_text("<input id='number'><p id='total'>1</p>", encoding="utf-8")
+        (folder / ".local-ai/verify.ps1").write_text("exit 0", encoding="utf-8")
+        (folder / ".local-ai/PLAN.md").write_text("- [x] Build and verify\n", encoding="utf-8")
+        state = {"verify_passed": True}
+        assert "Run check_webapp" in native_agent.completion_issue(folder, item, state)
+        state.update(browser_verified=True, browser_checked_path="index.html",
+                     browser_checked_hash=hashlib.sha256(page.read_bytes()).hexdigest())
+        assert native_agent.completion_issue(folder, item, state) == ""
+        page.write_text(page.read_text(encoding="utf-8") + "<!-- changed -->", encoding="utf-8")
+        assert "Run check_webapp" in native_agent.completion_issue(folder, item, state)
+
+
+def test_browser_check_evidence_accepts_json_encoded_cases():
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        page = folder / "index.html"
+        page.write_text("<input id='bill'><p id='total'>24.00</p>", encoding="utf-8")
+        arguments = {"path": "index.html", "cases": (
+            '[{"set":{"bill":"80"},"expect":{"total":"24.00"}},'
+            '{"set":{"bill":"0"},"visible":["error"]}]')}
+        evidence = native_agent.browser_check_evidence(
+            folder, arguments, '{"passed":true}')
+        assert evidence["browser_verified"] is True
+        assert evidence["browser_checked_hash"] == hashlib.sha256(page.read_bytes()).hexdigest()
+        assert native_agent.browser_check_evidence(folder, arguments, '{"passed":false}') == {}
+
+
 def test_read_file_streams_large_files_and_bounds_one_extremely_long_line():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
