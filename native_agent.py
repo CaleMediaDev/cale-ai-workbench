@@ -1915,6 +1915,44 @@ def invalidate_checks(state: dict) -> None:
     state.pop("recent_read_hashes", None)
     state.pop("read_cycle_nudged", None)
     state.pop("uncreated_step_plan", None)
+    state.pop("local_repair_feedback", None)
+
+
+def repair_avoid_models(state: dict, request_hash: str) -> list[dict]:
+    """Return bounded, request-scoped models that repeatedly failed tool work."""
+    feedback = state.get("local_repair_feedback", {})
+    if not isinstance(feedback, dict) or feedback.get("request_hash") != request_hash:
+        return []
+    rows = feedback.get("models", [])
+    if not isinstance(rows, list):
+        return []
+    return [{"model": row["model"], "weights": row.get("weights", "")} for row in rows[-8:]
+            if isinstance(row, dict) and isinstance(row.get("model"), str)
+            and type(row.get("failures")) is int and row["failures"] >= 2]
+
+
+def remember_local_tool_feedback(state: dict, model: str | None, weights: str,
+                                 request_hash: str, *, failed: bool, recovered: bool) -> None:
+    """Reads do not erase failures; verified progress or new instructions do."""
+    if recovered:
+        state.pop("local_repair_feedback", None)
+        return
+    if not failed or not isinstance(model, str) or not 0 < len(model) <= 256:
+        return
+    identity = weights if isinstance(weights, str) and re.fullmatch(r"[a-f0-9]{64}", weights) else ""
+    feedback = state.get("local_repair_feedback", {})
+    if not isinstance(feedback, dict) or feedback.get("request_hash") != request_hash:
+        feedback = {"request_hash": request_hash, "models": []}
+    rows = feedback.get("models", [])
+    rows = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    prior = next((row for row in rows if (identity and row.get("weights") == identity)
+                  or (not identity and row.get("model") == model and not row.get("weights"))), {})
+    count = prior.get("failures", 0)
+    count = count if type(count) is int else 0
+    rows = [row for row in rows if row is not prior]
+    rows.append({"model": model, "weights": identity, "failures": min(99, count + 1)})
+    feedback["models"] = rows[-8:]
+    state["local_repair_feedback"] = feedback
 
 
 def uncreated_plan_issue(folder: Path, state: dict | None, queue: dict) -> str:
@@ -2196,6 +2234,7 @@ def start_csv_cleanup(project: dict, folder: Path, call, messages: list,
 
 def run_slice(project: dict, complete=None) -> dict:
     """Execute a bounded set of model turns, checkpointing each completed tool."""
+    import task_context
     from cloud_ai import LOCAL_MODEL, Router
 
     folder = Path(project["folder"])
@@ -2236,7 +2275,10 @@ def run_slice(project: dict, complete=None) -> dict:
     # Constructing a fresh Router for each turn forces repeated model probes
     # and forgets short-term routing decisions during one task.
     router = Router() if complete is None else None
-    call = complete or (lambda payload: router.complete(payload, project["id"]))
+    def automatic_call(payload):
+        avoid = repair_avoid_models(state, task_context.request_identity(folder))
+        return router.complete(payload, project["id"], **({"repair_avoid": avoid} if avoid else {}))
+    call = complete or automatic_call
     context_limit = configured_context(ROOT)
     state.update(status="running", started=state.get("started") or time.time())
     save_state(project, state)
@@ -2257,7 +2299,6 @@ def run_slice(project: dict, complete=None) -> dict:
             save_state(project, state)
         messages = fresh_messages(messages, folder, state, project)
         messages = compact_messages(messages, folder, context_limit)
-        import task_context
         planned_request_hash = task_context.request_identity(folder)
         focus = focused_browser_check(project, state, planned_request_hash)
         available_tools = step_tools(project, state, repair_tools(project, state))
@@ -2532,6 +2573,24 @@ def run_slice(project: dict, complete=None) -> dict:
                 state["same_tool_failures"] = 0
                 state.pop("last_failed_tool", None)
                 state["failure_nudged"] = False
+            if router is not None:
+                kind = function.get("name", "")
+                proven = verifier_command_passed(kind, args, outcome)
+                if kind in {"check_webapp", "check_python_function", "check_document_report", "task_steps"}:
+                    try:
+                        verdict = json.loads(result)
+                        proven = (outcome == "Completed" and isinstance(verdict, dict) and (
+                            verdict.get("verifier_check_passed") is True
+                            or kind == "task_steps" and (args.get("action") == "complete" and verdict.get("passed") is True
+                                or args.get("action") == "plan" and verdict.get("total", 0) > 0)))
+                    except (ValueError, TypeError):
+                        proven = False
+                recovered = (proven and not state.get("failed_checks") and not state.get("uncreated_step_plan")
+                             and not task_context.checker_failures(folder, "", limit=1))
+                barrier = result.startswith("Tool error: The step queue advanced earlier in this response.")
+                remember_local_tool_feedback(state, getattr(router, "last_local_model", None),
+                    getattr(router, "last_local_weights", ""), planned_request_hash,
+                    failed=outcome.startswith("Failed") and not barrier, recovered=recovered)
             state["messages"] = messages
             state["current"] = f"{function.get('name', 'tool')}: {result[:150]}"
             if queue_result or function.get("name") == "task_steps" and outcome == "Completed":

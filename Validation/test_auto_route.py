@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from auto_route import (
     PROJECT_REQUEST,
     model_order,
+    prefer_different_weights,
     repair_messages,
     repeated_tool_failures,
     task_size,
@@ -17,6 +18,21 @@ from long_tasks import project_prompt
 
 
 class AutoRouteTests(unittest.TestCase):
+    def test_repair_preference_defers_every_alias_for_failed_weights_without_adding_models(self):
+        candidates = ["main", "fast", "alternate"]
+        weights = {"main": "a" * 64, "fast": "a" * 64, "alternate": "b" * 64}
+        avoid = [{"model": "fast:latest", "weights": "a" * 64}]
+        self.assertEqual(prefer_different_weights(candidates, weights, avoid), ["alternate", "main", "fast"])
+        self.assertEqual(candidates, ["main", "fast", "alternate"])
+        self.assertEqual(prefer_different_weights(candidates[:2], weights, avoid), candidates[:2])
+
+    def test_repair_preference_does_not_blame_replacement_weights_or_malformed_state(self):
+        candidates = ["fast", "alternate"]
+        old = [{"model": "fast", "weights": "a" * 64}]
+        self.assertEqual(prefer_different_weights(candidates, {"fast": "c" * 64}, old), candidates)
+        self.assertEqual(prefer_different_weights(candidates, {}, [{"model": "fast"}]), ["alternate", "fast"])
+        self.assertEqual(prefer_different_weights(candidates, {}, 42), candidates)
+
     def test_structured_failed_verdicts_trigger_repair_and_success_clears_it(self):
         for verdict in ({"passed": False}, {"ok": False}, {"status": "failed"}, {"status": "error"}):
             with self.subTest(verdict=verdict):

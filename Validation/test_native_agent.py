@@ -616,6 +616,59 @@ def test_failed_initial_plan_blocks_completion_and_survives_fresh_context_until_
     assert "uncreated_step_plan" not in pending
 
 
+def test_local_repair_feedback_survives_reads_restart_aliases_and_resets_on_verified_progress():
+    state = {}
+    identity = "f" * 64
+    for model in ("main", "fast"):
+        native_agent.remember_local_tool_feedback(state, model, "a" * 64, identity, failed=True, recovered=False)
+    copied = json.loads(json.dumps(state))
+    native_agent.remember_local_tool_feedback(copied, "fast", "a" * 64, identity, failed=False, recovered=False)
+    assert native_agent.repair_avoid_models(copied, identity) == [{"model": "fast", "weights": "a" * 64}]
+    assert native_agent.repair_avoid_models(copied, "e" * 64) == []
+    native_agent.remember_local_tool_feedback(copied, None, "", identity, failed=False, recovered=True)
+    assert not native_agent.repair_avoid_models(copied, identity)
+    native_agent.remember_local_tool_feedback(copied, "fast", "a" * 64, identity, failed=True, recovered=False)
+    native_agent.invalidate_checks(copied)
+    assert "local_repair_feedback" not in copied
+
+
+def test_native_local_repair_feedback_changes_next_router_call_across_slices(tmp_path):
+    item = project(tmp_path / "routing")
+    folder = Path(item["folder"])
+    (folder / "hello.txt").write_text('Hello')
+    (folder / ".local-ai/verify.ps1").write_text('exit 0\n')
+    observed = []
+    class RouterStub:
+        def complete(self, payload, task_id, **kwargs):
+            avoid = kwargs.get("repair_avoid", [])
+            self.last_local_model = "alternate" if avoid else "fast"
+            self.last_local_weights = ("b" if avoid else "a") * 64
+            number = len(observed)
+            observed.append((self.last_local_model, avoid))
+            name, arguments = (("read_file", {"path": "missing-one.txt"}),
+                               ("read_file", {"path": "AGENTS.md"}),
+                               ("read_file", {"path": "missing-two.txt"}),
+                               ("run_verifier", {}))[min(number, 3)]
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": str(number),
+                "function": {"name": name, "arguments": json.dumps(arguments)}}]}}]}
+    state_folder = folder / ".local-ai/test-supervisor"
+    state_folder.mkdir()
+    with patch("cloud_ai.Router", RouterStub), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 3):
+        state = native_agent.run_slice(item)
+    assert len(observed) == 3 and state["local_repair_feedback"]
+    assert observed[1][1] == []  # A successful read did not clear the first failure.
+    with (patch("cloud_ai.Router", RouterStub), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1),
+          patch.object(task_context, "checker_failures", return_value=[{"path": "other.html", "passed": False}]),
+          patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state_folder)):
+        pending = native_agent.run_slice(item)
+    assert pending["local_repair_feedback"]  # An unrelated outstanding check prevents reset.
+    with (patch("cloud_ai.Router", RouterStub), patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1),
+          patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state_folder)):
+        recovered = native_agent.run_slice(item)
+    assert observed[3] == ("alternate", [{"model": "fast", "weights": "a" * 64}])
+    assert "local_repair_feedback" not in recovered
+
+
 def test_legacy_step_database_migration_preserves_commands_and_failed_attempts():
     with tempfile.TemporaryDirectory() as temporary:
         folder = Path(project(Path(temporary) / "code")["folder"])

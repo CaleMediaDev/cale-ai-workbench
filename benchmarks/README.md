@@ -225,6 +225,24 @@ temperature scenario too: it should stay on the ordinary coding path.
 
 ## Recorded automatic local runs
 
+`browser_assertion_repair.py --auto-route --slices 2 --keep-folder C:\path\to\new-folder`
+uses the production local-only router and native tool-failure feedback rather
+than the fixed-model callback. Its report records each responding model's weight
+identity, repair preference and timing, in addition to token usage and independent
+grading. This variant still requires unchanged application bytes, a passing
+corrected verifier, rejection of a deliberately broken app, and at least two
+completed SQLite units. Routing preferences do not relax those requirements.
+
+Use `--runtime-root C:\path\to\AIWorkbench` to read the installed runtime's
+actual candidate tool-probe approvals. The [local repair routing report](results/local-repair-routing-20261103.json)
+retains two runs: without candidate approvals only duplicate 9B weights were
+eligible, and the task did not finish its SQLite units in 24 calls / 230.43 s.
+With real installed approvals, two 9B tool failures led to one Gemma call,
+then routine routing resumed. That run completed in 10 calls / 65.58 s,
+preserved the HTML bytes, finished both units, passed the corrected verifier,
+and rejected an invalid-state regression. Different eligibility configurations
+and individual runs do not establish a general speed or reliability advantage.
+
 These isolated synthetic tasks ran on the developer's Windows PC with cloud
 access disabled. The reports record actual router choices and independent
 grades. They are single runs with different app versions, not a controlled

@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +18,28 @@ import model_library
 import native_browser
 import task_context
 import webapp_check
+
+
+def observed_router(stats: dict):
+    """Observe production routing without replacing native feedback or eligibility."""
+    import cloud_ai
+
+    class ObservedRouter(cloud_ai.Router):
+        def complete(self, payload, task_id="", **kwargs):
+            started = time.monotonic()
+            result = super().complete(payload, task_id, **kwargs)
+            stats["model_calls"] += 1
+            calls = result.get("choices", [{}])[0].get("message", {}).get("tool_calls") or []
+            stats["tool_calls"] += len(calls)
+            stats["tools_used"].extend(str(item.get("function", {}).get("name", "")) for item in calls)
+            for name in ("prompt_tokens", "completion_tokens"):
+                stats[name] += int((result.get("usage") or {}).get(name) or 0)
+            stats["routes"].append({"model": self.last_local_model,
+                "weights": self.last_local_weights, "repair_avoid": kwargs.get("repair_avoid", []),
+                "seconds": round(time.monotonic() - started, 2)})
+            return result
+
+    return ObservedRouter()
 
 PAGE = '''<label for="bill">Bill</label><input id="bill" type="number" value="100">
 <p id="answer"></p><p id="error" hidden>Invalid</p><script>
@@ -65,12 +87,19 @@ def grade(folder: Path, source_sha256: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="cale-fast")
+    parser.add_argument("--auto-route", action="store_true",
+                        help="Use the real local-only router, including persisted tool-failure feedback")
+    parser.add_argument("--runtime-root", type=Path,
+                        help="Read candidate tool-probe approvals from an installed runtime")
     parser.add_argument("--slices", type=int, default=2)
     parser.add_argument("--keep-folder")
     args = parser.parse_args()
-    info = model_library.post("/api/show", {"model": args.model})
-    if info.get("remote_host") or info.get("remote_model"):
-        parser.error("Only physically installed local weights may run this fixture")
+    if args.runtime_root and not (args.runtime_root / "LongTasks/model-approvals.json").is_file():
+        parser.error("Runtime root must contain actual candidate model approvals")
+    if not args.auto_route:
+        info = model_library.post("/api/show", {"model": args.model})
+        if info.get("remote_host") or info.get("remote_model"):
+            parser.error("Only physically installed local weights may run this fixture")
     context = nullcontext(Path(args.keep_folder).resolve()) if args.keep_folder else tempfile.TemporaryDirectory()
     with context as temporary:
         folder = Path(temporary)
@@ -89,7 +118,12 @@ def main() -> int:
         stats = {"model_calls": 0, "tool_calls": 0, "tools_used": [], "prompt_tokens": 0, "completion_tokens": 0,
                  "assertion_revision_attempts": 0, "successful_assertion_revisions": 0,
                  "step_tool_errors": [], "revision_errors": []}
-        complete = worker.ollama_completion(args.model, 120, stats)
+        stats["routes"] = []
+        # Keep the native worker's automatic call path intact. A callback would
+        # bypass its feedback recorder and fail to exercise this feature.
+        router = observed_router(stats) if args.auto_route else None
+        complete = None if args.auto_route else worker.ollama_completion(args.model, 120, stats)
+        router_context = patch("cloud_ai.Router", return_value=router) if args.auto_route else nullcontext()
         worker.native_agent.PROJECT_COMMAND_TIMEOUT = 15
         started = time.monotonic()
         execute = worker.native_agent.execute_tool
@@ -106,9 +140,13 @@ def main() -> int:
                 except ValueError:
                     stats["revision_errors"] = (stats["revision_errors"] + [result[:400]])[-8:]
             return result
-        with patch("routing_mode.load_scope", return_value="local_only"), \
+        with ExitStack() as stack, router_context, patch("routing_mode.load_scope", return_value="local_only"), \
              patch.object(worker.long_tasks, "projects", return_value=[project]), \
              patch.object(worker.native_agent, "execute_tool", side_effect=observed_execute):
+            if args.runtime_root:
+                # Reuse actual tool-probe approvals, never invent an approval to
+                # force a desired model into the eligible candidates.
+                stack.enter_context(patch.object(model_library, "ROOT", args.runtime_root.resolve()))
             webapp_check.save_verifier(folder, BAD, accumulate=True)
             seed_args = {"path": "index.html", "cases": [{"set": {"bill": "50"}, "expect": {"answer": "60.00"}}]}
             seeded = worker.native_agent.execute_tool(folder, "check_webapp", seed_args)
@@ -125,7 +163,7 @@ def main() -> int:
         queue = task_context.step_status(folder)
         result["steps_completed"] = queue["total"] >= 2 and queue["remaining"] == 0
         result["passed"] = result["passed"] and result["steps_completed"]
-        report = {"scenario": "saved_browser_assertion_repair", "model": args.model,
+        report = {"scenario": "saved_browser_assertion_repair", "model": "automatic_local" if args.auto_route else args.model,
                   "seconds_including_seed_check": round(elapsed, 2), **stats,
                   "status": state["status"], "grade": result,
                   "steps": {key: queue[key] for key in ("total", "done", "remaining")}}

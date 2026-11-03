@@ -8,6 +8,16 @@ The native worker saves each model/tool step, resumes after a crash, keeps a pro
 
 For reports based on a local document, Cale can check exact source excerpts against the report and verify simple added or subtracted dollar amounts. A passing check saves a read-only verifier tied to the source file's bytes, so changing either the report or source invalidates that check. It only verifies the facts supplied to it; other claims still need review.
 
+Automatic native-worker routing remembers repeated local tool failures across
+checkpoints. After two failures it prefers different physical model weights
+within the already eligible local candidates, so switching aliases for the same
+weights does not count as trying another model. Reads and writes alone do not
+erase this feedback; verified recovery or new user instructions clear it.
+Explicit model selections, local/cloud modes, hardware checks and context limits
+remain authoritative. Deferred models remain fallbacks when alternatives cannot
+respond. This is a repair preference, not a guarantee that another model will
+solve the task or finish faster.
+
 For interactive single-file HTML apps, the native worker can use an offline Chromium check that fills real inputs, inspects visible results and errors, and checks mobile width. A passing check saves a repeatable browser verifier. The worker must rerun the check after changing the page before it can finish. This catches behavior that a source-text scan misses; it does not establish that an entire website is correct or visually polished.
 The checker handles letters entered for a number input as the empty value a browser would produce and reports that normalization. A live task browser is closed before the separate offline checker starts, so opening a website earlier in the task does not break local app checks. Rejected local `file://` browser URLs no longer start a browser session. Failed text assertions show the page's actual value to help the worker correct either the page or its test.
 When someone adds instructions to a task, Cale discards the earlier verifier and browser-check results before continuing. The revised work needs fresh checks, even when an earlier version of the task had passed.

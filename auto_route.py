@@ -306,6 +306,34 @@ def task_size(messages):
     return "balanced"
 
 
+def prefer_different_weights(candidates: list, weights: dict, avoid: list | None) -> list:
+    """Stable repair preference within an already eligible local candidate list.
+
+    A recorded weight digest survives aliases and avoids blaming replacement
+    weights when a model name is retagged. Unknown identities use only the
+    recorded alias. Deferred models remain available if alternatives fail.
+    """
+    entries = [entry for entry in (avoid if isinstance(avoid, list) else []) if isinstance(entry, dict)
+               and isinstance(entry.get("model"), str) and 0 < len(entry["model"]) <= 256][:8]
+    weights = weights if isinstance(weights, dict) else {}
+    def canonical(name):
+        return name.removesuffix(":latest")
+    def identity(name):
+        return weights.get(name) or weights.get(canonical(name)) or weights.get(canonical(name) + ":latest")
+    def deferred(name):
+        current = identity(name)
+        for entry in entries:
+            recorded = entry.get("weights")
+            known = isinstance(recorded, str) and re.fullmatch(r"[a-f0-9]{64}", recorded)
+            if known and current:
+                if current == recorded:
+                    return True
+            elif canonical(name) == canonical(entry["model"]):
+                return True
+        return False
+    return [name for name in candidates if not deferred(name)] + [name for name in candidates if deferred(name)]
+
+
 def model_order(size, available, main, fast, balanced, speeds=None):
     """Rank every installed tool-capable alias; the main model is a fallback."""
     ready = {name: parameters for name, parameters in available.items() if parameters}

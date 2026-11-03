@@ -46,6 +46,45 @@ REQUEST = {
 
 
 class CloudTests(unittest.TestCase):
+    def test_local_semantic_repair_uses_other_weights_and_keeps_hint_out_of_upstream_payload(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_weights = {cloud.LOCAL_MODEL: "a" * 64, cloud.FAST_MODEL: "a" * 64, "alternate": "b" * 64}
+        with (patch.object(router, "local_candidates", return_value=[cloud.LOCAL_MODEL, cloud.FAST_MODEL, "alternate"]),
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            self.assertEqual(router.complete(REQUEST, repair_avoid=[{"model": cloud.FAST_MODEL, "weights": "a" * 64}]), ANSWER)
+        self.assertEqual(post.call_args.args[1]["model"], "alternate")
+        self.assertNotIn("repair_avoid", post.call_args.args[1])
+        self.assertEqual((router.last_local_model, router.last_local_weights), ("alternate", "b" * 64))
+
+    def test_local_repair_keeps_deferred_models_as_api_failure_fallbacks(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_weights = {cloud.LOCAL_MODEL: "a" * 64, "alternate": "b" * 64}
+        with (patch.object(router, "local_candidates", return_value=[cloud.LOCAL_MODEL, "alternate"]),
+              patch.object(cloud, "post", side_effect=[OSError("alternate unavailable"), ANSWER]) as post):
+            self.assertEqual(router.complete(REQUEST, repair_avoid=[{"model": cloud.LOCAL_MODEL, "weights": "a" * 64}]), ANSWER)
+        self.assertEqual([call.args[1]["model"] for call in post.call_args_list], ["alternate", cloud.LOCAL_MODEL])
+
+    def test_repair_preference_respects_explicit_manual_model_and_free_cloud_only(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        (cloud.STATE / "model-choice.json").write_text('{"profile":"fast"}')
+        router = cloud.Router()
+        router.model_weights = {cloud.FAST_MODEL: "a" * 64, "alternate": "b" * 64}
+        avoid = [{"model": cloud.FAST_MODEL, "weights": "a" * 64}]
+        with (patch.object(router, "local_candidates", return_value=[cloud.FAST_MODEL, "alternate"]),
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            router.complete(REQUEST, repair_avoid=avoid)
+        self.assertEqual(post.call_args.args[1]["model"], cloud.FAST_MODEL)
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with (patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
+              patch.object(cloud, "post") as local):
+            router.complete(REQUEST, repair_avoid=avoid)
+        free.assert_called_once()
+        local.assert_not_called()
+        self.assertIsNone(router.last_local_model)
+
     def test_free_request_override_never_uses_paid_or_changes_global_mode(self):
         cloud.routing_mode.save_scope(cloud.STATE, "both")
         cloud.routing_mode.save(cloud.STATE, "floor_it")
@@ -827,7 +866,6 @@ class CloudTests(unittest.TestCase):
 
     def test_derestricted_retry_scales_with_task_size(self):
         small = cloud.CATALOG["permissive_small"]["alias"]
-        large = cloud.CATALOG["permissive"]["alias"]
 
         def response(url, payload, **kwargs):
             if url.endswith("/api/show"):

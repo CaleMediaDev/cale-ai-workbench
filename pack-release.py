@@ -38,6 +38,7 @@ extras = [
     "benchmarks/results/numeric-coverage-20261103.json",
     "benchmarks/browser_assertion_repair.py",
     "benchmarks/results/browser-assertion-repair-20261103.json",
+    "benchmarks/results/local-repair-routing-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",

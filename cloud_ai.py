@@ -37,7 +37,7 @@ import cloud_providers
 import pc_offline
 import routing_memory
 import routing_mode
-from auto_route import model_order, repair_messages, task_size
+from auto_route import model_order, prefer_different_weights, repair_messages, task_size
 from model_identity import configured_main_alias, configured_permissive_alias
 from model_library import (
     CATALOG,
@@ -829,18 +829,22 @@ class Router:
                 self.last_attempt = now
             return True
 
-    def complete(self, payload, task_id="", *, scope_override=None, cancel=None):
+    def complete(self, payload, task_id="", *, scope_override=None, cancel=None, repair_avoid=None):
         """Attribute this router request before any provider records its usage."""
         import usage_history
 
+        self.last_local_model = None
+        self.last_local_weights = ""
         token = usage_history.CURRENT_TASK.set(task_id)
         try:
+            if repair_avoid is not None:
+                return self._complete(payload, scope_override=scope_override, cancel=cancel, repair_avoid=repair_avoid)
             return (self._complete(payload) if scope_override is None and cancel is None else
                     self._complete(payload, scope_override=scope_override, cancel=cancel))
         finally:
             usage_history.CURRENT_TASK.reset(token)
 
-    def _complete(self, payload, scope_override=None, cancel=None):
+    def _complete(self, payload, scope_override=None, cancel=None, repair_avoid=None):
         """Return a validated completion from ChatGPT, free cloud, or Ollama."""
         import usage_history
 
@@ -1066,6 +1070,8 @@ class Router:
             import model_fitness
             selected = model_fitness.rank_game_models(
                 selected, CATALOG, ROOT, getattr(self, "model_weights", {}))
+        if profile == "main" and repair_avoid:
+            selected = prefer_different_weights(selected, getattr(self, "model_weights", {}), repair_avoid)
         last_error = None
         for selected_model in selected:
             local = dict(payload)
@@ -1092,10 +1098,15 @@ class Router:
                 )
                 record(
                     "local",
-                    f"Auto scale: {size}; local model responded.",
+                    ("Repair retry after tool failures; " if repair_avoid and profile == "main" else "")
+                    + f"Auto scale: {size}; local model responded.",
                     selected_model,
                 )
-                return retry_derestricted(payload, result, selected_model)
+                final = retry_derestricted(payload, result, selected_model)
+                if final is result:
+                    self.last_local_model = selected_model
+                    self.last_local_weights = getattr(self, "model_weights", {}).get(selected_model, "")
+                return final
             except Exception as exc:
                 last_error = exc
         # Free cloud is a fallback after installed local models fail. It never

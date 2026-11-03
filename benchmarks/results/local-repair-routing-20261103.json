@@ -1,0 +1,374 @@
+{
+  "scope": "Two synthetic local-only browser repair runs on RTX 3060 12 GB and 128 GB RAM. Different eligibility configuration; not a controlled speed comparison or universal quality claim. No cloud inference.",
+  "app_version": "0.5.442",
+  "runs": [
+    {
+      "scenario": "saved_browser_assertion_repair",
+      "model": "automatic_local",
+      "seconds_including_seed_check": 230.43,
+      "model_calls": 24,
+      "tool_calls": 25,
+      "tools_used": [
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "check_webapp",
+        "check_webapp",
+        "read_file",
+        "read_file",
+        "write_file",
+        "write_file",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "edit_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "check_webapp",
+        "read_file"
+      ],
+      "prompt_tokens": 131672,
+      "completion_tokens": 6290,
+      "assertion_revision_attempts": 4,
+      "successful_assertion_revisions": 1,
+      "step_tool_errors": [
+        "Tool error: ValueError: steps must be a JSON array of step objects, not an object or scalar",
+        "Tool error: ValueError: steps must be a JSON array of step objects, not an object or scalar",
+        "Tool error: ValueError: Malformed steps tool argument: supply an actual JSON array such as [{\"phase\":\"Check\",\"title\":\"Run existing checks\",\"check_tool\":\"run_verifier\"}]. Do not double-escape quotes. For revise, supply exactly one step; step_id belongs at the top level of the task_steps call. Correct tool arguments, not application source.",
+        "Tool error: ValueError: Supply the current active step_id 1 (Correct case 2 from empty-text to hidden for bill=0); steps cannot be skipped.",
+        "{\"passed\": false, \"total\": 2, \"done\": 0, \"remaining\": 2, \"active\": {\"id\": 1, \"phase\": \"Fix saved assertion\", \"title\": \"Correct case 2 from empty-text to hidden for bill=0\", \"status\": \"active\", \"attempts\": 1, \"evidence\": \"Check failed; inspect its returned output and fix the active step: Acceptance check failed: Tool error: ValueError: Saved browser cases changed; current suite_sha256=502bc5fc65c6f",
+        "{\"passed\": false, \"total\": 2, \"done\": 0, \"remaining\": 2, \"active\": {\"id\": 1, \"phase\": \"Fix saved assertion\", \"title\": \"Correct case 2 from empty-text to hidden for bill=0\", \"status\": \"active\", \"attempts\": 2, \"evidence\": \"Check failed; inspect its returned output and fix the active step: Acceptance check failed: Tool error: ValueError: Use the saved case index from the failed checker result\"}, \"rec",
+        "{\"passed\": false, \"total\": 2, \"done\": 0, \"remaining\": 2, \"active\": {\"id\": 1, \"phase\": \"Fix saved assertion\", \"title\": \"Correct case 2 from empty-text to hidden for bill=0\", \"status\": \"active\", \"attempts\": 3, \"evidence\": \"Check failed; inspect its returned output and fix the active step: Acceptance check failed: Tool error: ValueError: Use the saved case index from the failed checker result\"}, \"rec"
+      ],
+      "revision_errors": [
+        "Tool error: ValueError: Saved browser cases changed; current suite_sha256=502bc5fc65c6f927ecb40ddba7816fbe0d5ff4e51025fa2debcb45f8fad1949f",
+        "Tool error: ValueError: Use the saved case index from the failed checker result",
+        "Tool error: ValueError: Use the saved case index from the failed checker result"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.83
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.06
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.16
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 13.73
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 9.76
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 2.45
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 4.19
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 7.28
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.32
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 16.46
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 10.06
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.93
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 9.23
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.52
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.74
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 13.93
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 7.07
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 18.13
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.64
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 11.34
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 4.78
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 11.49
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 14.78
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.43
+        }
+      ],
+      "status": "continue",
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": true,
+        "verifier_rejects_invalid_state_regression": true,
+        "passed": false,
+        "steps_completed": false
+      },
+      "steps": {
+        "total": 2,
+        "done": 0,
+        "remaining": 2
+      },
+      "approval_scope": "development checkout: no candidate approvals, only duplicate 9B weights eligible"
+    },
+    {
+      "scenario": "saved_browser_assertion_repair",
+      "model": "automatic_local",
+      "seconds_including_seed_check": 65.58,
+      "model_calls": 10,
+      "tool_calls": 10,
+      "tools_used": [
+        "read_file",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "read_file",
+        "read_file",
+        "write_file",
+        "write_file",
+        "run_verifier"
+      ],
+      "prompt_tokens": 50081,
+      "completion_tokens": 1197,
+      "assertion_revision_attempts": 1,
+      "successful_assertion_revisions": 1,
+      "step_tool_errors": [
+        "Tool error: ValueError: steps must be a JSON array of step objects, not an object or scalar",
+        "Tool error: ValueError: Supply the current active step_id 1 (Correct case 2 assertion from expect:{} to hidden:['answer']); steps cannot be skipped."
+      ],
+      "revision_errors": [],
+      "routes": [
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.91
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 3.62
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.96
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 2.51
+        },
+        {
+          "model": "cale-gemma4-edge",
+          "weights": "370c2879f17648d337b0ab4e208fdce348e24d1060064e93d7645daafd56d39c",
+          "repair_avoid": [
+            {
+              "model": "cale-fast",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 7.63
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.72
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.26
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 8.2
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 4.51
+        },
+        {
+          "model": "cale-fast",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 3.85
+        }
+      ],
+      "status": "done",
+      "grade": {
+        "source_preserved": true,
+        "app_behavior": true,
+        "verifier_passes_correct": true,
+        "verifier_rejects_invalid_state_regression": true,
+        "passed": true,
+        "steps_completed": true
+      },
+      "steps": {
+        "total": 2,
+        "done": 2,
+        "remaining": 0
+      },
+      "approval_scope": "installed runtime tool-probe approvals"
+    }
+  ]
+}
