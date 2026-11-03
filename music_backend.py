@@ -161,14 +161,16 @@ def _request(path: str, data: dict | None = None, timeout: int = 30):
         raise RuntimeError(f"Local music API error {exc.code}: {detail[:300]}") from exc
 
 
-def _upload_cover(request: dict, source: Path) -> dict:
-    """Send source audio to the loopback API; it rejects absolute file paths."""
+def _upload_cover(request: dict, source: Path, field: str = "src_audio") -> dict:
+    """Upload an edit source or a style reference to the loopback music API."""
+    if field not in ("src_audio", "reference_audio"):
+        raise ValueError("Unknown music audio upload field")
     fields = {key: json.dumps(value) if isinstance(value, bool) else str(value)
               for key, value in request.items()}
     with source.open("rb") as audio:
         response = requests.post(
             BASE + "/release_task", data=fields,
-            files={"src_audio": (source.name, audio)}, timeout=300,
+            files={field: (source.name, audio)}, timeout=300,
         )
     if not response.ok:
         raise RuntimeError(
@@ -299,6 +301,7 @@ def _generate_music(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
     instrumental: bool = False, source_path: str = "",
     existing_task_id: str = "", on_task_submitted=None, on_progress=None,
+    reference_mode: str = "cover",
 ) -> dict:
     """Generate or cover music and save it to a new WAV/MP3/FLAC file."""
     if not prompt.strip():
@@ -313,20 +316,26 @@ def _generate_music(
     source = Path(source_path).resolve() if source_path else None
     if source and (not source.is_file() or source.suffix.lower() not in (".wav", ".mp3", ".flac")):
         raise ValueError("The cover source must be an existing WAV, MP3 or FLAC file.")
+    reference_mode = effective_reference_mode(source, duration_seconds, reference_mode)
     lm_ready = start_server()
     request = {
         "prompt": music_style.enhance(prompt.strip(), instrumental),
         "lyrics": "[Instrumental]" if instrumental else lyrics,
         "audio_format": target.suffix.lower()[1:], "audio_duration": duration_seconds,
-        "thinking": bool(lm_ready is True and not source), "inference_steps": 8, "batch_size": 1,
+        "thinking": bool(lm_ready is True and (not source or reference_mode == "style")),
+        "inference_steps": 8, "batch_size": 1,
     }
     tempo = music_style.requested_bpm(prompt)
     if tempo is not None:
         request["bpm"] = tempo
     if source:
-        request.update({"task_type": "cover", "audio_cover_strength": 0.2})
+        request.update({"task_type": "text2music" if reference_mode == "style" else "cover",
+                        "audio_cover_strength": 0.2})
     def submit() -> str:
-        submitted = _upload_cover(request, source) if source else _request("/release_task", request)
+        submitted = (_upload_cover(request, source, "reference_audio")
+                     if source and reference_mode == "style" else
+                     _upload_cover(request, source) if source else
+                     _request("/release_task", request))
         task_id = submitted.get("data", {}).get("task_id")
         if submitted.get("code") != 200 or not task_id:
             raise RuntimeError(f"Music generation was not accepted: {submitted.get('error')}")
@@ -414,12 +423,14 @@ def generate_music(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
     instrumental: bool = False, source_path: str = "",
     existing_task_id: str = "", on_task_submitted=None, on_progress=None,
+    reference_mode: str = "cover",
 ) -> dict:
     """Reserve GPU space, then generate or resume a local music request."""
     with _music_gpu_lease():
         return _generate_music(
             prompt, output_path, lyrics, duration_seconds, instrumental,
             source_path, existing_task_id, on_task_submitted, on_progress,
+            reference_mode,
         )
 
 
@@ -592,6 +603,36 @@ def audio_file_ok(path: str | Path) -> bool:
         return bool(volume and float(volume.group(1)) >= -60)
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def audio_duration_seconds(path: str | Path) -> float | None:
+    """Read a local audio file's duration without decoding or changing it."""
+    import imageio_ffmpeg
+
+    try:
+        result = subprocess.run(
+            [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-i", str(path)],
+            capture_output=True, text=True, timeout=15, creationflags=HIDE,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr)
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def effective_reference_mode(source: Path | None, duration_seconds: int,
+                             reference_mode: str) -> str:
+    """A longer requested version needs style conditioning, not fixed-length cover."""
+    if reference_mode not in ("cover", "style") or (reference_mode == "style" and not source):
+        raise ValueError("Choose cover or style with a source audio file")
+    if source and reference_mode == "cover":
+        source_seconds = audio_duration_seconds(source)
+        if source_seconds is not None and abs(source_seconds - duration_seconds) > 5:
+            return "style"
+    return reference_mode
 
 
 def compose_lyrics(prompt: str, duration_seconds: int) -> str:
@@ -850,6 +891,7 @@ def start_music_job(
     prompt: str, output_path: str, lyrics: str = "", duration_seconds: int = 30,
     instrumental: bool = False, source_path: str = "", task_id: str = "",
     vocal_retry: int = 0,
+    reference_mode: str = "cover",
 ) -> dict:
     """Launch a persistent local job; the agent can continue while it runs."""
     if not prompt.strip() or not 10 <= duration_seconds <= 600:
@@ -864,6 +906,10 @@ def start_music_job(
         raise ValueError("Choose a new WAV, MP3 or FLAC output file.")
     if source_path and not Path(source_path).resolve().is_file():
         raise ValueError("The cover source file does not exist.")
+    reference_mode = effective_reference_mode(
+        Path(source_path).resolve() if source_path else None,
+        duration_seconds, reference_mode,
+    )
     job_id = uuid.uuid4().hex
     import task_eta
 
@@ -875,7 +921,8 @@ def start_music_job(
         "job_id": job_id, "status": "queued", "current": "Starting local music", "progress": 5,
         "prompt": prompt, "output_path": str(target), "lyrics": lyrics,
         "duration_seconds": duration_seconds, "instrumental": bool(instrumental),
-        "source_path": source_path, "task_id": task_id, "created": started,
+        "source_path": source_path, "reference_mode": reference_mode,
+        "task_id": task_id, "created": started,
         "requested_at": started, "estimated_seconds": estimate,
         "vocal_retry": int(vocal_retry),
     }
@@ -921,7 +968,7 @@ def _run_job(job_id: str) -> None:
     attribution = usage_history.CURRENT_TASK.set(info.get("task_id", ""))
     try:
         lyrics = info["lyrics"]
-        needs_vocals = not info["source_path"] and music_style.requires_sustained_vocals(
+        needs_vocals = (not info["source_path"] or info.get("reference_mode") == "style") and music_style.requires_sustained_vocals(
             info["prompt"], info.get("lyrics", ""), info["instrumental"]
         )
         if needs_vocals and not lyrics.strip():
@@ -946,9 +993,19 @@ def _run_job(job_id: str) -> None:
                 info["prompt"], info["output_path"], lyrics,
                 info["duration_seconds"], info["instrumental"], info["source_path"],
                 info.get("server_task_id", ""), remember_task, remember_progress,
+                info.get("reference_mode", "cover"),
             )
         working["result"] = result
         _write_job(job_id, working)
+        if info.get("reference_mode") == "style":
+            rendered_seconds = audio_duration_seconds(result["path"])
+            if (rendered_seconds is None or
+                    abs(rendered_seconds - info["duration_seconds"]) >
+                    max(5, info["duration_seconds"] * 0.05)):
+                raise RuntimeError(
+                    "The music engine returned the source clip's length instead of "
+                    "the requested song length. The audio is saved for review."
+                )
         check = info.get("vocal_check")
         if needs_vocals:
             if not check or not check.get("passed"):

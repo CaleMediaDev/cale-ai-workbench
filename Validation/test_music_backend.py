@@ -609,6 +609,64 @@ def test_cover_uploads_source_audio_to_local_server(tmp_path):
     assert "src_audio_path" not in upload.call_args.args[0]
 
 
+def test_longer_reference_song_uses_style_audio_and_requested_duration(tmp_path):
+    source = tmp_path / "short-reference.wav"
+    source.write_bytes(b"source audio")
+    response = {"data": [{"status": 1,
+                         "result": '[{"file":"/v1/audio?path=long-song"}]'}]}
+    with (patch.object(music_backend, "start_server", return_value=False),
+          patch.object(music_backend, "audio_duration_seconds", return_value=29),
+          patch.object(music_backend, "_request", return_value=response),
+          patch.object(music_backend, "_upload_cover",
+                       return_value={"code": 200, "data": {"task_id": "task-3"}}) as upload,
+          patch.object(music_backend, "urlopen", return_value=io.BytesIO(b"three-minute song")),
+          patch.object(music_backend.time, "sleep")):
+        music_backend.generate_music(
+            "Male singer, late-night pop", str(tmp_path / "song.mp3"),
+            lyrics="A sung verse and chorus", duration_seconds=180,
+            source_path=str(source),
+        )
+    request = upload.call_args.args[0]
+    assert upload.call_args.args[2] == "reference_audio"
+    assert request["task_type"] == "text2music"
+    assert request["audio_duration"] == 180
+    assert request["lyrics"] == "A sung verse and chorus"
+
+
+def test_durable_long_reference_checks_actual_duration_and_vocals(tmp_path):
+    source = tmp_path / "reference.wav"
+    source.write_bytes(b"source audio")
+    output = tmp_path / "song.mp3"
+    with (patch.object(music_backend, "JOBS", tmp_path / "jobs"),
+          patch.object(music_backend, "_launch_job"),
+          patch.object(music_backend, "audio_duration_seconds", return_value=29)):
+        started = music_backend.start_music_job(
+            "Male singer with verses and chorus", str(output),
+            lyrics="[Verse]\nA late night song", duration_seconds=180,
+            source_path=str(source),
+        )
+        assert music_backend.music_job_status(started["job_id"])["reference_mode"] == "style"
+        with (patch.object(music_backend, "audio_duration_seconds", return_value=29),
+              patch.object(music_backend, "generate_music", return_value={"path": str(output)}),
+              patch.object(music_backend, "vocal_evidence") as vocals):
+            music_backend._run_job(started["job_id"])
+        failed = music_backend.music_job_status(started["job_id"])
+        assert failed["status"] == "error"
+        assert "source clip's length" in failed["current"]
+        vocals.assert_not_called()
+
+        failed["status"] = "queued"
+        music_backend._write_job(started["job_id"], failed)
+        with (patch.object(music_backend, "audio_duration_seconds", return_value=180),
+              patch.object(music_backend, "generate_music", return_value={"path": str(output)}),
+              patch.object(music_backend, "vocal_evidence", return_value={"passed": True,
+                  "segments": []}) as vocals,
+              patch("song_video.render", return_value={"path": "song-video.mp4"})):
+            music_backend._run_job(started["job_id"])
+        assert music_backend.music_job_status(started["job_id"])["status"] == "complete"
+        vocals.assert_called_once()
+
+
 def test_cover_upload_is_multipart_and_loopback_only(tmp_path):
     source = tmp_path / "original.mp3"
     source.write_bytes(b"source audio")

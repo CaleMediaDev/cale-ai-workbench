@@ -661,7 +661,7 @@ async def cover_music(
     source_path: str, prompt: str, output_path: str,
     duration_seconds: int = 30,
 ) -> dict:
-    """Create a local style cover. For long work, use start_music_job with source_path."""
+    """Create music from source audio. A different duration uses style reference; for long work use start_music_job."""
     import music_backend
 
     return await asyncio.wait_for(
@@ -677,14 +677,15 @@ async def cover_music(
 def start_music_job(
     prompt: str, output_path: str, lyrics: str = "",
     duration_seconds: int = 30, instrumental: bool = False,
-    source_path: str = "",
+    source_path: str = "", reference_mode: str = "cover",
 ) -> dict:
-    """Start a durable local song, instrumental, or cover job and return its ID immediately. Poll music_job_status."""
+    """Start a durable local music job. With source_path, use cover for the source's length or style to create a requested longer duration. Poll music_job_status."""
     import music_backend
 
     task_id = music_backend.project_for_output(output_path)
     return music_backend.start_music_job(
         prompt, output_path, lyrics, duration_seconds, instrumental, source_path,
+        reference_mode=reference_mode,
         **({"task_id": task_id} if task_id else {}),
     )
 
