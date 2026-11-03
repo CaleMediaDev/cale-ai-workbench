@@ -40,11 +40,12 @@ LOCAL_CATALOG = {
         }, "required": ["prompt", "output_path"]},
     },
     "local.start_music_job": {
-        "description": "Start a durable local music, song, beat, or instrumental job and return immediately. Check its completion with local.music_job_status; best for long renders.",
+        "description": "Start durable local music from a prompt or selected audio/video reference (WAV, MP3, FLAC, MP4, MOV, M4V, WebM, MKV). When a different duration is requested, use reference_mode=style for a full-length new song. Check local.music_job_status.",
         "inputSchema": {"type": "object", "properties": {
             "prompt": {"type": "string"}, "output_path": {"type": "string"},
             "lyrics": {"type": "string"}, "duration_seconds": {"type": "integer"},
             "instrumental": {"type": "boolean"}, "source_path": {"type": "string"},
+            "reference_mode": {"type": "string", "enum": ["cover", "style"]},
         }, "required": ["prompt", "output_path"]},
     },
     "local.music_job_status": {
@@ -54,7 +55,7 @@ LOCAL_CATALOG = {
         }, "required": ["job_id"]},
     },
     "local.cover_music": {
-        "description": "Make a local style cover from an existing WAV, MP3 or FLAC source audio file.",
+        "description": "Make local music from existing audio or a video with an audio track. A requested duration different from the source uses a style reference.",
         "inputSchema": {"type": "object", "properties": {
             "source_path": {"type": "string"}, "prompt": {"type": "string"},
             "output_path": {"type": "string"},
@@ -661,7 +662,7 @@ async def cover_music(
     source_path: str, prompt: str, output_path: str,
     duration_seconds: int = 30,
 ) -> dict:
-    """Create music from source audio. A different duration uses style reference; for long work use start_music_job."""
+    """Create music from source audio or video. A different duration uses style reference; for long work use start_music_job."""
     import music_backend
 
     return await asyncio.wait_for(
@@ -679,7 +680,7 @@ def start_music_job(
     duration_seconds: int = 30, instrumental: bool = False,
     source_path: str = "", reference_mode: str = "cover",
 ) -> dict:
-    """Start a durable local music job. With source_path, use cover for the source's length or style to create a requested longer duration. Poll music_job_status."""
+    """Start durable local music. source_path accepts audio or video; cover keeps its length, style makes a requested new length. Poll music_job_status."""
     import music_backend
 
     task_id = music_backend.project_for_output(output_path)

@@ -633,6 +633,39 @@ def test_longer_reference_song_uses_style_audio_and_requested_duration(tmp_path)
     assert request["lyrics"] == "A sung verse and chorus"
 
 
+def test_video_reference_extracts_audio_for_local_upload(tmp_path):
+    pcm = tmp_path / "tone.wav"
+    with wave.open(str(pcm), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(44100)
+        output.writeframes(b"".join(struct.pack("<h", round(12000 * math.sin(
+            2 * math.pi * 440 * i / 44100))) for i in range(44100)))
+    video = tmp_path / "reference.mp4"
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner",
+                    "-loglevel", "error", "-i", str(pcm), "-c:a", "aac", str(video)],
+                   check=True, timeout=30)
+    assert music_backend.effective_reference_mode(video, 180, "cover") == "style"
+    uploaded = []
+
+    def inspect_upload(request, source, field):
+        assert request["task_type"] == "text2music"
+        assert field == "reference_audio"
+        assert source.suffix == ".wav"
+        with wave.open(str(source), "rb") as converted:
+            assert converted.getnframes() >= 44000
+        uploaded.append(source)
+        return {"code": 200, "data": {"task_id": "local-only"}}
+
+    with (patch.object(music_backend, "ROOT", tmp_path),
+          patch.object(music_backend, "_upload_cover", side_effect=inspect_upload)):
+        result = music_backend._upload_reference_media(
+            {"task_type": "text2music"}, video, "reference_audio")
+    assert result["data"]["task_id"] == "local-only"
+    assert uploaded and not uploaded[0].exists()
+    assert video.is_file()
+
+
 def test_durable_long_reference_checks_actual_duration_and_vocals(tmp_path):
     source = tmp_path / "reference.wav"
     source.write_bytes(b"source audio")

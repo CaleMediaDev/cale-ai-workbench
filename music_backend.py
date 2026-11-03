@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import uuid
@@ -33,6 +34,8 @@ REVISION = "ca1e85fe9430179831e6bc6be790c332190a3866"
 BASE = "http://127.0.0.1:8001"
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 JOBS = ROOT / "LongTasks" / "music-jobs"
+AUDIO_REFERENCES = frozenset({".wav", ".mp3", ".flac"})
+VIDEO_REFERENCES = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv"})
 
 
 @contextmanager
@@ -179,6 +182,31 @@ def _upload_cover(request: dict, source: Path, field: str = "src_audio") -> dict
     return response.json()
 
 
+def _upload_reference_media(request: dict, source: Path, field: str) -> dict:
+    """Extract a video's audio only for the local upload, without altering it."""
+    if source.suffix.lower() in AUDIO_REFERENCES:
+        return _upload_cover(request, source, field)
+    import imageio_ffmpeg
+
+    temporary_root = ROOT / "Temp"
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="cale-audio-reference-", dir=temporary_root) as temp:
+        audio = Path(temp) / "reference.wav"
+        try:
+            result = subprocess.run(
+                [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel", "error",
+                 "-i", str(source), "-map", "0:a:0", "-vn", "-t", "600",
+                 "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", str(audio)],
+                capture_output=True, text=True, timeout=300, creationflags=HIDE,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("Could not read the video reference's audio track") from exc
+        if result.returncode or not audio.is_file() or audio.stat().st_size <= 44:
+            raise RuntimeError("The video reference has no readable audio track: "
+                               + result.stderr[-180:])
+        return _upload_cover(request, audio, field)
+
+
 def healthy() -> bool:
     try:
         result = _request("/health", timeout=2)
@@ -314,8 +342,9 @@ def _generate_music(
     if target.exists():
         raise ValueError("Output already exists. Choose a new filename.")
     source = Path(source_path).resolve() if source_path else None
-    if source and (not source.is_file() or source.suffix.lower() not in (".wav", ".mp3", ".flac")):
-        raise ValueError("The cover source must be an existing WAV, MP3 or FLAC file.")
+    if source and (not source.is_file() or source.suffix.lower() not in
+                   AUDIO_REFERENCES | VIDEO_REFERENCES):
+        raise ValueError("Choose an existing WAV, MP3, FLAC, MP4, MOV, M4V, WebM or MKV reference.")
     reference_mode = effective_reference_mode(source, duration_seconds, reference_mode)
     lm_ready = start_server()
     request = {
@@ -332,9 +361,9 @@ def _generate_music(
         request.update({"task_type": "text2music" if reference_mode == "style" else "cover",
                         "audio_cover_strength": 0.2})
     def submit() -> str:
-        submitted = (_upload_cover(request, source, "reference_audio")
+        submitted = (_upload_reference_media(request, source, "reference_audio")
                      if source and reference_mode == "style" else
-                     _upload_cover(request, source) if source else
+                     _upload_reference_media(request, source, "src_audio") if source else
                      _request("/release_task", request))
         task_id = submitted.get("data", {}).get("task_id")
         if submitted.get("code") != 200 or not task_id:
@@ -904,8 +933,9 @@ def start_music_job(
     target = Path(output_path).resolve()
     if target.suffix.lower() not in (".wav", ".mp3", ".flac") or target.exists():
         raise ValueError("Choose a new WAV, MP3 or FLAC output file.")
-    if source_path and not Path(source_path).resolve().is_file():
-        raise ValueError("The cover source file does not exist.")
+    if source_path and (not Path(source_path).resolve().is_file() or
+                        Path(source_path).suffix.lower() not in AUDIO_REFERENCES | VIDEO_REFERENCES):
+        raise ValueError("Choose an existing audio or video reference file.")
     reference_mode = effective_reference_mode(
         Path(source_path).resolve() if source_path else None,
         duration_seconds, reference_mode,
