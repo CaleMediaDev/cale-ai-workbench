@@ -714,13 +714,18 @@ async def make_music(
     """Create a local song or instrumental with ACE-Step. For long work, use start_music_job instead."""
     import music_backend
 
-    return await asyncio.wait_for(
+    result = await asyncio.wait_for(
         asyncio.to_thread(
             music_backend.generate_music, prompt, output_path, lyrics,
             duration_seconds, instrumental,
         ),
         timeout=7500,
     )
+
+    import song_video
+
+    video = await asyncio.to_thread(song_video.render_branded, result["path"])
+    return {**result, "video": video}
 
 
 @server.tool()
@@ -731,13 +736,18 @@ async def cover_music(
     """Create music from source audio or video. A different duration uses style reference; for long work use start_music_job."""
     import music_backend
 
-    return await asyncio.wait_for(
+    result = await asyncio.wait_for(
         asyncio.to_thread(
             music_backend.generate_music, prompt, output_path, "",
             duration_seconds, False, source_path,
         ),
         timeout=7500,
     )
+
+    import song_video
+
+    video = await asyncio.to_thread(song_video.render_branded, result["path"])
+    return {**result, "video": video}
 
 
 @server.tool()

@@ -120,3 +120,46 @@ def test_music_video_burns_timed_srt_captions_without_changing_inputs(tmp_path):
     with pytest.raises(ValueError, match="SRT"):
         music_video.make_music_video(str(song), str(tmp_path / "bad.mp4"),
                                      captions_path=str(song))
+
+
+
+def test_branded_song_video_preserves_art_audio_and_reuses_export(tmp_path):
+    import base64
+    import hashlib
+    import io
+
+    import song_video
+
+    source = tmp_path / "test song.wav"
+    with wave.open(str(source), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(struct.pack("<h", 1000) * 16000)
+    original = source.read_bytes()
+    artwork = base64.b64decode(song_video.BRANDED_COVER_BASE64)
+    assert hashlib.sha256(artwork).hexdigest() == song_video.BRANDED_COVER_SHA256
+    result = song_video.render_branded(str(source))
+    video = result["path"]
+    assert result["reused"] is False
+    assert song_video.render_branded(str(source))["reused"] is True
+    assert len(list(tmp_path.glob("*.mp4"))) == 1
+    frame = tmp_path / "frame.png"
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", video,
+                    "-frames:v", "1", str(frame)], check=True, capture_output=True)
+    with Image.open(frame) as actual, Image.open(io.BytesIO(artwork)) as reference:
+        assert actual.size == (1024, 1024)
+        reference = reference.convert("RGB").resize((1024, 1024))
+        diff = ImageChops.difference(actual.convert("RGB"), reference)
+        from PIL import ImageStat
+        assert max(ImageStat.Stat(diff).mean) < 12
+    probe = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", video],
+                           capture_output=True, text=True)
+    assert "Video: h264" in probe.stderr and "Audio: aac" in probe.stderr
+    assert source.read_bytes() == original
+    # Changed audio cannot reuse a stale video, even if its timestamp is restored.
+    with source.open("ab") as stream:
+        stream.write(b"new metadata")
+    changed = song_video.render_branded(str(source))
+    assert changed["path"] != video
+    assert song_video.render_branded(str(source))["path"] == changed["path"]

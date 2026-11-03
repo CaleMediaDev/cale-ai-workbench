@@ -879,7 +879,7 @@ def _retry_captioned_video(job_id: str, info: dict, error: Exception) -> None:
     retrying = attempts < 3
     _write_job(job_id, {
         **info, "status": "queued" if retrying else "error",
-        "current": ("Retrying the captioned video" if retrying
+        "current": ("Retrying the song video" if retrying
                     else "The audio is saved, but its video failed after three tries: "
                     + str(error)[:180]),
         "video_retries": attempts, "video_error": str(error)[:300],
@@ -940,7 +940,7 @@ def start_music_job(
     instrumental: bool = False, source_path: str = "", task_id: str = "",
     vocal_retry: int = 0,
     reference_mode: str = "cover",
-    make_video: bool = False,
+    make_video: bool = True,
 ) -> dict:
     """Launch a persistent local job; the agent can continue while it runs."""
     if not prompt.strip() or not 10 <= duration_seconds <= 600:
@@ -1082,11 +1082,11 @@ def _run_job(job_id: str) -> None:
         if info.get("make_video"):
             import song_video
 
-            working["current"] = "Making a video with captions"
+            working["current"] = "Making your Cale Media song video"
             working["progress"] = 88
             _write_job(job_id, working)
             try:
-                video = song_video.render(
+                video = song_video.render_branded(
                     result["path"], segments=(check or {}).get("segments", []),
                     lyrics=lyrics, title=info["prompt"],
                     instrumental=bool(info["instrumental"]),
@@ -1097,7 +1097,7 @@ def _run_job(job_id: str) -> None:
                 return
         _write_job(job_id, {
             **working, "status": "complete",
-            "current": "Music and captioned video are ready" if video else "Music is ready",
+            "current": "Music and video are ready" if video else "Music is ready",
             "progress": 100,
             "result": {**result, **({"video": video} if video else {})},
             "vocal_check": check,

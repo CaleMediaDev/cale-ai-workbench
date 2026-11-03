@@ -203,7 +203,7 @@ def test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio(tmp_pat
                 "recognized_words": 50, "last_vocal_second": 58}
         ) as check, patch.object(
             music_backend, "_write_job", side_effect=capture_write
-        ), patch("song_video.render", return_value={
+        ), patch("song_video.render_branded", return_value={
             "path": "song-video.mp4", "captions_path": "song.captions.srt"
         }) as render:
             music_backend._run_job(started["job_id"])
@@ -214,10 +214,10 @@ def test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio(tmp_pat
     assert (tmp_path / "song.lyrics.txt").read_text(encoding="utf-8").strip() == lyrics.strip()
     assert job["status"] == "complete"
     assert job["vocal_check"]["recognized_words"] == 50
-    assert (90, "Generating music locally · audio 100%") in progress_updates
-    assert (94, "Checking the vocals") in progress_updates
-    assert "video" not in job["result"]
-    render.assert_not_called()
+    assert (70, "Generating music locally · audio 100%") in progress_updates
+    assert (75, "Checking the vocals") in progress_updates
+    assert job["result"]["video"]["path"] == "song-video.mp4"
+    render.assert_called_once()
 
 
 def test_sparse_vocal_chops_do_not_trigger_lyric_or_singing_checks(tmp_path):
@@ -234,7 +234,7 @@ def test_sparse_vocal_chops_do_not_trigger_lyric_or_singing_checks(tmp_path):
               patch.object(music_backend, "generate_music",
                            return_value={"path": str(output)}) as generate,
               patch.object(music_backend, "vocal_evidence") as check,
-              patch("song_video.render", return_value={
+              patch("song_video.render_branded", return_value={
                   "path": "song-video.mp4", "captions_path": "song.captions.srt"
               }) as render):
             music_backend._run_job(started["job_id"])
@@ -242,7 +242,7 @@ def test_sparse_vocal_chops_do_not_trigger_lyric_or_singing_checks(tmp_path):
     compose.assert_not_called()
     check.assert_not_called()
     assert generate.call_args.args[2] == ""
-    render.assert_not_called()
+    render.assert_called_once()
     assert job["status"] == "complete"
     assert job["vocal_check"] is None
 
@@ -262,7 +262,7 @@ def test_saved_vocal_chop_song_recovers_without_singing_check(tmp_path):
         with (patch.object(music_backend, "_worker_running", return_value=False),
               patch.object(music_backend, "audio_file_ok", return_value=True),
               patch.object(music_backend, "vocal_evidence") as check,
-              patch("song_video.render", return_value={
+              patch("song_video.render_branded", return_value={
                   "path": "song-video.mp4", "captions_path": "song.captions.srt"
               })):
             music_backend.recover_music_jobs()
@@ -741,7 +741,7 @@ def test_durable_long_reference_checks_actual_duration_and_vocals(tmp_path):
               patch.object(music_backend, "generate_music", return_value={"path": str(output)}),
               patch.object(music_backend, "vocal_evidence", return_value={"passed": True,
                   "segments": []}) as vocals,
-              patch("song_video.render", return_value={"path": "song-video.mp4"})):
+              patch("song_video.render_branded", return_value={"path": "song-video.mp4"})):
             music_backend._run_job(started["job_id"])
         assert music_backend.music_job_status(started["job_id"])["status"] == "complete"
         vocals.assert_called_once()
@@ -801,12 +801,12 @@ def test_durable_music_job_survives_the_starting_process(tmp_path):
             args[8](0.8)
             current = music_backend.music_job_status(started["job_id"])
             assert current["server_task_id"] == "server-task-1"
-            assert current["progress"] == 79
+            assert current["progress"] == 63
             assert "audio 80%" in current["current"]
             return {"path": str(output)}
 
         with patch.object(music_backend, "generate_music", side_effect=finish), patch(
-            "song_video.render", return_value={
+            "song_video.render_branded", return_value={
                 "path": "song-video.mp4", "captions_path": "song.captions.srt"
             }
         ):
@@ -841,7 +841,7 @@ def test_explicit_singer_overrides_wrong_instrumental_tool_argument(tmp_path):
         with (patch.object(music_backend, "compose_lyrics", return_value="Bobby shines every ride"),
               patch.object(music_backend, "generate_music", return_value={"path": str(output)}),
               patch.object(music_backend, "vocal_evidence", return_value={"passed": True,
-                  "segments": []}), patch("song_video.render", return_value={"path": "video.mp4"})):
+                  "segments": []}), patch("song_video.render_branded", return_value={"path": "video.mp4"})):
             music_backend._run_job(started["job_id"])
         assert music_backend.music_job_status(started["job_id"])["status"] == "complete"
         assert music_backend.music_job_status(started["job_id"])["instrumental"] is False
@@ -1047,7 +1047,7 @@ def test_recovery_only_marks_playable_saved_song_complete(tmp_path):
         music_backend, "_worker_running", return_value=False
     ), patch.object(music_backend, "audio_file_ok", return_value=True), patch.object(
         music_backend, "_launch_job"
-    ) as launch, patch("song_video.render", return_value={
+    ) as launch, patch("song_video.render_branded", return_value={
         "path": "song-video.mp4", "captions_path": "song.captions.srt"
     }) as render:
         record = music_backend.music_job_status(job_id)
@@ -1101,7 +1101,7 @@ def test_failed_video_retries_saved_audio_without_generating_song_again(tmp_path
             return {"path": str(output), "model": "ACE-Step 1.5"}
 
         with patch.object(music_backend, "generate_music", side_effect=generate) as engine, patch(
-            "song_video.render", side_effect=[RuntimeError("encoder busy"),
+            "song_video.render_branded", side_effect=[RuntimeError("encoder busy"),
                                                RuntimeError("encoder busy"),
                                                {"path": "song-video.mp4",
                                                 "captions_path": "song.captions.srt"}]
@@ -1140,7 +1140,7 @@ def test_video_retry_stops_after_three_failures_without_losing_audio(tmp_path):
     with patch.object(music_backend, "JOBS", jobs), patch.object(
         music_backend, "_worker_running", return_value=False
     ), patch.object(music_backend, "audio_file_ok", return_value=True), patch(
-        "song_video.render", side_effect=RuntimeError("encoder unavailable")
+        "song_video.render_branded", side_effect=RuntimeError("encoder unavailable")
     ) as render:
         for attempt in range(1, 4):
             music_backend.recover_music_jobs()

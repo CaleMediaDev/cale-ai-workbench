@@ -5850,6 +5850,8 @@ def gui():
 
     window.bind_all("<MouseWheel>", scroll_super, add="+")
 
+    sharing_songs = set()
+
     def task_action(pid, kind):
         item = next((p for p in projects() if p["id"] == pid), None)
         if not item:
@@ -5886,6 +5888,42 @@ def gui():
             return
         if kind == "open":
             os.startfile(item["folder"])
+            return
+        if kind == "share_facebook":
+            selected = latest_song(item["folder"])
+            if not selected:
+                status.set("Your song is not saved yet.")
+                return
+            if pid in sharing_songs:
+                status.set("Preparing your Facebook video…")
+                return
+            sharing_songs.add(pid)
+            status.set("Preparing your Facebook video…")
+            def prepare_share():
+                try:
+                    import song_video
+                    video = song_video.render_branded(str(selected))["path"]
+                    def show_share():
+                        sharing_songs.discard(pid)
+                        window.clipboard_clear()
+                        window.clipboard_append(video)
+                        subprocess.Popen(["explorer.exe", "/select,", video],
+                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                        webbrowser.open("https://www.facebook.com/")
+                        status.set("Facebook opened. Choose Photo/video and upload the selected MP4. Its path is copied.")
+                        messagebox.showinfo("Share your song to Facebook",
+                            "Your video is ready and selected in the folder.\n\n"
+                            "On Facebook, choose Photo/video, select this MP4, then choose your audience and post.\n\n"
+                            + video + "\n\nThe file path is copied so you can paste it in the upload chooser.",
+                            parent=window)
+                    window.after(0, show_share)
+                except Exception as exc:
+                    message = str(exc)
+                    def show_error():
+                        sharing_songs.discard(pid)
+                        messagebox.showerror("Could not prepare Facebook video", message, parent=window)
+                    window.after(0, show_error)
+            threading.Thread(target=prepare_share, daemon=True).start()
             return
         if kind == "play_music":
             import music_backend
@@ -5957,6 +5995,9 @@ def gui():
                     messagebox.showinfo("Song", "No saved song yet.", parent=dialog)
             ttk.Button(pane, text="Play latest song",
                        command=play_latest_song).pack(anchor="w", pady=(8, 0))
+            ttk.Button(pane, text="Share to Facebook",
+                       command=lambda: task_action(item["id"], "share_facebook")).pack(
+                           anchor="w", pady=(8, 0))
             def show_song_versions():
                 versions = song_versions(item["folder"])
                 if not versions:
@@ -6307,6 +6348,10 @@ def gui():
                 controls, text="▶ Play song",
                 command=lambda pid=item["id"]: task_action(pid, "play_music"),
             ).pack(side="left", padx=(0, 6))
+        if standalone_audio_project(item) and item["status"] in ("ready_for_review", "accepted"):
+            ttk.Button(controls, text="Share to Facebook",
+                       command=lambda pid=item["id"]: task_action(pid, "share_facebook")).pack(
+                           side="left", padx=(0, 6))
         if camera:
             ttk.Button(
                 controls,

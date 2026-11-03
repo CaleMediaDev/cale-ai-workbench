@@ -382,3 +382,5 @@ For real local-model tasks rather than mocked component tests, run the opt-in [n
 Please report reproducible bugs and include versions and redacted errors. Do not upload your `Cloud`, `data`, `Projects`, `LongTasks`, or log directories.
 
 Made by [Cale Media — websites and digital marketing](https://calemedia.com/).
+
+New songs include a square MP4 using the supplied DJ Cale concert artwork. Audio remains a separate playable file; the video reuses it without regenerating music. **Share to Facebook** on finished song cards prepares/reuses the video, copies its path, reveals it in Explorer and opens Facebook. Choose Photo/video, select the MP4, then choose your audience and publish. The app does not publish automatically or require a Facebook API key.
