@@ -479,6 +479,11 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                         failures.append(
                             f"#{element_id} displayed {actual!r}; expected visible text containing {text!r}"
                         )
+                        if text.casefold() in {"exists", "present", "visible"} and target.evaluate(
+                                "el => ['CANVAS','IMG','SVG','INPUT','VIDEO','AUDIO'].includes(el.tagName.toUpperCase())"):
+                            failures.append(f"For presence of #{element_id}, use visible=[{element_id!r}]. "
+                                            "expect compares literal text, not presence sentinels. "
+                                            "Retain the page's working IDs and required behavior when correcting this assertion.")
                 for field, wanted in (("visible", True), ("hidden", False)):
                     for token in case.get(field, []):
                         target = find_target(token)

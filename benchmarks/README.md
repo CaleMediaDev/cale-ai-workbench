@@ -54,6 +54,24 @@ that unit, but this did not provide the missing phase plan or coverage. It is
 retained as a failed end-to-end build. The runner automates execution of selected
 acceptance; it does not fix a model's incomplete plan or infer omitted tests.
 
+## Further validation
+
+The [API coverage trial](results/api-coverage-20261103.json) planned all four
+requested helper functions but stopped after 428.72 seconds, 11 validated model
+responses and 15 upstream calls. Its next `task_steps` arguments failed the array
+schema; the rejected payload was not retained, so whether its inner list was
+valid JSON is unknown. Only one unit finished, three independent behaviors
+failed, and the verifier failed even on its baseline. This remains a failed
+fresh build. The later live-source briefing, quoted-list compatibility and
+presence-check diagnostics have separate regression evidence, not a success
+claim from this run.
+
+The later complete-game trial in the [game report](results/native-game-build-20261103.json)
+took 570.34 seconds / 24 local model calls. None of its six units completed;
+JavaScript syntax was invalid and mobile layout overflowed. A visible canvas
+was the only passing browser observation. This is a retained failure of an
+entire game, not a passing result inferred from the smaller module checks.
+
 ## Saved browser assertion repair
 
 `browser_assertion_repair.py --model cale-gemma4-edge --keep-folder C:\path\to\new-folder`

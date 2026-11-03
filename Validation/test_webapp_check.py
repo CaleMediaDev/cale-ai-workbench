@@ -39,6 +39,18 @@ window.addEventListener('keydown',e=>{
 });</script>"""
 
 
+def test_nontext_presence_mistake_still_fails_and_suggests_visible_without_rewriting_page(tmp_path):
+    source = '<canvas id="canvas"></canvas><p id="status">exists</p>'
+    page = tmp_path / "index.html"
+    page.write_text(source)
+    failed = webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"expect": {"canvas": "exists"}}]})
+    assert failed["passed"] is False
+    assert "use visible=['canvas']" in str(failed["cases"][0]["failures"])
+    assert page.read_text() == source
+    assert webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"visible": ["canvas"]}]})["passed"]
+    assert webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"expect": {"status": "exists"}}]})["passed"]
+
+
 def test_canvas_live_state_records_real_key_effects_and_rejects_broken_controls(tmp_path):
     path = tmp_path / "index.html"
     path.write_text(CANVAS_STATE_PAGE)

@@ -1,5 +1,5 @@
 {
-  "scope": "Two synthetic complete-game worker builds on RTX 3060 12 GB, 128 GB RAM, real automatic local-only routing. Both failed independent grading. Evolving code and different model samples; no controlled performance comparison. The later focused-prompt queue fix has regression coverage but no passing complete-game run. A later resumed run with step-target binding is retained separately; it does not establish a passing complete game.",
+  "scope": "Synthetic complete-game builds and continuation on RTX 3060 12 GB, 128 GB RAM, real automatic local-only routing. All retained runs failed independent grading; evolving code and model samples, not a controlled performance comparison or a qualified game model.",
   "runs": [
     {
       "scenario": "native_game_build",
@@ -690,6 +690,280 @@
         "remaining": 6
       },
       "worker_variant": "continued checkpoint with pinned bare completion and acceptance-identity commit guard"
+    },
+    {
+      "scenario": "native_game_build",
+      "brief": "Create index.html, a complete offline HTML space shooter, using your project tools.\nBuild a real canvas game with stars, player ship, enemies, bullets, score, lives,\nwaves, game over and Enter restart. Fit small screens. Arrow keys/A-D move,\nSpace shoots. No external assets. Use seconds-based timing at 120 pixels/second.\nCanvas logical size is 600x800, player center starts x=300, half-width=20.\nExpose the SAME live state and functions used for gameplay as window.game:\n{player:{x,y,w,h,invincible},bullets:[],enemies:[],score,lives,wave,playing,\nwaveSpawned,update(dt,keys),reset()}. keys contains ArrowLeft/ArrowRight/KeyA/KeyD/Space\nbooleans. Enemy/bullet objects use centered x,y,w,h and speed, enemy hp defaults1.\nupdate(0,{}) resolves existing collisions. Each killed enemy scores10.\nA player hit removes one life with at least1 second invulnerability. At zero\nlives playing=false. reset() starts play with score0/lives3/wave1/player.x300\nand no bullets. An empty wave advances after waveSpawned=true regardless of\nscore. Only positive-area rectangle overlap counts. Clear keys on blur.\nReturn a complete playable game, not just an API or a picture.\n Save actual files, not JSON in chat. Use task_steps for at least two tiny SQLite units, finish their real checks and create/run a repeatable verifier. Show a visible HUD with score, lives and wave. Test real keyboard movement, shooting and restart, not just text presence. Expose the requested window.game object as the actual live game state, not a separate test implementation. Keep all JavaScript inline in index.html for this single-file game.",
+      "seconds": 570.34,
+      "automatic_step_checks": 6,
+      "status": "continue",
+      "error": null,
+      "model_calls": 24,
+      "tool_calls": 24,
+      "prompt_tokens": 188279,
+      "completion_tokens": 11299,
+      "tools_used": [
+        "task_steps",
+        "task_steps",
+        "task_steps",
+        "write_file",
+        "edit_file",
+        "read_file",
+        "edit_file",
+        "edit_file",
+        "edit_file",
+        "read_file",
+        "edit_file",
+        "edit_file",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "edit_file",
+        "read_file",
+        "edit_file",
+        "read_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 10.78
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 24.45
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 12.53
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 54.74
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 10.84
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 30.98
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 93.51
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 63.73
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 94.87
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 5.77
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 18.86
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 22.71
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 6.12
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [],
+          "seconds": 15.65
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 8.39
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 6.66
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 6.94
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 7.22
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 8.29
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 7.52
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 22.82
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 6.95
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 10.38
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "seconds": 9.81
+        }
+      ],
+      "router_call_attempts": 24,
+      "upstream_local_calls": 25,
+      "grade": {
+        "logic": {
+          "valid_code": false
+        },
+        "browser": {
+          "checks": {
+            "mobile_fit": false,
+            "canvas_visible": true
+          },
+          "errors": [
+            "Unexpected identifier 'self'",
+            "Error: Page.evaluate: TypeError: Cannot read properties of undefined (reading 'reset')\n    at eval (eval at evaluate (:370:30), <anonymous>:1:13)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:370:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)"
+          ],
+          "passed": false
+        },
+        "verifier_passes_correct": false,
+        "verifier_rejects_missing_javascript": false,
+        "steps": {
+          "total": 6,
+          "done": 0,
+          "remaining": 6
+        },
+        "passed": false
+      },
+      "resumed": false,
+      "initial_turns": 0,
+      "initial_steps": {
+        "total": 0,
+        "done": 0,
+        "remaining": 0
+      },
+      "app_version": "0.5.450-development",
+      "development_note": "Named API ledger and live-source changes were loaded; quoted-step compatibility and nontext presence diagnostics were added after this process started. This run is not a controlled comparison or a complete-game success."
     }
   ]
 }

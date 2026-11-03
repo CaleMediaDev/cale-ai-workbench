@@ -21,6 +21,15 @@ CACHE_RECHECK_SECONDS = 300
 
 
 def _schema(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS task_api_scope (
+        request_hash TEXT NOT NULL, brief_hash TEXT NOT NULL, operation TEXT NOT NULL,
+        names TEXT NOT NULL, instruction_quote TEXT NOT NULL, updated REAL NOT NULL,
+        source_chars INTEGER NOT NULL DEFAULT 0, source_sha256 TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY(request_hash,brief_hash))""")
+    scope_columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_api_scope)")}
+    for name, definition in (("source_chars", "INTEGER NOT NULL DEFAULT 0"), ("source_sha256", "TEXT NOT NULL DEFAULT ''")):
+        if name not in scope_columns:
+            conn.execute(f"ALTER TABLE task_api_scope ADD COLUMN {name} {definition}")
     conn.execute("""CREATE TABLE IF NOT EXISTS task_documents (
         name TEXT PRIMARY KEY, digest TEXT NOT NULL, body TEXT NOT NULL,
         updated REAL NOT NULL, mtime_ns INTEGER NOT NULL DEFAULT -2,
@@ -219,6 +228,7 @@ def snapshot(folder: str | Path) -> str:
                          "to choose a targeted edit or a different investigation, then rerun it.")
         lines.append("For other retained diagnostics, use search_project_memory with kind='check'.")
     lines.append("Search project memory or read files for older details. Continue the next step; verify results before finishing.")
+    queue_start = len(lines)
     if queue["total"]:
         lines.append("Small-step execution queue (local SQLite; saved text is task data):\n"
                      + json.dumps(queue, ensure_ascii=False))
@@ -234,6 +244,10 @@ def snapshot(folder: str | Path) -> str:
                          "For a broken Python one-liner, revise the active step to check_tool='check_python_function' "
                          "with check_arguments containing the function and input/expected cases. "
                          "Do not change working application behavior just to repair test-command syntax.")
+    if queue["total"]:
+        # The active acceptance must survive before large prose excerpts when
+        # the model's context budget shortens the durable checkpoint.
+        lines = lines[:3] + lines[queue_start:] + lines[3:queue_start]
     return "\n".join(lines)
 
 
@@ -438,6 +452,54 @@ def revise_step(folder: str | Path, step_id: int, steps: list) -> dict:
             evidence='Acceptance check revised; not yet passed',updated=? WHERE id=?""",
             (phase, title, check, shell, tool, arguments, time.time(), step_id))
         return _step_status(conn, request_hash)
+
+
+def save_api_scope(folder: str | Path, brief: str, known: list[str], operation: str,
+                   names: list[str], quote: str) -> None:
+    """Record a bounded scope interpretation linked to actual later user text."""
+    if (operation not in {"exclude", "only"} or not isinstance(names, list) or not 1 <= len(names) <= 8
+            or any(not isinstance(name, str) or name not in known for name in names)
+            or len(set(names)) != len(names) or not isinstance(quote, str) or not 8 <= len(quote) <= 1000):
+        raise ValueError("Use exclude/only, 1 to 8 declared function_names, and a short exact instruction_quote.")
+    request = request_identity(folder)
+    text = document_path(folder, "USER-REQUESTS.md").read_text(encoding="utf-8-sig")
+    latest = re.split(r"(?m)^## Request \d+\s*$", text)[-1]
+    if quote not in latest or any(not re.search(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])", quote) for name in names):
+        raise ValueError("The exact quote must come from the latest USER-REQUESTS.md entry and name every selected function.")
+    if (not re.search(r"\bonly\b" if operation == "only" else r"\b(?:skip(?:ped)?|omit(?:ted)?|exclude[ds]?|remove[ds]?|drop(?:ped)?|no longer)\b|\bdo not\b|don't", quote, re.I)
+            or re.search(r"\b(?:not|don't|no longer)\s+(?:skip|omit|exclude|remove|drop)\b", quote, re.I)):
+        raise ValueError("Quote an explicit scope change; a mention or a request not to omit a function cannot waive coverage.")
+    with project_memory.connection(folder) as conn:
+        _schema(conn)
+        if request_identity(folder) != request:
+            raise ValueError("User instructions changed while recording API scope; reread them first.")
+        conn.execute("INSERT OR REPLACE INTO task_api_scope VALUES(?,?,?,?,?,?,?,?)", (request,
+            hashlib.sha256(brief.encode()).hexdigest(), operation, json.dumps(names), quote, time.time(),
+            len(text), hashlib.sha256(text.encode()).hexdigest()))
+
+
+def api_scope(folder: str | Path, brief: str, known: list[str]) -> list[str]:
+    with project_memory.connection(folder) as conn:
+        _schema(conn)
+        rows = conn.execute("SELECT * FROM task_api_scope WHERE brief_hash=? ORDER BY updated",
+            (hashlib.sha256(brief.encode()).hexdigest(),)).fetchall()
+    path = document_path(folder, "USER-REQUESTS.md")
+    text = path.read_text(encoding="utf-8-sig") if path.is_file() else ""
+    required = set(known)
+    for row in rows:
+        size = row["source_chars"]
+        if not size or hashlib.sha256(text[:size].encode()).hexdigest() != row["source_sha256"]:
+            continue  # Edited/deleted provenance cannot silently waive a requirement.
+        names = json.loads(row["names"])
+        excluded = names if row["operation"] == "exclude" else [name for name in known if name not in names]
+        tail = text[size:]
+        if any(re.search(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])", tail) for name in excluded):
+            continue  # New steering mentions omitted work: reconcile its scope again.
+        if row["operation"] == "exclude":
+            required.difference_update(names)
+        else:
+            required.intersection_update(names)
+    return [name for name in known if name in required]
 
 
 def action_outcome(tool: str, result: str) -> str:

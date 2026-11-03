@@ -264,6 +264,34 @@ custom integration commands remain explicit tool actions. These checks reduce
 bookkeeping inference; they do not create acceptance cases or prove test coverage
 of requirements the model omitted.
 
+For implementation requests that clearly name one Python/JavaScript module and
+declare two to eight plain function signatures on separate lines, the briefing
+now lists the required APIs and which have typed cases in that actual module.
+A generated function verifier cannot hand off while one is missing or its suite
+checksum is stale. Checks in a test-only copy do not cover the requested module.
+This is name coverage, not proof of correct behavior or edge-case coverage.
+Ambiguous multi-module requests and custom integration verifiers retain their
+existing workflow instead of being forced into this narrow function format.
+
+Later explicit API scope changes can be recorded through `task_steps scope`
+using `scope_operation='exclude'` or `'only'`, `function_names`, and an exact
+`instruction_quote` from the latest user-follow-up entry. The quote must name
+the selected APIs and express a scope change; a plan or progress claim cannot
+waive coverage. The SQLite record retains its source provenance across unrelated
+follow-ups. Edited provenance or later discussion of omitted APIs requires
+scope to be reconciled again. This records the agent's interpretation of an
+explicit instruction; it is not a general natural-language intent proof.
+
+The current SQLite acceptance is placed ahead of older prose in each fresh
+briefing. When its source file is at most 6,000 bytes, the worker also gets those
+current bytes and their digest without a separate read call. Larger sources
+continue through the normal bounded file tools. A valid, once-double-encoded
+native step list can be decoded and schema-validated without retrying inference;
+malformed lists and invalid step contents remain errors. Browser diagnostics
+also distinguish literal text assertions from presence checks for canvas/image
+elements; an invented `'exists'` expectation still fails rather than changing
+the page or silently weakening the check.
+
 The model still chooses its tests. The retained local JavaScript repair trial
 failed to complete its four steps, despite partial code repairs. Passing the
 checker implementation's regression suite is not proof of reliable game

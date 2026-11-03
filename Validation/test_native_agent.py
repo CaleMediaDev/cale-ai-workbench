@@ -489,6 +489,102 @@ def test_automatic_acceptance_waits_for_source_and_leaves_shell_checks_explicit(
         assert task_context.step_status(folder)["done"] == 0
 
 
+def test_named_api_coverage_blocks_omissions_and_stale_suite_but_preserves_custom_checks(tmp_path):
+    for javascript in (False, True):
+        item = project(tmp_path / ("api-js" if javascript else "api-py"))
+        folder = Path(item["folder"])
+        path = "logic.js" if javascript else "logic.py"
+        item["brief"] = f"Repair the functions in {path}.\nfirst(x) adds one.\nsecond(x) doubles x.\n"
+        source = ("function first(x){return x+1}\nfunction second(x){return x*2}" if javascript else
+                  "def first(x): return x+1\ndef second(x): return x*2")
+        (folder / path).write_text(source)
+        run = run_typed_javascript_check if javascript else run_typed_python_check
+        run(item, {"path": path, "function": "first", "cases": [{"args": [2], "expected": 3}]})
+        coverage = native_agent.function_coverage(item)
+        assert coverage["covered_functions"] == ["first"] and coverage["missing_functions"] == ["second"]
+        issue = native_agent.completion_issue(folder, item, {"verify_passed": True})
+        assert "omits explicitly requested APIs" in issue and "second" in issue
+        copy_path = "test-copy.js" if javascript else "test-copy.py"
+        (folder / copy_path).write_text(source)
+        run(item, {"path": copy_path, "function": "second", "cases": [{"args": [2], "expected": 4}]})
+        assert native_agent.function_coverage(item)["missing_functions"] == ["second"]
+        fresh = native_agent.fresh_messages([{"role": "system", "content": "brief"}], folder, {}, item)
+        assert "Explicit API coverage" in fresh[1]["content"] and '"missing_functions": ["second"]' in fresh[1]["content"]
+        run(item, {"path": path, "function": "second", "cases": [{"args": [2], "expected": 4}]})
+        assert native_agent.completion_issue(folder, item, {"verify_passed": True}) == ""
+        target = folder / (".local-ai/cale-javascript-checks.json" if javascript else ".local-ai/cale-python-checks.json")
+        target.write_bytes(target.read_bytes() + b' ')
+        assert "not pinned" in native_agent.completion_issue(folder, item, {"verify_passed": True})
+        (folder / ".local-ai/verify.ps1").write_text("# User integration suite\nexit 0\n")
+        assert native_agent.completion_issue(folder, item, {"verify_passed": True}) == ""
+
+
+def test_api_declaration_contract_ignores_ambiguous_modules_calls_and_documentation(tmp_path):
+    item = project(tmp_path / "contract-parser")
+    item["brief"] = "Repair logic.mjs.\n`first(x,y)` adds.\n- second(value) doubles."
+    assert native_agent.declared_function_contract(item) == ("logic.mjs", ["first", "second"])
+    for brief in ("Explain how to implement logic.js.\nfirst(x)\nsecond(y)",
+                  "Repair logic.js and other.js.\nfirst(x)\nsecond(y)",
+                  "Repair logic.js. Examples: first(1), second(2).",
+                  "Repair ../outside.js.\nfirst(x)\nsecond(y)"):
+        item["brief"] = brief
+        assert native_agent.declared_function_contract(item) is None
+
+
+def test_fresh_step_brief_reads_live_bounded_source_not_cached_or_unrelated_files(tmp_path):
+    item = project(tmp_path / "live-step-source")
+    folder = Path(item["folder"])
+    source = folder / "logic.js"
+    source.write_text("function calculate(x){return x+1}")
+    (folder / "private.txt").write_text("unrelated private phrase")
+    (folder / ".local-ai/PLAN.md").write_text("- [ ] Calculate\n" + "older plan detail\n" * 300)
+    task_context.plan_steps(folder, [{"phase": "Logic", "title": "Calculate", "check_tool": "check_javascript_function",
+        "check_arguments": {"path": "logic.js", "function": "calculate", "cases": [{"args": [2], "expected": 3}]}}])
+    messages = [{"role": "system", "content": "brief"}]
+    first = native_agent.fresh_messages(messages, folder, {}, item)[1]["content"]
+    assert '"source": "function calculate(x){return x+1}"' in first
+    assert first.index("Small-step execution queue") < first.index("Live acceptance source") < first.index("PLAN.md:")
+    assert "unrelated private phrase" not in first
+    stamp = source.stat()
+    source.write_text("function calculate(x){return x+2}")
+    os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    second = native_agent.fresh_messages(messages, folder, {}, item)[1]["content"]
+    assert '"source": "function calculate(x){return x+2}"' in second
+    assert '"source": "function calculate(x){return x+1}"' not in second
+    source.write_text("function calculate(x){return x}" + "/**/" * 2000)
+    large = native_agent.fresh_messages(messages, folder, {}, item)[1]["content"]
+    assert "Live acceptance source" not in large
+
+
+def test_api_scope_requires_latest_user_provenance_and_expires_when_omitted_work_is_mentioned(tmp_path):
+    import pytest
+
+    item = project(tmp_path / "scope-provenance")
+    folder = Path(item["folder"])
+    item["brief"] = "Repair logic.js.\nfirst(x) adds.\nsecond(x) doubles."
+    requests = folder / ".local-ai/USER-REQUESTS.md"
+    requests.write_text("## Request 1\nSkip second; I no longer need it.\n")
+    task_context.save_api_scope(folder, item["brief"], ["first", "second"], "exclude", ["second"],
+                               "Skip second; I no longer need it.")
+    assert native_agent.declared_function_contract(item)[1] == ["first"]
+    # Unrelated steering keeps the proven omission. Mentioning it reopens scope.
+    requests.write_text(requests.read_text() + "## Request 2\nMake first faster.\n")
+    assert native_agent.declared_function_contract(item)[1] == ["first"]
+    requests.write_text(requests.read_text() + "## Request 3\nActually restore second.\n")
+    assert native_agent.declared_function_contract(item)[1] == ["first", "second"]
+    with pytest.raises(ValueError, match="latest"):
+        task_context.save_api_scope(folder, item["brief"], ["first", "second"], "exclude", ["second"],
+                                   "Skip second; I no longer need it.")
+    requests.write_text("Do not skip second; it must be tested.")
+    with pytest.raises(ValueError, match="not to omit"):
+        task_context.save_api_scope(folder, item["brief"], ["first", "second"], "exclude", ["second"], requests.read_text())
+    requests.write_text("Only repair first now.")
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        saved = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "scope", "scope_operation": "only",
+            "function_names": ["first"], "instruction_quote": requests.read_text()}))
+    assert saved["scope_saved"] and saved["function_coverage"]["required_functions"] == ["first"]
+
+
 def test_javascript_formats_execute_current_source_and_generate_repeatable_verifiers(tmp_path):
     formats = [("js", "function calculate(x){return x*2}", "calculate"),
         ("js", "const calculate=x=>x*2", "calculate"),

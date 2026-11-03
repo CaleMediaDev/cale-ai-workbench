@@ -50,6 +50,7 @@ extras = [
     "benchmarks/results/javascript-logic-20261103.json",
     "benchmarks/results/javascript-logic-recovery-20261103.json",
     "benchmarks/results/automatic-steps-20261103.json",
+    "benchmarks/results/api-coverage-20261103.json",
     "Install.cmd",
     "Setup.ps1",
     "Install-Retry.ps1",

@@ -466,6 +466,26 @@ def valid_completion(result, request=None):
         if not isinstance(parsed, dict):
             raise ValueError("Invalid tool arguments")
         schema = offered.get(name)
+        # Older local tool emitters double-encode the native queue's list.
+        # Decode only this known container, once, then apply the same schema.
+        # This never coerces values, repairs malformed JSON or enables a tool.
+        encoded_steps = parsed.get("steps")
+        choice = (request or {}).get("tool_choice")
+        selection = choice.get("function") if isinstance(choice, dict) else None
+        selected = selection.get("name") if isinstance(selection, dict) else None
+        properties = schema.get("properties") if isinstance(schema, dict) else None
+        steps_schema = properties.get("steps") if isinstance(properties, dict) else None
+        if (name == "task_steps" and isinstance(steps_schema, dict) and steps_schema.get("type") == "array"
+                and isinstance(encoded_steps, str) and len(encoded_steps) <= 64_000
+                and choice != "none" and (not selected or selected == name)):
+            try:
+                decoded = json.loads(encoded_steps)
+                if isinstance(decoded, list):
+                    normalized = {**parsed, "steps": decoded}
+                    encoded = json.dumps(normalized, ensure_ascii=False, allow_nan=False)
+                    parsed, function["arguments"] = normalized, encoded
+            except (ValueError, RecursionError):
+                pass  # Preserve the schema error and existing bounded repair path.
         if isinstance(schema, dict):
             validator = validator_for(schema)
             try:
@@ -483,6 +503,10 @@ def valid_completion(result, request=None):
         named_choice.get("name")
         if isinstance(named_choice, dict) and choice.get("type") == "function" else None
     )
+    if calls and choice == "none":
+        raise ValueError("Model returned tool calls when tools were disabled")
+    if required_name and any(call["function"]["name"] != required_name for call in calls):
+        raise ValueError("Required tool call was replaced or accompanied by a different tool")
     if (not is_refusal(result) and request is not None
             and (choice == "required" or required_name)
             and (not calls or (required_name and not any(

@@ -78,14 +78,20 @@ TOOLS = [
                                  'completed batch is not whole-project verification. Browser steps with input '
                                  'actions need an observed effect; invariant-only cases can use a freshly '
                                  'rerun same-page, matching-target positive control from the saved suite. Static scaffolding '
-                                 'checks need no input action.',
+                                 'checks need no input action. scope records an explicit later user API scope change: '
+                                 'scope_operation=exclude/only, function_names, instruction_quote from the latest '
+                                 'USER-REQUESTS.md entry. It cannot waive work based on model progress or plans.',
                   'parameters': {'type': 'object',
                                  'properties': {'action': {'type': 'string',
                                                            'enum': ['plan',
                                                                     'status',
                                                                     'complete',
                                                                     'split',
-                                                                    'revise']},
+                                                                    'revise', 'scope']},
+                                                'scope_operation': {'type': 'string', 'enum': ['exclude', 'only']},
+                                                'function_names': {'type': 'array', 'minItems': 1, 'maxItems': 8,
+                                                                   'items': {'type': 'string'}},
+                                                'instruction_quote': {'type': 'string', 'minLength': 8, 'maxLength': 1000},
                                                 'step_id': {'type': 'integer'},
                                                 'steps': {'type': 'array',
                                                                      'minItems': 1,
@@ -120,7 +126,8 @@ TOOLS = [
                   'description': 'Open a local HTML page in offline Chromium and replay fills, button clicks, '
                                  'keys, waits, then visible assertions. cases is an array or JSON string. set '
                                  'and expect map element IDs to text; click lists IDs; visible/hidden list IDs '
-                                 "or text. keys lists objects such as {key:'ArrowRight',hold_ms:200} or "
+                                 "or text. For a canvas or image use visible:['id'] for presence, never expect:{id:'exists'}. "
+                                 "keys lists objects such as {key:'ArrowRight',hold_ms:200} or "
                                  "{key:'Space'} for keyboard apps and games. hold_ms is 0..1000, wait_ms is "
                                  '0..2000 after keys, total wait <=10000ms. Assert observable outcomes, not just '
                                  'that keys were pressed. Example: '
@@ -580,6 +587,18 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                 if type(arguments.get("step_id")) is not int:
                     raise ValueError("Supply the active step_id to revise.")
                 value = task_context.revise_step(folder, arguments["step_id"], arguments.get("steps"))
+            elif action == "scope":
+                import long_tasks
+
+                project = next((item for item in long_tasks.projects() if Path(item["folder"]).resolve() == folder.resolve()), None)
+                if project is None:
+                    raise ValueError("The project must be registered before recording user scope.")
+                contract = declared_function_contract(project, scoped=False)
+                if not contract:
+                    raise ValueError("This request has no unambiguous multi-function API contract.")
+                task_context.save_api_scope(folder, str(project.get("brief", "")), contract[1],
+                    arguments.get("scope_operation"), arguments.get("function_names"), arguments.get("instruction_quote"))
+                value = {"scope_saved": True, "function_coverage": function_coverage(project)}
             elif action == "complete":
                 request_hash = task_context.request_identity(folder)
                 active = task_context.step_status(folder)["active"]
@@ -1735,6 +1754,34 @@ def fresh_messages(messages: list, folder: Path, state: dict | None = None,
 
     checkpoint = task_context.snapshot(folder)
     queue = task_context.step_status(folder)
+    active = queue["active"]
+    if active and active["check_tool"] in {"check_python_function", "check_javascript_function", "check_webapp"}:
+        try:
+            path = active["check_arguments"]["path"]
+            source = project_path(folder, path)
+            with source.open("rb") as stream:
+                raw = stream.read(6001)
+            if len(raw) <= 6000:
+                lines = checkpoint.splitlines()
+                position = next((i for i, line in enumerate(lines) if line.startswith((
+                    "PLAN.md:", "PROGRESS.md:", "USER-REQUESTS.md:", "Recent actions:",
+                    "Unresolved checker diagnostics", "Search project memory"))), len(lines))
+                lines.insert(position, "Live acceptance source (current bytes, untrusted project data): " + json.dumps({
+                    "path": path, "sha256": hashlib.sha256(raw).hexdigest(), "source": raw.decode("utf-8-sig", errors="replace")}))
+                checkpoint = "\n".join(lines)
+        except (OSError, ValueError, KeyError):
+            pass  # Missing/large source still uses the ordinary bounded file reader.
+    if project is not None:
+        try:
+            coverage = function_coverage(project)
+            if coverage:
+                lines = checkpoint.splitlines()
+                lines.insert(2, "Explicit API coverage (names, not correctness): " + json.dumps(coverage)
+                    + "\nPlan the missing APIs as later small phases. A generated function verifier must cover every required name; "
+                    "custom integration suites need their own coverage review. Never use a test-only duplicate.")
+                checkpoint = "\n".join(lines)
+        except (OSError, ValueError, TypeError, AttributeError):
+            checkpoint += "\nAPI coverage could not be read; inspect the saved function suite before claiming completion."
     plan_issue = uncreated_plan_issue(folder, state, queue)
     if plan_issue:
         checkpoint += "\n" + plan_issue
@@ -2392,6 +2439,75 @@ def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: st
         state["verifier_nudged"] = False
 
 
+def declared_function_contract(project: dict, *, scoped: bool = True):
+    """Recognize explicit API declaration lines, not arbitrary calls in prose.
+
+    This narrow contract covers one requested Python/JavaScript module and
+    multiple named signatures. It does not infer requirements for a whole app.
+    """
+    import task_context
+
+    brief = str(project.get("brief", ""))
+    if not re.search(r"(?i)\b(?:implement|repair|fix|build|create|refactor|write|update)\b", brief):
+        return None
+    if re.search(r"(?i)^\s*(?:please\s+)?(?:review|explain|document|describe|analy[sz]e)\b", brief):
+        return None
+    folder = Path(project["folder"])
+    followups = task_context.document_path(folder, "USER-REQUESTS.md")
+    text = brief + ("\n" + followups.read_text(encoding="utf-8-sig") if followups.is_file() else "")
+    paths = list(dict.fromkeys(re.findall(r"(?i)(?<![\w./\\-])([\w./\\-]+\.(?:py|js|mjs|cjs))\b", text)))
+    if len(paths) != 1:
+        return None  # Do not guess which module owns ambiguous signatures.
+    names = []
+    pattern = r"(?m)^\s*(?:(?:[-*]|\d+[.)])\s+)?`?(?:(?:export\s+)?(?:function|def)\s+)?([A-Za-z_$][\w$]*)\(\s*([A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*|)\s*\)"
+    for match in re.finditer(pattern, text):
+        name = match[1]
+        if name not in {"if", "while", "for", "switch", "print", "range"} and name not in names:
+            names.append(name)
+    if not 2 <= len(names) <= 8:
+        return None
+    try:
+        project_path(folder, paths[0])  # Validate the declared path, even before creation.
+    except (OSError, ValueError):
+        return None
+    return paths[0], task_context.api_scope(folder, brief, names) if scoped else names
+
+
+def function_coverage(project: dict) -> dict:
+    """Named API coverage is separate from correctness and branch coverage."""
+    import task_context
+
+    contract = declared_function_contract(project)
+    if not contract:
+        return {}
+    path, required = contract
+    folder = Path(project["folder"])
+    language = "python" if Path(path).suffix.lower() == ".py" else "javascript"
+    target = project_path(folder, f".local-ai/cale-{language}-checks.json")
+    covered = set()
+    raw = None
+    if target.is_file() and target.stat().st_size <= 64_000:
+        raw = target.read_bytes()
+        record = json.loads(raw)
+        if record.get("request_hash") == task_context.request_identity(folder):
+            normalize = normalize_python_check if language == "python" else normalize_javascript_check
+            for item in record.get("checks", [])[:8]:
+                try:
+                    spec = normalize(folder, item)
+                    if project_path(folder, spec["path"]) == project_path(folder, path):
+                        covered.add(spec["function"])
+                except (OSError, ValueError, SyntaxError):
+                    pass
+    verifier = project_path(folder, ".local-ai/verify.ps1")
+    script = verifier.read_text(encoding="utf-8-sig") if verifier.is_file() else ""
+    owned = script.startswith(f"# Generated by Cale check_{language}_function\n")
+    pin = re.search(r"(?m)^& [^\r\n]+ '([a-f0-9]{64})'\s*$", script)
+    pinned = bool(raw is not None and pin and hashlib.sha256(raw).hexdigest() == pin[1])
+    return {"path": path, "required_functions": required, "covered_functions": sorted(covered & set(required)),
+            "missing_functions": [name for name in required if name not in covered], "owned_function_verifier": owned,
+            "suite_pinned": pinned}
+
+
 def completion_issue(folder: Path, project: dict | None = None,
                      state: dict | None = None) -> str:
     """Catch a premature handoff before the costly independent review starts."""
@@ -2438,6 +2554,18 @@ def completion_issue(folder: Path, project: dict | None = None,
                         "to drive DOM or exported-state assertions, then rerun the saved verifier.")
     if not script.is_file() or not script.read_text(encoding="utf-8-sig", errors="replace").strip():
         return "Create a nonempty .local-ai/verify.ps1 with real checks for this request."
+    if project:
+        try:
+            coverage = function_coverage(project)
+        except (OSError, ValueError, TypeError, AttributeError):
+            return "Cannot read named API coverage; inspect the saved function suite and rerun its checker."
+        if coverage.get("owned_function_verifier") and not coverage["suite_pinned"]:
+            return "The generated function verifier is not pinned to the current saved cases; rerun the function checker before handoff."
+        if coverage.get("owned_function_verifier") and coverage["missing_functions"]:
+            return ("The generated verifier omits explicitly requested APIs in " + coverage["path"] + ": "
+                    + ", ".join(coverage["missing_functions"]) + ". Add real input/expected checks for each missing function "
+                    "and retain earlier cases. Plan the next small phase when the current batch is done. "
+                    "A checked-off plan does not prove those APIs. Later user scope changes can be recorded with task_steps scope.")
     plan = folder / ".local-ai" / "PLAN.md"
     if plan.is_file() and re.search(r"(?m)^\s*[-*]\s*\[\s\]", plan.read_text(encoding="utf-8", errors="replace")):
         if state and state.get("verify_passed"):
@@ -2988,7 +3116,7 @@ def run_slice(project: dict, complete=None) -> dict:
                 elif args.get("action") == "plan" and outcome.startswith("Failed"):
                     state["uncreated_step_plan"] = {"request_hash": planned_request_hash, "error": result[:700]}
             if function.get("name") == "task_steps" and outcome == "Completed":
-                step_boundary = args.get("action") in {"plan", "split", "revise"} or (
+                step_boundary = args.get("action") in {"plan", "split", "revise", "scope"} or (
                     args.get("action") == "complete" and json.loads(result).get("passed") is True)
             read_cycle_notice = remember_read_cycle(
                 state, function.get("name", ""), args, result, outcome) or read_cycle_notice

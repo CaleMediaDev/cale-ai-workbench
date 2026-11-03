@@ -57,6 +57,43 @@ def argument_reply(steps):
 
 
 class CloudTests(unittest.TestCase):
+    def test_native_step_list_transport_decodes_once_then_validates_same_schema(self):
+        import native_agent
+
+        tool = next(t for t in native_agent.TOOLS if t["function"]["name"] == "task_steps")
+        request = {**REQUEST, "tools": [tool]}
+        step = {"phase": "Check", "title": "Run checks", "check_tool": "run_verifier"}
+        def reply(value):
+            result = argument_reply(value)
+            function = result["choices"][0]["message"]["tool_calls"][0]["function"]
+            function["name"] = "task_steps"
+            function["arguments"] = json.dumps({"action": "plan", "steps": value})
+            return result
+        result = cloud.valid_completion(reply(json.dumps([step])), request)
+        parsed = json.loads(result["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"])
+        self.assertEqual(parsed, {"action": "plan", "steps": [step]})
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536}
+        with patch.object(cloud, "post", return_value=reply(json.dumps([step]))) as post:
+            completed = router.complete(request)
+        self.assertEqual(post.call_count, 1)
+        self.assertIsInstance(json.loads(completed["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"])["steps"], list)
+        for invalid in ('[{broken', '[1]', json.dumps(json.dumps([step])), '[NaN]', ' ' * 64001):
+            with self.assertRaises(cloud.ToolArgumentError):
+                cloud.valid_completion(reply(invalid), request)
+        for choice in ("none", {"type": "function", "function": {"name": "other"}}):
+            with self.assertRaises(cloud.ToolArgumentError):
+                cloud.valid_completion(reply(json.dumps([step])), {**request, "tool_choice": choice})
+        # Other tools retain their declared strict behavior; no generic coercion.
+        with self.assertRaises(cloud.ToolArgumentError):
+            cloud.valid_completion(argument_reply('[1,2]'), ARGUMENT_REQUEST)
+
+    def test_valid_tool_data_cannot_override_disabled_or_forced_selection(self):
+        for choice in ("none", {"type": "function", "function": {"name": "other"}}):
+            with self.assertRaises(ValueError):
+                cloud.valid_completion(argument_reply([1, 2]), {**ARGUMENT_REQUEST, "tool_choice": choice})
+
     def test_local_schema_feedback_repairs_once_without_mutating_original_request(self):
         cloud.routing_mode.save_scope(cloud.STATE, "local_only")
         request = json.loads(json.dumps(ARGUMENT_REQUEST))
