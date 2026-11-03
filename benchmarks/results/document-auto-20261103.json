@@ -1,0 +1,49 @@
+{
+  "model": "automatic-local",
+  "scenario": "document",
+  "command_timeout": 90,
+  "seconds": 106.87,
+  "worker_status": "done",
+  "turns": 7,
+  "model_calls": 7,
+  "tool_calls": 10,
+  "prompt_tokens": 34523,
+  "completion_tokens": 1546,
+  "tools_used": [
+    "inspect_project_file",
+    "list_files",
+    "write_file",
+    "check_document_report",
+    "check_document_report",
+    "run_verifier",
+    "read_file",
+    "read_file",
+    "write_file",
+    "write_file"
+  ],
+  "models_used": [
+    "cale-qwen36",
+    "cale-qwen36",
+    "cale-qwen36",
+    "cale-local",
+    "cale-local",
+    "cale-local",
+    "cale-local"
+  ],
+  "worker_verified": true,
+  "current": "Checks passed; handing off for independent verification",
+  "completion_issue": "",
+  "grade": {
+    "summary_present": true,
+    "verifier_present": true,
+    "final_due_date": true,
+    "net_payable": true,
+    "support_phone": true,
+    "draft_superseded": true,
+    "verifier_passes_correct": true,
+    "verifier_rejects_wrong_total": true,
+    "verifier_rejects_changed_source": true,
+    "passed": true
+  },
+  "error": null
+}

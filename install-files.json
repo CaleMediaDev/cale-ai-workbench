@@ -1,4 +1,5 @@
 [
+  "benchmarks/results/webapp-auto-20261103.json", "benchmarks/results/document-auto-20261103.json",
   "capability_index.py", "Validation/test_capability_index.py",
   "native_agent.py", "task_context.py", "Validation/test_native_agent.py", "benchmarks/native_worker_smoke.py", "benchmarks/README.md", "native_browser.py", "Validation/test_native_browser.py", "webapp_check.py", "Validation/test_webapp_check.py", "document_check.py", "Validation/test_document_check.py", "project_documents.py", "Validation/test_project_documents.py", "native_specialists.py",
   "model_fitness.py", "Validation/test_model_fitness.py", "Install-Retry.ps1", "Validation/test_install_retry.py", "core_tool_health.py", "Repair-CoreTools.ps1", "browser_probe.js", "Validation/test_core_tool_health.py",
