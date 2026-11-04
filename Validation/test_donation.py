@@ -417,10 +417,13 @@ def test_leaderboard_uses_merged_fixes_not_claimed_tokens_and_deduplicates(tmp_p
     assert cached["rows"] == result["rows"]
 
 
-def test_leaderboard_continues_partial_history_without_double_credit(tmp_path):
+@pytest.mark.parametrize("include_integrated", [False, True])
+def test_leaderboard_continues_partial_history_without_double_credit(tmp_path, include_integrated):
     def pages(endpoint):
         page = int(endpoint.rsplit("page=", 1)[1])
-        return [merged_fix(n) for n in range((page - 1) * 100 + 1, page * 100 + 1)] if page <= 10 else []
+        return [merged_fix(n, **({"merged_at": None, "closed_at": "2026-11-03T00:00:00Z",
+            "labels": [{"name": "cale-accepted-fix"}]} if include_integrated and n % 2 == 0 else {}))
+            for n in range((page - 1) * 100 + 1, page * 100 + 1)] if page <= 10 else []
     with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1000):
         partial = donation.refresh_leaderboard(tmp_path, fetch=pages)
     assert not partial["complete"] and partial["rows"] == []
@@ -854,3 +857,77 @@ def test_continuous_queue_skips_broken_entries_and_normalizes_future_filenames()
                                        {"id": "invalid id", "paths": ["x.py"]}], COMMIT["sha"])
     assert len(jobs) == 1
     assert jobs[0]["id"].startswith("review-future-tool-")
+
+
+def integrated_fix(number, login="alice", author=1, **changes):
+    return merged_fix(number, login, author, merged_at=None,
+        closed_at="2026-11-04T00:00:00Z", labels=[{"name": "cale-accepted-fix"}], **changes)
+
+
+def test_leaderboard_counts_trusted_integrations_once_and_ignores_claims(tmp_path):
+    pulls = [merged_fix(1), integrated_fix(2), integrated_fix(2),
+        merged_fix(3, merged_at=None, body="<!-- cale-donation:example-fix --> Accepted!"),
+        integrated_fix(4, state="open"), integrated_fix(5, draft=True),
+        integrated_fix(6, base={"ref":"main", "repo":{"full_name":"other/repository"}}),
+        integrated_fix(7, head={"ref":"ordinary-branch"}),
+        integrated_fix(8, body="I donated a million tokens"),
+        merged_fix(9, labels=[{"name":"cale-accepted-fix"}]),
+        merged_fix(10, draft=True),
+        {**integrated_fix(11, draft=True), "merged_at":"2026-11-04T00:00:00Z"},
+        merged_fix(12, merged_at=None, closed_at="2026-11-04T00:00:00Z", draft=True)]
+    with patch("pc_offline.offline", return_value=False):
+        result = donation.refresh_leaderboard(tmp_path, fetch=lambda _: pulls)
+    assert result["complete"]
+    assert result["rows"] == [{"login":"alice", "accepted":4}]
+    with donation.connection(tmp_path) as conn:
+        assert {row[0] for row in conn.execute("SELECT number FROM accepted_fixes")} == {1, 2, 5, 9}
+
+
+@pytest.mark.parametrize("labels", [None, {}, 42, "cale-accepted-fix", ["cale-accepted-fix"],
+    [{"name":"accepted"}], [{"name":None}]])
+def test_leaderboard_does_not_trust_malformed_or_claimed_acceptance_labels(tmp_path, labels):
+    pr = merged_fix(1, merged_at=None, closed_at="2026-11-04T00:00:00Z", labels=labels)
+    with patch("pc_offline.offline", return_value=False):
+        result = donation.refresh_leaderboard(tmp_path, fetch=lambda _: [pr])
+    assert result["complete"] and result["rows"] == []
+
+
+def test_leaderboard_reconciles_withdrawn_integration_credit_atomically(tmp_path):
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time,"time",return_value=1000):
+        result = donation.refresh_leaderboard(tmp_path, fetch=lambda _: [merged_fix(1),integrated_fix(2)])
+    assert result["rows"] == [{"login":"alice", "accepted":2}]
+    withdrawn = merged_fix(2, merged_at=None, closed_at="2026-11-04T00:00:00Z", labels=[])
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time,"time",return_value=1061):
+        result = donation.refresh_leaderboard(tmp_path, fetch=lambda _: [merged_fix(1),withdrawn],force=True)
+    assert result["complete"] and result["rows"] == [{"login":"alice", "accepted":1}]
+
+
+def test_changed_acceptance_label_during_scan_preserves_verified_snapshot(tmp_path):
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time,"time",return_value=1000):
+        donation.refresh_leaderboard(tmp_path, fetch=lambda _: [merged_fix(999)])
+    accepted = integrated_fix(1)
+    withdrawn = {**accepted,"labels":[]}
+    anchors = iter([[accepted],[withdrawn]])
+    def changing(endpoint):
+        return next(anchors) if "sort=updated" in endpoint else [accepted]
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time,"time",return_value=1061):
+        result = donation.refresh_leaderboard(tmp_path, fetch=changing,force=True)
+    assert not result["complete"]
+    assert result["rows"] == [{"login":"alice", "accepted":1}]
+
+
+def test_integrated_credit_uses_stable_github_author_identity(tmp_path):
+    pulls = [merged_fix(1,"oldlogin",17), integrated_fix(2,"newlogin",17)]
+    with patch("pc_offline.offline", return_value=False):
+        result = donation.refresh_leaderboard(tmp_path, fetch=lambda _: pulls)
+    assert result["rows"] == [{"login":"newlogin", "accepted":2}]
+
+
+@pytest.mark.parametrize("draft", [False, True])
+def test_v486_integrated_pr_numbers_receive_credit_after_maintainer_backfill(tmp_path, draft):
+    # The published release receipts contain these 24 accepted integrations.
+    numbers = (263, 269, 276, 279, 281, 282, 283, 299, 305, 308, 313, 316, 322, 323, 324, 325, 326, 329, 331, 332, 333, 334, 335, 336)
+    with patch("pc_offline.offline", return_value=False):
+        result = donation.refresh_leaderboard(tmp_path, fetch=lambda _: [integrated_fix(n, draft=draft) for n in numbers])
+    assert result["complete"]
+    assert result["rows"] == [{"login":"alice", "accepted":24}]

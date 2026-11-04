@@ -28,6 +28,8 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 UPSTREAM = "CaleMediaDev/cale-ai-workbench"
+# Upstream maintainers apply this only after reviewed code is integrated on main.
+ACCEPTED_FIX_LABEL = "cale-accepted-fix"
 REVIEW_URL = f"https://github.com/{UPSTREAM}/pulls?q=is%3Apr+is%3Aopen+%22%5BDonation%5D%22"
 IDLE_SECONDS = 120
 DAY_SECONDS = 86400
@@ -327,7 +329,17 @@ def refresh_leaderboard(root: Path = ROOT, fetch=None, force=False) -> dict:
             for pr in pulls:
                 base, user, head = pr.get("base") or {}, pr.get("user") or {}, pr.get("head") or {}
                 number, author, login = pr.get("number"), user.get("id"), user.get("login", "")
-                if (pr.get("state") != "closed" or not pr.get("merged_at") or pr.get("draft")
+                labels = pr.get("labels")
+                integrated = isinstance(labels, list) and any(
+                    isinstance(label, dict) and label.get("name") == ACCEPTED_FIX_LABEL for label in labels)
+                # A closed PR can be accepted through a reviewed upstream
+                # integration instead of GitHub's merge endpoint. Labels come
+                # from the canonical repository, never donor-controlled text.
+                accepted_at = pr.get("merged_at") or (pr.get("closed_at") if integrated else None)
+                # Direct integrations can retain GitHub's draft flag. A merged
+                # draft is inconsistent; an unlabeled draft is not accepted.
+                invalid_draft = pr.get("draft") and (not integrated or bool(pr.get("merged_at")))
+                if (pr.get("state") != "closed" or not isinstance(accepted_at, str) or not accepted_at or invalid_draft
                         or base.get("ref") != "main" or base.get("repo", {}).get("full_name", "").casefold() != UPSTREAM.casefold()
                         or not str(pr.get("title", "")).startswith("[Donation] ")
                         or not re.fullmatch(r"cale-donation-[a-f0-9]{16}", str(head.get("ref", "")))
@@ -337,7 +349,7 @@ def refresh_leaderboard(root: Path = ROOT, fetch=None, force=False) -> dict:
                     continue
                 names[author] = login
                 conn.execute("INSERT INTO leaderboard_pending VALUES(?,?,?,?) ON CONFLICT(number) DO UPDATE SET author=excluded.author,login=excluded.login,merged=excluded.merged",
-                             (number, author, login, pr["merged_at"]))
+                             (number, author, login, accepted_at))
             for author, login in names.items():
                 conn.execute("UPDATE leaderboard_pending SET login=? WHERE author=? AND login<>?", (login, author, login))
             if complete:

@@ -522,3 +522,10 @@ The bounded game requirements review uses one structured function call and check
 Branded song-video completion does not require a captions file. Legacy captioned exports still require their SRT, and any explicitly declared captions must exist. Cards blocked by the old caption error automatically recheck the already-completed media and finish without generating another song or video.
 
 Branded videos on song task cards now include source-audio and video checksums. If an export disappears or its bytes change, Cale queues a video-only repair from the saved song. The worker pins the audio checksum, skips music generation, lyrics and transcription, and returns the card to Finished when the export succeeds. Duplicate polls share a per-job lock; Stop/changed audio prevent repair setup. Persistent failures are bounded to three automatic repairs, and Retry repeats the video stage on the same job instead of creating another song. Existing damaged exports are preserved, and subsequent Facebook sharing chooses a verified export. Legacy captioned formats keep their required captions.
+
+
+### Accepted donation credit
+
+The leaderboard counts each verified donation PR once, using its GitHub numeric author ID. A normal merge counts automatically. When a maintainer integrates reviewed code directly on `main` and closes the original PR, the maintainer applies the upstream `cale-accepted-fix` label after verifying its integration receipt. Closing a PR, editing its body, or claiming token totals does not grant credit. Donors do not label their own submissions on the upstream repository.
+
+Removing that acceptance label withdraws manually integrated credit on the next complete refresh. Partial or failed scans preserve the last verified leaderboard, and renamed accounts retain credit through their stable GitHub identity. Release maintainers must backfill this label for the 24 recorded manual integrations in v0.5.486 and apply it to future accepted integrations.
