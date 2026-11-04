@@ -54,6 +54,38 @@ class AutoModelTests(unittest.TestCase):
             self.assertEqual(json.loads((root / "LongTasks/vision-repair.json").read_text())["status"],
                              "complete")
 
+    def test_vision_repair_uses_custom_main_alias_without_source_record(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            created = []
+
+            def post(path, body, **_kwargs):
+                if path == "/api/create":
+                    created.append(body)
+                    return {"status": "success"}
+                if body["model"] == "custom-main":
+                    return {"capabilities": ["tools", "vision"]}
+                if body["model"] == "cale-vision" and created:
+                    return {"capabilities": ["vision"]}
+                raise OSError("alias missing")
+
+            locking = SimpleNamespace(
+                LK_NBLCK=1, LK_UNLCK=2, locking=lambda *_args: None,
+            )
+            with (patch.dict(sys.modules, {"msvcrt": locking}),
+                  patch.object(library, "ROOT", root),
+                  patch.object(library, "CATALOG", {"main": {"alias": "custom-main"}}),
+                  patch.object(library, "main_source_record", return_value={}),
+                  patch.object(library, "post", side_effect=post)):
+                self.assertTrue(library.repair_vision_alias())
+            self.assertEqual(len(created), 1)
+            self.assertEqual(created[0]["from"], "custom-main")
+            self.assertEqual(created[0]["model"], "cale-vision")
+            self.assertEqual(
+                json.loads((root / "LongTasks/vision-repair.json").read_text())["status"],
+                "complete",
+            )
+
     def test_vision_repair_waits_while_tasks_are_active(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
