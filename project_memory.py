@@ -132,7 +132,7 @@ def _eligible(root: Path, path: Path) -> bool:
         relative = resolved.relative_to(root)
         return (resolved.is_file() and not any(SECRET_NAME.search(part) for part in relative.parts[:-1])
                 and resolved.stat().st_size <= 256_000)
-    except OSError:
+    except (OSError, RuntimeError):
         return False
 
 

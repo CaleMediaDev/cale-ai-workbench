@@ -79,6 +79,29 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertEqual(memory.search(self.folder, "useful_component")[0]["source_path"],
                          "b.py")
 
+    def test_unresolvable_recalled_file_is_evicted_without_aborting_search(self):
+        source = self.folder / "app.py"
+        source.write_text("loopmarker obsolete evidence", encoding="utf-8")
+        memory.index_file(self.folder, source)
+        kept = memory.save(self.folder, "note", "Kept note", "loopmarker valid evidence")
+        original_resolve = Path.resolve
+
+        def resolve(path, *args, **kwargs):
+            if path == source:
+                raise RuntimeError("Symlink loop")
+            return original_resolve(path, *args, **kwargs)
+
+        with patch.object(Path, "resolve", resolve):
+            found = memory.search(self.folder, "loopmarker")
+
+        self.assertEqual([row["id"] for row in found], [kept["id"]])
+        with memory.connection(self.folder) as conn:
+            for table in ("memories", "memory_fts"):
+                self.assertEqual(conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE id=?",
+                    ("file:app.py",),
+                ).fetchone()[0], 0)
+
     def test_second_edit_during_search_hides_old_project_memory(self):
         source = self.folder / "app.py"
         source.write_text("old_widget", encoding="utf-8")
