@@ -2171,3 +2171,55 @@ class CloudTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_contains_diagnostic_uses_only_bounded_host_schema_guidance():
+    from jsonschema import Draft202012Validator
+    hint = "Include a real input action and an observable outcome in one unit."
+    secret = "PRIVATE_INSTANCE_AND_TOOL_OUTPUT"
+    schema = {"type": "array", "contains": {"description": hint, "type": "object", "required": ["action"]}}
+    error = next(Draft202012Validator(schema).iter_errors([{ "private": secret }]))
+    error.message = secret  # Raw validator/tool diagnostics must not leak either.
+    failure = cloud.ToolArgumentError("task_steps", error, {"private": secret})
+    assert failure.problem == "Schema rule contains: " + hint + "."
+    assert secret not in str(failure) and failure.arguments == {"private": secret}
+    for description in (None, {}, "   ", "H" * 10000 + secret):
+        condition = {"type": "integer"}
+        if description is not None:
+            condition["description"] = description
+        error = next(Draft202012Validator({"type": "array", "contains": condition}).iter_errors([secret]))
+        failure = cloud.ToolArgumentError("array_tool", error)
+        assert secret not in str(failure) and len(failure.problem) < 400
+        if isinstance(description, str) and description.strip():
+            assert failure.problem == "Schema rule contains: " + "H" * 350 + "."
+        else:
+            assert "at least one item matching its declared contains condition" in failure.problem
+
+
+def test_nested_contains_diagnostic_uses_local_host_hint_without_instance_values():
+    from jsonschema import Draft202012Validator
+    schema = {"type": "object", "properties": {"units": {"type": "array", "items": {
+        "type": "object", "properties": {"cases": {"type": "array", "contains": {
+            "description": "At least one case must observe a result.", "required": ["expect"]}}}}}}}
+    error = next(Draft202012Validator(schema).iter_errors({"units": [{"cases": [{"set": {"secret": "PRIVATE_VALUE"}}]}]}))
+    failure = cloud.ToolArgumentError("nested_tool", error)
+    assert failure.path == ["units", 0, "cases"]
+    assert failure.problem == "Schema rule contains: At least one case must observe a result.."
+    assert "PRIVATE_VALUE" not in str(failure) and "secret" not in str(failure)
+
+
+def test_contains_diagnostic_does_not_change_type_or_malformed_json_errors():
+    import pytest
+    from jsonschema import Draft202012Validator
+    schema = {"type": "object", "properties": {"rows": {"type": "array", "contains": {
+        "description": "HOST_CONTAINS_HINT", "type": "integer"}}}, "required": ["rows"]}
+    error = next(Draft202012Validator(schema).iter_errors({"rows": "PRIVATE_WRONG_TYPE"}))
+    failure = cloud.ToolArgumentError("rows_tool", error)
+    assert failure.path == ["rows"]
+    assert failure.problem == 'Schema rule type: expected "array"; received JSON string.'
+    assert "HOST_CONTAINS_HINT" not in str(failure) and "PRIVATE_WRONG_TYPE" not in str(failure)
+    request = {"tools": [{"type": "function", "function": {"name": "rows_tool", "parameters": schema}}]}
+    response = {"choices": [{"message": {"tool_calls": [{"id": "bad-json", "function": {
+        "name": "rows_tool", "arguments": "{ malformed JSON"}}]}}]}
+    with pytest.raises(json.JSONDecodeError):
+        cloud.valid_completion(response, request)

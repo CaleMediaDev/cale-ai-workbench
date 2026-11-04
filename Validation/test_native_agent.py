@@ -5991,3 +5991,43 @@ def test_initial_planning_interaction_contract_preserves_each_action_outcome_and
     inert[1]["check_arguments"]["cases"] = [{"visible": ["total"]}]
     validate({"action": "plan", "steps": inert}, public)
     assert native_agent.TOOLS == original_tools
+
+
+def test_initial_planning_contains_failure_explains_missing_interaction_without_repeating_values(tmp_path):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "semantic-plan-diagnostic")
+    steps[1]["check_arguments"]["cases"] = [{"expect": {"total": "PRIVATE_UNTRUSTED_MODEL_VALUE"}}]
+    request = {"tools": native_agent.initial_plan_tools(item, native_agent.TOOLS)}
+    schema = next(tool["function"]["parameters"] for tool in request["tools"] if tool["function"]["name"] == "task_steps")
+    hint = schema["properties"]["steps"]["contains"]["description"]
+    assert "nonempty set/click/keys or reload:true" in hint and "same unit's cases" in hint
+    response = initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+    with pytest.raises(cloud_ai.ToolArgumentError) as caught:
+        cloud_ai.valid_completion(response, request)
+    error = caught.value
+    assert error.path == ["steps"] and error.problem == "Schema rule contains: " + hint + "."
+    assert "PRIVATE_UNTRUSTED_MODEL_VALUE" not in str(error)
+    assert task_context.step_status(folder)["total"] == 0
+
+
+def test_initial_planning_contains_feedback_guides_semantic_retry_then_saves_valid_plan(tmp_path):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "semantic-contains-retry")
+    calls = []
+    def complete(payload):
+        calls.append(payload)
+        if len(calls) == 1:
+            inert = copy.deepcopy(steps)
+            inert[1]["check_arguments"]["cases"] = [{"expect": {"total": "PRIVATE_MODEL_VALUE"}}]
+            # Exercise the same schema rejection that the actual Router raises.
+            return cloud_ai.valid_completion(initial_planning_reply("task_steps", {"action": "plan", "steps": inert}), payload)
+        feedback = next(message["content"] for message in reversed(payload["messages"])
+            if "last inference was rejected" in message.get("content", ""))
+        assert "nonempty set/click/keys or reload:true" in feedback
+        assert "same unit's cases" in feedback and "Preserve the declared JSON types" in feedback
+        assert "quoted JSON" not in feedback and "argument syntax" not in feedback
+        assert "PRIVATE_MODEL_VALUE" not in feedback
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert len(calls) == 2 and state["status"] == "continue"
+    assert task_context.step_status(folder)["total"] == 2 and task_context.step_status(folder)["done"] == 0
+    assert not (folder / "index.html").exists()

@@ -502,6 +502,13 @@ class ToolArgumentError(ValueError):
                 and isinstance(error.instance, str) and error.instance in forbidden):
             detail = ("Cale tool names are not shell commands. Use check_tool with its typed "
                       "check_arguments, or a real repeatable shell command")
+        elif error.validator == "contains":
+            condition = error.schema.get("contains") if isinstance(error.schema, dict) else None
+            hint = condition.get("description") if isinstance(condition, dict) else None
+            # Use only the offered host schema's bounded semantic guidance,
+            # never jsonschema's message, rejected instance or child errors.
+            hint = " ".join(hint[:2000].split())[:350] if isinstance(hint, str) else ""
+            detail = hint or "array must include at least one item matching its declared contains condition"
         elif error.validator == "required" and isinstance(error.instance, dict):
             missing = [key for key in error.validator_value if key not in error.instance]
             if missing:

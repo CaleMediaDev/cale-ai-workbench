@@ -3566,7 +3566,11 @@ def initial_plan_tools(project: dict, available: list) -> list:
             {"required": [field], "properties": {field: {"minItems": 1}}}
             for field in ("visible", "hidden")
         ]}
-        steps["contains"] = {"required": ["check_tool", "check_arguments"], "properties": {
+        steps["contains"] = {"description": (
+            "Include at least one browser unit with a nonempty set/click/keys or reload:true action "
+            "and a nonempty expect/state/visible/hidden outcome in that same unit's cases. "
+            "Static layout-only units may remain."),
+            "required": ["check_tool", "check_arguments"], "properties": {
             "check_tool": {"const": "check_webapp"},
             "check_arguments": {"required": ["cases"], "properties": {
                 "cases": {"allOf": [{"contains": action}, {"contains": outcome}]}}}}}
@@ -4827,10 +4831,10 @@ def run_slice(project: dict, complete=None) -> dict:
             state["argument_correction_failures"] = count
             state["turns"] = int(state.get("turns", 0)) + 1
             messages.append({"role": "user", "content": (
-                "The last inference was rejected before any tool executed. Correct the tool argument syntax "
+                "The last inference was rejected before any tool executed. Correct the tool arguments "
                 "using the offered schema; preserve application behavior and the active SQLite unit. "
                 "Validator data: " + json.dumps({"tool": error.tool, "path": error.path, "problem": error.problem})
-                + " Supply actual JSON arrays/objects rather than quoted JSON. No progress was accepted.")})
+                + " Preserve the declared JSON types and correct the reported constraint. No progress was accepted.")})
             state.update(messages=messages, current="Correcting rejected tool arguments before continuing")
             save_state(project, state)
             continue
