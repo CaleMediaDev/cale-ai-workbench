@@ -305,3 +305,21 @@ def test_lead_cue_from_old_feedback_does_not_override_current_chopped_texture():
     assert caption.startswith("Sparse chopped vocal syllables")
     assert "clear sung verses and chorus" not in caption
     assert not music_style.requires_sustained_vocals(caption)
+
+
+def test_past_feedback_cannot_supply_current_song_tempo():
+    feedback = "\nPast user feedback:\n- Similar task the user liked: Piano at 80 BPM"
+    assert music_style.requested_bpm("Make a bright synth track" + feedback) is None
+    assert music_style.requested_bpm("Make a 150-BPM synth track" + feedback) == 150
+
+
+def test_directly_rejected_tempos_do_not_set_numeric_bpm():
+    for request in (
+        "not 120 BPM, use 140 BPM",
+        "Avoid 120-bpm music, choose 140 BPM",
+        "I don't want 120 BPM, make it 140 BPM",
+        "I don\u2019t want 120 BPM, make it 140 BPM",
+    ):
+        assert music_style.requested_bpm(request) == 140
+    assert music_style.requested_bpm("techno without 120 BPM") is None
+    assert music_style.requested_bpm("not a slow track; 140 BPM") == 140
