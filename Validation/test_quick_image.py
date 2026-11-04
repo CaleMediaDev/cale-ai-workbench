@@ -75,6 +75,44 @@ def test_direct_image_rejects_valid_checksums_but_invalid_pixels(tmp_path):
             quick_image.generate(tmp_path, "a dog", str(output))
 
 
+def test_non_png_deliverable_is_rejected_and_retried_on_recovery(tmp_path):
+    import pytest
+
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"")
+    output = tmp_path / "image.png"
+
+    def worker(*args, **kwargs):
+        request = json.loads(kwargs["input"])
+        path = Path(request["output_path"])
+        Image.new("RGB", (64, 64), "orange").save(path, format="JPEG")
+        return subprocess.CompletedProcess(args, 0, json.dumps({"path": str(path)}), "")
+
+    with (patch.object(quick_image.subprocess, "run", side_effect=worker),
+          patch.object(quick_image, "clarify_prompt", return_value="a dog")):
+        with pytest.raises(ValueError, match="did not save a PNG image"):
+            quick_image.generate(tmp_path, "a dog", str(output))
+
+    # The file has decodable pixels, but is not the requested PNG deliverable.
+    with Image.open(output) as picture:
+        assert picture.format == "JPEG"
+        picture.load()
+    assert not quick_image.image_file_ok(output)
+
+    job_id = "d" * 32
+    quick_image._write_job(tmp_path, job_id, {
+        "job_id": job_id, "status": "working", "prompt": "a dog",
+        "output_path": str(output),
+    })
+    with (patch.object(quick_image, "_worker_running", return_value=False),
+          patch.object(quick_image, "_launch_job") as launch):
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_called_once_with(tmp_path, job_id)
+    assert quick_image.image_job_status(tmp_path, job_id)["status"] == "queued"
+    assert not output.exists()
+
+
 def test_prompt_clarification_resolves_ambiguous_subject_locally():
     reply = {"message": {"content": "A small red diamond-shaped kite with a string against a clear blue sky."}}
     with patch.object(quick_image, "urlopen", return_value=BytesIO(json.dumps(reply).encode())) as opened:
