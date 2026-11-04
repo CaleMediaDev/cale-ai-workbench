@@ -139,6 +139,31 @@ class UserFileMemoryTests(unittest.TestCase):
         self.assertEqual(user_file_memory.search(self.state, "forest"), [])
         self.assertEqual(user_file_memory.search(self.state, "desert")[0]["path"], str(path))
 
+    def test_removing_null_beyond_text_prefix_allows_recovery_with_stable_metadata(self):
+        from types import SimpleNamespace
+
+        path = self.root / "notes.txt"
+        prefix = b"recoverable " + b"a" * (user_file_memory.MAX_TEXT - 12)
+        path.write_bytes(prefix + b"\x00")
+        stat = path.stat()
+        stable = SimpleNamespace(**{
+            field: getattr(stat, field)
+            for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        })
+        with patch.object(user_file_memory.os, "fstat", return_value=stable):
+            self.assertEqual(
+                user_file_memory.ingest(self.state, [str(path)])["skipped"], 1
+            )
+            with path.open("r+b") as stream:
+                stream.seek(user_file_memory.MAX_TEXT)
+                stream.write(b" ")
+            self.assertEqual(
+                user_file_memory.ingest(self.state, [str(path)])["indexed"], 1
+            )
+            self.assertEqual(
+                user_file_memory.search(self.state, "recoverable")[0]["path"], str(path)
+            )
+
     def test_replaced_image_with_same_size_and_mtime_is_reanalyzed(self):
         path = self.root / "receipt.png"
         path.write_bytes(b"first")
