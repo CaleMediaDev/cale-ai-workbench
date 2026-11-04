@@ -2,6 +2,7 @@
 
 import csv
 import json
+import sys
 from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +10,28 @@ from unittest.mock import patch
 import pytest
 
 import music_midi
+
+
+@pytest.mark.parametrize("diagnostic,expected", [(b"\xd0\x81", "\u0401"), (b"bad \xff byte", "bad \ufffd byte")])
+def test_worker_diagnostics_use_utf8_and_tolerate_invalid_bytes(tmp_path, diagnostic, expected):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"original")
+    target = tmp_path / "notes"
+    run = music_midi.subprocess.run
+
+    def worker(args, **kwargs):
+        # Exercise actual pipe decoding, without importing or running the model.
+        script = f"import sys; sys.stderr.buffer.write({diagnostic!r}); sys.exit(1)"
+        return run([sys.executable, "-c", script], **kwargs)
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path(sys.executable)), \
+         patch.object(music_midi.subprocess, "run", side_effect=worker):
+        with pytest.raises(RuntimeError) as error:
+            music_midi.transcribe_to_midi(str(source), str(target))
+    assert str(error.value) == expected
+    assert list(target.iterdir()) == []
+    assert source.read_bytes() == b"original"
 
 
 def test_staged_midi_publication_preserves_concurrent_output(tmp_path):
