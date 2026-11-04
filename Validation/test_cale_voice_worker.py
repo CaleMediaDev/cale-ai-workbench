@@ -166,3 +166,48 @@ def test_audio_writer_diagnostics_do_not_corrupt_json_output(tmp_path):
     assert "Audio writer diagnostic" in diagnostics.getvalue()
     assert target.read_bytes() == b"complete recording"
     assert list(tmp_path.iterdir()) == [target]
+
+
+def test_probe_renders_through_real_clone_generation_path_without_playback(tmp_path):
+    import sys
+    import wave
+    from types import SimpleNamespace
+    from pathlib import Path
+    import cale_voice
+    output = tmp_path / "probe.wav"
+    model, prompt = Mock(), object()
+    model.create_voice_clone_prompt.return_value = prompt
+    model.generate_voice_clone.return_value = ([[0.25] * 1600], 16000)
+    events = []
+    def fingerprint(snapshot):
+        events.append("fingerprint")
+        return "fingerprint-before-loading"
+    def loading():
+        events.append("load")
+        return model
+    def write(path, samples, rate):
+        print("Audio encoder diagnostics")
+        with wave.open(str(path), "wb") as audio:
+            audio.setnchannels(1); audio.setsampwidth(2); audio.setframerate(rate)
+            audio.writeframes(b"\1\0" * len(samples))
+    snapshot = Mock(return_value=str(tmp_path / "model"))
+    with (patch.object(cale_voice_worker, "ROOT", tmp_path),
+          patch.object(cale_voice_worker, "load_model", side_effect=loading),
+          patch.object(cale_voice_worker, "_MODEL_PATH", str(tmp_path / "model")),
+          patch.object(cale_voice, "_probe_runtime") as runtime,
+          patch.object(cale_voice, "_voice_fingerprint", side_effect=fingerprint),
+          patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=snapshot),
+                                   "soundfile": SimpleNamespace(write=write)}),
+          patch("sys.argv", ["cale_voice_worker.py", "--probe", str(output), str(tmp_path)]),
+          patch("sys.stdout", new_callable=io.StringIO) as stdout,
+          patch("sys.stderr", new_callable=io.StringIO) as stderr):
+        cale_voice_worker.main()
+    assert events == ["fingerprint", "load"]
+    runtime.assert_called_once_with(tmp_path)
+    snapshot.assert_called_once_with(cale_voice_worker.MODEL_ID, local_files_only=True)
+    model.generate_voice_clone.assert_called_once_with(text="Cale is ready.", language="English", voice_clone_prompt=prompt)
+    result = json.loads(stdout.getvalue())
+    assert result["engine"] == "Cale's local voice" and result["fingerprint"] == "fingerprint-before-loading"
+    assert "Audio encoder diagnostics" in stderr.getvalue()
+    with wave.open(str(output), "rb") as audio:
+        assert audio.getnframes() == 1600

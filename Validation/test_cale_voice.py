@@ -144,3 +144,227 @@ def test_invalid_audio_path_triggers_cleanup(tmp_path, answer, play):
             cale_voice.speak("Hello", tmp_path / "speech.wav", play=play)
         stop.assert_called_once_with()
         timer.assert_not_called()
+
+
+@pytest.fixture
+def clone_probe_runtime(tmp_path, monkeypatch):
+    import json
+    import wave
+    root = tmp_path / "runtime"
+    python = root / "Media/python/Scripts/python.exe"
+    reference = root / "assets/cale-voice-reference.wav"
+    marker = root / "LongTasks/cale-voice-ready.json"
+    for path in (python, reference, marker, root / "cale_voice.py", root / "cale_voice_worker.py"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"local voice fixture")
+    packages = root / "Media/python/Lib/site-packages"
+    for name, version in cale_voice.VOICE_PACKAGES.items():
+        metadata = packages / f"{name}-{version}.dist-info/METADATA"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text(name + " " + version)
+    snapshot = root / "cached-model"
+    snapshot.mkdir()
+    (snapshot / "config.json").write_text('{"model_type":"fixture"}')
+    (snapshot / "model.safetensors").write_bytes(b"local weights")
+    for name, value in {"ROOT": root, "MEDIA_PYTHON": python, "REFERENCE": reference,
+                        "MARKER": marker, "CONTROLLER_SCRIPT": root / "cale_voice.py",
+                        "WORKER_SCRIPT": root / "cale_voice_worker.py"}.items():
+        monkeypatch.setattr(cale_voice, name, value)
+    monkeypatch.setattr(cale_voice, "_probe_busy", lambda: False)
+    monkeypatch.setattr(cale_voice, "release_for_gpu_task", Mock())
+    def wav(path, mode="valid"):
+        import math
+        import struct
+        if mode == "silent":
+            samples = b"\0\0" * 1600
+        elif mode == "dc":
+            samples = struct.pack("<h", 8000) * 1600
+        elif mode == "quiet":
+            samples = b"\1\0\xff\xff" * 800
+        else:
+            samples = b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 220 * n / 16000))) for n in range(1600))
+        with wave.open(str(path), "wb") as output:
+            output.setnchannels(1); output.setsampwidth(2); output.setframerate(16000)
+            output.writeframes(b"" if mode == "empty" else samples)
+        if mode == "truncated":
+            path.write_bytes(path.read_bytes()[:-100])
+    def process(mode="valid", mutate=None):
+        def start(command, **kwargs):
+            target = Path(command[-2])
+            before = cale_voice._voice_fingerprint(str(snapshot))
+            if mode == "corrupt":
+                target.write_bytes(b"not wave data")
+            else:
+                wav(target, mode)
+            if mutate:
+                mutate()
+            answer = {"path": str(target), "engine": "Cale's local voice",
+                      "model_path": str(snapshot), "fingerprint": before}
+            child = Mock(returncode=0)
+            child.poll.return_value = 0
+            child.communicate.return_value = (json.dumps(answer), None)
+            return child
+        return start
+    return root, snapshot, wav, process
+
+
+def test_clone_probe_requires_actual_complete_non_silent_render_before_cache_pass(clone_probe_runtime, monkeypatch):
+    root, snapshot, wav, process = clone_probe_runtime
+    assert not cale_voice.capability_ready()
+    launch = Mock(side_effect=process())
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", launch)
+    report = cale_voice.run_probe()
+    assert report["status"] == "passed" and report["engine"] == "Cale's local voice"
+    assert report["audio"]["frames"] == 1600 and cale_voice.capability_ready()
+    command = launch.call_args.args[0]
+    assert command[:3] == [str(cale_voice.MEDIA_PYTHON), str(cale_voice.WORKER_SCRIPT), "--probe"]
+    assert command[-1] == str(root)
+    assert launch.call_args.kwargs["env"]["HF_HUB_OFFLINE"] == "1"
+    assert not Path(command[-2]).exists()  # Evidence metadata survives, temporary audio does not.
+
+
+@pytest.mark.parametrize("mode", ["empty", "truncated", "silent", "corrupt", "dc", "quiet"])
+def test_clone_probe_rejects_invalid_render_without_false_ready(clone_probe_runtime, monkeypatch, mode):
+    root, snapshot, wav, process = clone_probe_runtime
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", process(mode))
+    monkeypatch.setattr("self_diagnostics._stop_check", Mock())
+    report = cale_voice.run_probe()
+    assert report["status"] == "failed" and not cale_voice.capability_ready()
+
+
+def test_clone_fingerprint_accepts_real_size_vocabulary_and_tracks_changes(clone_probe_runtime):
+    import os
+    root, snapshot, wav, process = clone_probe_runtime
+    vocabulary = snapshot / "vocab.json"
+    vocabulary.write_bytes(b" " * 2_776_833)
+    first = cale_voice._voice_fingerprint(str(snapshot))
+    assert len(first) == 64
+    original = vocabulary.stat()
+    os.utime(vocabulary, ns=(original.st_atime_ns, original.st_mtime_ns + 10_000_000))
+    assert cale_voice._voice_fingerprint(str(snapshot)) != first
+
+
+@pytest.mark.parametrize("configuration", [None, "[]", "broken json", "{}" + " " * 2_000_000])
+def test_clone_fingerprint_requires_valid_bounded_configuration(clone_probe_runtime, configuration):
+    root, snapshot, wav, process = clone_probe_runtime
+    config = snapshot / "config.json"
+    if configuration is None:
+        config.unlink()
+    else:
+        config.write_text(configuration, encoding="utf-8")
+    with pytest.raises(ValueError):
+        cale_voice._voice_fingerprint(str(snapshot))
+
+
+@pytest.mark.parametrize("width", [1, 2, 3, 4])
+def test_probe_pcm_requires_audible_variation_in_a_channel(tmp_path, width):
+    import math
+    import wave
+    path = tmp_path / "probe.wav"
+    scale = 1 << (width * 8 - 1)
+    def encode(value):
+        return bytes([value + 128]) if width == 1 else value.to_bytes(width, "little", signed=True)
+    def write(samples):
+        with wave.open(str(path), "wb") as output:
+            output.setnchannels(2); output.setsampwidth(width); output.setframerate(16000)
+            output.writeframes(samples)
+    # Opposing DC offsets differ between channels but contain no sound.
+    dc = int(scale * 0.25)
+    write((encode(dc) + encode(-dc)) * 1600)
+    with pytest.raises(ValueError, match="audible variation"):
+        cale_voice._checked_probe_wav(path)
+    # One audible channel is enough; the other may be silent.
+    write(b"".join(encode(int(scale * .25 * math.sin(2 * math.pi * 220 * n / 16000))) + encode(0) for n in range(1600)))
+    assert cale_voice._checked_probe_wav(path)["frames"] == 1600
+
+
+@pytest.mark.parametrize("changed", ["reference", "controller", "worker", "model_config", "model_weights", "python", "package"])
+def test_clone_capability_cache_invalidates_changed_voice_dependencies(clone_probe_runtime, monkeypatch, changed):
+    root, snapshot, wav, process = clone_probe_runtime
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", process())
+    assert cale_voice.run_probe()["status"] == "passed" and cale_voice.capability_ready()
+    paths = {"reference": cale_voice.REFERENCE, "controller": cale_voice.CONTROLLER_SCRIPT,
+        "worker": cale_voice.WORKER_SCRIPT, "model_config": snapshot / "config.json",
+        "model_weights": snapshot / "model.safetensors", "python": cale_voice.MEDIA_PYTHON,
+        "package": root / "Media/python/Lib/site-packages/qwen_tts-0.1.1.dist-info/METADATA"}
+    paths[changed].write_bytes(paths[changed].read_bytes() + b"changed")
+    assert not cale_voice.capability_ready()
+
+
+def test_clone_probe_rejects_dependencies_changed_during_render(clone_probe_runtime, monkeypatch):
+    root, snapshot, wav, process = clone_probe_runtime
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", process(mutate=lambda: cale_voice.REFERENCE.write_bytes(b"changed reference")))
+    monkeypatch.setattr("self_diagnostics._stop_check", Mock())
+    assert cale_voice.run_probe()["status"] == "failed" and not cale_voice.capability_ready()
+
+
+@pytest.mark.parametrize("record", [{}, {"status": "passed"}, {"format": 1, "status": "passed", "engine": "Cale's local voice"}])
+def test_clone_capability_missing_or_incomplete_attestation_is_not_ready(clone_probe_runtime, record):
+    import json
+    root, snapshot, wav, process = clone_probe_runtime
+    record = {**record, "model_path": str(snapshot), "fingerprint": cale_voice._voice_fingerprint(str(snapshot))}
+    cale_voice._save_probe(record)
+    assert not cale_voice.capability_ready()
+    (root / "LongTasks/cale-voice-probe.json").write_text("invalid json")
+    assert not cale_voice.capability_ready()
+
+
+def test_clone_probe_defers_and_cancels_when_user_work_needs_the_pc(clone_probe_runtime, monkeypatch):
+    root, snapshot, wav, process = clone_probe_runtime
+    launch = Mock()
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", launch)
+    monkeypatch.setattr(cale_voice, "_probe_busy", lambda: True)
+    assert cale_voice.run_probe()["status"] == "deferred"
+    launch.assert_not_called()
+    child = Mock(returncode=None)
+    child.poll.return_value = None
+    launch.return_value = child
+    busy = Mock(side_effect=[False, True])
+    monkeypatch.setattr(cale_voice, "_probe_busy", busy)
+    stop = Mock()
+    monkeypatch.setattr("self_diagnostics._stop_check", stop)
+    assert cale_voice.run_probe()["status"] == "deferred"
+    stop.assert_called_once_with(child)
+    assert not cale_voice.capability_ready()
+
+
+def test_clone_probe_scheduling_is_async_and_never_marks_ready_before_render(clone_probe_runtime, monkeypatch):
+    root, snapshot, wav, process = clone_probe_runtime
+    launch = Mock(return_value=Mock(pid=1234))
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", launch)
+    assert cale_voice.schedule_probe()
+    assert not cale_voice.capability_ready()
+    command = launch.call_args.args[0]
+    assert command[1:] == [str(cale_voice.CONTROLLER_SCRIPT), "--probe", "--runtime-root", str(root)]
+    assert launch.call_args.kwargs["creationflags"] == cale_voice.HIDE | getattr(cale_voice.subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+    assert not cale_voice.schedule_probe()
+    assert launch.call_count == 1
+
+
+def test_clone_capability_survives_unrelated_release_and_mic_or_deep_check_failure(clone_probe_runtime, monkeypatch):
+    import json
+    import voice_assistant
+    root, snapshot, wav, process = clone_probe_runtime
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", process())
+    assert cale_voice.run_probe()["status"] == "passed"
+    (root / ".cale-ai-install").write_text("An unrelated new release")
+    (root / "LongTasks/install-progress.json").write_text(json.dumps({"status": "complete"}))
+    (root / "LongTasks/self-check.json").write_text(json.dumps({"status": "failed"}))
+    (root / "LongTasks/readiness-probes.json").write_text(json.dumps({"voice": {"ok": False, "microphone": False}}))
+    monkeypatch.setattr(voice_assistant, "ROOT", root)
+    assert cale_voice.capability_ready() and voice_assistant.speech_ready()
+
+
+def test_clone_probe_rejects_another_speech_engine_even_with_valid_audio(clone_probe_runtime, monkeypatch):
+    import json
+    root, snapshot, wav, process = clone_probe_runtime
+    original = process()
+    def fallback(command, **kwargs):
+        child = original(command, **kwargs)
+        answer = json.loads(child.communicate.return_value[0])
+        answer["engine"] = "Kokoro natural voice"
+        child.communicate.return_value = (json.dumps(answer), None)
+        return child
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", fallback)
+    monkeypatch.setattr("self_diagnostics._stop_check", Mock())
+    assert cale_voice.run_probe()["status"] == "failed" and not cale_voice.capability_ready()

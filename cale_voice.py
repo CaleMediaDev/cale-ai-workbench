@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
+import math
 import os
 import queue
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import wave
@@ -15,6 +19,8 @@ from pathlib import Path
 from model_library import save_download_status
 
 ROOT = Path(__file__).resolve().parent
+CONTROLLER_SCRIPT = Path(__file__).resolve()
+WORKER_SCRIPT = CONTROLLER_SCRIPT.with_name("cale_voice_worker.py")
 MEDIA_PYTHON = ROOT / "Media/python/Scripts/python.exe"
 STATUS = ROOT / "LongTasks/cale-voice-progress.json"
 MARKER = ROOT / "LongTasks/cale-voice-ready.json"
@@ -42,6 +48,224 @@ def ready() -> bool:
     return (MEDIA_PYTHON.is_file() and REFERENCE.is_file() and MARKER.is_file()
             and all((packages / f"{name}-{version}.dist-info").is_dir()
                     for name, version in VOICE_PACKAGES.items()))
+
+
+PROBE_SECONDS = 180
+PROBE_FORMAT = 1
+
+
+def _probe_record() -> dict:
+    path = ROOT / "LongTasks/cale-voice-probe.json"
+    try:
+        if path.stat().st_size > 8192:
+            return {}
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_probe(value: dict) -> None:
+    path = ROOT / "LongTasks/cale-voice-probe.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = path.with_name(path.name + f".{os.getpid()}.tmp")
+    staged.write_text(json.dumps(value), encoding="utf-8")
+    os.replace(staged, path)
+
+
+def _voice_fingerprint(model_path: str) -> str:
+    """Bound local metadata checks; never hash gigabytes of model weights."""
+    def digest(path: Path, maximum: int) -> str:
+        if not path.is_file() or not 0 < path.stat().st_size <= maximum:
+            raise ValueError("Required voice file is missing or oversized")
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    python = MEDIA_PYTHON.stat()
+    parts = [PROBE_FORMAT, str(MEDIA_PYTHON.resolve()), python.st_size, python.st_mtime_ns,
+             digest(REFERENCE, 16_000_000)]
+    for script in (CONTROLLER_SCRIPT, WORKER_SCRIPT):
+        parts.append(digest(script, 1_000_000))
+    packages = ROOT / "Media/python/Lib/site-packages"
+    for name in ("qwen_tts", "transformers", "accelerate", "torch", "torchaudio",
+                 "soundfile", "librosa", "einops", "numpy", "safetensors", "huggingface_hub"):
+        entries = []
+        for entry in packages.glob(name + "-*.dist-info"):
+            if len(entries) >= 8:
+                raise ValueError("Voice package metadata is ambiguous")
+            metadata = entry / "METADATA"
+            entries.append([entry.name, digest(metadata, 1_000_000)])
+        parts.append([name, sorted(entries)])
+    model = Path(model_path).resolve(strict=True)
+    if not model.is_dir():
+        raise ValueError("The checked voice snapshot is missing")
+    config = model / "config.json"
+    # Configuration drives model loading and must remain a bounded JSON object.
+    digest(config, 2_000_000)
+    if not isinstance(json.loads(config.read_text(encoding="utf-8")), dict):
+        raise ValueError("Voice model configuration must be a JSON object")
+    files = []
+    for index, path in enumerate(model.rglob("*")):
+        if index >= 256:
+            raise ValueError("Voice snapshot exceeds the bounded metadata probe")
+        if path.is_file():
+            stat = path.stat()
+            files.append([path.relative_to(model).as_posix(), str(path.resolve()),
+                          stat.st_size, stat.st_mtime_ns,
+                          # Vocabularies/tokenizers can exceed small-config limits.
+                          # Track large assets by path/size/mtime just like weights.
+                          digest(path, 2_000_000) if path.suffix == ".json" and stat.st_size <= 2_000_000 else ""])
+    if not any(row[0] == "config.json" for row in files) or not any(
+            Path(row[0]).suffix in {".safetensors", ".bin"} and row[2] > 0 for row in files):
+        raise ValueError("Voice snapshot has no configuration or model weights")
+    parts.append(sorted(files))
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
+
+
+def capability_ready() -> bool:
+    """Only an actual clone render with matching dependencies proves speech."""
+    report = _probe_record()
+    try:
+        audio = report.get("audio")
+        checked = report.get("checked_at")
+        if (not isinstance(checked, (int, float)) or not math.isfinite(checked)
+                or not 0 < checked <= time.time() + 60):
+            return False
+        if (not isinstance(audio, dict) or type(audio.get("frames")) is not int
+                or type(audio.get("sample_rate")) is not int or not 8000 <= audio["sample_rate"] <= 96000
+                or not 0.05 <= audio["frames"] / audio["sample_rate"] <= 15
+                or audio.get("channels") not in (1, 2)
+                or not isinstance(audio.get("sha256"), str) or len(audio["sha256"]) != 64
+                or any(c not in "0123456789abcdef" for c in audio["sha256"])):
+            return False
+        return bool(ready() and report.get("format") == PROBE_FORMAT
+                    and report.get("status") == "passed" and report.get("engine") == "Cale's local voice"
+                    and report.get("fingerprint") == _voice_fingerprint(report["model_path"]))
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        return False
+
+
+def _probe_busy() -> bool:
+    import self_diagnostics
+    import readiness_checklist
+    return (self_diagnostics.active_projects(ROOT / "LongTasks")
+            or readiness_checklist._heavy_gpu_active(ROOT))
+
+
+def _checked_probe_wav(path: Path) -> dict:
+    """Check complete, bounded PCM samples, not merely a WAV header or path."""
+    if not path.is_file() or not 44 < path.stat().st_size <= 8_000_000:
+        raise ValueError("Clone probe did not produce a bounded WAV")
+    with wave.open(str(path), "rb") as audio:
+        frames, rate = audio.getnframes(), audio.getframerate()
+        channels, width = audio.getnchannels(), audio.getsampwidth()
+        if (channels not in (1, 2) or width not in (1, 2, 3, 4) or not 8000 <= rate <= 96000
+                or not 0.05 <= frames / rate <= 15):
+            raise ValueError("Clone probe has invalid audio dimensions")
+        samples = audio.readframes(frames)
+        if len(samples) != frames * channels * width or not any(
+                value != 128 if width == 1 else value != 0 for value in samples):
+            raise ValueError("Clone probe audio is truncated or silent")
+        # Nonzero PCM alone accepts a constant DC offset or inaudible one-bit
+        # noise. Inspect bounded samples across the whole clip, independently
+        # per channel so opposite stereo DC offsets cannot impersonate speech.
+        stride = max(1, math.ceil(frames / 32000))
+        scale = float(1 << (width * 8 - 1))
+        audible = False
+        for channel in range(channels):
+            count = 0
+            total = squared = 0.0
+            minimum, maximum = 1.0, -1.0
+            for frame in range(0, frames, stride):
+                offset = (frame * channels + channel) * width
+                raw = samples[offset:offset + width]
+                value = ((raw[0] - 128) if width == 1 else int.from_bytes(raw, "little", signed=True)) / scale
+                count += 1
+                total += value
+                squared += value * value
+                minimum, maximum = min(minimum, value), max(maximum, value)
+            ac_rms = math.sqrt(max(0.0, squared / count - (total / count) ** 2))
+            if ac_rms >= 0.001 and maximum - minimum >= 0.005:
+                audible = True
+        if not audible:
+            raise ValueError("Clone probe audio has no audible variation")
+    return {"frames": frames, "sample_rate": rate, "channels": channels,
+            "sha256": hashlib.sha256(samples).hexdigest()}
+
+
+def schedule_probe() -> bool:
+    """Queue one low-priority offline probe; polling never waits for the GPU."""
+    if not ready() or capability_ready() or _probe_busy():
+        return False
+    import self_diagnostics
+    with self_diagnostics._report_lock(ROOT / "LongTasks/voice-probe", blocking=False) as acquired:
+        if not acquired:
+            return False
+        previous = _probe_record()
+        try:
+            age = time.time() - float(previous.get("checked_at") or 0)
+        except (TypeError, ValueError, OverflowError):
+            age = 60
+        if 0 <= age < 60:
+            return False
+        process = subprocess.Popen(
+            [sys.executable, str(CONTROLLER_SCRIPT), "--probe", "--runtime-root", str(ROOT)], cwd=ROOT,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=HIDE | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0))
+        _save_probe({"format": PROBE_FORMAT, "status": "running", "pid": process.pid,
+                     "checked_at": time.time()})
+        return True
+
+
+def run_probe() -> dict:
+    """Render through the actual clone worker; never record, play or download."""
+    import self_diagnostics
+    with self_diagnostics._report_lock(ROOT / "LongTasks/voice-probe", blocking=True):
+        if capability_ready():
+            return _probe_record()
+        report = {"format": PROBE_FORMAT, "status": "deferred", "checked_at": time.time()}
+        if not ready() or _probe_busy():
+            _save_probe(report)
+            return report
+        process = None
+        try:
+            release_for_gpu_task()  # Do not load a second copy beside an old persistent voice worker.
+            with tempfile.TemporaryDirectory(prefix="cale-voice-probe-") as temporary:
+                output = Path(temporary) / "clone.wav"
+                log = ROOT / "LongTasks/cale-voice-probe.log"
+                with log.open("w", encoding="utf-8") as errors:
+                    process = subprocess.Popen(
+                        [str(MEDIA_PYTHON), str(WORKER_SCRIPT), "--probe", str(output), str(ROOT)],
+                        cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
+                        text=True, encoding="utf-8", env=dict(os.environ, HF_HUB_OFFLINE="1"),
+                        creationflags=HIDE | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0))
+                    deadline = time.monotonic() + PROBE_SECONDS
+                    while process.poll() is None:
+                        if _probe_busy():
+                            self_diagnostics._stop_check(process)
+                            _save_probe(report)
+                            return report
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("Clone capability probe timed out")
+                        time.sleep(0.2)
+                    stdout, _ = process.communicate(timeout=3)
+                if process.returncode or len(stdout) > 8192:
+                    raise RuntimeError("The clone capability worker failed")
+                answer = json.loads(stdout)
+                if (not isinstance(answer, dict) or answer.get("engine") != "Cale's local voice"
+                        or Path(answer.get("path", "")).resolve() != output.resolve()):
+                    raise ValueError("The capability probe did not use Cale's clone")
+                # Worker reports fingerprints captured before loading/generation.
+                fingerprint = _voice_fingerprint(answer["model_path"])
+                if fingerprint != answer.get("fingerprint") or _probe_busy():
+                    raise ValueError("Voice files or task priority changed during the probe")
+                report.update(status="passed", engine=answer["engine"], model_path=answer["model_path"],
+                              fingerprint=fingerprint, audio=_checked_probe_wav(output))
+        except (OSError, ValueError, RuntimeError, TimeoutError, subprocess.SubprocessError, wave.Error, EOFError, KeyError, TypeError) as error:
+            if process is not None:
+                self_diagnostics._stop_check(process)
+            report.update(status="failed", detail=str(error)[:200])
+        report["checked_at"] = time.time()
+        _save_probe(report)
+        return report
 
 
 def _run(args: list[str], timeout: int = 900):
@@ -233,6 +457,11 @@ def speak(text: str, output_path: str | Path, play: bool = True,
             raise
         except (OSError, ValueError, queue.Empty, RuntimeError) as exc:
             _stop_worker()
+            try:
+                _save_probe({"format": PROBE_FORMAT, "status": "failed", "checked_at": time.time(),
+                             "detail": "Clone speech failed; awaiting a fresh idle capability probe"})
+            except OSError:
+                pass  # Preserve the original speech failure if status storage is unavailable.
             raise RuntimeError("Cale's voice worker could not finish this update.") from exc
         _idle_timer = threading.Timer(IDLE_SECONDS, _release_after_idle, args=(_generation,))
         _idle_timer.daemon = True
@@ -256,5 +485,25 @@ def speak(text: str, output_path: str | Path, play: bool = True,
     return answer
 
 
+def _probe_runtime(root: Path) -> None:
+    """Let a developer test candidate code against installed assets, offline."""
+    global ROOT, MEDIA_PYTHON, REFERENCE, STATUS, MARKER
+    ROOT = root.resolve(strict=True)
+    MEDIA_PYTHON = ROOT / "Media/python/Scripts/python.exe"
+    REFERENCE = ROOT / "assets/cale-voice-reference.wav"
+    STATUS = ROOT / "LongTasks/cale-voice-progress.json"
+    MARKER = ROOT / "LongTasks/cale-voice-ready.json"
+
+
 if __name__ == "__main__":
+    if "--probe" in sys.argv:
+        import argparse
+        parser = argparse.ArgumentParser(description="Render a silent, offline clone capability check only while idle.")
+        parser.add_argument("--probe", action="store_true")
+        parser.add_argument("--runtime-root", type=Path, default=ROOT)
+        args = parser.parse_args()
+        _probe_runtime(args.runtime_root)
+        report = run_probe()
+        print(json.dumps(report))
+        raise SystemExit(0 if report["status"] == "passed" else 1)
     install()

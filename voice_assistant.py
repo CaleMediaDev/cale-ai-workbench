@@ -568,7 +568,7 @@ def microphone_status():
 
 
 def speech_ready() -> bool:
-    """Cale stays silent until setup, his clone, and current checks pass."""
+    """Speak only after setup and a current actual clone render; mic is independent."""
     import cale_voice
 
     def state(name):
@@ -578,14 +578,13 @@ def speech_ready() -> bool:
             return {}
 
     try:
-        version = (ROOT / ".cale-ai-install").read_text(encoding="utf-8").strip()
-        checks = state("self-check.json")
-        probes = state("readiness-probes.json")
-        return bool(version and state("install-progress.json").get("status") == "complete"
-                    and cale_voice.ready() and checks.get("version") == version
-                    and checks.get("status") == "passed" and probes.get("version") == version
-                    and probes.get("voice", {}).get("ok"))
-    except (OSError, TypeError, AttributeError):
+        if state("install-progress.json").get("status") != "complete" or not cale_voice.ready():
+            return False
+        if cale_voice.capability_ready():
+            return True
+        cale_voice.schedule_probe()
+        return False
+    except (OSError, TypeError, AttributeError, ValueError, RuntimeError):
         return False
 
 

@@ -6,14 +6,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(sys.argv[3]).resolve() if len(sys.argv) == 4 and sys.argv[1] == "--probe" else Path(__file__).resolve().parent
 MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
 REFERENCE = ROOT / "assets/cale-voice-reference.wav"
+_MODEL_PATH = None
 REFERENCE_TEXT = "Hey, I'm Cale with Cale Media. How you doing?"
 
 
 def load_model():
     """Use the local GPU when present; downloads are staged during setup."""
+    global _MODEL_PATH
     with contextlib.redirect_stdout(sys.stderr):
         import torch
         from huggingface_hub import snapshot_download
@@ -26,6 +28,7 @@ def load_model():
         # Resolve the pinned cache snapshot first. Passing a local directory
         # prevents Transformers from probing Hugging Face during offline use.
         local_model = snapshot_download(MODEL_ID, local_files_only=True)
+        _MODEL_PATH = str(Path(local_model).resolve())
         return Qwen3TTSModel.from_pretrained(
             local_model,
             device_map="cuda:0" if cuda else "cpu",
@@ -61,6 +64,16 @@ def generate(model, voice_prompt, text: str, output_path: str) -> dict:
 
 
 def main():
+    # Probe fingerprints precede model loading so a raced replacement cannot
+    # attest audio produced from an older snapshot or reference.
+    probe = len(sys.argv) in (3, 4) and sys.argv[1] == "--probe"
+    if probe:
+        from huggingface_hub import snapshot_download
+        import cale_voice
+        cale_voice._probe_runtime(ROOT)
+        with contextlib.redirect_stdout(sys.stderr):
+            local_snapshot = snapshot_download(MODEL_ID, local_files_only=True)
+        before = cale_voice._voice_fingerprint(str(local_snapshot))
     model = load_model()
     # Extract the owner's voice once per worker. Re-encoding the same reference
     # for every short chat line adds avoidable seconds to spoken replies.
@@ -68,6 +81,12 @@ def main():
         voice_prompt = model.create_voice_clone_prompt(
             ref_audio=str(REFERENCE), ref_text=REFERENCE_TEXT,
         )
+    if probe:
+        with contextlib.redirect_stdout(sys.stderr):
+            response = generate(model, voice_prompt, "Cale is ready.", sys.argv[2])
+        response.update(model_path=_MODEL_PATH, fingerprint=before)
+        print(json.dumps(response), flush=True)
+        return
     if "--warm-model" in sys.argv:
         print(json.dumps({"ready": True}), flush=True)
         return

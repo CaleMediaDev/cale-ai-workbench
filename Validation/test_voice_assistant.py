@@ -48,31 +48,31 @@ class VoiceTests(unittest.TestCase):
                 voice_assistant.say("Your task is ready", require_clone=True)
         fallback.assert_not_called()
 
-    def test_speech_readiness_requires_current_setup_clone_and_checks(self):
+    def test_speech_readiness_requires_setup_and_actual_clone_probe_not_deep_suite_or_mic(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)
             state = root / "LongTasks"
             state.mkdir()
-            version = "Cale AI Workbench 0.5.421"
-            (root / ".cale-ai-install").write_text(version)
-            records = {
-                "install-progress.json": {"status": "complete"},
-                "self-check.json": {"version": version, "status": "passed"},
-                "readiness-probes.json": {"version": version, "voice": {"ok": True}},
-            }
-            for name, record in records.items():
-                (state / name).write_text(json.dumps(record))
+            setup = state / "install-progress.json"
+            setup.write_text(json.dumps({"status": "complete"}))
+            (state / "self-check.json").write_text(json.dumps({"status": "failed", "version": "older release"}))
+            (state / "readiness-probes.json").write_text(json.dumps({"voice": {"ok": False, "microphone": False}}))
             with (patch.object(voice_assistant, "ROOT", root),
-                  patch.object(cale_voice, "ready", return_value=True)):
+                  patch.object(cale_voice, "ready", return_value=True),
+                  patch.object(cale_voice, "capability_ready", return_value=True),
+                  patch.object(cale_voice, "schedule_probe") as schedule):
                 self.assertTrue(voice_assistant.speech_ready())
-                for name in records:
-                    original = (state / name).read_text()
-                    (state / name).write_text('{}')
-                    self.assertFalse(voice_assistant.speech_ready(), name)
-                    (state / name).write_text(original)
-            with (patch.object(voice_assistant, "ROOT", root),
-                  patch.object(cale_voice, "ready", return_value=False)):
+                (root / ".cale-ai-install").write_text("A newer unrelated release")
+                self.assertTrue(voice_assistant.speech_ready())
+                schedule.assert_not_called()
+                setup.write_text('{}')
                 self.assertFalse(voice_assistant.speech_ready())
+                setup.write_text(json.dumps({"status": "complete"}))
+                with patch.object(cale_voice, "capability_ready", return_value=False):
+                    self.assertFalse(voice_assistant.speech_ready())
+                    schedule.assert_called_once()
+                with patch.object(cale_voice, "ready", return_value=False):
+                    self.assertFalse(voice_assistant.speech_ready())
 
     def test_mute_interrupts_current_spoken_reply_without_muting_microphone(self):
         import queue
