@@ -80,7 +80,8 @@ def _skill_files(root: Path):
                 return
             try:
                 resolved = path.resolve(strict=True)
-                if (path.is_symlink() or not resolved.is_relative_to(source.resolve())
+                if (path.is_symlink() or not resolved.is_file()
+                        or not resolved.is_relative_to(source.resolve())
                         or path.stat().st_size > MAX_SKILL_BYTES):
                     continue
             except OSError:

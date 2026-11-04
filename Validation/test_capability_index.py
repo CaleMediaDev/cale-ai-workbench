@@ -36,6 +36,22 @@ def test_skills_and_tools_are_indexed_searched_and_refreshed():
             assert "Check contrast" in capability_index.read_skill(root, result[0]["id"])["content"]
 
 
+def test_directory_named_skill_md_does_not_block_index():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        skill, tools = fixture(root)
+        invalid = root / "vendor/agent-skills/not-a-skill/SKILL.md"
+        invalid.mkdir(parents=True)
+        with patch.object(capability_index, "_registered_tools", return_value=tools):
+            result = capability_index.sync(root)
+            assert result["skills"] == 1 and result["tools"] == 1
+            assert capability_index.health(root)["ok"]
+            assert capability_index.search(root, "accessible", kind="skill")[0]["id"] == "skill:" + skill.parent.name
+            assert capability_index.search(root, "image", kind="tool")[0]["name"] == "make_image"
+            assert capability_index.sync(root)["updated"] == 0
+        assert invalid.is_dir()
+
+
 def test_identical_installed_skill_replaces_bundled_path():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
