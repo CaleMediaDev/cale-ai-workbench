@@ -316,7 +316,7 @@ def probe_tool_use(alias, reasoning_effort=None):
         request,
         timeout=240,
     )
-    for call in result.get("message", {}).get("tool_calls", []):
+    for call in result.get("message", {}).get("tool_calls", []) or []:
         function = call.get("function", {})
         args = function.get("arguments", {})
         if (
