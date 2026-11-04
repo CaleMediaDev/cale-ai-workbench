@@ -288,6 +288,36 @@ class ProjectMemoryTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM memory_fts"
             ).fetchone()[0], 1)
 
+    def test_recalled_file_replaced_by_alias_evicts_obsolete_identity(self):
+        source = self.folder / "app.py"
+        target = self.folder / "implementation.py"
+        identifier = "file:app.py"
+        for replacement in ("originalmarker", "replacementmarker"):
+            with self.subTest(replacement=replacement):
+                source.write_text("originalmarker", encoding="utf-8")
+                memory.index_file(self.folder, source)
+                target.write_text(replacement, encoding="utf-8")
+                source.unlink()
+                try:
+                    source.symlink_to(target)
+                except (OSError, NotImplementedError) as exc:
+                    self.skipTest(f"Symlinks unavailable: {exc}")
+                try:
+                    with self.assertRaisesRegex(ValueError, "source file was removed"):
+                        memory.get(self.folder, identifier)
+                    with memory.connection(self.folder) as conn:
+                        for table in ("memories", "memory_fts"):
+                            self.assertEqual(conn.execute(
+                                f"SELECT COUNT(*) FROM {table} WHERE id=?",
+                                (identifier,),
+                            ).fetchone()[0], 0)
+                    memory.index_file(self.folder, source)
+                    found = memory.search(self.folder, replacement, kind="file")
+                    self.assertEqual([row["id"] for row in found],
+                                     ["file:implementation.py"])
+                finally:
+                    source.unlink()
+
     def test_old_identifier_does_not_match_new_identifier_by_shared_word(self):
         source = self.folder / "app.py"
         source.write_text("def old_widget(): return 1", encoding="utf-8")
