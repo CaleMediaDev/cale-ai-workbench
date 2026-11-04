@@ -3,12 +3,45 @@
 import asyncio
 import sys
 import types
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
 import project_memory
 import site_crawler
+
+
+@pytest.mark.parametrize("character", ["a", "\u6f22", "\U0001f600"])
+def test_multibyte_research_fits_real_memory_index(tmp_path, monkeypatch, character):
+    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+    markdown = "searchablezebra " + character * 99_000
+
+    class FakeCrawler:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def arun(self, **kwargs):
+            return types.SimpleNamespace(success=True, markdown=markdown, links={})
+
+    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
+        AsyncWebCrawler=FakeCrawler, BrowserConfig=lambda **kwargs: kwargs,
+        CrawlerRunConfig=lambda **kwargs: kwargs,
+    ))
+    result = asyncio.run(site_crawler.crawl_site(tmp_path, "https://example.com", max_pages=1))
+    assert result["errors"] == []
+    assert len(result["pages"]) == 1
+    assert result["pages"][0]["truncated"] is (character != "a")
+    saved = Path(result["pages"][0]["file"])
+    assert saved.stat().st_size <= 256_000
+    assert "\ufffd" not in saved.read_text(encoding="utf-8")
+    assert project_memory.search(tmp_path, "searchablezebra", kind="file")
 
 
 @pytest.mark.parametrize("bad_link", [
