@@ -19,28 +19,36 @@ OBSERVER = ContextVar("cale_usage_observer", default=None)
 def _connection():
     DATABASE.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DATABASE, timeout=20)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("""CREATE TABLE IF NOT EXISTS usage_events (
-        id INTEGER PRIMARY KEY, timestamp REAL NOT NULL, source TEXT NOT NULL,
-        model TEXT NOT NULL, prompt_tokens INTEGER NOT NULL,
-        completion_tokens INTEGER NOT NULL, total_tokens INTEGER NOT NULL
-    )""")
-    conn.execute("CREATE INDEX IF NOT EXISTS usage_time ON usage_events(timestamp)")
-    # Serialize column migrations across concurrently starting worker processes.
-    conn.execute("BEGIN IMMEDIATE")
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(usage_events)")}
-    if "tokens_per_second" not in columns:
-        conn.execute("ALTER TABLE usage_events ADD COLUMN tokens_per_second REAL")
-    if "task_id" not in columns:
-        conn.execute("ALTER TABLE usage_events ADD COLUMN task_id TEXT NOT NULL DEFAULT ''")
-    for name, definition in (("speed_basis", "TEXT NOT NULL DEFAULT 'unknown'"),
-                             ("speed_tokens", "INTEGER NOT NULL DEFAULT 0"),
-                             ("speed_seconds", "REAL"), ("elapsed_seconds", "REAL")):
-        if name not in columns:
-            conn.execute(f"ALTER TABLE usage_events ADD COLUMN {name} {definition}")
-    conn.execute("CREATE INDEX IF NOT EXISTS usage_task ON usage_events(task_id)")
-    conn.commit()
-    return conn
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""CREATE TABLE IF NOT EXISTS usage_events (
+            id INTEGER PRIMARY KEY, timestamp REAL NOT NULL, source TEXT NOT NULL,
+            model TEXT NOT NULL, prompt_tokens INTEGER NOT NULL,
+            completion_tokens INTEGER NOT NULL, total_tokens INTEGER NOT NULL
+        )""")
+        additions = (("tokens_per_second", "REAL"), ("task_id", "TEXT NOT NULL DEFAULT ''"),
+                     ("speed_basis", "TEXT NOT NULL DEFAULT 'unknown'"),
+                     ("speed_tokens", "INTEGER NOT NULL DEFAULT 0"),
+                     ("speed_seconds", "REAL"), ("elapsed_seconds", "REAL"))
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(usage_events)")}
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(usage_events)")}
+        if (any(name not in columns for name, _ in additions)
+                or not {"usage_time", "usage_task"}.issubset(indexes)):
+            # Serialize migrations only. Established WAL readers must not
+            # reserve a writer lock while the graph or router reads metrics.
+            conn.execute("BEGIN IMMEDIATE")
+            # Another worker may have migrated while this connection waited.
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(usage_events)")}
+            for name, definition in additions:
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE usage_events ADD COLUMN {name} {definition}")
+            conn.execute("CREATE INDEX IF NOT EXISTS usage_time ON usage_events(timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS usage_task ON usage_events(task_id)")
+            conn.commit()
+        return conn
+    except Exception:
+        conn.close()
+        raise
 
 
 def _count(value) -> int:

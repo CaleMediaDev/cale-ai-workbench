@@ -291,3 +291,31 @@ def test_concurrent_legacy_usage_migration_preserves_rows(tmp_path, monkeypatch)
         assert conn.execute("SELECT COUNT(*) FROM usage_events").fetchone()[0] == 7
         assert conn.execute("SELECT speed_basis FROM usage_events WHERE id=1").fetchone()[0] == "unknown"
     assert usage_history.recent_model_retirement_speed("concurrent") == 128
+
+
+def test_migrated_usage_reader_does_not_reserve_writer_lock(tmp_path, monkeypatch):
+    """Reading established WAL metrics must coexist with another worker's write."""
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for _ in range(3):
+        _local_timed("fast", 128, 1)
+    original_connect = sqlite3.connect
+    writer = original_connect(usage_history.DATABASE)
+    writer.execute("BEGIN IMMEDIATE")
+    def short_connect(*args, **kwargs):
+        kwargs["timeout"] = .05
+        return original_connect(*args, **kwargs)
+    try:
+        with monkeypatch.context() as patcher:
+            patcher.setattr(sqlite3, "connect", short_connect)
+            # A direct open exposes lock failures rather than a display's
+            # legitimate fallback hiding the failed database read.
+            reader = usage_history._connection()
+            try:
+                assert reader.execute("SELECT COUNT(*) FROM usage_events").fetchone()[0] == 3
+                assert not reader.in_transaction
+            finally:
+                reader.close()
+            assert usage_history.recent_model_retirement_speed("fast") == 128
+    finally:
+        writer.rollback()
+        writer.close()
