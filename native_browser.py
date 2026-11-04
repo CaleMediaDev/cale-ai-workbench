@@ -106,7 +106,7 @@ def _dom_contract(folder: Path, page) -> dict:
           copy.querySelectorAll('input,select,textarea,output,[contenteditable]').forEach(n => n.remove());
           return (copy.textContent || '').trim().slice(0,120);
         };
-        const labels = [...(el.labels || [])].slice(0,3).map(labelText);
+        const labels = el instanceof HTMLFormElement ? [] : [...(el.labels || [])].slice(0,3).map(labelText);
         const form = el.form || el.closest('form');
         targets.push({id:id.slice(0,120),id_count:id ? counts.get(id) : 0,
           id_truncated:id.length>120,
@@ -356,7 +356,7 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
               el.setAttribute('data-cale-ref', ref);
               let label = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
               if(local && !label) {
-                label = [...(el.labels || [])].slice(0,3).map(node => {
+                label = (el instanceof HTMLFormElement ? [] : [...(el.labels || [])]).slice(0,3).map(node => {
                   const copy = node.cloneNode(true);
                   copy.querySelectorAll('input,select,textarea,output,[contenteditable]').forEach(n => n.remove());
                   return (copy.textContent || '').trim();
