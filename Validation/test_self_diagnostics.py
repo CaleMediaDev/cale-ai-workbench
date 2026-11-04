@@ -9,7 +9,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import self_diagnostics as diagnostics
@@ -181,6 +181,27 @@ class SelfDiagnosticsTests(unittest.TestCase):
             result = diagnostics.run(self.root, self.state)
         self.assertEqual(result["status"], "superseded")
         self.assertEqual(json.loads((self.state / "self-check.json").read_text()), new_report)
+
+    def test_stop_check_continues_after_a_child_exits_concurrently(self):
+        import psutil
+
+        process = Mock(pid=123)
+        process.poll.return_value = None
+        vanished = Mock()
+        vanished.terminate.side_effect = psutil.NoSuchProcess(124)
+        sibling = Mock()
+        children = [vanished, sibling]
+        with (patch("psutil.Process") as parent,
+              patch("psutil.wait_procs", return_value=(children, [])) as wait):
+            parent.return_value.children.return_value = children
+            diagnostics._stop_check(process)
+
+        vanished.terminate.assert_called_once_with()
+        sibling.terminate.assert_called_once_with()
+        process.terminate.assert_called_once_with()
+        wait.assert_called_once_with(children, timeout=5)
+        process.wait.assert_called_once_with(timeout=5)
+        process.kill.assert_not_called()
 
     def test_running_check_yields_when_a_user_task_starts(self):
         process = SimpleNamespace(pid=123, poll=lambda: None)
