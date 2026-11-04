@@ -97,7 +97,7 @@ def generate(root: Path, prompt: str, output_path: str = "") -> Path:
 def image_file_ok(path: str | Path) -> bool:
     """Check that an image has real decodable pixels before review."""
     source = Path(path)
-    if not source.is_file() or source.stat().st_size < 100:
+    if not source.is_file():
         return False
     try:
         with Image.open(source) as picture:

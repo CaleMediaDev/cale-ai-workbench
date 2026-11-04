@@ -196,6 +196,29 @@ def test_recovery_retries_png_with_valid_checksums_but_invalid_pixels(tmp_path):
     assert not output.exists()
 
 
+def test_recovery_preserves_valid_png_smaller_than_100_bytes(tmp_path):
+    output = tmp_path / "small.png"
+    Image.new("RGB", (1, 1), "orange").save(output)
+    original = output.read_bytes()
+    assert len(original) < 100
+    assert quick_image.image_file_ok(output)
+
+    job_id = "e" * 32
+    quick_image._write_job(tmp_path, job_id, {
+        "job_id": job_id, "status": "working", "prompt": "a dog",
+        "output_path": str(output),
+    })
+    with (patch.object(quick_image, "_worker_running", return_value=False),
+          patch.object(quick_image, "_launch_job") as launch):
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_not_called()
+
+    info = quick_image.image_job_status(tmp_path, job_id)
+    assert info["status"] == "complete"
+    assert info["result"] == {"path": str(output)}
+    assert output.read_bytes() == original
+
+
 def test_image_job_pause_and_resume_reuse_same_id(tmp_path):
     job_id = "a" * 32
     quick_image._write_job(tmp_path, job_id, {
