@@ -48,6 +48,8 @@ def _run(arguments: list[str], output: Path) -> None:
         if output.suffix.lower() == ".wav":
             try:
                 with wave.open(str(staged), "rb") as audio:
+                    if audio.getframerate() <= 0:
+                        raise RuntimeError("Local audio edit produced an invalid WAV sample rate.")
                     if audio.getnframes() == 0:
                         raise RuntimeError("Local audio edit produced no audio frames.")
                     remaining = audio.getnframes()

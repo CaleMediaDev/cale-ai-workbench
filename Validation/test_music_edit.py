@@ -175,6 +175,45 @@ def test_edit_music_rejects_header_only_wav_after_successful_exit(tmp_path, monk
     assert len(staged_paths) == 2
 
 
+def test_edit_music_rejects_zero_sample_rate_wav(tmp_path, monkeypatch):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio"
+    source.write_bytes(original)
+    staged_paths = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def invalid_rate_success(command, **kwargs):
+        assert kwargs["timeout"] == 3600
+        assert "-n" in command
+        staged = Path(command[-1])
+        staged_paths.append(staged)
+        with wave.open(str(staged), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x00\x00" * 160)
+        data = bytearray(staged.read_bytes())
+        # The PCM fmt chunk stores sample rate and byte rate at offsets 24 and 28.
+        struct.pack_into("<II", data, 24, 0, 0)
+        staged.write_bytes(data)
+        with wave.open(str(staged), "rb") as audio:
+            assert audio.getframerate() == 0
+            assert audio.getnframes() == 160
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", invalid_rate_success)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="invalid WAV sample rate"):
+            music_edit.edit_music(str(source), str(output))
+        assert not output.exists()
+        assert source.read_bytes() == original
+        assert all(not path.parent.exists() for path in staged_paths)
+
+    assert len(staged_paths) == 2
+
+
 @pytest.mark.parametrize("missing_bytes", [1, 320])
 def test_edit_music_rejects_truncated_wav_after_successful_exit(tmp_path, monkeypatch, missing_bytes):
     source = tmp_path / "song.wav"
