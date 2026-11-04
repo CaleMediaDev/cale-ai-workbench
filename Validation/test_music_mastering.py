@@ -133,6 +133,45 @@ def test_mastering_preserves_destination_created_during_render(tmp_path, worker_
     assert not staged_paths[0].parent.exists()
 
 
+@pytest.mark.parametrize("destination_created", [False, True])
+def test_mastering_without_filesystem_hard_link_support(tmp_path, destination_created):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    source.write_bytes(b"source")
+    reference.write_bytes(b"reference")
+    staged_paths = []
+
+    def render(*args, **kwargs):
+        staged = Path(args[0][-1])
+        staged_paths.append(staged)
+        staged.write_bytes(b"mastered")
+        if destination_created:
+            output.write_bytes(b"another operation's audio")
+        return type("Result", (), {"returncode": 0})()
+
+    unsupported = OSError(music_mastering.errno.EOPNOTSUPP, "Hard links unsupported")
+    with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
+        music_mastering, "install", return_value=Path("python.exe")
+    ), patch.object(music_mastering.subprocess, "run", side_effect=render), patch.object(
+        music_mastering.os, "link", side_effect=unsupported
+    ):
+        if destination_created:
+            with pytest.raises(ValueError, match="new output"):
+                music_mastering.master_music(str(source), str(reference), str(output))
+        else:
+            result = music_mastering.master_music(str(source), str(reference), str(output))
+            assert Path(result["path"]) == output
+
+    assert output.read_bytes() == (
+        b"another operation's audio" if destination_created else b"mastered"
+    )
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"reference"
+    assert len(staged_paths) == 1
+    assert not staged_paths[0].parent.exists()
+
+
 def test_mastering_rejects_hard_linked_reference(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"
