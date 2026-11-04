@@ -6642,6 +6642,11 @@ def test_retarget_host_state_assertions_keep_boolean_and_numeric_types_distinct(
     assert not native_agent.browser_retarget_preserves_step(active, old, changed, revision)
     retained = copy.deepcopy(old); retained["cases"][0]["state"]["app.ready"] = 1
     assert not native_agent.browser_revision_matches_step(tmp_path, active, retained)
+    retained_correction = copy.deepcopy(corrected); retained_correction["cases"][0]["state"]["app.ready"] = 1
+    with patch.object(task_context, "revise_step", side_effect=AssertionError("Mismatched SQL must not be rewritten")):
+        aligned, note = native_agent.align_browser_step_revision(tmp_path, {"active": active}, retained,
+            retained_correction, {"own_batch_passed": True, "verifier_saved": True, "revision": revision})
+    assert aligned is False and "not the active acceptance sequence" in note
     from_state = {"saved_case": 1, "retarget_assertion": {"from": "state:app.ready", "to": "rows:items"}}
     new = copy.deepcopy(old); del new["cases"][0]["state"]["app.ready"]; new["cases"][0]["row_counts"] = {"items": 1}
     numeric_owner = copy.deepcopy(active); numeric_owner["check_arguments"]["cases"][0]["state"]["app.ready"] = 1
