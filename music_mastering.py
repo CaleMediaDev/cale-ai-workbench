@@ -98,8 +98,11 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
                 with destination:
                     with staged.open("rb") as rendered:
                         shutil.copyfileobj(rendered, destination)
-            except BaseException:
-                output.unlink()
+            except BaseException as exc:
+                try:
+                    output.unlink()
+                except OSError as cleanup_error:
+                    raise exc from cleanup_error
                 raise
     return {"source": str(source), "reference": str(reference), "path": str(output),
             "engine": "Matchering 2.0.6"}
