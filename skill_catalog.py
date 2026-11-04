@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 
 SKILLS = {
@@ -84,9 +85,16 @@ def sync(root: str | Path) -> dict:
         else:
             installed += 1
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(target.name + ".cale-updating")
-        temporary.write_bytes(data)
-        os.replace(temporary, target)
+        temporary_file = tempfile.NamedTemporaryFile(
+            dir=target.parent, prefix=target.name + ".", suffix=".cale-updating", delete=False
+        )
+        temporary = Path(temporary_file.name)
+        try:
+            with temporary_file:
+                temporary_file.write(data)
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
         managed[key] = _hash(data)
     temporary = marker.with_name(marker.name + ".tmp")
     temporary.write_text(json.dumps(managed, indent=2, sort_keys=True), encoding="utf-8")
