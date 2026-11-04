@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _thread: threading.Thread | None = None
 _last_attempt: float | None = None
+_last_attempt_root: Path | None = None
 
 
 def executable(root: Path = ROOT) -> Path:
@@ -105,12 +106,15 @@ def ensure(root: Path = ROOT) -> Path:
 
 def start_background(root: Path = ROOT) -> None:
     """Quietly repair a missing executable after an update or accidental deletion."""
-    global _thread, _last_attempt
+    global _thread, _last_attempt, _last_attempt_root
     if working(root) or (_thread is not None and _thread.is_alive()):
         return
-    if _last_attempt is not None and time.monotonic() - _last_attempt < 300:
+    resolved_root = Path(root).resolve()
+    if (_last_attempt is not None and _last_attempt_root == resolved_root
+            and time.monotonic() - _last_attempt < 300):
         return
     _last_attempt = time.monotonic()
+    _last_attempt_root = resolved_root
 
     def repair() -> None:
         global _last_attempt

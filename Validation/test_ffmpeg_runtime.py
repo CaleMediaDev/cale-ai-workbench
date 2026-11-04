@@ -123,6 +123,35 @@ def test_background_repair_only_throttles_failures(tmp_path, repair_fails):
         assert thread.return_value.start.call_count == expected_attempts
 
 
+def test_failed_background_repair_does_not_throttle_another_root(tmp_path):
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    with patch.object(ffmpeg_runtime, "_last_attempt", None), \
+            patch.object(ffmpeg_runtime, "_last_attempt_root", None), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", return_value=False), \
+            patch.object(ffmpeg_runtime, "ensure", side_effect=RuntimeError("repair failed")) as ensure, \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0), \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        thread.return_value.is_alive.return_value = False
+        thread.return_value.start.side_effect = (
+            lambda: thread.call_args.kwargs["target"]()
+        )
+
+        ffmpeg_runtime.start_background(first_root)
+        ensure.assert_called_once_with(first_root)
+
+        # The same runtime remains subject to the failure cooldown.
+        ffmpeg_runtime.start_background(first_root)
+        assert ensure.call_count == 1
+
+        # A different runtime must receive its own repair attempt immediately.
+        ffmpeg_runtime.start_background(second_root)
+        assert ensure.call_count == 2
+        ensure.assert_called_with(second_root)
+        assert thread.return_value.start.call_count == 2
+
+
 def test_first_background_repair_is_not_throttled_at_low_uptime(tmp_path):
     # Preserve the module's initial timestamp while restoring it after this test.
     with patch.object(ffmpeg_runtime, "_last_attempt", ffmpeg_runtime._last_attempt), \
