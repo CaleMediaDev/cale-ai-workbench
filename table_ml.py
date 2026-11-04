@@ -82,6 +82,7 @@ def _schema(rows: list[dict], columns: list[str]) -> dict:
 
 def _features(rows: list[dict], schema: dict) -> list[dict]:
     output = []
+    feature_owners = {}
     for row in rows:
         features = {}
         for column, spec in schema.items():
@@ -105,6 +106,17 @@ def _features(rows: list[dict], schema: dict) -> list[dict]:
                 features[column] = normalized
             else:
                 features[column] = value or "(missing)"
+        # New prediction categories can collide even when training categories
+        # did not. Check before DictVectorizer merges encoded coordinates.
+        for column, value in features.items():
+            categorical = schema[column]["kind"] == "category"
+            name = f"{column}={value}" if categorical else column
+            owner = (column, value) if categorical else (column,)
+            if name in feature_owners and feature_owners[name] != owner:
+                raise ValueError(
+                    "Feature names collide after categorical encoding; rename the columns."
+                )
+            feature_owners[name] = owner
         output.append(features)
     return output
 
