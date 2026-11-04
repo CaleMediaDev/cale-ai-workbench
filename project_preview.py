@@ -66,8 +66,8 @@ def source(folder):
     """Prefer a declared local server; otherwise preview a project HTML file."""
     try:
         folder = Path(folder).resolve()
-    except (OSError, RuntimeError):
-        # An inaccessible root or symlink loop leaves no usable preview.
+    except (OSError, RuntimeError, ValueError):
+        # An inaccessible, invalid, or looping root leaves no usable preview.
         return ""
     declaration = folder / ".local-ai/preview.json"
     try:
