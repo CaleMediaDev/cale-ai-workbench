@@ -151,6 +151,21 @@ class AutoRouteTests(unittest.TestCase):
             "quick",
         )
 
+    def test_question_shaped_file_tasks_do_not_use_fast_tier(self):
+        for request in (
+            "How would you summarize this PDF?",
+            "What are the totals? Analyze my CSV data.",
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(
+                    task_size([{"role": "user", "content": request}]),
+                    "balanced",
+                )
+        self.assertEqual(
+            task_size([{"role": "user", "content": "How do I create a folder?"}]),
+            "quick",
+        )
+
     def test_short_tool_tasks_do_not_use_fast_tier(self):
         for request in (
             "Read the attached PDF and summarize it.",

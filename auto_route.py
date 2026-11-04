@@ -313,6 +313,7 @@ def task_size(messages):
         and not live_lookup
         and not has_media_input(messages)
         and not EXPLICIT_TOOL.search(intent)
+        and not TOOL_WORK.search(intent)
     ):
         return "quick"
     if has_media_input(messages) or TOOL_WORK.search(intent) or EXPLICIT_TOOL.search(intent):
