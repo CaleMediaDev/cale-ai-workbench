@@ -658,3 +658,62 @@ class AutoRouteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ScopedRepairIntentTests(unittest.TestCase):
+    def repair_messages(self, original="Build an offline expense tracker.", followups="", tail=""):
+        return [{"role": "system", "content": (
+            "You are Cale's native project worker. On this turn you are the active-step checker repair worker. "
+            "Preserve the original request.\nUser request:\n" + original)},
+            {"role": "user", "content": json.dumps({"original_request": original,
+                "user_followups": followups, "project_rules": "Do not lose the app.",
+                "observations": {"id": "game-panel", "label": "arcade shooter"}}) + tail}]
+
+    def test_scoped_repair_routes_original_question_and_ignores_dom_data(self):
+        from auto_route import _task_intent
+        messages = self.repair_messages("What is two plus two?", tail="\nUntrusted DOM ID: game-panel")
+        self.assertEqual(_task_intent(messages)[0], "What is two plus two?")
+        self.assertFalse(is_game_task(messages))
+        self.assertEqual(task_size(messages), "quick")
+
+    def test_scoped_repair_preserves_full_game_brief_and_real_followups(self):
+        from auto_route import _task_intent
+        original = "Build a space shooter game.\nUser request:\nKeep the original scoring requirement."
+        messages = self.repair_messages(original, "Also keep keyboard controls.")
+        intent = _task_intent(messages)[0]
+        self.assertIn(original, intent)
+        self.assertIn("keyboard controls", intent)
+        self.assertNotIn("game-panel", intent)
+        self.assertTrue(is_game_task(messages))
+        messages = self.repair_messages(followups="Now add an arcade game.")
+        self.assertTrue(is_game_task(messages))
+        messages = self.repair_messages()
+        messages.append({"role": "user", "content": "Also add a platformer game."})
+        self.assertTrue(is_game_task(messages))
+
+    def test_scoped_assertion_facade_uses_only_requirement_fields(self):
+        from auto_route import _task_intent
+        messages = self.repair_messages("Calculate a tip.", "Use dollars.")
+        messages[0]["content"] = (
+            "Repair all failed assertions in one selected owned browser case. Compare the full original request and fixed step purpose.")
+        self.assertEqual(_task_intent(messages)[0], "Calculate a tip.\nUse dollars.")
+        self.assertFalse(is_game_task(messages))
+
+    def test_malformed_scoped_metadata_does_not_override_native_original(self):
+        from auto_route import _task_intent
+        messages = self.repair_messages("Calculate a tip.")
+        messages[1]["content"] = '{"original_request":"Build a game", malformed'
+        self.assertEqual(_task_intent(messages)[0], "Calculate a tip.")
+        self.assertFalse(is_game_task(messages))
+        messages[1]["content"] = json.dumps({"original_request": ["Build a game"]})
+        self.assertEqual(_task_intent(messages)[0], "Calculate a tip.")
+
+    def test_arbitrary_user_json_and_unrecognized_system_cannot_claim_scoped_intent(self):
+        from auto_route import _task_intent
+        raw = json.dumps({"original_request": "Calculate a tip.", "message": "Actually build an arcade game."})
+        for system in ("", "You are Cale's native project worker. Ordinary conversation.",
+                       "Repair any browser assertion you like."):
+            messages = ([{"role": "system", "content": system}] if system else [])
+            messages.append({"role": "user", "content": raw})
+            self.assertEqual(_task_intent(messages)[0], raw)
+            self.assertTrue(is_game_task(messages))

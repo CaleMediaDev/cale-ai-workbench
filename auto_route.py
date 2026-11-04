@@ -185,6 +185,52 @@ def repair_messages(messages):
     return [hint, *messages]
 
 
+def _scoped_repair_intent(messages):
+    """Read requirement fields only from the host's paired repair envelope.
+
+    Browser observations and any trailing diagnostic text are task data, not
+    user intent. Ordinary user JSON remains ordinary conversation content.
+    """
+    prefixes = (
+        "You are Cale's native project worker. On this turn repair only the invalid acceptance ",
+        "You are Cale's native project worker. On this turn you are the active-step checker repair worker. ",
+        "You are Cale's native project worker. This turn only decides whether the active failed ",
+        "You are Cale's native project worker. This turn only decides whether a saved test ",
+        "Repair all failed assertions in one selected owned browser case. ",
+    )
+    for index, message in enumerate(messages[:-1]):
+        if not isinstance(message, dict) or message.get("role") != "system":
+            continue
+        instruction = message_text(message.get("content"))
+        if not instruction.startswith(prefixes):
+            continue
+        paired = messages[index + 1]
+        if not isinstance(paired, dict) or paired.get("role") != "user":
+            continue
+        # Native repair wrappers also carry an independent original brief.
+        # Split at the first host delimiter; a user's quoted delimiter is data.
+        original = instruction.partition("\nUser request:\n")[2].strip()
+        followups = ""
+        try:
+            payload, _end = json.JSONDecoder().raw_decode(message_text(paired.get("content")).lstrip())
+            if (not isinstance(payload, dict) or not isinstance(payload.get("original_request"), str)
+                    or not payload["original_request"].strip()
+                    or not isinstance(payload.get("user_followups", ""), str)
+                    or original and payload["original_request"].strip() != original):
+                raise ValueError("Invalid repair requirement fields")
+            original = payload["original_request"].strip()
+            followups = payload.get("user_followups", "").strip()
+        except (ValueError, RecursionError):
+            if not original:
+                continue  # No trustworthy brief can be recovered from this envelope.
+        genuine = [message_text(item.get("content")).strip()
+                   for position, item in enumerate(messages)
+                   if position != index + 1 and isinstance(item, dict) and item.get("role") == "user"
+                   and not synthetic_worker_note(message_text(item.get("content")))]
+        return "\n".join(part for part in (original, followups, *genuine) if part)
+    return None
+
+
 def _task_intent(messages):
     """Read the saved user brief without treating worker guidance as intent."""
     users = [
@@ -208,7 +254,10 @@ def _task_intent(messages):
     native_brief = (native_prompt.split("\nUser request:\n", 1)[1].strip()
                     if "\nUser request:\n" in native_prompt else "")
     project = PROJECT_REQUEST.search(beginning) or PROJECT_REQUEST.search(request)
-    if native_brief:
+    scoped_intent = _scoped_repair_intent(messages)
+    if scoped_intent is not None:
+        intent = scoped_intent
+    elif native_brief:
         intent = native_brief
         real_followups = [
             item.strip() for item in users if not synthetic_worker_note(item)
