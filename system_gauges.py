@@ -183,7 +183,7 @@ class HardwareSampler:
             ram = None
         try:
             gpu = _gpu_percent()
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
             gpu = None
         try:
             drive, drive_free = _drive_space()
