@@ -120,7 +120,7 @@ def add_astro_ai_ui(project_path: str) -> dict:
     for original, target in files:
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("xb") as output, original.open("rb") as input_stream:
+            with original.open("rb") as input_stream, target.open("xb") as output:
                 shutil.copyfileobj(input_stream, output)
             shutil.copystat(original, target)
             added.append(str(target))
