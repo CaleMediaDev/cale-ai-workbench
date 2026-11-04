@@ -1209,6 +1209,27 @@ def test_video_retry_stops_after_three_failures_without_losing_audio(tmp_path):
     assert output.read_bytes() == b"preserved audio"
 
 
+@pytest.mark.parametrize("bad_record", [None, [], "damaged", 42, True])
+def test_project_jobs_skips_non_object_records(tmp_path, bad_record):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    task_id = "a" * 12
+    bad_path = jobs / ("1" * 32 + ".json")
+    good_path = jobs / ("2" * 32 + ".json")
+    good_record = {
+        "job_id": "2" * 32, "status": "working", "created": 1,
+        "output_path": str(project / "song.mp3"),
+    }
+    bad_path.write_text(json.dumps(bad_record), encoding="utf-8")
+    good_path.write_text(json.dumps(good_record), encoding="utf-8")
+    with (patch.object(music_backend, "JOBS", jobs),
+          patch.object(Path, "glob", return_value=[bad_path, good_path])):
+        assert music_backend.project_jobs(task_id, project) == [good_record]
+    assert json.loads(bad_path.read_text(encoding="utf-8")) == bad_record
+
+
 def test_agent_music_job_is_attributed_and_task_controls_only_its_renders(tmp_path):
     task_id = "a" * 12
     project = tmp_path / "Projects" / task_id
