@@ -1,6 +1,7 @@
 """Preview source selection and local URL boundary checks."""
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -96,6 +97,18 @@ class ProjectPreviewTests(unittest.TestCase):
 
             with patch.object(Path, "is_file", new=is_file):
                 self.assertEqual(preview.source(folder), fallback.as_uri())
+
+    def test_deeply_nested_declaration_falls_back_to_static_html(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary).resolve()
+            fallback = folder / "index.html"
+            fallback.write_text("hello", encoding="utf-8")
+            (folder / ".local-ai").mkdir()
+            depth = sys.getrecursionlimit() + 100
+            (folder / ".local-ai/preview.json").write_text(
+                "[" * depth + "0" + "]" * depth, encoding="utf-8"
+            )
+            self.assertEqual(preview.source(folder), fallback.as_uri())
 
     def test_declaration_and_static_html_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:
