@@ -222,6 +222,36 @@ class FileCatalogTests(unittest.TestCase):
                 state, {"status": "working"}
             ))  # Daily rescans continue in the background.
 
+    def test_search_continues_past_stale_candidates(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            target = root / "needle.txt"
+            target.write_text("", encoding="utf-8")
+            # Simulate cataloged files removed since the last scan. Repeated
+            # name tokens rank these stale hits ahead of the live match.
+            with file_catalog.database(state) as conn:
+                for number in range(70):
+                    parent = root / str(number)
+                    name = "needle needle needle needle.txt"
+                    conn.execute(
+                        "INSERT INTO entries(path,name,parent,kind,scan_id) VALUES(?,?,?,?,?)",
+                        (str(parent / name), name, str(parent), "file", "prior"),
+                    )
+                conn.execute(
+                    "INSERT INTO entries(path,name,parent,kind,scan_id) VALUES(?,?,?,?,?)",
+                    (str(target), target.name, str(root), "file", "prior"),
+                )
+
+            results = file_catalog.search(state, "needle", limit=1)
+
+            self.assertEqual([row["path"] for row in results], [str(target)])
+            with file_catalog.database(state) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0], 1
+                )
+
     def test_natural_phrase_returns_closest_filename(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"
