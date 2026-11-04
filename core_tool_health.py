@@ -14,9 +14,7 @@ HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CHECK_INTERVAL = 300
 AGENT_SDK_PROBE = "from openai.types.shared_params.response_format_json_object import ResponseFormatJSONObject"
 TOOLBOX_SDK_PROBE = AGENT_SDK_PROBE
-_last_check = 0.0
-_cached_root: Path | None = None
-_cached_missing: list[str] = []
+_health_cache: tuple[Path | None, tuple[str, ...], float] = (None, (), 0.0)
 _repair_thread: threading.Thread | None = None
 _last_repair: float | None = None
 _repair_lock = threading.Lock()
@@ -82,10 +80,13 @@ def _agent_launcher_works(root: Path) -> bool:
 
 def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     """Probe actual executables, cached briefly to keep the desktop responsive."""
-    global _cached_root, _cached_missing, _last_check
+    global _health_cache
     root = Path(root).resolve()
-    if not fresh and root == _cached_root and time.monotonic() - _last_check < CHECK_INTERVAL:
-        return list(_cached_missing)
+    # Keep eligibility and results from the same publication, even if another
+    # installation's probe replaces the cache while this lookup is in progress.
+    cached_root, cached_missing, last_check = _health_cache
+    if not fresh and root == cached_root and time.monotonic() - last_check < CHECK_INTERVAL:
+        return list(cached_missing)
     box = root / "Toolbox"
     unavailable = []
     node = box / "node-v26.13.0-win-x64/node.exe"
@@ -108,7 +109,7 @@ def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     toolbox_python = box / "python/Scripts/python.exe"
     if not _runnable(toolbox_python, "-c", TOOLBOX_SDK_PROBE):
         unavailable.append("Toolbox model SDK")
-    _cached_root, _cached_missing, _last_check = root, unavailable, time.monotonic()
+    _health_cache = (root, tuple(unavailable), time.monotonic())
     return list(unavailable)
 
 
