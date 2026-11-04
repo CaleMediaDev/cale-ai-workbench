@@ -139,6 +139,22 @@ class ModelIdentityTests(unittest.TestCase):
                         configured_permissive_alias(root), "qwen3-coder-permissive"
                     )
 
+    def test_quoted_default_key_preserves_legacy_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            for quote in ("'", '"'):
+                with self.subTest(quote=quote):
+                    (root / "data/config.yaml").write_text(
+                        "model:\n  options:\n    default: cale-local\n"
+                        f"  {quote}default{quote}: qwen3-coder-local\n",
+                        encoding="utf-8",
+                    )
+                    self.assertEqual(configured_main_alias(root), "qwen3-coder-local")
+                    self.assertEqual(
+                        configured_permissive_alias(root), "qwen3-coder-permissive"
+                    )
+
     def test_invalid_utf8_config_falls_back(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
