@@ -4,6 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+import pytest
+
 import cale_voice
 
 
@@ -64,3 +66,25 @@ def test_music_releases_only_this_installations_voice_worker(tmp_path):
     own.terminate.assert_called_once()
     own.wait.assert_called_once_with(timeout=5)
     other.terminate.assert_not_called()
+
+
+@pytest.mark.parametrize("lines", [
+    ["null"],
+    ["[]"],
+    ['{"ready": true}', "null"],
+    ['{"ready": true}', "[]"],
+])
+def test_non_object_worker_messages_trigger_cleanup(tmp_path, lines):
+    with (patch.object(cale_voice, "ROOT", tmp_path),
+          patch.object(cale_voice, "ready", return_value=True),
+          patch.object(cale_voice, "_worker", None),
+          patch.object(cale_voice, "_idle_timer", None),
+          patch.object(cale_voice, "_generation", 0),
+          patch.object(cale_voice.subprocess, "Popen"),
+          patch.object(cale_voice, "_line_with_timeout", side_effect=lines),
+          patch.object(cale_voice, "_stop_worker") as stop,
+          patch.object(cale_voice.threading, "Timer") as timer):
+        with pytest.raises(RuntimeError, match="could not finish this update"):
+            cale_voice.speak("Hello", tmp_path / "speech.wav", play=False)
+        stop.assert_called_once_with()
+        timer.assert_not_called()
