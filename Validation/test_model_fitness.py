@@ -274,6 +274,26 @@ def test_game_grader_invalid_json_is_a_failed_grade_and_allows_retry():
     assert run.call_count == 2
 
 
+def test_game_grader_nested_json_is_a_failed_grade_and_allows_retry():
+    nested = type("Result", (), {"stdout": "[" * 10000 + "0" + "]" * 10000})()
+    valid = type("Result", (), {"stdout": '{"movement":true}'})()
+    with (
+        patch("shutil.which", return_value="node"),
+        patch.object(
+            model_fitness.subprocess, "run", side_effect=[nested, valid]
+        ) as run,
+    ):
+        # Generated code can replace the serializer and exceed decoder depth.
+        assert model_fitness.grade_game_code(
+            "JSON.stringify = () => '['.repeat(10000) + '0' + ']'.repeat(10000);",
+            Path("missing"),
+        ) == {"valid_code": False}
+        assert model_fitness.grade_game_code("", Path("missing")) == {
+            "movement": True
+        }
+    assert run.call_count == 2
+
+
 def test_game_grader_process_timeout_is_a_failed_grade_and_allows_retry():
     result = type("Result", (), {"stdout": '{"movement":true}'})()
     with (
