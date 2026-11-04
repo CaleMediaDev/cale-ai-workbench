@@ -217,7 +217,7 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
             if preferred and not _recent_local_completion(
                     root, [str(model["name"]) for model in candidates]):
                 result["local_ai"] = _probe_local_ai(str(preferred["name"]))
-        except (OSError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError, OverflowError):
             pass
     if (not force and previous.get("version") == result["version"]
             and previous.get("voice", {}).get("ok")

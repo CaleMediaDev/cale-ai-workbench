@@ -361,6 +361,24 @@ def test_local_ai_probe_rejects_non_object_json_without_crashing(payload):
     }
 
 
+@pytest.mark.parametrize("size", ["1e999", "-1e999"])
+def test_optional_checks_recover_from_overflowing_model_sizes(tmp_path, size):
+    payload = ('{"models":[{"name":"cale-fast:latest","size":' + size + '}]}').encode()
+    with (patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(payload)),
+          patch.object(readiness_checklist, "_heavy_gpu_active", return_value=False),
+          patch.object(readiness_checklist, "_media_probe", return_value={"ok": False}),
+          patch.object(readiness_checklist, "_probe_local_ai") as probe):
+        result = readiness_checklist.run_optional_checks(tmp_path, test_local=True)
+
+    probe.assert_not_called()
+    assert "local_ai" not in result
+    assert result["voice"]["ok"] is False
+    assert result["browser"]["ok"] is False
+    saved = json.loads((tmp_path / "LongTasks/readiness-probes.json").read_text(
+        encoding="utf-8"))
+    assert saved == result
+
+
 def test_background_checks_do_not_probe_a_model_with_real_usage(tmp_path):
     state = tmp_path / "LongTasks"
     state.mkdir()
