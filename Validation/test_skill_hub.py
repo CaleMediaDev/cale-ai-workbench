@@ -100,6 +100,48 @@ class SkillHubTests(unittest.TestCase):
         self.assertEqual(set(skill_hub.SEEN), {identifier})
         self.assertEqual(skill_hub.INSPECTED, {})
 
+    def test_rejects_dot_only_identifier_segments(self):
+        valid_identifier = "skills-sh/example.org/accessibility.v2"
+        invalid_identifiers = [
+            f"skills-sh/{segment}/accessibility"
+            for segment in (".", "..")
+        ] + [
+            f"skills-sh/example/{segment}/accessibility"
+            for segment in (".", "..")
+        ] + [
+            f"skills-sh/example/{segment}"
+            for segment in (".", "..")
+        ]
+        payload = json.dumps([
+            {"identifier": identifier, "name": "accessibility"}
+            for identifier in invalid_identifiers + [valid_identifier]
+        ])
+        with patch.object(skill_hub, "_run", return_value=payload):
+            result = skill_hub.search("accessibility", limit=5)
+        self.assertEqual(result["matches"], [])
+        self.assertEqual(skill_hub.SEEN, {})
+
+        with patch.object(skill_hub, "_run", return_value=json.dumps([
+            {"identifier": valid_identifier, "name": "accessibility"}
+        ])):
+            result = skill_hub.search("accessibility")
+        self.assertEqual(
+            [match["identifier"] for match in result["matches"]],
+            [valid_identifier],
+        )
+
+        with patch.object(skill_hub, "_run") as run:
+            for identifier in invalid_identifiers:
+                with self.subTest(identifier=identifier):
+                    now = skill_hub.time.monotonic()
+                    skill_hub.SEEN[identifier] = now
+                    skill_hub.INSPECTED[identifier] = now
+                    with self.assertRaises(ValueError):
+                        skill_hub.inspect(identifier)
+                    with self.assertRaises(ValueError):
+                        skill_hub.install(identifier)
+            run.assert_not_called()
+
     def test_failed_reinspection_invalidates_previous_inspection(self):
         identifier = "skills-sh/example/workflows/accessibility"
         for outcome, error in (

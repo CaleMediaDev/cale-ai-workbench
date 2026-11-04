@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 SOURCES = frozenset({"skills-sh", "official", "github"})
-IDENTIFIER = re.compile(r"^(?:skills-sh|official|github)/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+){1,5}$")
+IDENTIFIER = re.compile(r"^(?:skills-sh|official|github)/(?!\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/(?!\.{1,2}(?:/|$))[A-Za-z0-9_.-]+){1,5}$")
 SEEN: dict[str, float] = {}
 INSPECTED: dict[str, float] = {}
 MAX_AGE = 30 * 60
