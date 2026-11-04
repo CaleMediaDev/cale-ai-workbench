@@ -246,7 +246,7 @@ class Player:
             raise
 
     def blend(self, path, seconds=FADE_SECONDS):
-        if self.mixing:
+        if self.mixing or self.paused_at is not None:
             return False
         self.prepare(path)
         # Keep the outgoing channel intact if the new channel cannot start.

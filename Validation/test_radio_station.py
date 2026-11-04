@@ -411,6 +411,34 @@ def test_failed_blend_start_releases_prepared_deck_and_allows_retry(tmp_path):
     assert player.outgoing is current and current.busy()
 
 
+def test_blend_while_paused_preserves_staged_audio_until_resume(tmp_path):
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    first, second = tmp_path/"first.wav", tmp_path/"second.wav"
+    player.play(first)
+    player.prepare(second)
+    old, staged = player.active, player.prepared
+    moment[0] = 10
+    player.pause()
+    moment[0] = 50
+
+    assert player.blend(second, 8) is False
+    assert player.active is old and old.paused
+    assert player.prepared is staged and not staged.running
+    assert not player.mixing
+    assert old.clock()[0] == 10 and staged.clock()[0] == 0
+
+    player.resume()
+    assert player.blend(second, 8) is True
+    assert player.active is staged and player.outgoing is old
+    assert staged.clock()[0] == 0
+    moment[0] = 54
+    player.advance_mix()
+    assert old.busy() and staged.busy()
+    assert staged.clock()[0] == 4
+    assert staged.volume == pytest.approx(old.volume)
+
+
 def test_pausing_and_muting_keep_both_decks_and_fade_position_consistent(tmp_path):
     moment = [0]
     player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
