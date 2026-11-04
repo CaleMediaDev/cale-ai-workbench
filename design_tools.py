@@ -239,8 +239,8 @@ addEventListener('blur',clearKeys);document.addEventListener('visibilitychange',
 document.getElementById('restart').addEventListener('click',()=>game.reset());
 document.getElementById('pause').addEventListener('click',()=>{if(!game.playing)return;paused=!paused;clearKeys();setText('pause',paused?'Resume':'Pause');document.getElementById('pause').setAttribute('aria-pressed',String(paused));game.hud();});
 for(const [id,key] of [['left','ArrowLeft'],['right','ArrowRight'],['fire','Space']]){
-  const button=document.getElementById(id);button.addEventListener('pointerdown',e=>{e.preventDefault();touch[key]=true;button.setPointerCapture?.(e.pointerId);});
-  for(const type of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(type,()=>{delete touch[key];});
+  const button=document.getElementById(id);button.addEventListener('pointerdown',e=>{e.preventDefault();(touch[key]??=new Set()).add(e.pointerId);button.setPointerCapture?.(e.pointerId);});
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(type,e=>{touch[key]?.delete(e.pointerId);if(touch[key]?.size===0)delete touch[key];});
 }
 game.reset();render();let previous=performance.now();
 function frame(now){const dt=Math.min(.05,Math.max(0,(now-previous)/1000));previous=now;const keys={};for(const key of allowedKeys)keys[key]=Boolean(held[key]||touch[key]);if(!paused)game.update(dt,keys);render();requestAnimationFrame(frame);}
