@@ -12,6 +12,7 @@ import codecs
 import copy
 import csv
 import hashlib
+import io
 import json
 import os
 import re
@@ -133,7 +134,7 @@ TOOLS = [
                                  'required': ['action'],
                                  'additionalProperties': False}}},
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 project file. Use start_line and max_lines for large files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "max_lines": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 project file. Use start_line and max_lines for large files. Editable files include the current raw-byte sha256; use that exact hash for the next edit_file call.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "max_lines": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "inspect_project_file", "description": "Read a local PDF, DOCX, XLSX, PPTX, image, or text file in this task folder, including browser downloads. Ask a question for relevant excerpts, or paginate with start_char. Extracted text is cached locally by file contents.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "question": {"type": "string"}, "start_char": {"type": "integer"}, "max_chars": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "check_document_report", "description": "Check a report against exact excerpts from a local source document and optional add/subtract money arithmetic. Each fact maps source_text to report_text; calculations use two source_texts and one report_text. On success saves a read-only verifier bound to the source bytes. Example: facts=[{source_text:'Payment due: November 15, 2026',report_text:'Final due date: November 15, 2026'}], calculations=[{operation:'subtract',source_texts:['Base fee: $1,280','Setup credit: $180'],report_text:'Net payable: $1,100'}]. facts and calculations may be JSON arrays or JSON-encoded strings.", "parameters": {"type": "object", "properties": {"source_path": {"type": "string"}, "report_path": {"type": "string"}, "facts": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"source_text": {"type": "string"}, "report_text": {"type": "string"}}, "required": ["source_text", "report_text"], "additionalProperties": False}}, {"type": "string"}]}, "calculations": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"operation": {"type": "string", "enum": ["add", "subtract"]}, "source_texts": {"type": "array", "items": {"type": "string"}}, "report_text": {"type": "string"}}, "required": ["operation", "source_texts", "report_text"], "additionalProperties": False}}, {"type": "string"}]}}, "required": ["source_path", "report_path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "transform_csv", "description": "Clean a project CSV with a real CSV parser. Use transforms such as title for names/cities and digits for phones, exact_lengths to discard invalid values, and unique_by to keep the first matching row. Example: transforms={name:title,phone:digits,city:title}, exact_lengths={phone:10}, unique_by=[phone]. Creates a separate output file; does not change the source.", "parameters": {"type": "object", "properties": {"input_path": {"type": "string"}, "output_path": {"type": "string"}, "transforms": {"type": "object", "additionalProperties": {"type": "string", "enum": ["keep", "trim", "title", "upper", "lower", "digits"]}}, "exact_lengths": {"type": "object", "additionalProperties": {"type": "integer"}}, "unique_by": {"type": "array", "items": {"type": "string"}}}, "required": ["input_path", "output_path"], "additionalProperties": False}}},
@@ -201,7 +202,7 @@ TOOLS = [
                                  'required': ['path', 'cases'],
                                  'additionalProperties': False}}},
     {"type": "function", "function": {"name": "write_file", "description": "Write complete UTF-8 text to a project file. Parent directories are created.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"], "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "edit_file", "description": "Replace one exact block in an existing UTF-8 project file without resending the whole file. Read the old block first. Fails if it is missing or appears more than once. Supply expected_sha256 from a previous edit to reject stale changes.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}, "expected_sha256": {"type": "string"}}, "required": ["path", "old_text", "new_text"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "edit_file", "description": "Replace one exact block in an existing UTF-8 project file without resending the whole file. Read the old block first. Fails if it is missing or appears more than once. Supply expected_sha256 from the latest read_file or edit_file result. After a stale-hash error reread the file and use its new hash, never the old one.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}, "expected_sha256": {"type": "string"}}, "required": ["path", "old_text", "new_text"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_text", "description": "Search text in project files using ripgrep.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "search_web", "description": "Search public webpages for current information. Read a relevant result before using it.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_webpage", "description": "Read a public webpage by URL for source evidence.", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"], "additionalProperties": False}}},
@@ -715,15 +716,28 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             )
         if name == "read_file":
             target = project_path(folder, arguments["path"])
-            encoding = "utf-8-sig" if target.suffix.lower() == ".ps1" else "utf-8"
+            encoding = "utf-8-sig"  # Match edit_file's BOM-free text, while hashing the original bytes.
             start = max(1, int(arguments.get("start_line", 1)))
             count = max(1, min(300, int(arguments.get("max_lines", 150))))
             lines = []
-            budget = MAX_TOOL_OUTPUT
-            with target.open("r", encoding=encoding, errors="replace") as stream:
+            # Bind the displayed excerpt and digest to the same byte snapshot.
+            # Only editable files are buffered (at most 10 MB); larger files
+            # retain bounded streaming reads without advertising an edit hash.
+            raw = None
+            if target.stat().st_size <= 10_000_000:
+                with target.open("rb") as source:
+                    raw = source.read(10_000_001)
+                if len(raw) > 10_000_000:
+                    raw = None
+            receipt = ("File sha256: " + hashlib.sha256(raw).hexdigest() if raw is not None else
+                       "No edit hash: file exceeds the 10 MB edit limit.")
+            budget = MAX_TOOL_OUTPUT - len(receipt) - 2
+            stream = (io.TextIOWrapper(io.BytesIO(raw), encoding=encoding, errors="replace") if raw is not None else
+                      target.open("r", encoding=encoding, errors="replace"))
+            with stream:
                 for _ in range(start - 1):
                     if _bounded_line(stream, 0)[0] is None:
-                        return ""
+                        return receipt
                 for number in range(start, start + count):
                     prefix = f"{number}: "
                     line, truncated = _bounded_line(stream, min(MAX_READ_LINE, max(0, budget - len(prefix) - 20)))
@@ -734,7 +748,7 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     budget -= len(entry) + 1
                     if budget < 50:
                         break
-            return "\n".join(lines)
+            return "\n".join([*lines, receipt])
         if name == "inspect_project_file":
             import project_documents
 

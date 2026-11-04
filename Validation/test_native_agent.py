@@ -5,6 +5,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -2146,7 +2147,8 @@ def test_read_file_streams_large_files_and_bounds_one_extremely_long_line():
         assert "[line truncated]" in result
         assert "20002: last line" in result
         assert len(result) < 5000
-        assert last == "20002: last line"
+        assert last.startswith("20002: last line\nFile sha256: ")
+        assert last.endswith(hashlib.sha256(source.read_bytes()).hexdigest())
 
 
 def test_native_worker_reuses_router_across_model_turns():
@@ -2528,6 +2530,59 @@ def test_edit_file_changes_one_block_and_refreshes_search_without_full_rewrite()
         })
         assert "file changed since that hash" in stale
         assert b"return 2" in source.read_bytes()
+
+
+def test_reread_recovers_stale_edit_hash_from_actual_bytes():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        source = folder / "app.py"
+        source.write_bytes(b"\xef\xbb\xbf# first\r\nvalue = 1\r\n")
+        assert native_agent.execute_tool(folder, "read_file", {"path": "app.py"}).startswith("1: # first\n")
+        first = native_agent.execute_tool(folder, "read_file", {"path": "app.py", "start_line": 2})
+        old_hash = re.search(r"File sha256: ([a-f0-9]{64})", first)[1]
+        source.write_bytes(b"\xef\xbb\xbf# changed elsewhere\r\nvalue = 1\r\n")
+        arguments = {"path": "app.py", "old_text": "value = 1", "new_text": "value = 2", "expected_sha256": old_hash}
+        assert "file changed since that hash" in native_agent.execute_tool(folder, "edit_file", arguments)
+        reread = native_agent.execute_tool(folder, "read_file", {"path": "app.py", "start_line": 2})
+        arguments["expected_sha256"] = re.search(r"File sha256: ([a-f0-9]{64})", reread)[1]
+        assert arguments["expected_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest() != old_hash
+        assert native_agent.execute_tool(folder, "edit_file", arguments).startswith("Edited app.py")
+        assert source.read_bytes() == b"\xef\xbb\xbf# changed elsewhere\r\nvalue = 2\r\n"
+
+
+def test_read_hash_describes_displayed_snapshot_even_if_live_file_changes():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        source = folder / "app.py"
+        original = b"value = 1\n"
+        source.write_bytes(original)
+        bounded = native_agent._bounded_line
+        def mutate(stream, limit):
+            source.write_bytes(b"value = 3\n")
+            return bounded(stream, limit)
+        with patch.object(native_agent, "_bounded_line", side_effect=mutate):
+            read = native_agent.execute_tool(folder, "read_file", {"path": "app.py"})
+        digest = re.search(r"File sha256: ([a-f0-9]{64})", read)[1]
+        assert "value = 1" in read and "value = 3" not in read
+        assert digest == hashlib.sha256(original).hexdigest()
+        rejected = native_agent.execute_tool(folder, "edit_file", {
+            "path": "app.py", "old_text": "value = 1", "new_text": "value = 2", "expected_sha256": digest})
+        assert "file changed since that hash" in rejected
+        assert source.read_bytes() == b"value = 3\n"
+
+
+def test_large_read_is_bounded_without_supplying_an_unusable_edit_hash():
+    with tempfile.TemporaryDirectory() as temporary:
+        item = project(Path(temporary) / "page")
+        folder = Path(item["folder"])
+        source = folder / "large.txt"
+        with source.open("wb") as stream:
+            stream.write(b"x" * 10_000_001)
+        read = native_agent.execute_tool(folder, "read_file", {"path": "large.txt", "max_lines": 1})
+        assert "[line truncated]" in read and len(read) < 5000
+        assert "No edit hash" in read and "File sha256:" not in read
 
 
 def test_edit_file_rejects_ambiguous_block_and_preserves_powershell_bom():
