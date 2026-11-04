@@ -169,7 +169,10 @@ catch (_) { console.log(JSON.stringify({valid_code:false})); }
         # Asynchronous work can outlive the VM deadline or terminate Node
         # outside the synchronous driver catch (e.g. an unhandled rejection).
         return {"valid_code": False}
-    checks = json.loads(result.stdout)
+    try:
+        checks = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"valid_code": False}
     return (
         checks
         if isinstance(checks, dict) and len(checks) <= 20
