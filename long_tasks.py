@@ -49,6 +49,18 @@ DEFAULT_ENGINE = "native"
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
+def take_ai_connection_request(state_folder: Path) -> str | None:
+    """Consume only an installer-selected provider, never a command or URL."""
+    marker = state_folder / "open-supercharge"
+    try:
+        with marker.open(encoding="utf-8-sig") as stream:
+            requested = stream.read(65).strip()
+        marker.unlink()
+    except (OSError, UnicodeError):
+        return None
+    return requested if requested in {"chatgpt", "claude", "grok", "openrouter"} else "setup"
+
+
 def update_dialog_open(children, ignored=()):
     """Ignore read-only panels while protecting visible input dialogs."""
     return any(
@@ -4039,6 +4051,84 @@ def gui():
         style="Muted.TLabel",
     ).pack(anchor="w", pady=(5, 12))
 
+    # The same four choices are visible in the first-run installer. The
+    # official provider apps own their subscription credentials and approvals.
+    quick_connections = ttk.Frame(super_page)
+    quick_connections.pack(fill="x", pady=(0, 14))
+    for column, (label, provider) in enumerate((
+            ("Connect ChatGPT", "chatgpt"), ("Connect Claude", "claude"),
+            ("Connect Grok", "grok"), ("Connect OpenRouter", "openrouter"))):
+        quick_connections.columnconfigure(column, weight=1)
+        ttk.Button(quick_connections, text=label,
+                   command=lambda selected=provider: open_ai_connection(selected),
+                   style="Accent.TButton").grid(row=0, column=column, sticky="ew", padx=(0, 8))
+
+    def connect_subscription(provider):
+        """Keep sign-in and account tokens inside the unmodified official CLI."""
+        names = {"claude": ("Claude", "Claude Code"), "grok": ("Grok", "Grok Build")}
+        if provider not in names:
+            return
+        name, app_name = names[provider]
+        panel = tk.Toplevel(window)
+        panel.title("Connect " + name)
+        panel.transient(window)
+        body = ttk.Frame(panel, padding=24)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Use your " + name + " subscription", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        ttk.Label(body, text=("Cale will install the official " + app_name + " app if needed and open its own sign-in. "
+            "Sign in with your account and an eligible plan. Cale does not copy your account tokens. "
+            "Task use counts against that plan's limits; this does not enable separately billed API usage."),
+            wraplength=560, style="Muted.TLabel").pack(anchor="w", pady=(10, 16))
+        events = queue.Queue()
+        status = tk.StringVar(value="Connecting does not start a task. You can keep installing Cale while you sign in.")
+        ttk.Label(body, textvariable=status, wraplength=560).pack(anchor="w", pady=(0, 14))
+
+        def begin():
+            button.configure(state="disabled")
+            status.set("Preparing " + app_name + "…")
+            def work():
+                try:
+                    result = cloud_providers.connect_subscription_agent(provider,
+                        on_progress=lambda message: events.put(("progress", message)))
+                    if result.get("connected"):
+                        cloud_providers.enable_subscription_agent(provider, True)
+                    events.put(("done", result))
+                except Exception as error:
+                    events.put(("error", str(error)))
+            threading.Thread(target=work, daemon=True).start()
+
+        button = ttk.Button(body, text="Connect and use my " + name + " plan", command=begin, style="Accent.TButton")
+        button.pack(anchor="w", ipady=5)
+        ttk.Button(body, text="Close", command=panel.destroy).pack(anchor="w", pady=(10, 0))
+
+        def poll_connection():
+            if not panel.winfo_exists():
+                return
+            try:
+                while True:
+                    kind, value = events.get_nowait()
+                    if kind == "progress":
+                        status.set(str(value))
+                    elif kind == "done":
+                        status.set(value.get("detail") or (name + " sign-in finished."))
+                        button.configure(state="normal", text="Connect again")
+                    else:
+                        status.set("Connection not finished: " + str(value))
+                        button.configure(state="normal")
+            except queue.Empty:
+                pass
+            panel.after(250, poll_connection)
+        panel.after(250, poll_connection)
+
+    def open_ai_connection(provider):
+        show_super()
+        if provider == "chatgpt":
+            connect_chatgpt()
+        elif provider == "openrouter":
+            connect()
+        elif provider in {"claude", "grok"}:
+            connect_subscription(provider)
+
     # Put the two easiest account connections first. Less common connections
     # stay collapsed so a new user does not start with a wall of API settings.
     chat_section = ttk.Frame(super_page, style="Card.TFrame", padding=18)
@@ -7121,13 +7211,11 @@ def gui():
         refresh()
         # Setup may open account connections while large model downloads keep
         # running. A marker also reaches an already-open single-instance GUI.
-        connection_request = STATE / "open-supercharge"
-        if connection_request.is_file():
-            try:
-                connection_request.unlink()
-                show_super()
-            except OSError:
-                pass  # Retry next tick when the marker is briefly locked.
+        requested_connection = take_ai_connection_request(STATE)
+        if requested_connection:
+            show_super()
+            if requested_connection != "setup":
+                open_ai_connection(requested_connection)
         if (time.monotonic() - getattr(window, "resume_update_checked_at", 0) > 15
                 and not getattr(window, "resume_update_checking", False)):
             window.resume_update_checked_at = time.monotonic()

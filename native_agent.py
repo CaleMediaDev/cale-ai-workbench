@@ -215,6 +215,17 @@ TOOLS = [
     {"type": "function", "function": {"name": "run_command", "description": "Run a noninteractive project command with a 90-second limit. Default shell is cmd.exe on Windows, /bin/sh elsewhere. For PowerShell cmdlets, variables, pipelines, or scripts, set shell to powershell (Windows PowerShell 5.1 on Windows). Do not mix cmd syntax such as cd /d or && into PowerShell; use Set-Location and semicolons. Foreground servers time out; use browser_open_project for local HTML previews. Returns exit code and output.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}, "shell": {"type": "string", "enum": ["default", "powershell"]}}, "required": ["command"], "additionalProperties": False}}},
 ]
 
+# Subscription providers run their official agent with its own permissions.
+# A result from that agent still needs Cale's original project checks.
+TOOLS.append({"type": "function", "function": {
+    "name": "delegate_subscription_task",
+    "description": "Ask an explicitly enabled Claude Code or Grok Build subscription agent to work in this registered project. It uses the person's plan, keeps official tool approvals, and returns actual output; independently verify all edits afterward.",
+    "parameters": {"type": "object", "properties": {
+        "provider": {"type": "string", "enum": ["claude", "grok"]},
+        "prompt": {"type": "string", "minLength": 1, "maxLength": 16000},
+        "timeout": {"type": "integer", "minimum": 10, "maximum": 300}},
+        "required": ["provider", "prompt"], "additionalProperties": False}}})
+
 
 def bind_step_checker_schemas(tools: list) -> None:
     """Expose the same nested contracts enforced when SQLite saves a plan.
@@ -634,6 +645,29 @@ def readable_powershell_error(stderr: str) -> str:
 
 def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit=None) -> str:
     try:
+        if name == "delegate_subscription_task":
+            import cloud_providers
+            import long_tasks
+
+            project = next((item for item in long_tasks.projects() if item.get("folder")
+                and Path(item["folder"]).resolve() == folder.resolve()), None)
+            if project is None:
+                raise ValueError("Subscription work needs a registered project")
+            prompt = arguments["prompt"]
+            if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 16000:
+                raise ValueError("Give the agent one bounded project task")
+            import usage_history
+
+            task_token = usage_history.CURRENT_TASK.set(project["id"])
+            try:
+                result = cloud_providers.run_subscription_task(arguments["provider"], folder,
+                    "Original project request:\n" + str(project.get("brief", ""))[:16000] +
+                    "\n\nCurrent requested step:\n" + prompt +
+                    "\n\nPreserve existing data and checks. Report actual edits and checks; do not claim whole-task completion.",
+                    timeout=arguments.get("timeout", 300))
+            finally:
+                usage_history.CURRENT_TASK.reset(task_token)
+            return json.dumps(result, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "task_steps":
             import task_context
 

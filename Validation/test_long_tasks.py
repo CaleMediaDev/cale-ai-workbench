@@ -3199,3 +3199,76 @@ def test_donation_activity_reaches_real_tk_chat_history_voice_and_link(tmp_path)
         assert control.popup is None  # Main chat updates while donation dialog is closed.
     finally:
         window.destroy()
+
+
+def test_first_install_requests_select_only_four_known_connection_flows(tmp_path):
+    for provider in ("chatgpt", "claude", "grok", "openrouter"):
+        marker = tmp_path / "open-supercharge"
+        marker.write_text(provider, encoding="utf-8-sig")
+        assert task_module.take_ai_connection_request(tmp_path) == provider
+        assert not marker.exists()
+    for unknown in ("setup", "https://evil.example/sign-in", "powershell -EncodedCommand bad", "x" * 100):
+        (tmp_path / "open-supercharge").write_text(unknown, encoding="utf-8")
+        assert task_module.take_ai_connection_request(tmp_path) == "setup"
+    assert task_module.take_ai_connection_request(tmp_path) is None
+
+
+def test_four_connection_dispatch_uses_existing_account_flows_and_official_agents():
+    import ast
+    tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+    node = next(item for item in ast.walk(tree) if isinstance(item, ast.FunctionDef) and item.name == "open_ai_connection")
+    calls = []
+    namespace = {"show_super": lambda: calls.append("show"), "connect_chatgpt": lambda: calls.append("chatgpt"),
+        "connect": lambda: calls.append("openrouter"), "connect_subscription": lambda code: calls.append(code)}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "real-connection-dispatch", "exec"), namespace)
+    for provider in ("chatgpt", "claude", "grok", "openrouter"):
+        namespace["open_ai_connection"](provider)
+        assert calls[-2:] == ["show", provider]
+    namespace["open_ai_connection"]("https://evil.example")
+    assert calls[-1] == "show"
+
+
+def test_subscription_connection_real_tk_requires_user_action_and_success_before_enabling():
+    import ast
+    import queue
+    import tkinter as tk
+    from tkinter import ttk
+    from types import SimpleNamespace
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+    node = next(item for item in ast.walk(tree) if isinstance(item, ast.FunctionDef) and item.name == "connect_subscription")
+    calls = []
+    class InlineThread:
+        def __init__(self, target, **kwargs): self.target = target
+        def start(self): self.target()
+    try:
+        for provider, connected in (("claude", True), ("grok", False)):
+            def connect(code, on_progress):
+                calls.append(("login", code))
+                on_progress("Official app is signing in")
+                return {"connected": connected, "detail": "Signed in" if connected else "Sign-in incomplete"}
+            namespace = {"window": window, "tk": tk, "ttk": ttk, "queue": queue,
+                "threading": SimpleNamespace(Thread=InlineThread),
+                "cloud_providers": SimpleNamespace(connect_subscription_agent=connect,
+                    enable_subscription_agent=lambda code, value: calls.append(("enable", code, value)))}
+            exec(compile(ast.Module(body=[node], type_ignores=[]), "real-subscription-dialog", "exec"), namespace)
+            before = list(calls)
+            namespace["connect_subscription"](provider)
+            assert calls == before  # Merely showing setup never spends/enables a plan.
+            panel = next(child for child in window.winfo_children() if isinstance(child, tk.Toplevel))
+            body = panel.winfo_children()[0]
+            button = next(child for child in body.winfo_children()
+                          if isinstance(child, ttk.Button) and child.cget("text").startswith("Connect and use my"))
+            button.invoke()
+            window.after(350, window.quit)
+            window.mainloop()
+            assert ("login", provider) in calls
+            assert (("enable", provider, True) in calls) is connected
+            panel.destroy()
+    finally:
+        window.destroy()

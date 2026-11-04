@@ -1,4 +1,4 @@
-# Visual first-run installer. The backend owns downloads and writes progress;
+﻿# Visual first-run installer. The backend owns downloads and writes progress;
 # technical output stays in log files unless the person opens Details.
 param([switch]$Preview,[string]$PreviewImage='')
 if($PreviewImage){$Preview=$true}
@@ -11,7 +11,7 @@ $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Cale AI Workbench - Install'
 $iconPath=Join-Path $PSScriptRoot 'assets\cale-icon.ico'
 if (Test-Path -LiteralPath $iconPath) { $form.Icon=New-Object Drawing.Icon($iconPath) }
-$form.ClientSize = New-Object Drawing.Size(760,480)
+$form.ClientSize = New-Object Drawing.Size(760,560)
 $form.FormBorderStyle='FixedSingle'; $form.MaximizeBox=$false
 $form.AutoScaleMode='Dpi'
 $form.StartPosition = 'CenterScreen'
@@ -49,11 +49,11 @@ $path.BackColor=$card; $path.ForeColor=$ink; $path.BorderStyle='FixedSingle'
 $path.Visible=$false
 $footer=New-Object Windows.Forms.Label
 $footer.Text='Cale Media  /  calemedia.com'; $footer.ForeColor=$muted
-$footer.SetBounds(26,438,708,22); $form.Controls.Add($footer)
+$footer.SetBounds(26,516,708,22); $form.Controls.Add($footer)
 $notice = New-Object Windows.Forms.Label
 $notice.Text = 'Click Install to get started. Keep your internet connected during setup. Downloads can take a while.'
 $notice.ForeColor=$muted
-$notice.SetBounds(26,315,708,48); $form.Controls.Add($notice)
+$notice.SetBounds(26,270,708,48); $form.Controls.Add($notice)
 $stage=New-Object Windows.Forms.Label
 $stage.Text='Ready to install'; $stage.Font=New-Object Drawing.Font('Segoe UI',14,[Drawing.FontStyle]::Bold)
 $stage.SetBounds(26,167,650,50); $form.Controls.Add($stage)
@@ -64,36 +64,71 @@ $bar=New-Object Windows.Forms.ProgressBar
 $bar.Minimum=0; $bar.Maximum=100; $bar.Style='Continuous'
 $bar.SetBounds(26,232,708,24); $form.Controls.Add($bar)
 $install = New-Object Windows.Forms.Button
-$install.Text='Install'; $install.SetBounds(26,374,190,44)
+$install.Text='Install'; $install.SetBounds(26,450,190,44)
 $install.FlatStyle='Flat'; $install.FlatAppearance.BorderSize=0; $install.BackColor=$accent; $install.ForeColor=[Drawing.Color]::White
 $form.Controls.Add($install)
 $open = New-Object Windows.Forms.Button
-$open.Text='Open Cale AI'; $open.Visible=$false; $open.Enabled=$false; $open.SetBounds(26,374,190,44)
+$open.Text='Open Cale AI'; $open.Visible=$false; $open.Enabled=$false; $open.SetBounds(26,450,190,44)
 $open.FlatStyle='Flat'; $open.FlatAppearance.BorderSize=0; $open.BackColor=$card; $open.ForeColor=$ink
 $form.Controls.Add($open)
-$accounts=New-Object Windows.Forms.Button
-$accounts.Text='Connect accounts'; $accounts.Enabled=$false
-$accounts.SetBounds(234,374,190,44); $accounts.FlatStyle='Flat'
-$accounts.FlatAppearance.BorderSize=0; $accounts.BackColor=$card; $accounts.ForeColor=$ink
-$form.Controls.Add($accounts)
-$accounts.Add_Click({
-    if($Preview){return}
-    $stateFolder=Join-Path $path.Text 'LongTasks'
-    [IO.Directory]::CreateDirectory($stateFolder) | Out-Null
-    [IO.File]::WriteAllText((Join-Path $stateFolder 'open-supercharge'),'setup')
-    Start-Process -FilePath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $path.Text 'long_tasks.py')+'"') -WindowStyle Normal
-})
+# Connections are visible from the first screen. A click before the Python UI
+# is ready is queued; downloads keep running and the timer opens the chosen flow.
+$script:pendingConnection=''
+$script:connectionReady=$false
+$connectionTitle=New-Object Windows.Forms.Label
+$connectionTitle.Text='Connect extra AI while you wait (optional)'
+$connectionTitle.Font=New-Object Drawing.Font('Segoe UI',11,[Drawing.FontStyle]::Bold)
+$connectionTitle.SetBounds(26,319,708,26); $form.Controls.Add($connectionTitle)
+$connectionHint=New-Object Windows.Forms.Label
+$connectionHint.Text='Use your own accounts. Cale also works with local AI.'
+$connectionHint.ForeColor=$muted
+$connectionHint.SetBounds(26,402,708,40); $form.Controls.Add($connectionHint)
+function Open-CaleAiConnection([string]$Provider) {
+    if($Provider -notin @('chatgpt','claude','grok','openrouter')) { return }
+    if($Preview) { $connectionHint.Text='Your browser sign-in will open here.'; return }
+    $script:pendingConnection=$Provider
+    if(-not $script:connectionReady) {
+        $connectionHint.Text='Selected '+$Provider+'. Start Install; we will open its connection as soon as the account screen is ready.'
+        return
+    }
+    try {
+        $stateFolder=Join-Path $path.Text 'LongTasks'
+        [IO.Directory]::CreateDirectory($stateFolder) | Out-Null
+        $requestPath=Join-Path $stateFolder 'open-supercharge'
+        $requestTemp=$requestPath+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
+        [IO.File]::WriteAllText($requestTemp,$Provider)
+        Move-Item -LiteralPath $requestTemp -Destination $requestPath -Force
+        Start-Process -FilePath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $path.Text 'long_tasks.py')+'"') -WindowStyle Normal
+        $script:pendingConnection=''
+        $connectionHint.Text='Finish the connection in Cale. Installation keeps running here.'
+    } catch {
+        $connectionHint.Text='The account screen is not ready yet. We will try again while setup continues.'
+    }
+}
+$connectionButtons=@()
+$connectionProviders=@('chatgpt','claude','grok','openrouter')
+$connectionLabels=@('Connect ChatGPT','Connect Claude','Connect Grok','Connect OpenRouter')
+for($connectionIndex=0;$connectionIndex -lt $connectionProviders.Count;$connectionIndex++) {
+    $connectionButton=New-Object Windows.Forms.Button
+    $connectionButton.Text=$connectionLabels[$connectionIndex]
+    $connectionButton.Tag=$connectionProviders[$connectionIndex]
+    $connectionButton.SetBounds((26+182*$connectionIndex),352,162,44)
+    $connectionButton.FlatStyle='Flat'; $connectionButton.FlatAppearance.BorderSize=0
+    $connectionButton.BackColor=$card; $connectionButton.ForeColor=$ink
+    $connectionButton.Add_Click({ Open-CaleAiConnection ([string]$this.Tag) })
+    $form.Controls.Add($connectionButton); $connectionButtons+= $connectionButton
+}
 $log = New-Object Windows.Forms.TextBox
 $log.Multiline=$true; $log.ReadOnly=$true; $log.ScrollBars='Vertical'
 $log.BackColor=$card; $log.ForeColor=$ink; $log.BorderStyle='None'; $log.Font=New-Object Drawing.Font('Consolas',9)
-$log.SetBounds(26,492,708,208); $log.Visible=$false; $form.Controls.Add($log)
+$log.SetBounds(26,572,708,208); $log.Visible=$false; $form.Controls.Add($log)
 $details=New-Object Windows.Forms.Button
-$details.Text='Details'; $details.SetBounds(614,374,120,44)
+$details.Text='Details'; $details.SetBounds(614,450,120,44)
 $details.FlatStyle='Flat'; $details.ForeColor=$muted; $form.Controls.Add($details)
 $details.Add_Click({
     $log.Visible=-not $log.Visible
-    if ($log.Visible) { $form.ClientSize=New-Object Drawing.Size(760,724); $details.Text='Hide details'; Update-SetupDetails }
-    else { $form.ClientSize=New-Object Drawing.Size(760,480); $details.Text='Details' }
+    if ($log.Visible) { $form.ClientSize=New-Object Drawing.Size(760,804); $details.Text='Hide details'; Update-SetupDetails }
+    else { $form.ClientSize=New-Object Drawing.Size(760,560); $details.Text='Details' }
 })
 $script:taskProcess=$null
 $script:taskLog=Join-Path $env:TEMP ('cale-ai-install-'+[guid]::NewGuid().ToString('N')+'.log')
@@ -118,8 +153,9 @@ $timer.Add_Tick({
                 if($state.status -eq 'working'){$stage.Text=[string]$state.current}
                 else {$stage.Text='Finishing setup and checking everything'}
                 if([int]$state.percent -ge 38 -and (Test-Path -LiteralPath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe'))){
-                    $accounts.Enabled=$true
-                    $notice.Text='While downloads continue, you can connect ChatGPT or other accounts. This is optional; Cale also works locally.'
+                    $script:connectionReady=$true
+                    if($script:pendingConnection){Open-CaleAiConnection $script:pendingConnection}
+                    $notice.Text='While downloads continue, you can connect ChatGPT, Claude, Grok or OpenRouter. This is optional; Cale also works locally.'
                 }
             }
         } catch { } # The next timer tick retries a temporarily busy status file.
@@ -142,8 +178,9 @@ $install.Add_Click({
     $install.Text='Installing...'; $install.Enabled=$false
     if($Preview){
         $stage.Text='Downloading your AI models';$percent.Text='42%';$bar.Value=42
-        $accounts.Enabled=$true
-        $notice.Text='While downloads continue, you can connect ChatGPT or other accounts. This is optional; Cale also works locally.'
+        $script:connectionReady=$true
+                    if($script:pendingConnection){Open-CaleAiConnection $script:pendingConnection}
+        $notice.Text='While downloads continue, you can connect ChatGPT, Claude, Grok or OpenRouter. This is optional; Cale also works locally.'
         return
     }
     $install.Enabled=$false; $open.Enabled=$false

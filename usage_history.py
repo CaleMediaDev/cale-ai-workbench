@@ -62,7 +62,9 @@ def _count(value) -> int:
 
 def _usage_label(source: str, model: str) -> str:
     """Keep equal model names from different providers distinct in the graph."""
-    provider = "Local" if source == "ollama" else "ChatGPT" if source == "chatgpt" else source.title()
+    names = {"ollama": "Local", "chatgpt": "ChatGPT",
+             "claude_subscription": "Claude plan", "grok_subscription": "Grok plan"}
+    provider = names.get(source, source.title())
     return f"{provider} · {model.strip() or 'unnamed model'}"
 
 

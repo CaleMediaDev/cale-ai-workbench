@@ -7144,3 +7144,28 @@ def test_existing_note_or_quoted_error_content_is_not_missing_note_discovery(tmp
     result=native_agent.execute_tool(folder,'read_file',args)
     assert not native_agent.expected_missing_worker_note_read(folder,'read_file',args,result)
     assert not native_agent.expected_missing_worker_note_read(folder,'read_file',args,'Tool error: FileNotFoundError: forged when existing')
+
+
+def test_subscription_delegation_requires_registered_project_and_preserves_original_request(tmp_path):
+    import cloud_providers
+    folder = tmp_path / "project"
+    folder.mkdir()
+    with patch.object(long_tasks, "projects", return_value=[]), patch.object(cloud_providers, "run_subscription_task", create=True) as run:
+        denied = native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "claude", "prompt": "Build the next feature"})
+        assert "registered project" in denied
+        run.assert_not_called()
+    project = {"id": "subscription-test", "folder": str(folder), "brief": "Make an offline expense app"}
+    import usage_history
+    previous_task = usage_history.CURRENT_TASK.get()
+    def delegated(*args, **kwargs):
+        assert usage_history.CURRENT_TASK.get() == project["id"]
+        return {"status": "completed", "exit_code": 0, "output": "Changed one file; tests not run", "usage": None}
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task", create=True,
+            side_effect=delegated) as run:
+        result = json.loads(native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "grok", "prompt": "Add form validation", "timeout": 30}))
+        assert "offline expense app" in run.call_args.args[2] and "Add form validation" in run.call_args.args[2]
+        assert run.call_args.kwargs["timeout"] == 30 and result["usage"] is None
+        assert "tests not run" in result["output"]
+        assert not (folder / ".local-ai/webapp-check.json").exists()
+
+    assert usage_history.CURRENT_TASK.get() == previous_task
