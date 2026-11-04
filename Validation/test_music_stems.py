@@ -1,11 +1,35 @@
 """Protect existing audio and report actual separated files."""
 
+import errno
+import os
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 import music_stems
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows publication without hard links")
+def test_separation_exports_when_hard_links_are_unavailable(tmp_path):
+    source, output = tmp_path / "song.mp3", tmp_path / "stems"
+    source.write_bytes(b"original music")
+
+    def render(args, **kwargs):
+        staging = Path(args[-1])
+        (staging / "vocals.wav").write_bytes(b"vocals")
+        (staging / "instrumental.wav").write_bytes(b"instrumental")
+        return type("Result", (), {"returncode": 0})()
+
+    with patch.object(music_stems.music_backend, "_setup_lock", side_effect=nullcontext), \
+         patch.object(music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext), \
+         patch.object(music_stems, "install", return_value=Path("python.exe")), \
+         patch.object(music_stems.subprocess, "run", side_effect=render), \
+         patch.object(music_stems.os, "link", side_effect=OSError(errno.EOPNOTSUPP, "No hard links")):
+        result = music_stems.separate_stems(str(source), str(output))
+    assert {Path(path).read_bytes() for path in result["files"]} == {b"vocals", b"instrumental"}
+    assert source.read_bytes() == b"original music"
 
 
 def test_failed_runtime_rebuild_is_retried(tmp_path):
@@ -191,7 +215,8 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
     source = tmp_path / "song.mp3"
     source.write_bytes(b"music")
     output = tmp_path / "stems"
-    original_link = music_stems.os.link
+    publication = "rename" if os.name == "nt" else "link"
+    original_publish = getattr(music_stems.os, publication)
     move_attempts = 0
 
     def render(args, **_kwargs):
@@ -205,7 +230,7 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
         move_attempts += 1
         if move_attempts == 2:
             raise OSError("simulated publication failure")
-        return original_link(path, destination)
+        return original_publish(path, destination)
 
     with patch.object(
         music_stems.music_backend, "_setup_lock", side_effect=nullcontext
@@ -215,7 +240,7 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
         music_stems, "install", return_value=Path("python.exe")
     ), patch.object(
         music_stems.subprocess, "run", side_effect=render
-    ), patch.object(music_stems.os, "link", side_effect=fail_second_move):
+    ), patch.object(music_stems.os, publication, side_effect=fail_second_move):
         with pytest.raises(OSError, match="simulated publication failure"):
             music_stems.separate_stems(str(source), str(output))
         assert list(output.iterdir()) == []
