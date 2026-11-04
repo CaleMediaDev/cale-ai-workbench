@@ -6,6 +6,7 @@ is transcribed, with provenance and any omitted page numbers made explicit.
 
 from __future__ import annotations
 
+import math
 import tempfile
 from pathlib import Path
 
@@ -78,7 +79,7 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                     image_path = Path(folder) / "page.png"
                     try:
                         width, height = page.get_size()
-                        if width <= 0 or height <= 0:
+                        if not (math.isfinite(width) and math.isfinite(height)) or width <= 0 or height <= 0:
                             # Invalid page dimensions cannot produce a usable image.
                             selected.discard(index)
                             continue
