@@ -15,7 +15,8 @@ import music_video
 import toolbox_mcp
 
 
-def test_music_video_timeout_removes_partial_output_and_allows_retry(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", [subprocess.TimeoutExpired, KeyboardInterrupt])
+def test_music_video_interrupted_render_removes_partial_output_and_allows_retry(tmp_path, monkeypatch, failure):
     song = tmp_path / "song.wav"
     video = tmp_path / "song-video.mp4"
     with wave.open(str(song), "wb") as audio:
@@ -33,12 +34,14 @@ def test_music_video_timeout_removes_partial_output_and_allows_retry(tmp_path, m
         calls.append(command)
         if len(calls) == 1:
             video.write_bytes(b"incomplete MP4")
-            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            if failure is subprocess.TimeoutExpired:
+                raise failure(command, kwargs["timeout"])
+            raise failure()
         video.write_bytes(b"completed MP4")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(music_video.subprocess, "run", fake_run)
-    with pytest.raises(subprocess.TimeoutExpired):
+    with pytest.raises(failure):
         music_video.make_music_video(str(song), str(video))
     assert not video.exists()
     assert song.read_bytes() == original
