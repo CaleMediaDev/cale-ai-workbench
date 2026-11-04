@@ -240,7 +240,13 @@ def task_size(messages):
     review_worker = bool(REVIEW_WORKER.search(beginning))
     if review_worker and tool_calls == 0:
         return "deep"
-    if review_worker and SIMPLE_MUSIC.search(intent):
+    if (
+        review_worker
+        and SIMPLE_MUSIC.search(intent)
+        and not PROJECT_BUILD.search(intent)
+        and not COMPLEX_PROJECT.search(intent)
+        and not MUSIC_VIDEO.search(intent)
+    ):
         return "balanced"
     # A detailed song brief describes the output, not a software project.
     # Keep the local worker on the middle model for rendering and verification;

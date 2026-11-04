@@ -286,6 +286,23 @@ class AutoRouteTests(unittest.TestCase):
         messages.append({"role": "assistant", "tool_calls": [{"function": {"name": "read_file"}}]})
         self.assertEqual(task_size(messages), "balanced")
 
+    def test_music_review_shortcut_does_not_downgrade_complex_app_work(self):
+        for brief in (
+            "Create a production-ready music app.",
+            "Create a music app with distributed rendering.",
+        ):
+            with self.subTest(brief=brief):
+                prompt = ("# Kanban task t_123: Music app — review\n\n## Body\n" +
+                          project_prompt({"title": "Music app", "folder": "C:/Tasks/app",
+                                          "brief": brief}))
+                messages = [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "tool_calls": [
+                        {"function": {"name": "read_file"}},
+                    ]},
+                ]
+                self.assertEqual(task_size(messages), "deep")
+
     def test_saved_project_brief_uses_same_step_routing_after_compaction(self):
         prompt = project_prompt({
             "title": "Recipe app", "folder": "C:/Tasks/recipe",
