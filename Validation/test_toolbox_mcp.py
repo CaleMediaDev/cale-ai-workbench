@@ -164,6 +164,44 @@ def test_preview_backend_errors_preserve_successful_browser_result(tmp_path):
         asyncio.run(check(failing_stage))
 
 
+def test_cancelled_media_call_kills_and_reaps_worker(tmp_path):
+    from unittest.mock import AsyncMock, Mock
+
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+
+    async def check():
+        started = asyncio.Event()
+
+        async def communicate(_input):
+            started.set()
+            await asyncio.Future()
+
+        process = SimpleNamespace(
+            returncode=None,
+            communicate=communicate,
+            kill=Mock(),
+            wait=AsyncMock(return_value=-9),
+        )
+        with (patch.object(toolbox_mcp, "ROOT", tmp_path),
+              patch.object(toolbox_mcp.asyncio, "create_subprocess_exec",
+                           AsyncMock(return_value=process))):
+            task = asyncio.create_task(toolbox_mcp.media_run("analyze_music"))
+            await started.wait()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            else:
+                raise AssertionError("Media cancellation was suppressed")
+        process.kill.assert_called_once_with()
+        process.wait.assert_awaited_once_with()
+
+    asyncio.run(check())
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):
