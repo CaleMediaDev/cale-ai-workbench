@@ -12,6 +12,29 @@ import pytest
 import song_video
 
 
+@pytest.mark.parametrize("start,end", [
+    (0, float("inf")), (0, "Infinity"), (0, 1e308),
+    (0, 10**400), (10**400, 1), (0.0001, 0.0002),
+])
+def test_invalid_transcription_times_use_authored_caption_fallback(start, end):
+    rows, source = song_video.caption_rows(
+        [{"start": start, "end": end, "text": "unusable timing"}],
+        "Authored line", "Song", False, 10,
+    )
+    assert rows == [(0.0, 10.0, "Authored line")]
+    assert source == "estimated_from_authored_lyrics"
+
+
+def test_invalid_timing_does_not_discard_valid_transcription():
+    rows, source = song_video.caption_rows(
+        [{"start": 0, "end": float("inf"), "text": "invalid"},
+         {"start": 1, "end": 2, "text": "Actual words"}],
+        "Authored line", "Song", False, 10,
+    )
+    assert rows == [(1.0, 2.0, "Actual words")]
+    assert source == "offline_transcription"
+
+
 def test_caption_rows_use_real_word_timing_and_do_not_invent_instrumental_lyrics():
     rows, source = song_video.caption_rows(
         [{"start": 1.2, "end": 2.4, "text": "  Hello  Cale "}],
