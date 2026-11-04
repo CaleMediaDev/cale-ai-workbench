@@ -143,6 +143,38 @@ def test_inspector_rejects_source_changes_during_cache_hits(tmp_path):
     assert source.read_text(encoding="utf-8") == "updated document"
 
 
+def test_inspector_rejects_source_changes_during_excerpt_selection(tmp_path):
+    source = tmp_path / "notes.pdf"
+    source.write_bytes(b"original PDF source")
+
+    def change_during_selection(text, question, *, limit, subject):
+        assert text == "original text"
+        source.write_bytes(b"updated PDF source")
+        return text
+
+    with patch.object(file_chat, "ROOT", tmp_path), patch.object(
+        file_chat, "document_text", side_effect=["original text", "updated text"],
+    ) as extract, patch.object(project_memory, "index_document_text"):
+        first = project_documents.inspect(tmp_path, "notes.pdf")
+        assert first["text"] == "original text" and not first["cached"]
+        with patch.object(file_chat, "select_excerpt", side_effect=change_during_selection) as select:
+            try:
+                project_documents.inspect(tmp_path, "notes.pdf", question="What changed?")
+            except RuntimeError as exc:
+                assert "document changed" in str(exc)
+            else:
+                raise AssertionError("Source edited during excerpt selection returned stale text")
+            select.assert_called_once()
+        assert extract.call_count == 1
+        fresh = project_documents.inspect(tmp_path, "notes.pdf")
+        cached = project_documents.inspect(tmp_path, "notes.pdf")
+
+    assert fresh["text"] == cached["text"] == "updated text"
+    assert not fresh["cached"] and cached["cached"]
+    assert extract.call_count == 2
+    assert source.read_bytes() == b"updated PDF source"
+
+
 def test_inspector_rejects_source_changes_during_indexing(tmp_path):
     source = tmp_path / "notes.pdf"
     source.write_bytes(b"original PDF source")

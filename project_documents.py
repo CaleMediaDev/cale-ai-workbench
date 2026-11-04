@@ -138,6 +138,9 @@ def inspect(folder: str | Path, path: str, question: str = "",
         start = max(0, min(int(start_char), len(text)))
         excerpt = text[start:start + limit]
         next_char = start + len(excerpt) if start + len(excerpt) < len(text) else None
+    # Question-based excerpt selection can outlast the earlier validation.
+    if _digest(source) != digest:
+        raise RuntimeError("The document changed while it was being read; try again")
     return {"source": relative, "text": excerpt, "kind": "document",
             "total_characters": len(text), "next_start_char": next_char,
             "cached": cached, "indexed": indexed}
