@@ -37,6 +37,18 @@ def test_missing_ffmpeg_is_installed_and_validated(tmp_path):
         assert ffmpeg_runtime.working(tmp_path)
 
 
+def test_stderr_errors_are_reported_as_failed_health_checks(tmp_path):
+    target = ffmpeg_runtime.executable(tmp_path)
+    target.parent.mkdir(parents=True)
+    # Fake a process that exits 0 but emits an error to stderr.
+    with patch.object(ffmpeg_runtime.subprocess, "run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            ["ffmpeg", "-version"], returncode=0,
+            stdout="ffmpeg version 5.1\n",
+            stderr="Error opening input file...\n"
+        )
+        assert ffmpeg_runtime.working(tmp_path) is False
+
 def test_undecodable_version_output_is_a_failed_health_check(tmp_path):
     target = ffmpeg_runtime.executable(tmp_path)
     target.parent.mkdir(parents=True)

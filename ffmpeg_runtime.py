@@ -32,7 +32,10 @@ def working(root: Path = ROOT) -> bool:
     try:
         result = subprocess.run([str(target), "-version"], capture_output=True,
                                 text=True, timeout=10, creationflags=HIDE)
-        return result.returncode == 0 and result.stdout.startswith("ffmpeg version")
+        # A healthy runtime must have a successful exit code and no error output.
+        if result.returncode != 0 or result.stderr:
+            return False
+        return result.stdout.startswith("ffmpeg version")
     except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
         return False
 
