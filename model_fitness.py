@@ -165,8 +165,8 @@ catch (_) { console.log(JSON.stringify({valid_code:false})); }
             check=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-    except subprocess.TimeoutExpired:
-        # Asynchronous work can outlive the synchronous VM deadline.
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        # Asynchronous work can outlive the VM deadline or terminate Node.
         return {"valid_code": False}
     checks = json.loads(result.stdout)
     return (
