@@ -200,6 +200,16 @@ suite creates a repeatable check, not a success claim. Failed assertion revision
 do not replace earlier assertions, custom verifiers remain untouched, and checks
 superseded by changed user instructions are not saved under the new request.
 
+The browser helper retains up to 32 independent sequences and 128 cases, within
+its existing 64 KB specification and 10-second explicit-wait budgets. Replay
+uses one browser process and a fresh offline context per sequence: tests cannot
+inherit another sequence's localStorage or cookies, while reloads within a
+sequence retain its storage. Larger reports stay in a private, bounded local
+file with a hash receipt in the command output. Cale validates that receipt,
+the suite identity, user instructions, and current HTML before trusting results;
+it does not drop test evidence to fit the log tail. Custom test suites remain
+the route for work beyond this bounded browser helper.
+
 The native worker can omit `step_id` when completing, splitting, or revising
 the active unit shown in its checkpoint. The inferred ID is bound to the exact
 request and acceptance check it saw; SQL split/revise transactions reject newer

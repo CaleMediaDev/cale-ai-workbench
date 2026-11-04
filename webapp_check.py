@@ -10,11 +10,18 @@ import math
 import os
 import re
 import sys
+import tempfile
+from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
+
+MAX_SAVED_SEQUENCES = 32
+MAX_SAVED_CASES = 128
+MAX_REPORT_BYTES = 1_000_000
+REPORT_NAME = "browser-check-report.json"
 
 
 def _project_file(folder: Path, name: str) -> Path:
@@ -202,8 +209,8 @@ def missing_numeric_boundaries(folder: Path, request: str) -> list[dict]:
     if saved.get("request_hash") != task_context.request_identity(folder):
         raise ValueError("Browser check instructions changed; rerun check_webapp")
     checks = saved.get("checks")
-    if not isinstance(checks, list) or not 1 <= len(checks) <= 8:
-        raise ValueError("Saved browser suite needs 1 to 8 sequences")
+    if not isinstance(checks, list) or not 1 <= len(checks) <= MAX_SAVED_SEQUENCES:
+        raise ValueError(f"Saved browser suite needs 1 to {MAX_SAVED_SEQUENCES} sequences")
     stopwords = {"a", "an", "the", "of", "your", "enter", "number", "input", "value", "field", "please"}
     def words(text):
         expanded = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
@@ -371,7 +378,7 @@ def project_only_route(folder: Path):
     return handle
 
 
-def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
+def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None) -> dict:
     """Exercise a local page offline and report each actual browser assertion."""
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
@@ -383,8 +390,9 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
     errors = []
     interactions = []
     normalized_inputs = []
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+    with (sync_playwright() if _browser is None else nullcontext()) as playwright:
+        browser = _browser if _browser is not None else playwright.chromium.launch(headless=True)
+        context = None
         try:
             context = browser.new_context(offline=True, viewport={
                 "width": spec.get("viewport_width", 375), "height": 812})
@@ -571,7 +579,10 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(destination), timeout=8_000)
         finally:
-            browser.close()
+            if _browser is None:
+                browser.close()
+            elif context is not None:
+                context.close()  # A borrowed process must never share sequence storage.
     if hashlib.sha256(page_path.read_bytes()).hexdigest() != page_hash:
         errors.append("HTML source changed while the browser check was running; rerun the check.")
     return {"passed": all(item["passed"] for item in results) and not errors,
@@ -638,8 +649,8 @@ def saved_suite(folder: Path, spec: dict, previous: dict | None = None) -> dict:
     checks = [check for check in checks if batch_key(check) != batch_key(incoming)] + [incoming]
     if len({batch_key(check) for check in checks}) != len(checks):
         raise ValueError("Saved browser sequences must be unique")
-    if len(checks) > 8 or sum(len(check["cases"]) for check in checks) > 24:
-        raise ValueError("Use at most 8 browser sequences and 24 retained cases; consolidate a complete integration check")
+    if len(checks) > MAX_SAVED_SEQUENCES or sum(len(check["cases"]) for check in checks) > MAX_SAVED_CASES:
+        raise ValueError(f"Use at most {MAX_SAVED_SEQUENCES} browser sequences and {MAX_SAVED_CASES} retained cases")
     wait = 0
     for check in checks:
         validate_spec(folder, check)
@@ -663,6 +674,8 @@ def assertion_targets(spec: dict) -> set[str]:
 
 def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = None) -> dict:
     """Replay request-bound sequences separately and reject changed test data."""
+    from playwright.sync_api import sync_playwright
+
     import task_context
 
     raw = spec_file.read_bytes()
@@ -690,27 +703,32 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
     results = []
     failures_left = 4
     requested_targets = assertion_targets(checks[-1])
-    for spec in checks:
-        spec = normalize_spec(spec)
-        result = check(folder, spec)
-        failures = [case for case in result["cases"] if not case["passed"]][:failures_left]
-        for failure in failures:
-            case = spec["cases"][failure["case"] - 1]
-            failure["inputs"] = {name: case[name] for name in ("reload", "set", "click", "keys", "wait_ms") if name in case}
-            if len(json.dumps(failure["inputs"])) > 2000:
-                failure["inputs"] = {"note": "Read this saved sequence for complete input arguments"}
-        failures_left -= len(failures)
-        targets = sorted({name for effect in result.get("interactions", []) for name in effect["targets"]},
-                         key=lambda name: (name not in requested_targets, name))
-        results.append({"path": spec["path"], "viewport_width": spec.get("viewport_width", 375),
-                        "passed": result["passed"], "cases": failures,
-                        "page_sha256": result["page_sha256"],
-                        "input_case_count": sum(bool(case.get("reload") or case.get("set") or case.get("click") or case.get("keys"))
-                                                for case in spec["cases"]),
-                        "interaction_case_count": len(result.get("interactions", [])),
-                        "interaction_targets": targets[:4], "interaction_targets_limited": len(targets) > 4,
-                        "case_count": result["case_count"], "failed_case_count": result["failed_case_count"],
-                        "javascript_errors": result["javascript_errors"][:3]})
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            for spec in checks:
+                spec = normalize_spec(spec)
+                result = check(folder, spec, _browser=browser)
+                failures = [case for case in result["cases"] if not case["passed"]][:failures_left]
+                for failure in failures:
+                    case = spec["cases"][failure["case"] - 1]
+                    failure["inputs"] = {name: case[name] for name in ("reload", "set", "click", "keys", "wait_ms") if name in case}
+                    if len(json.dumps(failure["inputs"])) > 2000:
+                        failure["inputs"] = {"note": "Read this saved sequence for complete input arguments"}
+                failures_left -= len(failures)
+                targets = sorted({name for effect in result.get("interactions", []) for name in effect["targets"]},
+                                 key=lambda name: (name not in requested_targets, name))
+                results.append({"path": spec["path"], "viewport_width": spec.get("viewport_width", 375),
+                                "passed": result["passed"], "cases": failures,
+                                "page_sha256": result["page_sha256"],
+                                "input_case_count": sum(bool(case.get("reload") or case.get("set") or case.get("click") or case.get("keys"))
+                                                        for case in spec["cases"]),
+                                "interaction_case_count": len(result.get("interactions", [])),
+                                "interaction_targets": targets[:4], "interaction_targets_limited": len(targets) > 4,
+                                "case_count": result["case_count"], "failed_case_count": result["failed_case_count"],
+                                "javascript_errors": result["javascript_errors"][:3]})
+        finally:
+            browser.close()
     unchanged = (spec_file.read_bytes() == raw
                  and saved["request_hash"] == task_context.request_identity(folder))
     try:
@@ -748,7 +766,7 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
         raise ValueError("Preserve the user's custom verifier; revise only an owned browser suite")
     sequence, number = arguments.get("saved_sequence"), arguments.get("saved_case")
     checks = saved.get("checks", [])
-    if type(sequence) is not int or not isinstance(checks, list) or not 1 <= sequence <= len(checks) <= 8:
+    if type(sequence) is not int or not isinstance(checks, list) or not 1 <= sequence <= len(checks) <= MAX_SAVED_SEQUENCES:
         raise ValueError("Use the saved sequence index from the failed checker result")
     batch = normalize_spec(copy.deepcopy(checks[sequence - 1]))
     validate_spec(folder, batch)
@@ -852,9 +870,64 @@ def serialize_saved_report(result: dict, limit: int = 10000) -> str:
     return encoded
 
 
+def transport_saved_report(folder: Path, report: dict, limit: int = 10000) -> str:
+    """Keep stdout bounded; large reports use a hash-bound local receipt.
+
+    Full results remain available for interaction evidence and diagnostics.
+    The fixed private path cannot redirect readers/writers outside the project.
+    """
+    encoded = json.dumps(report, ensure_ascii=True, allow_nan=False)
+    if len(encoded) <= limit:
+        return encoded
+    if not isinstance(report.get("checks"), list):
+        return serialize_saved_report(report, limit)  # Legacy single-page output.
+    root = folder.resolve()
+    notes = (root / ".local-ai").resolve()
+    if not notes.is_relative_to(root):
+        raise ValueError("Browser report must stay inside this project")
+    notes.mkdir(exist_ok=True)
+    target = notes / REPORT_NAME
+    if target.is_symlink():
+        raise ValueError("Browser report must be a regular file")
+    raw = encoded.encode("utf-8")
+    if len(raw) > MAX_REPORT_BYTES:
+        raise ValueError("Browser report exceeds the bounded local report size")
+    temporary = tempfile.NamedTemporaryFile(dir=notes, prefix="browser-report-", suffix=".tmp", delete=False)
+    staged = Path(temporary.name)
+    try:
+        with temporary:
+            temporary.write(raw)
+        os.replace(staged, target)
+    finally:
+        staged.unlink(missing_ok=True)
+    receipt = {key: report[key] for key in ("passed", "suite_sha256", "case_count", "failed_case_count")}
+    receipt.update(report_ref=REPORT_NAME, report_sha256=hashlib.sha256(raw).hexdigest(), checks=[])
+    encoded = json.dumps(receipt, ensure_ascii=True)
+    if len(encoded) > limit:
+        raise ValueError("Browser report receipt exceeds the transport budget")
+    return encoded
+
+
 def resolve_saved_report(folder: Path, report: dict) -> dict:
     """Bind compact verifier diagnostics to the exact suite that produced them."""
     import task_context
+
+    if "report_ref" in report:
+        root = folder.resolve()
+        target = root / ".local-ai" / REPORT_NAME
+        if (report.get("report_ref") != REPORT_NAME or target.is_symlink()
+                or not target.resolve().is_relative_to(root) or not target.is_file()
+                or target.stat().st_size > MAX_REPORT_BYTES):
+            raise ValueError("Browser report receipt has no bounded local report")
+        raw_report = target.read_bytes()
+        if hashlib.sha256(raw_report).hexdigest() != report.get("report_sha256"):
+            raise ValueError("Browser report changed after verification; rerun the verifier")
+        full = json.loads(raw_report)
+        if (not isinstance(full, dict) or "report_ref" in full or any(
+                full.get(key) != report.get(key) for key in
+                ("passed", "suite_sha256", "case_count", "failed_case_count"))):
+            raise ValueError("Browser report receipt contradicts the full result")
+        report = full
 
     path = (folder / ".local-ai/webapp-check.json").resolve()
     if not path.is_relative_to(folder.resolve()) or not path.is_file() or path.stat().st_size > 64000:
@@ -868,7 +941,7 @@ def resolve_saved_report(folder: Path, report: dict) -> dict:
     checks = suite.get("checks", [])
     results = report.get("checks", [])
     if (suite.get("request_hash") != task_context.request_identity(folder)
-            or not isinstance(results, list) or len(results) != len(checks) or not 1 <= len(checks) <= 8):
+            or not isinstance(results, list) or len(results) != len(checks) or not 1 <= len(checks) <= MAX_SAVED_SEQUENCES):
         raise ValueError("Saved browser report does not match current instructions and sequences")
     resolved = copy.deepcopy(report)
     for sequence, result in enumerate(resolved["checks"], 1):
@@ -977,7 +1050,7 @@ def main() -> int:
     if not spec_file.is_relative_to(folder / ".local-ai"):
         raise ValueError("Browser check spec must be in this project's .local-ai folder")
     result = run_saved_checks(folder, spec_file, args.spec_sha256)
-    print(serialize_saved_report(result))
+    print(transport_saved_report(folder, result))
     return 0 if result["passed"] else 1
 
 

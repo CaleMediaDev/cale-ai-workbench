@@ -1488,6 +1488,28 @@ def test_complete_cannot_silently_ignore_replacement_steps(tmp_path):
     assert task_context.step_status(folder)["active"]["check_command"] == "exit 9"
 
 
+def test_structured_step_summary_keeps_failures_without_quoted_verifier_transcripts(tmp_path):
+    folder = Path(project(tmp_path / "structured-summary")["folder"])
+    (folder / "logic.py").write_text("def double(x): return x\n")
+    step = {"phase": "Fix", "title": "Double value", "check_tool": "check_python_function",
+            "check_arguments": {"path": "logic.py", "function": "double", "cases": [{"args": [4], "expected": 8}]}}
+    active = task_context.plan_steps(folder, [step])["active"]
+    result = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert not result["passed"] and "check_output" not in result
+    assert result["check_summary"]["cases"][0]["inputs"] == {"args": [4], "kwargs": {}}
+    assert "8" in str(result["check_summary"]["cases"][0]["failures"])
+    assert "verification" not in result["check_summary"]
+    # An unstructured tool failure still supplies its concrete cause.
+    dispatch = native_agent.execute_tool
+    def unavailable(folder, name, arguments):
+        if name == "check_python_function":
+            return "Tool error: checker runtime unavailable"
+        return dispatch(folder, name, arguments)
+    with patch.object(native_agent, "execute_tool", side_effect=unavailable):
+        failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert not failed["passed"] and "runtime unavailable" in str(failed["check_summary"]["errors"])
+
+
 def test_step_acceptance_revised_during_check_cannot_receive_older_success(tmp_path):
     folder = Path(project(tmp_path / "racing-check")["folder"])
     original = {"phase": "Build", "title": "First", "check_command": "exit 0"}

@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import project_memory
+from webapp_check import MAX_SAVED_SEQUENCES
 
 DOCUMENTS = ("PLAN.md", "PROGRESS.md", "USER-REQUESTS.md")
 LIMITS = {"PLAN.md": 3500, "PROGRESS.md": 3500, "USER-REQUESTS.md": 2500}
@@ -728,7 +729,7 @@ def record_action(folder: str | Path, tool: str, result: str, arguments: dict | 
         try:
             revision = json.loads(result).get("revision", {})
             sequence, number = revision.get("saved_sequence"), revision.get("saved_case")
-            if type(sequence) is int and type(number) is int and 1 <= sequence <= 8 and 1 <= number <= 12:
+            if type(sequence) is int and type(number) is int and 1 <= sequence <= MAX_SAVED_SEQUENCES and 1 <= number <= 12:
                 subject = subject[:120] + f" (assertion sequence {sequence}, case {number})"
         except (ValueError, AttributeError):
             pass
@@ -756,7 +757,7 @@ def record_action(folder: str | Path, tool: str, result: str, arguments: dict | 
                 verdict = json.loads(result)
                 verified = verdict.get("verified_paths", [])
                 if (verdict.get("passed") is True and verdict.get("verifier_check_passed") is True
-                        and isinstance(verified, list) and len(verified) <= 8):
+                        and isinstance(verified, list) and len(verified) <= MAX_SAVED_SEQUENCES):
                     identity = request_hash or request_identity(folder)
                     for name in verified:
                         if not isinstance(name, str) or Path(name).is_absolute():

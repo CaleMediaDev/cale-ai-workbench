@@ -503,3 +503,20 @@ deletion fails after render replaces the buttons. The decimal-total check
 contains that later deletion; it is not evidence of an arithmetic-only bug.
 The retained suite has reached its eight-sequence bound; scalable retention
 needs work without discarding earlier failures. No complete-app pass is claimed.
+
+The `developments_v464` section retains two further failures. The first exhausted
+schema correction with no valid response; actual upstream calls and tokens are
+still reported. The second recorded 11 valid router responses / 14 upstream
+requests in 264.71 worker seconds and regressed deletion: 12 of 15 browser
+checks pass, three of six SQL units are complete, and the verifier fails.
+Shape-only transport receipts identify invalid quoted step lists with trailing
+extra data; no malformed JSON was silently repaired. This is not a speed gain
+or reliable full-app result. Developer-supplied lifecycle checks remain retained.
+
+The helper now retains 32 sequences / 128 cases within the same byte/wait
+budgets. Tests verify fresh storage per sequence while reusing one browser
+process, successful late-sequence revisions, complete hash-bound report receipts,
+and rejection of stale/corrupted reports. Structured worker summaries omit the
+duplicated escaped verifier transcript. The final 307 relevant regression tests
+pass; the artifact above remains a real task failure needing a different repair
+approach, not looser acceptance checks.

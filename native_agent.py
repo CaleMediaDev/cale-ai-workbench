@@ -25,6 +25,8 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from webapp_check import MAX_SAVED_SEQUENCES
+
 ROOT = Path(__file__).resolve().parent
 MAX_TURNS_PER_SLICE = 12
 MAX_TOOL_OUTPUT = 16_000
@@ -193,7 +195,7 @@ TOOLS = [
                                                                                               'mobile_fit': {'type': 'boolean'}},
                                                                                'additionalProperties': False}},
                                                                     {'type': 'string'}]},
-                                                'saved_sequence': {'type': 'integer', 'minimum': 1, 'maximum': 8},
+                                                'saved_sequence': {'type': 'integer', 'minimum': 1, 'maximum': MAX_SAVED_SEQUENCES},
                                                 'saved_case': {'type': 'integer', 'minimum': 1, 'maximum': 12},
                                                 'suite_sha256': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}},
                                  'required': ['path', 'cases'],
@@ -663,19 +665,23 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     unchanged=step_source_fingerprint(folder, structured) == before, expected_check=expected_check)
                 value["checked_step_id"] = active["id"]
                 value["check_sha256"] = expected_check
-                value["check_output"] = checked[-2500:]
+                if not structured:
+                    value["check_output"] = checked[-2500:]
                 value["check_tool"] = kind
                 if structured:
                     try:
                         verdict = json.loads(checked)
                     except ValueError:
                         verdict = {}
+                    if not isinstance(verdict, dict):
+                        verdict = {}
                     value["check_verdict"] = {"passed": value["passed"]}
                     value["check_summary"] = {
                         "cases": [{key: case[key] for key in
                                    ("case", "path", "function", "saved_sequence", "inputs", "failures") if key in case}
                                   for case in verdict.get("cases", []) if case.get("passed") is False][:2],
-                        "errors": verdict.get("errors", [])[:2]}
+                        "errors": verdict.get("errors", [])[:2] or
+                            ([checked[:1200]] if not verdict else [])}
                     if kind == "check_webapp":
                         value["check_summary"]["input_effect_proven"] = verdict.get("step_input_effect_proven")
                     value["check_path"] = check_args.get("path", "")
@@ -806,6 +812,11 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                             result["verifier_check_passed"] = False
                     if report and report.get("passed") is not True:
                         result["verifier_check_passed"] = False
+                    if report:
+                        result.pop("verification", None)
+                        result["verification_summary"] = {key: report.get(key) for key in
+                            ("passed", "case_count", "failed_case_count")}
+                        result["verification_summary"]["sequences"] = len(report["checks"])
                     if result["verifier_check_passed"] and report:
                         result["verified_paths"] = report.get("verified_paths", [])
                         result["retained_interaction_coverage"] = [
@@ -2548,7 +2559,7 @@ def remember_checker_verdict(state: dict, tool: str, arguments: dict, result: st
         failed.pop(key, None)
         if tool == "check_webapp" and verdict.get("verifier_check_passed") is True:
             verified = verdict.get("verified_paths", [])
-            if isinstance(verified, list) and len(verified) <= 8:
+            if isinstance(verified, list) and len(verified) <= MAX_SAVED_SEQUENCES:
                 for checked_path in verified:
                     if isinstance(checked_path, str):
                         normalized = os.path.normcase(os.path.normpath(checked_path)).replace("\\", "/")

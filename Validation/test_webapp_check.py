@@ -12,6 +12,7 @@ import pytest
 import long_tasks
 import native_agent
 import native_browser
+import project_memory
 import task_context
 import webapp_check
 
@@ -312,12 +313,12 @@ def test_saved_sequences_cannot_combine_interactions_from_different_html_version
         {"set": {"bill": "50"}, "expect": {"answer": "60.00"}}]}, accumulate=True)
     original = webapp_check.check
     calls = 0
-    def edit_between(folder, spec):
+    def edit_between(folder, spec, **kwargs):
         nonlocal calls
         if calls:
             path.write_text(PAGE + '<!-- changed between sequences -->')
         calls += 1
-        return original(folder, spec)
+        return original(folder, spec, **kwargs)
     with patch.object(webapp_check, "check", side_effect=edit_between):
         report = webapp_check.run_saved_checks(tmp_path, tmp_path / ".local-ai/webapp-check.json")
     assert not report["passed"]
@@ -696,11 +697,11 @@ def test_browser_suite_size_limits_and_tool_syntax_errors_are_explicit(tmp_path)
     with pytest.raises(ValueError, match="sibling lists"):
         webapp_check.validate_spec(tmp_path, {"path": "index.html", "cases": [{"expect": {"visible": ["error"]}}]})
     previous = None
-    for number in range(8):
+    for number in range(webapp_check.MAX_SAVED_SEQUENCES):
         spec = {"path": "index.html", "cases": [{"set": {"bill": str(number + 1)}, "visible": ["answer"]}]}
         previous = webapp_check.saved_suite(tmp_path, spec, previous)
-    with pytest.raises(ValueError, match="at most 8"):
-        webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [{"set": {"bill": "20"}, "visible": ["answer"]}]}, previous)
+    with pytest.raises(ValueError, match="at most 32"):
+        webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [{"set": {"bill": "999"}, "visible": ["answer"]}]}, previous)
 
 
 def test_same_input_sequence_retains_other_assertions_and_allows_explicit_corrections(tmp_path):
@@ -1268,12 +1269,14 @@ def test_failed_new_case_survives_an_unrelated_passing_check_until_source_is_fix
             return json.loads(native_agent.execute_tool(tmp_path, "check_webapp", spec))
     initial = run(good)
     assert initial["passed"], initial
+    assert "verification" not in initial and initial["verification_summary"]["passed"]
     failed = run(invalid)
     assert not failed["passed"] and failed["failed_cases_retained"]
     assert failed["verifier_check_passed"] is False
     assert page.read_text() == broken
     repeated = run(unrelated)
     assert not repeated["passed"] and not repeated["verifier_check_passed"]
+    assert "verification" not in repeated and not repeated["verification_summary"]["passed"]
     assert any("visibility was wrong" in str(case["failures"]) for case in repeated["cases"])
     saved = json.loads((tmp_path / ".local-ai/webapp-check.json").read_text())
     assert len(saved["checks"]) == 3
@@ -1307,3 +1310,120 @@ def test_superseded_browser_check_does_not_save_cases_under_new_user_request(tmp
     assert not result["passed"] and "instructions changed" in str(result["errors"])
     assert not (tmp_path / ".local-ai/verify.ps1").exists()
     assert not (tmp_path / ".local-ai/webapp-check.json").exists()
+
+
+def test_larger_suite_reuses_process_but_isolates_storage_and_rejects_real_regression(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text(STORAGE_PAGE)
+    for number in range(10):
+        value = f"note-{number}"
+        webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [
+            {"expect": {"saved": "empty"}},
+            {"set": {"note": value}, "click": ["save"], "expect": {"saved": value}},
+            {"reload": True, "expect": {"saved": value}}]}, accumulate=True)
+    path = tmp_path / ".local-ai/webapp-check.json"
+    original = webapp_check.check
+    browsers = []
+    def observed(folder, spec, **kwargs):
+        browsers.append(kwargs.get("_browser"))
+        return original(folder, spec, **kwargs)
+    with patch.object(webapp_check, "check", side_effect=observed):
+        report = webapp_check.run_saved_checks(tmp_path, path)
+    assert report["passed"] and report["case_count"] == 30 and len(report["checks"]) == 10
+    assert browsers[0] is not None and all(browser is browsers[0] for browser in browsers)
+    assert not browsers[0].is_connected()
+    # The first assertion in every sequence proves storage isolation. The
+    # last assertion proves reload persistence within that isolated sequence.
+    page.write_text(STORAGE_PAGE.replace("localStorage.setItem('memo',field.value);", ""))
+    failed = webapp_check.run_saved_checks(tmp_path, path)
+    assert not failed["passed"] and failed["failed_case_count"] == 10
+
+
+def test_late_sequence_can_be_revised_and_bound_to_full_verifier(tmp_path):
+    import hashlib
+
+    import cloud_ai
+
+    (tmp_path / "index.html").write_text(PAGE)
+    for number in range(10):
+        webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [
+            {"set": {"bill": str(number + 1)}, "expect": {"answer": "wrong" if number == 9 else f"{(number+1)*1.2:.2f}"}}]}, accumulate=True)
+    path = tmp_path / ".local-ai/webapp-check.json"
+    args = {"path": "index.html", "saved_sequence": 10, "saved_case": 1,
+            "suite_sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "cases": [{"expect": {"answer": "12.00"}}]}
+    tool = next(t for t in native_agent.TOOLS if t["function"]["name"] == "check_webapp")
+    response = {"choices": [{"message": {"tool_calls": [{"id": "late", "function": {"name": "check_webapp", "arguments": json.dumps(args)}}]}}]}
+    assert cloud_ai.valid_completion(response, {"tools": [tool]})
+    with patch.object(long_tasks, "projects", return_value=[{"id": "late", "folder": str(tmp_path)}]):
+        result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", args))
+    assert result["passed"] and result["verifier_check_passed"] and result["checked_sequence"] == 10
+    task_context.record_action(tmp_path, "check_webapp", json.dumps(result), args)
+    with project_memory.connection(tmp_path) as conn:
+        assert "sequence 10" in conn.execute("SELECT subject FROM task_events ORDER BY id DESC LIMIT 1").fetchone()[0]
+
+
+def test_large_report_receipt_preserves_all_results_and_rejects_stale_or_redirected_data(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    for number in range(10):
+        webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [
+            {"set": {"bill": str(number + 1)}, "expect": {"answer": f"{(number+1)*1.2:.2f}"}}]}, accumulate=True)
+    report = webapp_check.run_saved_checks(tmp_path, tmp_path / ".local-ai/webapp-check.json")
+    # Even when lossy inline elision could fit, transport preserves full
+    # interaction metadata through the pinned local report instead.
+    soft_limit = len(json.dumps(report, ensure_ascii=True)) - 80
+    soft = json.loads(webapp_check.transport_saved_report(tmp_path, report, limit=soft_limit))
+    assert "report_ref" in soft
+    assert webapp_check.resolve_saved_report(tmp_path, soft)["checks"] == report["checks"]
+    encoded = webapp_check.transport_saved_report(tmp_path, report, limit=512)
+    receipt = json.loads(encoded)
+    assert len(encoded) <= 512 and receipt["report_ref"] == webapp_check.REPORT_NAME
+    resolved = webapp_check.resolve_saved_report(tmp_path, receipt)
+    assert resolved["passed"] and len(resolved["checks"]) == 10
+    # Exercise the worker's real receipt parser without an additional child
+    # browser run: this is the exact, already verified report from above.
+    dispatch = native_agent.execute_tool
+    def receipt_verifier(folder, name, arguments):
+        if name == "run_verifier":
+            return "Exit code: 0\n" + encoded
+        return dispatch(folder, name, arguments)
+    latest = json.loads((tmp_path / ".local-ai/webapp-check.json").read_text())["checks"][-1]
+    with patch.object(native_agent, "execute_tool", side_effect=receipt_verifier):
+        result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", latest))
+    assert result["passed"] and result["verifier_check_passed"] and result["verified_paths"] == ["index.html"]
+    target = tmp_path / ".local-ai" / webapp_check.REPORT_NAME
+    raw = target.read_bytes()
+    target.write_bytes(raw + b" ")
+    with pytest.raises(ValueError, match="changed after verification"):
+        webapp_check.resolve_saved_report(tmp_path, receipt)
+    target.write_bytes(raw)
+    with patch.object(webapp_check.os, "replace", side_effect=OSError("simulated disk failure")):
+        with pytest.raises(OSError, match="disk failure"):
+            webapp_check.transport_saved_report(tmp_path, report, limit=512)
+    assert target.read_bytes() == raw and not list(target.parent.glob("browser-report-*.tmp"))
+    with pytest.raises(ValueError, match="contradicts"):
+        webapp_check.resolve_saved_report(tmp_path, {**receipt, "passed": False})
+    with pytest.raises(ValueError, match="no bounded local report"):
+        webapp_check.resolve_saved_report(tmp_path, {**receipt, "report_ref": "../elsewhere.json"})
+    (tmp_path / "index.html").write_text(PAGE + "<!-- changed -->")
+    with pytest.raises(ValueError, match="HTML changed"):
+        webapp_check.resolve_saved_report(tmp_path, receipt)
+
+
+def test_expanded_suite_limits_reject_overflow_without_dropping_old_checks(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    for number in range(webapp_check.MAX_SAVED_SEQUENCES):
+        webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [
+            {"set": {"bill": str(number)}, "expect": {"answer": "any"}}]}, accumulate=True)
+    path = tmp_path / ".local-ai/webapp-check.json"
+    raw = path.read_bytes()
+    with pytest.raises(ValueError, match="at most 32"):
+        webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [
+            {"set": {"bill": "999"}, "expect": {"answer": "any"}}]}, accumulate=True)
+    assert path.read_bytes() == raw
+    previous = None
+    for number in range(10):
+        previous = webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [
+            {"set": {"bill": str(number)}, "expect": {"answer": "any"}} for _ in range(12)]}, previous)
+    with pytest.raises(ValueError, match="128 retained"):
+        webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [
+            {"set": {"bill": "999"}, "expect": {"answer": "any"}} for _ in range(12)]}, previous)

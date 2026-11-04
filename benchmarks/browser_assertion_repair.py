@@ -54,6 +54,38 @@ def observed_router(stats: dict):
                 if inference:
                     for name in ("prompt_tokens", "completion_tokens"):
                         stats[name] += int((response.get("usage") or {}).get(name) or 0)
+                    # Retain transport shapes before schema validation rejects
+                    # a response, without logging prompts or argument values.
+                    for choice in response.get("choices", []) or []:
+                        if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
+                            continue
+                        for call in choice["message"].get("tool_calls", []) or []:
+                            if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
+                                continue
+                            function = call.get("function") or {}
+                            if function.get("name") != "task_steps":
+                                continue
+                            try:
+                                arguments = json.loads(function.get("arguments", "{}"))
+                            except (ValueError, TypeError):
+                                continue
+                            if not isinstance(arguments, dict) or "steps" not in arguments:
+                                continue
+                            value, layers = arguments["steps"], []
+                            for _ in range(3):
+                                entry = {"type": type(value).__name__}
+                                if isinstance(value, str):
+                                    entry.update(length=len(value), first=value.lstrip()[:1])
+                                layers.append(entry)
+                                if not isinstance(value, str) or len(value) > 64000:
+                                    break
+                                try:
+                                    value = json.loads(value)
+                                except ValueError as error:
+                                    entry["decode_error"] = error.msg
+                                    entry["decode_position"] = error.pos
+                                    break
+                            stats.setdefault("step_transport_shapes", []).append(layers)
                 return response
             with patch.object(cloud_ai, "post", side_effect=observed_post):
                 result = super().complete(payload, task_id, **kwargs)
