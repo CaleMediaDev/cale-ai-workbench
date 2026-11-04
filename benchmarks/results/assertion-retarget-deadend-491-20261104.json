@@ -1,0 +1,137 @@
+{
+  "initial_failures": [
+    "Missing expected element #row_counts"
+  ],
+  "supported_revision_attempts": [
+    {
+      "mode": "assertion_only",
+      "candidate_first_case": {
+        "set": {
+          "entry": "Alpha"
+        },
+        "click": [
+          "add"
+        ],
+        "expect": {
+          "row_counts": ":[{",
+          "status": "Ready"
+        },
+        "row_counts": {
+          "items": 1
+        }
+      },
+      "passed": false,
+      "failures": [
+        "Missing expected element #row_counts"
+      ],
+      "actual_rows": {
+        "items": {
+          "actual": 1,
+          "expected": 1,
+          "tag": "tbody"
+        }
+      }
+    },
+    {
+      "mode": "explicit_empty_expect",
+      "candidate_first_case": {
+        "set": {
+          "entry": "Alpha"
+        },
+        "click": [
+          "add"
+        ],
+        "expect": {
+          "row_counts": ":[{",
+          "status": "Ready"
+        },
+        "row_counts": {
+          "items": 1
+        }
+      },
+      "passed": false,
+      "failures": [
+        "Missing expected element #row_counts"
+      ],
+      "actual_rows": {
+        "items": {
+          "actual": 1,
+          "expected": 1,
+          "tag": "tbody"
+        }
+      }
+    },
+    {
+      "mode": "input_revision",
+      "candidate_first_case": {
+        "set": {
+          "entry": "Alpha"
+        },
+        "click": [
+          "add"
+        ],
+        "expect": {
+          "row_counts": ":[{",
+          "status": "Ready"
+        },
+        "row_counts": {
+          "items": 1
+        }
+      },
+      "passed": false,
+      "failures": [
+        "Missing expected element #row_counts"
+      ],
+      "actual_rows": {
+        "items": {
+          "actual": 1,
+          "expected": 1,
+          "tag": "tbody"
+        }
+      }
+    }
+  ],
+  "counterfactual_only_not_saved": {
+    "passed": true,
+    "cases": [
+      {
+        "set": {
+          "entry": "Alpha"
+        },
+        "click": [
+          "add"
+        ],
+        "expect": {
+          "status": "Ready"
+        },
+        "row_counts": {
+          "items": 1
+        }
+      },
+      {
+        "reload": true,
+        "row_counts": {
+          "items": 1
+        },
+        "expect": {
+          "status": "Ready"
+        }
+      }
+    ],
+    "interactions": [
+      {
+        "case": 1,
+        "actions": [
+          "set",
+          "click"
+        ],
+        "targets": [
+          "rows:items"
+        ]
+      }
+    ]
+  },
+  "source_unchanged": true,
+  "saved_suite_unchanged": true,
+  "inference_run": false
+}

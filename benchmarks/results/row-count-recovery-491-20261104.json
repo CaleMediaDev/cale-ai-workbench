@@ -1,0 +1,83 @@
+{
+  "version": "0.5.491",
+  "features": [
+    "Exact native DOM table/section row counts in browser checks and saved verifiers",
+    "Credit row-count input effects only for differing known native counts",
+    "Renew bounded checker-repair attempts after tool contract changes",
+    "Rebuild malformed acceptance without copying corrupt legacy argument values"
+  ],
+  "validation": {
+    "root_count_and_host": "27 passed",
+    "root_clean_context": "3 passed",
+    "combined_host_browser_neighbors": "96 passed",
+    "webapp_neighbors": "56 passed",
+    "clean_context_guard_neighbors": "11 passed"
+  },
+  "actual_local_model": {
+    "491a": {
+      "seconds": 300.02,
+      "model_calls": 17,
+      "run_outcome": "failed",
+      "browser_checks": {
+        "requested_category_choices": true,
+        "initial_empty": true,
+        "reject_blank": true,
+        "reject_negative": true,
+        "reject_zero": true,
+        "reject_nonnumeric": true,
+        "adds_two_and_totals": true,
+        "category_visible": true,
+        "reload_keeps_entries": true,
+        "delete_updates_total": true,
+        "reload_keeps_deletion": true,
+        "description_plain_text": true,
+        "decimal_totals": true,
+        "mobile_fit": true,
+        "no_remote_requests": true
+      },
+      "database": {
+        "total": 8,
+        "done": 2,
+        "remaining": 6
+      },
+      "verifier_passes_correct": false
+    },
+    "491b": {
+      "seconds": 150.01,
+      "model_calls": 10,
+      "run_outcome": "failed",
+      "browser_checks": {
+        "requested_category_choices": true,
+        "initial_empty": true,
+        "reject_blank": true,
+        "reject_negative": true,
+        "reject_zero": true,
+        "reject_nonnumeric": true,
+        "adds_two_and_totals": true,
+        "category_visible": true,
+        "reload_keeps_entries": true,
+        "delete_updates_total": true,
+        "reload_keeps_deletion": true,
+        "description_plain_text": true,
+        "decimal_totals": true,
+        "mobile_fit": true,
+        "no_remote_requests": true
+      },
+      "database": {
+        "total": 8,
+        "done": 2,
+        "remaining": 6
+      },
+      "verifier_passes_correct": false
+    }
+  },
+  "remaining_blocker": "Saved assertion revisions merge old targets, so a syntactically valid wrong target can remain permanently failing. Isolated real-browser reproduction confirms all current repair variants preserve the bad target; explicit single-target replacement needs implementation.",
+  "fixture_developer_edits": false,
+  "task_complete": false,
+  "limits": [
+    "Both resumed attempts failed overall; the app still passes all 15 independent browser checks",
+    "Two completed database steps do not establish functional coverage: one was reduced to a static check",
+    "No mutation rejection credit is awarded when the baseline verifier itself fails",
+    "Timings include background system activity and are not isolated throughput measurements"
+  ]
+}

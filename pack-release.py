@@ -23,6 +23,10 @@ if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
     "README.md", "ARCHITECTURE.md",
+    "benchmarks/results/assertion-retarget-deadend-491-20261104.json",
+    "benchmarks/results/offline-expense-resume-491a-20261104.json",
+    "benchmarks/results/offline-expense-resume-491b-20261104.json",
+    "benchmarks/results/row-count-recovery-491-20261104.json",
     "benchmarks/results/logic-recovery-490-20261104.json",
     "benchmarks/results/offline-expense-app-489-20261104.json",
     "benchmarks/results/offline-expense-resume-490a-20261104.json",
