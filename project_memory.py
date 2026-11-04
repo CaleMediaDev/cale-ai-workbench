@@ -312,7 +312,7 @@ def _refresh_file_record(root: Path, row, checked_documents: dict | None = None)
                 for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                     digest.update(chunk)
             changed = digest.hexdigest() != row["source_hash"]
-        except (OSError, ValueError):
+        except (OSError, RuntimeError, ValueError):
             changed = True
         if changed:
             # Extracted text belongs to exact source bytes. Never serve it
