@@ -351,5 +351,17 @@ class ProjectMemoryTests(unittest.TestCase):
                 toolbox_mcp.registered_project(str(other))
 
 
+def test_common_pair_survives_high_ranked_rare_single_term_hits(tmp_path):
+    # Rare single-term notes can outrank a longer, eligible two-term match.
+    for number in range(20):
+        project_memory.save(tmp_path, "note", f"Alpha {number}", "Short entry.")
+        project_memory.save(tmp_path, "note", f"Beta {number}", "Short entry.")
+    for number in range(6):
+        project_memory.save(tmp_path, "note", f"Gamma {number}", "Short entry.")
+    wanted = project_memory.save(tmp_path, "note", "Relevant entry", "alpha beta " + "background " * 1000)
+    found = project_memory.search(tmp_path, "alpha beta gamma", kind="note", limit=1)
+    assert [row["id"] for row in found] == [wanted["id"]]
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
