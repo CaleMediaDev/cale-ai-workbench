@@ -363,6 +363,36 @@ class UserFileMemoryTests(unittest.TestCase):
         path.write_bytes(b"\x00binary")
         self.assertEqual(user_file_memory.search(self.state, "budget"), [])
 
+    def test_null_image_description_clears_stale_text_and_allows_retry(self):
+        image = self.root / "a-image.png"
+        note = self.root / "b-note.txt"
+        image.write_bytes(b"original image")
+        with patch.object(user_file_memory.file_chat, "image_description",
+                          return_value="obsolete receipt"):
+            user_file_memory.ingest(self.state, [str(image)])
+        image.write_bytes(b"changed image fixture")
+        note.write_text("retained notebook", encoding="utf-8")
+        with patch.object(user_file_memory.file_chat, "image_description",
+                          side_effect=[None, "recovered receipt"]) as describe:
+            result = user_file_memory.ingest(self.state, [str(image), str(note)])
+            self.assertEqual(result, {"indexed": 1, "unchanged": 0, "skipped": 1})
+            with user_file_memory._connection(self.state) as conn:
+                failed = conn.execute(
+                    "SELECT version,content FROM files WHERE path=?", (str(image),)
+                ).fetchone()
+                self.assertEqual(tuple(failed), ("", ""))
+                self.assertEqual(conn.execute(
+                    "SELECT COUNT(*) FROM file_fts WHERE path=?", (str(image),)
+                ).fetchone()[0], 0)
+            self.assertEqual(
+                user_file_memory.search(self.state, "notebook")[0]["path"], str(note)
+            )
+            self.assertEqual(
+                user_file_memory.search(self.state, "recovered")[0]["path"], str(image)
+            )
+        self.assertEqual(describe.call_count, 2)
+        self.assertEqual(user_file_memory.search(self.state, "obsolete"), [])
+
     def test_image_and_recording_use_local_extractors(self):
         image = self.root / "receipt.png"
         recording = self.root / "meeting.wav"

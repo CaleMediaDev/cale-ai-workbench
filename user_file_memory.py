@@ -105,7 +105,10 @@ def _text(path: Path) -> str:
     if suffix in IMAGES:
         description = file_chat.image_description(
             path, "Describe this image accurately and transcribe readable text."
-        ).strip()
+        )
+        if not isinstance(description, str):
+            raise RuntimeError("The local image reader returned an invalid description.")
+        description = description.strip()
         return ("[AI-generated local image description; verify against the original image.]\n" + description) if description else ""
     if suffix in AUDIO:
         result = _media_call("transcribe_audio", path)
