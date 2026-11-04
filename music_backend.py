@@ -537,7 +537,7 @@ def project_jobs(task_id: str, folder: str | Path) -> list[dict]:
             if info.get("task_id") == task_id or owned_path:
                 created = float(info.get("created") or 0)
                 found.append((created, info))
-        except (OSError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError, OverflowError):
             continue
     return [info for _, info in sorted(found, key=lambda item: item[0])]
 
