@@ -150,7 +150,10 @@ def _text(path: Path) -> str:
         if b"\x00" in data:
             return ""
         return data[:MAX_TEXT].decode("utf-8-sig", "replace")
-    return file_chat.document_text(path, max_scanned_pages=12)[:MAX_TEXT]
+    content = file_chat.document_text(path, max_scanned_pages=12)
+    if not isinstance(content, str):
+        raise RuntimeError("The local document reader returned invalid text.")
+    return content[:MAX_TEXT]
 
 
 def _file_version(path: Path) -> str:

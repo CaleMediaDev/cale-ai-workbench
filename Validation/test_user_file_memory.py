@@ -432,6 +432,36 @@ class UserFileMemoryTests(unittest.TestCase):
         self.assertEqual(describe.call_count, 2)
         self.assertEqual(user_file_memory.search(self.state, "obsolete"), [])
 
+    def test_null_document_text_clears_stale_memory_and_allows_retry(self):
+        document = self.root / "a-report.pdf"
+        note = self.root / "b-note.txt"
+        document.write_bytes(b"original document")
+        with patch.object(user_file_memory.file_chat, "document_text",
+                          return_value="obsolete report"):
+            user_file_memory.ingest(self.state, [str(document)])
+        document.write_bytes(b"changed document fixture")
+        note.write_text("retained notebook", encoding="utf-8")
+        with patch.object(user_file_memory.file_chat, "document_text",
+                          side_effect=[None, "recovered report"]) as extract:
+            result = user_file_memory.ingest(self.state, [str(document), str(note)])
+            self.assertEqual(result, {"indexed": 1, "unchanged": 0, "skipped": 1})
+            with user_file_memory._connection(self.state) as conn:
+                failed = conn.execute(
+                    "SELECT version,content FROM files WHERE path=?", (str(document),)
+                ).fetchone()
+                self.assertEqual(tuple(failed), ("", ""))
+                self.assertEqual(conn.execute(
+                    "SELECT COUNT(*) FROM file_fts WHERE path=?", (str(document),)
+                ).fetchone()[0], 0)
+            self.assertEqual(
+                user_file_memory.search(self.state, "notebook")[0]["path"], str(note)
+            )
+            self.assertEqual(
+                user_file_memory.search(self.state, "recovered")[0]["path"], str(document)
+            )
+        self.assertEqual(extract.call_count, 2)
+        self.assertEqual(user_file_memory.search(self.state, "obsolete"), [])
+
     def test_image_and_recording_use_local_extractors(self):
         image = self.root / "receipt.png"
         recording = self.root / "meeting.wav"
