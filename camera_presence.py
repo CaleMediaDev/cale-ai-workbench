@@ -3,6 +3,7 @@
 import argparse
 import base64
 import json
+import math
 import os
 import sys
 import threading
@@ -19,8 +20,9 @@ def allowed(now=None):
     """Share the desktop app's expiring camera permission with camera tools."""
     try:
         until = float(json.loads(CONSENT.read_text(encoding="utf-8"))["until"])
-        return until > (time.time() if now is None else now)
-    except (OSError, ValueError, KeyError, TypeError):
+        current = time.time() if now is None else now
+        return math.isfinite(until) and math.isfinite(current) and until > current
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return False
 
 
