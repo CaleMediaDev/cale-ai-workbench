@@ -567,7 +567,9 @@ def hold_music_job(job_id: str, *, paused: bool = False) -> dict:
     import psutil
 
     info = music_job_status(job_id)
-    if info.get("status") in ("complete", "error", "stopped", "paused"):
+    if info.get("status") in ("complete", "error", "stopped"):
+        return info
+    if info.get("status") == "paused" and paused:
         return info
     if _worker_running(job_id, info):
         try:
