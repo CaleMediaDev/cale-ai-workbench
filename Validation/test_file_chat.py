@@ -106,6 +106,16 @@ def test_excerpt_ranks_complete_words_over_repeated_substrings():
     assert len(excerpt) <= 500
 
 
+@pytest.mark.parametrize("question", ["What is first?", "What is the final section?"])
+def test_small_excerpt_budget_keeps_single_chunk_hints_in_bounds(question):
+    text = "Opening notes. " + "material " * 30
+    assert 200 < len(text) < 350
+    excerpt = file_chat.select_excerpt(text, question, limit=200)
+    assert "[Characters 1-" in excerpt
+    assert "Opening notes." in excerpt
+    assert len(excerpt) <= 200
+
+
 def test_long_file_answer_discloses_omitted_sections(tmp_path):
     path = tmp_path / "long.txt"
     path.write_text("Opening.\n" + "Filler.\n" * 2000 + "Answer: 42.\n", encoding="utf-8")
