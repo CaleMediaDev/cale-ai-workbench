@@ -219,7 +219,8 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
         count = 0
         for base, dirs, names in os.walk(root, followlinks=False):
             dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS
-                             and not SECRET_NAME.search(d) and not (Path(base) / d).is_symlink())
+                             and not SECRET_NAME.search(d) and not (Path(base) / d).is_symlink()
+                             and not (Path(base) / d).is_junction())
             for name in sorted(names):
                 path = Path(base) / name
                 if path not in paths:

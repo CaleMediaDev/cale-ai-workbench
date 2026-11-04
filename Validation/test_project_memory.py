@@ -3,6 +3,7 @@
 import hashlib
 import os
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from contextlib import closing
@@ -53,6 +54,25 @@ def test_legacy_extracted_hits_are_invalidated_lazily_without_scanning_or_erasin
 
 
 class ProjectMemoryTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows directory junction")
+    def test_junction_targets_do_not_exhaust_project_scan_budget(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "project"
+            outside = Path(temp) / "outside"
+            source = root / "z-source"
+            source.mkdir(parents=True)
+            outside.mkdir()
+            (source / "app.py").write_text("projectzebra = True", encoding="utf-8")
+            for index in range(2):
+                (outside / f"{index}.txt").write_text("outside", encoding="utf-8")
+            subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(root / "a-link"), str(outside)],
+                           check=True, capture_output=True,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+            result = memory.index(root, include_code=True, max_files=2)
+            self.assertFalse(result["truncated"])
+            self.assertEqual(result["indexed"], 1)
+            self.assertEqual(memory.search(root, "projectzebra")[0]["source_path"], "z-source/app.py")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
