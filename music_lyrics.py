@@ -29,7 +29,7 @@ def prepare(source_path: str, output_dir: str) -> tuple[Path, Path]:
 def vocal_file(files: list[str]) -> Path:
     """Select the isolated vocal track, never the instrumental by accident."""
     vocals = [Path(name) for name in files if "vocal" in Path(name).stem.lower()
-              and "no vocal" not in Path(name).stem.lower()
+              and "no vocal" not in Path(name).stem.lower().replace("_", " ").replace("-", " ")
               and "instrument" not in Path(name).stem.lower()]
     if len(vocals) != 1 or not vocals[0].is_file():
         raise RuntimeError("Could not identify one isolated vocal track for lyric transcription.")
