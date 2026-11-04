@@ -139,6 +139,36 @@ def test_inspector_rejects_source_changes_during_indexing(tmp_path):
     assert source.read_bytes() == b"updated PDF source"
 
 
+def test_inspector_does_not_cache_transient_source_text_under_original_hash(tmp_path):
+    source = tmp_path / "notes.pdf"
+    original = b"original PDF source"
+    source.write_bytes(original)
+    extraction_paths = []
+
+    def extract_while_source_changes(path, max_scanned_pages):
+        extraction_paths.append(path)
+        assert max_scanned_pages == 20
+        source.write_bytes(b"transient PDF source")
+        try:
+            return path.read_bytes().decode("utf-8")
+        finally:
+            source.write_bytes(original)
+
+    with patch.object(file_chat, "ROOT", tmp_path), patch.object(
+        file_chat, "document_text", side_effect=extract_while_source_changes,
+    ) as extract, patch.object(project_memory, "index_document_text") as index:
+        first = project_documents.inspect(tmp_path, "notes.pdf")
+        cached = project_documents.inspect(tmp_path, "notes.pdf")
+
+    assert first["text"] == cached["text"] == original.decode("utf-8")
+    assert not first["cached"] and cached["cached"]
+    assert extract.call_count == 1
+    assert all(call.args[2] == original.decode("utf-8") for call in index.call_args_list)
+    assert source.read_bytes() == original
+    assert extraction_paths[0].name == source.name
+    assert not extraction_paths[0].exists()
+
+
 def test_inspector_rejects_source_changes_during_cache_publication(tmp_path):
     source = tmp_path / "notes.pdf"
     source.write_bytes(b"original PDF source")

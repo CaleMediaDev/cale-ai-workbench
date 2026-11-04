@@ -31,6 +31,26 @@ def _digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _extract_snapshot(source: Path, expected_digest: str) -> str:
+    """Extract only bytes verified to belong to the requested cache key."""
+    with tempfile.TemporaryDirectory(prefix="document-extract-") as directory:
+        snapshot = Path(directory) / source.name
+        digest = hashlib.sha256()
+        total = 0
+        with source.open("rb") as original, snapshot.open("wb") as output:
+            while chunk := original.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_SOURCE_BYTES:
+                    raise ValueError("This document exceeds the 50 MB local reader limit")
+                digest.update(chunk)
+                output.write(chunk)
+        if digest.hexdigest() != expected_digest:
+            raise RuntimeError("The document changed while it was being read; try again")
+        if source.suffix.casefold() in file_chat.PLAIN_TEXT:
+            return snapshot.read_text(encoding="utf-8-sig", errors="replace")
+        return file_chat.document_text(snapshot, max_scanned_pages=20)
+
+
 def inspect(folder: str | Path, path: str, question: str = "",
             start_char: int = 0, max_chars: int = MAX_EXCERPT_CHARS) -> dict:
     """Return a local excerpt; later calls reuse extraction if bytes match."""
@@ -67,10 +87,7 @@ def inspect(folder: str | Path, path: str, question: str = "",
         if _digest(source) != digest:
             raise RuntimeError("The document changed while it was being read; try again")
     else:
-        if source.suffix.casefold() in file_chat.PLAIN_TEXT:
-            text = source.read_text(encoding="utf-8-sig", errors="replace")
-        else:
-            text = file_chat.document_text(source, max_scanned_pages=20)
+        text = _extract_snapshot(source, digest)
         if _digest(source) != digest:
             raise RuntimeError("The document changed while it was being read; try again")
         if len(text) > MAX_EXTRACTED_CHARS:
