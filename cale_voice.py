@@ -132,7 +132,12 @@ def _stop_worker():
     if process.poll() is None:
         try:
             process.terminate()
-        except OSError:
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
             pass
     _, alive = psutil.wait_procs(descendants, timeout=3)
     for child in alive:
