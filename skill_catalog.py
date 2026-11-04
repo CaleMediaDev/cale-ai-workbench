@@ -42,7 +42,9 @@ def _sources(root: Path):
                 relative = Path(category) / name / source.relative_to(folder)
                 yield source, relative
     for name in SHARED_REFERENCES:
-        yield bundled / "references" / name, Path("references") / name
+        source = bundled / "references" / name
+        if source.is_file() and not source.is_symlink():
+            yield source, Path("references") / name
 
 
 def sync(root: str | Path) -> dict:
