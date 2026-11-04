@@ -615,7 +615,7 @@ def say(message, rate=0, cancel=None, require_clone=False):
                 and hashlib.sha256(reference.read_bytes()).hexdigest() == WAKE_REFERENCE_SHA256):
             try:
                 _play_file(bundled, cancel)
-            except (OSError, wave.Error):
+            except (OSError, EOFError, wave.Error):
                 pass  # An unusable bundled WAV must not prevent synthesized speech.
             else:
                 return {"path": str(bundled), "engine": "Cale's local voice (bundled)"}
@@ -636,7 +636,7 @@ def say(message, rate=0, cancel=None, require_clone=False):
                     if cached.is_file() and cached.stat().st_size > 1000:
                         try:
                             _play_file(cached, cancel)
-                        except (OSError, wave.Error):
+                        except (OSError, EOFError, wave.Error):
                             pass  # Regenerate an unusable cached acknowledgement.
                         else:
                             return {"path": str(cached), "engine": "Cale's local voice (cached)"}
