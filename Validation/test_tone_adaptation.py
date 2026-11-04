@@ -7,6 +7,13 @@ import tone_adaptation
 
 
 class ToneAdaptationTests(unittest.TestCase):
+    def test_empty_input_does_not_require_the_model_dependency(self):
+        with patch.dict("sys.modules", {"cloud_ai": None}):
+            for utterance in ("", " \t\r\n "):
+                with self.subTest(utterance=repr(utterance)):
+                    self.assertEqual(tone_adaptation.social_reply(utterance),
+                                     "I'm listening. What's up?")
+
     def test_social_reply_uses_fast_local_model(self):
         result = {"choices": [{"message": {"content": "Well, that was rude. What do you need?"}}]}
         with patch("cloud_ai.post", return_value=result) as post:
