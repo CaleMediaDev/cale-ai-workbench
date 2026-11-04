@@ -85,6 +85,17 @@ class SelfDiagnosticsTests(unittest.TestCase):
         self.assertFalse(diagnostics.schedule(
             self.root, self.state, now=200 + diagnostics.FAILURE_RETRY))
 
+    @unittest.skipIf(diagnostics.os.name == "nt", "POSIX file locking regression")
+    def test_non_windows_report_lock_rejects_contention_and_releases(self):
+        with diagnostics._report_lock(self.state, blocking=True) as acquired:
+            self.assertTrue(acquired)
+            with diagnostics._report_lock(self.state, blocking=False) as contender:
+                self.assertFalse(contender)
+            with diagnostics._report_lock(self.state, blocking=False) as contender:
+                self.assertFalse(contender)
+        with diagnostics._report_lock(self.state, blocking=False) as acquired:
+            self.assertTrue(acquired)
+
     def test_two_simultaneous_schedulers_launch_one_check(self):
         entered = threading.Event()
         release = threading.Event()

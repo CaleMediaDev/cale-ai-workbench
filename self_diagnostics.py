@@ -46,7 +46,23 @@ def _write(path: Path, data: dict) -> None:
 def _report_lock(state: Path, *, blocking: bool):
     """Serialize launches and final reports across GUI and supervisor processes."""
     if os.name != "nt":
-        yield True
+        import fcntl
+
+        state.mkdir(parents=True, exist_ok=True)
+        with (state / "self-check.lock").open("a+b") as handle:
+            acquired = False
+            try:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX |
+                                (0 if blocking else fcntl.LOCK_NB))
+                    acquired = True
+                except BlockingIOError:
+                    if blocking:
+                        raise
+                yield acquired
+            finally:
+                if acquired:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         return
     import msvcrt
 
