@@ -238,7 +238,7 @@ def watch(device=0, parent_pid=None, parent_started=None):
                     enrolling_name = str(json.loads(ENROLL_REQUEST.read_text(encoding="utf-8"))["name"])
                     enrolling_features = []
                     enrolling_started = time.monotonic()
-                except (OSError, ValueError, KeyError):
+                except (OSError, ValueError, KeyError, TypeError):
                     pass
                 ENROLL_REQUEST.unlink(missing_ok=True)
             if enrolling_name and time.monotonic() - enrolling_started > 12:
