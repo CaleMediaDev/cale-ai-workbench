@@ -79,6 +79,21 @@ class BusinessContactTests(unittest.TestCase):
         self.assertIn("Call our office.", page["text"])
         self.assertNotIn("<", page["text"])
 
+    def test_reader_preserves_mixed_case_contact_schemes(self):
+        body = (
+            '<a href="TEL:+15172581313">Phone</a>'
+            '<a href="MaIlTo:Office@RealBusiness.com">Email</a>'
+        )
+        with patch.object(
+            web_tools, "fetch",
+            return_value=("https://example.org/contact", body, "text/html", 200),
+        ):
+            page = web_tools.read_webpage("https://example.org/contact")
+        self.assertEqual(page["contact_links"], [
+            "TEL:+15172581313", "MaIlTo:Office@RealBusiness.com",
+        ])
+        self.assertEqual(web_tools.public_emails(page), ["office@realbusiness.com"])
+
     def test_reader_ignores_malformed_link_and_keeps_page_content(self):
         body = (
             '<title>Contact details</title>'
