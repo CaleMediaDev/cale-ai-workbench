@@ -74,8 +74,9 @@ def generate(root: Path, prompt: str, output_path: str = "") -> Path:
     }
     result = subprocess.run(
         [str(python), str(root / "media_worker.py")],
-        input=json.dumps(request), text=True, capture_output=True,
-        timeout=900, cwd=root, env=os.environ.copy(),
+        input=json.dumps(request), text=True, encoding="utf-8", errors="replace",
+        capture_output=True, timeout=900, cwd=root,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
