@@ -215,6 +215,37 @@ def test_local_dom_contract_handles_svg_non_string_type_property(tmp_path):
         native_browser.close()
 
 
+@pytest.mark.parametrize("input_type", ["range", "color"])
+def test_local_dom_contract_does_not_advertise_unfillable_input_types(tmp_path, input_type):
+    pytest.importorskip("playwright")
+    from playwright.sync_api import Error
+
+    (tmp_path / "index.html").write_text(
+        f'<title>Input contract</title><input id="unsupported" type="{input_type}">'
+        '<input id="text" aria-label="Text">', encoding="utf-8")
+    try:
+        opened = native_agent.execute_tool(
+            tmp_path, "browser_open_project", {"path": "index.html"})
+        if opened.startswith("Tool error:") and "Executable doesn't exist" in opened:
+            pytest.skip("Chromium runtime is not installed in this test environment")
+        assert json.loads(opened)["title"] == "Input contract"
+        snapshot = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        targets = {row["id"]: row for row in snapshot["dom_contract"]["targets"]}
+        assert targets["unsupported"]["visible"]
+        assert not targets["unsupported"]["disabled"]
+        assert not targets["unsupported"]["editable"]
+        assert targets["text"]["editable"]
+
+        page = native_browser._page(tmp_path)
+        with pytest.raises(Error, match="cannot be filled"):
+            page.locator("#unsupported").fill("42", timeout=1000)
+        text_ref = next(row["ref"] for row in snapshot["controls"] if row["label"] == "Text")
+        native_browser.execute(tmp_path, "type", {"ref": text_ref, "text": "supported"})
+        assert page.locator("#text").input_value() == "supported"
+    finally:
+        native_browser.close()
+
+
 def test_local_dom_contract_bounds_targets_and_unicode_output(tmp_path):
     pytest.importorskip("playwright")
     (tmp_path / "index.html").write_text("".join(
