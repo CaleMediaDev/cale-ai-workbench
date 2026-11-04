@@ -82,6 +82,26 @@ def test_note_csv_normalization_can_be_repeated(tmp_path, bends):
     assert not path.with_suffix(".csv.tmp").exists()
 
 
+def test_note_csv_without_pitch_bends_can_be_normalized_repeatedly(tmp_path):
+    path = tmp_path / "notes.csv"
+    path.write_text(
+        ",".join(music_midi.NOTE_COLUMNS) + "\n"
+        + "0.0,1.0,69,85,\n"
+    )
+
+    music_midi.normalize_note_events(path)
+    normalized = path.read_bytes()
+    music_midi.normalize_note_events(path)
+
+    assert path.read_bytes() == normalized
+    with path.open(newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == 1
+    assert list(rows[0]) == music_midi.NOTE_COLUMNS
+    assert rows[0]["pitch_bend"] == "[]"
+    assert not path.with_suffix(".csv.tmp").exists()
+
+
 def test_unexpected_note_csv_is_preserved_for_diagnosis(tmp_path):
     path = tmp_path / "notes.csv"
     path.write_text("unknown,format\n1,2\n")
