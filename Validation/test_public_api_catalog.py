@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -73,6 +74,28 @@ def test_catalog_preserves_stale_snapshot_on_incompatible_encoding(tmp_path):
 def test_catalog_recovers_from_fresh_malformed_cache(tmp_path):
     cache = tmp_path / "apis.json"
     cache.write_bytes(b'{"incomplete":')
+    current_time = cache.stat().st_mtime + 1
+    snapshot = [{"name": "Recovered snapshot"}]
+    downloaded = json.dumps(snapshot).encode("utf-8")
+
+    with patch.object(public_api_catalog, "CACHE", cache), \
+         patch.object(public_api_catalog.time, "time", return_value=current_time), \
+         patch.object(public_api_catalog, "urlopen") as open_url:
+        response = open_url.return_value.__enter__.return_value
+        response.read.return_value = downloaded
+        data, fresh = public_api_catalog._catalog()
+
+    open_url.assert_called_once()
+    response.read.assert_called_once_with(public_api_catalog.MAX_BYTES + 1)
+    assert data == snapshot
+    assert fresh is True
+    assert cache.read_bytes() == downloaded
+
+
+def test_catalog_recovers_from_excessively_nested_cache(tmp_path):
+    cache = tmp_path / "apis.json"
+    depth = sys.getrecursionlimit() + 100
+    cache.write_text("[" * depth + "]" * depth, encoding="utf-8")
     current_time = cache.stat().st_mtime + 1
     snapshot = [{"name": "Recovered snapshot"}]
     downloaded = json.dumps(snapshot).encode("utf-8")

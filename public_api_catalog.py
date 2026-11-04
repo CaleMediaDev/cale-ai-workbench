@@ -29,7 +29,7 @@ def _catalog() -> tuple[list[dict], bool]:
             raise ValueError("Unexpected public API catalog format.")
         data = cached
         fresh = time.time() - CACHE.stat().st_mtime < MAX_AGE
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         pass
     if not fresh:
         try:
