@@ -54,6 +54,10 @@ def followup_tasks(tasks: list[dict], text: str = "") -> list[dict]:
              and task["title"].strip() and task["title"].casefold() in value]
     if named:
         return active + named
+    value = re.sub(
+        r"^(?:(?:please|can you|could you|i want you to|i need you to|i want to|i need to|help me(?: to)?)\s+)+",
+        "", value,
+    )
     if active or not re.match(
         r"^(?:also|actually|instead|change it|add to (?:it|that)|tell (?:it|the ai) to|"
         r"(?:make|fix|update|improve|revise|redo|adjust)\s+(?:it|that|this)\b)",
