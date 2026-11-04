@@ -89,6 +89,29 @@ def test_run_removes_empty_output_after_successful_process(tmp_path, monkeypatch
     assert video_edit._destination(str(output), []) == output
 
 
+def test_edit_video_original_layout_pads_odd_dimensions(tmp_path):
+    executable = imageio_ffmpeg.get_ffmpeg_exe()
+    source = tmp_path / "odd.mkv"
+    output = tmp_path / "edited.mp4"
+    subprocess.run([
+        executable, "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc=size=161x91:rate=10:duration=0.5",
+        "-c:v", "ffv1", "-pix_fmt", "yuv444p", str(source),
+    ], check=True, capture_output=True, timeout=30)
+    original = source.read_bytes()
+
+    result = video_edit.edit_video(str(source), str(output), layout="original")
+
+    assert result["path"] == str(output)
+    frame = subprocess.run([
+        executable, "-hide_banner", "-loglevel", "error", "-i", str(output),
+        "-map", "0:v:0", "-frames:v", "1", "-pix_fmt", "rgb24",
+        "-f", "rawvideo", "pipe:1",
+    ], check=True, capture_output=True, timeout=30)
+    assert len(frame.stdout) == 162 * 92 * 3
+    assert source.read_bytes() == original
+
+
 def test_edit_video_extreme_speed_chains_atempo(tmp_path):
     """Speed 0.25 and 4.0 should work by chaining atempo filters."""
     clip = tmp_path / "clip.mp4"

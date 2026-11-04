@@ -90,6 +90,9 @@ def edit_video(source_path: str, output_path: str, start_seconds: float = 0,
         filters.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
         filters.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
         filters.append("setsar=1")
+    else:
+        # yuv420p requires even dimensions, including for original-layout inputs.
+        filters.append("pad=ceil(iw/2)*2:ceil(ih/2)*2")
     if filters:
         args += ["-vf", ",".join(filters)]
     if rate != 1:
