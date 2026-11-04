@@ -420,6 +420,22 @@ class AutoRouteTests(unittest.TestCase):
             {"role": "user", "content": "Build a production-ready multi-page file manager app."},
         ]), "deep")
 
+    def test_continuation_preserves_earlier_direct_project_scope(self):
+        prompt = project_prompt({
+            "title": "Help", "folder": "C:/Tasks/help",
+            "brief": "How do I create a folder?",
+        })
+        messages = [{"role": "user", "content": prompt}]
+        self.assertEqual(task_size(messages), "quick")
+        self.assertFalse(is_game_task(messages))
+        messages.append({"role": "user", "content":
+                         "Build a production-ready multi-page arcade game app."})
+        self.assertEqual(task_size(messages), "deep")
+        self.assertTrue(is_game_task(messages))
+        messages.append({"role": "user", "content": "Continue."})
+        self.assertEqual(task_size(messages), "deep")
+        self.assertTrue(is_game_task(messages))
+
     def test_kanban_protocol_nudge_does_not_escalate_small_music_work(self):
         prompt = project_prompt({
             "title": "Michigan song", "folder": "C:/Tasks/music",

@@ -217,12 +217,11 @@ def _task_intent(messages):
         # after END OF ORIGINAL REQUEST, outside PROJECT_REQUEST's capture.
         followups = RECENT_FOLLOWUPS.search(request)
         intent = original + ("\n" + followups.group(1).strip() if followups else "")
-        latest_real_user = next(
-            (item.strip() for item in reversed(users[1:]) if not synthetic_worker_note(item)),
-            "",
-        )
-        if latest_real_user:
-            intent += "\n" + latest_real_user
+        real_followups = [
+            item.strip() for item in users[1:] if not synthetic_worker_note(item)
+        ]
+        if real_followups:
+            intent += "\n" + "\n".join(real_followups)
     else:
         intent = request
     return intent, beginning, request, project, all_user_text
