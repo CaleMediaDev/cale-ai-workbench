@@ -1024,19 +1024,19 @@ async def watch_video(
 
 
 @server.tool()
-async def camera_snapshot(output_path: str, device: str = "0") -> dict:
-    """Capture one camera frame only while the desktop user's one-hour Camera switch is enabled."""
+async def camera_snapshot(output_path: str, device: str = "usb:0") -> dict:
+    """Capture one camera frame only while the desktop user's one-hour Camera switch is enabled. Use a registered name or usb:0 for USB camera 0."""
     return await media_run("capture_camera", 20, output_path=output_path, device=device)
 
 
 @server.tool()
 async def watch_camera(
     seconds: int = 10,
-    device: str = "0",
+    device: str = "usb:0",
     max_frames: int = 3,
     question: str = "Describe visible activity in this camera frame.",
 ) -> dict:
-    """Observe up to four camera frames over at most 30 seconds; requires the one-hour Camera switch."""
+    """Observe up to four camera frames over at most 30 seconds; requires the one-hour Camera switch. Use a registered name or usb:0 for USB camera 0."""
     return await media_run(
         "watch_camera",
         180,
@@ -1073,7 +1073,7 @@ async def remove_local_camera(name: str) -> dict:
 
 @server.tool()
 async def use_camera_for_greetings(name: str) -> dict:
-    """Choose a registered network camera or USB index for local visitor greetings."""
+    """Choose a registered network camera name or an explicit USB index such as usb:0 for local visitor greetings."""
     return await media_run("set_greeting_camera", 15, name=name)
 
 

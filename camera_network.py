@@ -105,19 +105,25 @@ def remove_camera(name):
 
 
 def camera_source(device):
-    if isinstance(device, int) or str(device).isdigit():
+    """Resolve names first; integers and usb:N explicitly select USB indexes."""
+    if isinstance(device, int):
         return int(device)
+    name = str(device)
     cameras = _saved()
-    if str(device) not in cameras:
-        raise ValueError("Camera not registered. Discover it and add its stream URL first.")
-    return _local_stream(cameras[str(device)])
+    if name in cameras:
+        return _local_stream(cameras[name])
+    if name[:4].casefold() == "usb:" and name[4:].isdecimal():
+        return int(name[4:])
+    if name.isdigit():
+        return int(name)
+    raise ValueError("Camera not registered. Discover it and add its stream URL first.")
 
 
 def greeting_camera():
     try:
         return str(json.loads(GREETING_SOURCE.read_text(encoding="utf-8"))["name"])
     except (OSError, ValueError, KeyError, TypeError):
-        return "0"
+        return "usb:0"
 
 
 def set_greeting_camera(name):
