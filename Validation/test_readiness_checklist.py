@@ -174,6 +174,18 @@ def test_completed_scan_marker_does_not_hide_a_missing_search_database(tmp_path)
     assert rows["Fast file search"]["state"] == "attention"
 
 
+@pytest.mark.parametrize("stdout", ["", " \n\t"])
+def test_media_probe_rejects_silent_successful_worker(tmp_path, stdout):
+    runtime = tmp_path / "Media/python/Scripts/python.exe"
+    runtime.parent.mkdir(parents=True)
+    runtime.touch()
+    completed = readiness_checklist.subprocess.CompletedProcess(
+        args=[], returncode=0, stdout=stdout, stderr="")
+    with patch.object(readiness_checklist.subprocess, "run", return_value=completed):
+        result = readiness_checklist._media_probe(tmp_path, "microphone_status")
+    assert result == {"ok": False, "detail": "Check failed"}
+
+
 @pytest.mark.parametrize("stdout", ["[]", "null", '"unexpected"', "1"])
 @pytest.mark.parametrize("returncode", [0, 1])
 def test_media_probe_rejects_non_object_json_without_crashing(tmp_path, stdout, returncode):
