@@ -98,6 +98,21 @@ def _voice_fingerprint(model_path: str) -> str:
     model = Path(model_path).resolve(strict=True)
     if not model.is_dir():
         raise ValueError("The checked voice snapshot is missing")
+    # snapshot_download(local_files_only=True) follows refs/main, not the old
+    # snapshot saved by an earlier render. Retaining old weights is not proof
+    # that the worker's currently selected revision has ever rendered audio.
+    revision_ref = None
+    if model.parent.name == "snapshots":
+        revision_ref = model.parent.parent / "refs/main"
+        if not revision_ref.is_file():
+            raise ValueError("The cached voice model selection is missing")
+        with revision_ref.open("rb") as stream:
+            selected_revision = stream.read(129)
+        revision = model.name.encode("ascii")
+        if (len(revision) != 40 or any(c not in b"0123456789abcdef" for c in revision)
+                or selected_revision not in (revision, revision + b"\n", revision + b"\r\n")):
+            raise ValueError("The checked voice snapshot is not the current cached model revision")
+        parts.append([str(revision_ref.resolve()), hashlib.sha256(selected_revision).hexdigest()])
     config = model / "config.json"
     # Configuration drives model loading and must remain a bounded JSON object.
     digest(config, 2_000_000)
@@ -117,6 +132,10 @@ def _voice_fingerprint(model_path: str) -> str:
     if not any(row[0] == "config.json" for row in files) or not any(
             Path(row[0]).suffix in {".safetensors", ".bin"} and row[2] > 0 for row in files):
         raise ValueError("Voice snapshot has no configuration or model weights")
+    if revision_ref is not None:
+        with revision_ref.open("rb") as stream:
+            if stream.read(129) != selected_revision:
+                raise ValueError("The cached voice model revision changed during its check")
     parts.append(sorted(files))
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
 

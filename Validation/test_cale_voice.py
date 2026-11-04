@@ -464,3 +464,84 @@ def test_clone_probe_rejects_another_speech_engine_even_with_valid_audio(clone_p
     monkeypatch.setattr(cale_voice.subprocess, "Popen", fallback)
     monkeypatch.setattr("self_diagnostics._stop_check", Mock())
     assert cale_voice.run_probe()["status"] == "failed" and not cale_voice.capability_ready()
+
+
+@pytest.fixture
+def hf_clone_probe_runtime(clone_probe_runtime):
+    import json
+    import shutil
+    root, cached, wav, _process = clone_probe_runtime
+    repository = root / "hf/hub/models--Qwen--Qwen3-TTS-12Hz-0.6B-Base"
+    old = repository / "snapshots" / ("a" * 40)
+    new = repository / "snapshots" / ("b" * 40)
+    for snapshot in (old, new):
+        shutil.copytree(cached, snapshot)
+    ref = repository / "refs/main"
+    ref.parent.mkdir(parents=True)
+    ref.write_text(old.name, encoding="ascii")
+    def render(snapshot, mutate=None):
+        def start(command, **_kwargs):
+            target = Path(command[-2])
+            before = cale_voice._voice_fingerprint(str(snapshot))
+            wav(target)
+            if mutate:
+                mutate()
+            answer = {"path": str(target), "engine": "Cale's local voice",
+                      "model_path": str(snapshot), "fingerprint": before}
+            child = Mock(returncode=0)
+            child.poll.return_value = 0
+            child.communicate.return_value = (json.dumps(answer), None)
+            return child
+        return start
+    return root, old, new, ref, render
+
+
+def test_clone_cache_requires_current_hf_main_revision_even_when_old_snapshot_remains(hf_clone_probe_runtime, monkeypatch):
+    root, old, new, ref, render = hf_clone_probe_runtime
+    launch = Mock(side_effect=render(old))
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", launch)
+    assert cale_voice.run_probe()["status"] == "passed"
+    assert cale_voice.capability_ready()
+    ref.write_text(new.name, encoding="ascii")
+    assert old.is_dir() and new.is_dir()
+    assert not cale_voice.capability_ready()
+    launch.side_effect = render(new)
+    report = cale_voice.run_probe()
+    assert report["status"] == "passed" and report["model_path"] == str(new)
+    assert launch.call_count == 2 and cale_voice.capability_ready()
+    assert old.is_dir()
+
+
+@pytest.mark.parametrize("revision", [None, b"", b"not-a-commit", b"a" * 129, b"a" * 40 + b" extra", b"../" + b"a" * 40])
+def test_clone_cache_rejects_missing_malformed_or_oversized_hf_main_ref(hf_clone_probe_runtime, monkeypatch, revision):
+    root, old, new, ref, render = hf_clone_probe_runtime
+    launch = Mock(side_effect=render(old))
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", launch)
+    assert cale_voice.run_probe()["status"] == "passed"
+    if revision is None:
+        ref.unlink()
+    else:
+        ref.write_bytes(revision)
+    assert not cale_voice.capability_ready()
+    launch.assert_called_once()
+
+
+def test_clone_probe_rejects_hf_main_revision_changed_during_actual_render(hf_clone_probe_runtime, monkeypatch):
+    root, old, new, ref, render = hf_clone_probe_runtime
+    launch = Mock(side_effect=render(old, lambda: ref.write_text(new.name, encoding="ascii")))
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", launch)
+    report = cale_voice.run_probe()
+    assert report["status"] == "failed"
+    assert not cale_voice.capability_ready()
+    assert old.is_dir() and new.is_dir()
+
+
+
+def test_clone_fingerprint_includes_bounded_hf_selection_file_digest(hf_clone_probe_runtime):
+    _root, old, _new, ref, _render = hf_clone_probe_runtime
+    first = cale_voice._voice_fingerprint(str(old))
+    ref.write_bytes(old.name.encode("ascii") + b"\n")
+    second = cale_voice._voice_fingerprint(str(old))
+    assert second != first
+    ref.write_bytes(old.name.encode("ascii") + b"\r\n")
+    assert cale_voice._voice_fingerprint(str(old)) not in (first, second)
