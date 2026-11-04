@@ -7024,3 +7024,24 @@ def test_recovery_response_cannot_execute_unbounded_tool_batch(tmp_path):
     assert len(list(folder.glob('*.txt')))<=4
     replies=[message for message in state['messages'] if message.get('role')=='tool']
     assert len(replies)==25 and any('recovery action budget' in message['content'] for message in replies)
+
+
+def test_recovery_claim_preserves_permission_and_account_authentication_barriers(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice')
+    barriers=[
+        'I cannot access local files because permissions were denied.',
+        'I cannot access local files until you authenticate.',
+        'I cannot access local files until authentication finishes.',
+        'I cannot use tools here because your account requires authorization.',
+        'I cannot access local files until you log in.',
+        'I cannot use the browser in this environment until you sign-in.',
+        'I cannot access local files without valid credentials.',
+    ]
+    for message in barriers:
+        assert not native_agent.capability_claim_with_unmet_goal(item,message),message
+    for message in [
+        'I cannot access local files or tools in this environment.',
+        'I cannot render audio in this chat because no tool runtime is available.',
+        'I cannot use local tools because the file access adapter is missing.',
+    ]:
+        assert native_agent.capability_claim_with_unmet_goal(item,message),message

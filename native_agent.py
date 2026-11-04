@@ -4844,7 +4844,7 @@ def capability_claim_with_unmet_goal(project,message):
     import task_context
     text=str(message or '').strip()
     if not re.match(r"(?is)^I(?:\s|['’]m\s)",text):return False
-    if re.search(r'(?i)\b(?:policy|permission|credentials|unauthorized|sign in|api key|ransomware|malware|harm|harmful|unsafe|illegal|abuse)\b',text[:400]):return False
+    if re.search(r'(?i)\b(?:polic(?:y|ies)|permissions?|credentials?|unauthori[sz]ed|authori[sz]ation|authenticat(?:e|es|ed|ing|ion)|sign[ -]?in|log[ -]?in|api key|ransomware|malware|harm|harmful|unsafe|illegal|abuse)\b',text[:400]):return False
     denial=r"(?:cannot|can['’]t|am unable to|['’]m unable to|do not have|don't have)"
     access=denial+r"\s+(?:directly\s+)?(?:access|read|open|write|use)\s+(?:to\s+)?(?:(?:your|local|the|any)\s+){0,2}(?:files?|folders?|tools?|browser|filesystem)\b"
     media=denial+r"\s+(?:directly\s+)?(?:(?:render|generate)\s+(?:audio|video|images?|files?)|(?:execute|run)\s+(?:code|commands?|tools?)|create\s+(?:a\s+)?(?:background\s+)?(?:music\s+)?tasks?)\b"
