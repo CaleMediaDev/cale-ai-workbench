@@ -340,6 +340,27 @@ def test_preload_and_equal_power_overlap_start_before_the_first_track_ends(tmp_p
     assert not old.opened and player.outgoing is None and staged.busy() and staged.volume == pytest.approx(65)
 
 
+def test_failed_blend_start_releases_prepared_deck_and_allows_retry(tmp_path):
+    player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
+    first, second = tmp_path/"first.wav", tmp_path/"second.wav"
+    player.play(first)
+    current = player.active
+    player.prepare(second)
+    failed = player.prepared
+
+    with patch.object(failed, "start", side_effect=RuntimeError("Cannot start track")):
+        with pytest.raises(RuntimeError, match="Cannot start track"):
+            player.blend(second)
+
+    assert player.active is current and current.busy() and current.volume == 65
+    assert not player.mixing and player.prepared is None
+    assert not failed.opened and failed.path is None
+    assert str(second.resolve()) not in player.protected_paths()
+    assert player.blend(second)
+    assert player.active is not failed and player.active.busy()
+    assert player.outgoing is current and current.busy()
+
+
 def test_pausing_and_muting_keep_both_decks_and_fade_position_consistent(tmp_path):
     moment = [0]
     player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
