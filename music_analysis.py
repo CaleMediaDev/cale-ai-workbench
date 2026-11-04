@@ -82,11 +82,16 @@ def analyze_music(source_path: str) -> dict:
         bpm = None
 
     segment_seconds = 4
-    frames_per_segment = round(segment_seconds * sample_rate / 512)
+    frames_per_segment = segment_seconds * sample_rate / 512
     changes = []
     previous_chord = None
-    for start in range(0, chroma.shape[1], frames_per_segment):
-        name = _best_chord(np.mean(chroma[:, start:start + frames_per_segment], axis=1))
+    for segment_index in range(int(np.ceil(chroma.shape[1] / frames_per_segment))):
+        # Round absolute boundaries rather than accumulating a rounded interval.
+        start = round(segment_index * frames_per_segment)
+        end = round((segment_index + 1) * frames_per_segment)
+        if start >= chroma.shape[1]:
+            break
+        name = _best_chord(np.mean(chroma[:, start:end], axis=1))
         if name and name != previous_chord:
             changes.append({"at_seconds": round(start * 512 / sample_rate, 1), "chord": name})
         previous_chord = name
