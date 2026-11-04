@@ -5,5 +5,18 @@
     {"station": "ambient downtempo", "render_seconds": 56.1, "audio_seconds": 180.0, "audible_decode_passed": true}
   ],
   "windows_play_pause_resume_skip_stop_passed": true,
-  "cloud_inference_used": false
+  "cloud_inference_used": false,
+  "vocal_club_trial": {
+    "description": "Live default Cale Club edited to request Cale Media lyrics and lead vocals, using the existing local music worker.",
+    "job_status": "complete",
+    "elapsed_seconds": 94.76,
+    "requested_audio_seconds": 180,
+    "vocal_check_passed": true,
+    "recognized_words": 387,
+    "last_vocal_second": 178.0,
+    "matched_lyric_terms": 105,
+    "required_lyric_terms": 15,
+    "lyrics_contain_cale_media": true,
+    "limitation": "Automatic vocal/lyric evidence does not prove exact sung brand pronunciation or subjective music quality."
+  }
 }

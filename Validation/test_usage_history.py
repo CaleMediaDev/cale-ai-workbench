@@ -5,6 +5,18 @@ import sqlite3
 import usage_history
 
 
+def test_radio_usage_keeps_exact_station_attribution(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    station = "radio-" + "a" * 32
+    marker = usage_history.CURRENT_TASK.set(station)
+    try:
+        assert usage_history.record_completion({"usage": {"total_tokens": 775}}, "ollama")
+    finally:
+        usage_history.CURRENT_TASK.reset(marker)
+    assert usage_history.task_totals()[station] == 775
+    assert usage_history.history()["total"] == 775
+
+
 def test_daily_monthly_and_lifetime_totals(tmp_path, monkeypatch):
     monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
     assert not usage_history.record_completion({"model": "m"}, "ollama")

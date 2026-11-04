@@ -63,6 +63,65 @@ def test_station_round_trip_and_validation(tmp_path):
         radio.save_station("Bad", "music", root=tmp_path, station_id="../../else")
 
 
+def test_default_vocal_stations_and_safe_legacy_migration(tmp_path):
+    legacy = radio.save_station("Cale Club", radio.LEGACY_CLUB, root=tmp_path)
+    custom = radio.save_station("Cale Country", "My own blues station", root=tmp_path)
+    radio.ensure_stations(tmp_path)
+    rows = {row["name"]: row for row in radio.stations(tmp_path)}
+    assert len(rows) == 6 and rows["Cale Club"]["id"] == legacy
+    assert not rows["Cale Club"]["instrumental"] and "Cale Media" in rows["Cale Club"]["prompt"]
+    assert rows["Cale Country"]["id"] == custom and rows["Cale Country"]["prompt"] == "My own blues station"
+    for name in ("Cale Rap", "Cale Pop", "Cale Rock"):
+        assert not rows[name]["instrumental"] and "Cale Media" in rows[name]["prompt"]
+    assert rows["Chill"]["instrumental"]
+    radio.ensure_stations(tmp_path)
+    assert len(radio.stations(tmp_path)) == 6
+    radio.save_station("Cale Club", "My custom music", root=tmp_path, station_id=legacy)
+    radio.ensure_stations(tmp_path)
+    assert next(row for row in radio.stations(tmp_path) if row["id"] == legacy)["prompt"] == "My custom music"
+
+
+def test_vocal_station_passes_vocal_intent_to_music_worker(tmp_path):
+    radio.ensure_stations(tmp_path)
+    club = next(row for row in radio.stations(tmp_path) if row["name"] == "Cale Club")
+    service = radio.Service(tmp_path, Player())
+    service.suspended = False
+    service.choose(club["id"])
+    with patch("music_backend.start_music_job", return_value={"job_id": "vocal-job"}) as render:
+        service.tick()
+    assert render.call_args.kwargs["instrumental"] is False
+    assert "Cale Media" in render.call_args.args[0]
+    assert render.call_args.kwargs["duration_seconds"] == 180
+
+
+def test_radio_metrics_count_only_reported_local_text_usage(tmp_path):
+    import sqlite3
+    assert radio.local_token_totals(tmp_path) == (None, None)
+    path = tmp_path / "LongTasks/usage.db"
+    path.parent.mkdir()
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE usage_events(source TEXT,total_tokens INTEGER,task_id TEXT)")
+        conn.executemany("INSERT INTO usage_events VALUES(?,?,?)", [
+            ("ollama", 100, "ordinary-task"), ("ollama", 40, "radio-club"),
+            ("chatgpt", 500, "radio-club"), ("groq", 200, "other")])
+    assert radio.local_token_totals(tmp_path) == (140, 40)
+
+
+def test_playback_status_does_not_erase_completed_render_evidence(tmp_path):
+    _, service, _, jobs, calls, generate = fixture(tmp_path)
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        current = service.current
+        row = next(row for row in service._rows() if row["id"] == current["id"])
+        assert row["status"] == "playing" and row["finished"] > 0 and row["render_seconds"] > 0
+        service.stop()
+        service.tick()
+        row = next(row for row in service._rows() if row["id"] == current["id"])
+        assert row["status"] == "played" and row["finished"] > 0
+
+
 def test_continuous_queue_prefetches_and_repeats_instead_of_silence(tmp_path):
     identity, service, player, jobs, calls, generate = fixture(tmp_path)
     with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):

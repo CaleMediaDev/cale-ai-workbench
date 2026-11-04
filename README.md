@@ -72,7 +72,9 @@ Skills and tool descriptions are also indexed in a local SQLite FTS5 database (`
 
 ## Cale Radio
 
-The homepage radio makes original three-minute tracks locally. Choose **Cale Club** or **Chill** and press **Play**, or use **+ Station** to name a station and describe its sound. **Edit** changes that station's prompt; **Include singing / vocals** requests vocal tracks. No radio account is needed.
+The homepage radio makes original three-minute tracks locally. **Cale Club**, **Cale Country**, **Cale Rap**, **Cale Pop**, and **Cale Rock** sing about Cale Media, local SEO, and marketing. **Chill** is instrumental. Choose a station and press **Play**, or use **+ Station** to name your own station and describe its sound. **Edit** changes its prompt and vocal setting. No radio account is needed. The exact old instrumental Cale Club preset is upgraded to vocals; custom station prompts are preserved.
+
+The player shows real track playback time, a separate next-track rendering bar, completed track count, **Total local tokens** across this installation, and **Radio tokens** from attributed local lyric calls. Token counts come from the usage ledger; audio generation has no invented token count. Radio-specific attribution begins with this update because older versions did not retain radio station IDs on usage events. Missing usage history displays a dash. Mute restores the previous volume when unmuted.
 
 The radio plays one track while preparing up to two more, with only one radio render active at a time. Normal song renders take priority over starting another radio render. If generation falls behind playback, the last good track repeats while the next finishes. Rendering speed depends on the PC and whether lyrics are needed; a three-minute render is not guaranteed to finish in under three minutes on every device.
 

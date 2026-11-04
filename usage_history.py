@@ -67,7 +67,7 @@ def record_completion(result: dict, source: str, elapsed_seconds: float | None =
             pass  # Optional accounting must not corrupt an inference reply.
     model = str(result.get("model") or "")[:150]
     task_id = CURRENT_TASK.get()
-    if not isinstance(task_id, str) or not re.fullmatch(r"[a-f0-9]{12}", task_id):
+    if not isinstance(task_id, str) or not re.fullmatch(r"(?:[a-f0-9]{12}|radio-[a-f0-9]{32})", task_id):
         task_id = ""
     # Ollama's own nanosecond duration is the most accurate local generation
     # speed. Other providers expose usage but usually no generation duration,

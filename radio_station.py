@@ -20,6 +20,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 SECONDS = 180
+LEGACY_CLUB = "Instrumental melodic techno, electronic drums and rich synthesizers, no guitars, energetic night-drive atmosphere"
+BRAND_LYRICS = "Original lyrics about Cale Media, local SEO and marketing, helping local businesses get found. Sing the name Cale Media in a memorable chorus. Clear lead vocals through verses and choruses."
+DEFAULT_STATIONS = (
+    ("Cale Club", "Melodic techno club anthem, 128 BPM, electronic drums, rich synthesizers and powerful bass, no guitars. " + BRAND_LYRICS, False),
+    ("Cale Country", "Upbeat modern country song, warm lead singer, acoustic guitar, steel guitar, live drums, big singalong chorus. " + BRAND_LYRICS, False),
+    ("Cale Rap", "Heavy-bass hip hop, 94 BPM, confident rapped verses, tight drums and a catchy sung chorus. " + BRAND_LYRICS, False),
+    ("Cale Pop", "Bright dance pop, punchy electronic drums, sparkling synths, expressive lead singer and a huge catchy chorus. " + BRAND_LYRICS, False),
+    ("Cale Rock", "Energetic anthemic rock, driving electric guitars, live drums, strong sung lead vocals and a big chorus. " + BRAND_LYRICS, False),
+    ("Chill", "Instrumental ambient downtempo, warm synthesizers and soft electronic beats, relaxing focused atmosphere", True),
+)
 
 
 def database(root=ROOT):
@@ -35,6 +45,7 @@ def database(root=ROOT):
         conn.execute("ALTER TABLE tracks ADD COLUMN config TEXT DEFAULT ''")
         conn.commit()
     conn.execute("CREATE INDEX IF NOT EXISTS radio_live_tracks ON tracks(created) WHERE status!='pruned'")
+    conn.execute("CREATE INDEX IF NOT EXISTS radio_queue ON tracks(station,config,status)")
     return conn
 
 
@@ -57,6 +68,34 @@ def save_station(name, prompt, instrumental=True, *, root=ROOT, station_id=None)
         conn.execute("INSERT INTO stations VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,prompt=excluded.prompt,instrumental=excluded.instrumental",
                      (identity, name.strip(), prompt.strip(), int(instrumental)))
     return identity
+
+
+def ensure_stations(root=ROOT):
+    """Add built-ins and migrate only the exact old instrumental Club preset."""
+    existing = stations(root)
+    club = DEFAULT_STATIONS[0]
+    for row in existing:
+        if row["name"] == club[0] and row["prompt"] == LEGACY_CLUB and row["instrumental"] == 1:
+            save_station(*club, root=root, station_id=row["id"])
+    names = {row["name"].casefold() for row in existing}
+    for name, prompt, instrumental in DEFAULT_STATIONS:
+        if name.casefold() not in names:
+            save_station(name, prompt, instrumental, root=root)
+
+
+def local_token_totals(root=ROOT):
+    """Read reported text-token usage; audio has no fabricated token count."""
+    path = Path(root) / "LongTasks/usage.db"
+    if not path.is_file():
+        return None, None
+    try:
+        with closing(sqlite3.connect(path.resolve().as_uri()+"?mode=ro", uri=True, timeout=0.25)) as conn:
+            row = conn.execute("""SELECT COALESCE(SUM(total_tokens),0),
+                COALESCE(SUM(CASE WHEN task_id LIKE 'radio-%' THEN total_tokens ELSE 0 END),0)
+                FROM usage_events WHERE source='ollama'""").fetchone()
+            return tuple(row)
+    except sqlite3.Error:
+        return None, None
 
 
 def foreground_music_busy():
@@ -96,6 +135,7 @@ class Player:
         self.opened = True
         try:
             self.set_volume(self.volume)
+            self.command(f"set {self.alias} time format milliseconds")
             self.command(f"play {self.alias}")
         except Exception:
             self.stop()
@@ -103,6 +143,12 @@ class Player:
 
     def busy(self):
         return self.opened and self.command(f"status {self.alias} mode") in ("playing", "paused")
+
+    def clock(self):
+        if not self.opened:
+            return 0, 0
+        return (int(self.command(f"status {self.alias} position"))/1000,
+                int(self.command(f"status {self.alias} length"))/1000)
 
     def pause(self):
         if self.opened:
@@ -142,11 +188,12 @@ class Service:
         self.progress = 0
         self.retry_at = 0
         self.thread = None
+        self.stats_at = 0
+        self.local_tokens = self.radio_tokens = None
+        self.tracks_made = 0
         self.commands = queue.SimpleQueue()
         self.view = {"message": self.message, "ready": 0, "progress": 0, "playing": False, "paused": False}
-        if not stations(self.root):
-            save_station("Cale Club", "Instrumental melodic techno, electronic drums and rich synthesizers, no guitars, energetic night-drive atmosphere", root=self.root)
-            save_station("Chill", "Instrumental ambient downtempo, warm synthesizers and soft electronic beats, relaxing focused atmosphere", root=self.root)
+        ensure_stations(self.root)
         with closing(database(self.root)) as conn, conn:
             conn.execute("UPDATE tracks SET status='played' WHERE status='playing'")
 
@@ -208,8 +255,29 @@ class Service:
         return dict(self.view)
 
     def _publish(self):
+        if time.monotonic() >= self.stats_at:
+            self.stats_at = time.monotonic()+10
+            self.local_tokens, self.radio_tokens = local_token_totals(self.root)
+            with closing(database(self.root)) as conn:
+                self.tracks_made = conn.execute("""SELECT COUNT(*) FROM tracks
+                    WHERE status IN ('ready','playing','played') OR (status='pruned' AND finished>0)""").fetchone()[0]
+        with closing(database(self.root)) as conn:
+            rendering = bool(conn.execute("SELECT 1 FROM tracks WHERE status='queued' LIMIT 1").fetchone())
+            if self.station:
+                signature = hashlib.sha256((self.station["prompt"]+str(self.station["instrumental"])).encode()).hexdigest()
+                self.ready = conn.execute("SELECT COUNT(*) FROM tracks WHERE station=? AND config=? AND status='ready'",
+                                          (self.station["id"], signature)).fetchone()[0]
+        elapsed, duration, on_air = 0, 0, False
+        try:
+            elapsed, duration = getattr(self.player, "clock", lambda: (0, 0))()
+            on_air = bool(self.enabled and self.current and not self.paused and self.player.busy())
+        except (RuntimeError, ValueError):
+            pass
         self.view = {"message": "Paused" if self.paused else self.message, "ready": self.ready,
-                     "progress": self.progress, "playing": self.enabled, "paused": self.paused}
+                     "progress": self.progress, "playing": self.enabled, "paused": self.paused,
+                     "on_air": on_air, "elapsed": elapsed, "duration": duration,
+                     "local_tokens": self.local_tokens, "radio_tokens": self.radio_tokens,
+                     "tracks_made": self.tracks_made, "rendering": rendering}
 
     def _commands(self):
         while not self.commands.empty():
@@ -231,8 +299,8 @@ class Service:
 
     def _update(self, identity, status, **values):
         with closing(database(self.root)) as conn, conn:
-            conn.execute("UPDATE tracks SET status=?,finished=?,render_seconds=? WHERE id=?",
-                         (status, values.get("finished", 0), values.get("render_seconds", 0), identity))
+            conn.execute("UPDATE tracks SET status=?,finished=COALESCE(?,finished),render_seconds=COALESCE(?,render_seconds) WHERE id=?",
+                         (status, values.get("finished"), values.get("render_seconds"), identity))
 
     def tick(self):
         try:
@@ -339,47 +407,97 @@ class Service:
 
 
 class Controls:
-    """Compact, always-visible radio card; station prompts are one dialog away."""
+    """A compact radio deck with real playback timing and local usage receipts."""
     def __init__(self, parent, window, service):
         import tkinter as tk
         from tkinter import ttk
 
         self.window, self.service = window, service
         style = ttk.Style(window)
-        style.configure("Radio.TCombobox", fieldbackground="#202d46", foreground="#edf3ff", background="#293955", arrowcolor="#edf3ff")
-        style.map("Radio.TCombobox", fieldbackground=[("readonly", "#202d46")], foreground=[("readonly", "#edf3ff")])
+        deck, field, ink, muted, accent = "#121c30", "#202d46", "#edf3ff", "#9baecc", "#8b7dff"
+        style.configure("Radio.TCombobox", fieldbackground=deck, foreground=ink, background=field, arrowcolor=ink, borderwidth=0, padding=4)
+        style.map("Radio.TCombobox", fieldbackground=[("readonly", deck)], foreground=[("readonly", ink)])
         style.configure("Radio.TEntry", fieldbackground="#202d46", foreground="#edf3ff", insertcolor="#edf3ff")
         style.configure("Radio.TCheckbutton", background="#0b1020", foreground="#edf3ff")
-        self.frame = ttk.Frame(parent, style="Card.TFrame", padding=(14, 10))
+        style.configure("Radio.TButton", background=field, foreground=ink, padding=(10, 7), font=("Segoe UI", 10, "bold"), borderwidth=0)
+        style.map("Radio.TButton", background=[("active", "#354665"), ("disabled", deck)], foreground=[("disabled", "#53627c")])
+        style.configure("Radio.Play.TButton", background=accent, foreground="#ffffff", padding=(16, 8), font=("Segoe UI", 11, "bold"), borderwidth=0)
+        style.map("Radio.Play.TButton", background=[("active", "#a394ff")])
+        style.configure("Radio.Playback.Horizontal.TProgressbar", background=accent, troughcolor="#283650", thickness=5, borderwidth=0)
+        style.configure("Radio.Build.Horizontal.TProgressbar", background="#5ce1c2", troughcolor="#283650", thickness=3, borderwidth=0)
+        style.configure("Radio.Horizontal.TScale", background=deck, troughcolor="#283650", borderwidth=0)
+        self.frame = tk.Frame(parent, background=deck, padx=14, pady=10, highlightbackground="#2b3954", highlightthickness=1)
         self.frame.pack(fill="x", pady=(0, 12))
-        line = ttk.Frame(self.frame, style="Card.TFrame")
+        line = tk.Frame(self.frame, background=deck)
         line.pack(fill="x")
-        ttk.Label(line, text="♫  CALE RADIO", style="Card.TLabel", font=("Segoe UI", 12, "bold")).pack(side="left", padx=(0, 12))
-        self.choice = ttk.Combobox(line, state="readonly", width=22, style="Radio.TCombobox")
-        self.choice.pack(side="left", padx=(0, 8))
+        cover = tk.Label(line, background=deck, foreground=accent, text="CALE", font=("Segoe UI", 14, "bold"))
+        logo = service.root / "assets/cale-logo.png"
+        if logo.is_file():
+            from PIL import Image, ImageTk
+            with Image.open(logo) as source:
+                source.thumbnail((48, 48), Image.Resampling.LANCZOS)
+                self.cover = ImageTk.PhotoImage(source.copy(), master=window)
+            cover.configure(image=self.cover, text="")
+        cover.pack(side="left", padx=(0, 12))
+        station = tk.Frame(line, background=deck)
+        station.pack(side="left")
+        tk.Label(station, text="C A L E   R A D I O", background=deck, foreground=accent, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        self.choice = ttk.Combobox(station, state="readonly", width=18, style="Radio.TCombobox", font=("Segoe UI", 14, "bold"))
+        self.choice.pack(anchor="w")
         self.choice.bind("<<ComboboxSelected>>", lambda _: self.tune())
-        self.play = ttk.Button(line, text="Play", width=7, command=self.toggle)
-        self.play.pack(side="left", padx=3)
-        self.next = ttk.Button(line, text="Next", width=7, command=service.skip)
-        self.next.pack(side="left", padx=3)
-        ttk.Button(line, text="Stop", width=7, command=service.stop).pack(side="left", padx=3)
-        ttk.Button(line, text="+ Station", width=10, command=self.station_dialog).pack(side="right", padx=3)
-        ttk.Button(line, text="Edit", width=5, command=lambda: self.station_dialog(True)).pack(side="right", padx=3)
+        self.kind = tk.StringVar(value="VOCALS · 3 MIN")
+        self.badge = tk.Label(line, text="READY", background="#252642", foreground="#bdb3ff", padx=9, pady=4, font=("Segoe UI", 8, "bold"))
+        self.badge.pack(side="left", padx=(12, 8))
+        ttk.Button(line, text="+ Station", width=9, command=self.station_dialog, style="Radio.TButton").pack(side="right", padx=(8, 0))
+        ttk.Button(line, text="Edit", width=5, command=lambda: self.station_dialog(True), style="Radio.TButton").pack(side="right")
+        self.metrics = []
+        for label in ("TRACKS MADE", "RADIO TOKENS", "TOTAL LOCAL TOKENS"):
+            metric = tk.Frame(line, background=deck)
+            metric.pack(side="right", padx=12)
+            value = tk.StringVar(value="—")
+            tk.Label(metric, textvariable=value, background=deck, foreground=ink, font=("Segoe UI", 13, "bold")).pack(anchor="e")
+            tk.Label(metric, text=label, background=deck, foreground=muted, font=("Segoe UI", 8, "bold")).pack(anchor="e")
+            self.metrics.append(value)
+
+        transport = tk.Frame(self.frame, background=deck)
+        transport.pack(fill="x", pady=(8, 0))
+        self.play = ttk.Button(transport, text="Play", width=7, command=self.toggle, style="Radio.Play.TButton")
+        self.play.pack(side="left")
+        self.next = ttk.Button(transport, text="Next", width=5, command=service.skip, style="Radio.TButton")
+        self.next.pack(side="left", padx=(7, 4))
+        ttk.Button(transport, text="Stop", width=5, command=service.stop, style="Radio.TButton").pack(side="left")
+        self.previous_volume = 65
         self.volume = tk.DoubleVar(value=65)
-        ttk.Scale(line, from_=0, to=100, length=80, variable=self.volume,
-                  command=lambda value: self.set_volume(value)).pack(side="right", padx=8)
-        ttk.Label(line, text="Volume", style="Card.TLabel").pack(side="right")
+        ttk.Scale(transport, from_=0, to=100, length=80, variable=self.volume, style="Radio.Horizontal.TScale",
+                  command=self.set_volume).pack(side="right", padx=(6, 0))
+        self.mute = ttk.Button(transport, text="Mute", width=5, command=self.toggle_mute, style="Radio.TButton")
+        self.mute.pack(side="right", padx=(8, 0))
+        progress = tk.Frame(transport, background=deck)
+        progress.pack(side="left", fill="x", expand=True, padx=(16, 8))
+        time_row = tk.Frame(progress, background=deck)
+        time_row.pack(fill="x")
+        tk.Label(time_row, textvariable=self.kind, background=deck, foreground=muted, font=("Segoe UI", 8, "bold")).pack(side="left")
+        self.clock = tk.StringVar(value="0:00 / 3:00")
+        tk.Label(time_row, textvariable=self.clock, background=deck, foreground=ink, font=("Segoe UI", 9)).pack(side="right")
+        self.timeline = ttk.Progressbar(progress, maximum=180, style="Radio.Playback.Horizontal.TProgressbar")
+        self.timeline.pack(fill="x", pady=(4, 0))
         self.text = tk.StringVar()
-        self.details = ttk.Frame(self.frame, style="Card.TFrame")
-        ttk.Label(self.details, textvariable=self.text, style="CardMuted.TLabel").pack(anchor="w", pady=(7, 3))
-        self.bar = ttk.Progressbar(self.details, maximum=100, style="Cale.Horizontal.TProgressbar")
-        self.bar.pack(fill="x")
+        self.details = tk.Frame(self.frame, background=deck)
+        tk.Label(self.details, textvariable=self.text, background=deck, foreground=muted, font=("Segoe UI", 9)).pack(anchor="w", pady=(7, 3))
+        self.bar = ttk.Progressbar(self.details, maximum=100, style="Radio.Build.Horizontal.TProgressbar")
         self.refresh_stations()
         self.poll()
         service.start()
 
     def set_volume(self, value):
+        if float(value) > 0:
+            self.previous_volume = float(value)
+        self.mute.configure(text="Unmute" if float(value) == 0 else "Mute")
         self.service.volume(value)
+
+    def toggle_mute(self):
+        self.volume.set(0 if self.volume.get() > 0 else self.previous_volume)
+        self.set_volume(self.volume.get())
 
     def refresh_stations(self):
         self.items = stations(self.service.root)
@@ -404,8 +522,25 @@ class Controls:
             self.details.pack(fill="x")
         elif not state["playing"]:
             self.details.pack_forget()
-        self.text.set(state["message"] + f"  ·  {state['ready']} queued")
+        self.text.set(state["message"] + f"  ·  {state['ready']} tracks ready")
+        if state.get("rendering"):
+            self.bar.pack(fill="x")
+        else:
+            self.bar.pack_forget()
         self.bar.configure(value=state["progress"])
+        elapsed, duration = state.get("elapsed", 0), state.get("duration", 0) or SECONDS
+        def clock(value):
+            return f"{int(value)//60}:{int(value)%60:02d}"
+        self.clock.set(clock(elapsed)+" / "+clock(duration))
+        self.timeline.configure(maximum=duration, value=min(elapsed, duration))
+        self.badge.configure(text="PAUSED" if state["paused"] else "ON AIR" if state.get("on_air") else "BUFFERING" if state["playing"] else "READY",
+                             background="#153a36" if state.get("on_air") else "#252642", foreground="#70edce" if state.get("on_air") else "#bdb3ff")
+        for value, key in zip(self.metrics, ("tracks_made", "radio_tokens", "local_tokens"), strict=True):
+            number = state.get(key)
+            value.set(f"{number:,}" if number is not None else "—")
+        index = self.choice.current()
+        if 0 <= index < len(self.items):
+            self.kind.set(("INSTRUMENTAL" if self.items[index]["instrumental"] else "VOCALS")+" · 3 MIN · LOCAL")
         self.play.configure(text="Resume" if state["paused"] else "Pause" if state["playing"] else "Play")
         self.next.configure(state="normal" if state["playing"] and state["ready"] else "disabled")
         self.window.after(500, self.poll)
