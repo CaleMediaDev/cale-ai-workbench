@@ -210,7 +210,7 @@ def test_background_flow_uses_only_public_source_and_keeps_usage_on_cancellation
           patch("usage_history.record_completion"),
           patch.object(donation, "public_file", side_effect=public),
           patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
-          patch.object(donation, "open_proposal", return_value="https://github.com/test/pull/1") as publish):
+          patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/1") as publish):
         service._run(cancel)
     assert donation.total_tokens(tmp_path) == 50
     assert "PRIVATE DOCUMENT" not in json.dumps(payloads)
@@ -222,7 +222,7 @@ def test_background_flow_uses_only_public_source_and_keeps_usage_on_cancellation
         publish.assert_called_once()
         with closing(donation.connection(tmp_path)) as conn:
             assert conn.execute("SELECT status,url FROM runs").fetchone() == (
-                "submitted", "https://github.com/test/pull/1")
+                "submitted", "https://github.com/CaleMediaDev/cale-ai-workbench/pull/1")
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -389,7 +389,7 @@ def test_local_background_flow_does_not_require_a_chatgpt_account(tmp_path):
           patch("chatgpt_auth.status", side_effect=AssertionError("ChatGPT should not be needed")),
           patch("usage_history.record_completion"), patch.object(donation, "public_file", side_effect=public),
           patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
-          patch.object(donation, "open_proposal", return_value="https://github.com/test/pull/2") as publish):
+          patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/2") as publish):
         service._run(threading.Event())
     publish.assert_called_once()
     assert donation.source_totals(tmp_path) == {"local": 50}
@@ -614,7 +614,7 @@ def test_full_blast_keeps_inflight_work_on_activity_but_explicit_stop_cancels(tm
           patch.object(donation, "public_file", side_effect=public),
           patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
           patch.object(donation, "complete_donation", side_effect=complete),
-          patch.object(donation, "open_proposal", return_value="https://github.com/test/pull/7") as publish):
+          patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/7") as publish):
         service._run(service.cancel)
     publish.assert_called_once()
     assert payloads and service.next_attempt == 0
@@ -1581,12 +1581,16 @@ def test_quota_exhausted_chatgpt_scheduler_immediately_uses_enabled_local(tmp_pa
          patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
          patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
-         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal',side_effect=lambda *args: drafts.append(args) or 'https://example.invalid/draft'),\
+         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal',side_effect=lambda *args: drafts.append(args) or 'https://github.com/CaleMediaDev/cale-ai-workbench/pull/11'),\
          patch.object(donation.threading,'Thread',DonationInlineThread):
         service.tick()
         assert resources==['chatgpt'] and service.next_attempt==0
         service.tick()
     assert resources==['chatgpt','local'] and len(drafts)==1
+    events=service.drain_events()
+    assert [event['phase'] for event in events]==['reviewing','waiting','reviewing','checking','submitting','submitted']
+    assert events[-1]['pr_url']=='https://github.com/'+donation.UPSTREAM+'/pull/11'
+    assert all('message' not in event and 'tests_ran' not in event for event in events)
     assert donation.resource_cooldown(tmp_path,'chatgpt')>0 and donation.resource_cooldown(tmp_path,'local')==0
     assert donation.settings(tmp_path)['sources']==['chatgpt','local']
     with closing(donation.connection(tmp_path)) as conn:
@@ -1640,3 +1644,57 @@ def test_cloud_pinned_child_never_turns_into_parallel_local_worker(tmp_path):
         service.tick();service.tick()
     assert complete.call_count==1 and complete.call_args.args[1]=='chatgpt'
     assert service.next_attempt>time.monotonic() and service.resource=='chatgpt'
+
+def test_donation_event_queue_is_shared_bounded_and_preserves_pr_events_over_progress(tmp_path):
+    service=donation.Service(tmp_path)
+    child=donation.Service(tmp_path,_lane=True,_resource='chatgpt',_events=service._events)
+    url='https://github.com/'+donation.UPSTREAM+'/pull/123'
+    child._emit_event('submitted','actual-run','chatgpt',job_title='Public title\nonly',pr_url=url)
+    for number in range(600):child._emit_event('reviewing',str(number),'chatgpt',job_title='Working')
+    events=[]
+    for _ in range(5):
+        part=service.drain_events();assert len(part)<=64;events.extend(part)
+    assert len(events)<=256 and any(row.get('pr_url')==url for row in events)
+    submitted=next(row for row in events if row['phase']=='submitted')
+    assert submitted['job_title']=='Public title only' and submitted['run_id']=='actual-run'
+    assert set(submitted)=={'event_id','run_id','phase','resource','job_title','pr_url'}
+    assert child.drain_events()==[]
+
+
+@pytest.mark.parametrize('url',['https://github.com/other/repo/pull/1','https://evil.invalid/pull/1',
+    'https://github.com/'+donation.UPSTREAM+'/pull/1?secret=x','javascript:bad'])
+def test_invalid_or_unconfirmed_pr_url_is_never_a_submitted_event(tmp_path,url):
+    service=donation.Service(tmp_path)
+    service._emit_event('submitted','run','local',pr_url=url)
+    service._emit_event('checking','run','local',pr_url=url)
+    events=service.drain_events()
+    assert len(events)==1 and events[0]['phase']=='checking' and 'pr_url' not in events[0]
+    assert 'message' not in events[0]
+
+
+def test_full_blast_children_report_actual_stages_to_parent_queue(tmp_path):
+    donation.set_enabled(True,tmp_path,chatgpt_account=FINGERPRINT,github_account='donor',sources=['chatgpt'],intensity='full_blast')
+    service=donation.Service(tmp_path);entered=[]
+    def work(worker,cancel):
+        entered.append(worker)
+        worker._emit_event('reviewing',str(len(entered)),'chatgpt',job_title='Public review')
+    with patch('pc_offline.offline',return_value=False),patch.object(donation.Service,'_run',autospec=True,side_effect=work),patch.object(donation.threading,'Thread',DonationInlineThread):
+        service.tick()
+    assert len(entered)==6 and len(service.drain_events())==6
+    assert all(child.resource=='chatgpt' for child in service.children)
+
+def test_failed_proposal_syntax_check_never_reports_sent_pr_or_private_model_output(tmp_path):
+    donation.set_enabled(True,tmp_path,github_account='donor',sources=['local'],intensity='medium')
+    service=donation.Service(tmp_path)
+    result={'choices':[{'message':{'content':'PRIVATE_MODEL_OUTPUT_NOT_A_VALID_PROPOSAL'}}]}
+    def public(path,revision):return json.dumps([JOB]) if path=='donation-tasks.json' else SOURCES[path]
+    with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
+         patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
+         patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
+         patch.object(donation,'complete_donation',return_value=result),patch.object(donation,'open_proposal') as publish:
+        service._run(threading.Event())
+    publish.assert_not_called()
+    events=service.drain_events()
+    assert [event['phase'] for event in events]==['reviewing','checking','error']
+    assert 'PRIVATE_MODEL_OUTPUT' not in json.dumps(events) and not any('pr_url' in event for event in events)

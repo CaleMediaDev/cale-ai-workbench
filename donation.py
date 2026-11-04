@@ -21,6 +21,7 @@ import threading
 import time
 import uuid
 from contextlib import closing
+from collections import deque
 from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
@@ -278,6 +279,12 @@ def local_completion(payload: dict, intensity: str, cancel, on_usage):
         "choices": [{"message": {"role": "assistant", "content": "".join(content)}}]}
     on_usage(result, "ollama", "main", False)
     return result
+
+
+def valid_proposal_url(url):
+    """A successful submission names an actual PR in the canonical upstream."""
+    return isinstance(url, str) and bool(re.fullmatch(
+        r"https://github\.com/" + re.escape(UPSTREAM) + r"/pull/[1-9][0-9]{0,18}", url, re.I))
 
 
 def inference_retry_seconds(error):
@@ -788,7 +795,7 @@ def continuous_jobs(jobs: list, revision: str, *, source_budget=35_000) -> list:
 class Service:
     """GUI-owned scheduler; no model or GitHub calls run on the UI thread."""
 
-    def __init__(self, root: Path = ROOT, *, _lane=False, _resource=None):
+    def __init__(self, root: Path = ROOT, *, _lane=False, _resource=None, _events=None):
         self.root = root
         self.last_activity = time.monotonic()
         self.cancel = threading.Event()
@@ -796,6 +803,7 @@ class Service:
         self.lane = _lane
         self.resource = _resource
         self.children = []
+        self._events = _events if _events is not None else {"queue": deque(), "lock": threading.Lock()}
         self.next_attempt = 0.0
         self.suspended = False
         consent = settings(root)
@@ -803,6 +811,36 @@ class Service:
         self.failures = 0
         self.message = (("Continuous donation work is enabled." if self.continuous else "Waiting for Cale to be idle.")
                         if consent["enabled"] else "Off · help improve Cale when you choose.")
+
+    def _emit_event(self, phase, run_id="", resource="", *, job_title="", pr_url=""):
+        """Nonblocking bounded notifications from actual host stages, never model prose.
+
+        Progress is discarded before terminal PR notifications under pressure.
+        All submitted PR URLs also remain durable in the existing runs ledger.
+        """
+        if phase not in {"reviewing", "checking", "submitting", "submitted", "no_change", "waiting", "error", "training", "trained"}:
+            return
+        if phase == "submitted" and not valid_proposal_url(pr_url):
+            return
+        event = {"event_id": uuid.uuid4().hex, "run_id": str(run_id)[:80], "phase": phase}
+        if resource in {*SOURCES, "cpu"}:event["resource"] = resource
+        if job_title:event["job_title"] = re.sub(r"[\x00-\x1f\x7f]", " ", str(job_title))[:160]
+        if phase == "submitted":event["pr_url"] = pr_url
+        with self._events["lock"]:
+            queue = self._events["queue"]
+            if len(queue) >= 256:
+                discard = next((index for index, old in enumerate(queue) if old["phase"] != "submitted"), None)
+                if discard is None:
+                    if phase != "submitted":return
+                    queue.popleft()  # Durable submitted URLs are never removed from the ledger.
+                else:del queue[discard]
+            queue.append(event)
+
+    def drain_events(self):
+        """Take at most 64 typed events; no I/O, account calls or inference on Tk."""
+        with self._events["lock"]:
+            queue = self._events["queue"]
+            return [dict(queue.popleft()) for _ in range(min(64, len(queue)))]
 
     def activity(self):
         """Track activity; only idle donation modes yield when the person returns."""
@@ -831,7 +869,7 @@ class Service:
             # Local/free work remains serial to respect GPU/provider limits.
             if consent["intensity"] == "full_blast" and "chatgpt" in consent["sources"]:
                 if not self.children:
-                    self.children = [Service(self.root, _lane=True, _resource="chatgpt")
+                    self.children = [Service(self.root, _lane=True, _resource="chatgpt", _events=self._events)
                                      for _ in range(FULL_BLAST_LANES - 1)]
                 for child in self.children:
                     child.tick(busy=busy, suspended=suspended)
@@ -906,13 +944,18 @@ class Service:
                     trained = None
                     try:
                         self.message = "Training a small public-data specialist on CPU (up to 5 minutes)…"
+                        self._emit_event("training", run_id, "cpu", job_title="Public-data model experiment")
                         trained = experiment.get("resume") or donation_models.run_job(self.root, check_cancel=check_cancel)
                         state = "ready" if trained["qualified"] else "not_qualified"
                         donation_models.complete(self.root, experiment, trained, state)
+                        self._emit_event("trained", run_id, "cpu", job_title="Public-data model experiment")
                         if trained["qualified"]:
                             check_cancel()
+                            self._emit_event("submitting", run_id, "cpu", job_title="Public-data model experiment")
                             url = donation_models.publish_candidate(self.root, experiment, trained, login, check_cancel)
+                            if not valid_proposal_url(url):raise ValueError("GitHub did not return a canonical contribution PR URL")
                             finish(self.root, run_id, "submitted", url)
+                            self._emit_event("submitted", run_id, "cpu", job_title="Public-data model experiment", pr_url=url)
                             with closing(donation_models._connection(self.root)) as conn, conn:
                                 conn.execute("UPDATE model_experiments SET state='submitted' WHERE fingerprint=? AND run_id=?",
                                              (experiment["fingerprint"], run_id))
@@ -1032,6 +1075,7 @@ class Service:
                 raise ValueError("Maintainer task exceeds the public-source context budget")
             check_cancel()
             self.message = f"Donating {resource.replace('_', ' ')} AI · reviewing public Cale code…"
+            self._emit_event("reviewing", run_id, resource, job_title=job.get("title", ""))
             payload = {"messages": [
                 {"role": "system", "content":
                  "Review public Cale AI Workbench source for one concrete correctness bug in the assigned area. "
@@ -1066,14 +1110,17 @@ class Service:
                 self.next_attempt = (0 if current["enabled"] and alternatives
                     and current["intensity"] in {"medium", "full_blast"} else
                     max(self.next_attempt, time.monotonic() + seconds))
+                self._emit_event("waiting", run_id, resource, job_title=job.get("title", ""))
                 self.message = (resource.replace("_", " ") + " is temporarily unavailable · "
                     + ("trying another enabled source." if self.next_attempt == 0 else "waiting for its cooldown."))
                 return
             check_cancel()
             text = result["choices"][0]["message"].get("content") or ""
+            self._emit_event("checking", run_id, resource, job_title=job.get("title", ""))
             proposal, edited = validate_proposal(text, sources)
             if not edited:
                 finish(self.root, run_id, "no_change")
+                self._emit_event("no_change", run_id, resource, job_title=job.get("title", ""))
                 self.message = "Review complete · no reliable code change proposed this time."
                 self.failures = 0
                 if consent["intensity"] in {"medium", "full_blast"}:
@@ -1081,8 +1128,11 @@ class Service:
                 return
             check_cancel()
             self.message = "Submitting a draft for maintainer review…"
+            self._emit_event("submitting", run_id, resource, job_title=job.get("title", ""))
             url = open_proposal(login, run_id, job, commit, proposal, edited, check_cancel)
+            if not valid_proposal_url(url):raise ValueError("GitHub did not return a canonical contribution PR URL")
             finish(self.root, run_id, "submitted", url)
+            self._emit_event("submitted", run_id, resource, job_title=job.get("title", ""), pr_url=url)
             self.message = "Thank you · your draft is waiting for maintainer review."
             self.failures = 0
             if consent["intensity"] in {"medium", "full_blast"}:
@@ -1105,10 +1155,12 @@ class Service:
                     seconds = 300
                 resource_cooldown(self.root, "github", seconds)
             self.next_attempt = time.monotonic() + max(30, min(86400, seconds))
+            self._emit_event("waiting", run_id, resource)
             self.message = "Account limit or connection delay · waiting before retrying."
         except Exception as error:
             if run_id:
                 finish(self.root, run_id, "failed")
             self.failures += 1
             self.next_attempt = max(self.next_attempt, time.monotonic() + min(600, 30 * 2 ** min(self.failures, 5)))
+            self._emit_event("error", run_id, resource)
             self.message = "Connection or account temporarily unavailable · retrying automatically."
