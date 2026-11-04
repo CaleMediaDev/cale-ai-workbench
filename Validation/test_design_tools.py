@@ -259,6 +259,71 @@ def test_rejects_non_astro_project(tmp_path):
         add_astro_ai_ui(str(tmp_path))
 
 
+def test_kit_install_preserves_file_created_after_conflict_check(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    import design_tools
+
+    kit = tmp_path / "kit"
+    (kit / "src").mkdir(parents=True)
+    (kit / "src/Message.astro").write_text("bundled component", encoding="utf-8")
+    (kit / "LICENSE").write_text("fixture license", encoding="utf-8")
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", kit)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text(
+        json.dumps({"dependencies": {"astro": "^5"}}), encoding="utf-8"
+    )
+    destination = project / "src/vendor/ai-ui"
+    raced_file = destination / "Message.astro"
+    original_mkdir = Path.mkdir
+
+    def mkdir_with_concurrent_edit(self, *args, **kwargs):
+        result = original_mkdir(self, *args, **kwargs)
+        if self == destination:
+            raced_file.write_text("concurrent custom component", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(Path, "mkdir", mkdir_with_concurrent_edit)
+
+    with pytest.raises(FileExistsError):
+        add_astro_ai_ui(str(project))
+
+    assert raced_file.read_text(encoding="utf-8") == "concurrent custom component"
+    assert not (destination / "LICENSE").exists()
+
+
+def test_kit_install_missing_source_does_not_leave_empty_destination(tmp_path, monkeypatch):
+    from pathlib import Path
+    import design_tools
+
+    kit = tmp_path / "kit"
+    (kit / "src").mkdir(parents=True)
+    original = kit / "src/Message.astro"
+    original.write_text("bundled component", encoding="utf-8")
+    (kit / "LICENSE").write_text("fixture license", encoding="utf-8")
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", kit)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text(
+        json.dumps({"dependencies": {"astro": "^5"}}), encoding="utf-8")
+    destination = project / "src/vendor/ai-ui"
+    real_mkdir = Path.mkdir
+
+    def source_disappears_after_preflight(path, *args, **kwargs):
+        result = real_mkdir(path, *args, **kwargs)
+        if path == destination:
+            original.unlink(missing_ok=True)
+        return result
+
+    monkeypatch.setattr(Path, "mkdir", source_disappears_after_preflight)
+    with pytest.raises(FileNotFoundError):
+        add_astro_ai_ui(str(project))
+    assert not (destination / "Message.astro").exists()
+    assert not (destination / "LICENSE").exists()
+
+
 def test_conflict_does_not_copy_other_files(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"devDependencies": {"astro": "^5"}}), encoding="utf-8")
     existing = tmp_path / "src/vendor/ai-ui/components/ai-ui/Message.astro"

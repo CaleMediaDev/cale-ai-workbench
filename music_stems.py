@@ -69,7 +69,8 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
             staging = Path(staging_dir)
             result = subprocess.run(
                 [str(python), str(Path(__file__).resolve()), "--worker", str(source), str(staging)],
-                capture_output=True, text=True, timeout=7200, creationflags=HIDE,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=7200, creationflags=HIDE,
             )
             if result.returncode != 0:
                 raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Audio separation failed.")

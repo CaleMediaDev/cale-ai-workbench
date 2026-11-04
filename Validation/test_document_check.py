@@ -71,6 +71,15 @@ def test_document_check_rejects_unicode_word_fragments(tmp_path, location, text)
     assert result["errors"] == [expected]
 
 
+@pytest.mark.parametrize("operation", [[], {}, ["add"]])
+def test_document_check_rejects_non_string_operations(tmp_path, operation):
+    folder = _project(tmp_path)
+    spec = {**SPEC, "calculations": [{**SPEC["calculations"][0],
+                                      "operation": operation}]}
+    with pytest.raises(ValueError, match="A calculation needs add or subtract"):
+        document_check.validate_spec(folder, spec)
+
+
 def test_document_check_rejects_wrong_amount_and_prefix_match(tmp_path):
     folder = _project(tmp_path)
     wrong = {**SPEC, "calculations": [{**SPEC["calculations"][0],

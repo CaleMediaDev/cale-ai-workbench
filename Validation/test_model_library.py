@@ -792,6 +792,21 @@ class AutoModelTests(unittest.TestCase):
                 library.probe_tool_use("candidate-source")
         post.assert_called_once()
 
+    def test_malformed_tool_call_records_fail_the_candidate_probe(self):
+        for value in (None, "invalid", [], 42, True):
+            for call in (value, {"function": value}):
+                with self.subTest(call=call):
+                    response = {
+                        "message": {"tool_calls": [call]},
+                        "eval_count": 64,
+                        "eval_duration": 2_000_000_000,
+                    }
+                    with patch.object(library, "post", return_value=response) as post:
+                        with self.assertRaisesRegex(library.CandidateModelError,
+                                                    "tool-use check"):
+                            library.probe_tool_use("candidate-source")
+                    post.assert_called_once()
+
     def test_non_object_tool_arguments_fail_the_candidate_probe(self):
         for arguments in (None, 'invalid', [], 42, True):
             with self.subTest(arguments=arguments):

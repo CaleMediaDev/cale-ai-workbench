@@ -60,8 +60,10 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
         if not isinstance(row, dict):
             continue
         identifier = str(row.get("identifier", ""))
-        name = str(row.get("name", ""))[:100]
-        description = str(row.get("description", ""))[:500]
+        name = row.get("name", "")
+        description = row.get("description", "")
+        name = name[:100] if isinstance(name, str) else ""
+        description = description[:500] if isinstance(description, str) else ""
         haystack = (name + " " + description).casefold()
         if (
             IDENTIFIER.fullmatch(identifier)

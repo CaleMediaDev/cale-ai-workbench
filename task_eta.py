@@ -172,7 +172,9 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
             (task_id,),
         ).fetchone()
         elapsed = float(row[0]) if row else 0.0
-        if row and row[2] and active and 0 <= now - row[1] <= 60:
+        # The previous observation determines whether this interval was active.
+        # Include work up to a pause or completion, but not time before resuming.
+        if row and row[2] and 0 <= now - row[1] <= 60:
             elapsed += now - row[1]
         previous = int(row[3]) if row else 0
         conn.execute("""INSERT INTO task_eta_state(task_id,active_seconds,last_seen,was_active,last_percent)

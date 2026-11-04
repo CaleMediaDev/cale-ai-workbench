@@ -25,8 +25,12 @@ SUPPORTED = file_chat.IMAGES | file_chat.PLAIN_TEXT | file_chat.DOCUMENTS
 
 def _digest(path: Path) -> str:
     digest = hashlib.sha256()
+    total = 0
     with path.open("rb") as source:
         while chunk := source.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_SOURCE_BYTES:
+                raise ValueError("This document exceeds the 50 MB local reader limit")
             digest.update(chunk)
     return digest.hexdigest()
 

@@ -115,6 +115,32 @@ def test_missing_nvidia_driver_reports_hardware_requirement(tmp_path):
             video_generation._hardware_ready(tmp_path / "clip.mp4")
 
 
+@pytest.mark.parametrize("worker_state", ["installing", "complete", "failed"])
+def test_launch_preserves_state_published_before_popen_returns(tmp_path, worker_state):
+    jobs = tmp_path / "jobs"
+
+    def launch_worker(command, **kwargs):
+        job_id = command[-1]
+        stored = json.loads((jobs / f"{job_id}.json").read_text(encoding="utf-8"))
+        assert stored["state"] == "starting"
+        video_generation._write(job_id, state=worker_state, detail="Worker published progress")
+        return SimpleNamespace(pid=12345)
+
+    with patch.object(video_generation, "JOBS", jobs), patch.object(
+        video_generation, "_hardware_ready"
+    ), patch.object(video_generation.subprocess, "Popen", side_effect=launch_worker):
+        result = video_generation.start_video_job(
+            "A calm forest in the rain", str(tmp_path / "clip.mp4")
+        )
+        stored = json.loads((jobs / f"{result['job_id']}.json").read_text(encoding="utf-8"))
+
+    assert result["state"] == worker_state
+    assert stored["state"] == worker_state
+    assert stored["detail"] == "Worker published progress"
+    assert stored["worker_pid"] == 12345
+    assert stored["log_path"] == str(jobs / f"{result['job_id']}.log")
+
+
 def test_worker_launch_failure_persists_failed_status(tmp_path):
     jobs = tmp_path / "jobs"
     with patch.object(video_generation, "JOBS", jobs), patch.object(

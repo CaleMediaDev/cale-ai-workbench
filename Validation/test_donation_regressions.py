@@ -60,6 +60,16 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class CalculatorPrecisionTests(unittest.TestCase):
+    def test_nested_floor_division_is_rejected_before_sibling_evaluation(self):
+        for expression in (
+            "1 / 0 + (2 // 1)",
+            "(2 // 1) + 1 / 0",
+            "1 / 0 + (2 ÷÷ 1)",
+        ):
+            with self.subTest(expression=expression):
+                self.assertIsNone(calculate(expression))
+        self.assertEqual(calculate("1 / 0 + (2 / 1)"), "Cannot divide by zero.")
+
     def test_unsupported_operator_is_rejected_before_evaluating_operands(self):
         for expression in ("1 // (1 / 0)", "(1 / 0) // 2", "1 // 0"):
             with self.subTest(expression=expression):

@@ -143,7 +143,11 @@ def _stop_check(process: subprocess.Popen) -> None:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 # An exited or inaccessible child must not prevent sibling cleanup.
                 pass
-        process.terminate()
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            # The parent may exit while its children still need cleanup.
+            pass
         _, alive = psutil.wait_procs(children, timeout=5)
         for child in alive:
             try:
