@@ -39,8 +39,14 @@ def _present(text: str, phrase: str) -> bool:
     boundary = r"(?![^\W_])"
     if phrase[-1].isdigit():
         boundary = r"(?![^\W_]|[.,][0-9])"
-    return bool(re.search(r"(?<![^\W_])" + re.escape(phrase) +
-                          boundary, normalized))
+    matches = re.finditer(r"(?<![^\W_])" + re.escape(phrase) + boundary, normalized)
+    for match in matches:
+        # Whitespace is normalized above, so a leading minus is at most two
+        # characters before the dollar sign. Do not verify its positive suffix.
+        if phrase.startswith("$") and normalized[max(0, match.start() - 2):match.start()].rstrip().endswith("-"):
+            continue
+        return True
+    return False
 
 
 def _money(text: str) -> Decimal:
