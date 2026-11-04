@@ -8,6 +8,27 @@ import web_tools
 
 
 class BusinessContactTests(unittest.TestCase):
+    def test_short_business_name_does_not_match_inside_another_name(self):
+        self.assertFalse(web_tools.name_matching_domain("Ace Plumbing", "https://palaceplumbing.com"))
+        self.assertFalse(web_tools.business_name_matches(
+            "Ace Plumbing", "Palace Plumbing", "https://directory.example/listing"))
+        self.assertFalse(web_tools.business_name_matches(
+            "Ace Plumbing", "Palace Plumbing", "https://palaceplumbing.com"))
+        self.assertTrue(web_tools.business_name_matches(
+            "Ace Plumbing", "Ace Plumbing - Contact", "https://directory.example/listing"))
+        self.assertTrue(web_tools.name_matching_domain("Ace Plumbing", "https://aceplumbing.com"))
+
+    def test_email_lookup_does_not_attribute_similarly_named_business(self):
+        results = {"results": [{"url": "https://palaceplumbing.com/contact", "title": "Palace Plumbing"}]}
+        page = {"source_url": "https://palaceplumbing.com/contact", "title": "Palace Plumbing",
+                "retrieved_at": "2026-11-04T00:00:00Z", "text": "Call Palace Plumbing",
+                "contact_links": ["mailto:office@palaceplumbing.com"]}
+        with patch.object(web_tools, "search_web", return_value=results), \
+             patch.object(web_tools, "read_webpage", return_value=page) as read:
+            result = web_tools.find_business_email("Ace Plumbing")
+        self.assertEqual(result["sources"], [])
+        read.assert_not_called()
+
     def test_web_reader_uses_bundled_curl_when_windows_omits_it(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory

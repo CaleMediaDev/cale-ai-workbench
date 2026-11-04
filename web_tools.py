@@ -326,7 +326,7 @@ def name_matching_domain(name: str, url: str) -> bool:
     if len(labels) < 2:
         return False
     brand = "".join(re.findall(r"[a-z0-9]+", name.casefold()))
-    return len(brand) >= 5 and brand in labels[-2]
+    return len(brand) >= 5 and brand == labels[-2]
 
 
 VISIBLE_PHONE = re.compile(
@@ -365,7 +365,7 @@ def business_name_matches(name: str, title: str, url: str) -> bool:
         word for word in re.findall(r"[a-z0-9]+", name.casefold())
         if len(word) > 1 and word not in {"the", "and", "llc", "inc"}
     ]
-    visible = (title + " " + (urlsplit(url).hostname or "")).casefold()
+    visible = set(re.findall(r"[a-z0-9]+", (title + " " + (urlsplit(url).hostname or "")).casefold()))
     return bool(words) and all(word in visible for word in words)
 
 
