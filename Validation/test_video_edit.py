@@ -4,12 +4,37 @@ import asyncio
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import imageio_ffmpeg
 import pytest
 
 import toolbox_mcp
 import video_edit
+
+
+@pytest.mark.parametrize("failure", ["timeout", "interrupt", "error", "success"])
+def test_concurrent_destination_is_never_deleted_or_replaced(tmp_path, monkeypatch, failure):
+    output = tmp_path / "edited.mp4"
+
+    def render(command, **kwargs):
+        output.write_bytes(b"another operation's video")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, 1)
+        if failure == "interrupt":
+            raise KeyboardInterrupt()
+        if failure == "error":
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="render failed")
+        Path(command[-1]).write_bytes(b"rendered video")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(video_edit.subprocess, "run", render)
+    expected = {"timeout": subprocess.TimeoutExpired, "interrupt": KeyboardInterrupt,
+                "error": RuntimeError, "success": FileExistsError}[failure]
+    with pytest.raises(expected):
+        video_edit._run([], output)
+    assert output.read_bytes() == b"another operation's video"
+    assert list(tmp_path.iterdir()) == [output]
 
 
 def test_replacing_soundtrack_preserves_compatible_video_packets(tmp_path):
@@ -93,9 +118,9 @@ def test_run_timeout_cleans_partial_output_only(tmp_path, monkeypatch, existing_
     timeout_error = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1)
 
     def timed_out(command, **kwargs):
-        assert command[-1] == str(output)
-        if not existing_output:
-            output.write_bytes(b"partial video")
+        staged = Path(command[-1])
+        assert staged != output and staged.parent.parent == output.parent
+        staged.write_bytes(b"partial video")
         raise timeout_error
 
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
@@ -118,9 +143,9 @@ def test_run_interruption_cleans_partial_output_only(tmp_path, monkeypatch, exis
     interruption = KeyboardInterrupt()
 
     def interrupted(command, **kwargs):
-        assert command[-1] == str(output)
-        if not existing_output:
-            output.write_bytes(b"partial video")
+        staged = Path(command[-1])
+        assert staged != output and staged.parent.parent == output.parent
+        staged.write_bytes(b"partial video")
         raise interruption
 
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
@@ -140,13 +165,14 @@ def test_run_distinguishes_overwrite_refusal_from_output_filename(tmp_path, monk
     output = tmp_path / "already exists.mp4"
 
     def failed_output(command, **kwargs):
-        assert command[-1] == str(output)
+        staged = Path(command[-1])
+        assert staged != output and staged.parent.parent == output.parent
         if overwrite_refused:
             # Another writer created the destination after _run checked it.
             output.write_bytes(b"existing video")
             stderr = f"File '{output}' already exists. Exiting.\n"
         else:
-            output.write_bytes(b"partial video")
+            staged.write_bytes(b"partial video")
             stderr = f"Error opening output file {output}.\nError opening output files: Invalid argument\n"
         return subprocess.CompletedProcess(command, 1, stdout="", stderr=stderr)
 
@@ -166,7 +192,8 @@ def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeyp
     real_run = subprocess.run
 
     def failed_process(command, **kwargs):
-        assert command[-1] == str(output)
+        staged = Path(command[-1])
+        assert staged != output and staged.parent.parent == output.parent
         # Exercise subprocess's real text decoding, without depending on FFmpeg
         # or the host locale to produce a particular diagnostic encoding.
         kwargs["encoding"] = "utf-8"
@@ -176,7 +203,7 @@ def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeyp
             "sys.stderr.buffer.write(b'Invalid filename: \\xff\\n'); "
             "sys.exit(1)"
         )
-        return real_run([sys.executable, "-c", script, str(output)], **kwargs)
+        return real_run([sys.executable, "-c", script, str(staged)], **kwargs)
 
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
     monkeypatch.setattr(video_edit.subprocess, "run", failed_process)
@@ -192,8 +219,9 @@ def test_run_removes_empty_output_after_successful_process(tmp_path, monkeypatch
     output = tmp_path / "edited.mp4"
 
     def empty_output(command, **kwargs):
-        assert command[-1] == str(output)
-        output.write_bytes(b"")
+        staged = Path(command[-1])
+        assert staged != output and staged.parent.parent == output.parent
+        staged.write_bytes(b"")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")

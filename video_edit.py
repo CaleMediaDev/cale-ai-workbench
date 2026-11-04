@@ -7,7 +7,9 @@ shell commands, so user-supplied filenames never become executable syntax.
 from __future__ import annotations
 
 import math
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -42,21 +44,20 @@ def _number(value: float, minimum: float, maximum: float, name: str) -> float:
 
 
 def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
-    command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner",
-               "-loglevel", "error", "-n", *arguments, str(output)]
-    output_existed = output.exists()
-    try:
+    with tempfile.TemporaryDirectory(prefix=".video-edit-", dir=output.parent) as directory:
+        staged = Path(directory) / output.name
+        command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner",
+                   "-loglevel", "error", "-n", *arguments, str(staged)]
         result = subprocess.run(command, capture_output=True, text=True,
                                 errors="replace", timeout=timeout, creationflags=HIDE)
-    except (subprocess.TimeoutExpired, KeyboardInterrupt):
-        if not output_existed:
-            output.unlink(missing_ok=True)
-        raise
-    if result.returncode or not output.is_file() or not output.stat().st_size:
-        overwrite_refused = f"File '{output}' already exists. Exiting." in result.stderr
-        if not output_existed and output.is_file() and not overwrite_refused:
-            output.unlink(missing_ok=True)
-        raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Video edit failed.")
+        if result.returncode or not staged.is_file() or not staged.stat().st_size:
+            raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Video edit failed.")
+        # Windows rename refuses an existing destination and also supports
+        # removable filesystems without hard links. POSIX rename would replace.
+        if os.name == "nt":
+            staged.rename(output)
+        else:
+            output.hardlink_to(staged)
     return {"path": str(output), "bytes": output.stat().st_size}
 
 
