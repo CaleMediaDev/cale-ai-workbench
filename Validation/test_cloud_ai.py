@@ -2223,3 +2223,139 @@ def test_contains_diagnostic_does_not_change_type_or_malformed_json_errors():
         "name": "rows_tool", "arguments": "{ malformed JSON"}}]}}]}
     with pytest.raises(json.JSONDecodeError):
         cloud.valid_completion(response, request)
+
+
+class SubscriptionAgentTests(unittest.TestCase):
+    def test_subscription_status_is_separate_from_free_registry_and_disabled(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(cloud_providers, 'AGENT_ROOT', Path(d),create=True):
+            for provider in ('claude','grok'):
+                value=cloud_providers.subscription_agent_status(provider)
+                self.assertFalse(value['installed']);self.assertFalse(value['connected']);self.assertFalse(value['enabled'])
+                self.assertNotIn(provider,cloud_providers.PROVIDERS)
+                with self.assertRaises(ValueError):cloud_providers.enable_subscription_agent(provider,True)
+
+    def test_subscription_builder_keeps_prompt_one_argument_and_approvals(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents',create=True):
+            folder=Path(d)/'project';folder.mkdir()
+            prompt='Fix this; $(whoami) & never run injected shell'
+            for provider in ('claude','grok'):
+                exe=cloud_providers._subscription_binary(provider);exe.parent.mkdir(parents=True,exist_ok=True);exe.write_bytes(b'MZfake')
+                args=cloud_providers.build_subscription_task_command(provider,folder,prompt)
+                self.assertIn(prompt,args)
+                self.assertFalse(any(x in args for x in ('--yolo','--always-approve','--dangerously-skip-permissions','bypassPermissions')))
+                self.assertIn('--max-turns',args)
+
+    def test_subscription_env_cannot_fall_back_to_paid_api_credentials(self):
+        with patch.dict('os.environ',{'ANTHROPIC_API_KEY':'secret','XAI_API_KEY':'secret','CLAUDE_CODE_OAUTH_TOKEN':'secret','OPENAI_API_KEY':'secret','KEEP_TEST':'yes'}):
+            env=cloud_providers._subscription_environment()
+        for key in ('ANTHROPIC_API_KEY','XAI_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','OPENAI_API_KEY'):self.assertNotIn(key,env)
+        self.assertEqual(env['KEEP_TEST'],'yes')
+
+
+    def test_subscription_connect_runs_only_official_login_and_is_not_enabled(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(cloud_providers,'AGENT_ROOT',Path(d)):
+            for provider in ('claude','grok'):
+                exe=cloud_providers._subscription_binary(provider);exe.parent.mkdir(parents=True,exist_ok=True);exe.write_bytes(b'MZfake')
+                replies=[(0,'do not expose auth output','')] + ([(0,json.dumps({'authMethod':'claude.ai'}),'')] if provider=='claude' else [])
+                with patch.object(cloud_providers,'_agent_process',side_effect=replies) as execute:
+                    status=cloud_providers.connect_subscription_agent(provider)
+                self.assertTrue(status['connected']);self.assertFalse(status['enabled'])
+                first=execute.call_args_list[0].args[0]
+                self.assertEqual(first[0],str(exe));self.assertEqual(first[-1],'login')
+                if provider=='claude':self.assertEqual(execute.call_args_list[1].args[0][-2:],['auth','status'])
+                self.assertNotIn('do not expose',json.dumps(status))
+                self.assertTrue(cloud_providers.enable_subscription_agent(provider,True)['enabled'])
+                self.assertFalse(cloud_providers.enable_subscription_agent(provider,False)['enabled'])
+
+    def test_subscription_failed_or_api_login_never_records_connected(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(cloud_providers,'AGENT_ROOT',Path(d)):
+            for provider,replies in [('grok',[(1,'secret','secret')]),('claude',[(0,'',''),(0,json.dumps({'authMethod':'api_key'}),'')])]:
+                exe=cloud_providers._subscription_binary(provider);exe.parent.mkdir(parents=True,exist_ok=True);exe.write_bytes(b'MZfake')
+                with patch.object(cloud_providers,'_agent_process',side_effect=replies):
+                    with self.assertRaises(RuntimeError):cloud_providers.connect_subscription_agent(provider)
+                self.assertFalse(cloud_providers.subscription_agent_status(provider)['connected'])
+
+    def test_subscription_task_respects_policy_and_reports_unknown_usage(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'),patch.object(cloud,'STATE',Path(d)/'Cloud'),patch.object(cloud.pc_offline,'offline',return_value=False):
+            folder=Path(d)/'project';folder.mkdir()
+            exe=cloud_providers._subscription_binary('grok');exe.parent.mkdir(parents=True);exe.write_bytes(b'MZfake')
+            cloud_providers._save_agent_preferences('grok',{'login_completed':True,'enabled':True})
+            for scope in ('local_only','free_cloud_only'):
+                cloud.routing_mode.save_scope(cloud.STATE,scope)
+                with patch.object(cloud_providers,'_agent_process') as execute:
+                    with self.assertRaisesRegex(ValueError,'policy'):cloud_providers.run_subscription_task('grok',folder,'Build a game')
+                execute.assert_not_called()
+            cloud.routing_mode.save_scope(cloud.STATE,'both')
+            with patch.object(cloud_providers,'_agent_process',return_value=(0,json.dumps({'result':'proposed changes'}),'')) as execute:
+                result=cloud_providers.run_subscription_task('grok',folder,'Build a game')
+            self.assertEqual(result['verification'],'agent_report_only');self.assertIsNone(result['usage'])
+            self.assertEqual(result['exit_code'],0);self.assertEqual(execute.call_args.kwargs['timeout'],300)
+            with patch.object(cloud.pc_offline,'offline',return_value=True),patch.object(cloud_providers,'_agent_process') as execute:
+                with self.assertRaises(ValueError):cloud_providers.run_subscription_task('grok',folder,'task')
+            execute.assert_not_called()
+            import usage_history
+            token=usage_history.CURRENT_TASK.set('a'*12)
+            try:
+                with patch.object(cloud,'task_route',return_value='local_only'),patch.object(cloud_providers,'_agent_process') as execute:
+                    with self.assertRaises(ValueError):cloud_providers.run_subscription_task('grok',folder,'task')
+                execute.assert_not_called()
+            finally:usage_history.CURRENT_TASK.reset(token)
+
+    def test_subscription_installer_checks_published_digest_before_extraction(self):
+        import platform
+        with tempfile.TemporaryDirectory() as d, patch.object(cloud_providers,'AGENT_ROOT',Path(d)),patch.object(platform,'machine',return_value='AMD64'):
+            response=io.BytesIO(b'not the official archive');response.geturl=lambda:'https://registry.npmjs.org/@anthropic-ai/claude-code-win32-x64/-/claude-code-win32-x64-2.1.318.tgz'
+            with patch.object(cloud_providers,'urlopen',return_value=response):
+                with self.assertRaisesRegex(ValueError,'checksum'):cloud_providers._install_subscription_agent('claude')
+            self.assertFalse(cloud_providers._subscription_binary('claude').exists())
+
+    def test_subscription_process_output_and_deadline_are_bounded(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises((ValueError,TimeoutError)):
+                cloud_providers._agent_process([sys.executable,'-c',"print('x'*10000)"],cwd=d,timeout=10,max_output=100)
+            with self.assertRaises(TimeoutError):
+                cloud_providers._agent_process([sys.executable,'-c','import time;time.sleep(10)'],cwd=d,timeout=.1)
+
+
+    def test_subscription_actual_usage_counts_cache_once_and_unknown_is_not_recorded(self):
+        import usage_history
+        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'),patch.object(cloud,'STATE',Path(d)/'Cloud'),patch.object(cloud.pc_offline,'offline',return_value=False),patch.object(usage_history,'DATABASE',Path(d)/'usage.db'):
+            folder=Path(d)/'project';folder.mkdir()
+            for provider in ('claude','grok'):
+                exe=cloud_providers._subscription_binary(provider);exe.parent.mkdir(parents=True,exist_ok=True);exe.write_bytes(b'MZfake')
+                cloud_providers._save_agent_preferences(provider,{'login_completed':True,'enabled':True})
+            token=usage_history.CURRENT_TASK.set('b'*12)
+            try:
+                report={'model':'haiku','usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':10,'cache_creation_input_tokens':4}}
+                with patch.object(cloud_providers,'_agent_process',return_value=(0,json.dumps(report),'')):
+                    measured=cloud_providers.run_subscription_task('claude',folder,'task')
+                self.assertEqual(measured['usage'],{'prompt_tokens':16,'completion_tokens':3,'total_tokens':19})
+                with patch.object(cloud_providers,'_agent_process',return_value=(0,json.dumps({'result':'done'}),'')):
+                    self.assertIsNone(cloud_providers.run_subscription_task('grok',folder,'task')['usage'])
+                db=sqlite3.connect(usage_history.DATABASE)
+                try:rows=db.execute('SELECT source,task_id,total_tokens FROM usage_events').fetchall()
+                finally:db.close()
+                self.assertEqual(rows,[('claude_subscription','b'*12,19)])
+            finally:usage_history.CURRENT_TASK.reset(token)
+        result={'usage':{'input_tokens':999,'output_tokens':999},'modelUsage':{'one':{'inputTokens':1,'outputTokens':2,'cacheReadInputTokens':3,'cacheCreationInputTokens':4},'two':{'inputTokens':5,'outputTokens':6}}}
+        self.assertEqual(cloud_providers._subscription_usage('claude',result)['total_tokens'],21)
+        self.assertIsNone(cloud_providers._subscription_usage('grok',{'usage':{'input_tokens':True,'output_tokens':5}}))
+
+    def test_subscription_installer_publishes_only_checksum_verified_executable(self):
+        import tarfile,hashlib,base64,platform
+        archive=io.BytesIO()
+        with tarfile.open(fileobj=archive,mode='w:gz') as package:
+            item=tarfile.TarInfo('package/claude.exe');data=b'MZofficial-test-executable';item.size=len(data);package.addfile(item,io.BytesIO(data))
+            traversal=tarfile.TarInfo('../outside.exe');traversal.size=3;package.addfile(traversal,io.BytesIO(b'bad'))
+        raw=archive.getvalue()
+        spec={**cloud_providers.SUBSCRIPTION_AGENTS['claude'],'integrity':{'x64':base64.b64encode(hashlib.sha512(raw).digest()).decode()}}
+        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'),patch.dict(cloud_providers.SUBSCRIPTION_AGENTS,{'claude':spec}),patch.object(platform,'machine',return_value='AMD64'):
+            response=io.BytesIO(raw);response.geturl=lambda:'https://registry.npmjs.org/@anthropic-ai/claude-code-win32-x64/-/claude-code-win32-x64-2.1.318.tgz'
+            with patch.object(cloud_providers,'urlopen',return_value=response):cloud_providers._install_subscription_agent('claude')
+            self.assertEqual(cloud_providers._subscription_binary('claude').read_bytes(),data)
+            self.assertFalse((Path(d)/'outside.exe').exists())
+
+    def test_subscription_process_cancellation_kills_owned_process_without_unrelated_processes(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(InterruptedError):
+                cloud_providers._agent_process([sys.executable,'-c','import time;time.sleep(10)'],cwd=d,timeout=10,cancel=lambda:True)
