@@ -138,8 +138,13 @@ def _stalled(progress: dict) -> bool:
 def repair_exhausted(progress: dict) -> bool:
     """Tell waiting tasks when automatic repair is finished without success."""
     if progress.get("owner") == "runtime_features":
-        return (progress.get("status") == "failed" and
-                int(progress.get("attempts", 0)) >= 3)
+        if progress.get("status") != "failed":
+            return False
+        try:
+            attempts = int(progress.get("attempts", 0))
+        except (TypeError, ValueError, OverflowError):
+            return False
+        return attempts >= 3
     if not (progress.get("status") == "error" and
             str(progress.get("current", "")).startswith("Setup needs attention:")):
         return False
