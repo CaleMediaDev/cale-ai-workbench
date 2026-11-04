@@ -304,6 +304,51 @@ def test_preview_backend_errors_preserve_successful_browser_result(tmp_path):
         asyncio.run(check(failing_stage))
 
 
+def test_concurrent_browser_previews_publish_their_own_captures(tmp_path):
+    async def check():
+        first_written = asyncio.Event()
+        second_written = asyncio.Event()
+        release_second = asyncio.Event()
+        paths = []
+
+        class FakeSession:
+            async def call_tool(self, name, arguments):
+                if name == "list_pages":
+                    return SimpleNamespace(
+                        is_error=False,
+                        content=[SimpleNamespace(text="1: https://example.com [selected]")],
+                    )
+                assert name == "take_screenshot"
+                path = tmp_path / arguments["filePath"]
+                paths.append(path)
+                if len(paths) == 1:
+                    path.write_bytes(b"first capture")
+                    first_written.set()
+                    await second_written.wait()
+                else:
+                    path.write_bytes(b"second capture")
+                    second_written.set()
+                    await release_second.wait()
+                return SimpleNamespace(is_error=False)
+
+        with (patch.dict(toolbox_mcp.SESSIONS, {"devtools": FakeSession()}, clear=True),
+              patch.object(toolbox_mcp, "registered_project", return_value=tmp_path)):
+            first = asyncio.create_task(toolbox_mcp.mirror_chrome_page(str(tmp_path)))
+            await first_written.wait()
+            second = asyncio.create_task(toolbox_mcp.mirror_chrome_page(str(tmp_path)))
+            try:
+                await first
+                assert (tmp_path / ".local-ai/browser.png").read_bytes() == b"first capture"
+            finally:
+                release_second.set()
+                await second
+            assert (tmp_path / ".local-ai/browser.png").read_bytes() == b"second capture"
+            assert paths[0] != paths[1]
+            assert all(not path.exists() for path in paths)
+
+    asyncio.run(asyncio.wait_for(check(), timeout=2))
+
+
 def test_cancelled_backend_initialization_closes_partial_backend():
     async def check():
         initializing = asyncio.Event()

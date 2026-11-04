@@ -624,7 +624,7 @@ async def mirror_chrome_page(project_folder: str = ""):
             folder = Path(row[0]).resolve()
         image = folder / ".local-ai/browser.png"
         image.parent.mkdir(parents=True, exist_ok=True)
-        temporary = image.with_name("browser-capture.tmp.png")
+        temporary = image.with_name(f"browser-capture-{uuid.uuid4().hex}.tmp.png")
         pages = await SESSIONS["devtools"].call_tool("list_pages", arguments={})
         listing = "\n".join(getattr(part, "text", "") for part in pages.content)
         selected = re.search(r"(?m)^\s*(\d+):[^\n]*\[selected\]", listing)
