@@ -1,0 +1,260 @@
+{
+  "scenario": "offline_expense_app",
+  "brief": "Create index.html, a complete single-file offline expense log for a small business.\nUse no accounts, external libraries, fonts, or network requests. Make it readable on a phone.\nThe form has accessible labels Description, Amount, and Category. Category choices are\nSupplies, Travel, Meals, and Other. Its button says Add expense. Show an expense table\nwith Description, Amount, Category, and a Delete button on each expense row.\nShow Total: $0.00 initially; display dollars with two decimal places and keep the total\ncorrect after adding and deleting entries. Reject a blank description, zero or negative\namount, and nonnumeric amounts, showing an accessible inline error with role=alert.\nDescriptions are plain text even when they contain HTML characters. Save entries on\nthis computer with localStorage. Reloading must preserve added entries and deletions.\nBuild actual working files using small SQLite steps for form validation, the expense\ntable/totals, and persistence. Save and run a repeatable verifier that exercises real\nform input and checks persistence across page reload. Keep PLAN.md and PROGRESS.md accurate.\n",
+  "seconds": 300.01,
+  "model_calls": 17,
+  "tool_calls": 17,
+  "prompt_tokens": 189048,
+  "completion_tokens": 9205,
+  "tools_used": [
+    "list_files",
+    "write_file",
+    "inspect_webapp",
+    "task_steps",
+    "read_file",
+    "task_steps",
+    "read_file",
+    "edit_file",
+    "read_file",
+    "read_file",
+    "task_steps",
+    "search_text",
+    "read_file",
+    "read_file",
+    "edit_file",
+    "read_file",
+    "task_steps"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 11.32
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 51.34
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 3.79
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 30.01
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 6.43
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 25.22
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 9.47
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 28.18
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 9.36
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 8.07
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 26.76
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 10.96
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 7.03
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 14.53
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 29.83
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 7.32
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 17.0
+    }
+  ],
+  "router_call_attempts": 18,
+  "upstream_local_calls": 21,
+  "step_transport_shapes": [
+    [
+      {
+        "type": "list"
+      }
+    ]
+  ],
+  "time_budget_exhausted": true,
+  "token_usage_incomplete": true,
+  "inference_budget_seconds": 300.0,
+  "experimental_initial_plan": false,
+  "host_code_sha256": {
+    "native_agent.py": "84be1dd829bb2931bb7cd547e1ceb8fe5f127f8cffbce68244382d8bbf3413c0",
+    "native_browser.py": "5d4bb12aea7e43c20e41a602146048f4512d968030ca52806d207b17362996b4",
+    "cloud_ai.py": "1e2381c536791cf1e769b5bc7968515ece7be1ec846da44426b04a38a8543b5e",
+    "auto_route.py": "f85950e75abff06e6d4548918281815a3327e103289ce203947ecfab5e102139",
+    "task_context.py": "6a8fbdcb9d69cf63da43c3e355b840505f51a2dbb342f1ce66b9944b3b28d90a",
+    "webapp_check.py": "d77059a5096d0b337600e1404f9fe776d9a36fdaed94b972a1578004061c06ac"
+  },
+  "grade_seconds": 30.96,
+  "total_seconds": 330.98,
+  "resumed": false,
+  "initial_turns": 0,
+  "initial_source_sha256": null,
+  "checkpoint_status": "running",
+  "inference_error": "TimeoutError: timed out",
+  "grade": {
+    "browser": {
+      "checks": {
+        "requested_category_choices": true,
+        "initial_empty": true,
+        "reject_blank": false,
+        "reject_negative": false,
+        "reject_zero": false,
+        "reject_nonnumeric": false,
+        "adds_two_and_totals": false,
+        "category_visible": false,
+        "reload_keeps_entries": false
+      },
+      "errors": [
+        "Cannot set properties of null (setting 'innerHTML')",
+        "Cannot read properties of null (reading 'value')",
+        "Cannot read properties of null (reading 'value')",
+        "Cannot read properties of null (reading 'value')",
+        "Cannot read properties of null (reading 'value')",
+        "Cannot read properties of null (reading 'value')",
+        "Cannot read properties of null (reading 'value')",
+        "Cannot set properties of null (setting 'innerHTML')",
+        "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"row\").filter(has=get_by_role(\"button\", name=re.compile(r\"^Delete\\b\", re.IGNORECASE))).filter(has_text=\"Wash supplies\").get_by_role(\"button\", name=re.compile(r\"^Delete\\b\", re.IGNORECASE))\n"
+      ],
+      "remote_requests": [],
+      "passed": false
+    },
+    "verifier_passes_correct": false,
+    "verifier_rejects_missing_javascript": false,
+    "steps": {
+      "total": 8,
+      "done": 0,
+      "remaining": 8
+    },
+    "passed": false
+  },
+  "run_outcome": "failed",
+  "independent_check_diagnostics": []
+}

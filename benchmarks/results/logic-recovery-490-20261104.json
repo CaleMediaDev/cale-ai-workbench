@@ -1,0 +1,50 @@
+{
+  "scope": "Recover the unchanged synthetic offline expense app using local models",
+  "before": {
+    "seconds": 300.01,
+    "model_calls": 17,
+    "database": {
+      "total": 8,
+      "done": 0,
+      "remaining": 8
+    },
+    "browser": {
+      "requested_category_choices": true,
+      "initial_empty": true,
+      "reject_blank": false,
+      "reject_negative": false,
+      "reject_zero": false,
+      "reject_nonnumeric": false,
+      "adds_two_and_totals": false,
+      "category_visible": false,
+      "reload_keeps_entries": false
+    },
+    "run_outcome": "failed"
+  },
+  "after": {
+    "seconds": 150.03,
+    "model_calls": 5,
+    "database": {
+      "total": 8,
+      "done": 1,
+      "remaining": 7
+    },
+    "browser_checks_passed": 15,
+    "browser_checks_total": 15,
+    "run_outcome": "failed"
+  },
+  "limitations": [
+    "Resumed repair, not a fresh successful build",
+    "Only one of eight durable steps complete",
+    "Saved verifier does not yet reject missing JavaScript or persistence mutations",
+    "Automatic self-check was concurrently running; timings are not isolated throughput measurements"
+  ],
+  "manual_fixture_edits": false,
+  "acceptance_weakened": false,
+  "validation": {
+    "new_semantic_preflight": "29 passed in root; 27 new regressions fail original",
+    "native_step_planning": "93 passed",
+    "browser_suite": "185 passed initially; 5 missing-checkout-log-folder failures all passed after the runtime directory existed (34 tests including new cases)",
+    "durable_checker_memory": "9 focused root tests passed; 2 new regressions fail original"
+  }
+}

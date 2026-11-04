@@ -1948,3 +1948,99 @@ def prepare_existing_html_review_fixture(folder, filename):
         "check_command": command, "shell": "powershell"}])["active"]
     checked = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
     assert checked["passed"] and checked["done"] == 1, checked
+
+
+
+@pytest.mark.parametrize("bad", [
+    {"cases": [{"expect": {"total-display.text": "$0.00"}}]},
+    {"cases": [{"set": {"#amount": "7"}, "expect": {"total": "7"}}]},
+    {"cases": [{"click": ["#submit"], "expect": {"total": "7"}}]},
+    {"cases": [{"state": {"game.constructor.name": "Game"}}]},
+    {"cases": [{"state": {"game.total": {"gt": 5, "lt": 3}}}]},
+    {"cases": [{"keys": [{"key": "Control+R"}], "expect": {"total": "7"}}]},
+    {"viewport_width": 319},
+    {"cases": [{"wait_ms": 2000, "expect": {"total": "7"}}] * 6},
+])
+@pytest.mark.parametrize("operation", ["plan", "revise", "split"])
+def test_semantic_browser_acceptance_rejected_before_any_sql_queue_mutation(tmp_path, bad, operation):
+    import copy
+    arguments = {"path": "future.html", "cases": [{"expect": {"total": "$0.00"}}]}
+    step = {"phase": "Totals", "title": "Observe requested total", "check_tool": "check_webapp", "check_arguments": arguments}
+    if operation != "plan":
+        task_context.plan_steps(tmp_path, [step])
+    before = copy.deepcopy(task_context.step_status(tmp_path))
+    malformed = copy.deepcopy(step)
+    malformed["check_arguments"].update(bad)
+    with pytest.raises(ValueError):
+        if operation == "plan":
+            task_context.plan_steps(tmp_path, [step, malformed])
+        elif operation == "revise":
+            task_context.revise_step(tmp_path, before["active"]["id"], [malformed])
+        else:
+            task_context.plan_steps(tmp_path, [step, malformed], split_id=before["active"]["id"])
+    assert task_context.step_status(tmp_path) == before
+    assert not (tmp_path / "future.html").exists()
+    assert not (tmp_path / ".local-ai/webapp-check.json").exists()
+
+
+@pytest.mark.parametrize("field,token", [("expect", "total-display.text"), ("set", "#amount")])
+def test_semantic_browser_preflight_names_wrong_case_key_not_source(tmp_path, field, token):
+    arguments = {"path": "future.html", "cases": [{field: {token: "7"}, "mobile_fit": True}]}
+    with pytest.raises(ValueError) as error:
+        task_context.plan_steps(tmp_path, [{"phase": "Totals", "title": "Observe total", "check_tool": "check_webapp", "check_arguments": arguments}])
+    message = str(error.value)
+    assert f"cases[0].{field}" in message and token in message
+    assert "not application source" in message
+    assert "CSS" in message and ".text" in message
+    assert task_context.step_status(tmp_path)["total"] == 0
+
+
+
+def test_semantic_browser_preflight_preserves_future_page_and_normalized_adjacent_cases(tmp_path):
+    import copy
+    spec = {"path": "future.html", "viewport_width": 1920, "cases": [
+        {"set": {"amount": "7.25"}, "click": ["Add expense"]},
+        {"expect": {"total-display": "$7.25", "preview": "<input>"}},
+        {"reload": True, "expect": {"total-display": "$7.25"}},
+    ]}
+    before = copy.deepcopy(spec)
+    with patch.object(webapp_check, "_project_file", side_effect=AssertionError("pure preflight must not inspect source")):
+        webapp_check.validate_spec_data(webapp_check.normalize_spec(spec))
+        queue = task_context.plan_steps(tmp_path, [{"phase": "Totals", "title": "Calculate requested dollars", "check_tool": "check_webapp", "check_arguments": spec}])
+    assert queue["total"] == 1 and queue["done"] == 0
+    assert queue["active"]["check_arguments"] == spec == before
+    assert not (tmp_path / "future.html").exists()
+    with pytest.raises(ValueError, match="HTML file must exist"):
+        webapp_check.validate_spec(tmp_path, webapp_check.normalize_spec(spec))
+
+
+def test_semantic_browser_preflight_bounds_bad_key_diagnostic():
+    token = "amount." + "x" * 1000 + "PRIVATE_TRAILING_VALUE"
+    with pytest.raises(ValueError) as error:
+        webapp_check.validate_spec_data({"cases": [{"set": {token: "unrelated private value"}, "expect": {"total": "7"}}]})
+    message = str(error.value)
+    assert len(message) < 500 and "cases[0].set" in message
+    assert "PRIVATE_TRAILING_VALUE" not in message and "unrelated private value" not in message
+
+
+def test_semantic_legacy_browser_sql_gets_grounded_revise_only_focus_without_source_mutation(tmp_path):
+    source = tmp_path / "index.html"
+    source.write_text('<input id="amount"><button id="add">Add expense</button><output id="total-display">$0.00</output>')
+    original = source.read_bytes()
+    args = {"path": "index.html", "cases": [{"set": {"amount": "7"}, "click": ["add"], "expect": {"total-display": "$7.00"}}]}
+    task_context.plan_steps(tmp_path, [{"phase": "Totals", "title": "Calculate the requested total", "check_tool": "check_webapp", "check_arguments": args}])
+    args["cases"][0]["expect"] = {"total-display.text": "$7.00"}
+    with project_memory.connection(tmp_path) as conn:
+        conn.execute("UPDATE task_steps SET check_arguments=?,attempts=1", (json.dumps(args),))
+    before = task_context.step_status(tmp_path)
+    project = {"id": "legacy", "folder": str(tmp_path), "brief": "Build an offline expense log. Add each submitted amount to the total and preserve entries after reload."}
+    state = {"step_focus_turns": 1}
+    available = native_agent.acceptance_repair_tools(project, state, native_agent.TOOLS)
+    scoped = native_agent.focused_step_repair_request(project, state, available, None, 64000)
+    assert scoped and scoped["_native_workload"] == "active_step_checker_repair"
+    assert [tool["function"]["name"] for tool in scoped["tools"]] == ["task_steps"]
+    assert scoped["tools"][0]["function"]["parameters"]["properties"]["action"]["enum"] == ["revise"]
+    briefing = json.dumps(scoped["messages"])
+    assert "cases[0].expect" in briefing and "total-display.text" in briefing
+    assert "total-display" in briefing and project["brief"] in briefing
+    assert task_context.step_status(tmp_path) == before and source.read_bytes() == original

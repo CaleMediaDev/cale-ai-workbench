@@ -1,0 +1,155 @@
+{
+  "scenario": "offline_expense_app",
+  "brief": "Create index.html, a complete single-file offline expense log for a small business.\nUse no accounts, external libraries, fonts, or network requests. Make it readable on a phone.\nThe form has accessible labels Description, Amount, and Category. Category choices are\nSupplies, Travel, Meals, and Other. Its button says Add expense. Show an expense table\nwith Description, Amount, Category, and a Delete button on each expense row.\nShow Total: $0.00 initially; display dollars with two decimal places and keep the total\ncorrect after adding and deleting entries. Reject a blank description, zero or negative\namount, and nonnumeric amounts, showing an accessible inline error with role=alert.\nDescriptions are plain text even when they contain HTML characters. Save entries on\nthis computer with localStorage. Reloading must preserve added entries and deletions.\nBuild actual working files using small SQLite steps for form validation, the expense\ntable/totals, and persistence. Save and run a repeatable verifier that exercises real\nform input and checks persistence across page reload. Keep PLAN.md and PROGRESS.md accurate.\n",
+  "seconds": 150.03,
+  "model_calls": 5,
+  "tool_calls": 5,
+  "prompt_tokens": 38838,
+  "completion_tokens": 5529,
+  "tools_used": [
+    "task_steps",
+    "read_file",
+    "read_file",
+    "edit_file",
+    "task_steps"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": "balanced",
+      "seconds": 37.25
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 10.51
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 9.4
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 49.21
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": "balanced",
+      "seconds": 31.79
+    }
+  ],
+  "router_call_attempts": 6,
+  "upstream_local_calls": 8,
+  "step_transport_shapes": [
+    [
+      {
+        "type": "list"
+      }
+    ],
+    [
+      {
+        "type": "str",
+        "length": 868,
+        "first": "[",
+        "decode_error": "Expecting ',' delimiter",
+        "decode_position": 867
+      }
+    ]
+  ],
+  "time_budget_exhausted": true,
+  "token_usage_incomplete": true,
+  "inference_budget_seconds": 150.0,
+  "experimental_initial_plan": false,
+  "host_code_sha256": {
+    "native_agent.py": "84be1dd829bb2931bb7cd547e1ceb8fe5f127f8cffbce68244382d8bbf3413c0",
+    "native_browser.py": "5d4bb12aea7e43c20e41a602146048f4512d968030ca52806d207b17362996b4",
+    "cloud_ai.py": "1e2381c536791cf1e769b5bc7968515ece7be1ec846da44426b04a38a8543b5e",
+    "auto_route.py": "f85950e75abff06e6d4548918281815a3327e103289ce203947ecfab5e102139",
+    "task_context.py": "3960b2e9788d611e4074c8b29a0c19dec284c97b7dedc5fa2923523f4c64177d",
+    "webapp_check.py": "81ecbcaa5143e3eea38a23db7419cb0fa5cbb1a57d0e985b91cc4a92d52450a6"
+  },
+  "grade_seconds": 41.32,
+  "total_seconds": 191.35,
+  "resumed": true,
+  "initial_turns": 17,
+  "initial_source_sha256": "55194a752d91cd31b645ac373d73036e5e9023216acb579e85ce9f379633564e",
+  "checkpoint_status": "running",
+  "inference_error": "TimeoutError: timed out",
+  "grade": {
+    "browser": {
+      "checks": {
+        "requested_category_choices": true,
+        "initial_empty": true,
+        "reject_blank": true,
+        "reject_negative": true,
+        "reject_zero": true,
+        "reject_nonnumeric": true,
+        "adds_two_and_totals": true,
+        "category_visible": true,
+        "reload_keeps_entries": true,
+        "delete_updates_total": true,
+        "reload_keeps_deletion": true,
+        "description_plain_text": true,
+        "decimal_totals": true,
+        "mobile_fit": true,
+        "no_remote_requests": true
+      },
+      "errors": [],
+      "remote_requests": [],
+      "passed": true
+    },
+    "verifier_passes_correct": true,
+    "verifier_rejects_missing_javascript": false,
+    "persistence_mutations": {
+      "storage_writes": {
+        "valid_behavior_mutation": true,
+        "verifier_rejected": false
+      },
+      "deletion_persistence": {
+        "valid_behavior_mutation": true,
+        "verifier_rejected": false
+      }
+    },
+    "verifier_passes_restored": true,
+    "steps": {
+      "total": 8,
+      "done": 1,
+      "remaining": 7
+    },
+    "passed": false
+  },
+  "run_outcome": "failed",
+  "independent_check_diagnostics": []
+}

@@ -283,11 +283,10 @@ def missing_numeric_boundaries(folder: Path, request: str) -> list[dict]:
     return missing
 
 
-def validate_spec(folder: Path, spec: dict) -> Path:
-    """Reject broad or ambiguous browser instructions before opening the page."""
+def validate_spec_data(spec: dict) -> None:
+    """Validate bounded case semantics without reading files or opening a browser."""
     if not isinstance(spec, dict):
         raise ValueError("Browser check must be an object")
-    page = _project_file(folder, spec.get("path"))
     cases = spec.get("cases")
     if not isinstance(cases, list) or not 1 <= len(cases) <= 12:
         raise ValueError("Give 1 to 12 browser cases")
@@ -297,7 +296,7 @@ def validate_spec(folder: Path, spec: dict) -> Path:
     if "mobile_fit" in spec and not isinstance(spec["mobile_fit"], bool):
         raise ValueError("mobile_fit must be true or false")
     total_wait = 0
-    for case in cases:
+    for case_index, case in enumerate(cases):
         if not isinstance(case, dict) or not set(case).issubset({"reload", "set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit", "state"}):
             raise ValueError("Use reload, set, click, keys, wait_ms, expect, visible, hidden, mobile_fit and state in each case")
         if "reload" in case and type(case["reload"]) is not bool:
@@ -335,12 +334,20 @@ def validate_spec(folder: Path, spec: dict) -> Path:
             raise ValueError("set and expect must be objects keyed by HTML ID")
         if len(updates) > 20 or len(expected) > 20:
             raise ValueError("Too many elements in one browser case")
-        for name, value in [*updates.items(), *expected.items()]:
-            _element_id(name)
-            if not isinstance(value, str) or len(value) > 200:
-                raise ValueError("Browser values and expected text must be short strings. "
-                                 "visible/hidden are sibling lists beside expect, not entries inside expect. "
-                                 "Correct the tool arguments before changing the app.")
+        for field, mapping in (("set", updates), ("expect", expected)):
+            for name, value in mapping.items():
+                try:
+                    _element_id(name)
+                except ValueError as error:
+                    token = json.dumps(name[:80] if isinstance(name, str) else type(name).__name__)
+                    raise ValueError(f"cases[{case_index}].{field} has invalid key {token}. "
+                        "Use the exact HTML element ID: a letter followed by up to 63 letters, digits, _ or -. "
+                        "Do not use CSS selectors, # prefixes, .text or property suffixes; "
+                        "correct check arguments, not application source.") from error
+                if not isinstance(value, str) or len(value) > 200:
+                    raise ValueError("Browser values and expected text must be short strings. "
+                                     "visible/hidden are sibling lists beside expect, not entries inside expect. "
+                                     "Correct the tool arguments before changing the app.")
         for field in ("visible", "hidden"):
             ids = case.get(field, [])
             if not isinstance(ids, list) or len(ids) > 20:
@@ -356,7 +363,12 @@ def validate_spec(folder: Path, spec: dict) -> Path:
         if not expected and not case.get("visible") and not case.get("hidden") and not case.get("mobile_fit") and not case.get("state"):
             raise ValueError("Each browser case needs an observable assertion. Put set/click/keys and "
                              "expect/visible/hidden in the same case; correct these test arguments, not the app.")
-    return page
+
+
+def validate_spec(folder: Path, spec: dict) -> Path:
+    """Reject invalid cases and require a contained, existing HTML page to run."""
+    validate_spec_data(spec)
+    return _project_file(folder, spec.get("path"))
 
 
 def project_only_route(folder: Path, *, on_document=None):

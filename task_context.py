@@ -312,6 +312,12 @@ def validate_repeatable_check(tool: str, arguments: dict) -> None:
         raise ValueError("Saved-case revision is a one-time checker action, not repeatable step acceptance. "
                          "Correct the saved suite through its checker first; then revise this SQLite step "
                          "with complete input/assertion cases and no saved_case, saved_sequence, suite_sha256 or revise_inputs.")
+    if tool == "check_webapp":
+        import webapp_check
+
+        # Planning may name a future page. Validate the executable case data
+        # without requiring that page or running a browser before its build.
+        webapp_check.validate_spec_data(webapp_check.normalize_spec(arguments))
 
 
 def _validate_steps(steps: list) -> list[tuple]:
