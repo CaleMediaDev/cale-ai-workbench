@@ -45,14 +45,21 @@ def _connect(root: str | Path):
         if "AUTOINCREMENT" not in stored_schema.upper():
             # Preserve existing review IDs, but never recycle them after retraction.
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute("ALTER TABLE feedback RENAME TO feedback_legacy")
-            conn.execute(schema)
-            conn.execute("""INSERT INTO feedback
-                (id,task_id,generation,kind,rating,title,brief,note,created)
-                SELECT id,task_id,generation,kind,rating,title,brief,note,created
-                FROM feedback_legacy""")
-            conn.execute("DROP TABLE feedback_legacy")
-            conn.execute("CREATE INDEX feedback_kind ON feedback(kind, created DESC)")
+            # A concurrent opener may already have migrated while this connection
+            # waited for the writer lock. Rebuilding again would erase the
+            # AUTOINCREMENT high-water mark for IDs deleted since that migration.
+            locked_schema = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='feedback'"
+            ).fetchone()[0]
+            if "AUTOINCREMENT" not in locked_schema.upper():
+                conn.execute("ALTER TABLE feedback RENAME TO feedback_legacy")
+                conn.execute(schema)
+                conn.execute("""INSERT INTO feedback
+                    (id,task_id,generation,kind,rating,title,brief,note,created)
+                    SELECT id,task_id,generation,kind,rating,title,brief,note,created
+                    FROM feedback_legacy""")
+                conn.execute("DROP TABLE feedback_legacy")
+                conn.execute("CREATE INDEX feedback_kind ON feedback(kind, created DESC)")
         yield conn
         conn.commit()
     finally:

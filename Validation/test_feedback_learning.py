@@ -207,3 +207,55 @@ def test_review_requires_comment_for_thumbs_down(tmp_path):
 
     with pytest.raises(ValueError, match="what to improve"):
         feedback_learning.record(tmp_path, task("song-3", "Music"), -1, "")
+
+
+def test_concurrent_legacy_migration_preserves_deleted_id_high_water(tmp_path, monkeypatch):
+    """A stale connection must not rebuild the table after another migration."""
+    import sqlite3
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    db = tmp_path / "feedback-learning.sqlite3"
+    with sqlite3.connect(db) as conn:
+        conn.execute("""CREATE TABLE feedback (
+            id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, generation INTEGER NOT NULL,
+            kind TEXT NOT NULL, rating INTEGER NOT NULL, title TEXT NOT NULL,
+            brief TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created REAL NOT NULL,
+            UNIQUE(task_id, generation, rating))""")
+        conn.execute("INSERT INTO feedback VALUES (7,'legacy',0,'music',1,'Old','Old','',1)")
+
+    waiting = threading.Event()
+    migrated = threading.Event()
+    real_connect = sqlite3.connect
+
+    class WaitingConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "BEGIN IMMEDIATE":
+                waiting.set()
+                assert migrated.wait(5), "first writer did not finish migration"
+            return super().execute(sql, parameters)
+
+    def connect(*args, **kwargs):
+        if threading.current_thread().name.startswith("stale-feedback"):
+            kwargs["factory"] = WaitingConnection
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(feedback_learning.sqlite3, "connect", connect)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="stale-feedback") as pool:
+        future = pool.submit(feedback_learning.record, tmp_path, task("second", "Music"), 1)
+        try:
+            assert waiting.wait(5), "second connection did not reach migration lock"
+            deleted_id = feedback_learning.record(tmp_path, task("first", "Music"), 1)
+            assert deleted_id > 7
+            assert feedback_learning.forget(tmp_path, deleted_id)
+        finally:
+            migrated.set()
+        later_id = future.result(timeout=5)
+
+    assert later_id > deleted_id, "stale migration recycled a retracted review ID"
+    assert not feedback_learning.forget(tmp_path, deleted_id)
+    assert feedback_learning.for_task(tmp_path, "legacy")[0]["id"] == 7
+    assert feedback_learning.for_task(tmp_path, "second")[0]["id"] == later_id
+    with real_connect(db) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name='feedback_legacy'").fetchone() is None
