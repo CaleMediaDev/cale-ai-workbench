@@ -772,6 +772,29 @@ def test_cover_upload_is_multipart_and_loopback_only(tmp_path):
     assert post.call_args.kwargs["files"]["src_audio"][0] == "original.mp3"
 
 
+def test_setup_status_interleaved_writes_use_distinct_temporary_files(tmp_path):
+    original_replace = music_backend.os.replace
+    sources = []
+
+    def interleave_write(source, destination):
+        sources.append(Path(source))
+        if len(sources) == 1:
+            music_backend._write_setup_status("working", "Second writer", 35)
+        return original_replace(source, destination)
+
+    with (patch.object(music_backend, "ROOT", tmp_path),
+          patch.object(music_backend.os, "replace", side_effect=interleave_write)):
+        music_backend._write_setup_status("working", "First writer", 5)
+
+    directory = tmp_path / "LongTasks"
+    assert len(sources) == 2
+    assert sources[0] != sources[1]
+    assert json.loads((directory / "music-install-progress.json").read_text(
+        encoding="utf-8"
+    )) == {"status": "working", "current": "First writer", "progress": 5}
+    assert not list(directory.glob("*.tmp"))
+
+
 def test_prefetch_downloads_in_background_on_capable_pc(tmp_path):
     engine = tmp_path / "Media" / "music" / "ACE-Step-1.5"
     downloader = engine / ".venv" / "Scripts" / "acestep-download.exe"
