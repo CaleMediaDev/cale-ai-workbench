@@ -64,6 +64,36 @@ def test_edit_music_rejects_nonfinite_timings(tmp_path, monkeypatch, parameter, 
     assert source.read_bytes() == original
 
 
+def test_edit_music_preserves_fade_timing_precision(tmp_path, monkeypatch):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio"
+    source.write_bytes(original)
+    calls = []
+    monkeypatch.setattr(music_edit, "_run", lambda *args: calls.append(args))
+    clip_duration = 10000.0
+    fade_in = 0.123456789
+    fade_out = 0.001
+
+    music_edit.edit_music(
+        str(source), str(output), duration_seconds=clip_duration,
+        fade_in_seconds=fade_in, fade_out_seconds=fade_out,
+    )
+
+    assert len(calls) == 1
+    arguments, destination = calls[0]
+    filters = arguments[arguments.index("-af") + 1].split(",")
+    fade_fields = [dict(field.split("=", 1) for field in item.split(":")[1:])
+                   for item in filters]
+    assert float(fade_fields[0]["d"]) == fade_in
+    assert float(fade_fields[1]["d"]) == fade_out
+    assert float(fade_fields[1]["st"]) == clip_duration - fade_out
+    assert float(fade_fields[1]["st"]) < clip_duration
+    assert destination == output
+    assert not output.exists()
+    assert source.read_bytes() == original
+
+
 def test_mix_music_renders_both_tracks_and_is_discoverable(tmp_path):
     background = tmp_path / "music.wav"
     foreground = tmp_path / "voice.wav"

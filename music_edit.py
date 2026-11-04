@@ -91,9 +91,9 @@ def edit_music(source_path: str, output_path: str, start_seconds: float = 0,
     if gain_db:
         filters.append(f"volume={gain_db:g}dB")
     if fade_in_seconds:
-        filters.append(f"afade=t=in:st=0:d={fade_in_seconds:g}")
+        filters.append(f"afade=t=in:st=0:d={fade_in_seconds:.17g}")
     if fade_out_seconds:
-        filters.append(f"afade=t=out:st={duration_seconds - fade_out_seconds:g}:d={fade_out_seconds:g}")
+        filters.append(f"afade=t=out:st={duration_seconds - fade_out_seconds:.17g}:d={fade_out_seconds:.17g}")
     args = ["-ss", str(start_seconds), "-i", str(source)]
     if duration_seconds is not None:
         args += ["-t", str(duration_seconds)]
