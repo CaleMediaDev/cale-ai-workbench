@@ -369,15 +369,17 @@ class Service:
         with self.lock:
             if self.current:
                 self._update(self.current["id"], "played")
-            self.player.stop()
-            self.station = station
-            self.current = None
-            self.repeating = False
-            self.skip_requested = False
-            self.ready = self.progress = 0
-            self.enabled, self.paused = True, False
-            self.retry_at = 0
-            self.message = "Tuning in · preparing your first track…"
+            try:
+                self.player.stop()
+            finally:
+                self.station = station
+                self.current = None
+                self.repeating = False
+                self.skip_requested = False
+                self.ready = self.progress = 0
+                self.enabled, self.paused = True, False
+                self.retry_at = 0
+                self.message = "Tuning in · preparing your first track…"
 
     def toggle(self):
         self.commands.put(("toggle", None))
