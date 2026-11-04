@@ -1,0 +1,3735 @@
+{
+  "version": "0.5.486",
+  "scope": "Pull requests 261–336",
+  "counts": {
+    "MERGED": 41,
+    "CLOSED": 35,
+    "OPEN": 0
+  },
+  "integration_receipts": [
+    {
+      "number": 263,
+      "reviewed_head": "8af3bb7b20a72093c0cc27915ee2c086336b274e",
+      "integration_commit": "41b2687758b2c177fda323d005c650a90b89dadc",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 41b2687758b2c177fda323d005c650a90b89dadc.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 269,
+      "reviewed_head": "33386af49138d3ec0b25c7d53061d84889172846",
+      "integration_commit": "9b8e9df8982c1a2a6065f6795608a17c7d69c84a",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 9b8e9df8982c1a2a6065f6795608a17c7d69c84a.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 276,
+      "reviewed_head": "724ede0806b84236f8b977e42d25526f0c9cdd26",
+      "integration_commit": "099873a70ea21b85b1c901977c71fe6a0cf3d8f9",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 099873a70ea21b85b1c901977c71fe6a0cf3d8f9.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 279,
+      "reviewed_head": "f9b322a3f35d057eba5741469d8f1347129235ba",
+      "integration_commit": "edd8451a14443721950e050ea7e9a8d99f009d11",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in edd8451a14443721950e050ea7e9a8d99f009d11.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 281,
+      "reviewed_head": "7cba8e798d91bf5b44c414a7f1f70a2ed6dc9dda",
+      "integration_commit": "5eed6a635ccde5a27edf6dd5984564991e152637",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 5eed6a635ccde5a27edf6dd5984564991e152637.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 282,
+      "reviewed_head": "859bb00ae28e63acaa5333e5d53913b9de91eddd",
+      "integration_commit": "746d9e15f1b05c4be7e1848c877035e1d08292fb",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 746d9e15f1b05c4be7e1848c877035e1d08292fb.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 283,
+      "reviewed_head": "813486024b1d9dc25e15e03e2475ebdfc4e7e5de",
+      "integration_commit": "3de18aecd8877fdbc5586fad6c10f93c4d392300",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 3de18aecd8877fdbc5586fad6c10f93c4d392300.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 299,
+      "reviewed_head": "691321b7cb2e85a57dbaccfdcb2de27eea945feb",
+      "integration_commit": "2f7ece6efce1c1948ea56274fe793e1c416419ec",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 2f7ece6efce1c1948ea56274fe793e1c416419ec.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 305,
+      "reviewed_head": "90123237caaa2e31539bd06c670b281b961ea3f3",
+      "integration_commit": "4a4c7c872e2329dd9ef162af9212457e6cb4ae20",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 4a4c7c872e2329dd9ef162af9212457e6cb4ae20.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 308,
+      "reviewed_head": "71d3cad211eab4b973ac6dffa68028c0545ab073",
+      "integration_commit": "548109b03fe6c5df485dc6b064536e4b02bc1500",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 548109b03fe6c5df485dc6b064536e4b02bc1500.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 313,
+      "reviewed_head": "cab83d29c2785cb92961a7fcea66c510fae477e8",
+      "integration_commit": "e6c3ac094e9b92a91fafa2ce82d45e8594f52b9e",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in e6c3ac094e9b92a91fafa2ce82d45e8594f52b9e.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 316,
+      "reviewed_head": "202eb9a7cad83ccefd5d53a38248a374bfcbf9f8",
+      "integration_commit": "7a3f5841498a93c8afe73c4162c31919a9b5754f",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 7a3f5841498a93c8afe73c4162c31919a9b5754f.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 322,
+      "reviewed_head": "5faddacda9b3e8d71bfe2cfbd2934ab1860cc0a8",
+      "integration_commit": "e8172ddbad7a764f73f1f9268a99df9ce67dde3a",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in e8172ddbad7a764f73f1f9268a99df9ce67dde3a.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 323,
+      "reviewed_head": "5e68d3504b0607e567e98099e0a67f6f253ac14d",
+      "integration_commit": "64f3a452d45acbedad440a8dd4d88114d40fc7fe",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 64f3a452d45acbedad440a8dd4d88114d40fc7fe.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 324,
+      "reviewed_head": "4650020ba55e543272b11399e0db700cda79d054",
+      "integration_commit": "c8e363ec803f836591591badafddb9b4ca41d937",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in c8e363ec803f836591591badafddb9b4ca41d937.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 325,
+      "reviewed_head": "9ffe0edb07ffe715c8433c8ca42a46d1bf122c52",
+      "integration_commit": "8a40179194df97e2eaeab374e9fbe17921a4d98d",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 8a40179194df97e2eaeab374e9fbe17921a4d98d.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 326,
+      "reviewed_head": "d02580d37c3c40d511f12dcc41a0f89090eabdd5",
+      "integration_commit": "5f15f5ee328d68d8fb25f65b7b997203edd501f6",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 5f15f5ee328d68d8fb25f65b7b997203edd501f6.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 329,
+      "reviewed_head": "b5a8f14d0ef084c4fa3aa0e9be905e17a7f3b169",
+      "integration_commit": "0ad5148226ff37d06b748e26ee0fe07f5520954a",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 0ad5148226ff37d06b748e26ee0fe07f5520954a.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 331,
+      "reviewed_head": "d373311cb73a6e6874a7fe7d06efc262f0a8e274",
+      "integration_commit": "415f5105cbdef0ada15d2bfe5d7b69edea8db308",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 415f5105cbdef0ada15d2bfe5d7b69edea8db308.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 332,
+      "reviewed_head": "07c21e2227f59068d95629c20661dd33afa743cd",
+      "integration_commit": "3f278ff36e2f2579c63cc42ab702bd04b338607c",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 3f278ff36e2f2579c63cc42ab702bd04b338607c.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 333,
+      "reviewed_head": "ffd7631de133eb508a9cc016832c074db07212b0",
+      "integration_commit": "a2506e02659031225a5d8629b68e7c71dee9f575",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in a2506e02659031225a5d8629b68e7c71dee9f575.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 334,
+      "reviewed_head": "7fd4143b0da8f00b98faabc8992f48c663918670",
+      "integration_commit": "463f742e569d7a09b665bdf8fa5a7cbf4eee5a35",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 463f742e569d7a09b665bdf8fa5a7cbf4eee5a35.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 335,
+      "reviewed_head": "324a4ad6e5a11d4ab2a5898cf6bb3a3e4dcff95b",
+      "integration_commit": "822435996c6a8c7d0a8a36f04e9897a2d3640fec",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 822435996c6a8c7d0a8a36f04e9897a2d3640fec.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 336,
+      "reviewed_head": "b99c57dde18583d48130986b56ed5a5ee9d0e6d1",
+      "integration_commit": "3b717a788686409d49d383f588229819cfde3131",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Exact reviewed change integrated and regression-checked on main in 3b717a788686409d49d383f588229819cfde3131.",
+      "disposition": "integrated"
+    },
+    {
+      "number": 314,
+      "reviewed_head": "4b97fc774aa804e8e7e947adf8eb6bea3c909c0d",
+      "integration_commit": "7a3f5841498a93c8afe73c4162c31919a9b5754f",
+      "tested_commit": "c1d7492fbf75eb5628e58be8000f0e59b21ba254",
+      "state": "closed",
+      "github_merged": false,
+      "reason": "Superseded by broader canonical #316, integrated in 7a3f5841498a93c8afe73c4162c31919a9b5754f.",
+      "disposition": "superseded"
+    }
+  ],
+  "combined_check_summary": "1 failed, 1582 passed, 8 skipped, 249 subtests passed in 585.69s (0:09:45)",
+  "resolved_test_integration_failure": "The combined run exposed a missing import in the newly retained independent search test; only its test import changed afterward. The full affected memory suite was rerun successfully; the other 56-file combined results were retained.",
+  "memory_recheck": "20 passed, 2 skipped, 8 subtests passed in 3.46s",
+  "method": "Exact-head review, before/after focused checks and current-main integration; server states verified independently of merge command exit.",
+  "limitations": [
+    "Windows symlink privilege-dependent tests may skip; supplemental mocked proofs are retained in review records.",
+    "Focused checks do not prove end-to-end model, microphone, music or application-generation quality."
+  ],
+  "reviews": [
+    {
+      "number": 261,
+      "github": {
+        "headRefOid": "230f64e9ec0003e38300f0f626325d376a48ab63",
+        "mergeCommit": {
+          "oid": "0b7a6e0113244b91fa1ee595b8311da09e276420"
+        },
+        "mergedAt": "2026-11-04T09:57:21Z",
+        "number": 261,
+        "state": "MERGED",
+        "title": "[Donation] Clean up partial audio when FFmpeg times out",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/261"
+      },
+      "review": {
+        "number": 261,
+        "head": "230f64e9ec0003e38300f0f626325d376a48ab63",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Render audio in private same-filesystem staging and publish atomically without overwriting concurrent output.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "18 passed in 1.45s"
+          ],
+          "new_tests": [
+            "test_edit_music_preserves_destination_created_during_render",
+            "test_edit_music_timeout_discards_partial_audio_and_allows_retry"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\261"
+        }
+      }
+    },
+    {
+      "number": 262,
+      "github": {
+        "headRefOid": "f9cd620c772e5b33a1b9e83b0719e42bfd7bf0e4",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 262,
+        "state": "CLOSED",
+        "title": "[Donation] Reject lyric segments that collapse to zero-duration SRT cues",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/262"
+      },
+      "review": {
+        "number": 262,
+        "head": "f9cd620c772e5b33a1b9e83b0719e42bfd7bf0e4",
+        "status": "duplicate",
+        "duplicate_of": 260,
+        "reason": "Duplicate of already merged PR260, identical zero-duration SRT guard.",
+        "checks": {
+          "pre_patch_exit": null,
+          "post_patch_exit": null,
+          "post_summary": [],
+          "new_tests": null,
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\262"
+        }
+      }
+    },
+    {
+      "number": 263,
+      "github": {
+        "headRefOid": "8af3bb7b20a72093c0cc27915ee2c086336b274e",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 263,
+        "state": "CLOSED",
+        "title": "[Donation] Resolve PATH-based FFmpeg discovery before checking the source file",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/263"
+      },
+      "review": {
+        "number": 263,
+        "head": "8af3bb7b20a72093c0cc27915ee2c086336b274e",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Resolve imageio FFmpeg PATH command names before validation, avoiding unnecessary pip repair.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "7 passed in 1.30s"
+          ],
+          "new_tests": [
+            "test_ensure_resolves_discovered_ffmpeg_command_on_path"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\263"
+        }
+      }
+    },
+    {
+      "number": 264,
+      "github": {
+        "headRefOid": "d9685383235f984fc93ef7adaa88fc198c0ca7c6",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 264,
+        "state": "CLOSED",
+        "title": "[Donation] Discard partial audio when FFmpeg times out",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/264"
+      },
+      "review": {
+        "number": 264,
+        "head": "d9685383235f984fc93ef7adaa88fc198c0ca7c6",
+        "status": "duplicate",
+        "duplicate_of": 261,
+        "reason": "Equivalent timeout-safe staging and no-overwrite publication already retained in earlier PR261.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "19 passed in 1.30s"
+          ],
+          "new_tests": [
+            "test_edit_music_discards_partial_output_on_timeout",
+            "test_edit_music_publishes_without_overwriting"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\264"
+        }
+      }
+    },
+    {
+      "number": 265,
+      "github": {
+        "headRefOid": "36958ae864a9308d614eb7e822a8f9ceed1b640b",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 265,
+        "state": "CLOSED",
+        "title": "[Donation] Clean up partial audio when FFmpeg times out",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/265"
+      },
+      "review": {
+        "number": 265,
+        "head": "36958ae864a9308d614eb7e822a8f9ceed1b640b",
+        "status": "duplicate",
+        "duplicate_of": 261,
+        "reason": "Equivalent timeout-safe staging and no-overwrite publication already retained in earlier PR261.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "18 passed in 1.32s"
+          ],
+          "new_tests": [
+            "test_edit_music_timeout_cleans_partial_audio"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\265"
+        }
+      }
+    },
+    {
+      "number": 266,
+      "github": {
+        "headRefOid": "abd4ea3327e48c7a76360a780ccf6c379f56af49",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 266,
+        "state": "CLOSED",
+        "title": "[Donation] Clean up partial audio when FFmpeg times out",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/266"
+      },
+      "review": {
+        "number": 266,
+        "head": "abd4ea3327e48c7a76360a780ccf6c379f56af49",
+        "status": "duplicate",
+        "duplicate_of": 261,
+        "reason": "Equivalent audio staging fix already retained in PR261; this variant also fails its old empty-output fixture.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 1,
+          "post_summary": [
+            "1 failed, 18 passed in 1.57s"
+          ],
+          "new_tests": [
+            "test_edit_music_publication_preserves_concurrent_output",
+            "test_edit_music_timeout_cleans_staging_and_preserves_originals"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\266"
+        }
+      }
+    },
+    {
+      "number": 267,
+      "github": {
+        "headRefOid": "e3f6389f50cf28531ed50323087c25625092e046",
+        "mergeCommit": {
+          "oid": "7bf9b6c03019f1ca71d942f75355b58bc00d96d6"
+        },
+        "mergedAt": "2026-11-04T10:02:39Z",
+        "number": 267,
+        "state": "MERGED",
+        "title": "[Donation] Only throttle failed FFmpeg background repairs",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/267"
+      },
+      "review": {
+        "number": 267,
+        "head": "e3f6389f50cf28531ed50323087c25625092e046",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Clear successful FFmpeg repair throttle so a subsequent missing executable can repair promptly.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "8 passed in 1.27s"
+          ],
+          "new_tests": [
+            "test_background_repair_only_throttles_failures"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\267"
+        }
+      }
+    },
+    {
+      "number": 268,
+      "github": {
+        "headRefOid": "d9b46f1dec7375a2d76b9f33468d3a0db44d1bd2",
+        "mergeCommit": {
+          "oid": "96c6b7f13ec55ceaef4b0d455e5f7fbf8c0137c5"
+        },
+        "mergedAt": "2026-11-04T10:02:45Z",
+        "number": 268,
+        "state": "MERGED",
+        "title": "[Donation] Key tool-health cache by absolute installation root",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/268"
+      },
+      "review": {
+        "number": 268,
+        "head": "d9b46f1dec7375a2d76b9f33468d3a0db44d1bd2",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Resolve tool health installation roots before cache key comparison across working directories.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "11 passed in 0.22s"
+          ],
+          "new_tests": [
+            "test_health_cache_distinguishes_relative_roots_after_chdir"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\268"
+        }
+      }
+    },
+    {
+      "number": 269,
+      "github": {
+        "headRefOid": "33386af49138d3ec0b25c7d53061d84889172846",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 269,
+        "state": "CLOSED",
+        "title": "[Donation] Respect the active model architecture's context ceiling",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/269"
+      },
+      "review": {
+        "number": 269,
+        "head": "33386af49138d3ec0b25c7d53061d84889172846",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Honor the active architecture context ceiling rather than a larger auxiliary model ceiling.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "11 passed, 3 subtests passed in 0.13s"
+          ],
+          "new_tests": [
+            "test_auxiliary_architecture_cannot_raise_native_ceiling"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\269"
+        }
+      }
+    },
+    {
+      "number": 270,
+      "github": {
+        "headRefOid": "57ebccedc67173ac8f29161545c564153643a005",
+        "mergeCommit": {
+          "oid": "cdb12ca07633273898d8b411d459af462c7915e3"
+        },
+        "mergedAt": "2026-11-04T10:02:58Z",
+        "number": 270,
+        "state": "MERGED",
+        "title": "[Donation] Remove invalid scanned files from the incremental memory index",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/270"
+      },
+      "review": {
+        "number": 270,
+        "head": "57ebccedc67173ac8f29161545c564153643a005",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Remove stale memory records for inspected defaults that become binary or oversized.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "16 passed, 1 skipped, 4 subtests passed in 1.86s"
+          ],
+          "new_tests": [
+            "test_incremental_index_removes_defaults_that_become_invalid"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\270"
+        }
+      }
+    },
+    {
+      "number": 271,
+      "github": {
+        "headRefOid": "6b16363ea0bcc417bec85bccc453008d267596d9",
+        "mergeCommit": {
+          "oid": "c51bd4739b8f05ad65d96240bbedce947c7211af"
+        },
+        "mergedAt": "2026-11-04T10:03:03Z",
+        "number": 271,
+        "state": "MERGED",
+        "title": "[Donation] Reject unknown model weights instead of budgeting them as zero",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/271"
+      },
+      "review": {
+        "number": 271,
+        "head": "6b16363ea0bcc417bec85bccc453008d267596d9",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Reject absent model weight sizes instead of treating unknown models as zero bytes.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "11 passed, 5 subtests passed in 0.12s"
+          ],
+          "new_tests": [
+            "test_missing_model_weights_are_not_budgeted_as_zero"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\271"
+        }
+      }
+    },
+    {
+      "number": 272,
+      "github": {
+        "headRefOid": "8db080be4951e63e982764e7eb5abc4e37ababb2",
+        "mergeCommit": {
+          "oid": "361de74fcdcc3970349b41c635ef7cf98df6d9b0"
+        },
+        "mergedAt": "2026-11-04T10:03:09Z",
+        "number": 272,
+        "state": "MERGED",
+        "title": "[Donation] Refresh feedback recency when an existing review is updated",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/272"
+      },
+      "review": {
+        "number": 272,
+        "head": "8db080be4951e63e982764e7eb5abc4e37ababb2",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Refresh review timestamp when feedback is edited so latest guidance is selected.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "6 passed in 0.30s"
+          ],
+          "new_tests": [
+            "test_updated_review_refreshes_recency_for_guidance"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\272"
+        }
+      }
+    },
+    {
+      "number": 273,
+      "github": {
+        "headRefOid": "fc9321b6286ec5a8c7820d5e244209a981b65dab",
+        "mergeCommit": {
+          "oid": "3e79550ba616af789b72a5d75470af99d52ffcb5"
+        },
+        "mergedAt": "2026-11-04T10:03:17Z",
+        "number": 273,
+        "state": "MERGED",
+        "title": "[Donation] Use canonical file identities when scanning symlink aliases",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/273"
+      },
+      "review": {
+        "number": 273,
+        "head": "fc9321b6286ec5a8c7820d5e244209a981b65dab",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Use canonical identities for aliased code files, preventing duplicate index rows.",
+        "checks": {
+          "pre_patch_exit": 0,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "15 passed, 2 skipped, 2 subtests passed in 2.44s"
+          ],
+          "new_tests": [
+            "test_code_scan_uses_canonical_identity_for_symlink_aliases"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\273",
+          "platform_symlink_test_skipped": true,
+          "supplement_pre": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\273-280-supplement-pre.txt",
+          "supplement_post": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\273-280-supplement-post.txt",
+          "supplement_summary": "2 mocked-filesystem regressions fail baseline; combined head modules plus supplements:38passed4skipped2subtests"
+        }
+      }
+    },
+    {
+      "number": 274,
+      "github": {
+        "headRefOid": "969fc72a5cce9fa0b35e4ad34d7d4c38ca4a3f7d",
+        "mergeCommit": {
+          "oid": "477e9e2383d4be9459d203d412a1417de6c66c6e"
+        },
+        "mergedAt": "2026-11-04T10:06:07Z",
+        "number": 274,
+        "state": "MERGED",
+        "title": "[Donation] Do not treat warning text inside successful tool output as a failure",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/274"
+      },
+      "review": {
+        "number": 274,
+        "head": "969fc72a5cce9fa0b35e4ad34d7d4c38ca4a3f7d",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Do not interpret a warning substring inside successful output as a tool-loop failure.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "44 passed, 33 subtests passed in 1.32s"
+          ],
+          "new_tests": [
+            "test_warning_text_in_successful_output_does_not_trigger_repair"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\274"
+        }
+      }
+    },
+    {
+      "number": 275,
+      "github": {
+        "headRefOid": "3ed9fb8c956bd769da91e4849fb9100899e88d61",
+        "mergeCommit": {
+          "oid": "fd90f0e8a119bd6450de4a3f0dddbb42c6af116c"
+        },
+        "mergedAt": "2026-11-04T10:03:24Z",
+        "number": 275,
+        "state": "MERGED",
+        "title": "[Donation] Propagate voice worker stream failures instead of waiting for a timeout",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/275"
+      },
+      "review": {
+        "number": 275,
+        "head": "3ed9fb8c956bd769da91e4849fb9100899e88d61",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Propagate worker pipe read errors instead of waiting for a false voice timeout.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "19 passed in 0.23s"
+          ],
+          "new_tests": [
+            "test_worker_stream_errors_reach_the_caller"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\275"
+        }
+      }
+    },
+    {
+      "number": 276,
+      "github": {
+        "headRefOid": "724ede0806b84236f8b977e42d25526f0c9cdd26",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 276,
+        "state": "CLOSED",
+        "title": "[Donation] Reject malformed specialist descriptions before indexing",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/276"
+      },
+      "review": {
+        "number": 276,
+        "head": "724ede0806b84236f8b977e42d25526f0c9cdd26",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Skip malformed specialist descriptions without blocking the whole capability index.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "7 passed in 2.57s"
+          ],
+          "new_tests": [
+            "test_malformed_specialist_descriptions_do_not_block_index"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\276"
+        }
+      }
+    },
+    {
+      "number": 277,
+      "github": {
+        "headRefOid": "59ecaffa2a5876e9bc0f2248b29a4c3282632d68",
+        "mergeCommit": {
+          "oid": "d6f0b1a55247451ab389d0ef6d4a80c7b926be17"
+        },
+        "mergedAt": "2026-11-04T10:06:13Z",
+        "number": 277,
+        "state": "MERGED",
+        "title": "[Donation] Allow another page from a host after an unsuccessful web read",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/277"
+      },
+      "review": {
+        "number": 277,
+        "head": "59ecaffa2a5876e9bc0f2248b29a4c3282632d68",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Permit a second page from the same host when the first is unreadable.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "72 passed in 1.34s"
+          ],
+          "new_tests": [
+            "test_web_sources_retry_host_until_a_readable_page_is_found"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\277"
+        }
+      }
+    },
+    {
+      "number": 278,
+      "github": {
+        "headRefOid": "3e3779fe4414ba18efc8ddc223df50e1dbb9c49b",
+        "mergeCommit": {
+          "oid": "d447237723b8e8cbccb77e7564fad53b171f75c2"
+        },
+        "mergedAt": "2026-11-04T10:03:44Z",
+        "number": 278,
+        "state": "MERGED",
+        "title": "[Donation] Accept YAML whitespace before the manifest version colon",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/278"
+      },
+      "review": {
+        "number": 278,
+        "head": "3e3779fe4414ba18efc8ddc223df50e1dbb9c49b",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Accept legal YAML whitespace before the version separator.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "10 passed in 0.18s"
+          ],
+          "new_tests": [
+            "test_installed_version_accepts_whitespace_before_colon"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\278"
+        }
+      }
+    },
+    {
+      "number": 279,
+      "github": {
+        "headRefOid": "f9b322a3f35d057eba5741469d8f1347129235ba",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 279,
+        "state": "CLOSED",
+        "title": "[Donation] Recover from structurally invalid face-enrollment requests",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/279"
+      },
+      "review": {
+        "number": 279,
+        "head": "f9b322a3f35d057eba5741469d8f1347129235ba",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Discard malformed enrollment JSON structure without killing the camera watcher.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "15 passed in 0.30s"
+          ],
+          "new_tests": [
+            "test_malformed_enrollment_structure_does_not_stop_watcher"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\279"
+        }
+      }
+    },
+    {
+      "number": 280,
+      "github": {
+        "headRefOid": "ab6611d6a07ab5ed10ff983c31b4f096e290b2dd",
+        "mergeCommit": {
+          "oid": "d70ea89d2db33aadab2e53c9c5be856bfba47d6c"
+        },
+        "mergedAt": "2026-11-04T10:04:01Z",
+        "number": 280,
+        "state": "MERGED",
+        "title": "[Donation] Reject dangling destination parent symlinks before copying the UI kit",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/280"
+      },
+      "review": {
+        "number": 280,
+        "head": "ab6611d6a07ab5ed10ff983c31b4f096e290b2dd",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Reject dangling UI-kit parent symlinks during preflight before copying any earlier files.",
+        "checks": {
+          "pre_patch_exit": 0,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "21 passed, 2 skipped in 11.87s"
+          ],
+          "new_tests": [
+            "test_dangling_kit_parent_symlink_is_rejected_before_copy"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\280",
+          "platform_symlink_test_skipped": true,
+          "supplement_pre": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\273-280-supplement-pre.txt",
+          "supplement_post": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\273-280-supplement-post.txt",
+          "supplement_summary": "2 mocked-filesystem regressions fail baseline; combined head modules plus supplements:38passed4skipped2subtests"
+        }
+      }
+    },
+    {
+      "number": 281,
+      "github": {
+        "headRefOid": "7cba8e798d91bf5b44c414a7f1f70a2ed6dc9dda",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 281,
+        "state": "CLOSED",
+        "title": "[Donation] Prevent Decimal precision from rounding document-check arithmetic",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/281"
+      },
+      "review": {
+        "number": 281,
+        "head": "7cba8e798d91bf5b44c414a7f1f70a2ed6dc9dda",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Use sufficient local Decimal precision to check large dollar arithmetic exactly.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "14 passed in 2.24s"
+          ],
+          "new_tests": [
+            "test_document_check_uses_exact_arithmetic_for_large_amounts"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\281"
+        }
+      }
+    },
+    {
+      "number": 282,
+      "github": {
+        "headRefOid": "859bb00ae28e63acaa5333e5d53913b9de91eddd",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 282,
+        "state": "CLOSED",
+        "title": "[Donation] Handle an undecodable companion manifest as a repairable installation failure",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/282"
+      },
+      "review": {
+        "number": 282,
+        "head": "859bb00ae28e63acaa5333e5d53913b9de91eddd",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Treat unreadable companion manifests as repairable rather than throwing during pairing.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "8 passed in 0.14s"
+          ],
+          "new_tests": [
+            "test_corrupt_manifest_reports_repair_without_launching_broker"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\282"
+        }
+      }
+    },
+    {
+      "number": 283,
+      "github": {
+        "headRefOid": "813486024b1d9dc25e15e03e2475ebdfc4e7e5de",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 283,
+        "state": "CLOSED",
+        "title": "[Donation] Preserve native PDF text when the scanned reader returns no content",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/283"
+      },
+      "review": {
+        "number": 283,
+        "head": "813486024b1d9dc25e15e03e2475ebdfc4e7e5de",
+        "status": "accept",
+        "duplicate_of": null,
+        "reason": "Preserve valid native PDF text when optional scan extraction is empty or null.",
+        "checks": {
+          "pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "25 passed in 0.34s"
+          ],
+          "new_tests": [
+            "test_pdf_empty_scan_result_preserves_native_text"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-261-283-20261104-045335\\283"
+        }
+      }
+    },
+    {
+      "number": 284,
+      "github": {
+        "headRefOid": "33ddfa93a682cbd10a4cd2609904107797602fe9",
+        "mergeCommit": {
+          "oid": "e32fcf1eeef29f050b201910d9db1127c9bcf64c"
+        },
+        "mergedAt": "2026-11-04T09:58:23Z",
+        "number": 284,
+        "state": "MERGED",
+        "title": "[Donation] Treat malformed grader output as a failed grade",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/284"
+      },
+      "review": {
+        "number": 284,
+        "head": "33ddfa93a682cbd10a4cd2609904107797602fe9",
+        "parent": "9e29c34c32db129ef47a62fad3bf33cf427f2b14",
+        "files": [
+          "Validation/test_model_fitness.py",
+          "model_fitness.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_game_grader_invalid_json_is_a_failed_grade_and_allows_retry"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr284-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr284-head.txt",
+            "summary": "20 passed in 0.44s"
+          },
+          "integration": {
+            "number": 284,
+            "head": "33ddfa93a682cbd10a4cd2609904107797602fe9",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "20 passed in 0.53s"
+          }
+        },
+        "github_result": {
+          "number": 284,
+          "head": "33ddfa93a682cbd10a4cd2609904107797602fe9",
+          "result": "{\"sha\":\"e32fcf1eeef29f050b201910d9db1127c9bcf64c\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "e32fcf1eeef29f050b201910d9db1127c9bcf64c",
+          "current_head": "33ddfa93a682cbd10a4cd2609904107797602fe9"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 285,
+      "github": {
+        "headRefOid": "100bd2375e9e0495df004ef56ca03c97ae99e783",
+        "mergeCommit": {
+          "oid": "221234c1339f6b5cb297c168586ce64b86459b6d"
+        },
+        "mergedAt": "2026-11-04T09:58:29Z",
+        "number": 285,
+        "state": "MERGED",
+        "title": "[Donation] Preserve configured model aliases with inline YAML comments",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/285"
+      },
+      "review": {
+        "number": 285,
+        "head": "100bd2375e9e0495df004ef56ca03c97ae99e783",
+        "parent": "fb7454903ef69e61ed4cf5280938c183071d393a",
+        "files": [
+          "Validation/test_model_identity.py",
+          "model_identity.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_inline_comment_preserves_legacy_model_names"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr285-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr285-head.txt",
+            "summary": "6 passed, 5 subtests passed in 0.13s"
+          },
+          "integration": {
+            "number": 285,
+            "head": "100bd2375e9e0495df004ef56ca03c97ae99e783",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "6 passed, 5 subtests passed in 0.13s"
+          }
+        },
+        "github_result": {
+          "number": 285,
+          "head": "100bd2375e9e0495df004ef56ca03c97ae99e783",
+          "result": "{\"sha\":\"221234c1339f6b5cb297c168586ce64b86459b6d\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "221234c1339f6b5cb297c168586ce64b86459b6d",
+          "current_head": "100bd2375e9e0495df004ef56ca03c97ae99e783"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 286,
+      "github": {
+        "headRefOid": "3c62cd6b113f4b65c8976a4c1f9ae876a69daf1e",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 286,
+        "state": "CLOSED",
+        "title": "[Donation] Continue searching past stale catalog matches",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/286"
+      },
+      "review": {
+        "number": 286,
+        "head": "3c62cd6b113f4b65c8976a4c1f9ae876a69daf1e",
+        "parent": "5582e7bb84a03416227922e7d23e151c40cce7a7",
+        "files": [
+          "Validation/test_file_catalog.py",
+          "file_catalog.py"
+        ],
+        "status": "reject",
+        "reason": "Unbounded stale-row scan/deletion under DB transaction; 5000-match real SQLite profile increases exists checks46->5000; closed with concrete reason.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_stale_matches_do_not_hide_existing_lower_ranked_file"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr286-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr286-head.txt",
+            "summary": "13 passed in 0.89s"
+          },
+          "integration": {}
+        },
+        "github_state": "CLOSED"
+      }
+    },
+    {
+      "number": 287,
+      "github": {
+        "headRefOid": "e0cf50d7254aab06c554926783c99d6a13368b5d",
+        "mergeCommit": {
+          "oid": "2172eda15ba85a6c820c61445890adfb63686661"
+        },
+        "mergedAt": "2026-11-04T09:58:35Z",
+        "number": 287,
+        "state": "MERGED",
+        "title": "[Donation] Allow a paused music job to be stopped",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/287"
+      },
+      "review": {
+        "number": 287,
+        "head": "e0cf50d7254aab06c554926783c99d6a13368b5d",
+        "parent": "8e4c415c246b590eced3313486814e48585a1b9f",
+        "files": [
+          "Validation/test_music_backend.py",
+          "music_backend.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_stopping_paused_music_job_prevents_resume"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr287-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr287-head.txt",
+            "summary": "71 passed in 2.98s"
+          },
+          "integration": {
+            "number": 287,
+            "head": "e0cf50d7254aab06c554926783c99d6a13368b5d",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "71 passed in 2.89s"
+          }
+        },
+        "github_result": {
+          "number": 287,
+          "head": "e0cf50d7254aab06c554926783c99d6a13368b5d",
+          "result": "{\"sha\":\"2172eda15ba85a6c820c61445890adfb63686661\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "2172eda15ba85a6c820c61445890adfb63686661",
+          "current_head": "e0cf50d7254aab06c554926783c99d6a13368b5d"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 288,
+      "github": {
+        "headRefOid": "35311805b73578ced8d3b086c71e5419175e90bc",
+        "mergeCommit": {
+          "oid": "b03aaefd97f645c19a9f0c60ffac75644deb8579"
+        },
+        "mergedAt": "2026-11-04T10:01:06Z",
+        "number": 288,
+        "state": "MERGED",
+        "title": "[Donation] Preserve absolute reference paths in durable music jobs",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/288"
+      },
+      "review": {
+        "number": 288,
+        "head": "35311805b73578ced8d3b086c71e5419175e90bc",
+        "parent": "fb7454903ef69e61ed4cf5280938c183071d393a",
+        "files": [
+          "Validation/test_music_backend.py",
+          "music_backend.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_durable_reference_path_survives_worker_directory_change"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr288-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr288-head.txt",
+            "summary": "71 passed in 2.37s"
+          },
+          "integration": {
+            "number": 288,
+            "head": "35311805b73578ced8d3b086c71e5419175e90bc",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "71 passed in 2.32s"
+          }
+        },
+        "github_result": {
+          "number": 288,
+          "head": "35311805b73578ced8d3b086c71e5419175e90bc",
+          "state": "MERGED",
+          "merge": "b03aaefd97f645c19a9f0c60ffac75644deb8579",
+          "handled_by": "root"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 289,
+      "github": {
+        "headRefOid": "526e5c4494215b4b334d3d7b83174d3ad1527f9a",
+        "mergeCommit": {
+          "oid": "cb9a3f07b3543211c07f7c7d1233666bc61c0611"
+        },
+        "mergedAt": "2026-11-04T10:01:24Z",
+        "number": 289,
+        "state": "MERGED",
+        "title": "[Donation] Record image-job launch failures when the Toolbox runtime is missing",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/289"
+      },
+      "review": {
+        "number": 289,
+        "head": "526e5c4494215b4b334d3d7b83174d3ad1527f9a",
+        "parent": "8e4c415c246b590eced3313486814e48585a1b9f",
+        "files": [
+          "Validation/test_quick_image.py",
+          "quick_image.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_missing_toolbox_runtime_marks_started_job_as_error"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr289-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr289-head.txt",
+            "summary": "9 passed in 0.29s"
+          },
+          "integration": {
+            "number": 289,
+            "head": "526e5c4494215b4b334d3d7b83174d3ad1527f9a",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "9 passed in 0.33s"
+          }
+        },
+        "github_result": {
+          "number": 289,
+          "head": "526e5c4494215b4b334d3d7b83174d3ad1527f9a",
+          "state": "MERGED",
+          "merge": "cb9a3f07b3543211c07f7c7d1233666bc61c0611",
+          "handled_by": "root"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 290,
+      "github": {
+        "headRefOid": "4af54f394f40a31e1d97a543cdc82d4119df297e",
+        "mergeCommit": {
+          "oid": "1f64e25e8627e1eaa364cf9dbddf7c202b7efe9b"
+        },
+        "mergedAt": "2026-11-04T10:01:52Z",
+        "number": 290,
+        "state": "MERGED",
+        "title": "[Donation] Keep successfully downloaded catalog data when cache persistence fails",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/290"
+      },
+      "review": {
+        "number": 290,
+        "head": "4af54f394f40a31e1d97a543cdc82d4119df297e",
+        "parent": "8e4c415c246b590eced3313486814e48585a1b9f",
+        "files": [
+          "Validation/test_public_api_catalog.py",
+          "public_api_catalog.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_catalog_uses_download_when_cache_replacement_fails"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr290-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr290-head.txt",
+            "summary": "8 passed in 0.94s"
+          },
+          "integration": {
+            "number": 290,
+            "head": "4af54f394f40a31e1d97a543cdc82d4119df297e",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "8 passed in 1.09s"
+          }
+        },
+        "github_result": {
+          "number": 290,
+          "head": "4af54f394f40a31e1d97a543cdc82d4119df297e",
+          "state": "MERGED",
+          "merge": "1f64e25e8627e1eaa364cf9dbddf7c202b7efe9b",
+          "handled_by": "root"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 291,
+      "github": {
+        "headRefOid": "7b2c4c382558a072e46bd2816d27cbc3b347d7a8",
+        "mergeCommit": {
+          "oid": "e956f2abbf03ad2a5dfee102500d18992a92d034"
+        },
+        "mergedAt": "2026-11-04T09:59:19Z",
+        "number": 291,
+        "state": "MERGED",
+        "title": "[Donation] Recover feature setup from future-dated progress timestamps",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/291"
+      },
+      "review": {
+        "number": 291,
+        "head": "7b2c4c382558a072e46bd2816d27cbc3b347d7a8",
+        "parent": "8e4c415c246b590eced3313486814e48585a1b9f",
+        "files": [
+          "Validation/test_runtime_features.py",
+          "runtime_features.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_setup_recovers_from_future_timestamp"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr291-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr291-head.txt",
+            "summary": "34 passed in 0.47s"
+          },
+          "integration": {
+            "number": 291,
+            "head": "7b2c4c382558a072e46bd2816d27cbc3b347d7a8",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "34 passed in 0.47s"
+          }
+        },
+        "github_result": {
+          "number": 291,
+          "head": "7b2c4c382558a072e46bd2816d27cbc3b347d7a8",
+          "result": "{\"sha\":\"e956f2abbf03ad2a5dfee102500d18992a92d034\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "e956f2abbf03ad2a5dfee102500d18992a92d034",
+          "current_head": "7b2c4c382558a072e46bd2816d27cbc3b347d7a8"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 292,
+      "github": {
+        "headRefOid": "ba165367dfb952ebf9875226e758f5fda1b9d29f",
+        "mergeCommit": {
+          "oid": "30d513ecfd56487210f13e4b49f6528f8c7b7d4e"
+        },
+        "mergedAt": "2026-11-04T09:59:28Z",
+        "number": 292,
+        "state": "MERGED",
+        "title": "[Donation] Verify filename search matches the existing file's index row",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/292"
+      },
+      "review": {
+        "number": 292,
+        "head": "ba165367dfb952ebf9875226e758f5fda1b9d29f",
+        "parent": "8e4c415c246b590eced3313486814e48585a1b9f",
+        "files": [
+          "Validation/test_readiness_checklist.py",
+          "readiness_checklist.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_file_index_requires_a_match_for_the_existing_files_own_row"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr292-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr292-head.txt",
+            "summary": "43 passed in 0.71s"
+          },
+          "integration": {
+            "number": 292,
+            "head": "ba165367dfb952ebf9875226e758f5fda1b9d29f",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "43 passed in 0.67s"
+          }
+        },
+        "github_result": {
+          "number": 292,
+          "head": "ba165367dfb952ebf9875226e758f5fda1b9d29f",
+          "result": "{\"sha\":\"30d513ecfd56487210f13e4b49f6528f8c7b7d4e\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "30d513ecfd56487210f13e4b49f6528f8c7b7d4e",
+          "current_head": "ba165367dfb952ebf9875226e758f5fda1b9d29f"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 293,
+      "github": {
+        "headRefOid": "930a9d167db0a35c8e0fdb979fa481151ed97ba8",
+        "mergeCommit": {
+          "oid": "28344dd3492096536599943d371ef0e639c87740"
+        },
+        "mergedAt": "2026-11-04T09:59:36Z",
+        "number": 293,
+        "state": "MERGED",
+        "title": "[Donation] Finalize station changes even when audio cleanup fails",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/293"
+      },
+      "review": {
+        "number": 293,
+        "head": "930a9d167db0a35c8e0fdb979fa481151ed97ba8",
+        "parent": "8e4c415c246b590eced3313486814e48585a1b9f",
+        "files": [
+          "Validation/test_radio_station.py",
+          "radio_station.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_station_change_recovers_when_audio_cleanup_reports_an_error"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr293-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr293-head.txt",
+            "summary": "32 passed in 6.01s"
+          },
+          "integration": {
+            "number": 293,
+            "head": "930a9d167db0a35c8e0fdb979fa481151ed97ba8",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "32 passed in 5.75s"
+          }
+        },
+        "github_result": {
+          "number": 293,
+          "head": "930a9d167db0a35c8e0fdb979fa481151ed97ba8",
+          "result": "{\"sha\":\"28344dd3492096536599943d371ef0e639c87740\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "28344dd3492096536599943d371ef0e639c87740",
+          "current_head": "930a9d167db0a35c8e0fdb979fa481151ed97ba8"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 294,
+      "github": {
+        "headRefOid": "18fac046cf45dc0d0e8836dae5b091341db67d90",
+        "mergeCommit": {
+          "oid": "b3d3518173f0941d9f9fe133ba1ec77e0d71a5b3"
+        },
+        "mergedAt": "2026-11-04T09:59:42Z",
+        "number": 294,
+        "state": "MERGED",
+        "title": "[Donation] Continue stopping the self-check tree when a child exits concurrently",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/294"
+      },
+      "review": {
+        "number": 294,
+        "head": "18fac046cf45dc0d0e8836dae5b091341db67d90",
+        "parent": "8e4c415c246b590eced3313486814e48585a1b9f",
+        "files": [
+          "Validation/test_self_diagnostics.py",
+          "self_diagnostics.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_stop_check_continues_after_a_child_exits_concurrently"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr294-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr294-head.txt",
+            "summary": "11 passed, 1 skipped in 0.33s"
+          },
+          "integration": {
+            "number": 294,
+            "head": "18fac046cf45dc0d0e8836dae5b091341db67d90",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "11 passed, 1 skipped in 0.32s"
+          }
+        },
+        "github_result": {
+          "number": 294,
+          "head": "18fac046cf45dc0d0e8836dae5b091341db67d90",
+          "result": "{\"sha\":\"b3d3518173f0941d9f9fe133ba1ec77e0d71a5b3\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "b3d3518173f0941d9f9fe133ba1ec77e0d71a5b3",
+          "current_head": "18fac046cf45dc0d0e8836dae5b091341db67d90"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 295,
+      "github": {
+        "headRefOid": "9bea4b6b70f5ffc776f3decca22d33f7cc06dd44",
+        "mergeCommit": {
+          "oid": "1c6a5ce48ef5a09dfde38d736da3b9d3f1aa6138"
+        },
+        "mergedAt": "2026-11-04T09:59:48Z",
+        "number": 295,
+        "state": "MERGED",
+        "title": "[Donation] Use a supported dtype on CUDA GPUs without BF16 support",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/295"
+      },
+      "review": {
+        "number": 295,
+        "head": "9bea4b6b70f5ffc776f3decca22d33f7cc06dd44",
+        "parent": "8e4c415c246b590eced3313486814e48585a1b9f",
+        "files": [
+          "Validation/test_cale_voice_worker.py",
+          "cale_voice_worker.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_model_loading_uses_float16_when_cuda_does_not_support_bfloat16"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr295-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr295-head.txt",
+            "summary": "6 passed in 0.16s"
+          },
+          "integration": {
+            "number": 295,
+            "head": "9bea4b6b70f5ffc776f3decca22d33f7cc06dd44",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "6 passed in 0.14s"
+          }
+        },
+        "github_result": {
+          "number": 295,
+          "head": "9bea4b6b70f5ffc776f3decca22d33f7cc06dd44",
+          "result": "{\"sha\":\"1c6a5ce48ef5a09dfde38d736da3b9d3f1aa6138\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "1c6a5ce48ef5a09dfde38d736da3b9d3f1aa6138",
+          "current_head": "9bea4b6b70f5ffc776f3decca22d33f7cc06dd44"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 296,
+      "github": {
+        "headRefOid": "01a576865436d59a6eaff720a3ae48d5e7c8b260",
+        "mergeCommit": {
+          "oid": "7d8b5c8c9b2666d22d2c93a220efc37f7fbb26eb"
+        },
+        "mergedAt": "2026-11-04T09:59:57Z",
+        "number": 296,
+        "state": "MERGED",
+        "title": "[Donation] Preserve supplementary Unicode characters in selectable PDF text",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/296"
+      },
+      "review": {
+        "number": 296,
+        "head": "01a576865436d59a6eaff720a3ae48d5e7c8b260",
+        "parent": "14deff4adbc34bf06e32ece883d2c2031ec293a2",
+        "files": [
+          "Validation/test_scanned_pdf.py",
+          "scanned_pdf.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_native_pdf_preserves_supplementary_unicode"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr296-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr296-head.txt",
+            "summary": "9 passed in 2.32s"
+          },
+          "integration": {
+            "number": 296,
+            "head": "01a576865436d59a6eaff720a3ae48d5e7c8b260",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "9 passed in 2.41s"
+          }
+        },
+        "github_result": {
+          "number": 296,
+          "head": "01a576865436d59a6eaff720a3ae48d5e7c8b260",
+          "result": "{\"sha\":\"7d8b5c8c9b2666d22d2c93a220efc37f7fbb26eb\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "7d8b5c8c9b2666d22d2c93a220efc37f7fbb26eb",
+          "current_head": "01a576865436d59a6eaff720a3ae48d5e7c8b260"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 297,
+      "github": {
+        "headRefOid": "4d4e43bbfd85f9698a0f97d22f6d980f0422484a",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 297,
+        "state": "CLOSED",
+        "title": "[Donation] Resolve discovered links against the final page URL",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/297"
+      },
+      "review": {
+        "number": 297,
+        "head": "4d4e43bbfd85f9698a0f97d22f6d980f0422484a",
+        "parent": "1d8cb0f31ba023366113fbf108291f5af520490c",
+        "files": [
+          "Validation/test_site_crawler.py",
+          "site_crawler.py"
+        ],
+        "status": "superseded",
+        "reason": "Wrong Crawl4AI field: .url preserves submitted URL; actual redirected_url handled by canonical298. Correctly-shaped redirect regression fails297 and passes298; close after298 merged.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_redirected_page_resolves_links_against_final_url"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr297-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr297-head.txt",
+            "summary": "14 passed in 1.20s"
+          },
+          "integration": {}
+        },
+        "github_state": "CLOSED"
+      }
+    },
+    {
+      "number": 298,
+      "github": {
+        "headRefOid": "94308fef1d69c3ebc18da9865cbf0b4e5a2c765a",
+        "mergeCommit": {
+          "oid": "1c8c9b879e873039bf88317729c379c4cd3e5477"
+        },
+        "mergedAt": "2026-11-04T10:01:45Z",
+        "number": 298,
+        "state": "MERGED",
+        "title": "[Donation] Resolve relative links against the redirected page URL",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/298"
+      },
+      "review": {
+        "number": 298,
+        "head": "94308fef1d69c3ebc18da9865cbf0b4e5a2c765a",
+        "parent": "eb5f6e19ce38dc8a219ebdb5cf565e285ed2427f",
+        "files": [
+          "Validation/test_site_crawler.py",
+          "site_crawler.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_relative_links_use_redirect_destination"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr298-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr298-head.txt",
+            "summary": "15 passed in 1.17s"
+          },
+          "integration": {
+            "number": 298,
+            "head": "94308fef1d69c3ebc18da9865cbf0b4e5a2c765a",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "15 passed in 1.16s"
+          }
+        },
+        "github_result": {
+          "number": 298,
+          "head": "94308fef1d69c3ebc18da9865cbf0b4e5a2c765a",
+          "result": "{\"sha\":\"1c8c9b879e873039bf88317729c379c4cd3e5477\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "1c8c9b879e873039bf88317729c379c4cd3e5477",
+          "current_head": "94308fef1d69c3ebc18da9865cbf0b4e5a2c765a"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 299,
+      "github": {
+        "headRefOid": "691321b7cb2e85a57dbaccfdcb2de27eea945feb",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 299,
+        "state": "CLOSED",
+        "title": "[Donation] Preserve local files that collide with skill staging filenames",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/299"
+      },
+      "review": {
+        "number": 299,
+        "head": "691321b7cb2e85a57dbaccfdcb2de27eea945feb",
+        "parent": "eb5f6e19ce38dc8a219ebdb5cf565e285ed2427f",
+        "files": [
+          "Validation/test_skill_catalog.py",
+          "skill_catalog.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_preserves_local_file_at_staging_path"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr299-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr299-head.txt",
+            "summary": "5 passed, 1 skipped in 0.53s"
+          },
+          "integration": {
+            "number": 299,
+            "head": "691321b7cb2e85a57dbaccfdcb2de27eea945feb",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "5 passed, 1 skipped in 0.52s"
+          }
+        },
+        "github_result": {
+          "number": 299,
+          "head": "691321b7cb2e85a57dbaccfdcb2de27eea945feb",
+          "result": "{\"message\":\"Merge already in progress\",\"documentation_url\":\"https://docs.github.com/rest/pulls/pulls#merge-a-pull-request\",\"status\":\"405\"}gh: Merge already in progress (HTTP 405)\n",
+          "state": "open",
+          "merge": "d6adf9b57e8759860f2a7b5a6ae8810649292190",
+          "current_head": "691321b7cb2e85a57dbaccfdcb2de27eea945feb"
+        },
+        "github_state": "OPEN",
+        "pending_reason": "Reviewed/tested; GitHub reports merge already in progress after502. Root owns final confirmation/recovery; no further child mutations."
+      }
+    },
+    {
+      "number": 300,
+      "github": {
+        "headRefOid": "d71f036a3914d964cb459b70967fd2e9d38522ee",
+        "mergeCommit": {
+          "oid": "b5131af9f52fc6e418460eb5176195412e6504a0"
+        },
+        "mergedAt": "2026-11-04T10:00:25Z",
+        "number": 300,
+        "state": "MERGED",
+        "title": "[Donation] Reject CPU snapshots with a rolled-back idle counter",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/300"
+      },
+      "review": {
+        "number": 300,
+        "head": "d71f036a3914d964cb459b70967fd2e9d38522ee",
+        "parent": "eb5f6e19ce38dc8a219ebdb5cf565e285ed2427f",
+        "files": [
+          "Validation/test_system_gauges.py",
+          "system_gauges.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_cpu_percent_rejects_idle_counter_rollback_and_recovers"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr300-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr300-head.txt",
+            "summary": "10 passed in 0.10s"
+          },
+          "integration": {
+            "number": 300,
+            "head": "d71f036a3914d964cb459b70967fd2e9d38522ee",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "10 passed in 0.10s"
+          }
+        },
+        "github_result": {
+          "number": 300,
+          "head": "d71f036a3914d964cb459b70967fd2e9d38522ee",
+          "result": "{\"sha\":\"b5131af9f52fc6e418460eb5176195412e6504a0\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "b5131af9f52fc6e418460eb5176195412e6504a0",
+          "current_head": "d71f036a3914d964cb459b70967fd2e9d38522ee"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 301,
+      "github": {
+        "headRefOid": "6fc653deb6bfd87d05f82ddebd66d911658f5af9",
+        "mergeCommit": {
+          "oid": "ddd897bc416015ad6f9d0ee61a5b45820e789088"
+        },
+        "mergedAt": "2026-11-04T10:00:39Z",
+        "number": 301,
+        "state": "MERGED",
+        "title": "[Donation] Preserve network throughput when link-speed sampling fails",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/301"
+      },
+      "review": {
+        "number": 301,
+        "head": "6fc653deb6bfd87d05f82ddebd66d911658f5af9",
+        "parent": "c28037430570e7e67404ec92e71240d79913466b",
+        "files": [
+          "Validation/test_system_gauges.py",
+          "system_gauges.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_network_throughput_survives_unavailable_interface_stats"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr301-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr301-head.txt",
+            "summary": "10 passed in 0.15s"
+          },
+          "integration": {
+            "number": 301,
+            "head": "6fc653deb6bfd87d05f82ddebd66d911658f5af9",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "10 passed in 0.11s"
+          }
+        },
+        "github_result": {
+          "number": 301,
+          "head": "6fc653deb6bfd87d05f82ddebd66d911658f5af9",
+          "result": "{\"sha\":\"ddd897bc416015ad6f9d0ee61a5b45820e789088\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "ddd897bc416015ad6f9d0ee61a5b45820e789088",
+          "current_head": "6fc653deb6bfd87d05f82ddebd66d911658f5af9"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 302,
+      "github": {
+        "headRefOid": "1a384a0c308a356b5a5760801938baf3f384bce9",
+        "mergeCommit": {
+          "oid": "0925ce66dc917ae4516fd903e24cc37bc28e7df2"
+        },
+        "mergedAt": "2026-11-04T10:02:14Z",
+        "number": 302,
+        "state": "MERGED",
+        "title": "[Donation] Reject nonfinite prediction scores caused by arithmetic overflow",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/302"
+      },
+      "review": {
+        "number": 302,
+        "head": "1a384a0c308a356b5a5760801938baf3f384bce9",
+        "parent": "3f279ae562aae83df0bd318e38a2d00d485396e8",
+        "files": [
+          "Validation/test_table_ml.py",
+          "table_ml.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_prediction_rejects_score_overflow"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr302-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr302-head.txt",
+            "summary": "11 passed, 8 subtests passed in 2.30s"
+          },
+          "integration": {
+            "number": 302,
+            "head": "1a384a0c308a356b5a5760801938baf3f384bce9",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "11 passed, 8 subtests passed in 2.64s"
+          }
+        },
+        "github_result": {
+          "number": 302,
+          "head": "1a384a0c308a356b5a5760801938baf3f384bce9",
+          "result": "{\"sha\":\"0925ce66dc917ae4516fd903e24cc37bc28e7df2\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "0925ce66dc917ae4516fd903e24cc37bc28e7df2",
+          "current_head": "1a384a0c308a356b5a5760801938baf3f384bce9"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 303,
+      "github": {
+        "headRefOid": "c4318c30f00f9c3222120defcb1046217df2aea8",
+        "mergeCommit": {
+          "oid": "ce644c1f5598d941d7ac282c3f900c3758f1121b"
+        },
+        "mergedAt": "2026-11-04T10:03:00Z",
+        "number": 303,
+        "state": "MERGED",
+        "title": "[Donation] Clear backend registries when startup is cancelled after a backend succeeds",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/303"
+      },
+      "review": {
+        "number": 303,
+        "head": "c4318c30f00f9c3222120defcb1046217df2aea8",
+        "parent": "187adaf4e7021ec700558df7405716e3d06133b9",
+        "files": [
+          "Validation/test_toolbox_mcp.py",
+          "toolbox_mcp.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_cancelled_second_backend_startup_clears_first_backend_registries"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr303-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr303-head.txt",
+            "summary": "18 passed in 1.31s"
+          },
+          "integration": {
+            "number": 303,
+            "head": "c4318c30f00f9c3222120defcb1046217df2aea8",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "18 passed in 1.30s"
+          }
+        },
+        "github_result": {
+          "number": 303,
+          "head": "c4318c30f00f9c3222120defcb1046217df2aea8",
+          "result": "{\"sha\":\"ce644c1f5598d941d7ac282c3f900c3758f1121b\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "ce644c1f5598d941d7ac282c3f900c3758f1121b",
+          "current_head": "c4318c30f00f9c3222120defcb1046217df2aea8"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 304,
+      "github": {
+        "headRefOid": "1cf6a3bc8eed813cef8dd67a29a4fe55214582c7",
+        "mergeCommit": {
+          "oid": "e9bbb9c146954e575b2fdcff245cef21078886e1"
+        },
+        "mergedAt": "2026-11-04T10:01:12Z",
+        "number": 304,
+        "state": "MERGED",
+        "title": "[Donation] Reject malformed video frame entries without aborting indexing",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/304"
+      },
+      "review": {
+        "number": 304,
+        "head": "1cf6a3bc8eed813cef8dd67a29a4fe55214582c7",
+        "parent": "f80de74882b448ec619e04ed91d3fbb69b71b838",
+        "files": [
+          "Validation/test_user_file_memory.py",
+          "user_file_memory.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_null_video_frame_entry_clears_stale_memory_and_allows_retry"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr304-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr304-head.txt",
+            "summary": "30 passed, 1 skipped, 2 subtests passed in 3.42s"
+          },
+          "integration": {
+            "number": 304,
+            "head": "1cf6a3bc8eed813cef8dd67a29a4fe55214582c7",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "30 passed, 1 skipped, 2 subtests passed in 3.41s"
+          }
+        },
+        "github_result": {
+          "number": 304,
+          "head": "1cf6a3bc8eed813cef8dd67a29a4fe55214582c7",
+          "result": "{\n  \"message\": \"Server Error\"\n}\ngh: Server Error (HTTP 502)\n",
+          "state": "MERGED",
+          "merge": "e9bbb9c146954e575b2fdcff245cef21078886e1",
+          "current_head": "1cf6a3bc8eed813cef8dd67a29a4fe55214582c7"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 305,
+      "github": {
+        "headRefOid": "90123237caaa2e31539bd06c670b281b961ea3f3",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 305,
+        "state": "CLOSED",
+        "title": "[Donation] Keep status speech available after malformed model-status responses",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/305"
+      },
+      "review": {
+        "number": 305,
+        "head": "90123237caaa2e31539bd06c670b281b961ea3f3",
+        "parent": "81cdc4e90a33a6e1f8634ce7d714549268dd2183",
+        "files": [
+          "Validation/test_voice_assistant.py",
+          "voice_assistant.py"
+        ],
+        "status": "accept_corrected",
+        "reason": "Production AttributeError fallback correct; fixed invalid context-manager grouping in donated test while retaining original commit. Corrected prepatch regression4fails; full43pass19subtests on currentmain. Reviewed corrected head90123237caaa2e31539bd06c670b281b961ea3f3.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_malformed_model_status_preserves_immediate_speech_fallback"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr305-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 1,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr305-head.txt",
+            "summary": "4 failed, 43 passed, 15 subtests passed in 1.32s"
+          },
+          "integration": {
+            "number": 305,
+            "head": "8a5f084bb79c913897fcf17420c369ea01c100d1",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 1,
+            "summary": "4 failed, 43 passed, 15 subtests passed in 1.21s"
+          },
+          "corrected_integration": {
+            "original_head": "8a5f084bb79c913897fcf17420c369ea01c100d1",
+            "reviewed_head": "90123237caaa2e31539bd06c670b281b961ea3f3",
+            "test": "43 passed, 19 subtests passed",
+            "baseline": "4 failed, 1 passed, 42 deselected; corrected test against prepatch production"
+          }
+        },
+        "original_head": "8a5f084bb79c913897fcf17420c369ea01c100d1",
+        "github_result": {
+          "number": 305,
+          "head": "90123237caaa2e31539bd06c670b281b961ea3f3",
+          "result": "{\"message\":\"Merge already in progress\",\"documentation_url\":\"https://docs.github.com/rest/pulls/pulls#merge-a-pull-request\",\"status\":\"405\"}gh: Merge already in progress (HTTP 405)\n",
+          "state": "open",
+          "merge": "bda41cd12f7ba8bd75ef92b593d3b4c8606b8070",
+          "current_head": "90123237caaa2e31539bd06c670b281b961ea3f3"
+        },
+        "github_state": "OPEN",
+        "pending_reason": "Reviewed/tested; GitHub reports merge already in progress after502. Root owns final confirmation/recovery; no further child mutations."
+      }
+    },
+    {
+      "number": 306,
+      "github": {
+        "headRefOid": "7b3e6934611cac28cd96991e862ea451c5b33a8d",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 306,
+        "state": "CLOSED",
+        "title": "[Donation] Clear backend registries when startup is cancelled after partial success",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/306"
+      },
+      "review": {
+        "number": 306,
+        "head": "7b3e6934611cac28cd96991e862ea451c5b33a8d",
+        "parent": "d36d2e0557066cc9d285b55a55edd668ab839b73",
+        "files": [
+          "Validation/test_toolbox_mcp.py",
+          "toolbox_mcp.py"
+        ],
+        "status": "duplicate",
+        "reason": "Canonical303 clears registries through ExitStack on startup cancellation and passes306 regression;306 additionally removes existing redundant finally but adds no missing behavior.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_cancelled_second_backend_startup_clears_published_first_backend"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr306-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr306-head.txt",
+            "summary": "18 passed in 1.28s"
+          },
+          "integration": {}
+        },
+        "github_state": "CLOSED"
+      }
+    },
+    {
+      "number": 307,
+      "github": {
+        "headRefOid": "57a9073159b24bf549096e1206a4c41c6c235569",
+        "mergeCommit": {
+          "oid": "8f11a1678ae577e5b583d94c3bdd69f27364395a"
+        },
+        "mergedAt": "2026-11-04T10:02:35Z",
+        "number": 307,
+        "state": "MERGED",
+        "title": "[Donation] Skip malformed search-result redirect targets",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/307"
+      },
+      "review": {
+        "number": 307,
+        "head": "57a9073159b24bf549096e1206a4c41c6c235569",
+        "parent": "81cdc4e90a33a6e1f8634ce7d714549268dd2183",
+        "files": [
+          "Validation/test_web_tools.py",
+          "web_tools.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow production correction; added regression fails prepatch; full touched suite and current-main integration pass.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_search_skips_malformed_duckduckgo_redirect_target"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr307-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-284-307-evidence\\pr307-head.txt",
+            "summary": "18 passed, 2 subtests passed in 0.92s"
+          },
+          "integration": {
+            "number": 307,
+            "head": "57a9073159b24bf549096e1206a4c41c6c235569",
+            "main": "70af4e6b84b1f2ebeca32a872fa8b9cabfda3c5a",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "18 passed, 2 subtests passed in 0.87s"
+          }
+        },
+        "github_result": {
+          "number": 307,
+          "head": "57a9073159b24bf549096e1206a4c41c6c235569",
+          "result": "{\"sha\":\"8f11a1678ae577e5b583d94c3bdd69f27364395a\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+          "state": "MERGED",
+          "merge": "8f11a1678ae577e5b583d94c3bdd69f27364395a",
+          "current_head": "57a9073159b24bf549096e1206a4c41c6c235569"
+        },
+        "github_state": "MERGED"
+      }
+    },
+    {
+      "number": 308,
+      "github": {
+        "headRefOid": "71d3cad211eab4b973ac6dffa68028c0545ab073",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 308,
+        "state": "CLOSED",
+        "title": "[Donation] Keep reading pages when an anchor has a malformed URL",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/308"
+      },
+      "review": {
+        "number": 308,
+        "head": "71d3cad211eab4b973ac6dffa68028c0545ab073",
+        "base": "448511c57637c0f7aa8e20bf506512a0960a7e1f",
+        "new_tests": [
+          "test_reader_ignores_malformed_link_and_keeps_page_content",
+          "test_reader_preserves_closing_block_text_boundaries"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 1.73,
+          "tail": "..................                                                     [100%]\n18 passed, 2 subtests passed in 0.96s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 2.25,
+          "tail": "\"\")\n            scheme = scheme.replace(b, \"\")\n    \n        allow_fragments = bool(allow_fragments)\n        netloc = query = fragment = ''\n        i = url.find(':')\n        if i > 0 and url[0].isascii() and url[0].isalpha():\n            for c in url[:i]:\n                if c not in scheme_chars:\n                    break\n            else:\n                scheme, url = url[:i].lower(), url[i+1:]\n        if url[:2] == '//':\n            netloc, url = _splitnetloc(url, 2)\n            if (('[' in netloc and ']' not in netloc) or\n                    (']' in netloc and '[' not in netloc)):\n>               raise ValueError(\"Invalid IPv6 URL\")\nE               ValueError: Invalid IPv6 URL\n\n..\\..\\..\\Programs\\Python\\Python313\\Lib\\urllib\\parse.py:514: ValueError\n=========================== short test summary info ===========================\nFAILED Validation/test_web_tools.py::BusinessContactTests::test_reader_ignores_malformed_link_and_keeps_page_content\n1 failed, 1 passed, 16 deselected in 1.43s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "b3d3518173f0941d9f9fe133ba1ec77e0d71a5b3",
+          "code": 0,
+          "tail": "..................                                                     [100%]\n18 passed, 2 subtests passed in 0.88s\n"
+        },
+        "action": "defer_root_integration",
+        "merge_error": "{\"message\":\"Merge already in progress\",\"documentation_url\":\"https://docs.github.com/rest/pulls/pulls#merge-a-pull-request\",\"status\":\"405\"}gh: Merge already in progress (HTTP 405)\n",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "410f0aef4e428d907326e346bc29e842ab5098ca",
+          "draft": false,
+          "head": "71d3cad211eab4b973ac6dffa68028c0545ab073"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; GitHub API ready/merge failure or base movement prevented a confirmed direct merge. Included in the private tested canonical integration chain for root.",
+        "disposition": "defer_root_integration",
+        "reviewed_head": "71d3cad211eab4b973ac6dffa68028c0545ab073"
+      }
+    },
+    {
+      "number": 309,
+      "github": {
+        "headRefOid": "760bf872018aab388e4501245ae48dcbd5552f56",
+        "mergeCommit": {
+          "oid": "e8cd6d3b77996c93b9f0ca79510cb2280c15b1bd"
+        },
+        "mergedAt": "2026-11-04T10:00:16Z",
+        "number": 309,
+        "state": "MERGED",
+        "title": "[Donation] Exclude music history with missing or invalid start timestamps",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/309"
+      },
+      "review": {
+        "number": 309,
+        "head": "760bf872018aab388e4501245ae48dcbd5552f56",
+        "base": "81cdc4e90a33a6e1f8634ce7d714549268dd2183",
+        "new_tests": [
+          "test_music_eta_requires_a_valid_historical_start_timestamp",
+          "test_music_countdown_rejects_nonfinite_estimates_and_timestamps"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 1.1,
+          "tail": "...........                                                              [100%]\n11 passed in 0.45s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 0.91,
+          "tail": "bs\"\n        jobs.mkdir()\n        for index, elapsed in enumerate((48, 60, 72)):\n            (jobs / f\"{index}.json\").write_text(json.dumps({\n                \"status\": \"complete\", \"instrumental\": False,\n                \"duration_seconds\": 180, \"finished\": elapsed,\n            }), encoding=\"utf-8\")\n>       assert task_eta.music_estimate_seconds(jobs, 180, False) is None\nE       AssertionError: assert 60 is None\nE        +  where 60 = <function music_estimate_seconds at 0x0000025F46C2E700>(WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1463/test_music_eta_requires_a_vali0/music-jobs'), 180, False)\nE        +    where <function music_estimate_seconds at 0x0000025F46C2E700> = task_eta.music_estimate_seconds\n\nValidation\\test_task_eta.py:95: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_task_eta.py::test_music_eta_requires_a_valid_historical_start_timestamp\n1 failed, 1 passed, 9 deselected in 0.27s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "7d8b5c8c9b2666d22d2c93a220efc37f7fbb26eb",
+          "code": 0,
+          "tail": "...........                                                              [100%]\n11 passed in 0.39s\n"
+        },
+        "merge_reply": {
+          "sha": "e8cd6d3b77996c93b9f0ca79510cb2280c15b1bd",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "e8cd6d3b77996c93b9f0ca79510cb2280c15b1bd",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "e8cd6d3b77996c93b9f0ca79510cb2280c15b1bd",
+          "draft": false,
+          "head": "760bf872018aab388e4501245ae48dcbd5552f56"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "760bf872018aab388e4501245ae48dcbd5552f56"
+      }
+    },
+    {
+      "number": 310,
+      "github": {
+        "headRefOid": "43517b1eb9ce918a15f58065b68b35ca777d7f95",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 310,
+        "state": "CLOSED",
+        "title": "[Donation] Exclude song history with missing or invalid start timestamps",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/310"
+      },
+      "review": {
+        "number": 310,
+        "head": "43517b1eb9ce918a15f58065b68b35ca777d7f95",
+        "base": "a1086616f55aa7ca67c96e2cdd0c55cb7b16be31",
+        "new_tests": [
+          "test_music_eta_excludes_history_without_valid_start_timestamps",
+          "test_music_countdown_rejects_nonfinite_estimates_and_timestamps"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 1.89,
+          "tail": "...........                                                              [100%]\n11 passed in 1.24s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 0.96,
+          "tail": "imestamps in enumerate(invalid_starts):\n            (jobs / f\"invalid-{index}.json\").write_text(json.dumps({\n                \"status\": \"complete\", \"instrumental\": False,\n                \"duration_seconds\": 180, \"finished\": 3000,\n                **timestamps,\n            }), encoding=\"utf-8\")\n>       assert task_eta.music_estimate_seconds(jobs, 180, False) == 54\nE       AssertionError: assert 3000 == 54\nE        +  where 3000 = <function music_estimate_seconds at 0x0000027FB3EC27A0>(WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1465/test_music_eta_excludes_histor0/music-jobs'), 180, False)\nE        +    where <function music_estimate_seconds at 0x0000027FB3EC27A0> = task_eta.music_estimate_seconds\n\nValidation\\test_task_eta.py:107: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_task_eta.py::test_music_eta_excludes_history_without_valid_start_timestamps\n1 failed, 1 passed, 9 deselected in 0.29s\n"
+        },
+        "verdict": "accept",
+        "duplicate_proof": {
+          "base": "c98156d3b5279c423ffbd28374ee43138dff3056",
+          "code": 0,
+          "tail": "..                                                                       [100%]\n2 passed, 9 deselected in 0.16s\n"
+        },
+        "closure_comment": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/310#issuecomment-6627990427",
+        "action": "closed_duplicate",
+        "reason": "Verified the new invalid-start-timestamp regression against current main after #309: it passes without this production patch. #309 contains the identical production fix. Closing this duplicate; the broader regression was also checked during review.",
+        "verified_remote": {
+          "state": "closed",
+          "merged": false,
+          "merge_commit_sha": "fdcf8ca01608ac46a1897ea2dd070d46bd445ff9",
+          "draft": true,
+          "head": "43517b1eb9ce918a15f58065b68b35ca777d7f95"
+        },
+        "disposition": "closed_duplicate",
+        "reviewed_head": "43517b1eb9ce918a15f58065b68b35ca777d7f95"
+      }
+    },
+    {
+      "number": 311,
+      "github": {
+        "headRefOid": "515a961a3c57c285651fc5c7a8ca8d61c8d7aef7",
+        "mergeCommit": {
+          "oid": "5a137c714b43049b43ccf88c7fa024c80485b3ce"
+        },
+        "mergedAt": "2026-11-04T10:00:33Z",
+        "number": 311,
+        "state": "MERGED",
+        "title": "[Donation] Reject terminal elapsed-time fallback timestamps before task creation",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/311"
+      },
+      "review": {
+        "number": 311,
+        "head": "515a961a3c57c285651fc5c7a8ca8d61c8d7aef7",
+        "base": "f53dd04124d673759efe49352e0949d4ffc9e97b",
+        "new_tests": [
+          "test_total_time_rejects_terminal_fallback_before_creation",
+          "test_countdown_needs_real_progress_and_survives_restart"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 1.08,
+          "tail": "...........                                                              [100%]\n11 passed in 0.42s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 1.04,
+          "tail": "                                     [100%]\n================================== FAILURES ===================================\n__________ test_total_time_rejects_terminal_fallback_before_creation __________\n\n    def test_total_time_rejects_terminal_fallback_before_creation():\n        for status in (\"ready_for_review\", \"accepted\", \"stopped\"):\n            for finished in (None, \"invalid\", float(\"nan\"), 999):\n                for updated in (0, -1, 999):\n>                   assert task_eta.total_time(\n                        1000, updated, status, now=2000, finished=finished,\n                    ) == \"—\"\nE                   AssertionError: assert '0s' == '—'\nE                     \nE                     - —\nE                     + 0s\n\nValidation\\test_task_eta.py:38: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_task_eta.py::test_total_time_rejects_terminal_fallback_before_creation\n1 failed, 1 passed, 9 deselected in 0.35s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "e8cd6d3b77996c93b9f0ca79510cb2280c15b1bd",
+          "code": 0,
+          "tail": "............                                                             [100%]\n12 passed in 0.40s\n"
+        },
+        "merge_reply": {
+          "sha": "5a137c714b43049b43ccf88c7fa024c80485b3ce",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "5a137c714b43049b43ccf88c7fa024c80485b3ce",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "5a137c714b43049b43ccf88c7fa024c80485b3ce",
+          "draft": false,
+          "head": "515a961a3c57c285651fc5c7a8ca8d61c8d7aef7"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "515a961a3c57c285651fc5c7a8ca8d61c8d7aef7"
+      }
+    },
+    {
+      "number": 312,
+      "github": {
+        "headRefOid": "5774491b7450e50a1114183afe28f8f685494111",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 312,
+        "state": "CLOSED",
+        "title": "[Donation] Exclude completed-state intervals from resumed task countdowns",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/312"
+      },
+      "review": {
+        "number": 312,
+        "head": "5774491b7450e50a1114183afe28f8f685494111",
+        "base": "e85eac289f8427d0af5e1bf6846afcc51eacd71b",
+        "new_tests": [
+          "test_completion_does_not_advance_active_clock_on_resume",
+          "test_stalled_and_completed_tasks"
+        ],
+        "head_tests": {
+          "code": 1,
+          "seconds": 1.25,
+          "tail": "tus, 10, \"working\", 1000)\n            task_eta.countdown(db, status, 30, \"working\", 1030)\n            assert task_eta.countdown(db, status, 50, \"working\", 1060) == (\n                \"About 1m 07s to review\"\n            )\n            assert task_eta.countdown(db, status, 100, status, 1065) == \"\"\n            # Resume within the restart threshold: the completed interval must\n            # not be mistaken for active work, even if progress is revised.\n>           assert task_eta.countdown(db, status, 50, \"working\", 1080) == (\n                \"About 1m 07s to review\"\n            )\nE           AssertionError: assert 'Estimating time…' == 'About 1m 07s to review'\nE             \nE             - About 1m 07s to review\nE             + Estimating time…\n\nValidation\\test_task_eta.py:65: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_task_eta.py::test_completion_does_not_advance_active_clock_on_resume\n1 failed, 10 passed in 0.59s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 1.07,
+          "tail": "0, \"working\", 1030)\n            assert task_eta.countdown(db, status, 50, \"working\", 1060) == (\n                \"About 1m 07s to review\"\n            )\n            assert task_eta.countdown(db, status, 100, status, 1065) == \"\"\n            # Resume within the restart threshold: the completed interval must\n            # not be mistaken for active work, even if progress is revised.\n>           assert task_eta.countdown(db, status, 50, \"working\", 1080) == (\n                \"About 1m 07s to review\"\n            )\nE           AssertionError: assert 'About 47s to review' == 'About 1m 07s to review'\nE             \nE             - About 1m 07s to review\nE             ?       ^^^^\nE             + About 47s to review\nE             ?       ^\n\nValidation\\test_task_eta.py:65: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_task_eta.py::test_completion_does_not_advance_active_clock_on_resume\n1 failed, 1 passed, 9 deselected in 0.37s\n"
+        },
+        "verdict": "needs_review",
+        "integration": {
+          "base": "5a137c714b43049b43ccf88c7fa024c80485b3ce",
+          "code": 1,
+          "tail": "    [100%]\n================================== FAILURES ===================================\n___________ test_completion_does_not_advance_active_clock_on_resume ___________\n\ntmp_path = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1511/test_completion_does_not_advan0')\n\n    def test_completion_does_not_advance_active_clock_on_resume(tmp_path):\n        db = tmp_path / \"projects.db\"\n        for status in (\"ready_for_review\", \"accepted\"):\n            task_eta.countdown(db, status, 10, \"working\", 1000)\n            task_eta.countdown(db, status, 30, \"working\", 1030)\n            assert task_eta.countdown(db, status, 50, \"working\", 1060) == (\n                \"About 1m 07s to review\"\n            )\n            assert task_eta.countdown(db, status, 100, status, 1065) == \"\"\n            # Resume within the restart threshold: the completed interval must\n            # not be mistaken for active work, even if progress is revised.\n>           assert task_eta.countdown(db, status, 50, \"working\", 1080) == (\n                \"About 1m 07s to review\"\n            )\nE           AssertionError: assert 'Estimating time…' == 'About 1m 07s to review'\nE             \nE             - About 1m 07s to review\nE             + Estimating time…\n\nValidation\\test_task_eta.py:77: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_task_eta.py::test_completion_does_not_advance_active_clock_on_resume\n1 failed, 12 passed in 0.57s\n"
+        },
+        "action": "closed_failing",
+        "closure_comment": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/312#issuecomment-6627991325",
+        "reason": "The reviewed head and current main plus this patch both fail the new test test_completion_does_not_advance_active_clock_on_resume: after resume the result is Estimating time instead of About 1m 07s to review. Current-main integration results: 1 failed, 12 passed. Closing this failing proposal rather than merging a fix that does not pass its own regression.",
+        "verified_remote": {
+          "state": "closed",
+          "merged": false,
+          "merge_commit_sha": "51e8f7c293a72e812c7a414b25e385f17617e353",
+          "draft": true,
+          "head": "5774491b7450e50a1114183afe28f8f685494111"
+        },
+        "disposition": "closed_failing",
+        "reviewed_head": "5774491b7450e50a1114183afe28f8f685494111"
+      }
+    },
+    {
+      "number": 313,
+      "github": {
+        "headRefOid": "cab83d29c2785cb92961a7fcea66c510fae477e8",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 313,
+        "state": "CLOSED",
+        "title": "[Donation] Exclude rejected singers when classifying sustained vocal intent",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/313"
+      },
+      "review": {
+        "number": 313,
+        "head": "cab83d29c2785cb92961a7fcea66c510fae477e8",
+        "base": "f9df5028b0c43d6af4a0b45b9356c6d86dee35a3",
+        "new_tests": [
+          "test_rejected_singer_does_not_turn_vocal_texture_into_sustained_singing",
+          "test_sparse_female_hook_does_not_get_full_verse_direction"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 0.77,
+          "tail": "...............                                                          [100%]\n15 passed in 0.12s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 0.89,
+          "tail": "==================================\n___ test_rejected_singer_does_not_turn_vocal_texture_into_sustained_singing ___\n\n    def test_rejected_singer_does_not_turn_vocal_texture_into_sustained_singing():\n        for exclusion in (\"no male singer\", \"without a female singer\"):\n            request = \"Heavy dubstep with vocal chops, \" + exclusion\n>           assert not music_style.requires_sustained_vocals(request)\nE           AssertionError: assert not True\nE            +  where True = <function requires_sustained_vocals at 0x000001EB567BF600>('Heavy dubstep with vocal chops, no male singer')\nE            +    where <function requires_sustained_vocals at 0x000001EB567BF600> = music_style.requires_sustained_vocals\n\nValidation\\test_music_style.py:90: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_style.py::test_rejected_singer_does_not_turn_vocal_texture_into_sustained_singing\n1 failed, 1 passed, 13 deselected in 0.25s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "ddd897bc416015ad6f9d0ee61a5b45820e789088",
+          "code": 0,
+          "tail": "...............                                                          [100%]\n15 passed in 0.12s\n"
+        },
+        "action": "defer_root_integration",
+        "error": "API call failed: GraphQL: Something went wrong while executing your query on 2026-11-04T10:00:44Z. Please include `EA4A:1B1E34:78C344:18D9F77:6AEB024C` when reporting this issue.\n",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "e1a57f873ed7c759430db69d03fd0f9b56d82d33",
+          "draft": true,
+          "head": "cab83d29c2785cb92961a7fcea66c510fae477e8"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; GitHub API ready/merge failure or base movement prevented a confirmed direct merge. Included in the private tested canonical integration chain for root.",
+        "disposition": "defer_root_integration",
+        "reviewed_head": "cab83d29c2785cb92961a7fcea66c510fae477e8"
+      }
+    },
+    {
+      "number": 314,
+      "github": {
+        "headRefOid": "4b97fc774aa804e8e7e947adf8eb6bea3c909c0d",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 314,
+        "state": "CLOSED",
+        "title": "[Donation] Prevent mastering from overwriting an output created during processing",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/314"
+      },
+      "review": {
+        "number": 314,
+        "head": "4b97fc774aa804e8e7e947adf8eb6bea3c909c0d",
+        "base": "f9df5028b0c43d6af4a0b45b9356c6d86dee35a3",
+        "new_tests": [
+          "test_mastering_preserves_output_created_during_rendering",
+          "test_mastering_rejects_hard_linked_reference"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 1.94,
+          "tail": ".......                                                                  [100%]\n7 passed in 1.17s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 2.12,
+          "tail": "bytes(b\"reference\")\n        rendered_paths = []\n    \n        def render(*args, **kwargs):\n            rendered = Path(args[0][-1])\n            rendered_paths.append(rendered)\n            output.write_bytes(b\"another process's audio\")\n            rendered.write_bytes(b\"mastered\")\n            return type(\"Result\", (), {\"returncode\": 0})()\n    \n        with patch.object(music_mastering.music_backend, \"_setup_lock\"), patch.object(\n            music_mastering, \"install\", return_value=Path(\"python.exe\")\n        ), patch.object(music_mastering.subprocess, \"run\", side_effect=render):\n>           with pytest.raises(FileExistsError):\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE           Failed: DID NOT RAISE FileExistsError\n\nValidation\\test_music_mastering.py:113: Failed\n=========================== short test summary info ===========================\nFAILED Validation/test_music_mastering.py::test_mastering_preserves_output_created_during_rendering\n1 failed, 1 passed, 5 deselected in 1.31s\n"
+        },
+        "verdict": "accept",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "008afeb7439f01393297deaf91725a5d0b48c666",
+          "draft": true,
+          "head": "4b97fc774aa804e8e7e947adf8eb6bea3c909c0d"
+        },
+        "action": "superseded_pending_canonical",
+        "canonical_pr": 316,
+        "reason": "Same destination-preservation issue as canonical PR316, which includes success/failure/timeout coverage and preserves the existing ValueError interface. Root will close this original after PR316 behavior reaches main.",
+        "disposition": "superseded_pending_canonical",
+        "reviewed_head": "4b97fc774aa804e8e7e947adf8eb6bea3c909c0d"
+      }
+    },
+    {
+      "number": 315,
+      "github": {
+        "headRefOid": "5c5d4f261db8a6ba1b86c070d71391cc2b7d73da",
+        "mergeCommit": {
+          "oid": "3c632ecfd0f8390bd20fc200ce92ceabbe9588b9"
+        },
+        "mergedAt": "2026-11-04T10:00:56Z",
+        "number": 315,
+        "state": "MERGED",
+        "title": "[Donation] Roll back partially published stems when a file move fails",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/315"
+      },
+      "review": {
+        "number": 315,
+        "head": "5c5d4f261db8a6ba1b86c070d71391cc2b7d73da",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_failed_publication_leaves_output_empty_for_retry"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 1.96,
+          "tail": "........                                                                 [100%]\n8 passed in 1.31s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 1.15,
+          "tail": "          music_stems, \"install\", return_value=Path(\"python.exe\")\n        ), patch.object(\n            music_stems.subprocess, \"run\", side_effect=render\n        ), patch.object(Path, \"rename\", autospec=True, side_effect=fail_second_move):\n            with pytest.raises(OSError, match=\"simulated publication failure\"):\n                music_stems.separate_stems(str(source), str(output))\n>           assert list(output.iterdir()) == []\nE           AssertionError: assert [WindowsPath(...mental).wav')] == []\nE             \nE             Left contains one more item: WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1474/test_failed_publication_leaves0/stems/song_(Instrumental).wav')\nE             Use -v to get more diff\n\nValidation\\test_music_stems.py:186: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_stems.py::test_failed_publication_leaves_output_empty_for_retry\n1 failed, 7 deselected in 0.48s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "ddd897bc416015ad6f9d0ee61a5b45820e789088",
+          "code": 0,
+          "tail": "........                                                                 [100%]\n8 passed in 1.29s\n"
+        },
+        "merge_reply": {
+          "sha": "3c632ecfd0f8390bd20fc200ce92ceabbe9588b9",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "3c632ecfd0f8390bd20fc200ce92ceabbe9588b9",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "3c632ecfd0f8390bd20fc200ce92ceabbe9588b9",
+          "draft": false,
+          "head": "5c5d4f261db8a6ba1b86c070d71391cc2b7d73da"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "5c5d4f261db8a6ba1b86c070d71391cc2b7d73da"
+      }
+    },
+    {
+      "number": 316,
+      "github": {
+        "headRefOid": "202eb9a7cad83ccefd5d53a38248a374bfcbf9f8",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 316,
+        "state": "CLOSED",
+        "title": "[Donation] Preserve output files created while mastering is in progress",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/316"
+      },
+      "review": {
+        "number": 316,
+        "head": "202eb9a7cad83ccefd5d53a38248a374bfcbf9f8",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_mastering_preserves_destination_created_during_render",
+          "test_mastering_rejects_hard_linked_reference"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 1.83,
+          "tail": ".........                                                                [100%]\n9 passed in 1.05s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 2.24,
+          "tail": ", as\n        the built-in open() function does.\n        \"\"\"\n        if \"b\" not in mode:\n            encoding = io.text_encoding(encoding)\n>       return io.open(self, mode, buffering, encoding, errors, newline)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       FileNotFoundError: [Errno 2] No such file or directory: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-1477\\\\test_mastering_preserves_desti2\\\\master.wav'\n\n..\\..\\..\\Programs\\Python\\Python313\\Lib\\pathlib\\_local.py:537: FileNotFoundError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_mastering.py::test_mastering_preserves_destination_created_during_render[success]\nFAILED Validation/test_music_mastering.py::test_mastering_preserves_destination_created_during_render[failure]\nFAILED Validation/test_music_mastering.py::test_mastering_preserves_destination_created_during_render[timeout]\n3 failed, 1 passed, 5 deselected in 1.40s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "3c632ecfd0f8390bd20fc200ce92ceabbe9588b9",
+          "code": 0,
+          "tail": ".........                                                                [100%]\n9 passed in 1.12s\n"
+        },
+        "action": "defer_root_integration",
+        "merge_error": "{\"message\":\"Base branch was modified. Review and try the merge again.\",\"documentation_url\":\"https://docs.github.com/rest/pulls/pulls#merge-a-pull-request\",\"status\":\"405\"}gh: Base branch was modified. Review and try the merge again. (HTTP 405)\n",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "8c7fdcb50798d41c69b30d1af69866eb17be76bd",
+          "draft": false,
+          "head": "202eb9a7cad83ccefd5d53a38248a374bfcbf9f8"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; GitHub API ready/merge failure or base movement prevented a confirmed direct merge. Included in the private tested canonical integration chain for root.",
+        "disposition": "defer_root_integration",
+        "reviewed_head": "202eb9a7cad83ccefd5d53a38248a374bfcbf9f8"
+      }
+    },
+    {
+      "number": 317,
+      "github": {
+        "headRefOid": "c14264e26d8457df9b6ec9d4d9cba358b0f48609",
+        "mergeCommit": {
+          "oid": "c98156d3b5279c423ffbd28374ee43138dff3056"
+        },
+        "mergedAt": "2026-11-04T10:01:26Z",
+        "number": 317,
+        "state": "MERGED",
+        "title": "[Donation] Handle undecodable FFmpeg diagnostics without leaving a partial video",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/317"
+      },
+      "review": {
+        "number": 317,
+        "head": "c14264e26d8457df9b6ec9d4d9cba358b0f48609",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_music_video_invalid_diagnostic_bytes_allow_cleanup_and_retry",
+          "test_music_video_renders_offline_and_preserves_source"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 3.64,
+          "tail": "........                                                                 [100%]\n8 passed in 2.89s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 2.11,
+          "tail": "_ _\n\ncommand = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-n', ...]\nkwargs = {'capture_output': True, 'text': True, 'timeout': 3600, 'creationflags': 134217728, ...}\n\n    def fake_run(command, **kwargs):\n        assert command[-1] == str(video)\n        assert not video.exists()\n        calls.append(command)\n        if len(calls) == 1:\n            video.write_bytes(b\"incomplete MP4\")\n            # Model subprocess text decoding of non-UTF-8 FFmpeg diagnostics.\n>           stderr = b\"Encoder failed: \\xff\".decode(\n                \"utf-8\", errors=kwargs.get(\"errors\", \"strict\")\n            )\nE           UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 16: invalid start byte\n\nValidation\\test_music_video.py:138: UnicodeDecodeError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_video.py::test_music_video_invalid_diagnostic_bytes_allow_cleanup_and_retry\n1 failed, 1 passed, 6 deselected in 1.38s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "e9bbb9c146954e575b2fdcff245cef21078886e1",
+          "code": 0,
+          "tail": "........                                                                 [100%]\n8 passed in 2.87s\n"
+        },
+        "merge_reply": {
+          "sha": "c98156d3b5279c423ffbd28374ee43138dff3056",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "c98156d3b5279c423ffbd28374ee43138dff3056",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "c98156d3b5279c423ffbd28374ee43138dff3056",
+          "draft": false,
+          "head": "c14264e26d8457df9b6ec9d4d9cba358b0f48609"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "c14264e26d8457df9b6ec9d4d9cba358b0f48609"
+      }
+    },
+    {
+      "number": 318,
+      "github": {
+        "headRefOid": "1838ae4dfd5ff634685a3aad844d9c05a3de1941",
+        "mergeCommit": {
+          "oid": "f46cf389c789eb0cb626f0b0eebb5d0644a2d600"
+        },
+        "mergedAt": "2026-11-04T10:01:41Z",
+        "number": 318,
+        "state": "MERGED",
+        "title": "[Donation] Recover when a cached browser context closes",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/318"
+      },
+      "review": {
+        "number": 318,
+        "head": "1838ae4dfd5ff634685a3aad844d9c05a3de1941",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_closed_project_context_is_replaced_on_next_open",
+          "test_download_filename_collision_search_continues_past_999"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 6.85,
+          "tail": ".......s...                                                              [100%]\n10 passed, 1 skipped in 6.21s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 2.53,
+          "tail": "> Any:\n        if self._api_zone.get():\n            return await cb()\n        task = asyncio.current_task(self._loop)\n        parsed_st = _attach_api_call_information(\n            getattr(task, \"__pw_stack__\", None) or _capture_stack_trace(),\n            is_internal,\n            title,\n        )\n        self._api_zone.set(parsed_st)\n        try:\n            return await cb()\n        except Exception as error:\n>           raise rewrite_error(error, f\"{parsed_st['apiName']}: {error}\") from None\nE           playwright._impl._errors.TargetClosedError: BrowserContext.new_page: Target page, context or browser has been closed\n\nC:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Lib\\site-packages\\playwright\\_impl\\_connection.py:636: TargetClosedError\n=========================== short test summary info ===========================\nFAILED Validation/test_native_browser.py::test_closed_project_context_is_replaced_on_next_open\n1 failed, 1 passed, 9 deselected in 1.87s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "c98156d3b5279c423ffbd28374ee43138dff3056",
+          "code": 0,
+          "tail": ".......s...                                                              [100%]\n10 passed, 1 skipped in 5.54s\n"
+        },
+        "merge_reply": {
+          "sha": "f46cf389c789eb0cb626f0b0eebb5d0644a2d600",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "f46cf389c789eb0cb626f0b0eebb5d0644a2d600",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "f46cf389c789eb0cb626f0b0eebb5d0644a2d600",
+          "draft": false,
+          "head": "1838ae4dfd5ff634685a3aad844d9c05a3de1941"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "1838ae4dfd5ff634685a3aad844d9c05a3de1941"
+      }
+    },
+    {
+      "number": 319,
+      "github": {
+        "headRefOid": "9ea8341204046545908ed7775d80611f41e6f713",
+        "mergeCommit": {
+          "oid": "1da56e4ce364b119788cdfcb9a856c7643b27c6b"
+        },
+        "mergedAt": "2026-11-04T10:01:57Z",
+        "number": 319,
+        "state": "MERGED",
+        "title": "[Donation] Handle malformed failure timestamps without crashing setup recovery",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/319"
+      },
+      "review": {
+        "number": 319,
+        "head": "9ea8341204046545908ed7775d80611f41e6f713",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_invalid_failure_timestamp_does_not_crash_recovery",
+          "test_slow_live_installer_is_not_restarted"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 2.92,
+          "tail": "................                                                         [100%]\n16 passed in 2.26s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 1.24,
+          "tail": "n:\"))):\n            return False\n        if _retry_runner_running():\n            return False\n        if _installer_running(progress):\n            return False\n        script = ROOT / \"Install-Backend.ps1\"\n        if not script.is_file():\n            return False\n        record = _read(record_path)\n        attempts = max(0, int(record.get(\"attempts\", 0)))\n        if (attempts < len(RETRY_DELAYS) and\n>               time.time() - max(float(progress.get(\"updated\", 0)),\n                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n                                  float(record.get(\"started\", 0))) < RETRY_DELAYS[attempts]):\nE                                 TypeError: float() argument must be a string or a real number, not 'NoneType'\n\nsetup_recovery.py:172: TypeError\n=========================== short test summary info ===========================\nFAILED Validation/test_setup_recovery.py::test_invalid_failure_timestamp_does_not_crash_recovery\n1 failed, 1 passed, 14 deselected in 0.59s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "f46cf389c789eb0cb626f0b0eebb5d0644a2d600",
+          "code": 0,
+          "tail": "................                                                         [100%]\n16 passed in 2.23s\n"
+        },
+        "merge_reply": {
+          "sha": "1da56e4ce364b119788cdfcb9a856c7643b27c6b",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "1da56e4ce364b119788cdfcb9a856c7643b27c6b",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "1da56e4ce364b119788cdfcb9a856c7643b27c6b",
+          "draft": false,
+          "head": "9ea8341204046545908ed7775d80611f41e6f713"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "9ea8341204046545908ed7775d80611f41e6f713"
+      }
+    },
+    {
+      "number": 320,
+      "github": {
+        "headRefOid": "8885ef6c1d705acc9cd8860d725434c3df60edda",
+        "mergeCommit": {
+          "oid": "810034bb7c5c91f6585c948c800e6d08c146eae8"
+        },
+        "mergedAt": "2026-11-04T10:02:08Z",
+        "number": 320,
+        "state": "MERGED",
+        "title": "[Donation] Preserve non-ASCII topics in skill search relevance filtering",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/320"
+      },
+      "review": {
+        "number": 320,
+        "head": "8885ef6c1d705acc9cd8860d725434c3df60edda",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_search_matches_non_ascii_topic",
+          "test_search_skips_non_object_entries"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 0.79,
+          "tail": ".......                                                                [100%]\n7 passed, 2 subtests passed in 0.11s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 0.92,
+          "tail": "k interface accessibility.\",\n            },\n            {\n                \"identifier\": identifier,\n                \"name\": \"日本語\",\n                \"description\": \"Japanese translation assistance.\",\n            },\n        ])\n        with patch.object(skill_hub, \"_run\", return_value=payload):\n            result = skill_hub.search(\"日本語\")\n>       self.assertEqual(\n            [match[\"identifier\"] for match in result[\"matches\"]],\n            [identifier],\n        )\nE       AssertionError: Lists differ: [] != ['skills-sh/example/translation']\nE       \nE       Second list contains 1 additional elements.\nE       First extra element 0:\nE       'skills-sh/example/translation'\nE       \nE       - []\nE       + ['skills-sh/example/translation']\n\nValidation\\test_skill_hub.py:55: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_skill_hub.py::SkillHubTests::test_search_matches_non_ascii_topic\n1 failed, 1 passed, 5 deselected in 0.24s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "1da56e4ce364b119788cdfcb9a856c7643b27c6b",
+          "code": 0,
+          "tail": ".......                                                                [100%]\n7 passed, 2 subtests passed in 0.10s\n"
+        },
+        "merge_reply": {
+          "sha": "810034bb7c5c91f6585c948c800e6d08c146eae8",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "810034bb7c5c91f6585c948c800e6d08c146eae8",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "810034bb7c5c91f6585c948c800e6d08c146eae8",
+          "draft": false,
+          "head": "8885ef6c1d705acc9cd8860d725434c3df60edda"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "8885ef6c1d705acc9cd8860d725434c3df60edda"
+      }
+    },
+    {
+      "number": 321,
+      "github": {
+        "headRefOid": "aee4708a97754050e7305ba1456a3aa15fc78dbb",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 321,
+        "state": "CLOSED",
+        "title": "[Donation] Reject malformed IPv6 loopback authorities",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/321"
+      },
+      "review": {
+        "number": 321,
+        "head": "aee4708a97754050e7305ba1456a3aa15fc78dbb",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_malformed_ipv6_authority_falls_back_to_static_html",
+          "test_symlink_loop_does_not_block_static_html_fallback"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 0.83,
+          "tail": ".....s...                                                            [100%]\n8 passed, 1 skipped, 4 subtests passed in 0.16s\n"
+        },
+        "before": {
+          "code": 0,
+          "seconds": 0.77,
+          "tail": ".s                                                                       [100%]\n1 passed, 1 skipped, 7 deselected in 0.11s\n"
+        },
+        "verdict": "needs_review",
+        "duplicate_proof": {
+          "base": "c98156d3b5279c423ffbd28374ee43138dff3056",
+          "code": 0,
+          "tail": ".s                                                                       [100%]\n1 passed, 1 skipped, 7 deselected in 0.12s\n"
+        },
+        "closure_comment": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/321#issuecomment-6627992059",
+        "action": "closed_duplicate",
+        "reason": "Verified against current main on the managed Python 3.13 runtime: urllib.parse.urlsplit already rejects http://[::1]garbage:3000/ with ValueError, which safe_loopback_url already handles. The new malformed-authority regression passes without this production patch. Closing this redundant guard; valid IPv6 loopback remains accepted.",
+        "verified_remote": {
+          "state": "closed",
+          "merged": false,
+          "merge_commit_sha": "145e1b4c97295f9de1ffd1ad93233cef1aa4ef38",
+          "draft": true,
+          "head": "aee4708a97754050e7305ba1456a3aa15fc78dbb"
+        },
+        "disposition": "closed_duplicate",
+        "reviewed_head": "aee4708a97754050e7305ba1456a3aa15fc78dbb"
+      }
+    },
+    {
+      "number": 322,
+      "github": {
+        "headRefOid": "5faddacda9b3e8d71bfe2cfbd2934ab1860cc0a8",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 322,
+        "state": "CLOSED",
+        "title": "[Donation] Recover gracefully when the local model dependency cannot be imported",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/322"
+      },
+      "review": {
+        "number": 322,
+        "head": "5faddacda9b3e8d71bfe2cfbd2934ab1860cc0a8",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_missing_model_dependency_leaves_a_short_reply",
+          "test_model_failure_leaves_a_short_reply"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 0.94,
+          "tail": "..........                                              [100%]\n10 passed, 17 subtests passed in 0.30s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 1.02,
+          "tail": "ud_ai\": None}):\n>           self.assertEqual(tone_adaptation.social_reply(\"Hello\"),\n                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n                             \"I heard you. What do you need?\")\n\nValidation\\test_tone_adaptation.py:29: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nutterance = 'Hello'\n\n    def social_reply(utterance: str) -> str:\n        \"\"\"Make one short on-device reply to a visitor who just spoke to Cale.\"\"\"\n        words = str(utterance).strip()\n        if not words:\n            return \"I'm listening. What's up?\"\n    \n>       from cloud_ai import FAST_MODEL, post\nE       ModuleNotFoundError: import of cloud_ai halted; None in sys.modules\n\ntone_adaptation.py:24: ModuleNotFoundError\n=========================== short test summary info ===========================\nFAILED Validation/test_tone_adaptation.py::ToneAdaptationTests::test_missing_model_dependency_leaves_a_short_reply\n1 failed, 1 passed, 8 deselected in 0.38s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "810034bb7c5c91f6585c948c800e6d08c146eae8",
+          "code": 0,
+          "tail": "..........                                              [100%]\n10 passed, 17 subtests passed in 0.31s\n"
+        },
+        "action": "defer_root_integration",
+        "merge_error": "{\n  \"message\": \"Server Error\"\n}\ngh: Server Error (HTTP 502)\n",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "3292030da0a3eb830689fdcda849130d0edf94de",
+          "draft": false,
+          "head": "5faddacda9b3e8d71bfe2cfbd2934ab1860cc0a8"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; GitHub API ready/merge failure or base movement prevented a confirmed direct merge. Included in the private tested canonical integration chain for root.",
+        "disposition": "defer_root_integration",
+        "reviewed_head": "5faddacda9b3e8d71bfe2cfbd2934ab1860cc0a8"
+      }
+    },
+    {
+      "number": 323,
+      "github": {
+        "headRefOid": "5e68d3504b0607e567e98099e0a67f6f253ac14d",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 323,
+        "state": "CLOSED",
+        "title": "[Donation] Treat disappearing speech-model files as incomplete installations",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/323"
+      },
+      "review": {
+        "number": 323,
+        "head": "5e68d3504b0607e567e98099e0a67f6f253ac14d",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_file_removed_during_readiness_check_is_not_ready",
+          "test_empty_voice_file_triggers_repair_before_completion"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 0.93,
+          "tail": ".......                                                            [100%]\n7 passed, 6 subtests passed in 0.25s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 0.98,
+          "tail": "isper/config.json')\nfollow_symlinks = True\n\n    def stat(self, *, follow_symlinks=True):\n        \"\"\"\n        Return the result of the stat() system call on this path, like\n        os.stat() does.\n        \"\"\"\n>       return os.stat(self, follow_symlinks=follow_symlinks)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       FileNotFoundError: [WinError 2] The system cannot find the file specified: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp4re4ee06\\\\Media\\\\models\\\\whisper\\\\config.json'\n\n..\\..\\..\\Programs\\Python\\Python313\\Lib\\pathlib\\_local.py:515: FileNotFoundError\n=========================== short test summary info ===========================\nSUBFAILED(check='ready') Validation/test_natural_voice.py::NaturalVoiceTests::test_file_removed_during_readiness_check_is_not_ready\nSUBFAILED(check='whisper_ready') Validation/test_natural_voice.py::NaturalVoiceTests::test_file_removed_during_readiness_check_is_not_ready\n2 failed, 2 passed, 5 deselected, 2 subtests passed in 0.34s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "0925ce66dc917ae4516fd903e24cc37bc28e7df2",
+          "code": 0,
+          "tail": ".......                                                            [100%]\n7 passed, 6 subtests passed in 0.24s\n"
+        },
+        "action": "defer_root_integration",
+        "merge_error": "{\"message\":\"Base branch was modified. Review and try the merge again.\",\"documentation_url\":\"https://docs.github.com/rest/pulls/pulls#merge-a-pull-request\",\"status\":\"405\"}gh: Base branch was modified. Review and try the merge again. (HTTP 405)\n",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "ebeacc4264daf0ce7d84ea6ebd718586ee22069c",
+          "draft": false,
+          "head": "5e68d3504b0607e567e98099e0a67f6f253ac14d"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; GitHub API ready/merge failure or base movement prevented a confirmed direct merge. Included in the private tested canonical integration chain for root.",
+        "disposition": "defer_root_integration",
+        "reviewed_head": "5e68d3504b0607e567e98099e0a67f6f253ac14d"
+      }
+    },
+    {
+      "number": 324,
+      "github": {
+        "headRefOid": "4650020ba55e543272b11399e0db700cda79d054",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 324,
+        "state": "CLOSED",
+        "title": "[Donation] Handle odd-sized videos in the original layout",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/324"
+      },
+      "review": {
+        "number": 324,
+        "head": "4650020ba55e543272b11399e0db700cda79d054",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_edit_video_original_layout_pads_odd_dimensions",
+          "test_edit_video_extreme_speed_chains_atempo"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 4.15,
+          "tail": "..........                                                               [100%]\n10 passed in 3.39s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 2.9,
+          "tail": "] Error sending frames to consumers: Generic error in an external library\nE           [vf#0:0 @ 0000019e2ab37500] Task finished with error code: -542398533 (Generic error in an external library)\nE           [vf#0:0 @ 0000019e2ab37500] Terminating thread with return code -542398533 (Generic error in an external library)\nE           [vost#0:0/libx264 @ 0000019e2ab31ac0] Could not open encoder before EOF\nE           [vost#0:0/libx264 @ 0000019e2ab31ac0] Task finished with error code: -22 (Invalid argument)\nE           [vost#0:0/libx264 @ 0000019e2ab31ac0] Terminating thread with return code -22 (Invalid argument)\nE           [out#0/mp4 @ 0000019e2ab63240] Nothing was written into output file, because at least one of its streams received no packets.\n\nvideo_edit.py:58: RuntimeError\n=========================== short test summary info ===========================\nFAILED Validation/test_video_edit.py::test_edit_video_original_layout_pads_odd_dimensions\n1 failed, 1 passed, 8 deselected in 2.15s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "96c6b7f13ec55ceaef4b0d455e5f7fbf8c0137c5",
+          "code": 0,
+          "tail": "..........                                                               [100%]\n10 passed in 3.50s\n"
+        },
+        "action": "defer_root_integration",
+        "merge_error": "{\"message\":\"Base branch was modified. Review and try the merge again.\",\"documentation_url\":\"https://docs.github.com/rest/pulls/pulls#merge-a-pull-request\",\"status\":\"405\"}gh: Base branch was modified. Review and try the merge again. (HTTP 405)\n",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "2889c973b27aec57200c32daee74fe4e27bb5734",
+          "draft": false,
+          "head": "4650020ba55e543272b11399e0db700cda79d054"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; GitHub API ready/merge failure or base movement prevented a confirmed direct merge. Included in the private tested canonical integration chain for root.",
+        "disposition": "defer_root_integration",
+        "reviewed_head": "4650020ba55e543272b11399e0db700cda79d054"
+      }
+    },
+    {
+      "number": 325,
+      "github": {
+        "headRefOid": "9ffe0edb07ffe715c8433c8ca42a46d1bf122c52",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 325,
+        "state": "CLOSED",
+        "title": "[Donation] Reject stale document text when the source changes during indexing",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/325"
+      },
+      "review": {
+        "number": 325,
+        "head": "9ffe0edb07ffe715c8433c8ca42a46d1bf122c52",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_inspector_rejects_source_changes_during_indexing",
+          "test_inspector_rejects_source_changes_during_cache_publication"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 2.83,
+          "tail": ".........                                                                [100%]\n9 passed in 2.08s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 1.08,
+          "tail": "_chat, \"document_text\", side_effect=[\"original text\", \"updated text\"],\n        ) as extract, patch.object(project_memory, \"index_document_text\") as index:\n            first = project_documents.inspect(tmp_path, \"notes.pdf\")\n            assert first[\"text\"] == \"original text\" and not first[\"cached\"]\n            index.side_effect = change_during_indexing\n            try:\n                project_documents.inspect(tmp_path, \"notes.pdf\")\n            except RuntimeError as exc:\n                assert \"document changed\" in str(exc)\n            else:\n>               raise AssertionError(\"Source edited during indexing returned stale text\")\nE               AssertionError: Source edited during indexing returned stale text\n\nValidation\\test_project_documents.py:130: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_project_documents.py::test_inspector_rejects_source_changes_during_indexing\n1 failed, 1 passed, 7 deselected in 0.44s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "c51bd4739b8f05ad65d96240bbedce947c7211af",
+          "code": 0,
+          "tail": ".........                                                                [100%]\n9 passed in 2.06s\n"
+        },
+        "action": "defer_root_integration",
+        "error": "API call failed: GraphQL: Something went wrong while executing your query on 2026-11-04T10:03:15Z. Please include `C04D:EC837:4F5A07A:104A5F9C:6AEB02E0` when reporting this issue.\n",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "8168da55ebb9ab145aeebbc708b91c38975e998b",
+          "draft": true,
+          "head": "9ffe0edb07ffe715c8433c8ca42a46d1bf122c52"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; GitHub API ready/merge failure or base movement prevented a confirmed direct merge. Included in the private tested canonical integration chain for root.",
+        "disposition": "defer_root_integration",
+        "reviewed_head": "9ffe0edb07ffe715c8433c8ca42a46d1bf122c52"
+      }
+    },
+    {
+      "number": 326,
+      "github": {
+        "headRefOid": "d02580d37c3c40d511f12dcc41a0f89090eabdd5",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 326,
+        "state": "CLOSED",
+        "title": "[Donation] Wait for killed ComfyUI processes before releasing the GPU lock",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/326"
+      },
+      "review": {
+        "number": 326,
+        "head": "d02580d37c3c40d511f12dcc41a0f89090eabdd5",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_render_cleanup_waits_for_killed_server",
+          "test_runtime_requires_all_verified_weights_before_reuse"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 5.82,
+          "tail": "...............                                                          [100%]\n15 passed in 5.18s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 0.98,
+          "tail": "= launch.return_value\n            server.poll.return_value = 1\n            server.terminate.side_effect = lambda: events.append((\"terminate\", None))\n            server.kill.side_effect = lambda: events.append((\"kill\", None))\n            server.wait.side_effect = wait_for_exit\n    \n            with pytest.raises(RuntimeError, match=\"exited during startup\"):\n                video_generation._render_job(job_id, {})\n    \n>       assert events == [\n            (\"terminate\", None), (\"wait\", 20), (\"kill\", None), (\"wait\", None)\n        ]\nE       AssertionError: assert [('terminate'...'kill', None)] == [('terminate'...'wait', None)]\nE         \nE         Right contains one more item: ('wait', None)\nE         Use -v to get more diff\n\nValidation\\test_video_generation.py:261: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_video_generation.py::test_render_cleanup_waits_for_killed_server\n1 failed, 1 passed, 13 deselected in 0.34s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "361de74fcdcc3970349b41c635ef7cf98df6d9b0",
+          "code": 0,
+          "tail": "...............                                                          [100%]\n15 passed in 5.15s\n"
+        },
+        "action": "defer_root_integration",
+        "merge_error": "{\"message\":\"Merge already in progress\",\"documentation_url\":\"https://docs.github.com/rest/pulls/pulls#merge-a-pull-request\",\"status\":\"405\"}gh: Merge already in progress (HTTP 405)\n",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "d7ba067127e5915164252882cd96a18f1b6b406b",
+          "draft": false,
+          "head": "d02580d37c3c40d511f12dcc41a0f89090eabdd5"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; GitHub API ready/merge failure or base movement prevented a confirmed direct merge. Included in the private tested canonical integration chain for root.",
+        "disposition": "defer_root_integration",
+        "reviewed_head": "d02580d37c3c40d511f12dcc41a0f89090eabdd5"
+      }
+    },
+    {
+      "number": 327,
+      "github": {
+        "headRefOid": "597f99becc15ad821a8bbabab8d5da218659f4aa",
+        "mergeCommit": {
+          "oid": "e21f54531b8239a4254495ad5f4f2422dcbb7c7a"
+        },
+        "mergedAt": "2026-11-04T10:03:50Z",
+        "number": 327,
+        "state": "MERGED",
+        "title": "[Donation] Prevent repeated multiplication symbols from becoming exponentiation",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/327"
+      },
+      "review": {
+        "number": 327,
+        "head": "597f99becc15ad821a8bbabab8d5da218659f4aa",
+        "base": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+        "new_tests": [
+          "test_unicode_multiplication_does_not_create_exponentiation",
+          "test_thousands_separators_require_valid_numeric_grouping"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 0.96,
+          "tail": "........                                             [100%]\n8 passed, 92 subtests passed in 0.30s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 0.97,
+          "tail": "ot_create_exponentiation>\n\n    def test_unicode_multiplication_does_not_create_exponentiation(self):\n        for expression in (\"2 ×× 3\", \"2 ×* 3\", \"2 *× 3\"):\n            with self.subTest(expression=expression):\n>               self.assertIsNone(calculate(expression))\nE               AssertionError: '2 *× 3 = 8' is not None\n\nValidation\\test_donation_regressions.py:66: AssertionError\n=========================== short test summary info ===========================\nSUBFAILED(expression='2 ×× 3') Validation/test_donation_regressions.py::CalculatorPrecisionTests::test_unicode_multiplication_does_not_create_exponentiation\nSUBFAILED(expression='2 ×* 3') Validation/test_donation_regressions.py::CalculatorPrecisionTests::test_unicode_multiplication_does_not_create_exponentiation\nSUBFAILED(expression='2 *× 3') Validation/test_donation_regressions.py::CalculatorPrecisionTests::test_unicode_multiplication_does_not_create_exponentiation\n3 failed, 2 passed, 6 deselected, 12 subtests passed in 0.32s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "fd90f0e8a119bd6450de4a3f0dddbb42c6af116c",
+          "code": 0,
+          "tail": "........                                             [100%]\n8 passed, 92 subtests passed in 0.27s\n"
+        },
+        "merge_reply": {
+          "sha": "e21f54531b8239a4254495ad5f4f2422dcbb7c7a",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "e21f54531b8239a4254495ad5f4f2422dcbb7c7a",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "e21f54531b8239a4254495ad5f4f2422dcbb7c7a",
+          "draft": false,
+          "head": "597f99becc15ad821a8bbabab8d5da218659f4aa"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "597f99becc15ad821a8bbabab8d5da218659f4aa"
+      }
+    },
+    {
+      "number": 328,
+      "github": {
+        "headRefOid": "3327674002645fa137073fd1a80570e0c3fdf327",
+        "mergeCommit": {
+          "oid": "cf590d466cc393bb2a9f3239e36d87f82e0e7090"
+        },
+        "mergedAt": "2026-11-04T10:04:17Z",
+        "number": 328,
+        "state": "MERGED",
+        "title": "[Donation] Recover from malformed entries in the owned-model source list",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/328"
+      },
+      "review": {
+        "number": 328,
+        "head": "3327674002645fa137073fd1a80570e0c3fdf327",
+        "base": "006e7ae8d0b8aad60e7534a01f21412db5c21c89",
+        "new_tests": [
+          "test_owned_sources_recovers_from_non_string_list_entries",
+          "test_retired_main_source_waits_for_active_tasks"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 7.41,
+          "tail": ".................................................          [100%]\n49 passed, 14 subtests passed in 6.78s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 1.12,
+          "tail": "te_text(json.dumps([\n                \"existing:latest\", {}, [], None, 42, True,\n            ]), encoding=\"utf-8\")\n            with patch.object(library, \"ROOT\", root):\n>               self.assertEqual(library.owned_sources(), {\"existing:latest\"})\n                                 ^^^^^^^^^^^^^^^^^^^^^^^\n\nValidation\\test_model_library.py:131: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\n    def owned_sources():\n        path = ROOT / \"LongTasks/auto-owned-models.json\"\n        try:\n            value = json.loads(path.read_text(encoding=\"utf-8\"))\n>           return set(value) if isinstance(value, list) else set()\n                   ^^^^^^^^^^\nE           TypeError: unhashable type: 'dict'\n\nmodel_library.py:664: TypeError\n=========================== short test summary info ===========================\nFAILED Validation/test_model_library.py::AutoModelTests::test_owned_sources_recovers_from_non_string_list_entries\n1 failed, 1 passed, 47 deselected in 0.50s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "e21f54531b8239a4254495ad5f4f2422dcbb7c7a",
+          "code": 0,
+          "tail": ".................................................          [100%]\n49 passed, 14 subtests passed in 6.16s\n"
+        },
+        "merge_reply": {
+          "sha": "cf590d466cc393bb2a9f3239e36d87f82e0e7090",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "cf590d466cc393bb2a9f3239e36d87f82e0e7090",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "cf590d466cc393bb2a9f3239e36d87f82e0e7090",
+          "draft": false,
+          "head": "3327674002645fa137073fd1a80570e0c3fdf327"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "3327674002645fa137073fd1a80570e0c3fdf327"
+      }
+    },
+    {
+      "number": 329,
+      "github": {
+        "headRefOid": "b5a8f14d0ef084c4fa3aa0e9be905e17a7f3b169",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 329,
+        "state": "CLOSED",
+        "title": "[Donation] Reject an existing file as the MIDI output directory",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/329"
+      },
+      "review": {
+        "number": 329,
+        "head": "b5a8f14d0ef084c4fa3aa0e9be905e17a7f3b169",
+        "base": "006e7ae8d0b8aad60e7534a01f21412db5c21c89",
+        "new_tests": [
+          "test_transcription_rejects_existing_file_as_output_directory",
+          "test_transcription_reports_real_midi_and_notes"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 1.11,
+          "tail": "............                                                             [100%]\n12 passed in 0.44s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 1.14,
+          "tail": "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1502/test_transcription_rejects_exi0/notes')\n\n    def iterdir(self):\n        \"\"\"Yield path objects of the directory contents.\n    \n        The children are yielded in arbitrary order, and the\n        special entries '.' and '..' are not included.\n        \"\"\"\n        root_dir = str(self)\n>       with os.scandir(root_dir) as scandir_it:\n             ^^^^^^^^^^^^^^^^^^^^\nE       NotADirectoryError: [WinError 267] The directory name is invalid: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-1502\\\\test_transcription_rejects_exi0\\\\notes'\n\n..\\..\\..\\Programs\\Python\\Python313\\Lib\\pathlib\\_local.py:575: NotADirectoryError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_midi.py::test_transcription_rejects_existing_file_as_output_directory\n1 failed, 1 passed, 10 deselected in 0.49s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "cf590d466cc393bb2a9f3239e36d87f82e0e7090",
+          "code": 0,
+          "tail": "............                                                             [100%]\n12 passed in 0.36s\n"
+        },
+        "action": "defer_root_integration",
+        "merge_error": "{\"message\":\"Merge already in progress\",\"documentation_url\":\"https://docs.github.com/rest/pulls/pulls#merge-a-pull-request\",\"status\":\"405\"}gh: Merge already in progress (HTTP 405)\n",
+        "verified_remote": {
+          "state": "open",
+          "merged": false,
+          "merge_commit_sha": "34564fa697fdefe96d5a0918f87b91a9c40c6ced",
+          "draft": false,
+          "head": "b5a8f14d0ef084c4fa3aa0e9be905e17a7f3b169"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; GitHub API ready/merge failure or base movement prevented a confirmed direct merge. Included in the private tested canonical integration chain for root.",
+        "disposition": "defer_root_integration",
+        "reviewed_head": "b5a8f14d0ef084c4fa3aa0e9be905e17a7f3b169"
+      }
+    },
+    {
+      "number": 330,
+      "github": {
+        "headRefOid": "7810a01a6d091181e9306feabd0d3cd204aa8d3c",
+        "mergeCommit": {
+          "oid": "6bf7f0b353e01e9469bc53c6713eff2633503260"
+        },
+        "mergedAt": "2026-11-04T10:04:54Z",
+        "number": 330,
+        "state": "MERGED",
+        "title": "[Donation] Reject nonfinite or nonpositive tempo estimates",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/330"
+      },
+      "review": {
+        "number": 330,
+        "head": "7810a01a6d091181e9306feabd0d3cd204aa8d3c",
+        "base": "006e7ae8d0b8aad60e7534a01f21412db5c21c89",
+        "new_tests": [
+          "test_analysis_reports_only_finite_positive_tempos",
+          "test_analysis_records_same_chord_returning_after_silence"
+        ],
+        "head_tests": {
+          "code": 0,
+          "seconds": 0.93,
+          "tail": ".......                                                                  [100%]\n7 passed in 0.25s\n"
+        },
+        "before": {
+          "code": 1,
+          "seconds": 1.34,
+          "tail": "      feature=SimpleNamespace(chroma_stft=lambda **kwargs: np.zeros((12, 44))),\n            beat=SimpleNamespace(),\n        )\n        monkeypatch.setitem(sys.modules, \"librosa\", librosa_stub)\n    \n        for tempo, expected in (\n            (float(\"nan\"), None),\n            (float(\"inf\"), None),\n            (float(\"-inf\"), None),\n            (-120.0, None),\n            (0.0, None),\n            (120.0, 120.0),\n        ):\n            for estimate in (tempo, np.array([tempo])):\n                librosa_stub.beat.beat_track = lambda **kwargs: (estimate, np.array([0, 20]))\n                result = music_analysis.analyze_music(str(source))\n>               assert result[\"tempo_bpm\"] == expected\nE               assert nan == None\n\nValidation\\test_music_analysis.py:46: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_analysis.py::test_analysis_reports_only_finite_positive_tempos\n1 failed, 1 passed, 5 deselected in 0.35s\n"
+        },
+        "verdict": "accept",
+        "integration": {
+          "base": "0ad5148226ff37d06b748e26ee0fe07f5520954a",
+          "code": 0,
+          "tail": ".......                                                                  [100%]\n7 passed in 0.36s\n"
+        },
+        "merge_reply": {
+          "sha": "6bf7f0b353e01e9469bc53c6713eff2633503260",
+          "merged": true,
+          "message": "Pull Request successfully merged"
+        },
+        "action": "merged",
+        "merged_commit": "6bf7f0b353e01e9469bc53c6713eff2633503260",
+        "verified_remote": {
+          "state": "closed",
+          "merged": true,
+          "merge_commit_sha": "6bf7f0b353e01e9469bc53c6713eff2633503260",
+          "draft": false,
+          "head": "7810a01a6d091181e9306feabd0d3cd204aa8d3c"
+        },
+        "reason": "Exact reviewed head and current-main integration tests passed; merge verified through authoritative GitHub merged state.",
+        "disposition": "merged",
+        "reviewed_head": "7810a01a6d091181e9306feabd0d3cd204aa8d3c"
+      }
+    },
+    {
+      "number": 331,
+      "github": {
+        "headRefOid": "d373311cb73a6e6874a7fe7d06efc262f0a8e274",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 331,
+        "state": "CLOSED",
+        "title": "[Donation] Skip unconvertible lyric timestamps consistently with other invalid timings",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/331"
+      },
+      "review": {
+        "number": 331,
+        "head": "d373311cb73a6e6874a7fe7d06efc262f0a8e274",
+        "parent": "6bf7f0b353e01e9469bc53c6713eff2633503260",
+        "files": [
+          "Validation/test_music_lyrics.py",
+          "music_lyrics.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow validation fix; meaningful regression fails prepatch and full touched suite passes at exact head and local current-main integration.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_save_skips_unconvertible_timestamps"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-331-332-evidence\\pr331-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-331-332-evidence\\pr331-head.txt",
+            "summary": "27 passed in 1.05s"
+          },
+          "integration": {
+            "number": 331,
+            "head": "d373311cb73a6e6874a7fe7d06efc262f0a8e274",
+            "main": "5f15f5ee328d68d8fb25f65b7b997203edd501f6",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "27 passed in 1.09s"
+          }
+        },
+        "remote_mutations": "none; root integrates original reviewed head"
+      }
+    },
+    {
+      "number": 332,
+      "github": {
+        "headRefOid": "07c21e2227f59068d95629c20661dd33afa743cd",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 332,
+        "state": "CLOSED",
+        "title": "[Donation] Reject successful WAV edits containing no audio frames",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/332"
+      },
+      "review": {
+        "number": 332,
+        "head": "07c21e2227f59068d95629c20661dd33afa743cd",
+        "parent": "6bf7f0b353e01e9469bc53c6713eff2633503260",
+        "files": [
+          "Validation/test_music_edit.py",
+          "music_edit.py"
+        ],
+        "status": "accept",
+        "reason": "Narrow validation fix; meaningful regression fails prepatch and full touched suite passes at exact head and local current-main integration.",
+        "checks": {
+          "regression_before": {
+            "exit": 1,
+            "tests": [
+              "test_edit_music_rejects_header_only_wav_after_successful_exit"
+            ],
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-331-332-evidence\\pr332-baseline.txt"
+          },
+          "focused_head": {
+            "exit": 0,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-331-332-evidence\\pr332-head.txt",
+            "summary": "19 passed in 1.66s"
+          },
+          "integration": {
+            "number": 332,
+            "head": "07c21e2227f59068d95629c20661dd33afa743cd",
+            "main": "5f15f5ee328d68d8fb25f65b7b997203edd501f6",
+            "merge_exit": 0,
+            "exit": 0,
+            "summary": "19 passed in 1.32s"
+          }
+        },
+        "remote_mutations": "none; root integrates original reviewed head"
+      }
+    },
+    {
+      "number": 333,
+      "github": {
+        "headRefOid": "ffd7631de133eb508a9cc016832c074db07212b0",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 333,
+        "state": "CLOSED",
+        "title": "[Donation] Serialize background repair admission to prevent duplicate repairs",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/333"
+      },
+      "review": {
+        "number": 333,
+        "head": "ffd7631de133eb508a9cc016832c074db07212b0",
+        "status": "accept",
+        "reason": "Serialize eligibility/probe/thread-launch admission with a nonblocking process-local lock to prevent overlapping background repair starts.",
+        "checks": {
+          "base": "5f15f5ee328d68d8fb25f65b7b997203edd501f6",
+          "supplied_pre_patch_exit": 1,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "12 passed in 0.21s"
+          ],
+          "new_tests": [
+            "test_overlapping_background_checks_launch_only_one_repair"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-333-336-20261104-050852\\333"
+        },
+        "patch": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-333-336-20261104-050852\\333.patch"
+      }
+    },
+    {
+      "number": 334,
+      "github": {
+        "headRefOid": "7fd4143b0da8f00b98faabc8992f48c663918670",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 334,
+        "state": "CLOSED",
+        "title": "[Donation] Prevent cumulative drift in four-second chord segments",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/334"
+      },
+      "review": {
+        "number": 334,
+        "head": "7fd4143b0da8f00b98faabc8992f48c663918670",
+        "new_tests": [
+          "test_analysis_chord_segment_boundaries_do_not_accumulate_rounding_drift"
+        ],
+        "head_tests": {
+          "code": 1,
+          "tail": "tart in (0, 2 * frames_per_segment):\n            chroma[[0, 4, 7], start:start + frames_per_segment] = 1.0\n    \n        librosa_stub = SimpleNamespace(\n            get_duration=lambda *, path: 12.0,\n            load=lambda *args, **kwargs: (np.full(12 * sample_rate, 0.1), sample_rate),\n            effects=SimpleNamespace(harmonic=lambda signal: signal),\n            feature=SimpleNamespace(chroma_stft=lambda **kwargs: chroma),\n            beat=SimpleNamespace(beat_track=lambda **kwargs: (0.0, np.array([]))),\n        )\n        monkeypatch.setitem(sys.modules, \"librosa\", librosa_stub)\n    \n        result = music_analysis.analyze_music(str(source))\n    \n>       assert result[\"chord_changes\"] == [\n            {\"at_seconds\": 0.0, \"chord\": \"C major\"},\n            {\"at_seconds\": 8.0, \"chord\": \"C major\"},\n        ]\nE       AssertionError: assert [{'at_seconds...': 'C major'}] == [{'at_seconds...': 'C major'}]\nE         \nE         Right contains one more item: {'at_seconds': 8.0, 'chord': 'C major'}\nE         Use -v to get more diff\n\nValidation\\test_music_analysis.py:73: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_analysis.py::test_analysis_records_same_chord_returning_after_silence\n1 failed, 7 passed in 0.41s\n"
+        },
+        "before_on_root_base": {
+          "code": 1,
+          "tail": "[[2, 7, 11], change_frame:] = 1.0\n    \n        librosa_stub = SimpleNamespace(\n            get_duration=lambda *, path: float(duration),\n            load=lambda *args, **kwargs: (np.full(duration * sample_rate, 0.1), sample_rate),\n            effects=SimpleNamespace(harmonic=lambda signal: signal),\n            feature=SimpleNamespace(chroma_stft=lambda **kwargs: chroma),\n            beat=SimpleNamespace(beat_track=lambda **kwargs: (0.0, np.array([]))),\n        )\n        monkeypatch.setitem(sys.modules, \"librosa\", librosa_stub)\n    \n        result = music_analysis.analyze_music(str(source))\n    \n>       assert result[\"chord_changes\"] == [\n            {\"at_seconds\": 0.0, \"chord\": \"C major\"},\n            {\"at_seconds\": 176.0, \"chord\": \"G major\"},\n        ]\nE       AssertionError: assert [{'at_seconds...': 'G major'}] == [{'at_seconds...': 'G major'}]\nE         \nE         At index 1 diff: {'at_seconds': 175.7, 'chord': 'G major'} != {'at_seconds': 176.0, 'chord': 'G major'}\nE         Use -v to get more diff\n\nValidation\\test_music_analysis.py:154: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_analysis.py::test_analysis_chord_segment_boundaries_do_not_accumulate_rounding_drift\n1 failed, 7 deselected in 0.38s\n"
+        },
+        "integration": {
+          "base": "5f15f5ee328d68d8fb25f65b7b997203edd501f6",
+          "merge_code": 0,
+          "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+          "tests": {
+            "code": 1,
+            "tail": "tart in (0, 2 * frames_per_segment):\n            chroma[[0, 4, 7], start:start + frames_per_segment] = 1.0\n    \n        librosa_stub = SimpleNamespace(\n            get_duration=lambda *, path: 12.0,\n            load=lambda *args, **kwargs: (np.full(12 * sample_rate, 0.1), sample_rate),\n            effects=SimpleNamespace(harmonic=lambda signal: signal),\n            feature=SimpleNamespace(chroma_stft=lambda **kwargs: chroma),\n            beat=SimpleNamespace(beat_track=lambda **kwargs: (0.0, np.array([]))),\n        )\n        monkeypatch.setitem(sys.modules, \"librosa\", librosa_stub)\n    \n        result = music_analysis.analyze_music(str(source))\n    \n>       assert result[\"chord_changes\"] == [\n            {\"at_seconds\": 0.0, \"chord\": \"C major\"},\n            {\"at_seconds\": 8.0, \"chord\": \"C major\"},\n        ]\nE       AssertionError: assert [{'at_seconds...': 'C major'}] == [{'at_seconds...': 'C major'}]\nE         \nE         Right contains one more item: {'at_seconds': 8.0, 'chord': 'C major'}\nE         Use -v to get more diff\n\nValidation\\test_music_analysis.py:73: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_analysis.py::test_analysis_records_same_chord_returning_after_silence\n1 failed, 7 passed in 0.37s\n"
+          }
+        },
+        "verdict": "accept_with_corrected_existing_fixture",
+        "contributor": {
+          "login": "CaleMediaDev",
+          "id": 349578792,
+          "original_pr": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/334",
+          "reviewed_head": "7fd4143b0da8f00b98faabc8992f48c663918670"
+        },
+        "reason": "The production algorithm correctly rounds absolute source-frame boundaries. The old silence fixture used two multiplied rounded intervals, placing one returning-chord frame inside the nominal four-to-eight-second silent window. Correcting the fixture to independently rounded absolute boundaries preserves its original silence/return expectation and passes both before and after the fix.",
+        "corrected_fixture_before_production": {
+          "failed": 1,
+          "passed": 7,
+          "failure": "Independent drift regression: 175.7s instead of176.0s; corrected silence fixture passed."
+        },
+        "root_after_production": {
+          "passed": 8,
+          "seconds": 0.25
+        },
+        "root_changed_files": [
+          "music_analysis.py",
+          "Validation/test_music_analysis.py"
+        ]
+      }
+    },
+    {
+      "number": 335,
+      "github": {
+        "headRefOid": "324a4ad6e5a11d4ab2a5898cf6bb3a3e4dcff95b",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 335,
+        "state": "CLOSED",
+        "title": "[Donation] Replace superseded feedback when a generation's rating changes",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/335"
+      },
+      "review": {
+        "number": 335,
+        "head": "324a4ad6e5a11d4ab2a5898cf6bb3a3e4dcff95b",
+        "new_tests": [
+          "test_rating_change_replaces_only_same_generation_review",
+          "test_review_requires_comment_for_thumbs_down"
+        ],
+        "head_tests": {
+          "code": 0,
+          "tail": ".......                                                                  [100%]\n7 passed in 0.36s\n"
+        },
+        "before_on_root_base": {
+          "code": 1,
+          "tail": "F.                                                                       [100%]\n================================== FAILURES ===================================\n___________ test_rating_change_replaces_only_same_generation_review ___________\n\ntmp_path = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1535/test_rating_change_replaces_on0')\n\n    def test_rating_change_replaces_only_same_generation_review(tmp_path):\n        reviewed = task(\"changed-vote\", \"Techno synth bass\", title=\"Techno synth bass\")\n        feedback_learning.record(tmp_path, reviewed, 1)\n        feedback_learning.record(tmp_path, reviewed, -1, \"Use electronic drums\")\n        reviews = feedback_learning.for_task(tmp_path, \"changed-vote\")\n>       assert len(reviews) == 1\nE       AssertionError: assert 2 == 1\nE        +  where 2 = len([{'id': 2, 'generation': 0, 'kind': 'music', 'rating': -1, ...}, {'id': 1, 'generation': 0, 'kind': 'music', 'rating': 1, ...}])\n\nValidation\\test_feedback_learning.py:115: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_feedback_learning.py::test_rating_change_replaces_only_same_generation_review\n1 failed, 1 passed, 5 deselected in 0.28s\n"
+        },
+        "integration": {
+          "base": "5f15f5ee328d68d8fb25f65b7b997203edd501f6",
+          "merge_code": 0,
+          "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+          "tests": {
+            "code": 0,
+            "tail": ".......                                                                  [100%]\n7 passed in 0.34s\n"
+          }
+        },
+        "verdict": "accept"
+      }
+    },
+    {
+      "number": 336,
+      "github": {
+        "headRefOid": "b99c57dde18583d48130986b56ed5a5ee9d0e6d1",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 336,
+        "state": "CLOSED",
+        "title": "[Donation] Apply fallback search eligibility before limiting ranked results",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/336"
+      },
+      "review": {
+        "number": 336,
+        "head": "b99c57dde18583d48130986b56ed5a5ee9d0e6d1",
+        "status": "accept",
+        "reason": "Apply two-term fallback eligibility inside FTS before LIMIT so high-ranked single-term notes cannot hide relevant matches.",
+        "checks": {
+          "base": "5f15f5ee328d68d8fb25f65b7b997203edd501f6",
+          "supplied_pre_patch_exit": 0,
+          "post_patch_exit": 0,
+          "post_summary": [
+            "17 passed, 2 skipped, 4 subtests passed in 4.34s"
+          ],
+          "new_tests": [
+            "test_fallback_filters_single_term_hits_before_result_limit"
+          ],
+          "evidence_prefix": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-333-336-20261104-050852\\336",
+          "supplied_test_passes_baseline": true,
+          "independent_baseline_exit": 1,
+          "independent_post_exit": 0,
+          "independent_test": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-333-336-20261104-050852\\snapshot\\review_fallback_proof.py",
+          "independent_before_log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-333-336-20261104-050852\\336-independent-pre.txt",
+          "independent_after_log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-333-336-20261104-050852\\336-independent-post.txt",
+          "independent_post_summary": "18 passed,2 skipped,4 subtests passed in2.49s",
+          "test_guidance": "Strengthen retained corpus with20alpha-only+20beta-only+6gamma-only notes before the long alpha-beta result."
+        },
+        "patch": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\pr-review-333-336-20261104-050852\\336.patch"
+      }
+    }
+  ]
+}
