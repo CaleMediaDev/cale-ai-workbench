@@ -634,8 +634,12 @@ def say(message, rate=0, cancel=None, require_clone=False):
                     stamp = reference.stat().st_mtime_ns
                     cached = ROOT / "Media" / "voice-cache" / f"wake-v1-{stamp}.wav"
                     if cached.is_file() and cached.stat().st_size > 1000:
-                        _play_file(cached, cancel)
-                        return {"path": str(cached), "engine": "Cale's local voice (cached)"}
+                        try:
+                            _play_file(cached, cancel)
+                        except (OSError, wave.Error):
+                            pass  # Regenerate an unusable cached acknowledgement.
+                        else:
+                            return {"path": str(cached), "engine": "Cale's local voice (cached)"}
                 result = cale_voice.speak(str(message)[:280], Path(folder) / "update.wav", cancel=cancel)
                 if cached is not None:
                     try:

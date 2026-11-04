@@ -645,6 +645,44 @@ class VoiceTests(unittest.TestCase):
             self.assertEqual(speak.call_count, 1)
             playback.assert_called_once()
 
+    def test_corrupt_cached_wake_reply_is_regenerated_with_clone(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            reference = root / "reference.wav"
+            reference.write_bytes(b"voice")
+            cached = root / "Media" / "voice-cache" / (
+                f"wake-v1-{reference.stat().st_mtime_ns}.wav"
+            )
+            cached.parent.mkdir(parents=True)
+            cached.write_bytes(b"invalid WAV" * 200)
+            fresh_audio = b"fresh audio" * 200
+            cancel = threading.Event()
+
+            def synthesize(_message, output, cancel=None):
+                Path(output).write_bytes(fresh_audio)
+                return {"path": str(output), "engine": "Cale's local voice"}
+
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant, "speech_ready", return_value=True),
+                patch.object(voice_assistant, "_heavy_gpu_active", return_value=False),
+                patch.object(cale_voice, "REFERENCE", reference),
+                patch.object(cale_voice, "ready", return_value=True),
+                patch.object(cale_voice, "speak", side_effect=synthesize) as clone,
+                patch.object(voice_assistant, "_play_file",
+                             side_effect=wave.Error("invalid WAV header")) as play,
+                patch.object(voice_assistant, "media_call") as fallback,
+            ):
+                result = voice_assistant.say(
+                    voice_assistant.WAKE_ACK, cancel=cancel, require_clone=True
+                )
+            self.assertEqual(result["engine"], "Cale's local voice")
+            play.assert_called_once_with(cached, cancel)
+            clone.assert_called_once()
+            self.assertIs(clone.call_args.kwargs["cancel"], cancel)
+            fallback.assert_not_called()
+            self.assertEqual(cached.read_bytes(), fresh_audio)
+
     def test_bundled_wake_reply_plays_without_model_startup(self):
         import hashlib
         import tempfile
