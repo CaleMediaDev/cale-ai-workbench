@@ -116,6 +116,29 @@ def test_negated_gendered_lead_does_not_override_vocal_texture():
         assert gender + " lead vocals throughout" in music_style.enhance(positive)
 
 
+def test_any_gendered_vocal_exclusion_preserves_texture_and_positive_intent():
+    for gender, other in (("male", "female"), ("female", "male")):
+        for exclusion in ("no any " + gender + " vocals",
+                          "without any " + gender + " lead vocals",
+                          "avoid any " + gender + " singer"):
+            request = "Heavy dubstep with vocal chops, " + exclusion
+            assert not music_style.explicit_lead_vocals(request)
+            assert not music_style.unambiguous_vocal_song(request)
+            assert not music_style.requires_sustained_vocals(request)
+            assert music_style.vocal_intent(request) == other
+            caption = music_style.enhance(request)
+            assert "Sparse chopped vocal syllables" in caption
+            assert "clear sung verses and chorus" not in caption
+            assert exclusion not in caption
+            assert music_style.enhance(caption) == caption
+
+            positive = request + ", but include " + other + " lead vocals"
+            assert music_style.vocal_intent(positive) == other
+            assert music_style.explicit_lead_vocals(positive)
+            assert music_style.requires_sustained_vocals(positive)
+            assert other + " lead vocals throughout" in music_style.enhance(positive)
+
+
 def test_negated_lead_vocals_preserve_vocal_texture():
     for exclusion in ("no lead vocals", "without any lead vocals",
                       "avoid lead vocals", "don't want lead vocals"):
@@ -250,3 +273,22 @@ def test_explicit_bpm_is_parsed_for_music_engine():
     assert music_style.requested_bpm("80-bpm synth groove") == 80
     assert music_style.requested_bpm("a fast electronic track") is None
     assert music_style.requested_bpm("10 bpm drone") is None
+
+
+def test_explicit_lead_and_chops_keep_full_lead_caption_idempotent():
+    for gender in ("female", "male"):
+        request = f"Dubstep with vocal chops and {gender} lead vocals"
+        caption = music_style.enhance(request)
+        assert f"{gender} lead vocals throughout" in caption
+        assert f"short {gender} vocal hooks" not in caption
+        assert "vocal chops" in caption
+        assert music_style.enhance(caption) == caption
+        assert music_style.requires_sustained_vocals(caption)
+
+
+def test_lead_cue_from_old_feedback_does_not_override_current_chopped_texture():
+    request = "Heavy dubstep with vocal chops, without any male lead vocals"
+    caption = music_style.enhance(request + "\nPast user feedback: Add female lead vocals")
+    assert caption.startswith("Sparse chopped vocal syllables")
+    assert "clear sung verses and chorus" not in caption
+    assert not music_style.requires_sustained_vocals(caption)

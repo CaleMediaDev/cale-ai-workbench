@@ -21,7 +21,7 @@ NEGATED_GUITAR = re.compile(
     re.I,
 )
 NEGATED_SINGER = re.compile(
-    rf"\b{NEGATION}\s+(?:a\s+)?(male|man|guy|boy|female|woman|girl)"
+    rf"\b{NEGATION}\s+(?:(?:a|any)\s+)?(male|man|guy|boy|female|woman|girl)"
     r"\s+(?:lead\s+)?(?:voice|vocals?|singer)\b", re.I,
 )
 NEGATED_LEAD_VOCALS = re.compile(
@@ -155,7 +155,10 @@ def enhance(prompt: str, instrumental: bool = False) -> str:
     cleaned, _, _ = _clean_negations(prompt)
     cues = []
     sustained = requires_sustained_vocals(cleaned, instrumental=instrumental)
-    sparse = sparse_vocal_style(cleaned)
+    # Chops can accompany a requested lead; they do not cancel that lead.
+    # Inspect only the cleaned current request, not exclusions or old feedback.
+    current = cleaned.split("Past user feedback", 1)[0]
+    sparse = sparse_vocal_style(cleaned) and not re.search(r"\blead\s+vocals?\b", current, re.I)
     if sustained and intent == "female":
         cue = ("Distinct short female vocal hooks and chopped phrases between instrumental drops"
                if sparse else
