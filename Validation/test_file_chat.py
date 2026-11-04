@@ -213,6 +213,24 @@ def test_pdf_empty_scan_result_preserves_native_text(worker_text):
         assert file_chat.document_text(Path("report.pdf")) == "Native PDF content."
 
 
+@pytest.mark.parametrize("worker_text", ["42", "[]", "{}", "true"])
+@pytest.mark.parametrize("native_text", ["Native PDF content.", ""])
+def test_pdf_non_text_scan_content_uses_existing_recovery(worker_text, native_text):
+    converter_module = Mock()
+    converter_module.MarkItDown.return_value.convert.return_value.text_content = native_text
+    result = Mock(returncode=0, stdout='{"has_scans": true, "text": ' + worker_text + '}')
+    with (
+        patch.dict("sys.modules", {"markitdown": converter_module}),
+        patch.object(file_chat.Path, "is_file", return_value=True),
+        patch.object(file_chat.subprocess, "run", return_value=result),
+    ):
+        if native_text:
+            assert file_chat.document_text(Path("report.pdf")) == native_text
+        else:
+            with pytest.raises(RuntimeError, match="local scanned-PDF reader did not respond"):
+                file_chat.document_text(Path("report.pdf"))
+
+
 @pytest.mark.parametrize("payload", ["null", "[]", "42", '"text"'])
 @pytest.mark.parametrize("native_text", ["Native PDF content.", ""])
 def test_pdf_non_object_worker_response_uses_existing_recovery(payload, native_text):
