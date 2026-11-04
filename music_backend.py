@@ -212,7 +212,8 @@ def _upload_reference_media(request: dict, source: Path, field: str) -> dict:
 def healthy() -> bool:
     try:
         result = _request("/health", timeout=2)
-        return result.get("data", {}).get("service") == "ACE-Step API"
+        data = result.get("data") if isinstance(result, dict) else None
+        return isinstance(data, dict) and data.get("service") == "ACE-Step API"
     except (OSError, ValueError, KeyError, RuntimeError):
         return False
 
@@ -220,7 +221,9 @@ def healthy() -> bool:
 def music_lm_ready() -> bool:
     """Use the LM only when the engine confirms it loaded successfully."""
     try:
-        return bool(_request("/health", timeout=2).get("data", {}).get("llm_initialized"))
+        result = _request("/health", timeout=2)
+        data = result.get("data") if isinstance(result, dict) else None
+        return isinstance(data, dict) and bool(data.get("llm_initialized"))
     except (OSError, ValueError, KeyError, RuntimeError):
         return False
 

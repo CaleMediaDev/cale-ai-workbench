@@ -99,6 +99,17 @@ def test_music_planner_status_falls_back_when_unavailable():
         assert music_backend.music_lm_ready() is False
 
 
+@pytest.mark.parametrize("response", [
+    None, [], "unavailable", 42,
+    {"data": None}, {"data": []}, {"data": "unavailable"}, {"data": 42},
+])
+@pytest.mark.parametrize("probe", [music_backend.healthy, music_backend.music_lm_ready])
+def test_health_probes_reject_non_object_response_shapes(response, probe):
+    with patch.object(music_backend, "_request", return_value=response) as request:
+        assert probe() is False
+    request.assert_called_once_with("/health", timeout=2)
+
+
 def test_music_install_repairs_broken_environment_without_refetching_source(tmp_path):
     engine = tmp_path / "ACE-Step-1.5"
     python = engine / ".venv/Scripts/python.exe"
