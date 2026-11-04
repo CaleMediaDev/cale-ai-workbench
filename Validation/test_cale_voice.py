@@ -142,6 +142,30 @@ def test_stopping_launcher_also_stops_gpu_child():
     assert cale_voice._worker is None
 
 
+def test_stopping_worker_waits_for_forcibly_killed_gpu_child():
+    worker = Mock(pid=100)
+    worker.poll.return_value = None
+    child = Mock()
+
+    def wait_for_children(children, timeout):
+        assert children == [child]
+        assert timeout == 3
+        if child.kill.called:
+            return [child], []
+        return [], [child]
+
+    with (patch.object(cale_voice, "_worker", worker),
+          patch("psutil.Process") as process,
+          patch("psutil.wait_procs", side_effect=wait_for_children) as wait):
+        process.return_value.children.return_value = [child]
+        cale_voice._stop_worker()
+        assert cale_voice._worker is None
+        child.terminate.assert_called_once_with()
+        child.kill.assert_called_once_with()
+        assert wait.call_count == 2
+        wait.assert_called_with([child], timeout=3)
+
+
 def test_stopping_worker_kills_it_if_termination_times_out():
     worker = Mock(pid=100)
     worker.poll.return_value = None
