@@ -757,6 +757,13 @@ def cleanup_retired_main_sources():
         try:
             delete_model(source)
             removed += 1
+        except HTTPError as error:
+            # Deletion may have succeeded before a previous queue write failed.
+            # An absent source is already in the desired final state.
+            if error.code == 404:
+                removed += 1
+            else:
+                remaining.append(source)
         except Exception:
             remaining.append(source)
     temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
