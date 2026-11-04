@@ -203,6 +203,7 @@ def read_webpage(url: str, find: str = "", start_char: int = 0, question: str = 
     page = Page(final_url)
     if "html" in content_type.lower():
         page.feed(content)
+        page.close()
         text = page.clean_text()
     else:
         text = content
@@ -280,6 +281,7 @@ def search_web(query: str) -> dict:
             continue
         page = Page(url)
         page.feed(content)
+        page.close()
         results, seen = [], set()
         for link in page.links:
             target = link["url"]
