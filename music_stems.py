@@ -6,6 +6,7 @@ the workbench's voice, vision, or ACE-Step runtimes. Model files stay local.
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import subprocess
@@ -86,10 +87,19 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
             try:
                 for path in staged_files:
                     destination = target / path.name
-                    # Staging is inside target, so both paths share a filesystem.
-                    # Unlike rename on POSIX, link never replaces an existing file.
-                    os.link(path, destination)
-                    published.append(destination)
+                    # Prefer a no-replace hard link, but support filesystems
+                    # without hard links using an exclusive, rollback-safe copy.
+                    try:
+                        os.link(path, destination)
+                    except OSError as exc:
+                        if exc.errno not in {errno.ENOTSUP, errno.EXDEV}:
+                            raise
+                        with destination.open("xb") as output:
+                            published.append(destination)
+                            with path.open("rb") as input_file:
+                                shutil.copyfileobj(input_file, output)
+                    else:
+                        published.append(destination)
             except OSError:
                 for path in reversed(published):
                     path.unlink()

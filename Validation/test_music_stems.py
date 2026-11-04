@@ -226,6 +226,58 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
     assert source.read_bytes() == b"music"
 
 
+@pytest.mark.parametrize("interrupt_copy", [False, True])
+def test_publication_without_hard_links_is_retryable(tmp_path, interrupt_copy):
+    import errno
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+    original_copy = music_stems.shutil.copyfileobj
+    copy_attempts = 0
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        (staging / "song_(Vocals).wav").write_bytes(b"vocals")
+        (staging / "song_(Instrumental).wav").write_bytes(b"instrumental")
+        return SimpleNamespace(returncode=0)
+
+    def copy_with_interruption(input_file, output_file):
+        nonlocal copy_attempts
+        copy_attempts += 1
+        if interrupt_copy and copy_attempts == 2:
+            output_file.write(b"partial")
+            raise OSError("interrupted stem copy")
+        return original_copy(input_file, output_file)
+
+    with patch.object(
+        music_stems.music_backend, "_setup_lock", side_effect=nullcontext
+    ), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext
+    ), patch.object(
+        music_stems, "install", return_value=Path("python.exe")
+    ), patch.object(
+        music_stems.subprocess, "run", side_effect=render
+    ), patch.object(
+        music_stems.os, "link", side_effect=OSError(errno.ENOTSUP, "Hard links unsupported")
+    ), patch.object(
+        music_stems.shutil, "copyfileobj", side_effect=copy_with_interruption
+    ):
+        if interrupt_copy:
+            with pytest.raises(OSError, match="interrupted stem copy"):
+                music_stems.separate_stems(str(source), str(output))
+            assert list(output.iterdir()) == []
+        result = music_stems.separate_stems(str(source), str(output))
+
+    assert {Path(path).read_bytes() for path in result["files"]} == {
+        b"vocals", b"instrumental"
+    }
+    assert set(output.iterdir()) == {Path(path) for path in result["files"]}
+    assert source.read_bytes() == b"music"
+
+
 def test_publication_preserves_file_created_during_inference(tmp_path):
     from contextlib import nullcontext
     from types import SimpleNamespace
