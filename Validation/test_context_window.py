@@ -117,6 +117,21 @@ class ContextWindowTests(unittest.TestCase):
                         info, 128 * 2**30, 7 * 2**30
                     )
 
+    def test_missing_architecture_excludes_boolean_context_limits(self):
+        for value in (True, False):
+            with self.subTest(value=value):
+                info = {"model_info": {"clip.context_length": value}}
+                with self.assertRaisesRegex(ValueError, "native context limit"):
+                    context_window.native_context(info)
+                info["model_info"]["qwen.context_length"] = 262144
+                self.assertEqual(context_window.native_context(info), 262144)
+                self.assertEqual(
+                    context_window.desired_context(
+                        info, 128 * 2**30, 7 * 2**30
+                    ),
+                    262144,
+                )
+
     def test_configured_window_cannot_substitute_for_missing_native_limit(self):
         for metadata in ({}, {"model_info": {}}):
             with self.subTest(metadata=metadata):

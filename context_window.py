@@ -58,7 +58,8 @@ def native_context(info):
         raise ValueError("Cannot determine native context limit for model architecture")
     values = [
         int(value) for key, value in model_info.items()
-        if key.endswith(".context_length") and isinstance(value, int) and value > 0
+        if key.endswith(".context_length") and isinstance(value, int)
+        and not isinstance(value, bool) and value > 0
     ]
     if not values:
         raise ValueError("Cannot determine native context limit from model metadata")
