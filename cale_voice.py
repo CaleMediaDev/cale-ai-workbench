@@ -8,6 +8,7 @@ import json
 import math
 import os
 import queue
+import re
 import subprocess
 import sys
 import tempfile
@@ -382,6 +383,23 @@ def _stop_worker():
             pass
 
 
+def _is_voice_worker_process(info: dict, script: str) -> bool:
+    """Recognize the app's direct Python/script launch from OS process metadata."""
+    command = info.get("cmdline")
+    executable = info.get("exe")
+    if (not isinstance(command, (list, tuple)) or len(command) < 2
+            or not isinstance(command[1], str) or not isinstance(executable, str)):
+        return False
+    interpreter = Path(executable)
+    if (not interpreter.is_absolute() or not re.fullmatch(
+            r"python(?:w)?(?:[0-9]+(?:\.[0-9]+)*)?(?:\.exe)?", interpreter.name.casefold())):
+        return False
+    # Cale launches this absolute script as argv[1], with no interpreter flags.
+    # An editor or another Python program may merely have the path as data.
+    entrypoint = Path(command[1])
+    return entrypoint.is_absolute() and str(entrypoint.resolve()).casefold() == script
+
+
 def release_for_gpu_task() -> None:
     """Free voice-model VRAM before a separate music or image worker starts.
 
@@ -392,12 +410,9 @@ def release_for_gpu_task() -> None:
     import psutil
 
     script = str((ROOT / "cale_voice_worker.py").resolve()).casefold()
-    for process in psutil.process_iter(["pid", "cmdline"]):
+    for process in psutil.process_iter(["pid", "cmdline", "exe"]):
         try:
-            command = process.info.get("cmdline") or []
-            if process.pid == os.getpid() or not any(
-                str(Path(part).resolve()).casefold() == script for part in command
-            ):
+            if process.pid == os.getpid() or not _is_voice_worker_process(process.info, script):
                 continue
             try:
                 descendants = process.children(recursive=True)

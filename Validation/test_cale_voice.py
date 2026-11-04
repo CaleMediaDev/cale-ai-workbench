@@ -9,9 +9,45 @@ import pytest
 import cale_voice
 
 
+@pytest.mark.parametrize("program,arguments,owned", [
+    ("venv/python.exe", ["venv/python.exe", "WORKER"], True),
+    ("base/python.exe", ["base/python.exe", "WORKER"], True),
+    ("base/python.exe", ["venv/python.exe", "WORKER"], True),
+    ("notepad.exe", ["notepad.exe", "WORKER"], False),
+    ("Code.exe", ["Code.exe", "--reuse-window", "WORKER"], False),
+    ("python.exe", ["python.exe", "OTHER", "WORKER"], False),
+    ("python.exe", ["python.exe", "-c", "WORKER"], False),
+    ("python.exe", ["python.exe", "-m", "other_module", "WORKER"], False),
+    ("python.exe", ["python.exe", "-u", "WORKER"], False),
+    ("notepad.exe", ["python.exe", "WORKER"], False),
+    (None, ["python.exe", "WORKER"], False),
+    ("python.exe", ["python.exe", "cale_voice_worker.py"], False),
+])
+def test_gpu_release_owns_only_a_python_worker_script_entrypoint(tmp_path, program, arguments, owned):
+    worker = str(tmp_path / "cale_voice_worker.py")
+    command = [worker if value == "WORKER" else str(tmp_path / "other.py") if value == "OTHER" else value
+               for value in arguments]
+    process = Mock(pid=100, info={"exe": str(tmp_path / program) if program else None, "cmdline": command})
+    process.children.return_value = []
+    with patch.object(cale_voice, "ROOT", tmp_path), \
+         patch("psutil.process_iter", return_value=[process]) as processes, \
+         patch("os.getpid", return_value=500), patch("psutil.wait_procs", return_value=([], [])):
+        cale_voice.release_for_gpu_task()
+    processes.assert_called_once_with(["pid", "cmdline", "exe"])
+    if owned:
+        process.children.assert_called_once_with(recursive=True)
+        process.terminate.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=5)
+    else:
+        process.children.assert_not_called()
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+        process.wait.assert_not_called()
+
+
 def test_gpu_release_still_stops_parent_when_children_are_inaccessible(tmp_path):
     import psutil
-    own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
+    own = Mock(pid=100, info={"exe": str(tmp_path / "python.exe"), "cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
     own.children.side_effect = psutil.AccessDenied(pid=100)
     with patch.object(cale_voice, "ROOT", tmp_path), patch("psutil.process_iter", return_value=[own]), \
          patch("os.getpid", return_value=500), patch("psutil.wait_procs", return_value=([], [])):
@@ -21,7 +57,7 @@ def test_gpu_release_still_stops_parent_when_children_are_inaccessible(tmp_path)
 
 
 def test_gpu_release_waits_for_killed_descendants_before_returning(tmp_path):
-    own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
+    own = Mock(pid=100, info={"exe": str(tmp_path / "python.exe"), "cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
     child = Mock()
     own.children.return_value = [child]
     with patch.object(cale_voice, "ROOT", tmp_path), patch("psutil.process_iter", return_value=[own]), \
@@ -35,7 +71,7 @@ def test_gpu_release_waits_for_killed_descendants_before_returning(tmp_path):
 
 def test_gpu_release_waits_for_parent_after_forced_kill(tmp_path):
     import psutil
-    own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
+    own = Mock(pid=100, info={"exe": str(tmp_path / "python.exe"), "cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
     own.children.return_value = []
     own.wait.side_effect = [psutil.TimeoutExpired(5, pid=100), 0]
     with patch.object(cale_voice, "ROOT", tmp_path), patch("psutil.process_iter", return_value=[own]), \
@@ -127,8 +163,8 @@ def test_stopping_worker_kills_it_if_termination_times_out():
 
 @pytest.mark.parametrize("child_survives", [False, True])
 def test_music_releases_only_this_installations_voice_worker(tmp_path, child_survives):
-    own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
-    other = Mock(pid=101, info={"cmdline": ["python.exe", str(tmp_path / "other.py")]})
+    own = Mock(pid=100, info={"exe": str(tmp_path / "python.exe"), "cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
+    other = Mock(pid=101, info={"exe": str(tmp_path / "python.exe"), "cmdline": ["python.exe", str(tmp_path / "other.py")]})
     child = Mock()
     own.children.return_value = [child]
     alive = [child] if child_survives else []
