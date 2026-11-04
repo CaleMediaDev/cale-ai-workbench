@@ -103,6 +103,20 @@ def test_background_repair_waits_for_first_install(tmp_path, monkeypatch):
         assert not core_tool_health.start_background(tmp_path)
 
 
+def test_background_repair_ignores_non_object_progress(tmp_path, monkeypatch):
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    progress = tmp_path / "LongTasks/install-progress.json"
+    progress.parent.mkdir()
+    monkeypatch.setattr(core_tool_health, "_last_repair", None)
+    monkeypatch.setattr(core_tool_health, "_repair_thread", None)
+
+    for record in (None, [], "complete", 1):
+        progress.write_text(json.dumps(record), encoding="utf-8")
+        with patch.object(core_tool_health, "missing", return_value=[]) as missing:
+            assert not core_tool_health.start_background(tmp_path)
+            missing.assert_called_once_with(tmp_path)
+
+
 def test_background_repair_runs_once_and_rechecks(tmp_path, monkeypatch):
     (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
     progress = tmp_path / "LongTasks/install-progress.json"

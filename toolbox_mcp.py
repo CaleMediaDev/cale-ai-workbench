@@ -604,7 +604,9 @@ async def mirror_chrome_page(project_folder: str = ""):
         if not shot.is_error and temporary.is_file():
             os.replace(temporary, image)
         temporary.unlink(missing_ok=True)
-    except (OSError, sqlite3.Error, RuntimeError, ValueError):
+    except Exception:
+        # Preview is best-effort, including backend protocol/transport failures.
+        # Cancellation derives from BaseException and must still propagate.
         pass
 
 

@@ -75,6 +75,35 @@ def test_inspector_paginates_and_invalidates_changed_source(tmp_path):
     assert fresh["text"] == "updated" and not fresh["cached"]
 
 
+def test_inspector_handles_overlapping_cache_publications(tmp_path):
+    source = tmp_path / "notes.txt"
+    source.write_text("shared document text", encoding="utf-8")
+    real_replace = os.replace
+    interleaved = False
+    nested_results = []
+
+    def publish_after_another_inspection(temporary, cache):
+        nonlocal interleaved
+        if not interleaved:
+            interleaved = True
+            # Publish another inspection after the first has written its
+            # temporary file, but before the first moves it into the cache.
+            nested_results.append(project_documents.inspect(tmp_path, "notes.txt"))
+        return real_replace(temporary, cache)
+
+    with patch.object(project_documents.os, "replace", side_effect=publish_after_another_inspection), patch.object(
+        project_memory, "index_file", return_value=None,
+    ):
+        first = project_documents.inspect(tmp_path, "notes.txt")
+        cached = project_documents.inspect(tmp_path, "notes.txt")
+
+    assert interleaved
+    assert first["text"] == nested_results[0]["text"] == cached["text"] == "shared document text"
+    assert not first["cached"] and not nested_results[0]["cached"]
+    assert cached["cached"]
+    assert not list((tmp_path / ".local-ai/document-cache").glob("*.tmp"))
+
+
 def test_inspector_rejects_paths_outside_task_folder(tmp_path):
     root = tmp_path / "task"
     root.mkdir()
