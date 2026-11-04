@@ -77,6 +77,8 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 pages.append({"url": url, "file": str(path), "characters": len(markdown)})
                 for link in (result.links or {}).get("internal", []):
                     candidate = link.get("href", "")
+                    if not isinstance(candidate, str):
+                        continue
                     try:
                         base_url = getattr(result, "redirected_url", None) or url
                         candidate = normalized_url(urljoin(base_url, candidate), host)
