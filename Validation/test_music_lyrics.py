@@ -83,6 +83,41 @@ def test_save_rejects_millisecond_overflow_without_partial_output(tmp_path, star
     assert source.read_bytes() == b"original"
 
 
+@pytest.mark.parametrize("start,end", [(0.0001, 0.0004), (0.9996, 1.0004)])
+def test_save_rejects_zero_duration_srt_cues_without_partial_output(tmp_path, start, end):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    target = tmp_path / "lyrics"
+    transcription = {"segments": [
+        {"start": start, "end": end, "text": "Too brief"},
+    ]}
+
+    with pytest.raises(RuntimeError, match="No clear lyrics"):
+        music_lyrics.save(source, source, target, transcription)
+
+    assert not target.exists()
+    assert source.read_bytes() == b"original"
+
+
+def test_save_filters_collapsed_cues_consistently_across_outputs(tmp_path):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    target = tmp_path / "lyrics"
+    valid = {"start": 1.25, "end": 2.5, "text": "Keep this"}
+    result = music_lyrics.save(source, source, target, {"segments": [
+        {"start": 0.0001, "end": 0.0004, "text": "Too brief"},
+        valid,
+    ]})
+
+    assert result["segments"] == 1
+    assert (target / "lyrics.txt").read_text(encoding="utf-8") == "Keep this\n"
+    assert (target / "lyrics.srt").read_text(encoding="utf-8") == (
+        "1\n00:00:01,250 --> 00:00:02,500\nKeep this\n"
+    )
+    assert json.loads((target / "lyrics.json").read_text(encoding="utf-8"))["segments"] == [valid]
+    assert source.read_bytes() == b"original"
+
+
 def test_lyric_tool_protects_existing_files_and_reports_unclear_vocals(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
