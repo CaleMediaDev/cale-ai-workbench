@@ -5,6 +5,7 @@ import json
 import math
 import struct
 import wave
+from pathlib import Path
 
 import pytest
 
@@ -95,7 +96,7 @@ def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeyp
         assert "-n" in command
         assert kwargs["timeout"] == 3600
         assert source.read_bytes() == original
-        output.write_bytes(b"")
+        Path(command[-1]).write_bytes(b"")
         return music_edit.subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(music_edit.subprocess, "run", empty_success)
@@ -108,6 +109,61 @@ def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeyp
         assert source.read_bytes() == original
 
     assert len(calls) == 2
+
+
+def test_edit_music_timeout_discards_partial_audio_and_allows_retry(tmp_path, monkeypatch):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio"
+    source.write_bytes(original)
+    staged_paths = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def timeout_then_success(command, **kwargs):
+        assert "-n" in command
+        assert kwargs["timeout"] == 3600
+        staged = Path(command[-1])
+        staged_paths.append(staged)
+        assert staged != output
+        assert not output.exists()
+        staged.write_bytes(b"partial audio")
+        if len(staged_paths) == 1:
+            raise music_edit.subprocess.TimeoutExpired(command, kwargs["timeout"])
+        staged.write_bytes(b"completed audio")
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", timeout_then_success)
+
+    with pytest.raises(music_edit.subprocess.TimeoutExpired):
+        music_edit.edit_music(str(source), str(output))
+
+    assert not output.exists()
+    assert not staged_paths[0].parent.exists()
+    assert source.read_bytes() == original
+
+    music_edit.edit_music(str(source), str(output))
+    assert output.read_bytes() == b"completed audio"
+    assert source.read_bytes() == original
+    assert len(staged_paths) == 2
+    assert all(not path.parent.exists() for path in staged_paths)
+
+
+def test_edit_music_preserves_destination_created_during_render(tmp_path, monkeypatch):
+    output = tmp_path / "clip.wav"
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def successful_render(command, **kwargs):
+        Path(command[-1]).write_bytes(b"edited audio")
+        output.write_bytes(b"concurrently created audio")
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", successful_render)
+
+    with pytest.raises(FileExistsError):
+        music_edit._run([], output)
+
+    assert output.read_bytes() == b"concurrently created audio"
+    assert list(tmp_path.iterdir()) == [output]
 
 
 def test_mix_music_refuses_to_replace_source(tmp_path):
