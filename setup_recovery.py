@@ -114,9 +114,15 @@ def _retry_runner_running() -> bool:
 
 def _stalled(progress: dict) -> bool:
     """A quiet download may take hours; only a dead installer is stalled."""
-    return (progress.get("owner") != "runtime_features"
-            and progress.get("status") == "working"
-            and time.time() - float(progress.get("updated", 0)) >= STALE_SECONDS
+    if progress.get("owner") == "runtime_features" or progress.get("status") != "working":
+        return False
+    try:
+        updated = float(progress.get("updated", 0))
+    except (TypeError, ValueError):
+        # A readable JSON record can still contain an invalid timestamp.
+        # Without a usable timestamp, do not infer that setup is stale.
+        return False
+    return (time.time() - updated >= STALE_SECONDS
             and not _installer_running(progress)
             and not _retry_runner_running())
 
