@@ -120,7 +120,7 @@ def _eligible(root: Path, path: Path) -> bool:
         return False
     try:
         resolved = path.resolve(strict=True)
-        if not resolved.is_relative_to(root):
+        if not resolved.is_relative_to(root) or SECRET_NAME.search(resolved.name):
             return False
         relative = resolved.relative_to(root)
         return (resolved.is_file() and not any(SECRET_NAME.search(part) for part in relative.parts[:-1])
