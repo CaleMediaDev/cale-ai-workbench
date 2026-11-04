@@ -52,6 +52,37 @@ class ContextWindowTests(unittest.TestCase):
                 {"model_info": {"qwen.context_length": 32768}}, 128 * 2**30, 7 * 2**30
             )
 
+    def test_sync_updates_main_model_regardless_of_section_order(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "data").mkdir()
+            config = root / "data/config.yaml"
+            original = (
+                "other:\n  context_length: 65536\n"
+                "fallback_providers:\n"
+                "  - model: cale-fast\n"
+                "    context_length: 32768\n"
+                "model:\n  context_length: 65536\n"
+                "next_section:\n  context_length: 65536\n"
+            )
+            config.write_text(original, encoding="utf-8")
+            info = {
+                "parameters": "num_ctx 262144\n",
+                "model_info": {"qwen.context_length": 262144},
+            }
+            with (patch.object(context_window, "post", return_value=info) as post,
+                  patch.object(context_window, "physical_ram_bytes", return_value=128 * 2**30),
+                  patch.object(context_window, "model_bytes", return_value=52 * 2**30)):
+                self.assertEqual(context_window.sync(root, "main"), 262144)
+            self.assertEqual(
+                config.read_text(encoding="utf-8"),
+                original.replace(
+                    "model:\n  context_length: 65536\n",
+                    "model:\n  context_length: 262144\n",
+                ),
+            )
+            post.assert_called_once_with("/api/show", {"model": "main"})
+
     def test_sync_grows_only_main_alias_and_hermes_together(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

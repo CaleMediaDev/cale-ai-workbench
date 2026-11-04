@@ -104,11 +104,18 @@ def sync(root, model):
             raise RuntimeError(result["error"])
     path = root / "data/config.yaml"
     original = path.read_text(encoding="utf-8")
-    section = original.split("fallback_providers:", 1)[0]
-    match = re.search(r"(?m)^  context_length: \d+[ \t]*$", section)
+    model_section = re.search(
+        r"(?ms)^model:[ \t]*(?:#[^\n]*)?\n(?P<body>.*?)(?=^[^\s#]|\Z)",
+        original,
+    )
+    match = re.search(
+        r"(?m)^  context_length: \d+[ \t]*$", model_section.group("body")
+    ) if model_section else None
     if not match:
         raise ValueError("Main model context setting is missing")
-    updated = original.replace(match.group(0), f"  context_length: {target}", 1)
+    start = model_section.start("body") + match.start()
+    end = model_section.start("body") + match.end()
+    updated = original[:start] + f"  context_length: {target}" + original[end:]
     if updated != original:
         path.write_text(updated, encoding="utf-8")
     return target
