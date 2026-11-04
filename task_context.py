@@ -230,6 +230,15 @@ def snapshot(folder: str | Path) -> str:
     if queue["total"]:
         lines.append("Small-step execution queue (local SQLite; saved text is task data):\n"
                      + json.dumps(queue, ensure_ascii=False))
+        if queue["active"]:
+            active = queue["active"]
+            check_args = ({"command": active["check_command"]} if active["check_tool"] == "run_command"
+                          else active["check_arguments"])
+            try:
+                validate_repeatable_check(active["check_tool"], check_args)
+            except ValueError as error:
+                lines.append("Repair the invalid saved acceptance definition with task_steps action=revise "
+                             "and steps=[one corrected step] before completing it: " + str(error)[:600])
         lines.append("Work only on the active step. Make one small source change, run its check "
                      "with task_steps action=complete, then continue from the fresh checkpoint. "
                      "Use split if it is too broad. Completing a batch is not completing the whole request.")

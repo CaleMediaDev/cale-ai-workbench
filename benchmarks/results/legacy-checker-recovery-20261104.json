@@ -1,0 +1,78 @@
+{
+  "scenario": "legacy checker recovery with a seeded correct function",
+  "seconds": 37.91,
+  "model_calls": 6,
+  "tool_calls": 5,
+  "prompt_tokens": 55564,
+  "completion_tokens": 1001,
+  "tools_used": [
+    "read_file",
+    "task_steps",
+    "write_file",
+    "write_file",
+    "run_verifier"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 6.25
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 8.32
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 7.08
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 6.89
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 5.55
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 1.47
+    }
+  ],
+  "router_call_attempts": 6,
+  "upstream_local_calls": 7,
+  "step_transport_shapes": [
+    [
+      {
+        "type": "list"
+      }
+    ]
+  ],
+  "inference_error": null,
+  "status": "continue",
+  "source_preserved": true,
+  "units_done": 1,
+  "units_remaining": 0,
+  "verifier_passed": true,
+  "mutation_rejected": true,
+  "restored_verifier_passed": true,
+  "passed": false,
+  "source_sha256": "edaaeb1663f87186a7d2b9942f72c68fdfb45038cadc123c80897872606d0c10"
+}

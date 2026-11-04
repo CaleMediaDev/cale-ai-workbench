@@ -2035,6 +2035,41 @@ def step_tools(project: dict, state: dict, available: list) -> list:
     return [tool for tool in available if tool["function"]["name"] in core]
 
 
+def acceptance_repair_tools(project: dict, state: dict, available: list) -> list:
+    """Give invalid legacy acceptance a precise, bounded repair operation.
+
+    This changes no SQLite row and waives no check. Discovery/source tools stay
+    available, and the ordinary step cycle restores the full contract every
+    fifth turn so exceptional work retains an escape path.
+    """
+    import task_context
+
+    active = task_context.step_status(project["folder"])["active"]
+    if not active or not state.get("step_focus_turns"):
+        return available
+    arguments = ({"command": active["check_command"]} if active["check_tool"] == "run_command"
+                 else active["check_arguments"])
+    try:
+        task_context.validate_repeatable_check(active["check_tool"], arguments)
+        return available
+    except ValueError:
+        focused = []
+        for tool in available:
+            if tool["function"]["name"] == "task_steps":
+                tool = copy.deepcopy(tool)
+                parameters = tool["function"]["parameters"]
+                parameters["properties"]["action"]["enum"] = ["revise"]
+                parameters["properties"]["step_id"]["const"] = active["id"]
+                parameters["properties"]["steps"].update(minItems=1, maxItems=1)
+                parameters["required"] = ["action", "steps"]
+                tool["function"]["description"] = (
+                    "The active saved acceptance definition is invalid. Revise exactly one step with a real "
+                    "repeatable checker consistent with the original requirement. This does not complete "
+                    "the step; its actual check must still pass. Read source or run checks first if needed.")
+            focused.append(tool)
+        return focused
+
+
 def step_source_fingerprint(folder: Path, structured: bool = False):
     """Owned checker generation may update verify.ps1, never project source."""
     import long_tasks
@@ -3734,6 +3769,7 @@ def run_slice(project: dict, complete=None) -> dict:
         planned_step = task_context.step_status(folder)["active"]
         focus = focused_browser_check(project, state, planned_request_hash)
         available_tools = step_tools(project, state, repair_tools(project, state))
+        available_tools = acceptance_repair_tools(project, state, available_tools)
         call_messages = [*messages, focus[1]] if focus else messages
         if not focus and len(available_tools) < len(TOOLS):
             call_messages = [*messages, {"role": "user", "content": (

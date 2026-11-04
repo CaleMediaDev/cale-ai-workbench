@@ -1,0 +1,33 @@
+{
+  "scenario": "legacy checker recovery with a seeded correct function",
+  "seconds": 0.11,
+  "model_calls": 0,
+  "tool_calls": 0,
+  "prompt_tokens": 0,
+  "completion_tokens": 0,
+  "tools_used": [],
+  "routes": [],
+  "resumed": true,
+  "inference_budget_seconds": 1.0,
+  "inference_error": null,
+  "status": "done",
+  "source_preserved": true,
+  "units_done": 1,
+  "units_remaining": 0,
+  "verifier_passed": true,
+  "mutation_rejected": true,
+  "negative_input_mutation_rejected": true,
+  "restored_verifier_passed": true,
+  "passed": true,
+  "source_sha256": "edaaeb1663f87186a7d2b9942f72c68fdfb45038cadc123c80897872606d0c10",
+  "scope": "Independent regrade of the already completed seeded-function recovery. Zero model calls here is not the task latency.",
+  "recovery_inference_seconds_across_two_slices": 68.67,
+  "native_tests": {
+    "passed": 197,
+    "seconds": 157.1
+  },
+  "source_sha256_runtime": {
+    "native_agent.py": "6580d0df036eb932c4d12cd7dc3303afdd352158598ba7febc7f6cc6b6bc74dc",
+    "task_context.py": "46c2dfc976cd59d15346551af6ce4b77542350a7757bb7bc6ad0a6d757615d3e"
+  }
+}

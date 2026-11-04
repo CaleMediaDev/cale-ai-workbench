@@ -1,0 +1,96 @@
+{
+  "scenario": "legacy checker recovery with a seeded correct function",
+  "seconds": 30.76,
+  "model_calls": 8,
+  "tool_calls": 9,
+  "prompt_tokens": 76746,
+  "completion_tokens": 1245,
+  "tools_used": [
+    "read_file",
+    "read_file",
+    "write_file",
+    "write_file",
+    "read_file",
+    "read_file",
+    "read_file",
+    "read_file",
+    "edit_file"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 4.32
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 2.86
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 3.32
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 2.36
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 1.76
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 5.02
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 2.77
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 7.55
+    }
+  ],
+  "router_call_attempts": 8,
+  "upstream_local_calls": 9,
+  "resumed": true,
+  "inference_budget_seconds": 50.0,
+  "inference_error": null,
+  "status": "done",
+  "source_preserved": true,
+  "units_done": 1,
+  "units_remaining": 0,
+  "verifier_passed": true,
+  "mutation_rejected": true,
+  "restored_verifier_passed": true,
+  "passed": true,
+  "source_sha256": "edaaeb1663f87186a7d2b9942f72c68fdfb45038cadc123c80897872606d0c10",
+  "negative_input_mutation_rejected": true,
+  "verifier_passed_after_negative_mutation_restore": true,
+  "prior_slice_seconds": 37.91,
+  "total_inference_seconds": 68.67,
+  "scope": "Local native-worker recovery of a seeded correct function. Two slices; first was capped at six turns, resumed without changing source or instructions. This is not a fresh application build."
+}

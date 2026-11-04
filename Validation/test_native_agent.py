@@ -71,6 +71,22 @@ def test_legacy_shell_tool_label_is_blocked_before_process_and_can_be_repaired(t
     active = queued["active"]["id"]
     with project_memory.connection(tmp_path) as conn:
         conn.execute("UPDATE task_steps SET check_command='write_file' WHERE id=?", (active,))
+    assert "Repair the invalid saved acceptance definition" in task_context.snapshot(tmp_path)
+    project = {"folder": str(tmp_path)}
+    original_tools = copy.deepcopy(native_agent.TOOLS)
+    from jsonschema import ValidationError, validate
+    state = {}
+    for _ in range(4):
+        available = native_agent.step_tools(project, state, native_agent.TOOLS)
+        focused = native_agent.acceptance_repair_tools(project, state, available)
+        schema = next(tool["function"]["parameters"] for tool in focused if tool["function"]["name"] == "task_steps")
+        assert schema["properties"]["action"]["enum"] == ["revise"]
+        with pytest.raises(ValidationError):
+            validate({"action": "complete", "steps": [queue_step("Wrong completion", "exit 0")]}, schema)
+        assert "read_file" in {tool["function"]["name"] for tool in focused}
+    available = native_agent.step_tools(project, state, native_agent.TOOLS)
+    assert native_agent.acceptance_repair_tools(project, state, available) is available
+    assert native_agent.TOOLS == original_tools
     original = native_agent.execute_tool
     def guarded(folder, name, arguments, **kwargs):
         assert name != "run_command", "The invalid legacy checker must not launch a shell"
@@ -82,9 +98,12 @@ def test_legacy_shell_tool_label_is_blocked_before_process_and_can_be_repaired(t
     assert unchanged["done"] == 0 and unchanged["active"]["attempts"] == 0
     corrected = {"phase": "Check", "title": "Check identity", "check_tool": "check_python_function",
         "check_arguments": {"path": "logic.py", "function": "identity", "cases": [{"args": [2], "expected": 2}]}}
+    validate({"action": "revise", "step_id": active, "steps": [corrected]}, schema)
     assert json.loads(original(tmp_path, "task_steps", {"action": "revise", "step_id": active, "steps": [corrected]}))["remaining"] == 1
     assert json.loads(original(tmp_path, "task_steps", {"action": "complete", "step_id": active}))["done"] == 1
     assert (tmp_path / "logic.py").read_text() == "def identity(value): return value\n"
+    assert "Repair the invalid saved acceptance definition" not in task_context.snapshot(tmp_path)
+    assert native_agent.acceptance_repair_tools(project, {"step_focus_turns": 1}, native_agent.TOOLS) is native_agent.TOOLS
 
 
 def test_step_queue_checks_real_work_and_resumes_in_another_process():
