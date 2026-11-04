@@ -1,10 +1,38 @@
 """Local design helpers keep source findings and color math inspectable."""
 
 import json
+import os
+import subprocess
 
 import pytest
 
 from design_tools import add_astro_ai_ui, check_color_contrast, luminance
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory junction")
+def test_astro_kit_does_not_write_through_junction_parent(tmp_path, monkeypatch):
+    import design_tools
+
+    kit = tmp_path / "kit"
+    (kit / "src").mkdir(parents=True)
+    (kit / "src/Message.astro").write_text("component", encoding="utf-8")
+    (kit / "LICENSE").write_text("fixture license", encoding="utf-8")
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", kit)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text('{"dependencies":{"astro":"*"}}', encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    kept = outside / "keep.txt"
+    kept.write_bytes(b"unrelated content")
+    junction = project / "src"
+    subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(junction), str(outside)],
+                   check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    with pytest.raises(FileExistsError, match="no files were changed"):
+        add_astro_ai_ui(str(project))
+    assert junction.is_junction()
+    assert list(outside.iterdir()) == [kept]
+    assert kept.read_bytes() == b"unrelated content"
 
 
 def test_space_shooter_is_new_offline_file_with_safe_title_and_no_overwrite(tmp_path):
