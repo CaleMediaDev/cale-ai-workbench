@@ -48,7 +48,7 @@ def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
     try:
         result = subprocess.run(command, capture_output=True, text=True,
                                 errors="replace", timeout=timeout, creationflags=HIDE)
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
         if not output_existed:
             output.unlink(missing_ok=True)
         raise
