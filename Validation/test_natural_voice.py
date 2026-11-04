@@ -13,6 +13,31 @@ import natural_voice
 
 
 class NaturalVoiceTests(unittest.TestCase):
+    def test_inaccessible_lock_file_replaces_stale_working_status_with_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            status = root / "voice-status.json"
+            status.write_text(json.dumps({"status": "working"}))
+            lock_path = root / "natural-voice.lock"
+            original_open = Path.open
+            fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=lambda *args: None)
+
+            def open_path(path, *args, **kwargs):
+                if path == lock_path:
+                    raise PermissionError("Natural voice lock file is inaccessible")
+                return original_open(path, *args, **kwargs)
+
+            with (
+                patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+                patch.object(natural_voice, "STATUS", status),
+                patch.object(Path, "open", autospec=True, side_effect=open_path),
+                patch.object(natural_voice.subprocess, "run") as run,
+            ):
+                natural_voice.install()
+            self.assertEqual(json.loads(status.read_text())["status"], "error")
+            self.assertIn("Natural voice lock file is inaccessible", status.read_text())
+            run.assert_not_called()
+
     def test_missing_media_python_replaces_stale_working_status_with_error(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
