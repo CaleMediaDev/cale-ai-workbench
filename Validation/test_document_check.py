@@ -80,6 +80,26 @@ def test_document_check_rejects_truncated_decimal_amounts(tmp_path, source_amoun
         document_check.check(folder, spec)
 
 
+@pytest.mark.parametrize("malformed", ["1,00", "12,34", "1,0000"])
+@pytest.mark.parametrize("location", ["source", "report"])
+def test_document_check_rejects_malformed_thousands_groups(tmp_path, malformed, location):
+    folder = _project(tmp_path)
+    parsed_amount = int(malformed.replace(",", ""))
+    source_amount = malformed if location == "source" else str(parsed_amount)
+    report_amount = malformed if location == "report" else str(parsed_amount)
+    (folder / "terms.txt").write_text(
+        f"Base fee: ${source_amount}\nExtra fee: $0\n", encoding="utf-8")
+    (folder / "summary.md").write_text(
+        f"Total payable: ${report_amount}\n", encoding="utf-8")
+    spec = {"source_path": "terms.txt", "report_path": "summary.md",
+            "calculations": [{"operation": "add",
+                              "source_texts": [f"Base fee: ${source_amount}",
+                                               "Extra fee: $0"],
+                              "report_text": f"Total payable: ${report_amount}"}]}
+    with pytest.raises(ValueError, match="Calculation phrases need a dollar amount"):
+        document_check.check(folder, spec)
+
+
 @pytest.mark.parametrize("suffix", [".50", ",000"])
 @pytest.mark.parametrize("location", ["source", "report"])
 def test_document_check_rejects_numeric_evidence_prefixes(tmp_path, suffix, location):
