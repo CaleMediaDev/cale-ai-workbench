@@ -46,6 +46,10 @@ def safe_loopback_url(value):
         if (
             parsed.scheme not in ("http", "https")
             or parsed.hostname not in ("127.0.0.1", "localhost", "::1")
+            or (
+                parsed.hostname == "::1"
+                and not parsed.netloc.startswith("[::1]:")
+            )
             or parsed.username is not None
             or parsed.password is not None
             or parsed.port is None

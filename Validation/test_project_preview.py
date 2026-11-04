@@ -70,6 +70,21 @@ class ProjectPreviewTests(unittest.TestCase):
         ):
             self.assertEqual(preview.safe_loopback_url(url), "", url)
 
+    def test_malformed_ipv6_authority_falls_back_to_static_html(self):
+        valid_url = "http://[::1]:3000/"
+        self.assertEqual(preview.safe_loopback_url(valid_url), valid_url)
+        malformed_url = "http://[::1]garbage:3000/"
+        self.assertEqual(preview.safe_loopback_url(malformed_url), "")
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary).resolve()
+            fallback = folder / "index.html"
+            fallback.write_text("hello", encoding="utf-8")
+            (folder / ".local-ai").mkdir()
+            (folder / ".local-ai/preview.json").write_text(
+                json.dumps({"url": malformed_url}), encoding="utf-8"
+            )
+            self.assertEqual(preview.source(folder), fallback.as_uri())
+
     def test_symlink_loop_does_not_block_static_html_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary).resolve()
