@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path, PurePosixPath
@@ -536,17 +537,24 @@ def add_design_tools_to_config(root, backup):
     return config, previous
 
 
+def _replace_update_file(target, content):
+    """Publish bytes through a private sibling without borrowing existing paths."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".cale-update-",
+                                         suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def write_version_marker(root, version):
     """Commit the installed version only after its source files are in place."""
-    marker = root / ".cale-ai-install"
-    temporary = root / ".cale-ai-install.updating"
-    try:
-        temporary.write_text(
-            "Cale AI Workbench " + ".".join(map(str, version)), encoding="utf-8"
-        )
-        os.replace(temporary, marker)
-    finally:
-        temporary.unlink(missing_ok=True)
+    content = "Cale AI Workbench " + ".".join(map(str, version))
+    _replace_update_file(root / ".cale-ai-install", content.encode("utf-8"))
 
 
 def _validate_update_destinations(files):
@@ -589,9 +597,7 @@ def apply(archive_path, version):
                 if target.is_file():
                     previous.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(target, previous)
-                staged = target.with_name(target.name + ".updating")
-                staged.write_bytes(archive.read(name))
-                os.replace(staged, target)
+                _replace_update_file(target, archive.read(name))
                 replaced.append((target, previous))
             migration = add_design_tools_to_config(ROOT, backup)
             if migration:
