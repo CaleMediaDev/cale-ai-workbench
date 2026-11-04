@@ -120,7 +120,10 @@ def _text(path: Path) -> str:
             question="Describe the visible events and transcribe readable text.",
         )
         frames = result["sampled_frames"]
-        if not isinstance(frames, list):
+        if not isinstance(frames, list) or any(
+            not isinstance(frame, dict) or not isinstance(frame.get("description"), str)
+            for frame in frames
+        ):
             raise RuntimeError("The local media reader returned invalid video frames.")
         observations = "\n".join(
             f"{frame['timestamp_seconds']}s: {frame['description']}"
