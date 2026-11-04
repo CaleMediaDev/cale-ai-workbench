@@ -218,6 +218,37 @@ def test_local_dom_contract_handles_form_control_named_id(tmp_path):
         native_browser.close()
 
 
+def test_local_snapshot_handles_form_control_named_labels(tmp_path):
+    pytest.importorskip("playwright")
+    (tmp_path / "index.html").write_text(
+        '<!doctype html><title>Named labels control</title><body>'
+        '<form id="editor" role="button">'
+        '<label for="field">Field</label>'
+        '<input id="field" name="labels" value="PRIVATE_FIELD_VALUE">'
+        '</form></body>', encoding="utf-8")
+    try:
+        opened = native_agent.execute_tool(
+            tmp_path, "browser_open_project", {"path": "index.html"})
+        if opened.startswith("Tool error:") and "Executable doesn't exist" in opened:
+            pytest.skip("Chromium runtime is not installed in this test environment")
+        assert json.loads(opened)["title"] == "Named labels control"
+        page = native_browser._page(tmp_path)
+        assert page.evaluate(
+            "document.querySelector('form').labels === document.querySelector('input')")
+
+        raw = native_browser.execute(tmp_path, "snapshot", {})
+        snapshot = json.loads(raw)
+        targets = {row["id"]: row for row in snapshot["dom_contract"]["targets"]}
+        assert targets["editor"]["labels"] == []
+        assert targets["field"]["labels"] == ["Field"]
+        assert any(row["tag"] == "form" for row in snapshot["controls"])
+        assert next(row for row in snapshot["controls"] if row["tag"] == "input")["label"] == "Field"
+        assert "PRIVATE_FIELD_VALUE" not in raw
+        assert not snapshot["dom_contract"]["stale"]
+    finally:
+        native_browser.close()
+
+
 def test_local_dom_contract_handles_svg_non_string_type_property(tmp_path):
     pytest.importorskip("playwright")
     (tmp_path / "index.html").write_text(
