@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 if __name__ != "__main__":
@@ -66,18 +67,21 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
     output.parent.mkdir(parents=True, exist_ok=True)
     with music_backend._setup_lock():
         python = install()
-    try:
+    # Render privately on the destination filesystem. Publishing must not replace
+    # a file created after the initial existence check, even on worker failure.
+    with tempfile.TemporaryDirectory(prefix="cale-master-output-", dir=output.parent) as temporary:
+        staged = Path(temporary) / "master.wav"
         result = subprocess.run(
             [str(python), str(Path(__file__).resolve()), "--worker", str(source),
-             str(reference), str(output)], capture_output=True, text=True,
+             str(reference), str(staged)], capture_output=True, text=True,
             timeout=3600, creationflags=HIDE,
         )
-    except subprocess.TimeoutExpired:
-        output.unlink(missing_ok=True)
-        raise
-    if result.returncode or not output.is_file() or output.stat().st_size == 0:
-        output.unlink(missing_ok=True)
-        raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Music mastering failed.")
+        if result.returncode or not staged.is_file() or staged.stat().st_size == 0:
+            raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Music mastering failed.")
+        try:
+            os.link(staged, output)
+        except FileExistsError:
+            raise ValueError("Choose a new output filename so existing audio is preserved.") from None
     return {"source": str(source), "reference": str(reference), "path": str(output),
             "engine": "Matchering 2.0.6"}
 
