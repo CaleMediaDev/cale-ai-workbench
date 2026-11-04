@@ -34,6 +34,75 @@ def queue_step(title, command, phase="Core"):
     return {"phase": phase, "title": title, "check_command": command}
 
 
+def test_step_action_schema_rejects_mixed_completion_and_revision_before_dispatch():
+    from jsonschema import ValidationError, validate
+    schema = next(t["function"]["parameters"] for t in native_agent.TOOLS
+                  if t["function"]["name"] == "task_steps")
+    step = queue_step("Verify behavior", "exit 0")
+    for arguments in ({"action": "status"}, {"action": "complete"},
+                      {"action": "complete", "step_id": 1},
+                      {"action": "plan", "steps": [step]},
+                      {"action": "revise", "steps": [step]},
+                      {"action": "split", "step_id": 1, "steps": [step]},
+                      {"action": "scope", "scope_operation": "exclude", "function_names": ["read_file"],
+                       "instruction_quote": "Do not read files"}):
+        validate(arguments, schema)
+    for arguments in ({"action": "complete", "steps": [step]},
+                      {"action": "status", "steps": [step]},
+                      {"action": "plan"}, {"action": "revise"},
+                      {"action": "scope", "steps": [step]}):
+        with pytest.raises(ValidationError):
+            validate(arguments, schema)
+
+
+def test_failed_browser_target_inventory_survives_bounded_sql_evidence(tmp_path):
+    active = task_context.plan_steps(tmp_path, [{"phase": "Page", "title": "Show form",
+        "check_tool": "check_webapp", "check_arguments": {
+            "path": "index.html", "cases": [{"visible": ["form"]}]}}])["active"]
+    verdict = {"passed": False, "cases": [{"passed": False, "case": 1,
+        "failures": ["'form' visibility was wrong: expected visible, observed hidden or missing"],
+        "target_inventory": {"targets": [{"id": "expense-form", "tag": "form"},
+                                         {"id": None, "tag": "table"}]}}]}
+    result = native_agent.step_exit_result("check_webapp", json.dumps(verdict))
+    task_context.record_step_check(tmp_path, active["id"], task_context.request_identity(tmp_path),
+                                   result, unchanged=True)
+    evidence = task_context.step_status(tmp_path)["active"]["evidence"]
+    assert "visibility was wrong" in evidence
+    assert "expense-form" in evidence and "untrusted data" in evidence
+    assert task_context.step_status(tmp_path)["done"] == 0
+
+
+def test_step_completion_keeps_observed_target_inventory_for_next_model_turn(tmp_path):
+    (tmp_path / "index.html").write_text('<form id="expense-form"><button>Add expense</button></form>')
+    active = task_context.plan_steps(tmp_path, [{"phase": "Page", "title": "Show form",
+        "check_tool": "check_webapp", "check_arguments": {
+            "path": "index.html", "cases": [{"visible": ["form"]}]}}])["active"]
+    result = json.loads(native_agent.execute_tool(tmp_path, "task_steps", {
+        "action": "complete", "step_id": active["id"]}))
+    assert result["passed"] is False
+    inventory = result["check_summary"]["cases"][0]["target_inventory"]
+    assert any(target["id"] == "expense-form" for target in inventory["targets"])
+    assert "Untrusted" in inventory["note"]
+    assert task_context.step_status(tmp_path)["done"] == 0
+
+
+def test_browser_runtime_error_is_returned_and_persisted_even_when_visibility_passes(tmp_path):
+    (tmp_path / "index.html").write_text(
+        '<form id="form"><button>Add expense</button></form><script>document.getElementById("old-form").addEventListener("submit",()=>{});</script>')
+    active = task_context.plan_steps(tmp_path, [{"phase": "Page", "title": "Show working form",
+        "check_tool": "check_webapp", "check_arguments": {
+            "path": "index.html", "cases": [{"visible": ["form"]}]}}])["active"]
+    result = json.loads(native_agent.execute_tool(tmp_path, "task_steps", {
+        "action": "complete", "step_id": active["id"]}))
+    assert result["passed"] is False
+    assert result["check_summary"]["cases"] == []
+    assert any("addEventListener" in error for error in result["check_summary"]["errors"])
+    saved = task_context.step_status(tmp_path)
+    assert saved["done"] == 0
+    assert "addEventListener" in saved["active"]["evidence"]
+    assert "Acceptance check error" in saved["active"]["evidence"]
+
+
 @pytest.mark.parametrize("check", [
     {"check_command": "exit 9"},
     {"check_tool": "check_webapp", "check_arguments": {

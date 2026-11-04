@@ -33,6 +33,72 @@ SPEC = {"path": "index.html", "viewport_width": 375, "cases": [
 ]}
 
 
+@pytest.mark.parametrize("failed_case", [
+    {"visible": ["form", "table"]},
+    {"set": {"missing-input": "new value"}, "visible": ["expense-form"]},
+    {"click": ["missing-button"], "visible": ["expense-list"]},
+    {"expect": {"missing-output": "anything"}},
+])
+def test_failed_target_check_reports_visible_literal_ids_without_private_values(tmp_path, failed_case):
+    """A tag-name mistake is diagnosable without guessing IDs or reading values."""
+    (tmp_path / "index.html").write_text('''<!doctype html><body>
+        <form id="expense-form"><label for="amount">Amount</label>
+        <input id="amount" value="PRIVATE_INPUT_VALUE"><textarea id="notes">PRIVATE_TEXTAREA</textarea>
+        <button id="add" type="button">Add expense</button></form>
+        <table id="expense-list"><tr><td>PRIVATE_TABLE_DATA</td></tr></table>
+        <form><button type="button">Other action</button></form>
+        <output id="summary">PRIVATE_REFLECTED_VALUE</output>
+        <div hidden><button id="hidden-target">HIDDEN_LABEL</button></div>
+        <div aria-hidden="true"><button id="aria-hidden-target">HIDDEN_LABEL</button></div>
+        <button style="visibility:hidden" id="css-hidden-target">HIDDEN_LABEL</button>
+        <input type="hidden" id="hidden-input" value="PRIVATE_HIDDEN_VALUE">
+        <div contenteditable id="editor">PRIVATE_EDITOR</div>
+        <iframe srcdoc='<button id="frame-target">PRIVATE_FRAME</button>'></iframe>
+        <div id="shadow-host"></div><script>
+        localStorage.setItem('secret','PRIVATE_STORAGE');
+        document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML=
+            '<button id="shadow-target">PRIVATE_SHADOW</button>';
+        </script></body>''', encoding="utf-8")
+    result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [failed_case]})
+    assert not result["passed"]
+    inventory = result["cases"][0]["target_inventory"]
+    targets = {item["id"]: item for item in inventory["targets"] if item["id"]}
+    assert targets["expense-form"]["tag"] == "form"
+    assert targets["expense-list"]["role"] == "table"
+    assert targets["amount"]["label"] == "Amount"
+    assert targets["add"]["text"] == "Add expense"
+    assert any(item["id"] is None and item["tag"] == "form" for item in inventory["targets"])
+    assert not set(targets) & {"frame-target", "shadow-target", "hidden-target", "aria-hidden-target",
+                              "css-hidden-target", "hidden-input", "editor"}
+    assert "PRIVATE_" not in json.dumps(inventory)
+    assert "HIDDEN_LABEL" not in json.dumps(inventory)
+    assert "not selectors" in inventory["note"]
+    passing = webapp_check.check(tmp_path, {"path": "index.html", "cases": [
+        {"visible": ["expense-form", "expense-list"]}]})
+    assert passing["passed"]
+    assert "target_inventory" not in passing["cases"][0]
+
+
+def test_failed_target_inventory_stays_bounded_and_compact_reports_preserve_verdict(tmp_path):
+    (tmp_path / "index.html").write_text(
+        "<body>" + "".join(f'<button id="b{number}">{"x" * 300}</button>' for number in range(50)),
+        encoding="utf-8")
+    spec = {"path": "index.html", "cases": [{"visible": ["missing"]}]}
+    result = webapp_check.check(tmp_path, spec)
+    inventory = result["cases"][0]["target_inventory"]
+    assert inventory["truncated"]
+    assert 1 <= len(inventory["targets"]) <= 16
+    assert len(json.dumps(inventory)) < 3600
+    # Force the existing compact path; optional hints cannot consume the
+    # transport budget or turn a failed assertion into a successful one.
+    expanded = {**result, "javascript_errors": ["x" * 2000] * 20}
+    compact = json.loads(webapp_check.serialize_result(expanded, 4500))
+    assert not compact["passed"]
+    assert compact["cases"][0]["failures"] == result["cases"][0]["failures"]
+    assert len(compact["cases"][0]["target_inventory"]["targets"]) <= 4
+    assert len(inventory["targets"]) > 4  # Serialization did not mutate the result.
+
+
 @pytest.mark.parametrize("novalidate", [False, True])
 def test_failed_submit_reports_native_constraints_without_dispatching_invalid_events(tmp_path, novalidate):
     source = '''<form id="form" %s><input id="amount" type="number" min="0.01">

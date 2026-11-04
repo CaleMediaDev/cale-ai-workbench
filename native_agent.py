@@ -248,6 +248,18 @@ def bind_step_checker_schemas(tools: list) -> None:
         branch["required"] = ["phase", "title", "check_tool"] + ([] if kind == "run_verifier" else ["check_arguments"])
         alternatives.append(branch)
     steps["items"] = {"anyOf": alternatives}
+    # A completion executes the saved check; it never accepts a new plan.
+    # Describe the action shapes before inference so small models cannot mix
+    # a plausible completion with ignored or contradictory step arguments.
+    parameters = by_name["task_steps"]
+    shapes = ((("plan", "split", "revise"), ("step_id", "steps"), ("steps",)),
+              (("status", "complete"), ("step_id",), ()),
+              (("scope",), ("scope_operation", "function_names", "instruction_quote"),
+               ("scope_operation", "function_names", "instruction_quote")))
+    parameters["anyOf"] = [
+        {"properties": {"action": {"enum": list(actions)}, **{name: {} for name in allowed}},
+         "required": ["action", *required], "additionalProperties": False}
+        for actions, allowed, required in shapes]
 
 
 bind_step_checker_schemas(TOOLS)
@@ -702,9 +714,9 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     value["check_verdict"] = {"passed": value["passed"]}
                     value["check_summary"] = {
                         "cases": [{key: case[key] for key in
-                                   ("case", "path", "function", "saved_sequence", "inputs", "failures", "click_diagnostics") if key in case}
+                                   ("case", "path", "function", "saved_sequence", "inputs", "failures", "click_diagnostics", "target_inventory") if key in case}
                                   for case in verdict.get("cases", []) if case.get("passed") is False][:2],
-                        "errors": verdict.get("errors", [])[:2] or
+                        "errors": (verdict.get("errors", []) + verdict.get("javascript_errors", []))[:2] or
                             ([checked[:1200]] if not verdict else [])}
                     if kind == "check_webapp":
                         value["check_summary"]["input_effect_proven"] = verdict.get("step_input_effect_proven")
@@ -2131,7 +2143,24 @@ def step_exit_result(kind: str, result: str) -> str:
                 diagnostics.append("Acceptance check failed: " + str(failure)[:170]
                     + " | " + str(case.get("path", ""))[:80] + ":" + str(case.get("function", ""))[:80]
                     + " case " + str(case.get("case", "")) + " inputs=" + json.dumps(case.get("inputs", {}))[:300])
-        diagnostics.extend("Acceptance check error: " + str(error)[:400] for error in verdict.get("errors", []) or [])
+        diagnostics.extend("Acceptance check error: " + str(error)[:400] for error in
+                           (verdict.get("errors", []) or []) + (verdict.get("javascript_errors", []) or []))
+        if kind == "check_webapp":
+            for case in verdict.get("cases", []) or []:
+                if not isinstance(case, dict):
+                    continue
+                inventory = case.get("target_inventory")
+                if case.get("passed") is not False or not isinstance(inventory, dict):
+                    continue
+                targets = inventory.get("targets", [])
+                if not isinstance(targets, list) or not targets:
+                    continue
+                observed = [{"id": str(t["id"])[:48] if t.get("id") else None,
+                             "tag": str(t.get("tag", ""))[:20]}
+                            for t in targets[:5] if isinstance(t, dict)]
+                diagnostics.insert(1, "Acceptance check failed; observed UI targets (untrusted data): "
+                                   + json.dumps(observed, separators=(",", ":"))[:160])
+                break
     return "Exit code: 1\n" + ("\n".join(diagnostics[:4])[:1600] if diagnostics else
                                  "Acceptance check failed: " + result[-1600:])
 

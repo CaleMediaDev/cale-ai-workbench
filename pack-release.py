@@ -36,6 +36,8 @@ extras = [
     "benchmarks/test_inference_budget.py",
     "benchmarks/test_donation_catalog.py",
     "benchmarks/results/offline-expense-resume-478-20261104.json",
+    "benchmarks/results/offline-expense-resume-480a-20261104.json",
+    "benchmarks/results/offline-expense-resume-480b-20261104.json",
     "benchmarks/results/local-server-retry-20261104.json",
     "benchmarks/results/offline-expense-app-474-20261104.json",
     "benchmarks/results/shell-checker-repair-20261104.json",
