@@ -1075,7 +1075,7 @@ def start_music_job(
     _write_job(job_id, info)
     try:
         _launch_job(job_id)
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         _write_job(job_id, {**info, "status": "error", "current": str(exc)[:300]})
         raise
     return {"job_id": job_id, "status": "queued", "output_path": str(target)}
