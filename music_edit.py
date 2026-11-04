@@ -6,6 +6,7 @@ These tools write new files, leaving recordings and generated songs intact.
 
 from __future__ import annotations
 
+import math
 import subprocess
 from pathlib import Path
 
@@ -50,6 +51,11 @@ def edit_music(source_path: str, output_path: str, start_seconds: float = 0,
     """Trim, fade and adjust gain in one pass; duration is the saved clip length."""
     source = _source(source_path)
     output = _output(output_path, (source,))
+    timings = (start_seconds, fade_in_seconds, fade_out_seconds)
+    if duration_seconds is not None:
+        timings += (duration_seconds,)
+    if not all(math.isfinite(value) for value in timings):
+        raise ValueError("Start, duration and fade lengths must be finite.")
     if start_seconds < 0 or duration_seconds is not None and duration_seconds <= 0:
         raise ValueError("Start must be nonnegative and duration must be positive.")
     if fade_in_seconds < 0 or fade_out_seconds < 0:

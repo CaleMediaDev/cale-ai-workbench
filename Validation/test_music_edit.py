@@ -42,6 +42,27 @@ def test_edit_music_renders_playable_trimmed_audio(tmp_path):
         music_edit.edit_music(str(source), str(output))
 
 
+@pytest.mark.parametrize("parameter", [
+    "start_seconds", "duration_seconds", "fade_in_seconds", "fade_out_seconds",
+])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_edit_music_rejects_nonfinite_timings(tmp_path, monkeypatch, parameter, value):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    tone(source)
+    original = source.read_bytes()
+    calls = []
+    monkeypatch.setattr(music_edit, "_run", lambda *args: calls.append(args))
+    options = {"duration_seconds": 0.5, parameter: value}
+
+    with pytest.raises(ValueError, match="finite"):
+        music_edit.edit_music(str(source), str(output), **options)
+
+    assert calls == []
+    assert not output.exists()
+    assert source.read_bytes() == original
+
+
 def test_mix_music_renders_both_tracks_and_is_discoverable(tmp_path):
     background = tmp_path / "music.wav"
     foreground = tmp_path / "voice.wav"
