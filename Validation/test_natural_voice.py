@@ -13,6 +13,42 @@ import natural_voice
 
 
 class NaturalVoiceTests(unittest.TestCase):
+    def test_empty_voice_file_triggers_repair_before_completion(self):
+        names = ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin")
+        for empty_name in names:
+            with self.subTest(empty_file=empty_name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                media_python = root / "python.exe"
+                media_python.touch()
+                voice = root / "voice"
+                voice.mkdir()
+                for name in names:
+                    (voice / name).write_bytes(b"" if name == empty_name else b"weights")
+                status = root / "voice-status.json"
+                fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=lambda *args: None)
+
+                def run_command(command, **kwargs):
+                    if "--download-voice" in command:
+                        for name in names:
+                            (voice / name).write_bytes(b"repaired weights")
+                    return SimpleNamespace(returncode=0)
+
+                with (
+                    patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+                    patch.object(natural_voice, "ROOT", root),
+                    patch.object(natural_voice, "MEDIA_PYTHON", media_python),
+                    patch.object(natural_voice, "STATUS", status),
+                    patch.object(natural_voice, "VOICE", voice),
+                    patch.object(natural_voice, "whisper_ready", return_value=True),
+                    patch.object(natural_voice.subprocess, "run", side_effect=run_command) as run,
+                ):
+                    self.assertFalse(natural_voice.ready())
+                    natural_voice.install()
+                    self.assertTrue(natural_voice.ready())
+                self.assertEqual(run.call_count, 2)
+                self.assertIn("--download-voice", run.call_args_list[1].args[0])
+                self.assertEqual(json.loads(status.read_text())["status"], "complete")
+
     def test_missing_media_python_replaces_stale_working_status_with_error(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
