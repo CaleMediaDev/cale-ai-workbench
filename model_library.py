@@ -1024,7 +1024,7 @@ def auto_install(status_dir, refresh=True):
                     save_download_status(path, "skipped_hardware",
                                          "This model would be too slow on this PC", 0)
                     continue
-                speed = model_fitness.measured_speed(model.get("alias", profile))
+                speed = model_fitness.retirement_speed(model.get("alias", profile))
                 if speed is not None and speed < 5:
                     retired = retire_slow_model(model)
                     waiting = not retired and alias_update_waits_for_tasks(model)

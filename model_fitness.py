@@ -431,8 +431,15 @@ def measured_speed(alias):
     return usage_history.recent_model_speed(alias)
 
 
+def retirement_speed(alias):
+    """Require sustained timing evidence before globally avoiding a local model."""
+    import usage_history
+
+    return usage_history.recent_model_retirement_speed(alias)
+
+
 def suitable(alias, weights_gb, ram_gb, vram_gb, min_tokens_per_second=5.0):
     if not hardware_allows(weights_gb, ram_gb, vram_gb):
         return False
-    speed = measured_speed(alias)
+    speed = retirement_speed(alias)
     return speed is None or speed >= min_tokens_per_second

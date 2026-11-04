@@ -535,9 +535,9 @@ def test_game_grader_outer_timeout_marks_code_invalid():
 
 
 def test_repeated_slow_completions_disqualify_model():
-    with patch.object(model_fitness, "measured_speed", return_value=2.2):
+    with patch.object(model_fitness, "retirement_speed", return_value=2.2):
         assert not model_fitness.suitable("cale-qwen35", 20.6, 128, 12)
-    with patch.object(model_fitness, "measured_speed", return_value=18.4):
+    with patch.object(model_fitness, "retirement_speed", return_value=18.4):
         assert model_fitness.suitable("cale-qwen36", 21.1, 128, 12)
 
 

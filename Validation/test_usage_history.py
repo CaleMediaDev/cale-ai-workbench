@@ -150,3 +150,144 @@ def test_task_totals_attribute_only_valid_worker_context(tmp_path, monkeypatch):
         one: [("Local", 30)], two: [("Local", 15)],
     }
     assert usage_history.history()["total"] == 145
+
+
+def test_tiny_fast_local_answers_do_not_disqualify_hardware_fit_model(tmp_path, monkeypatch):
+    import model_fitness
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    monkeypatch.setattr(model_fitness, "hardware_allows", lambda *args: True)
+    for _ in range(3):
+        assert usage_history.record_completion(
+            {"model": "tiny", "usage": {"completion_tokens": 1}},
+            "ollama", elapsed_seconds=0.5,
+        )
+    assert usage_history.recent_model_speed("tiny") == 2
+    assert model_fitness.suitable("tiny", 1, 128, 12)
+
+
+def _local_timed(model, tokens, seconds, native=False):
+    result = {"model": model, "usage": {"completion_tokens": tokens}}
+    if native:
+        result.update(eval_count=tokens, eval_duration=int(seconds * 1_000_000_000))
+    assert usage_history.record_completion(result, "ollama", elapsed_seconds=seconds)
+
+
+def test_sustained_compatible_slow_calls_still_disqualify(tmp_path, monkeypatch):
+    import model_fitness
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    monkeypatch.setattr(model_fitness, "hardware_allows", lambda *args: True)
+    for _ in range(3):
+        _local_timed("slow", 128, 64)
+    assert usage_history.recent_model_retirement_speed("slow") == 2
+    assert not model_fitness.suitable("slow", 1, 128, 12)
+
+
+def test_qualified_fast_samples_count_even_under_ten_seconds(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for seconds in (64, 64, 2, 2, 2, 2, 2):
+        _local_timed("mixed", 128, seconds)
+    assert usage_history.recent_model_retirement_speed("mixed") == 64
+
+
+def test_native_decode_basis_and_short_sample_isolation(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for _ in range(3):
+        _local_timed("native", 64, 32, native=True)
+    for _ in range(20):
+        _local_timed("native", 1, .01)
+    assert usage_history.recent_model_retirement_speed("native") == 2
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        assert conn.execute("SELECT speed_basis,speed_tokens,speed_seconds,elapsed_seconds "
+                            "FROM usage_events ORDER BY id LIMIT 1").fetchone() == ("decode",64,32,32)
+
+
+def test_hardware_gate_still_overrides_fast_or_unknown_timing(tmp_path, monkeypatch):
+    import model_fitness
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    monkeypatch.setattr(model_fitness, "hardware_allows", lambda *args: False)
+    for _ in range(3):
+        _local_timed("fast", 128, 1)
+    assert not model_fitness.suitable("fast", 20, 8, 0)
+    assert not model_fitness.suitable("unknown", 20, 8, 0)
+
+
+def test_legacy_low_speed_is_preserved_for_display_not_retirement(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        conn.execute("CREATE TABLE usage_events(id INTEGER PRIMARY KEY,timestamp REAL,source TEXT,"
+                     "model TEXT,prompt_tokens INTEGER,completion_tokens INTEGER,total_tokens INTEGER,"
+                     "tokens_per_second REAL,task_id TEXT)")
+        conn.executemany("INSERT INTO usage_events VALUES(?,?,?,?,?,?,?,?,?)",
+                         [(i,usage_history.time.time(),"ollama","old",0,128,128,2,"") for i in range(1,4)])
+    assert usage_history.recent_model_speed("old") == 2
+    assert usage_history.recent_model_retirement_speed("old") is None
+    assert usage_history.history()["total"] == 384
+
+
+def test_retirement_window_alias_provider_and_last_twelve(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for _ in range(12):
+        _local_timed("window:latest", 128, 64)
+    for _ in range(12):
+        _local_timed("window:latest", 128, 1)
+    assert usage_history.recent_model_retirement_speed("window") == 128
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        conn.execute("UPDATE usage_events SET timestamp=?", (usage_history.time.time()-31*86400,))
+    assert usage_history.recent_model_retirement_speed("window") is None
+    for _ in range(3):
+        assert usage_history.record_completion({"model":"window","usage":{"completion_tokens":128}},
+                                              "chatgpt", elapsed_seconds=64)
+    assert usage_history.recent_model_retirement_speed("window") is None
+
+
+def test_invalid_elapsed_cannot_create_retirement_evidence(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for seconds in (float("inf"),float("nan"),-1,0,None):
+        _local_timed("invalid",128,seconds)
+    assert usage_history.recent_model_retirement_speed("invalid") is None
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        assert conn.execute("SELECT DISTINCT speed_basis,speed_tokens,speed_seconds,elapsed_seconds "
+                            "FROM usage_events").fetchall() == [("unknown",0,None,None)]
+
+
+def test_native_provenance_uses_decode_time_not_wall_clock(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for _ in range(3):
+        assert usage_history.record_completion({"model":"decode", "usage":{"completion_tokens":64},
+               "eval_count":64,"eval_duration":1_000_000_000}, "ollama", elapsed_seconds=100)
+    assert usage_history.recent_model_retirement_speed("decode") == 64
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        assert conn.execute("SELECT speed_seconds,elapsed_seconds FROM usage_events LIMIT 1").fetchone() == (1,100)
+
+
+def test_retirement_requires_three_length_qualified_calls(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for _ in range(3):
+        _local_timed("short",63,63,native=True)
+        _local_timed("short",127,127)
+    assert usage_history.recent_model_retirement_speed("short") is None
+    for _ in range(2):
+        _local_timed("qualified",128,128)
+    assert usage_history.recent_model_retirement_speed("qualified") is None
+    _local_timed("qualified",128,128)
+    assert usage_history.recent_model_retirement_speed("qualified") == 1
+
+
+def test_concurrent_legacy_usage_migration_preserves_rows(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        # Existing app-created ledgers already use WAL before this migration.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE usage_events(id INTEGER PRIMARY KEY,timestamp REAL,source TEXT,"
+                     "model TEXT,prompt_tokens INTEGER,completion_tokens INTEGER,total_tokens INTEGER)")
+        conn.execute("INSERT INTO usage_events VALUES(1,0,'ollama','legacy',1,1,2)")
+    def record(_):
+        return usage_history.record_completion({"model":"concurrent","usage":{"completion_tokens":128}},
+                                              "ollama",elapsed_seconds=1)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        assert all(pool.map(record,range(6)))
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM usage_events").fetchone()[0] == 7
+        assert conn.execute("SELECT speed_basis FROM usage_events WHERE id=1").fetchone()[0] == "unknown"
+    assert usage_history.recent_model_retirement_speed("concurrent") == 128

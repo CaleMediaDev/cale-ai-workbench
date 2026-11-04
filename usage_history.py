@@ -1,5 +1,6 @@
 """Persist actual provider-reported token counts for the desktop graph."""
 
+import math
 import re
 import sqlite3
 import statistics
@@ -25,12 +26,20 @@ def _connection():
         completion_tokens INTEGER NOT NULL, total_tokens INTEGER NOT NULL
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS usage_time ON usage_events(timestamp)")
+    # Serialize column migrations across concurrently starting worker processes.
+    conn.execute("BEGIN IMMEDIATE")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(usage_events)")}
     if "tokens_per_second" not in columns:
         conn.execute("ALTER TABLE usage_events ADD COLUMN tokens_per_second REAL")
     if "task_id" not in columns:
         conn.execute("ALTER TABLE usage_events ADD COLUMN task_id TEXT NOT NULL DEFAULT ''")
+    for name, definition in (("speed_basis", "TEXT NOT NULL DEFAULT 'unknown'"),
+                             ("speed_tokens", "INTEGER NOT NULL DEFAULT 0"),
+                             ("speed_seconds", "REAL"), ("elapsed_seconds", "REAL")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE usage_events ADD COLUMN {name} {definition}")
     conn.execute("CREATE INDEX IF NOT EXISTS usage_task ON usage_events(task_id)")
+    conn.commit()
     return conn
 
 
@@ -77,17 +86,24 @@ def record_completion(result: dict, source: str, elapsed_seconds: float | None =
         eval_duration = max(0, int(result.get("eval_duration", 0)))
     except (TypeError, ValueError, OverflowError):
         eval_duration = 0
+    try:
+        elapsed = float(elapsed_seconds)
+        if not math.isfinite(elapsed) or elapsed <= 0:
+            elapsed = None
+    except (TypeError, ValueError, OverflowError):
+        elapsed = None
+    basis, tokens, seconds = "unknown", 0, None
     if eval_count and eval_duration:
-        speed = eval_count / (eval_duration / 1_000_000_000)
-    elif elapsed_seconds and elapsed_seconds > 0 and completion:
-        speed = completion / elapsed_seconds
-    else:
-        speed = None
+        basis, tokens, seconds = "decode", eval_count, eval_duration / 1_000_000_000
+    elif elapsed and completion:
+        basis, tokens, seconds = "end_to_end", completion, elapsed
+    speed = tokens / seconds if seconds else None
     try:
         with closing(_connection()) as conn, conn:
             conn.execute(
-                "INSERT INTO usage_events(timestamp,source,model,prompt_tokens,completion_tokens,total_tokens,tokens_per_second,task_id) VALUES (?,?,?,?,?,?,?,?)",
-                (time.time(), source[:40], model, prompt, completion, total, speed, task_id),
+                "INSERT INTO usage_events(timestamp,source,model,prompt_tokens,completion_tokens,total_tokens,tokens_per_second,task_id,speed_basis,speed_tokens,speed_seconds,elapsed_seconds) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (time.time(), source[:40], model, prompt, completion, total, speed, task_id,
+                 basis, tokens, seconds, elapsed),
             )
         return True
     except (OSError, sqlite3.Error):
@@ -150,12 +166,37 @@ def recent_local_speed(default: float = 35.0, models=None) -> float:
 
 
 def recent_model_speed(model: str) -> float | None:
-    """Only retire a model after three measured local completions."""
+    """Recent local throughput for ranking/display, including short replies."""
     try:
         with closing(_connection()) as conn:
             rows = conn.execute(
                 "SELECT tokens_per_second FROM usage_events WHERE source='ollama' "
                 "AND model IN (?, ?) AND tokens_per_second > 0 AND timestamp > ? "
+                "ORDER BY id DESC LIMIT 12",
+                (model, model + ":latest", time.time() - 30 * 86400),
+            ).fetchall()
+        return statistics.median(row[0] for row in rows) if len(rows) >= 3 else None
+    except (OSError, sqlite3.Error):
+        return None
+
+
+def recent_model_retirement_speed(model: str) -> float | None:
+    """Use sustained local responses for exclusion/removal, not tiny replies.
+
+    Native decode samples need 64 generated tokens; compatibility endpoints
+    lacking decode timing need 128 output tokens. Both fast and slow qualifying
+    calls count. End-to-end rates include prompt/load time, so establish sustained
+    task slowness, not pure decode speed. Legacy unknown timing is display-only.
+    """
+    try:
+        with closing(_connection()) as conn:
+            rows = conn.execute(
+                "SELECT tokens_per_second FROM usage_events WHERE source='ollama' "
+                "AND model IN (?, ?) AND timestamp > ? "
+                "AND tokens_per_second > 0 AND tokens_per_second < 1e100 "
+                "AND speed_seconds > 0 AND speed_seconds < 1e100 "
+                "AND ((speed_basis='decode' AND speed_tokens >= 64) "
+                "OR (speed_basis='end_to_end' AND speed_tokens >= 128)) "
                 "ORDER BY id DESC LIMIT 12",
                 (model, model + ":latest", time.time() - 30 * 86400),
             ).fetchall()
