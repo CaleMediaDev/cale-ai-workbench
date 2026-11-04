@@ -152,6 +152,28 @@ class VoiceTests(unittest.TestCase):
                             "microphone_status", {}), {"input_device": "Mic"})
                         self.assertEqual(launch.call_count, 2)
 
+    def test_one_shot_media_call_rejects_non_object_json(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Media/python/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant, "_persistent_mic_call", return_value=None),
+                patch.object(voice_assistant.subprocess, "run") as run,
+            ):
+                for response in ('null', '[]', '"unexpected"', '42', 'true'):
+                    with self.subTest(response=response):
+                        run.return_value = Mock(stdout=response, returncode=0)
+                        with self.assertRaisesRegex(
+                            RuntimeError, "The local voice service did not respond"
+                        ):
+                            voice_assistant.media_call("microphone_status")
+                run.return_value = Mock(stdout='{"input_device":"Mic"}', returncode=0)
+                self.assertEqual(voice_assistant.media_call("microphone_status"),
+                                 {"input_device": "Mic"})
+
     def test_status_rephrasing_uses_fast_local_model_and_keeps_facts(self):
         fake = ModuleType("cloud_ai")
         fake.FAST_MODEL = "cale-fast"
