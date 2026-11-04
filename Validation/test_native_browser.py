@@ -176,6 +176,22 @@ def test_snapshot_clears_refs_from_controls_that_become_hidden(tmp_path):
         native_browser.close()
 
 
+def test_download_filename_collision_search_continues_past_999(tmp_path):
+    destination = tmp_path / "Downloads"
+    destination.mkdir()
+    original = destination / "report.txt"
+    original.write_text("original", encoding="utf-8")
+    for number in range(2, 1000):
+        (destination / f"report-{number}.txt").write_text("saved", encoding="utf-8")
+
+    target = native_browser._download_target(tmp_path, "report.txt")
+
+    assert target == destination / "report-1000.txt"
+    assert not target.exists()
+    assert original.read_text(encoding="utf-8") == "original"
+    assert (destination / "report-999.txt").read_text(encoding="utf-8") == "saved"
+
+
 def test_download_filename_stays_in_project_and_does_not_overwrite(tmp_path):
     first = native_browser._download_target(tmp_path, "../secret.txt")
     assert first.parent == tmp_path / "Downloads"
