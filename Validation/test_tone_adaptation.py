@@ -57,6 +57,16 @@ class ToneAdaptationTests(unittest.TestCase):
                 with patch("cloud_ai.post", return_value=result):
                     self.assertEqual(tone_adaptation.social_reply("Hello"), "Hello! What do you need?")
 
+    def test_only_enclosing_quote_pairs_are_removed(self):
+        for content, expected in (
+            ('I would call that "progress"', 'I would call that "progress"'),
+            ('  "Hello! What do you need?"  ', 'Hello! What do you need?'),
+        ):
+            with self.subTest(content=content):
+                result = {"choices": [{"message": {"content": content}}]}
+                with patch("cloud_ai.post", return_value=result):
+                    self.assertEqual(tone_adaptation.social_reply("Hello"), expected)
+
     def test_empty_and_oversized_normalized_replies_use_the_bounded_fallback(self):
         for content in (" \r\n\u2028 ", "Long words " * 50):
             result = {"choices": [{"message": {"content": content}}]}
