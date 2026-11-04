@@ -174,6 +174,33 @@ class SkillCatalogTests(unittest.TestCase):
             {self.root / "data/skills", self.root / "data/.cale-skill-files.json", staging},
         )
 
+    def test_skips_symlinked_bundled_reference(self):
+        name = skill_catalog.SHARED_REFERENCES[0]
+        source = self.root / "vendor/agent-skills/references" / name
+        external = self.root / "external-reference.md"
+        external.write_text("Not reviewed bundle content", encoding="utf-8")
+        source.unlink()
+        try:
+            source.symlink_to(external)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Symlinks unavailable: {exc}")
+
+        result = skill_catalog.sync(self.root)
+
+        self.assertEqual(result, {
+            "installed": len(skill_catalog.SKILLS) + len(skill_catalog.SHARED_REFERENCES) - 1,
+            "updated": 0,
+            "preserved": 0,
+        })
+        self.assertFalse((self.root / "data/skills/references" / name).exists())
+        self.assertTrue(source.is_symlink())
+        self.assertEqual(external.read_text(encoding="utf-8"), "Not reviewed bundle content")
+        other = skill_catalog.SHARED_REFERENCES[1]
+        self.assertEqual(
+            (self.root / "data/skills/references" / other).read_text(encoding="utf-8"),
+            "Shared reference",
+        )
+
     def test_preserves_local_skill_edits(self):
         skill_catalog.sync(self.root)
         installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
