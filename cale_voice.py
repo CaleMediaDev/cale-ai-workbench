@@ -215,6 +215,8 @@ def speak(text: str, output_path: str | Path, play: bool = True,
                 raise RuntimeError("The voice worker returned an invalid response.")
             if "error" in answer:
                 raise RuntimeError(answer["error"])
+            if not isinstance(answer.get("path"), str) or not answer["path"]:
+                raise RuntimeError("The voice worker returned an invalid audio path.")
         except SpeechInterrupted:
             _stop_worker()
             raise
