@@ -123,7 +123,10 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
         )
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Audio-to-MIDI failed.")
-        midi = sorted(path for path in staging.glob("*.mid") if path.stat().st_size > 0)
+        midi = sorted(
+            path for path in staging.glob("*.mid")
+            if path.is_file() and path.stat().st_size > 0
+        )
         if not midi:
             raise RuntimeError("Basic Pitch finished without a MIDI file.")
         for notes in staging.glob("*.csv"):

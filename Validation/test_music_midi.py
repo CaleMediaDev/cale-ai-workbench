@@ -130,6 +130,38 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
     assert json.loads(row["pitch_bend"]) == [1.0, 2.0, 3.0]
 
 
+@pytest.mark.parametrize("has_midi_file", [False, True])
+def test_transcription_does_not_treat_directory_as_midi(tmp_path, has_midi_file):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"audio")
+    target = tmp_path / "notes"
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        directory = staging / "a.mid"
+        directory.mkdir()
+        (directory / "payload").write_bytes(b"not a MIDI file")
+        if has_midi_file:
+            (staging / "z.mid").write_bytes(b"MThd")
+        return type("Done", (), {"returncode": 0})()
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path("python.exe")), \
+         patch.object(music_midi.subprocess, "run", side_effect=render):
+        if has_midi_file:
+            result = music_midi.transcribe_to_midi(str(source), str(target))
+            assert Path(result["midi_path"]) == target / "z.mid"
+            assert result["files"] == [str(target / "z.mid")]
+            assert (target / "z.mid").read_bytes() == b"MThd"
+        else:
+            with pytest.raises(RuntimeError, match="without a MIDI file"):
+                music_midi.transcribe_to_midi(str(source), str(target))
+            assert list(target.iterdir()) == []
+
+    assert not (target / "a.mid").exists()
+    assert source.read_bytes() == b"audio"
+
+
 def test_failed_transcription_with_partial_output_can_be_retried(tmp_path):
     source = tmp_path / "guitar.wav"
     source.write_bytes(b"audio")
