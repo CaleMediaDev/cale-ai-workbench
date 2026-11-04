@@ -39,18 +39,28 @@ def _present(text: str, phrase: str) -> bool:
     boundary = r"(?![^\W_])"
     if phrase[-1].isdigit():
         boundary = r"(?![^\W_]|[.,][0-9])"
-    return bool(re.search(r"(?<![^\W_])" + re.escape(phrase) +
-                          boundary, normalized))
+    matches = re.finditer(r"(?<![^\W_])" + re.escape(phrase) + boundary, normalized)
+    for match in matches:
+        # Whitespace is normalized above, so a leading minus is at most two
+        # characters before the dollar sign. Do not verify its positive suffix.
+        if phrase.startswith("$") and normalized[max(0, match.start() - 2):match.start()].rstrip().endswith("-"):
+            continue
+        return True
+    return False
 
 
 def _money(text: str) -> Decimal:
     match = re.search(
-        r"\$\s*(-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(?!\d|[.,]\d)\b",
+        r"(?P<negative>-\s*)?\$\s*(?P<amount>-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(?!\d|[.,]\d)\b",
         text,
     )
     if not match:
         raise ValueError("Calculation phrases need a dollar amount")
-    return Decimal(match.group(1).replace(",", ""))
+    amount = match.group("amount")
+    if match.group("negative") and amount.startswith("-"):
+        raise ValueError("A dollar amount cannot have two negative signs")
+    value = Decimal(amount.replace(",", ""))
+    return value.copy_negate() if match.group("negative") else value
 
 
 def normalize_spec(spec: dict) -> dict:

@@ -31,6 +31,52 @@ def _project(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.mark.parametrize("left,right,total,passed", [
+    ("-$100", "$200", "$100", True),
+    ("-$100", "$200", "$300", False),
+    ("$100", "$200", "-$300", False),
+    ("-$200", "$100", "-$100", True),
+    ("$-100", "$200", "$100", True),
+    ("- $100.25", "$200.50", "$100.25", True),
+])
+def test_document_arithmetic_preserves_currency_signs(tmp_path, left, right, total, passed):
+    (tmp_path / "terms.txt").write_text(f"Adjustment: {left}\nFee: {right}\n", encoding="utf-8")
+    (tmp_path / "summary.md").write_text(f"Total: {total}\n", encoding="utf-8")
+    spec = {"source_path": "terms.txt", "report_path": "summary.md",
+            "calculations": [{"operation": "add",
+                              "source_texts": [f"Adjustment: {left}", f"Fee: {right}"],
+                              "report_text": f"Total: {total}"}]}
+    result = document_check.check(tmp_path, spec)
+    assert result["passed"] is passed
+    assert result["errors"] == ([] if passed else [
+        "Calculation 1: report amount differs from source arithmetic"])
+
+
+def test_document_arithmetic_rejects_double_currency_sign():
+    with pytest.raises(ValueError, match="two negative signs"):
+        document_check._money("Adjustment: -$-100")
+
+
+@pytest.mark.parametrize("negative", ["-$300", "- $300"])
+@pytest.mark.parametrize("location", ["source", "report"])
+def test_positive_currency_excerpt_cannot_match_negative_amount(tmp_path, negative, location):
+    source = f"Amount: {negative}" if location == "source" else "Amount: $300"
+    report = f"Total: {negative}" if location == "report" else "Total: $300"
+    (tmp_path / "terms.txt").write_text(source, encoding="utf-8")
+    (tmp_path / "summary.md").write_text(report, encoding="utf-8")
+    spec = {"source_path": "terms.txt", "report_path": "summary.md",
+            "facts": [{"source_text": "$300", "report_text": "$300"}]}
+    result = document_check.check(tmp_path, spec)
+    assert result["passed"] is False
+    assert result["errors"] == (["Fact 1: source evidence was not found"] if location == "source"
+                                else ["Fact 1: report text was not found"])
+
+
+def test_currency_matching_can_find_later_positive_amount():
+    assert document_check._present("Refund: -$300. Fee: $300.", "$300")
+    assert document_check._present("Refund: - $300.", "- $300")
+
+
 def test_document_check_saves_source_bound_read_only_verifier(tmp_path):
     folder = _project(tmp_path)
     result = document_check.check(folder, SPEC)
