@@ -524,6 +524,29 @@ def test_stop_attempts_both_channels_even_if_one_close_reports_an_error(tmp_path
     assert not old.opened and player.outgoing is None
 
 
+def test_worker_survives_failure_to_publish_its_retry_status(tmp_path):
+    import sqlite3
+
+    _, service, player, _, _, _ = fixture(tmp_path)
+    waits = []
+
+    def wait(timeout):
+        waits.append(timeout)
+        if len(waits) == 2:
+            service.closed.set()
+
+    with patch.object(service, "tick", side_effect=[sqlite3.OperationalError("database is locked"), None]) as tick, \
+            patch.object(service, "_publish", side_effect=sqlite3.OperationalError("database is locked")) as publish, \
+            patch.object(service.closed, "wait", side_effect=wait), \
+            patch.object(radio.time, "monotonic", side_effect=range(0, 100, 10)):
+        service._loop()
+
+    assert tick.call_count == 2
+    publish.assert_called_once_with()
+    assert len(waits) == 2
+    assert not player.active
+
+
 def test_radio_admission_is_atomic_across_services(tmp_path):
     import threading
     from concurrent.futures import ThreadPoolExecutor

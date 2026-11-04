@@ -608,7 +608,12 @@ class Service:
                     self.message = "Radio will retry: " + str(error)[:100]
                     self.retry_at = time.monotonic() + 30
                     next_tick = time.monotonic()+1
-                self._publish()
+                try:
+                    self._publish()
+                except Exception:
+                    # Publishing uses the same database that may have failed
+                    # above. Leave the last snapshot intact and retry next tick.
+                    pass
             self.closed.wait(0.05 if getattr(self.player, "mixing", False) else 0.15)
         self.player.stop()
 
