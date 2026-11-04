@@ -63,6 +63,22 @@ class BusinessContactTests(unittest.TestCase):
         )
         self.assertEqual(result["sources"][0]["email_addresses"], ["hello@puremichiganlawncare.com"])
 
+    def test_reader_parses_mixed_case_html_content_type(self):
+        body = (
+            '<html><head><title>Business contact</title></head><body>'
+            '<p>Call our office.</p><a href="tel:+15172581313">Phone</a>'
+            '</body></html>'
+        )
+        with patch.object(
+            web_tools, "fetch",
+            return_value=("https://example.org/contact", body, "Text/HTML; charset=UTF-8", 200),
+        ):
+            page = web_tools.read_webpage("https://example.org/contact")
+        self.assertEqual(page["title"], "Business contact")
+        self.assertEqual(page["contact_links"], ["tel:+15172581313"])
+        self.assertIn("Call our office.", page["text"])
+        self.assertNotIn("<", page["text"])
+
     def test_question_selects_late_live_page_passage(self):
         body = "Opening notes.\n" + "Ordinary material.\n" * 1400
         body += "The current warranty code is W-4817.\n"
