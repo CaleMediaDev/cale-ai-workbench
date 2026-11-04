@@ -249,8 +249,9 @@ def _render_branded(source_path: str, **_caption_options) -> dict:
     artwork = base64.b64decode(BRANDED_COVER_BASE64, validate=True)
     if hashlib.sha256(artwork).hexdigest() != BRANDED_COVER_SHA256:
         raise RuntimeError("The bundled song artwork failed its integrity check.")
-    with tempfile.TemporaryDirectory(prefix="cale-song-cover-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="cale-song-cover-", dir=source.parent) as temporary:
         cover = Path(temporary) / "cover.jpg"
+        rendered = Path(temporary) / "render.mp4"
         cover.write_bytes(artwork)
         command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner",
                    "-loglevel", "error", "-n", "-loop", "1", "-framerate", "10",
@@ -258,18 +259,20 @@ def _render_branded(source_path: str, **_caption_options) -> dict:
                    "-vf", "scale=1024:1024:force_original_aspect_ratio=decrease,pad=1024:1024:(ow-iw)/2:(oh-ih)/2",
                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage",
                    "-pix_fmt", "yuv420p", "-crf", "23", "-c:a", "aac", "-b:a", "192k",
-                   "-movflags", "+faststart", "-shortest", str(video)]
-        try:
-            result = subprocess.run(command, capture_output=True, timeout=900,
-                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            if result.returncode or not video.is_file() or not _video_playable(video):
-                raise RuntimeError(result.stderr.decode("utf-8", errors="replace")[-800:]
-                                   or "Song video encoding failed.")
-            if _digest(source) != source_hash:
-                raise RuntimeError("The song changed during video rendering. Retry with the saved audio.")
-        except Exception:
-            video.unlink(missing_ok=True)
-            raise
+                   "-movflags", "+faststart", "-shortest", str(rendered)]
+        result = subprocess.run(command, capture_output=True, timeout=900,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if result.returncode or not rendered.is_file() or not _video_playable(rendered):
+            raise RuntimeError(result.stderr.decode("utf-8", errors="replace")[-800:]
+                               or "Song video encoding failed.")
+        if _digest(source) != source_hash:
+            raise RuntimeError("The song changed during video rendering. Retry with the saved audio.")
+        # Only publish a verified complete export. Windows rename refuses an
+        # existing destination; POSIX needs an exclusive link instead.
+        if os.name == "nt":
+            rendered.rename(video)
+        else:
+            video.hardlink_to(rendered)
     record = {"source_sha256": source_hash, "cover_sha256": BRANDED_COVER_SHA256,
               "video_sha256": _digest(video)}
     temporary_record = _render_record(video).with_suffix(".tmp")
