@@ -246,10 +246,11 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
         for path in _files(paths):
             processed += 1
             source = str(path)
+            previous = conn.execute("SELECT version FROM files WHERE path=?", (source,)).fetchone()
+            expected_version = previous["version"] if previous else None
             try:
                 stat = path.stat()
                 version = _file_version(path)
-                previous = conn.execute("SELECT version FROM files WHERE path=?", (source,)).fetchone()
                 if previous and previous["version"] == version:
                     unchanged += 1
                     continue
@@ -257,12 +258,13 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
                 if _file_version(path) != version:
                     raise RuntimeError("File changed during indexing; retry on the next search.")
                 if not content:
-                    conn.execute("""INSERT INTO files(path,size,modified_ns,version,content)
+                    cleared = conn.execute("""INSERT INTO files(path,size,modified_ns,version,content)
                         VALUES(?,?,?,?, '') ON CONFLICT(path) DO UPDATE SET
                         size=excluded.size, modified_ns=excluded.modified_ns,
-                        version=excluded.version, content=''""",
-                        (source, stat.st_size, stat.st_mtime_ns, version))
-                    conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
+                        version=excluded.version, content='' WHERE files.version=?""",
+                        (source, stat.st_size, stat.st_mtime_ns, version, expected_version))
+                    if cleared.rowcount:
+                        conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
                     skipped += 1
                     continue
                 conn.execute("""INSERT INTO files(path,size,modified_ns,version,content) VALUES(?,?,?,?,?)
@@ -275,11 +277,13 @@ def ingest(state: str | Path, paths: list[str]) -> dict:
                              (source, path.name, content))
                 indexed += 1
             except (OSError, ValueError, RuntimeError, KeyError, ImportError, subprocess.TimeoutExpired):
-                # Keep the selected path for a later retry, but hide stale text.
-                conn.execute("""INSERT INTO files(path,size,modified_ns,version,content)
+                # Hide our stale record, preserving a newer successful scan.
+                cleared = conn.execute("""INSERT INTO files(path,size,modified_ns,version,content)
                     VALUES(?, -1, -1, '', '') ON CONFLICT(path) DO UPDATE SET
-                    size=-1, modified_ns=-1, version='', content=''""", (source,))
-                conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
+                    size=-1, modified_ns=-1, version='', content=''
+                    WHERE files.version=?""", (source, expected_version))
+                if cleared.rowcount:
+                    conn.execute("DELETE FROM file_fts WHERE path=?", (source,))
                 skipped += 1
             finally:
                 if processed % BATCH_FILES == 0:
