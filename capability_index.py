@@ -127,8 +127,8 @@ def _registered_tools(root: Path) -> list[dict]:
 
 
 def _upsert(conn: sqlite3.Connection, row: dict) -> bool:
-    prior = conn.execute("SELECT content_hash FROM capabilities WHERE id=?", (row["id"],)).fetchone()
-    if prior and prior["content_hash"] == row["hash"]:
+    prior = conn.execute("SELECT content_hash,path FROM capabilities WHERE id=?", (row["id"],)).fetchone()
+    if prior and prior["content_hash"] == row["hash"] and prior["path"] == row["path"]:
         return False
     conn.execute("""INSERT INTO capabilities
         (id,kind,name,description,path,schema_json,content_hash,updated)
