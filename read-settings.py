@@ -25,6 +25,7 @@ def validate_config(config):
         model = setting.get("default") if name == "main" else setting.get("model")
         if (
             setting.get("provider") != "custom"
+            or url.scheme not in ("http", "https")
             or url.hostname not in ("127.0.0.1", "localhost", "::1")
             or url.port not in ((11434, 11435) if name == "main" else (11434,))
             or url.path.rstrip("/") != "/v1"

@@ -65,3 +65,22 @@ def test_auxiliary_main_cannot_replace_main_route_during_validation():
     config["auxiliary"]["main"] = _config("cale-local")["model"]
     with pytest.raises(ValueError):
         read_settings.validate_config(config)
+
+
+@pytest.mark.parametrize("scheme", ["ftp:", "file:", "ws:", ""])
+@pytest.mark.parametrize("route", ["main", "auxiliary"])
+def test_non_http_local_urls_are_rejected(scheme, route):
+    config = _config("cale-local")
+    if route == "main":
+        config["model"]["base_url"] = f"{scheme}//127.0.0.1:11435/v1"
+    else:
+        config["auxiliary"]["vision"]["base_url"] = f"{scheme}//127.0.0.1:11434/v1"
+    with pytest.raises(ValueError):
+        read_settings.validate_config(config)
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_http_protocols_remain_supported_for_local_routes(scheme):
+    config = _config("cale-local", url=f"{scheme}://127.0.0.1:11435/v1")
+    config["auxiliary"]["vision"]["base_url"] = f"{scheme}://127.0.0.1:11434/v1"
+    assert read_settings.validate_config(config)["model"] == "cale-local"
