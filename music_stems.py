@@ -80,8 +80,16 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
             if len(staged_files) < 2:
                 raise RuntimeError("Audio separator did not produce both vocal and instrumental tracks.")
             files = [target / path.name for path in staged_files]
-            for path in staging.iterdir():
-                path.rename(target / path.name)
+            published = []
+            try:
+                for path in staging.iterdir():
+                    destination = target / path.name
+                    path.rename(destination)
+                    published.append(destination)
+            except OSError:
+                for path in reversed(published):
+                    path.rename(staging / path.name)
+                raise
     return {"source": str(source), "output_dir": str(target),
             "files": [str(path) for path in files], "model": "Audio Separator"}
 
