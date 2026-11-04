@@ -138,6 +138,26 @@ class BusinessContactTests(unittest.TestCase):
                     self.assertIn("Needle at the end.", page["text"])
                     self.assertEqual(page["text"], body[expected_match - 1000:])
 
+    def test_search_skips_malformed_duckduckgo_redirect_target(self):
+        html = (
+            '<a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2F%5Bbroken">'
+            'Malformed result</a>'
+            '<a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.gov%2Fstory">'
+            'Official story</a>'
+        )
+        with patch.object(
+            web_tools, "fetch",
+            side_effect=[RuntimeError("HTTP 429"), (
+                "https://lite.duckduckgo.com/lite/?q=test", html,
+                "text/html", 200,
+            )],
+        ):
+            result = web_tools.search_web("test")
+        self.assertEqual(result["search_engine"], "DuckDuckGo Lite")
+        self.assertEqual(result["results"], [
+            {"title": "Official story", "url": "https://example.gov/story"},
+        ])
+
     def test_search_falls_back_after_brave_rate_limit(self):
         html = (
             '<a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.gov%2Fstory">'
