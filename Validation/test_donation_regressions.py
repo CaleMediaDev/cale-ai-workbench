@@ -60,6 +60,19 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class CalculatorPrecisionTests(unittest.TestCase):
+    def test_unicode_multiplication_does_not_create_exponentiation(self):
+        for expression in ("2 ×× 3", "2 ×* 3", "2 *× 3"):
+            with self.subTest(expression=expression):
+                self.assertIsNone(calculate(expression))
+        for expression, answer in (
+            ("2×3", "6"),
+            ("2×-3", "-6"),
+            ("2 ** 3", "8"),
+            ("2 ^ 3", "8"),
+        ):
+            with self.subTest(expression=expression):
+                self.assertEqual(calculate(expression), f"{expression} = {answer}")
+
     def test_thousands_separators_require_valid_numeric_grouping(self):
         for expression in (
             "1234,567 + 1",
