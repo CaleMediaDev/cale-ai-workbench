@@ -176,6 +176,7 @@ class HardwareSampler:
             cpu = cpu_percent(self.previous_cpu, current)
             self.previous_cpu = current
         except (AttributeError, OSError):
+            self.previous_cpu = None
             cpu = None
         try:
             ram = _ram_percent()
