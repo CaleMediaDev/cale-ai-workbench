@@ -67,13 +67,14 @@ def source(folder):
     folder = Path(folder).resolve()
     declaration = folder / ".local-ai/preview.json"
     try:
-        if declaration.is_file():
+        declaration = declaration.resolve()
+        if declaration.is_relative_to(folder) and declaration.is_file():
             url = safe_loopback_url(
                 json.loads(declaration.read_text(encoding="utf-8"))["url"]
             )
             if url:
                 return url
-    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
         pass
     for name in HTML_CANDIDATES:
         try:

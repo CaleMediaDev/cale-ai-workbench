@@ -115,6 +115,24 @@ class ProjectPreviewTests(unittest.TestCase):
             with patch.object(Path, "is_file", new=is_file):
                 self.assertEqual(preview.source(folder), fallback.as_uri())
 
+    def test_external_declaration_symlink_falls_back_to_static_html(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            folder = root / "project"
+            folder.mkdir()
+            fallback = folder / "index.html"
+            fallback.write_text("hello", encoding="utf-8")
+            (folder / ".local-ai").mkdir()
+            external = root / "preview.json"
+            external.write_text(
+                json.dumps({"url": "http://localhost:3000"}), encoding="utf-8"
+            )
+            try:
+                (folder / ".local-ai/preview.json").symlink_to(external)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"Symlinks unavailable: {error}")
+            self.assertEqual(preview.source(folder), fallback.as_uri())
+
     def test_deeply_nested_declaration_falls_back_to_static_html(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary).resolve()
