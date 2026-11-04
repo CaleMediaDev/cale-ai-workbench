@@ -159,7 +159,8 @@ def save_verifier(folder: Path, requested: dict, source_sha256: str) -> bool:
     record = {"spec": spec, "source_sha256": source_sha256}
     target = notes / "document-check.json"
     temporary = target.with_suffix(".tmp")
-    temporary.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    raw = json.dumps(record, indent=2).encode("utf-8")
+    temporary.write_bytes(raw)
     os.replace(temporary, target)
 
     def literal(value: str) -> str:
@@ -171,7 +172,7 @@ def save_verifier(folder: Path, requested: dict, source_sha256: str) -> bool:
         "if (-not (Test-Path -LiteralPath $python)) { $python = (Get-Command python -ErrorAction Stop).Source }\n"
         f"& $python {literal(str(Path(__file__).resolve()))} --folder "
         "(Split-Path -Parent $PSScriptRoot) --spec "
-        "(Join-Path $PSScriptRoot 'document-check.json')\n"
+        f"(Join-Path $PSScriptRoot 'document-check.json') --spec-sha256 {hashlib.sha256(raw).hexdigest()}\n"
         "if ($LASTEXITCODE -ne 0) { exit 1 }\n"
     )
     script_temp = verifier.with_suffix(".tmp")
@@ -201,12 +202,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--folder", type=Path, required=True)
     parser.add_argument("--spec", type=Path, required=True)
+    parser.add_argument("--spec-sha256")
     args = parser.parse_args()
     folder = args.folder.resolve()
     spec_file = args.spec.resolve()
     if not spec_file.is_relative_to(folder / ".local-ai"):
         raise ValueError("Document check spec must be in this project's .local-ai folder")
-    result = verify_saved(folder, json.loads(spec_file.read_text(encoding="utf-8")))
+    raw = spec_file.read_bytes()
+    if args.spec_sha256 is not None and hashlib.sha256(raw).hexdigest() != args.spec_sha256:
+        result = {"passed": False, "errors": [
+            "Document check definition changed after validation; rerun check_document_report"]}
+    else:
+        result = verify_saved(folder, json.loads(raw.decode("utf-8")))
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result["passed"] else 1
 
