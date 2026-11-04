@@ -31,6 +31,18 @@ def test_total_time_only_requires_updated_when_used_as_fallback():
         ) == "2m 05s"
 
 
+def test_total_time_rejects_terminal_fallback_before_creation():
+    for status in ("ready_for_review", "accepted", "stopped"):
+        for finished in (None, "invalid", float("nan"), 999):
+            for updated in (0, -1, 999):
+                assert task_eta.total_time(
+                    1000, updated, status, now=2000, finished=finished,
+                ) == "—"
+            assert task_eta.total_time(
+                1000, 1000, status, now=2000, finished=finished,
+            ) == "0s"
+
+
 def test_countdown_needs_real_progress_and_survives_restart(tmp_path):
     db = tmp_path / "projects.db"
     assert task_eta.countdown(db, "task", 10, "working", 1000) == "Estimating time…"
