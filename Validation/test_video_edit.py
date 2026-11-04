@@ -109,6 +109,32 @@ def test_run_timeout_cleans_partial_output_only(tmp_path, monkeypatch, existing_
         assert video_edit._destination(str(output), []) == output
 
 
+@pytest.mark.parametrize("overwrite_refused", [False, True])
+def test_run_distinguishes_overwrite_refusal_from_output_filename(tmp_path, monkeypatch, overwrite_refused):
+    output = tmp_path / "already exists.mp4"
+
+    def failed_output(command, **kwargs):
+        assert command[-1] == str(output)
+        if overwrite_refused:
+            # Another writer created the destination after _run checked it.
+            output.write_bytes(b"existing video")
+            stderr = f"File '{output}' already exists. Exiting.\n"
+        else:
+            output.write_bytes(b"partial video")
+            stderr = f"Error opening output file {output}.\nError opening output files: Invalid argument\n"
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr=stderr)
+
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", failed_output)
+    with pytest.raises(RuntimeError):
+        video_edit._run([], output)
+    if overwrite_refused:
+        assert output.read_bytes() == b"existing video"
+    else:
+        assert not output.exists()
+        assert video_edit._destination(str(output), []) == output
+
+
 def test_run_removes_empty_output_after_successful_process(tmp_path, monkeypatch):
     output = tmp_path / "edited.mp4"
 
