@@ -464,6 +464,9 @@ def record_step_check(folder: str | Path, step_id: int, request_hash: str,
         _schema(conn)
         conn.commit()
         conn.execute("BEGIN IMMEDIATE")
+        # Another writer may have delayed us while the user changed the request.
+        if request_identity(folder) != request_hash:
+            raise ValueError("User instructions changed during the check. Replan against the new request.")
         current = _step_status(conn, request_hash)
         if not current["active"] or current["active"]["id"] != step_id:
             raise ValueError("That step is no longer active; no progress was advanced.")
