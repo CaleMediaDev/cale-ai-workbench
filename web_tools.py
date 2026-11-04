@@ -149,7 +149,13 @@ class Page(HTMLParser):
         if tag == "title":
             self.in_title = True
         if tag == "a":
-            self.anchor = {"url": urljoin(self.url, attrs.get("href", "")), "parts": []}
+            self.anchor = None
+            try:
+                target = urljoin(self.url, attrs.get("href", ""))
+            except ValueError:
+                pass  # A malformed link must not discard the rest of the page.
+            else:
+                self.anchor = {"url": target, "parts": []}
         if tag in ("p", "div", "section", "br", "li", "h1", "h2", "h3", "tr"):
             self.text.append("\n")
 

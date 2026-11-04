@@ -79,6 +79,25 @@ class BusinessContactTests(unittest.TestCase):
         self.assertIn("Call our office.", page["text"])
         self.assertNotIn("<", page["text"])
 
+    def test_reader_ignores_malformed_link_and_keeps_page_content(self):
+        body = (
+            '<title>Contact details</title>'
+            '<p>Before <a href="https://[broken">broken link</a> after.</p>'
+            '<a href="/contact">Contact page</a>'
+            '<a href="tel:+15172581313">Phone</a>'
+        )
+        with patch.object(
+            web_tools, "fetch",
+            return_value=("https://example.org/details", body, "text/html", 200),
+        ):
+            page = web_tools.read_webpage("https://example.org/details")
+        self.assertEqual(page["title"], "Contact details")
+        self.assertIn("Before broken link after.", page["text"])
+        self.assertEqual(page["links"], [
+            {"url": "https://example.org/contact", "title": "Contact page"},
+        ])
+        self.assertEqual(page["contact_links"], ["tel:+15172581313"])
+
     def test_reader_preserves_closing_block_text_boundaries(self):
         body = (
             '<p>First <strong>paragraph</strong>.</p>Trailing text'
