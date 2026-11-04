@@ -207,6 +207,47 @@ def test_edit_music_rejects_header_only_wav_after_successful_exit(tmp_path, monk
     assert len(staged_paths) == 2
 
 
+@pytest.mark.parametrize("suffix", [".mp3", ".flac"])
+def test_edit_music_rejects_compressed_output_without_frames(tmp_path, monkeypatch, suffix):
+    source = tmp_path / "song.wav"
+    output = tmp_path / ("clip" + suffix)
+    original = b"original audio"
+    source.write_bytes(original)
+    staged_paths = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def metadata_only_success(command, **kwargs):
+        assert kwargs["timeout"] == 3600
+        assert "-n" in command
+        staged = Path(command[-1])
+        staged_paths.append(staged)
+        assert not output.exists()
+        if staged.suffix == suffix:
+            staged.write_bytes(b"nonempty compressed metadata without audio frames")
+        else:
+            assert staged.suffix == ".wav"
+            assert "-xerror" in command
+            assert command[command.index("-i") + 1] == str(staged_paths[-2])
+            assert command[command.index("-map") + 1] == "0:a:0"
+            with wave.open(str(staged), "wb") as audio:
+                audio.setnchannels(1)
+                audio.setsampwidth(2)
+                audio.setframerate(16000)
+                audio.writeframes(b"")
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", metadata_only_success)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="no audio frames"):
+            music_edit.edit_music(str(source), str(output))
+        assert not output.exists()
+        assert source.read_bytes() == original
+        assert all(not path.parent.exists() for path in staged_paths)
+
+    assert len(staged_paths) == 4
+
+
 def test_edit_music_rejects_zero_sample_rate_wav(tmp_path, monkeypatch):
     source = tmp_path / "song.wav"
     output = tmp_path / "clip.wav"
