@@ -698,18 +698,119 @@ def test_claim_collision_moves_to_next_job_without_fetching_lost_source(tmp_path
     assert service.next_attempt == 0
 
 
-def test_parallel_lanes_cannot_claim_the_same_public_revision_job(tmp_path):
+def test_parallel_lanes_cannot_claim_same_job_across_public_revisions(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
     # Initialize schema before racing the actual transactional claim path.
     with closing(donation.connection(tmp_path)):
         pass
     with ThreadPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(lambda _: donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", COMMIT["sha"]), range(3)))
+        results = list(pool.map(lambda n: donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", str(n) * 40), range(3)))
     assert sum(bool(result) for result in results) == 1
     donation.finish(tmp_path, next(result for result in results if result), "no_change")
     assert not donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", COMMIT["sha"])
     assert donation.claim_run(tmp_path, "different-area", "chatgpt", "full_blast", COMMIT["sha"])
-    assert donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "c"*40)
+    assert not donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "c"*40)
+
+
+def test_six_first_launch_lanes_migrate_old_ledger_without_duplicate_columns(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    path = tmp_path / "LongTasks" / "donations.db"
+    path.parent.mkdir()
+    # Create a real pre-migration ledger, not connection()'s current schema.
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, started REAL NOT NULL, status TEXT NOT NULL, "
+                     "tokens INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', "
+                     "url TEXT NOT NULL DEFAULT '', job TEXT NOT NULL DEFAULT '')")
+        conn.execute("INSERT INTO runs(id,started,status,tokens,job) VALUES('historic',1,'no_change',23,'old-area')")
+    entered = threading.Barrier(6)
+    def first_launch(number):
+        entered.wait(timeout=5)
+        return donation.claim_run(tmp_path, "new-area", "chatgpt", "full_blast", str(number) * 40)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(first_launch, range(6)))
+    assert sum(bool(result) for result in results) == 1
+    with sqlite3.connect(path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+        assert {"resource", "intensity", "revision", "updated", "review_checked"} <= columns
+        assert conn.execute("SELECT tokens,job FROM runs WHERE id='historic'").fetchone() == (23, "old-area")
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize("status", ["requested", "received", "no_change"])
+def test_cross_revision_reservations_expire_from_recent_activity(tmp_path, status):
+    with patch.object(donation.time, "time", return_value=1000):
+        run = donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "a" * 40)
+    with patch.object(donation.time, "time", return_value=2000):
+        if status == "received":
+            donation.record_result(tmp_path, run, RESULT)
+        elif status == "no_change":
+            donation.finish(tmp_path, run, status)
+    with patch.object(donation.time, "time", return_value=2801):
+        if status == "requested":
+            assert donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "b" * 40)
+        else:
+            assert not donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "b" * 40)
+    with patch.object(donation.time, "time", return_value=5000):
+        assert donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "c" * 40)
+
+
+def test_submitted_cross_revision_guard_waits_for_authoritative_review(tmp_path):
+    with patch.object(donation.time, "time", return_value=1000):
+        run = donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "a" * 40)
+        donation.finish(tmp_path, run, "submitted", f"https://github.com/{donation.UPSTREAM}/pull/7")
+    closed = {"number": 7, "state": "closed", "base": {"repo": {"full_name": donation.UPSTREAM}},
+              "head": {"ref": "cale-donation-" + run[:16]}, "body": "<!-- cale-donation:same-area -->"}
+    with patch.object(donation.time, "time", return_value=100000):
+        assert not donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "b" * 40)
+        donation.refresh_pending_reviews(tmp_path, fetch=lambda _: {**closed, "state": "open"})
+        assert not donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "c" * 40)
+        donation.refresh_pending_reviews(tmp_path, fetch=lambda _: pytest.fail("Shared sync lease must avoid another request"))
+    with patch.object(donation.time, "time", return_value=100031):
+        def unavailable(_):
+            raise OSError("offline")
+        donation.refresh_pending_reviews(tmp_path, fetch=unavailable)
+        assert not donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "d" * 40)
+    with patch.object(donation.time, "time", return_value=100062):
+        donation.refresh_pending_reviews(tmp_path, fetch=lambda _: closed)
+        assert donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "e" * 40)
+
+
+def test_pending_review_refresh_is_bounded_and_rotates_oldest_drafts(tmp_path):
+    for number in range(8):
+        run = donation.claim_run(tmp_path, f"area-{number}", "chatgpt", "full_blast", "a" * 40)
+        donation.finish(tmp_path, run, "submitted", f"https://github.com/{donation.UPSTREAM}/pull/{number+1}")
+    calls = []
+    with patch.object(donation.time, "time", return_value=100000):
+        donation.refresh_pending_reviews(tmp_path, fetch=lambda endpoint: calls.append(endpoint) or {})
+        donation.refresh_pending_reviews(tmp_path, fetch=lambda _: pytest.fail("Other lane must share lease"))
+    assert len(calls) == 3
+    with patch.object(donation.time, "time", return_value=100031):
+        donation.refresh_pending_reviews(tmp_path, fetch=lambda endpoint: calls.append(endpoint) or {})
+    assert len(calls) == 6 and len(set(calls)) == 6
+
+
+def test_search_index_lag_after_new_main_commit_cannot_repeat_submitted_job(tmp_path):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+                         github_account="donor", sources=["chatgpt"], intensity="full_blast")
+    run = donation.claim_run(tmp_path, JOB["id"], "chatgpt", "full_blast", "b" * 40)
+    donation.finish(tmp_path, run, "submitted", f"https://github.com/{donation.UPSTREAM}/pull/7")
+    service = donation.Service(tmp_path)
+    def api(endpoint):
+        if endpoint.endswith("/pulls/7"):
+            return {"number": 7, "state": "open"}
+        return {"total_count": 0} if "search/" in endpoint else COMMIT
+    with (patch("pc_offline.offline", return_value=False),
+          patch("github_account.account", return_value="donor"),
+          patch("chatgpt_auth.status", return_value={"sharing": True}),
+          patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT),
+          patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kwargs: jobs),
+          patch.object(donation, "public_file", return_value=json.dumps([JOB])) as public,
+          patch.object(donation, "gh_api", side_effect=api),
+          patch.object(donation, "complete_donation") as inference):
+        service._run(threading.Event())
+    inference.assert_not_called()
+    assert [call.args[0] for call in public.call_args_list] == ["donation-tasks.json"]
+    assert "waiting for maintainer review" in service.message
 
 
 def test_account_cooldown_is_shared_by_other_lanes(tmp_path):

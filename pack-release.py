@@ -23,6 +23,7 @@ if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
     "README.md", "ARCHITECTURE.md",
+    "benchmarks/results/pr-backlog-20261104.json",
     "benchmarks/results/local-radio-20261103.json",
     "benchmarks/radio_crossfade.py",
     "benchmarks/results/radio-crossfade-20261103.json",
