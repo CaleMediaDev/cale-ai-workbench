@@ -307,18 +307,18 @@ async def lifespan(_server):
             )
             backend_stack = AsyncExitStack()
             try:
-                reader, writer = await backend_stack.enter_async_context(
-                    stdio_client(params)
-                )
-                session = await backend_stack.enter_async_context(
-                    ClientSession(
-                        reader,
-                        writer,
-                        read_timeout_seconds=1200,
-                        list_roots_callback=project_roots,
-                    )
-                )
                 async with asyncio.timeout(DISCOVERY_SECONDS):
+                    reader, writer = await backend_stack.enter_async_context(
+                        stdio_client(params)
+                    )
+                    session = await backend_stack.enter_async_context(
+                        ClientSession(
+                            reader,
+                            writer,
+                            read_timeout_seconds=1200,
+                            list_roots_callback=project_roots,
+                        )
+                    )
                     await session.initialize()
                 tools = await _discover_tools(session)
             except BaseException as exc:
