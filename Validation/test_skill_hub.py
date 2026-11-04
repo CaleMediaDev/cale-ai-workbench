@@ -38,7 +38,10 @@ class SkillHubTests(unittest.TestCase):
 
     def test_search_rejects_boundary_control_characters_before_trimming(self):
         with patch.object(skill_hub, "_run", return_value="[]") as run:
-            for control in ("\n", "\r", "\t", "\x0b", "\x0c", "\x1f"):
+            for control in (
+                "\n", "\r", "\t", "\x0b", "\x0c", "\x1f",
+                "\x7f", "\x80", "\x85", "\x9f",
+            ):
                 for query in (control + "accessibility", "accessibility" + control):
                     with self.subTest(query=repr(query)):
                         with self.assertRaisesRegex(ValueError, "control characters"):
