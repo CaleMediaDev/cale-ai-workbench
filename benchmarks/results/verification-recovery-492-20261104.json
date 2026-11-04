@@ -1,0 +1,87 @@
+{
+  "version": "0.5.492",
+  "features": [
+    "Explicit single-target saved assertion replacement with real selected-case execution",
+    "Save passing ordinary selected-case corrections while retaining later failures",
+    "Exact owned SQL synchronization with typed Boolean/number distinction",
+    "Applicable selected-case focused repair schemas and bounded retries",
+    "Smaller tool catalog preserving newest tool batch and steering in small context"
+  ],
+  "validation": {
+    "full_native_worker_and_webapp_suite": {
+      "passed": 628,
+      "seconds": 600.26
+    },
+    "root_new_retarget_selection": {
+      "passed": 44,
+      "seconds": 24.6
+    },
+    "root_compaction_and_large_excerpt": {
+      "passed": 4,
+      "seconds": 0.56
+    },
+    "catalog_tokens": 4167
+  },
+  "regression_proofs": [
+    "Old assertion target cannot be removed through existing APIs; two actual browser failures before retarget",
+    "Extra retained assertion must not authorize active SQL rewrite",
+    "True and 1 must not match typed state requirements",
+    "Ordinary selected case passes but cannot save while another case fails; two actual browser failures before partial repair",
+    "Growing catalog drops newest exchange in6000-token context; strict original tests pass after reducing duplication"
+  ],
+  "local_model": {
+    "seconds": 300.01,
+    "model_calls": 15,
+    "tool_calls": 15,
+    "tools_used": [
+      "task_steps",
+      "task_steps",
+      "task_steps",
+      "read_file",
+      "task_steps",
+      "check_webapp",
+      "read_file",
+      "task_steps",
+      "task_steps",
+      "task_steps",
+      "read_file",
+      "read_file",
+      "task_steps",
+      "task_steps",
+      "read_file"
+    ],
+    "browser": {
+      "requested_category_choices": true,
+      "initial_empty": true,
+      "reject_blank": true,
+      "reject_negative": true,
+      "reject_zero": true,
+      "reject_nonnumeric": true,
+      "adds_two_and_totals": true,
+      "category_visible": true,
+      "reload_keeps_entries": true,
+      "delete_updates_total": true,
+      "reload_keeps_deletion": true,
+      "description_plain_text": true,
+      "decimal_totals": true,
+      "mobile_fit": true,
+      "no_remote_requests": true
+    },
+    "database": {
+      "total": 8,
+      "done": 2,
+      "remaining": 6
+    },
+    "verifier_passes_correct": false,
+    "run_outcome": "failed"
+  },
+  "task_complete": false,
+  "manual_task_edits": false,
+  "limitations": [
+    "Mechanism regression success does not establish model orchestration success",
+    "Actual resumed task still fails overall; two database steps do not prove functional coverage",
+    "Mutation testing is not credited when the baseline verifier itself fails",
+    "Timings include other system activity; no isolated speed improvement claimed"
+  ],
+  "next_work": "Simplify focused repair payloads and inject known metadata through existing trusted bindings rather than asking the local model to reconstruct nested bookkeeping."
+}
