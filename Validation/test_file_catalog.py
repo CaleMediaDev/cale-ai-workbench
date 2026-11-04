@@ -236,6 +236,27 @@ class FileCatalogTests(unittest.TestCase):
             self.assertEqual(file_catalog.search(state, "my budget")[0]["path"], str(target))
             self.assertEqual(file_catalog.search(state, "my budget spreadsheet from 2025"), [])
 
+    def test_deleted_candidates_do_not_hide_existing_match(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            target = root / "needle extra words report.txt"
+            target.write_text("", encoding="utf-8")
+            # Shorter names rank ahead of the live match. Seed deleted files
+            # directly so this test does not depend on scan order or disk space.
+            paths = [root / f"needle-{number}.txt" for number in range(80)]
+            with file_catalog.database(state) as conn:
+                conn.executemany(
+                    "INSERT INTO entries(path,name,parent,kind,scan_id) VALUES(?,?,?,?,?)",
+                    [(str(path), path.name, str(root), "file", "prior")
+                     for path in paths + [target]],
+                )
+
+            results = file_catalog.search(state, "needle", limit=1)
+
+            self.assertEqual([row["path"] for row in results], [str(target)])
+
     def test_filler_word_does_not_hide_compound_filename(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"
