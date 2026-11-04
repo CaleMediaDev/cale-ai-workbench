@@ -116,6 +116,44 @@ def test_music_video_empty_output_is_removed_and_allows_retry(tmp_path, monkeypa
     assert song.read_bytes() == original
 
 
+def test_music_video_invalid_diagnostic_bytes_allow_cleanup_and_retry(tmp_path, monkeypatch):
+    song = tmp_path / "song.wav"
+    video = tmp_path / "song-video.mp4"
+    with wave.open(str(song), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b"\x00\x00" * 16000)
+    original = song.read_bytes()
+    calls = []
+    monkeypatch.setattr(music_video.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def fake_run(command, **kwargs):
+        assert command[-1] == str(video)
+        assert not video.exists()
+        calls.append(command)
+        if len(calls) == 1:
+            video.write_bytes(b"incomplete MP4")
+            # Model subprocess text decoding of non-UTF-8 FFmpeg diagnostics.
+            stderr = b"Encoder failed: \xff".decode(
+                "utf-8", errors=kwargs.get("errors", "strict")
+            )
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr=stderr)
+        video.write_bytes(b"completed MP4")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(music_video.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="Encoder failed:"):
+        music_video.make_music_video(str(song), str(video))
+    assert not video.exists()
+
+    result = music_video.make_music_video(str(song), str(video))
+    assert result["path"] == str(video)
+    assert video.read_bytes() == b"completed MP4"
+    assert len(calls) == 2
+    assert song.read_bytes() == original
+
+
 def test_music_video_renders_offline_and_preserves_source(tmp_path):
     song = tmp_path / "song.wav"
     video = tmp_path / "song-video.mp4"
