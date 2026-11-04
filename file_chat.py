@@ -218,7 +218,10 @@ def answer_from_files(question: str, paths: list[str]) -> str:
                 {"messages": messages, "max_tokens": 500, "temperature": 0.2},
                 result, model,
             )
-            answer = (result["choices"][0]["message"].get("content") or "").strip()
+            message = result["choices"][0]["message"]
+            if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+                continue  # A malformed local reply must not block the next model.
+            answer = message["content"].strip()
             if answer:
                 names = ", ".join(f"[{i}] {Path(path).name}" for i, path in enumerate(paths, 1))
                 if partial_files:

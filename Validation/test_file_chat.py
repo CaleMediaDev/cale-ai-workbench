@@ -38,6 +38,9 @@ def test_file_answer_uses_read_only_local_excerpt(tmp_path):
 @pytest.mark.parametrize("malformed", [
     {"choices": None},
     {"choices": [{"message": None}]},
+    {"choices": [{"message": []}]},
+    {"choices": [{"message": {"content": None}}]},
+    {"choices": [{"message": {"content": 123}}]},
 ])
 def test_null_response_fields_fall_back_to_next_local_model(tmp_path, malformed):
     report = tmp_path / "report.txt"
