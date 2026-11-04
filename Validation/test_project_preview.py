@@ -149,3 +149,15 @@ class ProjectPreviewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_malformed_authority_rejected_when_legacy_parser_returns_it():
+    from urllib.parse import SplitResult
+    malformed = "http://[::1]invalid:3000/"
+    # Older urllib implementations returned these hostname/port fields.
+    # Require the app boundary to reject the complete malformed authority
+    # even when its parser dependency does not reject it first.
+    parsed = SplitResult("http", "[::1]invalid:3000", "/", "", "")
+    assert parsed.hostname == "::1" and parsed.port == 3000
+    with patch.object(preview, "urlsplit", return_value=parsed):
+        assert preview.safe_loopback_url(malformed) == ""
