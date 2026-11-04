@@ -435,6 +435,43 @@ def test_runtime_requires_all_verified_weights_before_reuse(tmp_path):
         assert video_generation._verified_runtime()
 
 
+def test_runtime_marker_publication_uses_independent_temporary_files(tmp_path):
+    runtime = tmp_path / "runtime"
+    python = runtime / "ComfyUI" / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"python")
+    model = runtime / "ComfyUI" / "models" / "model.safetensors"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"verified model")
+    hashes = {"model.safetensors": hashlib.sha256(model.read_bytes()).hexdigest()}
+    fingerprints = {"model.safetensors": [100_000_001, 1]}
+    marker = runtime / "cale-video-ready.json"
+    original_replace = Path.replace
+    publications = []
+
+    def publish_after_competing_check(path, target):
+        if Path(target) == marker:
+            publications.append(path)
+            if len(publications) == 1:
+                # Another caller finishes verification before this caller
+                # publishes its marker. Both must retain their own temp file.
+                assert not marker.exists()
+                assert video_generation._verified_runtime()
+        return original_replace(path, target)
+
+    with patch.object(video_generation, "RUNTIME", runtime), patch.object(
+        video_generation, "MODEL_HASHES", hashes
+    ), patch.object(
+        video_generation, "_model_fingerprints", return_value=fingerprints
+    ), patch.object(Path, "replace", publish_after_competing_check):
+        assert video_generation._verified_runtime()
+
+    assert len(publications) == 2
+    assert publications[0] != publications[1]
+    assert all(not path.exists() for path in publications)
+    assert json.loads(marker.read_text(encoding="utf-8")) == fingerprints
+
+
 def test_windows_installer_patch_is_exact_and_idempotent(tmp_path):
     installer = tmp_path / "install.ps1"
     installer.write_text(

@@ -256,9 +256,18 @@ def _verified_runtime() -> bool:
             return False
         if digest.hexdigest() != expected:
             return False
-    temporary = marker.with_suffix(".tmp")
-    temporary.write_text(json.dumps(fingerprints), encoding="utf-8")
-    temporary.replace(marker)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=marker.parent,
+            prefix=marker.stem + "-", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(fingerprints, stream)
+        temporary.replace(marker)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return True
 
 
