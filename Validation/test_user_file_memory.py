@@ -75,7 +75,21 @@ class UserFileMemoryTests(unittest.TestCase):
 
         with patch.object(user_file_memory, "_file_version", side_effect=record_version):
             self.assertIn("first memory", user_file_memory.get(self.state, str(first))["content"])
-        self.assertEqual(seen, [first])
+        self.assertEqual(seen, [first, first])
+
+    def test_get_rejects_source_deleted_before_refresh_enumeration(self):
+        path = self.root / "notes.txt"
+        path.write_text("cached detail", encoding="utf-8")
+        user_file_memory.ingest(self.state, [str(path)])
+        actual_ingest = user_file_memory.ingest
+
+        def delete_then_ingest(state, paths):
+            path.unlink()
+            return actual_ingest(state, paths)
+
+        with patch.object(user_file_memory, "ingest", side_effect=delete_then_ingest):
+            with self.assertRaises(ValueError):
+                user_file_memory.get(self.state, str(path))
 
     def test_get_does_not_index_an_unselected_file(self):
         path = self.root / "never-selected.txt"
