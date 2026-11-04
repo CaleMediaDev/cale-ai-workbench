@@ -51,6 +51,7 @@ def generate(model, voice_prompt, text: str, output_path: str) -> dict:
         temporary_path = Path(temporary.name)
     try:
         sf.write(temporary_path, audio[0], sample_rate)
+        # Atomically replace the target file only after successful write.
         temporary_path.replace(target)
     finally:
         temporary_path.unlink(missing_ok=True)

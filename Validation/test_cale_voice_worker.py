@@ -94,6 +94,10 @@ def test_failed_audio_write_preserves_existing_recording(tmp_path):
 
     soundfile = SimpleNamespace(write=Mock(side_effect=failing_write))
     with patch.dict(sys.modules, {"soundfile": soundfile}):
+        # The temporary file is written first; if that fails, the target must be untouched.
+        # Note: In this specific failing scenario, the write itself might not fail immediately
+        # but we verify behavior when an exception occurs after a partial write attempt.
+        # Since our mock writes to the temp file then raises, we expect OSError to bubble up.
         with pytest.raises(OSError, match="audio write failed"):
             cale_voice_worker.generate(model, object(), "hello", str(target))
 
