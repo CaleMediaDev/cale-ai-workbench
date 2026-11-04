@@ -683,6 +683,52 @@ class VoiceTests(unittest.TestCase):
             fallback.assert_not_called()
             self.assertEqual(cached.read_bytes(), fresh_audio)
 
+    def test_truncated_cached_wav_is_regenerated_after_eof(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            reference = root / "reference.wav"
+            reference.write_bytes(b"voice")
+            cached = root / "Media" / "voice-cache" / (
+                f"wake-v1-{reference.stat().st_mtime_ns}.wav"
+            )
+            cached.parent.mkdir(parents=True)
+            # A valid RIFF/WAVE prefix followed by a truncated fmt chunk payload.
+            cached.write_bytes(
+                b"RIFF" + (4096).to_bytes(4, "little") + b"WAVE"
+                + b"JUNK" + (1000).to_bytes(4, "little") + b"\0" * 1000
+                + b"fmt " + (16).to_bytes(4, "little") + b"\x01"
+            )
+            self.assertGreater(cached.stat().st_size, 1000)
+            with self.assertRaises(EOFError):
+                with wave.open(str(cached), "rb"):
+                    pass
+            fresh_audio = b"fresh audio" * 200
+
+            def synthesize(_message, output, cancel=None):
+                Path(output).write_bytes(fresh_audio)
+                return {"path": str(output), "engine": "clone"}
+
+            winsound = Mock()
+            with (
+                patch.dict(sys.modules, {"winsound": winsound}),
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant, "speech_ready", return_value=True),
+                patch.object(voice_assistant, "_heavy_gpu_active", return_value=False),
+                patch.object(cale_voice, "REFERENCE", reference),
+                patch.object(cale_voice, "ready", return_value=True),
+                patch.object(cale_voice, "speak", side_effect=synthesize) as clone,
+                patch.object(voice_assistant, "media_call") as fallback,
+            ):
+                result = voice_assistant.say(
+                    voice_assistant.WAKE_ACK,
+                    cancel=threading.Event(), require_clone=True,
+                )
+            self.assertEqual(result["engine"], "clone")
+            clone.assert_called_once()
+            fallback.assert_not_called()
+            winsound.PlaySound.assert_not_called()
+            self.assertEqual(cached.read_bytes(), fresh_audio)
+
     def test_bundled_wake_reply_plays_without_model_startup(self):
         import hashlib
         import tempfile
