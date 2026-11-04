@@ -14,14 +14,18 @@ def validate_config(config):
     context = int(config["model"].get("context_length", 0))
     if context < 64000:
         raise ValueError("Long tasks require at least a 64K model context window.")
-    models = {"main": config["model"], **config.get("auxiliary", {})}
+    auxiliary = config.get("auxiliary", {})
+    if "main" in auxiliary:
+        raise ValueError("The auxiliary model name 'main' is reserved for the main route.")
+    models = {"main": config["model"], **auxiliary}
     for name, setting in models.items():
-        if setting.get("enabled") is False:
+        if name != "main" and setting.get("enabled") is False:
             continue
         url = urlsplit(setting.get("base_url", ""))
         model = setting.get("default") if name == "main" else setting.get("model")
         if (
             setting.get("provider") != "custom"
+            or url.scheme not in ("http", "https")
             or url.hostname not in ("127.0.0.1", "localhost", "::1")
             or url.port not in ((11434, 11435) if name == "main" else (11434,))
             or url.path.rstrip("/") != "/v1"
