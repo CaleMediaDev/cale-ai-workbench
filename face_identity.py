@@ -93,14 +93,27 @@ class FaceModel:
 
         if feature is None:
             return None
-        candidate = np.asarray(feature)
+        try:
+            candidate = np.asarray(feature, dtype=float)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if candidate.ndim != 1 or not candidate.size or not np.isfinite(candidate).all():
+            return None
         scores = []
         for name, examples in _known().items():
             if not isinstance(examples, list):
                 continue
             for sample in examples[:8]:
-                if len(sample) == len(candidate):
-                    scores.append((float(np.dot(candidate, np.asarray(sample))), name))
+                try:
+                    vector = np.asarray(sample, dtype=float)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if vector.shape != candidate.shape or not np.isfinite(vector).all():
+                    continue
+                with np.errstate(over="ignore", invalid="ignore"):
+                    score = float(np.dot(candidate, vector))
+                if np.isfinite(score):
+                    scores.append((score, name))
         if not scores:
             return None
         by_name = {}
