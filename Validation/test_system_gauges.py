@@ -166,6 +166,57 @@ def test_network_bandwidth_rejects_counter_rollback_and_recovers():
         ) == (8, 4, 12)
 
 
+def test_network_counter_runtime_failure_is_isolated_and_recovers(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    readings = iter([
+        SimpleNamespace(bytes_recv=1_000_000, bytes_sent=2_000_000),
+        RuntimeError("Network counters unavailable"),
+        SimpleNamespace(bytes_recv=9_000_000, bytes_sent=6_000_000),
+        SimpleNamespace(bytes_recv=13_000_000, bytes_sent=8_000_000),
+    ])
+    times = iter([10.0, 12.0, 14.0, 16.0])
+
+    def network_counters():
+        reading = next(readings)
+        if isinstance(reading, Exception):
+            raise reading
+        return reading
+
+    monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(
+        disk_io_counters=lambda: None,
+        net_io_counters=network_counters,
+        net_if_stats=lambda: {"Ethernet": SimpleNamespace(isup=True, speed=100)},
+    ))
+    monkeypatch.setattr(system_gauges, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(system_gauges, "_cpu_times", lambda: None)
+    monkeypatch.setattr(system_gauges, "_ram_percent", lambda: 37)
+    monkeypatch.setattr(system_gauges, "_gpu_percent", lambda: 41)
+    monkeypatch.setattr(system_gauges, "_drive_space", lambda: (25, 100))
+    monkeypatch.setattr(system_gauges.time, "monotonic", lambda: next(times))
+
+    sampler = system_gauges.HardwareSampler()
+    first = sampler.sample()
+    assert first["net_down_mbps"] is None
+    failed = sampler.sample()
+    assert failed["net_down_mbps"] is None
+    assert failed["net_up_mbps"] is None
+    assert failed["net"] is None
+    assert failed["ram"] == 37
+    assert failed["gpu"] == 41
+    assert failed["drive"] == 25
+    assert sampler.previous_net is None
+    primed = sampler.sample()
+    assert primed["net_down_mbps"] is None
+    assert primed["net_up_mbps"] is None
+    assert primed["net"] is None
+    recovered = sampler.sample()
+    assert recovered["net_down_mbps"] == 16
+    assert recovered["net_up_mbps"] == 8
+    assert recovered["net"] == 24
+
+
 def test_network_throughput_survives_unavailable_interface_stats(monkeypatch):
     import sys
     from types import SimpleNamespace
