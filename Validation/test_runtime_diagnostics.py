@@ -33,6 +33,27 @@ def test_success_and_expired_episode_allow_new_report(tmp_path):
     assert diagnostics.record(tmp_path, "camera", "disconnected", now=4010)
 
 
+def test_ongoing_failures_do_not_extend_reported_episode(tmp_path):
+    start = 100
+    assert not diagnostics.record(tmp_path, "camera", "unavailable", now=start)
+    assert diagnostics.record(tmp_path, "camera", "unavailable", now=start + 1)
+    assert not diagnostics.record(
+        tmp_path, "camera", "unavailable",
+        now=start + diagnostics.EPISODE_SECONDS // 2,
+    )
+
+    # The episode expires even though the most recent failure is still recent.
+    new_start = start + diagnostics.EPISODE_SECONDS + 1
+    assert not diagnostics.record(tmp_path, "camera", "unavailable", now=new_start)
+    issue = diagnostics.issues(tmp_path)[0]
+    assert issue["first_seen"] == new_start
+    assert issue["last_seen"] == new_start
+    assert issue["count"] == 1
+    assert issue["reported"] == 0
+    assert diagnostics.record(tmp_path, "camera", "unavailable", now=new_start + 1)
+    assert not diagnostics.record(tmp_path, "camera", "unavailable", now=new_start + 2)
+
+
 def test_issue_message_is_bounded_and_categories_are_validated(tmp_path):
     diagnostics.record(tmp_path, "speech", "x" * 1000, now=10)
     assert len(diagnostics.issues(tmp_path)[0]["detail"]) == diagnostics.MAX_DETAIL

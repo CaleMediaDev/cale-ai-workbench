@@ -49,7 +49,9 @@ def record(state: Path, kind: str, detail: str, now: float | None = None) -> boo
         row = db.execute(
             "SELECT first_seen,last_seen,count,reported FROM issues WHERE kind=?", (kind,)
         ).fetchone()
-        if row and 0 <= now - row[1] <= EPISODE_SECONDS:
+        # Repeated failures must not extend an episode indefinitely. Keep
+        # last_seen for detecting backward clock changes, not expiration.
+        if row and now >= row[1] and now - row[0] <= EPISODE_SECONDS:
             first_seen, count, reported = row[0], row[2] + 1, row[3]
         else:
             first_seen, count, reported = now, 1, 0
