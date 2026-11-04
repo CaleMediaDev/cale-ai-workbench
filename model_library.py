@@ -206,7 +206,7 @@ def validated_recommendations(document):
             size = int(item["download_gb"])
             ram = int(item["ram_gb"])
             context = int(item["context"])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError):
             if previous is not None and profile not in BUILTIN_PROFILES:
                 raise ValueError("An existing model recommendation has invalid sizing.") from None
             continue
