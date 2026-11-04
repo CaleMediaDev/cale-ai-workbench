@@ -457,6 +457,7 @@ def _render_job(job_id: str, data: dict) -> None:
             server.wait(timeout=20)
         except subprocess.TimeoutExpired:
             server.kill()
+            server.wait()
 
 
 if __name__ == "__main__":

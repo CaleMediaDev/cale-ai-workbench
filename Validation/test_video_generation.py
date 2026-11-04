@@ -167,6 +167,31 @@ def test_worker_log_failure_is_visible_and_preserves_request(tmp_path):
         assert status["progress_percent"] is None
 
 
+def test_render_cleanup_waits_for_killed_server(tmp_path):
+    job_id = "b" * 32
+    with patch.object(video_generation, "JOBS", tmp_path), patch.object(
+        video_generation, "_write"
+    ), patch.object(video_generation, "_free_port", return_value=8188), patch.object(
+        video_generation.subprocess, "Popen"
+    ) as launch:
+        server = launch.return_value
+        server.poll.return_value = 1
+        server.wait.side_effect = [
+            subprocess.TimeoutExpired("ComfyUI", 20), None
+        ]
+        with pytest.raises(RuntimeError, match="exited during startup"):
+            video_generation._render_job(job_id, {})
+
+        server.terminate.assert_called_once_with()
+        server.kill.assert_called_once_with()
+        assert [call[0] for call in server.method_calls[-4:]] == [
+            "terminate", "wait", "kill", "wait"
+        ]
+        assert server.wait.call_args_list[0].kwargs == {"timeout": 20}
+        assert server.wait.call_args_list[1].args == ()
+        assert server.wait.call_args_list[1].kwargs == {}
+
+
 def test_video_status_reports_latest_sampler_progress(tmp_path):
     job_id = "a" * 32
     with patch.object(video_generation, "JOBS", tmp_path):
