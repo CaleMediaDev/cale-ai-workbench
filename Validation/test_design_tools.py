@@ -195,6 +195,23 @@ def test_installs_local_ai_components_into_astro_project(tmp_path):
     assert add_astro_ai_ui(str(tmp_path))["files_added"] == 0
 
 
+@pytest.mark.parametrize("package", [
+    None,
+    [],
+    {"dependencies": None},
+    {"dependencies": ["astro"]},
+    {"dependencies": {"astro": "^5"}, "devDependencies": None},
+    {"dependencies": {"astro": "^5"}, "peerDependencies": "astro"},
+])
+def test_rejects_invalid_manifest_structure_before_copy(tmp_path, package):
+    (tmp_path / "package.json").write_text(json.dumps(package), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="package.json"):
+        add_astro_ai_ui(str(tmp_path))
+
+    assert not (tmp_path / "src").exists()
+
+
 def test_rejects_non_astro_project(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"react": "*"}}), encoding="utf-8")
     with pytest.raises(ValueError, match="Astro"):

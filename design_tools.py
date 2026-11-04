@@ -91,6 +91,11 @@ def add_astro_ai_ui(project_path: str) -> dict:
         package = json.loads(package_file.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError("The project's package.json is not valid JSON.") from exc
+    if not isinstance(package, dict) or any(
+        not isinstance(package.get(section, {}), dict)
+        for section in ("dependencies", "devDependencies", "peerDependencies")
+    ):
+        raise ValueError("The project's package.json must be an object with object-valued dependency sections.")
     dependencies = {
         **package.get("dependencies", {}),
         **package.get("devDependencies", {}),
