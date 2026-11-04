@@ -78,6 +78,32 @@ class ProjectMemoryTests(unittest.TestCase):
         source.unlink()
         self.assertFalse(memory.search(self.folder, "budget"))
 
+    def test_incremental_index_removes_defaults_that_become_invalid(self):
+        source = self.folder / "README.md"
+        other = self.folder / "app.py"
+        other.write_text("preserved code record", encoding="utf-8")
+        memory.index_file(self.folder, other)
+
+        for invalid_data in (b"binary\x00content", b"x" * 256_001):
+            with self.subTest(size=len(invalid_data)):
+                source.write_text("obsolete searchable passage", encoding="utf-8")
+                memory.index(self.folder)
+                source.write_bytes(invalid_data)
+
+                result = memory.index(self.folder)
+                self.assertEqual(result["removed"], 1)
+                # Check storage before search can lazily remove stale hits.
+                with memory.connection(self.folder) as conn:
+                    for table in ("memories", "memory_fts"):
+                        self.assertEqual(conn.execute(
+                            f"SELECT COUNT(*) FROM {table} WHERE id=?",
+                            ("file:README.md",),
+                        ).fetchone()[0], 0)
+                        self.assertEqual(conn.execute(
+                            f"SELECT COUNT(*) FROM {table} WHERE id=?",
+                            ("file:app.py",),
+                        ).fetchone()[0], 1)
+
     def test_save_cannot_overwrite_an_indexed_document_chunk(self):
         source = self.folder / "manual.pdf"
         source.write_bytes(b"document bytes")
