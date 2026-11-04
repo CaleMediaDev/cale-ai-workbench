@@ -263,7 +263,8 @@ def run(root: Path = ROOT, state: Path = STATE) -> dict:
         log.write_text(output, encoding="utf-8")
         if deferred:
             report = {"version": started_version, "status": "deferred",
-                      "failures": int(previous.get("failures", 0)),
+                      "failures": (int(previous.get("failures", 0))
+                                   if previous.get("version") == started_version else 0),
                       "checked_at": time.time(),
                       "summary": "Self-check paused while a task is active"}
             _write(state / "self-check.json", report)

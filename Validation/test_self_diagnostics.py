@@ -245,6 +245,23 @@ class SelfDiagnosticsTests(unittest.TestCase):
         process.wait.assert_called_once_with(timeout=5)
         process.kill.assert_not_called()
 
+    def test_deferred_check_only_preserves_current_release_failures(self):
+        current = diagnostics.version(self.root)
+        for previous_version, expected_failures in (("older", 0), (current, 2)):
+            with self.subTest(previous_version=previous_version):
+                (self.state / "self-check.json").write_text(json.dumps({
+                    "version": previous_version, "status": "failed", "failures": 2,
+                }))
+                with (patch.object(diagnostics, "active_projects", return_value=True),
+                      patch.object(diagnostics.subprocess, "Popen") as launch):
+                    report = diagnostics.run(self.root, self.state)
+                launch.assert_not_called()
+                self.assertEqual(report["status"], "deferred")
+                self.assertEqual(report["version"], current)
+                self.assertEqual(report["failures"], expected_failures)
+                self.assertEqual(
+                    json.loads((self.state / "self-check.json").read_text()), report)
+
     def test_running_check_yields_when_a_user_task_starts(self):
         process = SimpleNamespace(pid=123, poll=lambda: None)
         with (patch.object(diagnostics, "active_projects", side_effect=[False, True]),
