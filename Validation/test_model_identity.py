@@ -102,6 +102,26 @@ class ModelIdentityTests(unittest.TestCase):
                         configured_permissive_alias(root), "qwen3-coder-permissive"
                     )
 
+    def test_spaces_before_mapping_colons_preserve_legacy_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            for header, key in (
+                ("model :", "default"),
+                ("model:", "default "),
+                ("model   : # local models", "default   "),
+            ):
+                with self.subTest(header=header, key=key):
+                    (root / "data/config.yaml").write_text(
+                        f"{header}\n  options:\n    default: cale-local\n"
+                        f"  {key}: qwen3-coder-local\n",
+                        encoding="utf-8",
+                    )
+                    self.assertEqual(configured_main_alias(root), "qwen3-coder-local")
+                    self.assertEqual(
+                        configured_permissive_alias(root), "qwen3-coder-permissive"
+                    )
+
     def test_invalid_utf8_config_falls_back(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
