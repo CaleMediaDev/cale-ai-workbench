@@ -69,9 +69,9 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
         try:
             result = subprocess.run(command, capture_output=True, text=True,
                                     timeout=3600, creationflags=HIDE, cwd=temp)
-        except subprocess.TimeoutExpired:
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
             # subprocess.run has stopped FFmpeg, but its incomplete MP4 can
-            # remain and would prevent a retry using the same output path.
+            # remain after a timeout or interruption and prevent a retry.
             if output.is_file():
                 output.unlink(missing_ok=True)
             raise
