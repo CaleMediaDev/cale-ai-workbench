@@ -110,9 +110,9 @@ def image_description(path: Path, question: str) -> str:
 
 def document_text(path: Path, max_scanned_pages: int = 6) -> str:
     """Extract documents and merge native/vision text in mixed-page PDFs."""
-    from markitdown import MarkItDown
-
     try:
+        from markitdown import MarkItDown
+
         text = MarkItDown(enable_plugins=False).convert(str(path)).text_content or ""
     except Exception:
         if path.suffix.casefold() != ".pdf":
