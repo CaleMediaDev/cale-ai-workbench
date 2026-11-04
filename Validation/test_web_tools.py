@@ -79,6 +79,21 @@ class BusinessContactTests(unittest.TestCase):
         self.assertIn("Call our office.", page["text"])
         self.assertNotIn("<", page["text"])
 
+    def test_reader_preserves_closing_block_text_boundaries(self):
+        body = (
+            '<p>First <strong>paragraph</strong>.</p>Trailing text'
+            '<div>Second block.</div>More text'
+        )
+        with patch.object(
+            web_tools, "fetch",
+            return_value=("https://example.org/details", body, "text/html", 200),
+        ):
+            page = web_tools.read_webpage("https://example.org/details")
+        self.assertEqual(
+            page["text"],
+            "First paragraph.\nTrailing text\nSecond block.\nMore text",
+        )
+
     def test_question_selects_late_live_page_passage(self):
         body = "Opening notes.\n" + "Ordinary material.\n" * 1400
         body += "The current warranty code is W-4817.\n"

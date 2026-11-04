@@ -155,6 +155,44 @@ def test_background_repair_resolves_relative_installation_root(tmp_path, monkeyp
     assert json.loads((root / "LongTasks/core-tool-repair.json").read_text())["status"] == "complete"
 
 
+def test_long_repair_timeout_starts_cooldown_at_completion(tmp_path, monkeypatch):
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    monkeypatch.setattr(core_tool_health, "_last_repair", None)
+    monkeypatch.setattr(core_tool_health, "_repair_thread", None)
+    clock = [1000.0]
+    monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: clock[0])
+
+    class ImmediateThread:
+        def __init__(self, target, **kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+        def is_alive(self):
+            return False
+
+    def timeout(args, **kwargs):
+        clock[0] += 901
+        raise core_tool_health.subprocess.TimeoutExpired(args, 900)
+
+    monkeypatch.setattr(core_tool_health.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(core_tool_health.subprocess, "run", timeout)
+    with patch.object(core_tool_health, "missing", return_value=["GitHub CLI"]):
+        assert core_tool_health.start_background(tmp_path)
+    assert json.loads((tmp_path / "LongTasks/core-tool-repair.json").read_text())["status"] == "failed"
+
+    with patch.object(core_tool_health, "missing", side_effect=AssertionError("cooldown")):
+        assert not core_tool_health.start_background(tmp_path)
+        clock[0] += core_tool_health.CHECK_INTERVAL - 1
+        assert not core_tool_health.start_background(tmp_path)
+
+    clock[0] += 1
+    with patch.object(core_tool_health, "missing", return_value=[]) as missing:
+        assert not core_tool_health.start_background(tmp_path)
+        missing.assert_called_once_with(tmp_path)
+
+
 def test_background_repair_runs_once_and_rechecks(tmp_path, monkeypatch):
     (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
     progress = tmp_path / "LongTasks/install-progress.json"

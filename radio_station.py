@@ -248,7 +248,14 @@ class Player:
             return False
         self.prepare(path)
         # Keep the outgoing channel intact if the new channel cannot start.
-        self.prepared.start()
+        try:
+            self.prepared.start()
+        except Exception:
+            try:
+                self.prepared.stop()
+            finally:
+                self.prepared = None
+            raise
         self.outgoing, self.active = self.active, self.prepared
         self.prepared = None
         self.fade_start = self.now()
@@ -392,11 +399,13 @@ class Service:
             self.skip_requested = False
             self.enabled = False
             self.paused = False
-            self.player.stop()
-            if self.current:
-                self._update(self.current["id"], "played")
-                self.current = None
-            self.message = "Radio stopped. Your stations are saved; the current render can finish in cache."
+            try:
+                self.player.stop()
+            finally:
+                if self.current:
+                    self._update(self.current["id"], "played")
+                    self.current = None
+                self.message = "Radio stopped. Your stations are saved; the current render can finish in cache."
 
     def skip(self):
         self.commands.put(("skip", None))

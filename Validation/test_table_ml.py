@@ -102,6 +102,24 @@ class TableMLTests(unittest.TestCase):
             # LogisticRegression chooses its first class for a zero score.
             self.assertEqual(labels, ["cold", "cold", "hot"])
 
+    def test_prediction_rejects_numeric_normalization_overflow(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            model.write_text(json.dumps({
+                "format": "cale-table-model-v1", "problem_type": "regression",
+                "schema": {"size": {"kind": "number", "median": -1e308, "scale": 1}},
+                "feature_names": ["size"], "coefficients": [[1]],
+                "intercepts": [0], "classes": [], "target_column": "value",
+                "metric": "holdout_mean_absolute_error", "holdout_score": 1,
+                "baseline_score": 2,
+            }), encoding="utf-8")
+            prediction = root / "new.csv"
+            prediction.write_text("size\n1e308\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "overflowed during normalization"):
+                predict_table_model(str(model), str(prediction),
+                                    str(root / "predicted.csv"))
+
     def test_malformed_model_is_rejected_before_writing(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

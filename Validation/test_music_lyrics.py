@@ -67,6 +67,22 @@ def test_save_rejects_infinite_end_without_leaving_partial_output(tmp_path):
     assert source.read_bytes() == b"original"
 
 
+@pytest.mark.parametrize("start,end", [(1.0, 1e308), (1e308, 1.1e308)])
+def test_save_rejects_millisecond_overflow_without_partial_output(tmp_path, start, end):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    target = tmp_path / "lyrics"
+    transcription = {"segments": [
+        {"start": start, "end": end, "text": "Hello world"},
+    ]}
+
+    with pytest.raises(RuntimeError, match="No clear lyrics"):
+        music_lyrics.save(source, source, target, transcription)
+
+    assert not target.exists()
+    assert source.read_bytes() == b"original"
+
+
 def test_lyric_tool_protects_existing_files_and_reports_unclear_vocals(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
@@ -81,3 +97,38 @@ def test_lyric_tool_protects_existing_files_and_reports_unclear_vocals(tmp_path)
     with pytest.raises(RuntimeError, match="No clear lyrics"):
         music_lyrics.save(source, source, tmp_path / "new", {"segments": []})
     assert not (tmp_path / "new").exists()
+
+
+@pytest.mark.parametrize("start,end", [
+    (0.0, 0.0004),
+    (1.0001, 1.0004),
+    (1.0006, 1.0014),
+])
+@pytest.mark.parametrize("include_valid", [False, True])
+def test_save_rejects_captions_that_collapse_at_millisecond_precision(
+    tmp_path, start, end, include_valid
+):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    vocal = tmp_path / "vocals.wav"
+    vocal.write_bytes(b"isolated")
+    target = tmp_path / "lyrics"
+    valid = {"start": 2.0, "end": 3.0, "text": "Keep this"}
+    segments = [{"start": start, "end": end, "text": "Collapsed caption"}]
+    if include_valid:
+        segments.append(valid)
+        result = music_lyrics.save(source, vocal, target, {"segments": segments})
+        assert result["segments"] == 1
+        assert (target / "lyrics.txt").read_text(encoding="utf-8") == "Keep this\n"
+        assert (target / "lyrics.srt").read_text(encoding="utf-8") == (
+            "1\n00:00:02,000 --> 00:00:03,000\nKeep this\n"
+        )
+        assert json.loads((target / "lyrics.json").read_text(encoding="utf-8"))[
+            "segments"
+        ] == [valid]
+    else:
+        with pytest.raises(RuntimeError, match="No clear lyrics"):
+            music_lyrics.save(source, vocal, target, {"segments": segments})
+        assert not target.exists()
+    assert source.read_bytes() == b"original"
+    assert vocal.read_bytes() == b"isolated"

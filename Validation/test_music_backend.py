@@ -1230,6 +1230,29 @@ def test_project_jobs_skips_non_object_records(tmp_path, bad_record):
     assert json.loads(bad_path.read_text(encoding="utf-8")) == bad_record
 
 
+@pytest.mark.parametrize("bad_created", ["not-a-timestamp", [1], {"time": 1}])
+def test_project_jobs_skips_invalid_timestamp_and_sorts_valid_jobs(tmp_path, bad_created):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    task_id = "a" * 12
+    records = [
+        {"job_id": "1" * 32, "task_id": task_id, "created": bad_created},
+        {"job_id": "2" * 32, "task_id": task_id, "created": 20},
+        {"job_id": "3" * 32, "task_id": task_id, "created": 10},
+    ]
+    paths = []
+    for record in records:
+        path = jobs / (record["job_id"] + ".json")
+        path.write_text(json.dumps(record), encoding="utf-8")
+        paths.append(path)
+    with (patch.object(music_backend, "JOBS", jobs),
+          patch.object(Path, "glob", return_value=paths)):
+        assert music_backend.project_jobs(task_id, project) == [records[2], records[1]]
+    assert json.loads(paths[0].read_text(encoding="utf-8")) == records[0]
+
+
 def test_agent_music_job_is_attributed_and_task_controls_only_its_renders(tmp_path):
     task_id = "a" * 12
     project = tmp_path / "Projects" / task_id

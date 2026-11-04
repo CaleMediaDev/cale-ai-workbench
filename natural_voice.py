@@ -26,9 +26,12 @@ def ready():
 
 
 def whisper_ready():
-    """A config alone is insufficient if the transcription weights were lost."""
+    """Both transcription files must exist and contain data."""
     folder = ROOT / "Media/models/whisper"
-    return (folder / "config.json").is_file() and (folder / "model.bin").is_file()
+    return all(
+        path.is_file() and path.stat().st_size > 0
+        for path in (folder / "config.json", folder / "model.bin")
+    )
 
 
 def install():

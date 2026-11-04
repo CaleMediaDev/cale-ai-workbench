@@ -179,11 +179,15 @@ def start_background() -> bool:
     if current.get("status") == "failed" and age < RETRY_DELAYS[attempts]:
         return False
     progress(3, "Preparing local tools" if attempts == 0 else "Repairing local tools", attempts=attempts + 1)
-    subprocess.Popen(
-        [sys.executable, str(Path(__file__).resolve()), "--install"],
-        cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, creationflags=HIDE,
-    )
+    try:
+        subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--install"],
+            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, creationflags=HIDE,
+        )
+    except OSError as exc:
+        progress(0, "Tool update needs attention: " + str(exc)[:200], "failed")
+        raise
     return True
 
 

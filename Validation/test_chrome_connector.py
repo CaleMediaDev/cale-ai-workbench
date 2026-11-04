@@ -44,6 +44,15 @@ def test_installed_version_accepts_quoted_yaml(tmp_path, monkeypatch, version_li
     assert chrome_connector.installed_version() == "0.2.6"
 
 
+def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_bytes(b"\xef\xbb\xbfversion: 0.2.6\n")
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    assert chrome_connector.installed_version() == "0.2.6"
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()

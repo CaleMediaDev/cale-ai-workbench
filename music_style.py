@@ -97,7 +97,7 @@ def requires_sustained_vocals(prompt: str, lyrics: str = "",
     if lyrics.strip():
         return True
     request = prompt.split("Past user feedback", 1)[0]
-    if VOCAL_FREE.search(request):
+    if VOCAL_FREE.search(request) or WHOLE_INSTRUMENTAL.search(request):
         return False
     return not (VOCAL_TEXTURE.search(request) and not LEAD_VOCALS.search(request))
 
@@ -116,7 +116,9 @@ def _clean_negations(prompt: str) -> tuple[str, bool, bool]:
 
 def vocal_intent(prompt: str, instrumental: bool = False) -> str:
     """Use the person's current request before any appended learned examples."""
-    if instrumental or VOCAL_FREE.search(prompt.split("Past user feedback", 1)[0]):
+    current_request = prompt.split("Past user feedback", 1)[0]
+    if (instrumental or VOCAL_FREE.search(current_request)
+            or WHOLE_INSTRUMENTAL.search(current_request)):
         return "none"
     request, no_male, no_female = _clean_negations(
         prompt.split("Past user feedback", 1)[0]

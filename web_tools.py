@@ -158,6 +158,8 @@ class Page(HTMLParser):
             self.skip = max(0, self.skip - 1)
         if self.skip:
             return
+        if tag in ("p", "div", "section", "li", "h1", "h2", "h3", "tr"):
+            self.text.append("\n")
         if tag == "title":
             self.in_title = False
         if tag == "a" and self.anchor:

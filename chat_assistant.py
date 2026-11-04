@@ -129,8 +129,8 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
     )
     clock = re.search(r"\b(\d{1,2}):([0-5]\d)\b", duration_text)
     combined = re.search(
-        r"\b(\d+)\s*(?:minutes?|mins?|min)\s*(?:and\s*)?"
-        r"(\d+)\s*(?:seconds?|secs?|sec|s)\b", duration_text, re.IGNORECASE,
+        r"\b(\d+)\s*(?:-\s*)?(?:minutes?|mins?|min)\s*(?:and\s*)?"
+        r"(\d+)\s*(?:-\s*)?(?:seconds?|secs?|sec|s)\b", duration_text, re.IGNORECASE,
     )
     single_candidates = re.finditer(
         r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|minutes?|mins?|min|s)\b",

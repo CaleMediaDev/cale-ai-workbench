@@ -53,7 +53,7 @@ def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
             output.unlink(missing_ok=True)
         raise
     if result.returncode or not output.is_file() or not output.stat().st_size:
-        if result.returncode and output.is_file() and "already exists" not in result.stderr.lower():
+        if not output_existed and output.is_file() and "already exists" not in result.stderr.lower():
             output.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Video edit failed.")
     return {"path": str(output), "bytes": output.stat().st_size}

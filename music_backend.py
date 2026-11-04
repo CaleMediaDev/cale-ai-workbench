@@ -535,10 +535,11 @@ def project_jobs(task_id: str, folder: str | Path) -> list[dict]:
             output_path = info.get("output_path")
             owned_path = bool(output_path) and Path(str(output_path)).resolve().is_relative_to(project)
             if info.get("task_id") == task_id or owned_path:
-                found.append(info)
+                created = float(info.get("created") or 0)
+                found.append((created, info))
         except (OSError, ValueError, TypeError):
             continue
-    return sorted(found, key=lambda job: float(job.get("created") or 0))
+    return [info for _, info in sorted(found, key=lambda item: item[0])]
 
 
 def hold_project_jobs(task_id: str, folder: str | Path, *, paused: bool) -> int:

@@ -127,6 +127,30 @@ def test_note_csv_normalization_preserves_existing_temporary_file(tmp_path, vali
     assert set(tmp_path.iterdir()) == {path, existing}
 
 
+@pytest.mark.parametrize("bends", ["[1,2,3]", "[1, 2, -3]"])
+def test_unquoted_pitch_bend_arrays_are_normalized(tmp_path, bends):
+    path = tmp_path / "notes.csv"
+    path.write_text(
+        ",".join(music_midi.NOTE_COLUMNS) + "\n"
+        + "0.0,1.0,69,85," + bends + "\n"
+    )
+
+    music_midi.normalize_note_events(path)
+    normalized = path.read_bytes()
+    music_midi.normalize_note_events(path)
+
+    assert path.read_bytes() == normalized
+    with path.open(newline="") as stream:
+        rows = list(csv.reader(stream))
+    assert rows[0] == music_midi.NOTE_COLUMNS
+    assert len(rows) == 2
+    assert len(rows[1]) == 5
+    assert rows[1][:4] == ["0.0", "1.0", "69", "85"]
+    assert json.loads(rows[1][4]) == [float(value) for value in json.loads(bends)]
+    assert not path.with_suffix(".csv.tmp").exists()
+
+
+
 def test_unexpected_note_csv_is_preserved_for_diagnosis(tmp_path):
     path = tmp_path / "notes.csv"
     path.write_text("unknown,format\n1,2\n")

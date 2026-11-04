@@ -79,8 +79,8 @@ def normalize_note_events(path: Path) -> None:
                 bends = row[4:]
                 if bends == [""]:
                     bends = []
-                elif len(bends) == 1 and bends[0].lstrip().startswith("["):
-                    bends = json.loads(bends[0])
+                elif bends[0].lstrip().startswith("["):
+                    bends = json.loads(",".join(bends))
                 row = row[:4] + [json.dumps([float(value) for value in bends])]
                 writer.writerow(row)
         os.replace(temporary, path)

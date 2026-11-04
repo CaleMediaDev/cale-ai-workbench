@@ -14,6 +14,23 @@ def test_total_time_shows_wall_clock_and_freezes_on_acceptance():
     assert task_eta.total_time(0, 0, "working", now=1000) == "—"
 
 
+def test_total_time_only_requires_updated_when_used_as_fallback():
+    for updated in (None, "invalid", float("nan"), float("inf")):
+        for status in ("working", "paused"):
+            assert task_eta.total_time(1000, updated, status, now=1065) == "1m 05s"
+        for status in ("ready_for_review", "accepted", "stopped"):
+            assert task_eta.total_time(
+                1000, updated, status, now=9999, finished=1125,
+            ) == "2m 05s"
+            assert task_eta.total_time(
+                1000, updated, status, now=9999,
+            ) == "—"
+    for finished in (None, "invalid", float("nan"), 999):
+        assert task_eta.total_time(
+            1000, 1125, "accepted", now=9999, finished=finished,
+        ) == "2m 05s"
+
+
 def test_countdown_needs_real_progress_and_survives_restart(tmp_path):
     db = tmp_path / "projects.db"
     assert task_eta.countdown(db, "task", 10, "working", 1000) == "Estimating time…"

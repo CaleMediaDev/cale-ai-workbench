@@ -126,8 +126,8 @@ def _fast_model_loaded(model: str) -> bool:
     try:
         with urlopen("http://127.0.0.1:11434/api/ps", timeout=0.35) as response:
             running = json.load(response).get("models", [])
-        alias = model.split(":", 1)[0]
-        return any(str(item.get("name", "")).split(":", 1)[0] == alias
+        alias = model.removesuffix(":latest")
+        return any(str(item.get("name", "")).removesuffix(":latest") == alias
                    for item in running)
     except (OSError, ValueError, TypeError):
         return False
