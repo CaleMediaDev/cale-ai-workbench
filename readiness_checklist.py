@@ -304,6 +304,9 @@ def snapshot(root: Path = ROOT) -> dict:
         root / ".cale-ai-install").is_file() else ""
     if probes.get("version") != version:
         probes = {}
+    for section in ("local_ai", "voice", "vision", "browser"):
+        if not isinstance(probes.get(section, {}), dict):
+            probes.pop(section)
     rows = []
 
     base_ready = setup.get("status") == "complete"
