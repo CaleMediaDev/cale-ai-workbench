@@ -118,7 +118,8 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
         staging = Path(directory)
         result = subprocess.run(
             [str(python), "-c", script, str(source), str(staging)],
-            capture_output=True, text=True, timeout=3600, creationflags=HIDE,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=3600, creationflags=HIDE,
             env={**os.environ, "PYTHONUTF8": "1"},
         )
         if result.returncode != 0:
