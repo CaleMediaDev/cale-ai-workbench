@@ -83,6 +83,40 @@ def test_save_rejects_millisecond_overflow_without_partial_output(tmp_path, star
     assert source.read_bytes() == b"original"
 
 
+@pytest.mark.parametrize("invalid", [None, "not a timestamp", {}, 10 ** 400])
+@pytest.mark.parametrize("field", ["start", "end"])
+@pytest.mark.parametrize("include_valid", [False, True])
+def test_save_skips_unconvertible_timestamps(tmp_path, invalid, field, include_valid):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    vocal = tmp_path / "vocals.wav"
+    vocal.write_bytes(b"isolated")
+    target = tmp_path / "lyrics"
+    malformed = {"start": 0.0, "end": 1.0, "text": "Invalid timing"}
+    malformed[field] = invalid
+    valid = {"start": 2.0, "end": 3.0, "text": "Keep this"}
+    segments = [malformed]
+
+    if include_valid:
+        segments.append(valid)
+        result = music_lyrics.save(source, vocal, target, {"segments": segments})
+        assert result["segments"] == 1
+        assert (target / "lyrics.txt").read_text(encoding="utf-8") == "Keep this\n"
+        assert (target / "lyrics.srt").read_text(encoding="utf-8") == (
+            "1\n00:00:02,000 --> 00:00:03,000\nKeep this\n"
+        )
+        assert json.loads((target / "lyrics.json").read_text(encoding="utf-8"))[
+            "segments"
+        ] == [valid]
+    else:
+        with pytest.raises(RuntimeError, match="No clear lyrics"):
+            music_lyrics.save(source, vocal, target, {"segments": segments})
+        assert not target.exists()
+
+    assert source.read_bytes() == b"original"
+    assert vocal.read_bytes() == b"isolated"
+
+
 def test_lyric_tool_protects_existing_files_and_reports_unclear_vocals(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
