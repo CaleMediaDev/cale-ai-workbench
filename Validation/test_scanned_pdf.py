@@ -48,6 +48,40 @@ def test_failed_scan_export_closes_image_resources(tmp_path):
     recognize.assert_not_called()
 
 
+def test_native_pdf_does_not_require_vision_worker(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    pdf = tmp_path / "native.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    textpage = Mock()
+    textpage.get_text_range.return_value = "Native invoice 4817"
+    page = Mock()
+    page.get_textpage.return_value = textpage
+    document = Mock()
+    document.__len__ = Mock(return_value=1)
+    document.__getitem__ = Mock(return_value=page)
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(PdfDocument=Mock(return_value=document)),
+        "media_worker": None,
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert result["text"] == (
+        "[Selectable PDF text]\n\n"
+        "[Page 1; selectable text]\nNative invoice 4817"
+    )
+    assert result["pages_read"] == [1]
+    assert result["scanned_pages"] == []
+    assert result["has_scans"] is False
+    assert result["partial"] is False
+    page.render.assert_not_called()
+    textpage.close.assert_called_once_with()
+    page.close.assert_called_once_with()
+    document.close.assert_called_once_with()
+
+
 def test_text_layer_error_falls_back_to_vision_and_preserves_native_text(tmp_path):
     import sys
     from unittest.mock import Mock
