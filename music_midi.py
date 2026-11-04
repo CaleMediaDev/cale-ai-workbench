@@ -96,6 +96,8 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
     target = Path(output_dir).expanduser().resolve()
     if target == source.parent:
         raise ValueError("Choose a separate output folder for the MIDI file.")
+    if target.exists() and not target.is_dir():
+        raise ValueError("Choose an output folder, not an existing file.")
     if target.exists() and any(target.iterdir()):
         raise ValueError("Choose an empty output folder to protect existing files.")
     target.mkdir(parents=True, exist_ok=True)
