@@ -272,8 +272,10 @@ class Player:
         self.active.set_volume(self.volume*math.sin(fraction*math.pi/2))
         self.outgoing.set_volume(self.volume*math.cos(fraction*math.pi/2))
         if fraction >= 1:
-            self.outgoing.stop()
-            self.outgoing = None
+            try:
+                self.outgoing.stop()
+            finally:
+                self.outgoing = None
 
     def protected_paths(self):
         return {deck.path for deck in (self.active, self.outgoing, self.prepared) if deck is not None and deck.path}

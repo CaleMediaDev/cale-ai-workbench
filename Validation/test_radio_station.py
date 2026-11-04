@@ -561,6 +561,31 @@ def test_cache_cleanup_preserves_the_outgoing_deck_until_fade_finishes(tmp_path)
         assert not outgoing.exists() and service.player.active.busy()
 
 
+def test_completed_fade_releases_outgoing_state_when_close_reports_an_error(tmp_path):
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    player.play(tmp_path/"one.wav")
+    player.blend(tmp_path/"two.wav", 8)
+    old, current = player.outgoing, player.active
+    original_stop = old.stop
+
+    def stop_with_error():
+        original_stop()
+        raise RuntimeError("Close failed")
+
+    moment[0] = 8
+    with patch.object(old, "stop", side_effect=stop_with_error), pytest.raises(RuntimeError, match="Close failed"):
+        player.advance_mix()
+
+    assert not old.opened
+    assert player.outgoing is None and not player.mixing
+    assert player.active is current and current.busy()
+    assert current.volume == pytest.approx(player.volume)
+    assert player.blend(tmp_path/"three.wav")
+    assert player.outgoing is current and current.busy()
+    assert player.active.busy()
+
+
 def test_stop_attempts_both_channels_even_if_one_close_reports_an_error(tmp_path):
     player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
     player.play(tmp_path/"one.wav")
