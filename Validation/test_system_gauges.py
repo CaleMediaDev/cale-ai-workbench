@@ -119,6 +119,40 @@ def test_network_throughput_survives_unavailable_interface_stats(monkeypatch):
     assert second["net"] is None
 
 
+def test_gpu_decode_failure_is_isolated_and_recovers(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    calls = []
+
+    def run_gpu(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        return SimpleNamespace(returncode=0, stdout="41\n")
+
+    monkeypatch.setattr(system_gauges, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(system_gauges.subprocess, "run", run_gpu)
+    monkeypatch.setattr(system_gauges.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
+    monkeypatch.setattr(system_gauges, "_cpu_times", lambda: None)
+    monkeypatch.setattr(system_gauges, "_ram_percent", lambda: 37)
+    monkeypatch.setattr(system_gauges, "_drive_space", lambda: (25, 100))
+    monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(
+        disk_io_counters=lambda: None,
+        net_io_counters=lambda: None,
+        net_if_stats=lambda: {},
+    ))
+
+    sampler = system_gauges.HardwareSampler()
+    first = sampler.sample()
+    assert first["gpu"] is None
+    assert first["ram"] == 37
+    assert first["drive"] == 25
+    assert sampler.sample()["gpu"] == 41
+    assert len(calls) == 2
+    assert all(call["text"] is True for call in calls)
+
+
 def test_non_windows_sample_returns_all_sensor_fields_as_unavailable(monkeypatch):
     from types import SimpleNamespace
 
