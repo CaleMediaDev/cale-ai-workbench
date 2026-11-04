@@ -188,6 +188,58 @@ class CameraPresenceTests(unittest.TestCase):
         camera.release.assert_called_once_with()
         model.features.assert_called_once()
 
+    def test_watcher_recovers_from_frame_read_exception(self):
+        import camera_presence
+
+        class ReadError(Exception):
+            pass
+
+        request = Mock()
+        request.is_file.return_value = False
+        model = Mock()
+        model.features.return_value = []
+        camera = Mock()
+        camera.isOpened.return_value = True
+        frame = np.zeros((8, 8, 3), dtype=np.uint8)
+        camera.read.side_effect = [ReadError("temporary read failure"), (True, frame)]
+        cascade = Mock()
+        cascade.empty.return_value = False
+        cv2 = SimpleNamespace(
+            error=ReadError,
+            data=SimpleNamespace(haarcascades="."),
+            CascadeClassifier=Mock(return_value=cascade),
+            VideoCapture=Mock(return_value=camera),
+            CAP_DSHOW=0,
+            COLOR_BGR2GRAY=1,
+            cvtColor=lambda *_args: np.zeros((8, 8), dtype=np.uint8),
+        )
+        modules = {
+            "cv2": cv2,
+            "camera_network": SimpleNamespace(
+                camera_source=lambda source: source,
+                greeting_camera=lambda: 0,
+            ),
+            "face_identity": SimpleNamespace(
+                ENROLL_REQUEST=request,
+                FaceModel=Mock(return_value=model),
+                enroll=Mock(),
+            ),
+        }
+        events = Mock()
+        with patch.dict("sys.modules", modules), patch.multiple(
+            camera_presence,
+            allowed=Mock(side_effect=[True, True, True, False]),
+            emit=events,
+            preview_frame=Mock(return_value=""),
+        ), patch.object(camera_presence.time, "sleep") as sleep:
+            self.assertEqual(camera_presence.watch(), 0)
+
+        self.assertEqual(camera.read.call_count, 2)
+        model.features.assert_called_once_with(frame)
+        sleep.assert_any_call(0.5)
+        camera.release.assert_called_once_with()
+        self.assertFalse(any(call.args[0] == "error" for call in events.call_args_list))
+
     def test_enrollment_rejects_multiple_visible_faces(self):
         model = FaceModel.__new__(FaceModel)
         model.features = lambda _frame: [[1.0, 0.0], [0.0, 1.0]]
