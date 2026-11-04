@@ -37,11 +37,15 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
         for index in range(total):
             page = document[index]
             try:
-                textpage = page.get_textpage()
                 try:
-                    text = textpage.get_text_range().strip()
-                finally:
-                    textpage.close()
+                    textpage = page.get_textpage()
+                    try:
+                        text = textpage.get_text_range().strip()
+                    finally:
+                        textpage.close()
+                except pdfium.PdfiumError:
+                    # An unreadable text layer need not prevent rendering the page.
+                    text = ""
                 if text:
                     native[index] = text
                 else:
