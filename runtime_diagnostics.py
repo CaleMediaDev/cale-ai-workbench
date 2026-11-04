@@ -38,6 +38,9 @@ def record(state: Path, kind: str, detail: str, now: float | None = None) -> boo
     now = time.time() if now is None else now
     detail = " ".join(str(detail).split())[:MAX_DETAIL]
     with _open(state) as db:
+        # Lock before reading so concurrent recorders cannot lose increments
+        # or both report the same episode.
+        db.execute("BEGIN IMMEDIATE")
         row = db.execute(
             "SELECT first_seen,last_seen,count,reported FROM issues WHERE kind=?", (kind,)
         ).fetchone()

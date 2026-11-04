@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import json
+import math
 import os
 import subprocess
 import sys
@@ -153,8 +154,17 @@ def start_background() -> bool:
     # Never mistake its long-running work for a stalled feature update.
     if current and not owned and current.get("status") != "complete":
         return False
-    age = time.time() - current.get("updated", 0)
-    attempts = max(0, int(current.get("attempts", 0)))
+    try:
+        updated = float(current.get("updated", 0))
+        if not math.isfinite(updated):
+            updated = 0
+    except (TypeError, ValueError, OverflowError):
+        updated = 0
+    age = time.time() - updated
+    try:
+        attempts = max(0, int(current.get("attempts", 0)))
+    except (TypeError, ValueError, OverflowError):
+        attempts = 0
     if current.get("status") == "working":
         # Installation commands can be quiet for a long time. A live process
         # is progress; a dead one should be repaired promptly.

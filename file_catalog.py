@@ -160,7 +160,9 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None,
                 }
                 _status(state, **result)
                 return result
+            completed_roots = []
             for root in roots:
+                unreadable_before = unreadable
                 pending = [root]
                 while pending:
                     folder = pending.pop()
@@ -224,9 +226,11 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None,
                     # A stack pops its last entry first. Sort each directory's
                     # children so the user's profile wins over Windows trees.
                     pending.extend(sorted(child_folders, key=folder_priority))
-            # Prune only after a complete pass. An interrupted process leaves
-            # the prior catalog intact for the next launch to recover.
-            for root in roots:
+                if unreadable == unreadable_before:
+                    completed_roots.append(root)
+            # Prune only roots traversed without errors. Unreadable entries or
+            # directories may still contain paths from the prior catalog.
+            for root in completed_roots:
                 # Include the separator so sibling roots with a shared name
                 # prefix are not mistaken for descendants of this root.
                 prefix = os.path.join(str(root), "")
