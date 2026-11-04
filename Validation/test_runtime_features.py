@@ -130,6 +130,29 @@ def test_missing_pip_is_bootstrapped(tmp_path, monkeypatch):
     assert [args[2] for args in calls] == ["pip", "ensurepip", "pip"]
 
 
+@pytest.mark.parametrize("updated", [None, "invalid timestamp", [], {}])
+def test_failed_setup_recovers_from_invalid_timestamp(tmp_path, monkeypatch, updated):
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({
+        "status": "failed", "updated": updated,
+        "attempts": 1, "owner": "runtime_features",
+    }), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ROOT", tmp_path)
+    monkeypatch.setattr(runtime_features, "ready", lambda: False)
+    monkeypatch.setattr(runtime_features.time, "time", lambda: 1000)
+    launches = []
+    monkeypatch.setattr(runtime_features.subprocess, "Popen", lambda *args, **kwargs: launches.append(args))
+
+    assert runtime_features.start_background()
+
+    assert len(launches) == 1
+    current = json.loads(progress.read_text(encoding="utf-8"))
+    assert current["status"] == "working"
+    assert current["attempts"] == 2
+    assert current["updated"] == 1000
+
+
 def test_failed_setup_retries_with_backoff_and_limit(tmp_path, monkeypatch):
     progress = tmp_path / "install-progress.json"
     monkeypatch.setattr(runtime_features, "PROGRESS", progress)

@@ -153,7 +153,11 @@ def start_background() -> bool:
     # Never mistake its long-running work for a stalled feature update.
     if current and not owned and current.get("status") != "complete":
         return False
-    age = time.time() - current.get("updated", 0)
+    try:
+        updated = float(current.get("updated", 0))
+    except (TypeError, ValueError, OverflowError):
+        updated = 0
+    age = time.time() - updated
     attempts = max(0, int(current.get("attempts", 0)))
     if current.get("status") == "working":
         # Installation commands can be quiet for a long time. A live process
