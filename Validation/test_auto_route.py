@@ -72,6 +72,22 @@ class AutoRouteTests(unittest.TestCase):
                 self.assertFalse(repeated_tool_failures([
                     {"role": "tool", "content": json.dumps(verdict)} for _ in range(3)]))
 
+    def test_only_nonzero_integer_exit_codes_trigger_repair(self):
+        for code, expected in ((True, False), (False, False), ("1", False),
+                               (0, False), (1, True), (-1, True)):
+            with self.subTest(code=repr(code)):
+                messages = [{"role": "user", "content": "Calculate a tip."}]
+                messages.extend(
+                    {"role": "tool", "content": json.dumps({"exit_code": code})}
+                    for _ in range(3)
+                )
+                self.assertEqual(repeated_tool_failures(messages), expected)
+                self.assertEqual(task_size(messages), "deep" if expected else "quick")
+                if expected:
+                    self.assertIn("Do not repeat", repair_messages(messages)[0]["content"])
+                else:
+                    self.assertIs(repair_messages(messages), messages)
+
     def test_database_routing_evidence_survives_short_history(self):
         for attempts, repeats, expected in ((1, 0, False), (2, 0, True), (0, 3, True), (0, 0, False)):
             content = 'Current task checkpoint (data):\nNative routing evidence: ' + json.dumps(
