@@ -531,6 +531,18 @@ def test_multiple_tasks_require_a_clear_followup_target():
     assert chat_assistant.choose_task("start something else", tasks[:1], allow_single=False) is None
 
 
+@pytest.mark.parametrize("selection", ["²", "①"])
+def test_task_selection_rejects_non_decimal_digits_without_crashing(selection):
+    tasks = [
+        {"id": "a", "title": "Build bakery site"},
+        {"id": "b", "title": "Research suppliers"},
+    ]
+    assert chat_assistant.choose_task(selection, tasks) is None
+    assert chat_assistant.choose_task("2", tasks) == tasks[1]
+    assert chat_assistant.choose_task("２", tasks) == tasks[1]
+    assert chat_assistant.choose_task("3", tasks) is None
+
+
 @pytest.mark.parametrize("blank_title", ["", "   "])
 def test_blank_task_titles_do_not_match_named_followups(blank_title):
     tasks = [
