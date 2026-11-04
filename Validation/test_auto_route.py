@@ -233,6 +233,27 @@ class AutoRouteTests(unittest.TestCase):
         self.assertEqual(task_size([{"role": "system", "content": question},
                                     {"role": "user", "content": "Begin the task."}]), "quick")
 
+    def test_native_worker_preserves_direct_followup_scope(self):
+        import native_agent
+
+        prompt = native_agent.prompt({
+            "id": "native-followup", "folder": "C:/Tasks/test",
+            "brief": "How do I create a folder?",
+        })
+        messages = [{"role": "system", "content": prompt},
+                    {"role": "user", "content": "Begin the task."}]
+        self.assertEqual(task_size(messages), "quick")
+        self.assertFalse(is_game_task(messages))
+
+        messages.append({"role": "user", "content":
+                         "Build a production-ready multi-page arcade game app."})
+        self.assertEqual(task_size(messages), "deep")
+        self.assertTrue(is_game_task(messages))
+
+        messages.append({"role": "user", "content": "Continue."})
+        self.assertEqual(task_size(messages), "deep")
+        self.assertTrue(is_game_task(messages))
+
     def test_build_and_saved_project_use_deep_tier(self):
         self.assertEqual(
             task_size([{"role": "user", "content": "Build and test a recipe app."}]),
