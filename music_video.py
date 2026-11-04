@@ -56,7 +56,7 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
             f"[1:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},format=rgba[cover];"
             + spectrum + ",format=rgba,colorkey=0x000000:0.05:0.1[spec];"
-            f"[cover][spec]overlay=shortest=1:format=auto,format=yuv420p[{video_label}]"
+            f"[cover][spec]overlay=shortest=1:format=auto,setsar=1,format=yuv420p[{video_label}]"
         )
     # Keep partial renders private and on the destination filesystem so that
     # publication can be atomic without ever replacing an existing output.
