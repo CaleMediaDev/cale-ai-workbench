@@ -52,6 +52,20 @@ class NaturalVoiceTests(unittest.TestCase):
                     self.assertFalse(getattr(natural_voice, check_name)())
                 self.assertEqual(removed, [target])
 
+    def test_non_directory_model_ancestor_is_not_ready(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            media = root / "Media"
+            media.mkdir()
+            # Neither model path can exist when its shared ancestor is a file.
+            (media / "models").write_bytes(b"not a directory")
+            with (
+                patch.object(natural_voice, "ROOT", root),
+                patch.object(natural_voice, "VOICE", media / "models/natural_voice"),
+            ):
+                self.assertFalse(natural_voice.ready())
+                self.assertFalse(natural_voice.whisper_ready())
+
     def test_empty_voice_file_triggers_repair_before_completion(self):
         names = ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin")
         for empty_name in names:
