@@ -88,6 +88,23 @@ def test_countdown_invalid_timestamps_leave_observations_unchanged(tmp_path):
     )
 
 
+def test_pause_preserves_work_before_pause_and_excludes_paused_time(tmp_path):
+    db = tmp_path / "projects.db"
+    task_eta.countdown(db, "task", 10, "working", 1000)
+    task_eta.countdown(db, "task", 30, "working", 1030)
+    assert task_eta.countdown(db, "task", 50, "working", 1060) == (
+        "About 1m 07s to review"
+    )
+    # Ten seconds of work precede the pause; the following thirty are paused.
+    assert task_eta.countdown(db, "task", 50, "paused", 1070) == "Paused"
+    assert task_eta.countdown(db, "task", 50, "working", 1100) == (
+        "About 57s to review"
+    )
+    assert task_eta.countdown(db, "task", 50, "working", 1110) == (
+        "About 47s to review"
+    )
+
+
 def test_pause_does_not_advance_active_clock(tmp_path):
     db = tmp_path / "projects.db"
     task_eta.countdown(db, "task", 10, "working", 1000)
