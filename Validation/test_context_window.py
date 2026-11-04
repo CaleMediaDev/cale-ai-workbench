@@ -48,6 +48,21 @@ class ContextWindowTests(unittest.TestCase):
             131072,
         )
 
+    def test_auxiliary_architecture_cannot_raise_native_ceiling(self):
+        info = {
+            "parameters": "num_ctx 524288\n",
+            "model_info": {
+                "general.architecture": "qwen",
+                "qwen.context_length": 65536,
+                "clip.context_length": 262144,
+            },
+        }
+        self.assertEqual(context_window.native_context(info), 65536)
+        self.assertEqual(
+            context_window.desired_context(info, 128 * 2**30, 7 * 2**30),
+            65536,
+        )
+
     def test_non_power_of_two_native_window_is_used_when_memory_fits(self):
         info = {"model_info": {"qwen.context_length": 98304}}
         self.assertEqual(

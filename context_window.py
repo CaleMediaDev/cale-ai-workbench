@@ -49,8 +49,13 @@ def configured_context(info):
 
 def native_context(info):
     """Read the model architecture's advertised limit from Ollama /api/show."""
+    model_info = info.get("model_info", {})
+    architecture = model_info.get("general.architecture")
+    native = model_info.get(f"{architecture}.context_length")
+    if architecture and isinstance(native, int) and native > 0:
+        return native
     values = [
-        int(value) for key, value in info.get("model_info", {}).items()
+        int(value) for key, value in model_info.items()
         if key.endswith(".context_length") and isinstance(value, int) and value > 0
     ]
     return max(values, default=configured_context(info))
