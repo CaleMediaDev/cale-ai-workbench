@@ -487,6 +487,37 @@ class AutoModelTests(unittest.TestCase):
             self.assertNotIn("feed_model", catalog)
             self.assertIn("main", catalog)
 
+    def test_non_string_feed_identifiers_fall_back_to_cached_profile(self):
+        old_feed = {"schema": 1, "models": {"feed_model": {
+            "label": "Working", "alias": "cale-feed-model",
+            "source": "qwen3.5:35b", "origin": "https://ollama.com/library/qwen3.5",
+            "license": "Apache-2.0", "download_gb": 22, "ram_gb": 48,
+            "context": 65536, "auto": True,
+        }}}
+        for field in ("alias", "source"):
+            for value in (None, 42, [], {}):
+                with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as folder:
+                    root = Path(folder)
+                    cache = root / "LongTasks/model-recommendations.json"
+                    cache.parent.mkdir()
+                    cache.write_text(json.dumps(old_feed), encoding="utf-8")
+                    bad_feed = json.loads(json.dumps(old_feed))
+                    bad_feed["models"]["feed_model"][field] = value
+                    catalog = {
+                        "main": {"alias": "base"},
+                        "feed_model": dict(old_feed["models"]["feed_model"]),
+                    }
+                    with (
+                        patch.object(library, "ROOT", root),
+                        patch.object(library, "CATALOG", catalog),
+                        patch.object(library, "urlopen", return_value=io.BytesIO(
+                            json.dumps(bad_feed).encode())),
+                    ):
+                        accepted = library.refresh_catalog()
+                    self.assertEqual(accepted["feed_model"]["alias"], "cale-feed-model")
+                    self.assertEqual(catalog["feed_model"]["source"], "qwen3.5:35b")
+                    self.assertEqual(json.loads(cache.read_text(encoding="utf-8")), old_feed)
+
     def test_bad_feed_update_keeps_last_cached_working_profile(self):
         old_model = {"alias": "cale-feed-model", "source": "qwen3.5:35b"}
         old_feed = {"schema": 1, "models": {"feed_model": {
