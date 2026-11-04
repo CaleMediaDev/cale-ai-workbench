@@ -1306,7 +1306,7 @@ def test_project_jobs_skips_non_object_records(tmp_path, bad_record):
     assert json.loads(bad_path.read_text(encoding="utf-8")) == bad_record
 
 
-@pytest.mark.parametrize("bad_created", ["not-a-timestamp", [1], {"time": 1}])
+@pytest.mark.parametrize("bad_created", ["not-a-timestamp", [1], {"time": 1}, 10**400])
 def test_project_jobs_skips_invalid_timestamp_and_sorts_valid_jobs(tmp_path, bad_created):
     jobs = tmp_path / "music-jobs"
     jobs.mkdir()
