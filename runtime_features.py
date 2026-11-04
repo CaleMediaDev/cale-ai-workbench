@@ -28,7 +28,8 @@ def progress(percent: int, current: str, status: str = "working", attempts: int 
     PROGRESS.parent.mkdir(parents=True, exist_ok=True)
     if attempts is None:
         try:
-            attempts = int(json.loads(PROGRESS.read_text(encoding="utf-8")).get("attempts", 0))
+            previous = json.loads(PROGRESS.read_text(encoding="utf-8"))
+            attempts = int(previous.get("attempts", 0)) if isinstance(previous, dict) else 0
         except (OSError, ValueError, TypeError):
             attempts = 0
     value = {"percent": percent, "current": current, "status": status,
@@ -136,6 +137,8 @@ def start_background() -> bool:
         current = json.loads(PROGRESS.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         pass
+    if not isinstance(current, dict):
+        current = {}
     owned = current.get("owner") == "runtime_features" or str(current.get("current", "")).startswith(
         ("Tool update needs attention:", "Preparing new local tools")
     )
