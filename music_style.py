@@ -158,7 +158,7 @@ def enhance(prompt: str, instrumental: bool = False) -> str:
     # Chops can accompany a requested lead; they do not cancel that lead.
     # Inspect only the cleaned current request, not exclusions or old feedback.
     current = cleaned.split("Past user feedback", 1)[0]
-    sparse = sparse_vocal_style(cleaned) and not re.search(r"\blead\s+vocals?\b", current, re.I)
+    sparse = sparse_vocal_style(current) and not re.search(r"\blead\s+vocals?\b", current, re.I)
     if sustained and intent == "female":
         cue = ("Distinct short female vocal hooks and chopped phrases between instrumental drops"
                if sparse else
