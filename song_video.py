@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -77,10 +78,12 @@ def caption_rows(segments: list[dict], lyrics: str, title: str,
         for segment in segments:
             try:
                 start, end = float(segment["start"]), float(segment["end"])
-            except (KeyError, TypeError, ValueError):
+            except (KeyError, TypeError, ValueError, OverflowError):
                 continue
             words = " ".join(str(segment.get("text", "")).split())
-            if words and 0 <= start < end:
+            if (words and math.isfinite(start) and math.isfinite(end)
+                    and math.isfinite(start * 1000) and math.isfinite(end * 1000)
+                    and 0 <= start < end and round(end * 1000) > round(start * 1000)):
                 timed.append((start, end, words))
         if timed:
             return timed, "offline_transcription"
