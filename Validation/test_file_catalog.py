@@ -236,6 +236,33 @@ class FileCatalogTests(unittest.TestCase):
             self.assertEqual(file_catalog.search(state, "my budget")[0]["path"], str(target))
             self.assertEqual(file_catalog.search(state, "my budget spreadsheet from 2025"), [])
 
+    def test_search_refills_candidates_after_removing_deleted_matches(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            file_catalog, "enough_space", return_value=True
+        ):
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            stale = []
+            for number in range(70):
+                folder = root / f"slot{number:03d}"
+                folder.mkdir()
+                path = folder / "needle.txt"
+                path.write_text("", encoding="utf-8")
+                stale.append(path)
+            folder = root / "survivor"
+            folder.mkdir()
+            target = folder / "needle other.txt"
+            target.write_text("", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            for path in stale:
+                path.unlink()
+
+            self.assertEqual(
+                file_catalog.search(state, "needle", limit=1),
+                [{"path": str(target), "name": target.name, "kind": "file"}],
+            )
+
     def test_filler_word_does_not_hide_compound_filename(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"
