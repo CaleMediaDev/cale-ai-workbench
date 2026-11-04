@@ -85,11 +85,13 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
             try:
                 for path in staged_files:
                     destination = target / path.name
-                    path.rename(destination)
+                    # Staging is inside target, so both paths share a filesystem.
+                    # Unlike rename on POSIX, link never replaces an existing file.
+                    os.link(path, destination)
                     published.append(destination)
             except OSError:
                 for path in reversed(published):
-                    path.rename(staging / path.name)
+                    path.unlink()
                 raise
     return {"source": str(source), "output_dir": str(target),
             "files": [str(path) for path in files], "model": "Audio Separator"}

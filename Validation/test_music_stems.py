@@ -191,7 +191,7 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
     source = tmp_path / "song.mp3"
     source.write_bytes(b"music")
     output = tmp_path / "stems"
-    original_rename = Path.rename
+    original_link = music_stems.os.link
     move_attempts = 0
 
     def render(args, **_kwargs):
@@ -205,7 +205,7 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
         move_attempts += 1
         if move_attempts == 2:
             raise OSError("simulated publication failure")
-        return original_rename(path, destination)
+        return original_link(path, destination)
 
     with patch.object(
         music_stems.music_backend, "_setup_lock", side_effect=nullcontext
@@ -215,13 +215,53 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
         music_stems, "install", return_value=Path("python.exe")
     ), patch.object(
         music_stems.subprocess, "run", side_effect=render
-    ), patch.object(Path, "rename", autospec=True, side_effect=fail_second_move):
+    ), patch.object(music_stems.os, "link", side_effect=fail_second_move):
         with pytest.raises(OSError, match="simulated publication failure"):
             music_stems.separate_stems(str(source), str(output))
         assert list(output.iterdir()) == []
         result = music_stems.separate_stems(str(source), str(output))
 
     assert len(result["files"]) == 2
+    assert {Path(path).read_bytes() for path in result["files"]} == {b"vocals", b"instrumental"}
+    assert source.read_bytes() == b"music"
+
+
+def test_publication_preserves_file_created_during_inference(tmp_path):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+    collision = output / "song_(Vocals).wav"
+    attempts = 0
+
+    def render(args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        staging = Path(args[-1])
+        (staging / "song_(Instrumental).wav").write_bytes(b"instrumental")
+        (staging / "song_(Vocals).wav").write_bytes(b"vocals")
+        if attempts == 1:
+            # Arrives after the empty-folder check; sorts after Instrumental.
+            collision.write_bytes(b"external audio")
+        return SimpleNamespace(returncode=0)
+
+    with patch.object(
+        music_stems.music_backend, "_setup_lock", side_effect=nullcontext
+    ), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext
+    ), patch.object(
+        music_stems, "install", return_value=Path("python.exe")
+    ), patch.object(music_stems.subprocess, "run", side_effect=render):
+        with pytest.raises(FileExistsError):
+            music_stems.separate_stems(str(source), str(output))
+        assert set(output.iterdir()) == {collision}
+        assert collision.read_bytes() == b"external audio"
+        collision.unlink()
+        result = music_stems.separate_stems(str(source), str(output))
+
+    assert attempts == 2
     assert {Path(path).read_bytes() for path in result["files"]} == {b"vocals", b"instrumental"}
     assert source.read_bytes() == b"music"
 
