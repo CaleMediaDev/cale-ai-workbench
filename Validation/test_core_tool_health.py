@@ -29,9 +29,7 @@ def test_health_cache_distinguishes_relative_roots_after_chdir(tmp_path, monkeyp
         ghidra.parent.mkdir(parents=True)
         ghidra.touch()
 
-    monkeypatch.setattr(core_tool_health, "_cached_root", None)
-    monkeypatch.setattr(core_tool_health, "_cached_missing", [])
-    monkeypatch.setattr(core_tool_health, "_last_check", 0.0)
+    monkeypatch.setattr(core_tool_health, "_health_cache", (None, (), 0.0))
     monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: 1000.0)
     monkeypatch.setattr(core_tool_health, "_agent_python", lambda root: None)
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
@@ -44,6 +42,39 @@ def test_health_cache_distinguishes_relative_roots_after_chdir(tmp_path, monkeyp
     assert core_tool_health.missing(Path("installation")) == []
     monkeypatch.chdir(broken.parent)
     assert core_tool_health.missing(Path("installation")) == ["GitHub CLI"]
+
+
+def test_cache_lookup_keeps_results_from_its_own_installation(tmp_path, monkeypatch):
+    broken = tmp_path / "broken"
+    healthy = tmp_path / "healthy"
+    for root in (broken, healthy):
+        ghidra = root / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+        ghidra.parent.mkdir(parents=True)
+        ghidra.touch()
+
+    monkeypatch.setattr(core_tool_health, "_health_cache", (None, (), 0.0))
+    monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: 1000.0)
+    monkeypatch.setattr(core_tool_health, "_agent_python", lambda root: None)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    broken_gh = broken / "Toolbox/gh_2.103.3_windows_amd64/bin/gh.exe"
+    monkeypatch.setattr(core_tool_health, "_runnable",
+                        lambda path, *args: path != broken_gh)
+    assert core_tool_health.missing(broken, fresh=True) == ["GitHub CLI"]
+
+    publications = []
+
+    def interleaved_clock():
+        # Publish another root's results after cache eligibility has begun,
+        # as an overlapping probe could do. Avoid recursion in its timestamp.
+        monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: 1000.0)
+        publications.append(core_tool_health.missing(healthy, fresh=True))
+        return 1000.0
+
+    monkeypatch.setattr(core_tool_health.time, "monotonic", interleaved_clock)
+    assert core_tool_health.missing(broken) == ["GitHub CLI"]
+    assert publications == [[]]
+    assert core_tool_health.missing(healthy) == []
 
 
 def test_browser_runtime_failure_is_visible_even_when_node_runs(tmp_path, monkeypatch):
