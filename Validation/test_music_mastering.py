@@ -150,6 +150,30 @@ def test_mastering_rejects_hard_linked_reference(tmp_path):
     assert reference.read_bytes() == b"source"
 
 
+def test_mastering_rejects_dangling_output_symlink(tmp_path):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    target = tmp_path / "missing-target.wav"
+    source.write_bytes(b"source")
+    reference.write_bytes(b"reference")
+    try:
+        output.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Creating symlinks is unavailable on this system")
+
+    with patch.object(music_mastering, "install") as install:
+        with pytest.raises(ValueError, match="new output"):
+            music_mastering.master_music(str(source), str(reference), str(output))
+        install.assert_not_called()
+
+    assert output.is_symlink()
+    assert output.readlink() == target
+    assert not target.exists()
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"reference"
+
+
 def test_mastering_rejects_overwrite_and_same_reference(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"

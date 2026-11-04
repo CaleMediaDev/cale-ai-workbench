@@ -53,7 +53,8 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
     """Write a new mastered WAV; preserve both input audio files."""
     source = Path(source_path).expanduser().resolve(strict=True)
     reference = Path(reference_path).expanduser().resolve(strict=True)
-    output = Path(output_path).expanduser().resolve()
+    output = Path(output_path).expanduser()
+    output = output.parent.resolve() / output.name
     if not source.is_file() or source.suffix.lower() not in SUPPORTED:
         raise ValueError("Choose an existing WAV, MP3, FLAC, M4A or OGG source song.")
     if not reference.is_file() or reference.suffix.lower() not in SUPPORTED:
@@ -62,7 +63,7 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
         raise ValueError("Choose a different reference song to match.")
     if output.suffix.lower() != ".wav":
         raise ValueError("The mastered output must be a WAV file.")
-    if output.exists() or output in (source, reference):
+    if output.exists() or output.is_symlink() or output in (source, reference):
         raise ValueError("Choose a new output filename so existing audio is preserved.")
     output.parent.mkdir(parents=True, exist_ok=True)
     with music_backend._setup_lock():
