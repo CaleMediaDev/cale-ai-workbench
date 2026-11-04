@@ -151,6 +151,46 @@ class CloudTests(unittest.TestCase):
             "type": "json_schema", "json_schema": {"schema": {"enum": ["x" * 12000]}}}}),
             cloud.estimated_input_tokens(REQUEST) + 3000)
 
+    def test_nested_plan_checker_arguments_are_repaired_before_plan_dispatch(self):
+        import native_agent
+        tool = next(item for item in native_agent.TOOLS if item["function"]["name"] == "task_steps")
+        request = {**REQUEST, "tools": [tool]}
+        valid = {"action": "plan", "steps": [{"phase": "Create", "title": "Check total",
+            "check_tool": "check_webapp", "check_arguments": {"path": "index.html", "cases": [
+                {"set": {"amount": "10"}, "click": ["Add expense"], "expect": {"tot": "10.00"}}]}}]}
+        bad = json.loads(json.dumps(valid))
+        bad["steps"][0]["check_arguments"]["cases"] = [{"input": "amount=10", "expect": "Total: $10.00"}]
+        malformed = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "bad-plan",
+            "type": "function", "function": {"name": "task_steps", "arguments": json.dumps(bad)}}]}}]}
+        with self.assertRaises(cloud.ToolArgumentError) as caught:
+            cloud.valid_completion(malformed, request)
+        guarded = cloud.argument_repair_request(request, caught.exception)
+        guarded_schema = guarded["tools"][0]["function"]["parameters"]
+        self.assertEqual(guarded_schema["properties"]["steps"]["maxItems"], 1)
+        self.assertEqual(guarded_schema["properties"]["action"]["enum"], ["plan"])
+        self.assertEqual(tool["function"]["parameters"]["properties"]["steps"]["maxItems"], 8)
+        expanded = json.loads(json.dumps(valid))
+        expanded["steps"].append(expanded["steps"][0])
+        from jsonschema import ValidationError, validate
+        with self.assertRaises(ValidationError):
+            validate(expanded, guarded_schema)
+        serialized = json.loads(json.dumps(malformed))
+        quoted = json.loads(serialized["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"])
+        quoted["steps"][0]["check_arguments"]["cases"] = json.dumps(quoted["steps"][0]["check_arguments"]["cases"])
+        serialized["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps(quoted)
+        with self.assertRaises(cloud.ToolArgumentError):
+            cloud.valid_completion(serialized, request)
+        corrected = {**ANSWER, "choices": [{**ANSWER["choices"][0], "message": {
+            "role": "assistant", "content": json.dumps(valid)}}]}
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536}
+        with patch.object(cloud, "post", side_effect=[malformed, corrected]) as upstream:
+            result = router.complete(request)
+        self.assertEqual(upstream.call_count, 2)
+        call = result["choices"][0]["message"]["tool_calls"][0]
+        self.assertEqual(json.loads(call["function"]["arguments"]), valid)
+
     def test_json_repair_keeps_quoted_refusal_text_as_tool_data(self):
         guarded = {**REQUEST, "tools": [{"type": "function", "function": {"name": "save_quote",
             "parameters": {"type": "object", "properties": {"text": {"type": "string"}},

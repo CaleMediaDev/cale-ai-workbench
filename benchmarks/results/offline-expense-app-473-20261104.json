@@ -1,0 +1,272 @@
+{
+  "scenario": "offline_expense_app",
+  "brief": "Create index.html, a complete single-file offline expense log for a small business.\nUse no accounts, external libraries, fonts, or network requests. Make it readable on a phone.\nThe form has accessible labels Description, Amount, and Category. Category choices are\nSupplies, Travel, Meals, and Other. Its button says Add expense. Show an expense table\nwith Description, Amount, Category, and a Delete button on each expense row.\nShow Total: $0.00 initially; display dollars with two decimal places and keep the total\ncorrect after adding and deleting entries. Reject a blank description, zero or negative\namount, and nonnumeric amounts, showing an accessible inline error with role=alert.\nDescriptions are plain text even when they contain HTML characters. Save entries on\nthis computer with localStorage. Reloading must preserve added entries and deletions.\nBuild actual working files using small SQLite steps for form validation, the expense\ntable/totals, and persistence. Save and run a repeatable verifier that exercises real\nform input and checks persistence across page reload. Keep PLAN.md and PROGRESS.md accurate.\n",
+  "seconds": 300.01,
+  "model_calls": 15,
+  "tool_calls": 15,
+  "prompt_tokens": 136399,
+  "completion_tokens": 9523,
+  "tools_used": [
+    "task_steps",
+    "task_steps",
+    "task_steps",
+    "write_file",
+    "write_file",
+    "write_file",
+    "check_webapp",
+    "read_file",
+    "read_file",
+    "read_file",
+    "edit_file",
+    "task_steps",
+    "read_file",
+    "edit_file",
+    "edit_file"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 10.74
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 23.7
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 7.92
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 47.77
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 12.56
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 29.45
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 9.64
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 14.19
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 8.3
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 7.0
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 12.97
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 21.45
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 6.44
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 27.64
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 27.6
+    }
+  ],
+  "router_call_attempts": 16,
+  "upstream_local_calls": 17,
+  "step_transport_shapes": [
+    [
+      {
+        "type": "str",
+        "length": 2251,
+        "first": "[",
+        "decode_error": "Extra data",
+        "decode_position": 2250
+      }
+    ],
+    [
+      {
+        "type": "list"
+      }
+    ],
+    [
+      {
+        "type": "list"
+      }
+    ]
+  ],
+  "time_budget_exhausted": true,
+  "token_usage_incomplete": true,
+  "inference_budget_seconds": 300.0,
+  "grade_seconds": 3.05,
+  "total_seconds": 303.06,
+  "resumed": false,
+  "initial_turns": 0,
+  "initial_source_sha256": null,
+  "checkpoint_status": "running",
+  "inference_error": "TimeoutError: timed out",
+  "grade": {
+    "browser": {
+      "checks": {
+        "requested_category_choices": true,
+        "initial_empty": true,
+        "reject_blank": false,
+        "reject_negative": false,
+        "reject_zero": false,
+        "reject_nonnumeric": false,
+        "adds_two_and_totals": true,
+        "category_visible": true,
+        "reload_keeps_entries": true,
+        "delete_updates_total": true,
+        "reload_keeps_deletion": true,
+        "description_plain_text": true,
+        "decimal_totals": true,
+        "mobile_fit": false,
+        "no_remote_requests": true
+      },
+      "errors": [
+        "missing ) after argument list",
+        "missing ) after argument list",
+        "missing ) after argument list"
+      ],
+      "remote_requests": [],
+      "passed": false
+    },
+    "verifier_passes_correct": false,
+    "verifier_rejects_missing_javascript": false,
+    "mutation_status": "not_run_baseline_verifier_failed",
+    "steps": {
+      "total": 6,
+      "done": 0,
+      "remaining": 6
+    },
+    "passed": false
+  },
+  "run_outcome": "failed",
+  "independent_check_diagnostics": [],
+  "tested_source_commit": "b9e4ca3",
+  "source_note": "Fresh unassisted synthetic build; no implementation or plan seeded. Runtime source remained unchanged during the five-minute trial. Budget stop leaves the overall grade failed."
+}

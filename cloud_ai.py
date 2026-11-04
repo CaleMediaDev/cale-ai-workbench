@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
+import copy
 import hashlib
 import json
 import os
@@ -421,8 +422,9 @@ class EmptyInferenceResponse(ValueError):
 class ToolArgumentError(ValueError):
     """An offered tool's decoded arguments failed its declared JSON schema."""
 
-    def __init__(self, name, error):
+    def __init__(self, name, error, arguments=None):
         self.tool = name
+        self.arguments = arguments  # Transient repair context; never included in error text.
         self.path = [item if type(item) is int else str(item)[:160] for item in list(error.absolute_path)[:16]]
         # Do not repeat a huge escaped bad value as an example for the model
         # to copy. The schema rule, expected shape and path are the evidence.
@@ -443,6 +445,18 @@ def argument_repair_request(payload, error):
              and isinstance(tool.get("function"), dict) and tool["function"].get("name") == error.tool]
     if choice == "none" or named and named != error.tool or not tools:
         raise error  # A correction cannot enable or select a forbidden tool.
+    tools = copy.deepcopy(tools[:1])
+    original = error.arguments
+    if (error.tool == "task_steps" and isinstance(original, dict)
+            and error.path[:1] == ["steps"] and len(error.path) > 1
+            and isinstance(original.get("steps"), list) and 1 <= len(original["steps"]) <= 8):
+        # A nested case error does not authorize inventing additional work.
+        # Keep the already-valid batch shape while repairing its argument data.
+        properties = tools[0]["function"]["parameters"]["properties"]
+        count = len(original["steps"])
+        properties["steps"].update(minItems=count, maxItems=count)
+        if original.get("action") in properties["action"].get("enum", []):
+            properties["action"]["enum"] = [original["action"]]
     feedback = json.dumps({"tool": error.tool, "argument_path": error.path,
                            "problem": error.problem}, ensure_ascii=True)
     budget = payload.get("max_tokens", payload.get("max_completion_tokens", 4096))
@@ -571,7 +585,7 @@ def valid_completion(result, request=None):
                 continue
             error = next(validator(schema).iter_errors(parsed), None)
             if error:
-                raise ToolArgumentError(name, error)
+                raise ToolArgumentError(name, error, parsed)
     choice = (request or {}).get("tool_choice")
     named_choice = choice.get("function") if isinstance(choice, dict) else None
     required_name = (

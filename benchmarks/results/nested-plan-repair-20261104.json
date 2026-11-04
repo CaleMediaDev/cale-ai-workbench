@@ -1,0 +1,48 @@
+{
+  "passed": true,
+  "scenario": "injected malformed arguments; real local correction and SQLite plan",
+  "seconds": 2.09,
+  "model": "cale-main-64k",
+  "initial_bad_response": "injected nested browser cases with unsupported input field and text expect",
+  "correction": "live local inference",
+  "tool_choice_sent": false,
+  "requested_format": "json_schema",
+  "raw_tool_calls": 0,
+  "validated_tool": "task_steps",
+  "sql_units_created": 1,
+  "sql_units_completed": 0,
+  "user_projects_touched": false,
+  "usage": {
+    "prompt_tokens": 460,
+    "prompt_tokens_details": {
+      "cached_tokens": 456
+    },
+    "completion_tokens": 80,
+    "total_tokens": 540
+  },
+  "earlier_attempt_without_count_preservation": {
+    "passed": false,
+    "transport_arguments_valid": true,
+    "expected_step_count": 1,
+    "observed_step_count": 3,
+    "tool_dispatched": false,
+    "seconds": 5.07
+  },
+  "router_tests": {
+    "passed": 123,
+    "subtests_passed": 18,
+    "seconds": 7.57
+  },
+  "scope": "Injected nested argument error, actual local JSON correction, validation and an isolated SQLite plan. Does not prove app completion.",
+  "source_sha256": {
+    "cloud_ai.py": "9f3cf65aa20ad5bb7271fc18e152214d8e8b5a101f578b05534d30f53fabccf6",
+    "native_agent.py": "7ab6f9c7014b8776a8091147065fc54b353047498e77dde06508d64335a5d5f3"
+  },
+  "validation": {
+    "native_worker_tests_passed": 190,
+    "router_tests_passed": 123,
+    "router_subtests_passed": 18,
+    "combined_suite_seconds": 156.0,
+    "note": "The router suite was rerun after step-count preservation; native suite verifies the final typed plan contract and compaction behavior."
+  }
+}

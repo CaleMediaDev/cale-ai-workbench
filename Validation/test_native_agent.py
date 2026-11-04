@@ -15,6 +15,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 import cloud_ai
 import long_tasks
 import native_agent
@@ -30,6 +32,30 @@ def project(folder):
 
 def queue_step(title, command, phase="Core"):
     return {"phase": phase, "title": title, "check_command": command}
+
+
+@pytest.mark.parametrize("check", [
+    {"check_command": "Write-Output checked"},
+    {"check_tool": "run_verifier"},
+    {"check_tool": "check_python_function", "check_arguments": {"path": "logic.py", "function": "identity",
+        "cases": [{"args": [2], "expected": 2}]}},
+    {"check_tool": "check_javascript_function", "check_arguments": {"path": "logic.js", "function": "identity",
+        "cases": [{"args": [2], "expected": 2}]}},
+    {"check_tool": "check_webapp", "check_arguments": {"path": "index.html", "cases": [{"visible": ["heading"]}]}},
+])
+def test_typed_plan_contract_accepts_supported_repeatable_checks(tmp_path, check):
+    from jsonschema import ValidationError, validate
+    arguments = {"action": "plan", "steps": [{"phase": "Check", "title": "Verify behavior", **check}]}
+    schema = next(tool["function"]["parameters"] for tool in native_agent.TOOLS if tool["function"]["name"] == "task_steps")
+    validate(arguments, schema)
+    result = json.loads(native_agent.execute_tool(tmp_path, "task_steps", arguments))
+    assert result["total"] == 1 and result["done"] == 0
+    if check.get("check_tool") not in (None, "run_verifier"):
+        once = copy.deepcopy(arguments)
+        once["steps"][0]["check_arguments"]["saved_case"] = 1
+        once["steps"][0]["check_arguments"]["suite_sha256"] = "0" * 64
+        with pytest.raises(ValidationError):
+            validate(once, schema)
 
 
 def test_step_queue_checks_real_work_and_resumes_in_another_process():

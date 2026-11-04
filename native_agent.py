@@ -79,25 +79,16 @@ TOOLS = [
             "required": ["path", "function", "cases"], "additionalProperties": False}}},
     {'type': 'function',
      'function': {'name': 'task_steps',
-                  'description': 'Durable SQLite queue for small phases. Plan 2-6 tiny steps. Use '
-                                 "check_tool='check_python_function' with check_arguments={path,function,cases}, "
-                                 "or check_tool='check_javascript_function' for a pure JavaScript module, "
-                                 "or check_tool='check_webapp' with check_arguments={path,cases} for HTML apps. "
-                                 "Use check_tool='run_verifier' for integration. Other work can use a read-only "
-                                 'check_command. complete runs the saved acceptance check and advances only on '
-                                 'success without source changes. split makes smaller steps; revise corrects the '
-                                 'active check with steps=[one corrected step]. steps must be an actual JSON '
-                                 'array, never a quoted or escaped string. status resumes progress. A '
-                                 'native worker may omit step_id for complete, split or revise to target its '
-                                 'shown active unit; changed units/checks are rejected. '
-                                 'Store full repeatable cases in steps; saved_case/saved_sequence/suite_sha256 '
-                                 'are one-time checker arguments. '
-                                 'completed batch is not whole-project verification. Browser steps with input '
-                                 'actions need an observed effect; invariant-only cases can use a freshly '
-                                 'rerun same-page, matching-target positive control from the saved suite. Static scaffolding '
-                                 'checks need no input action. scope records an explicit later user API scope change: '
-                                 'scope_operation=exclude/only, function_names, instruction_quote from the latest '
-                                 'USER-REQUESTS.md entry. It cannot waive work based on model progress or plans.',
+                  'description': 'Durable SQLite phases. Plan 1-6 tiny steps; preserve a requested count during repair. '
+                                 'Use typed check_tool/check_arguments or a read-only check_command. complete runs '
+                                 'saved acceptance and advances only on success with unchanged source. split divides '
+                                 'the active step; revise supplies exactly one replacement. Native calls may omit '
+                                 'step_id for the shown active unit; stale checks are rejected. status resumes. '
+                                 'Keep repeatable cases here; one-time saved-case revisions belong to the checker. '
+                                 'Browser input steps need observed effects or fresh same-page, matching-target '
+                                 'positive controls. Static checks need no input. scope requires an explicit latest '
+                                 'USER-REQUESTS.md quote plus scope_operation and function_names; never waive work '
+                                 'from model progress. A completed batch is not whole-project verification.',
                   'parameters': {'type': 'object',
                                  'properties': {'action': {'type': 'string',
                                                            'enum': ['plan',
@@ -228,6 +219,44 @@ TOOLS = [
     {"type": "function", "function": {"name": "run_verifier", "description": "Run this project's saved .local-ai/verify.ps1 in a contained process. Returns the real check result and a short log; use after the last source edit.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "run_command", "description": "Run a noninteractive project command with a 90-second limit. Default shell is cmd.exe on Windows, /bin/sh elsewhere. For PowerShell cmdlets, variables, pipelines, or scripts, set shell to powershell (Windows PowerShell 5.1 on Windows). Do not mix cmd syntax such as cd /d or && into PowerShell; use Set-Location and semicolons. Foreground servers time out; use browser_open_project for local HTML previews. Returns exit code and output.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}, "shell": {"type": "string", "enum": ["default", "powershell"]}}, "required": ["command"], "additionalProperties": False}}},
 ]
+
+
+def bind_step_checker_schemas(tools: list) -> None:
+    """Expose the same nested contracts enforced when SQLite saves a plan.
+
+    Complete, disjoint alternatives work with structured local output as well
+    as ordinary tool calls. Checker argument mistakes can then use the router's
+    bounded schema repair before the dispatcher attempts a plan mutation.
+    """
+    by_name = {tool["function"]["name"]: tool["function"]["parameters"] for tool in tools}
+    steps = by_name["task_steps"]["properties"]["steps"]
+    base = steps["items"]
+    command = copy.deepcopy(base)
+    for name in ("check_tool", "check_arguments"):
+        command["properties"].pop(name)
+    command["required"] = ["phase", "title", "check_command"]
+    alternatives = [command]
+    for kind in ("check_python_function", "check_javascript_function", "check_webapp", "run_verifier"):
+        branch = copy.deepcopy(base)
+        for name in ("check_command", "shell"):
+            branch["properties"].pop(name)
+        arguments = copy.deepcopy(by_name[kind])
+        for name in ("saved_case", "saved_sequence", "suite_sha256"):
+            arguments.get("properties", {}).pop(name, None)
+        cases = arguments.get("properties", {}).get("cases", {})
+        if "anyOf" in cases:
+            # New model plans use structured arrays. Direct checker calls can
+            # still accept their legacy serialized-case representation.
+            arguments["properties"]["cases"] = next(
+                copy.deepcopy(option) for option in cases["anyOf"] if option.get("type") == "array")
+        branch["properties"]["check_tool"] = {"type": "string", "enum": [kind]}
+        branch["properties"]["check_arguments"] = arguments
+        branch["required"] = ["phase", "title", "check_tool"] + ([] if kind == "run_verifier" else ["check_arguments"])
+        alternatives.append(branch)
+    steps["items"] = {"anyOf": alternatives}
+
+
+bind_step_checker_schemas(TOOLS)
 
 
 def state_file(project: dict) -> Path:
