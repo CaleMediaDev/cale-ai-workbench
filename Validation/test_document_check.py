@@ -80,6 +80,21 @@ def test_document_check_rejects_truncated_decimal_amounts(tmp_path, source_amoun
         document_check.check(folder, spec)
 
 
+@pytest.mark.parametrize("report_amount", ["$1,100.50", "$1,100,000"])
+def test_document_check_rejects_numeric_continuations(tmp_path, report_amount):
+    folder = _project(tmp_path)
+    checked = document_check.check(folder, SPEC)
+    assert checked["passed"] is True
+    record = {"spec": SPEC, "source_sha256": checked["source_sha256"]}
+    (folder / "summary.md").write_text(
+        REPORT.replace("$1,100", report_amount), encoding="utf-8")
+
+    for result in (document_check.check(folder, SPEC),
+                   document_check.verify_saved(folder, record)):
+        assert result["passed"] is False
+        assert result["errors"] == ["Calculation 1: report text was not found"]
+
+
 def test_document_check_rejects_source_change_during_extraction(tmp_path):
     folder = _project(tmp_path)
     original_inspect = document_check.project_documents.inspect
