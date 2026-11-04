@@ -93,7 +93,8 @@ def calculate(question: str) -> str | None:
         if "," in token and not re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d*)?", token):
             return None
     normalized = expression.replace(",", "")
-    normalized = normalized.replace("×", "*").replace("÷", "/").replace("^", "**")
+    # Keep multiplication tokens separate so mixed/repeated symbols cannot form **.
+    normalized = normalized.replace("×", " * ").replace("÷", "/").replace("^", "**")
     try:
         tree = ast.parse(normalized, mode="eval")
         return f"{expression} = {_display(_evaluate(tree.body, normalized))}"
