@@ -66,15 +66,25 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                     markdown = getattr(markdown_result, "fit_markdown", "") or ""
                     if not str(markdown).strip():
                         markdown = getattr(markdown_result, "raw_markdown", "") or ""
-                markdown = str(markdown)[:100_000]
+                markdown = str(markdown)
+                original_length = len(markdown)
+                markdown = markdown[:100_000]
                 if not markdown.strip():
                     raise RuntimeError("No readable page content")
                 path = page_path(project, url)
                 path.parent.mkdir(parents=True, exist_ok=True)
-                body = f"# Source: {url}\n\nCrawled: {datetime.now(timezone.utc).isoformat()}\n\n{markdown}\n"
-                path.write_text(body, encoding="utf-8")
+                header = f"# Source: {url}\n\nCrawled: {datetime.now(timezone.utc).isoformat()}\n\n"
+                budget = project_memory.MAX_FILE_BYTES - len(header.encode("utf-8")) - 1
+                if budget <= 0:
+                    raise ValueError("Research metadata exceeds the project memory file limit")
+                # Memory limits files by bytes. Cut only at a UTF-8 boundary,
+                # including room for provenance and the final newline.
+                markdown = markdown.encode("utf-8")[:budget].decode("utf-8", errors="ignore")
+                body = header + markdown + "\n"
+                path.write_text(body, encoding="utf-8", newline="\n")
                 project_memory.index_file(project, path)
-                pages.append({"url": url, "file": str(path), "characters": len(markdown)})
+                pages.append({"url": url, "file": str(path), "characters": len(markdown),
+                              "truncated": len(markdown) < original_length})
                 for link in (result.links or {}).get("internal", []):
                     if not isinstance(link, dict):
                         continue

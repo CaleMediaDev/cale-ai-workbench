@@ -20,6 +20,7 @@ KINDS = frozenset({"requirement", "decision", "lesson", "skill", "component", "a
 TEXT_SUFFIXES = frozenset({".md", ".txt", ".py", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".json", ".html", ".css", ".yaml", ".yml", ".toml", ".ps1", ".sql"})
 DOCUMENT_SUFFIXES = frozenset({".pdf", ".docx", ".xlsx", ".pptx"})
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+MAX_FILE_BYTES = 256_000
 DOCUMENT_CHUNK_CHARS = 16_000
 # Only project_documents' derived pre-snapshot records are retired. Explicit
 # notes/skills and caller-defined extractor revisions retain their identities.
@@ -131,7 +132,7 @@ def _eligible(root: Path, path: Path) -> bool:
             return False
         relative = resolved.relative_to(root)
         return (resolved.is_file() and not any(SECRET_NAME.search(part) for part in relative.parts[:-1])
-                and resolved.stat().st_size <= 256_000)
+                and resolved.stat().st_size <= MAX_FILE_BYTES)
     except (OSError, RuntimeError):
         return False
 
