@@ -231,7 +231,7 @@ def watch(device=0, parent_pid=None, parent_started=None):
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             height, width = gray.shape[:2]
             if width > 640:
-                gray = cv2.resize(gray, (640, round(height * 640 / width)))
+                gray = cv2.resize(gray, (640, max(1, round(height * 640 / width))))
             try:
                 features = face_model.features(frame) if face_model else []
             except Exception:
