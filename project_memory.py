@@ -220,7 +220,7 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
         for path in paths:
             if not _eligible(root, path):
                 continue
-            relative = path.relative_to(root).as_posix()
+            relative = path.resolve().relative_to(root).as_posix()
             identifier = "file:" + relative
             try:
                 data = path.read_bytes()
