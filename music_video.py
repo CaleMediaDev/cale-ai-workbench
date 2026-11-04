@@ -18,7 +18,11 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
                      background_image: str = "", captions_path: str = "") -> dict:
     """Pair local audio, optional cover art and timed captions with a spectrum."""
     source = Path(source_path).expanduser().resolve(strict=True)
-    output = Path(output_path).expanduser().resolve()
+    output = Path(output_path).expanduser()
+    # Resolve only after rejecting existing links, including dangling ones.
+    if output.is_symlink():
+        raise ValueError("Save the video as a new MP4 file without replacing an existing file.")
+    output = output.resolve()
     if not source.is_file() or source.suffix.lower() not in {".wav", ".mp3", ".flac", ".m4a", ".ogg"}:
         raise ValueError("Choose an existing WAV, MP3, FLAC, M4A or OGG audio file.")
     if layout not in SIZES:
