@@ -1114,3 +1114,54 @@ def test_usable_review_labels_keep_positive_closure_classification(tmp_path,merg
     donation.refresh_pending_reviews(tmp_path,fetch=lambda _:facts)
     with closing(donation.connection(tmp_path)) as conn:
         assert conn.execute('SELECT status,review_state FROM runs WHERE id=?',(run,)).fetchone()==('reviewed',expected)
+
+
+def test_review_sync_reserves_live_slots_amid_large_legacy_history(tmp_path):
+    with closing(donation.connection(tmp_path)) as conn,conn:
+        conn.executemany('INSERT INTO runs(id,started,status,job,url,review_checked) VALUES(?,?,?,?,?,?)',
+                         [(f'legacy-{i}',float(i),'reviewed',f'old-{i}',f'https://github.com/{donation.UPSTREAM}/pull/{i+1}',0) for i in range(362)])
+        conn.executemany('INSERT INTO runs(id,started,status,job,url,review_checked) VALUES(?,?,?,?,?,?)',
+                         [(f'live-{i}',1000.0+i,'submitted',f'new-{i}',f'https://github.com/{donation.UPSTREAM}/pull/{1001+i}',0) for i in range(44)])
+    calls=[]
+    with patch.object(donation.time,'time',return_value=100000):
+        donation.refresh_pending_reviews(tmp_path,fetch=lambda endpoint:calls.append(int(endpoint.rsplit('/',1)[1])) or {})
+        donation.refresh_pending_reviews(tmp_path,fetch=lambda _:pytest.fail('Shared lease must prevent another lane issuing requests'))
+    assert calls==[1001,1002,362]
+    with patch.object(donation.time,'time',return_value=100031):
+        donation.refresh_pending_reviews(tmp_path,fetch=lambda endpoint:calls.append(int(endpoint.rsplit('/',1)[1])) or {})
+    assert calls==[1001,1002,362,1003,1004,361]
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs WHERE status='submitted'").fetchone()[0]==44
+
+
+@pytest.mark.parametrize('submitted,historical,expected', [(1,5,[1001,5,4]),(5,0,[1001,1002,1003]),(0,5,[5,4,3]),(0,0,[])])
+def test_review_sync_unused_reserved_slots_are_filled_without_starving_history(tmp_path,submitted,historical,expected):
+    with closing(donation.connection(tmp_path)) as conn,conn:
+        conn.executemany('INSERT INTO runs(id,started,status,job,url,review_checked) VALUES(?,?,?,?,?,?)',
+                         [(f'legacy-{i}',float(i),'reviewed',f'old-{i}',f'https://github.com/{donation.UPSTREAM}/pull/{i+1}',0) for i in range(historical)])
+        conn.executemany('INSERT INTO runs(id,started,status,job,url,review_checked) VALUES(?,?,?,?,?,?)',
+                         [(f'live-{i}',1000.0+i,'submitted',f'new-{i}',f'https://github.com/{donation.UPSTREAM}/pull/{1001+i}',0) for i in range(submitted)])
+    calls=[]
+    donation.refresh_pending_reviews(tmp_path,fetch=lambda endpoint:calls.append(int(endpoint.rsplit('/',1)[1])) or {})
+    assert calls==expected
+    assert len(calls)<=3
+
+
+def test_review_sync_six_lanes_share_fair_three_fact_budget(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    with closing(donation.connection(tmp_path)) as conn,conn:
+        for index in range(5):
+            conn.execute('INSERT INTO runs(id,started,status,job,url) VALUES(?,?,?,?,?)',
+                         (f'old-{index}',float(index),'reviewed',f'history-{index}',f'https://github.com/{donation.UPSTREAM}/pull/{index+1}'))
+            conn.execute('INSERT INTO runs(id,started,status,job,url) VALUES(?,?,?,?,?)',
+                         (f'new-{index}',1000.0+index,'submitted',f'pending-{index}',f'https://github.com/{donation.UPSTREAM}/pull/{1001+index}'))
+    barrier=threading.Barrier(6)
+    calls=[]
+    def refresh(_):
+        barrier.wait(timeout=5)
+        donation.refresh_pending_reviews(tmp_path,fetch=lambda endpoint:calls.append(int(endpoint.rsplit('/',1)[1])) or {})
+    with patch.object(donation.time,'time',return_value=100000),ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(refresh,range(6)))
+    assert calls==[1001,1002,5]
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs WHERE status='submitted'").fetchone()[0]==5

@@ -417,8 +417,9 @@ def finish(root: Path, run_id: str, status: str, url: str = "") -> None:
 def refresh_pending_reviews(root: Path, fetch=None, check_cancel=lambda: None) -> None:
     """Release reviewed drafts from authoritative PR facts, never search lag.
 
-    All lanes share one three-PR batch per 30 seconds. Failed requests preserve
-    reservations, and oldest-first checks eventually revisit every draft.
+    All lanes share one three-PR batch per 30 seconds. Two submitted slots and
+    one historical slot prevent migration backlog starving live reservations;
+    unused slots spill over. Failed requests preserve reservations.
     """
     now = time.time()
     with closing(connection(root)) as conn, conn:
@@ -426,7 +427,10 @@ def refresh_pending_reviews(root: Path, fetch=None, check_cancel=lambda: None) -
         until = conn.execute("SELECT until FROM cooldowns WHERE resource='review_sync'").fetchone()
         if until and until[0] > now:
             return
-        rows = conn.execute("SELECT id,url,job FROM runs WHERE status='submitted' OR (status='reviewed' AND review_state='') ORDER BY review_checked,started LIMIT 3").fetchall()
+        submitted = conn.execute("SELECT id,url,job FROM runs WHERE status='submitted' ORDER BY review_checked,started,id LIMIT 3").fetchall()
+        historical = conn.execute("SELECT id,url,job FROM runs WHERE status='reviewed' AND review_state='' ORDER BY review_checked,started DESC,id LIMIT 3").fetchall()
+        rows = submitted[:2] + historical[:1]
+        rows += (submitted[2:] + historical[1:])[:3 - len(rows)]
         if not rows:
             return
         conn.execute("INSERT INTO cooldowns VALUES('review_sync',?) ON CONFLICT(resource) DO UPDATE SET until=excluded.until", (now + 30,))
