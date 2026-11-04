@@ -30,7 +30,7 @@ def configured_main_alias(root: Path) -> str:
     for line in lines:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if re.fullmatch(r"model:(?:\s+#.*|\s*)", line):
+        if re.fullmatch(r"model *:(?:\s+#.*|\s*)", line):
             in_model = True
             continue
         if in_model and not line[0].isspace():
@@ -42,7 +42,7 @@ def configured_main_alias(root: Path) -> str:
             if indent != model_indent:
                 continue
             match = re.fullmatch(
-                r"\s+default:\s*(['\"]?)([a-zA-Z0-9._-]+)\1(?:\s+#.*)?\s*", line
+                r"\s+default *:\s*(['\"]?)([a-zA-Z0-9._-]+)\1(?:\s+#.*)?\s*", line
             )
             if match:
                 candidate = match.group(2).lower()
