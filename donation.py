@@ -249,14 +249,19 @@ def local_completion(payload: dict, intensity: str, cancel, on_usage):
     import cloud_ai
 
     profile = PROFILES[intensity]
-    candidates = cloud_ai.Router().local_candidates(profile["size"], cloud_ai.estimated_context(payload))
+    # Whole approved source/test pairs stay available. Local reviews request one
+    # small patch, not the account-backed Full Blast output allowance. Reserve
+    # the actual requested generation plus template/tokenization headroom.
+    output = min(profile["output"], 3072)
+    context = max(8192, cloud_ai.estimated_input_tokens(payload) + output + 1024)
+    candidates = cloud_ai.Router().local_candidates("quick", context)
     if not candidates:
         raise RuntimeError("No suitable installed local model")
     cpus = os.cpu_count() or 2
     threads = min(2, cpus) if intensity == "slow" else max(1, cpus // 2) if intensity == "medium" else cpus
     body = {"model": candidates[0], "messages": payload["messages"], "stream": True,
             "think": False, "format": "json", "options": {"num_thread": threads,
-            "num_predict": profile["output"], "num_ctx": cloud_ai.estimated_context(payload)}}
+            "num_predict": output, "num_ctx": context}}
     if cancel():
         raise InterruptedError("Local donation paused")
     content, final = [], None
@@ -1021,8 +1026,7 @@ class Service:
                     if isinstance(job, dict) else job for job in jobs]
             source_budget = 160_000 if consent["intensity"] == "full_blast" and resource == "chatgpt" else 40_000
             if consent["intensity"] in {"medium", "full_blast"}:
-                jobs = (continuous_jobs(jobs, revision, source_budget=source_budget) if source_budget > 40_000
-                        else continuous_jobs(jobs, revision))
+                jobs = continuous_jobs(jobs, revision, source_budget=source_budget)
             if not jobs:
                 self.message = "Waiting for a maintainer contribution task. Retrying automatically."
                 return

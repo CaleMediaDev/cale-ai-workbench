@@ -1698,3 +1698,38 @@ def test_failed_proposal_syntax_check_never_reports_sent_pr_or_private_model_out
     events=service.drain_events()
     assert [event['phase'] for event in events]==['reviewing','checking','error']
     assert 'PRIVATE_MODEL_OUTPUT' not in json.dumps(events) and not any('pr_url' in event for event in events)
+
+@pytest.mark.parametrize('intensity',['slow','medium','full_blast'])
+def test_local_donation_uses_quick_approved_candidates_with_honest_output_context(intensity):
+    import cloud_ai
+    calls=[]
+    class Stream:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def __iter__(self):yield b'{"done":true,"message":{"content":"{\\"changes\\":[]}"},"prompt_eval_count":10,"eval_count":5}\n'
+    def opened(request,**kwargs):calls.append(json.loads(request.data));return Stream()
+    payload={'messages':[{'role':'user','content':'# Public code\n'+('x'*35000)}]}
+    with patch('cloud_ai.Router.local_candidates',return_value=['approved-local']) as candidates,patch.object(donation,'urlopen',side_effect=opened):
+        donation.local_completion(payload,intensity,lambda:False,lambda *args:None)
+    body=calls[0]
+    assert candidates.call_args.args[0]=='quick'
+    assert body['options']['num_predict']<=3072
+    assert body['options']['num_ctx']>=cloud_ai.estimated_input_tokens(payload)+body['options']['num_predict']+1024
+    assert candidates.call_args.args[1]==body['options']['num_ctx']
+
+
+def test_local_scheduler_keeps_full_40kb_pair_eligibility(tmp_path):
+    donation.set_enabled(True,tmp_path,github_account='donor',sources=['local'],intensity='medium')
+    service=donation.Service(tmp_path)
+    sources={'example.py':SOURCE+'# '+('p'*35000)+'\n','Validation/test_example.py':TEST+'# '+('t'*2000)+'\n'}
+    tree={'tree':[{'type':'blob','path':path,'sha':hashlib.sha1(("blob "+str(len(text.encode()))+'\0').encode()+text.encode()).hexdigest(),'size':len(text.encode())} for path,text in sources.items()]}
+    def public(path,revision):return json.dumps([JOB]) if path=='donation-tasks.json' else sources[path]
+    def api(endpoint):return {'total_count':0} if 'search/' in endpoint else tree if '/git/trees/' in endpoint else COMMIT
+    with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
+         patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
+         patch.object(donation,'public_file',side_effect=public),patch.object(donation,'gh_api',side_effect=api),\
+         patch.object(donation,'complete_donation',return_value={'choices':[{'message':{'content':'{"changes":[]}'}}]}) as inference:
+        service._run(threading.Event())
+    inference.assert_called_once()
+    offered=json.loads(inference.call_args.args[0]['messages'][1]['content'])
+    assert offered['source']==sources and offered['task']['id']==JOB['id']
