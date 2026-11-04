@@ -44,7 +44,10 @@ def _present(text: str, phrase: str) -> bool:
 
 
 def _money(text: str) -> Decimal:
-    match = re.search(r"\$\s*(-?\d[\d,]*(?:\.\d{1,2})?)(?!\d|\.\d)\b", text)
+    match = re.search(
+        r"\$\s*(-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(?!\d|[.,]\d)\b",
+        text,
+    )
     if not match:
         raise ValueError("Calculation phrases need a dollar amount")
     return Decimal(match.group(1).replace(",", ""))
