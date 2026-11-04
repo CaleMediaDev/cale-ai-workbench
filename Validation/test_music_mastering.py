@@ -38,6 +38,40 @@ def test_mastering_preserves_inputs_and_writes_new_result(tmp_path):
     assert reference.read_bytes() == b"reference"
 
 
+def test_mastering_publishes_result_with_non_utf8_worker_diagnostics(tmp_path):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    source.write_bytes(b"source")
+    reference.write_bytes(b"reference")
+    real_run = music_mastering.subprocess.run
+    worker_results = []
+
+    def render(command, **kwargs):
+        staged = command[-1]
+        # Exercise the UTF-8 decoding case independently of the host locale.
+        kwargs.setdefault("encoding", "utf-8")
+        result = real_run(
+            [music_mastering.sys.executable, "-c",
+             "import pathlib, sys; "
+             "pathlib.Path(sys.argv[1]).write_bytes(b'mastered'); "
+             "sys.stderr.buffer.write(bytes([255]))", staged],
+            **kwargs,
+        )
+        worker_results.append(result)
+        return result
+
+    with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
+        music_mastering, "install", return_value=Path("python.exe")
+    ), patch.object(music_mastering.subprocess, "run", side_effect=render):
+        result = music_mastering.master_music(str(source), str(reference), str(output))
+
+    assert Path(result["path"]).read_bytes() == b"mastered"
+    assert worker_results[0].stderr == "\ufffd"
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"reference"
+
+
 def test_mastering_timeout_removes_partial_output_and_preserves_inputs(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"

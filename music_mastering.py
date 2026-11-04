@@ -76,6 +76,7 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
         result = subprocess.run(
             [str(python), str(Path(__file__).resolve()), "--worker", str(source),
              str(reference), str(staged)], capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
             timeout=3600, creationflags=HIDE,
         )
         if result.returncode or not staged.is_file() or staged.stat().st_size == 0:
