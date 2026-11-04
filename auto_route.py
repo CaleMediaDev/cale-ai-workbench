@@ -160,7 +160,7 @@ def repeated_tool_failures(messages):
                                          result.get("ok") is False or
                                          result.get("passed") is False or
                                          result.get("status") in ("blocked", "failed", "error") or
-                                         isinstance(result.get("exit_code"), int)
+                                         type(result.get("exit_code")) is int
                                          and result["exit_code"] != 0):
             failures += 1
         else:
