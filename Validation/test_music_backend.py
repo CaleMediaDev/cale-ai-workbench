@@ -847,6 +847,32 @@ def test_explicit_singer_overrides_wrong_instrumental_tool_argument(tmp_path):
         assert music_backend.music_job_status(started["job_id"])["instrumental"] is False
 
 
+def test_durable_reference_path_survives_worker_directory_change(tmp_path, monkeypatch):
+    submission_dir = tmp_path / "submission"
+    submission_dir.mkdir()
+    reference = submission_dir / "reference.wav"
+    reference.write_bytes(b"reference audio")
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    output = tmp_path / "cover.mp3"
+    monkeypatch.chdir(submission_dir)
+    with (patch.object(music_backend, "JOBS", tmp_path / "jobs"),
+          patch.object(music_backend, "_launch_job"),
+          patch.object(music_backend, "audio_duration_seconds", return_value=30)):
+        started = music_backend.start_music_job(
+            "instrumental jazz cover", str(output), instrumental=True,
+            source_path="reference.wav", make_video=False,
+        )
+        saved = music_backend.music_job_status(started["job_id"])
+        assert saved["source_path"] == str(reference)
+        monkeypatch.chdir(worker_dir)
+        with patch.object(music_backend, "generate_music",
+                          return_value={"path": str(output)}) as generate:
+            music_backend._run_job(started["job_id"])
+        assert generate.call_args.args[5] == str(reference)
+        assert music_backend.music_job_status(started["job_id"])["status"] == "complete"
+
+
 def test_music_job_id_cannot_escape_job_directory():
     with pytest.raises(ValueError, match="Invalid local music job ID"):
         music_backend.music_job_status("../outside")

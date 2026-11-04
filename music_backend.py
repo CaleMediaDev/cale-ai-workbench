@@ -1038,8 +1038,10 @@ def start_music_job(
                         Path(source_path).suffix.lower() not in
                         AUDIO_REFERENCES | TRANSCODE_AUDIO_REFERENCES | VIDEO_REFERENCES):
         raise ValueError("Choose an existing audio or video reference file.")
+    # Workers run from ROOT, which may differ from the submitting process's cwd.
+    source_path = str(Path(source_path).resolve()) if source_path else ""
     reference_mode = effective_reference_mode(
-        Path(source_path).resolve() if source_path else None,
+        Path(source_path) if source_path else None,
         duration_seconds, reference_mode,
     )
     job_id = uuid.uuid4().hex
