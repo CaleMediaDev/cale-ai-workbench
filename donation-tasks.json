@@ -63,7 +63,7 @@
     "id": "project-memory-search",
     "title": "Keep fast project memory searchable and consistent",
     "instructions": "Inspect SQLite writes, search ranking and bounded memory retrieval for reproducible stale, missing or inconsistent results. Add a focused regression test. Preserve storage compatibility, parameterized queries and local-only project data.",
-    "paths": ["project_memory.py", "Validation/test_project_memory.py"]
+    "paths": ["project_memory.py", "Validation/test_project_memory_contributions.py"]
   },
   {
     "id": "runtime-error-episodes",
