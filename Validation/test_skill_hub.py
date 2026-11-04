@@ -36,6 +36,23 @@ class SkillHubTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[0].args[0:2], ("search", "accessibility"))
         self.assertEqual(run.call_args_list[2].args, ("install", identifier, "--yes"))
 
+    def test_search_rejects_boundary_control_characters_before_trimming(self):
+        with patch.object(skill_hub, "_run", return_value="[]") as run:
+            for control in ("\n", "\r", "\t", "\x0b", "\x0c", "\x1f"):
+                for query in (control + "accessibility", "accessibility" + control):
+                    with self.subTest(query=repr(query)):
+                        with self.assertRaisesRegex(ValueError, "control characters"):
+                            skill_hub.search(query)
+            run.assert_not_called()
+            self.assertEqual(skill_hub.SEEN, {})
+            self.assertEqual(skill_hub.INSPECTED, {})
+
+            skill_hub.search("  accessibility  ")
+            run.assert_called_once_with(
+                "search", "accessibility", "--source", "skills-sh",
+                "--limit", "5", "--json",
+            )
+
     def test_search_matches_non_ascii_topic(self):
         identifier = "skills-sh/example/translation"
         payload = json.dumps([
