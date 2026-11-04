@@ -1,7 +1,7 @@
 """Voice control uses the local media worker and bounds recorded clips."""
 
-import json
 import io
+import json
 import os
 import subprocess
 import sys
