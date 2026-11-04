@@ -112,6 +112,35 @@ def test_edit_video_original_layout_pads_odd_dimensions(tmp_path):
     assert source.read_bytes() == original
 
 
+@pytest.mark.parametrize("operation", ["edit", "join"])
+def test_fixed_layout_preserves_anamorphic_display_proportions(tmp_path, operation):
+    executable = imageio_ffmpeg.get_ffmpeg_exe()
+    source = tmp_path / "anamorphic.mp4"
+    output = tmp_path / "square.mp4"
+    subprocess.run([
+        executable, "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "color=c=white:s=160x90:r=10:d=0.5",
+        "-vf", "setsar=2", "-c:v", "libx264", str(source),
+    ], check=True, capture_output=True, timeout=30)
+
+    if operation == "edit":
+        video_edit.edit_video(str(source), str(output), layout="square")
+    else:
+        video_edit.join_videos([str(source), str(source)], str(output), layout="square")
+
+    frame = subprocess.run([
+        executable, "-hide_banner", "-loglevel", "error", "-i", str(output),
+        "-map", "0:v:0", "-frames:v", "1", "-pix_fmt", "gray",
+        "-f", "rawvideo", "pipe:1",
+    ], check=True, capture_output=True, timeout=30)
+    assert len(frame.stdout) == 1080 * 1080
+    # Display aspect is (160 * 2) / 90, not 160 / 90. In a
+    # 1080-square canvas the white picture must be about 304 pixels high.
+    white_rows = [y for y in range(1080) if frame.stdout[y * 1080 + 540] > 200]
+    assert len(white_rows) == pytest.approx(1080 * 90 / 320, abs=3)
+    assert (white_rows[0] + white_rows[-1]) / 2 == pytest.approx(539.5, abs=2)
+
+
 def test_edit_video_extreme_speed_chains_atempo(tmp_path):
     """Speed 0.25 and 4.0 should work by chaining atempo filters."""
     clip = tmp_path / "clip.mp4"
