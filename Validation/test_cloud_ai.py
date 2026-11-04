@@ -571,6 +571,39 @@ class CloudTests(unittest.TestCase):
         paid.assert_not_called()
         local.assert_not_called()
 
+    def test_free_cloud_refusal_and_answer_each_record_reported_usage_once(self):
+        from contextlib import closing
+
+        import usage_history
+
+        cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
+        cloud.save_provider_key("groq", "gsk_test_secret_value", True)
+        with patch.object(usage_history, "DATABASE", Path(self.temp.name) / "usage.db"):
+            projects = cloud.ROOT / "LongTasks/projects.db"
+            projects.parent.mkdir(parents=True, exist_ok=True)
+            with closing(sqlite3.connect(projects)) as conn, conn:
+                conn.execute("CREATE TABLE projects(id TEXT PRIMARY KEY, ai_route TEXT)")
+                conn.execute("INSERT INTO projects VALUES('abcdef123456','automatic')")
+            for index, reply in enumerate((REFUSAL, ANSWER), 1):
+                reported = {**reply, "usage": {
+                    "prompt_tokens": 13, "completion_tokens": 7, "total_tokens": 20}}
+                with (patch.object(cloud_providers, "complete", return_value=(reported, .5)),
+                      patch("chatgpt_auth.complete") as paid,
+                      patch.object(cloud, "post") as local):
+                    if reply is REFUSAL:
+                        with self.assertRaisesRegex(RuntimeError, "Free cloud only is selected"):
+                            cloud.Router().complete(REQUEST, "abcdef123456")
+                    else:
+                        self.assertEqual(cloud.Router().complete(REQUEST, "abcdef123456"), reported)
+                paid.assert_not_called()
+                local.assert_not_called()
+                self.assertEqual(usage_history.task_totals(), {"abcdef123456": 20 * index})
+                with closing(sqlite3.connect(usage_history.DATABASE)) as conn:
+                    self.assertEqual(conn.execute(
+                        "SELECT source,prompt_tokens,completion_tokens,total_tokens,tokens_per_second "
+                        "FROM usage_events ORDER BY id").fetchall(),
+                        [("groq", 13, 7, 20, 14.0)] * index)
+
     def test_cloud_only_does_not_fall_back_to_local(self):
         with (tempfile.TemporaryDirectory() as directory,
               patch.object(cloud, "STATE", Path(directory)),

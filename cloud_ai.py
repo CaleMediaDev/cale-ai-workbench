@@ -1315,12 +1315,13 @@ class Router:
                         provider, provider_key, payload,
                         account_id=(account.get("provider_accounts") or {}).get(provider, ""))
                     result = valid_completion(result, payload)
+                    # A declined answer still consumed the provider-reported tokens.
+                    usage_history.record_completion(result, provider, elapsed)
                     if free_cloud_only and is_refusal(result):
                         routing_memory.record(provider, size, "refusal")
                         reason = "Connected free cloud models declined this request."
                         continue
                     routing_memory.record(provider, size, "success")
-                    usage_history.record_completion(result, provider, elapsed)
                     record(provider, "Connected free-plan cloud response received.",
                            result.get("model", spec["model"]))
                     return (result if free_cloud_only else retry_derestricted(
