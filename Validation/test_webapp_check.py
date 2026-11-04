@@ -1074,6 +1074,39 @@ def test_repair_request_errors_do_not_resurrect_superseded_failure(tmp_path, inv
     assert "malformed checker arguments" in summary and "Old behavior sentinel" not in summary
 
 
+def test_explicit_visibility_id_revision_replaces_wrong_targets_and_preserves_other_checks(tmp_path):
+    """A checksum-bound rename must not union the broken IDs back into the suite."""
+    import hashlib
+    source = '''<form id="expense-form"><input id="amount" value="1"></form>
+        <table id="expense-table"><tr><td>Ready</td></tr></table>
+        <p id="error" hidden>Invalid</p><p id="total">1</p>
+        <script>document.getElementById('amount').oninput=e=>
+            document.getElementById('total').textContent=e.target.value;</script>'''
+    (tmp_path / "index.html").write_text(source)
+    original = {"path": "index.html", "cases": [
+        {"visible": ["form", "table"], "hidden": ["error"], "expect": {"total": "1"}},
+        {"set": {"amount": "2"}, "expect": {"total": "2"}}]}
+    unrelated = {"path": "index.html", "viewport_width": 800,
+                 "cases": [{"visible": ["expense-form"], "mobile_fit": True}]}
+    webapp_check.save_verifier(tmp_path, original, accumulate=True)
+    webapp_check.save_verifier(tmp_path, unrelated, accumulate=True)
+    spec_file = tmp_path / ".local-ai/webapp-check.json"
+    before = json.loads(spec_file.read_text())
+    revision = {"path": "index.html", "saved_sequence": 1, "saved_case": 1,
+                "suite_sha256": hashlib.sha256(spec_file.read_bytes()).hexdigest(),
+                "cases": [{"visible": ["expense-form", "expense-table"]}]}
+    item = {"id": "renamed-visible-targets", "folder": str(tmp_path)}
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", revision))
+    assert result["passed"] and result["verifier_check_passed"]
+    after = json.loads(spec_file.read_text())
+    repaired = after["checks"][-1]
+    assert after["checks"][0] == before["checks"][1]
+    assert repaired["cases"][1] == original["cases"][1]
+    assert repaired["cases"][0] == {**original["cases"][0], "visible": ["expense-form", "expense-table"]}
+    assert (tmp_path / "index.html").read_text() == source
+
+
 def test_case_revision_rejects_stale_input_edits_custom_verifiers_and_changed_instructions(tmp_path):
     import hashlib
 

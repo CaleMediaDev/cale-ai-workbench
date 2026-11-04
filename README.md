@@ -212,6 +212,19 @@ suite creates a repeatable check, not a success claim. Failed assertion revision
 do not replace earlier assertions, custom verifiers remain untouched, and checks
 superseded by changed user instructions are not saved under the new request.
 
+After a failed structured step, focused turns offer `task_steps action=revise_check`
+to correct only its typed checker arguments. The saved phase, title, checker,
+path and function remain fixed; ordinary revision tools return periodically.
+The operation does not complete a step. Browser failures immediately include
+the checksum-bound saved-case reference needed for an explicit assertion repair.
+Such repairs replace the selected mistaken assertions while preserving unrelated
+assertions, cases, input actions and sequences.
+When an explicit owned-browser assertion revision passes, the native worker can
+align its matching active SQLite check to the corrected arguments. This requires
+the same request, page, input sequence and original active check; changes after
+the check, stale bindings and unrelated sequences cannot advance progress. Alignment itself
+does not complete the step: its acceptance check must still run and pass.
+
 The browser helper retains up to 32 independent sequences and 128 cases, within
 its existing 64 KB specification and 10-second explicit-wait budgets. Replay
 uses one browser process and a fresh offline context per sequence: tests cannot

@@ -34,6 +34,9 @@ MAX_TOOL_OUTPUT = 16_000
 RECENT_WORK_GROUPS = 4
 MAX_READ_LINE = 4000
 PROJECT_COMMAND_TIMEOUT = 90
+# Single-use handles are injected after inference, never advertised as tool
+# arguments. Model-supplied JSON cannot forge a trusted active-step binding.
+_BROWSER_REVISION_BINDINGS = {}
 
 TOOLS = [
     {"type": "function", "function": {
@@ -649,6 +652,25 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     raise ValueError("Supply the active step_id to revise.")
                 value = task_context.revise_step(folder, arguments["step_id"], arguments.get("steps"),
                     expected_request=arguments.get("_expected_request"), expected_check=arguments.get("_expected_check"))
+            elif action == "revise_check":
+                if set(arguments) - {"action", "step_id", "check_arguments", "_expected_request", "_expected_check"}:
+                    raise ValueError("revise_check changes only the active check_arguments; use ordinary revise for a different step or checker.")
+                request_hash = task_context.request_identity(folder)
+                active = task_context.step_status(folder)["active"]
+                if (not active or type(arguments.get("step_id")) is not int
+                        or arguments["step_id"] != active["id"] or not failed_structured_step(active)):
+                    raise ValueError("revise_check requires the current active step_id and a failed structured acceptance attempt.")
+                check_args = arguments.get("check_arguments")
+                if not isinstance(check_args, dict):
+                    raise ValueError("Supply the complete typed check_arguments object.")
+                for field in ("path", "function"):
+                    if check_args.get(field) != active["check_arguments"].get(field):
+                        raise ValueError(f"revise_check preserves the saved {field}; use ordinary revise deliberately for a different target.")
+                replacement = {"phase": active["phase"], "title": active["title"],
+                               "check_tool": active["check_tool"], "check_arguments": check_args}
+                value = task_context.revise_step(folder, active["id"], [replacement],
+                    expected_request=arguments.get("_expected_request", request_hash),
+                    expected_check=arguments.get("_expected_check", task_context.step_check_identity(active)))
             elif action == "scope":
                 import long_tasks
 
@@ -729,8 +751,9 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     if not value["passed"]:
                         value["next_action"] = (
                             "Compare the failed case with the original requirement. Fix source if it is wrong. "
-                            "If the expected value is wrong, use task_steps action=revise with step_id="
-                            f"{active['id']} and steps=[one corrected step including all its acceptance cases]. "
+                            "If the check arguments are wrong, the next focused turn offers task_steps action=revise_check "
+                            f"with step_id={active['id']} and check_arguments containing all corrected acceptance cases. "
+                            "Use ordinary revise deliberately to change its path/function or checker. "
                             "Then complete that step again. Editing generated checker JSON does not revise "
                             "the acceptance cases saved in SQLite.")
                         reference = verdict.get("assertion_revision_reference")
@@ -824,9 +847,22 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             import task_context
             import webapp_check
 
+            arguments = dict(arguments)
+            revision_binding = take_browser_revision_binding(folder, arguments)
             native_browser.close()
             revision = None
+            old_sequence = None
             if any(name in arguments for name in ("saved_sequence", "saved_case", "suite_sha256")):
+                if revision_binding:
+                    saved_path = folder / ".local-ai/webapp-check.json"
+                    if saved_path.is_file() and not saved_path.is_symlink() and saved_path.stat().st_size <= 64000:
+                        raw = saved_path.read_bytes()
+                        if hashlib.sha256(raw).hexdigest() == arguments.get("suite_sha256"):
+                            saved = json.loads(raw)
+                            sequence = arguments.get("saved_sequence")
+                            checks = saved.get("checks", [])
+                            if type(sequence) is int and isinstance(checks, list) and 1 <= sequence <= len(checks):
+                                old_sequence = copy.deepcopy(checks[sequence - 1])
                 arguments, revision = webapp_check.prepare_assertion_revision(folder, arguments)
             check_request = task_context.request_identity(folder)
             result = webapp_check.check(folder, arguments, screenshot=True)
@@ -911,6 +947,27 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             if saved.is_file() and saved.stat().st_size <= 64000:
                 raw = saved.read_bytes()
                 result["suite_sha256"] = hashlib.sha256(raw).hexdigest()
+                if result.get("failed_cases_retained") and not revision:
+                    # The first failed check already saved an owned sequence.
+                    # Give it a precise revision reference immediately instead
+                    # of requiring a later unrelated success to rediscover it.
+                    try:
+                        suite = json.loads(raw)
+                        def input_identity(spec):
+                            normalized = webapp_check.normalize_spec(spec)
+                            inputs = [{key: case.get(key, default) for key, default in (
+                                ("reload", False), ("set", {}), ("click", []), ("keys", []), ("wait_ms", 0))}
+                                for case in normalized["cases"]]
+                            return (project_path(folder, normalized["path"]), normalized.get("viewport_width", 375),
+                                    json.dumps(inputs, sort_keys=True))
+                        matches = [number for number, spec in enumerate(suite.get("checks", []), 1)
+                                   if input_identity(spec) == input_identity(arguments)]
+                        if (suite.get("suite_version") == 1 and suite.get("request_hash") == check_request
+                                and len(matches) == 1):
+                            result["cases"] = [{**case, "path": arguments["path"], "saved_sequence": matches[0]}
+                                               for case in result.get("cases", [])]
+                    except (ValueError, TypeError, KeyError, OSError):
+                        pass  # Optional metadata must not change the failed verdict.
                 if revision:
                     result["revision"] = revision
                     if result.get("verifier_saved"):
@@ -937,6 +994,11 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                         "with this reference and cases=[one corrected assertion-only case]. A suggested hidden "
                         "assertion is appropriate only when the user requires hiding rather than clearing text. "
                         "The checker retains input actions and unrelated assertions; it does not repair source bugs.")
+            if revision_binding and revision:
+                aligned, reason = align_browser_step_revision(folder, revision_binding, old_sequence, arguments,
+                    result, before_step_commit=before_step_commit)
+                result["active_step_check_aligned"] = aligned
+                result["active_step_alignment"] = reason
             result["ok"] = result["passed"]
             return webapp_check.serialize_result(result, MAX_TOOL_OUTPUT)
         if name == "create_game_starter":
@@ -2047,6 +2109,121 @@ def step_tools(project: dict, state: dict, available: list) -> list:
     return [tool for tool in available if tool["function"]["name"] in core]
 
 
+def bind_browser_assertion_revision(folder: Path, arguments: dict, planned_step: dict | None,
+                                    request_hash: str) -> dict:
+    """Bind an explicit saved-case repair to the exact active check inference saw.
+
+    An opaque single-use runtime handle keeps model-controlled JSON from
+    inventing a binding. Unrelated pages and ordinary calls retain their public
+    checker behavior and cannot synchronize SQLite acceptance as a side effect.
+    """
+    import task_context
+
+    if "_active_browser_revision" in arguments:
+        raise ValueError("Active browser revision bindings are supplied by the worker, not tool arguments.")
+    if (not all(name in arguments for name in ("saved_sequence", "saved_case", "suite_sha256"))
+            or not planned_step or planned_step.get("check_tool") != "check_webapp"):
+        return arguments
+    if request_hash != task_context.request_identity(folder):
+        raise ValueError("User instructions changed before the browser assertion revision; read the fresh checkpoint.")
+    active = task_context.step_status(folder)["active"]
+    if not active or task_context.step_check_identity(active) != task_context.step_check_identity(planned_step):
+        raise ValueError("The active browser check changed before the assertion revision; read the fresh checkpoint.")
+    if project_path(folder, arguments.get("path")) != project_path(folder, active["check_arguments"]["path"]):
+        return arguments
+    now = time.monotonic()
+    for token, binding in list(_BROWSER_REVISION_BINDINGS.items()):
+        if binding["expires"] < now:
+            _BROWSER_REVISION_BINDINGS.pop(token, None)
+    while len(_BROWSER_REVISION_BINDINGS) >= 128:
+        _BROWSER_REVISION_BINDINGS.pop(next(iter(_BROWSER_REVISION_BINDINGS)))
+    token = os.urandom(24).hex()
+    _BROWSER_REVISION_BINDINGS[token] = {"folder": str(folder.resolve()), "request": request_hash,
+        "check": task_context.step_check_identity(active), "active": copy.deepcopy(active), "expires": now + 180}
+    return {**arguments, "_active_browser_revision": token}
+
+
+def take_browser_revision_binding(folder: Path, arguments: dict) -> dict | None:
+    """Consume a genuine worker handle before normalizing public checker data."""
+    if "_active_browser_revision" not in arguments:
+        return None
+    token = arguments.pop("_active_browser_revision")
+    binding = _BROWSER_REVISION_BINDINGS.pop(token, None) if isinstance(token, str) else None
+    if not binding or binding["expires"] < time.monotonic() or binding["folder"] != str(folder.resolve()):
+        raise ValueError("The browser assertion revision binding is missing, expired or already used; read the fresh checkpoint.")
+    return binding
+
+
+def browser_revision_matches_step(folder: Path, active: dict, old_sequence: dict | None) -> bool:
+    """Link only the same page, viewport, input sequence and retained assertions."""
+    import webapp_check
+
+    if not isinstance(old_sequence, dict):
+        return False
+    try:
+        planned = webapp_check.normalize_spec(active["check_arguments"])
+        old = webapp_check.normalize_spec(old_sequence)
+        if (project_path(folder, planned["path"]) != project_path(folder, old["path"])
+                or planned.get("viewport_width", 375) != old.get("viewport_width", 375)
+                or len(planned["cases"]) != len(old["cases"])):
+            return False
+        if "mobile_fit" in planned and planned["mobile_fit"] != old.get("mobile_fit"):
+            return False
+        for current, retained in zip(planned["cases"], old["cases"], strict=True):
+            for key, default in (("reload", False), ("set", {}), ("click", []), ("keys", []), ("wait_ms", 0)):
+                if current.get(key, default) != retained.get(key, default):
+                    return False
+            for key in ("expect", "state"):
+                if any(name not in retained.get(key, {}) or retained[key][name] != value
+                       for name, value in current.get(key, {}).items()):
+                    return False
+            for key in ("visible", "hidden"):
+                if not set(current.get(key, [])) <= set(retained.get(key, [])):
+                    return False
+            if "mobile_fit" in current and current["mobile_fit"] != retained.get("mobile_fit"):
+                return False
+        return True
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
+def align_browser_step_revision(folder: Path, binding: dict, old_sequence: dict | None,
+                                corrected: dict, result: dict, *, before_step_commit=None) -> tuple[bool, str]:
+    """Synchronize linked acceptance after an explicit, actually passing repair.
+
+    No step completes here. The replacement retains its metadata and all cases
+    prepared for the repaired owned sequence; SQL rechecks request/check identity
+    while holding its write transaction. Raw public checker calls never bind.
+    """
+    import task_context
+
+    if not (result.get("passed") is True and result.get("verifier_saved") is True
+            and result.get("verifier_check_passed") is True):
+        return False, "Explicit browser revision did not pass its owned verifier; SQLite acceptance unchanged."
+    if not browser_revision_matches_step(folder, binding["active"], old_sequence):
+        return False, "The selected saved sequence is not the active acceptance sequence; SQLite unchanged."
+    if before_step_commit is not None and not before_step_commit():
+        return False, "Task control changed; SQLite acceptance unchanged."
+    try:
+        if (binding["request"] != task_context.request_identity(folder)
+                or hashlib.sha256(project_path(folder, corrected["path"]).read_bytes()).hexdigest() != result.get("page_sha256")):
+            return False, "User instructions or HTML changed; SQLite acceptance unchanged."
+        active = binding["active"]
+        replacement = {"phase": active["phase"], "title": active["title"],
+                       "check_tool": active["check_tool"], "check_arguments": corrected}
+        task_context.revise_step(folder, active["id"], [replacement],
+            expected_request=binding["request"], expected_check=binding["check"])
+        return True, "Active SQLite acceptance now matches the explicit repaired browser sequence; not yet completed."
+    except (ValueError, OSError) as error:
+        return False, "SQLite acceptance unchanged: " + str(error)[:180]
+
+
+def failed_structured_step(active: dict) -> bool:
+    """Offer argument repair only after a real failed acceptance attempt."""
+    return (active.get("check_tool") in {"check_python_function", "check_javascript_function", "check_webapp"}
+            and int(active.get("attempts", 0)) > 0 and str(active.get("evidence", "")).startswith("Check failed;"))
+
+
 def acceptance_repair_tools(project: dict, state: dict, available: list) -> list:
     """Give invalid legacy acceptance a precise, bounded repair operation.
 
@@ -2063,7 +2240,6 @@ def acceptance_repair_tools(project: dict, state: dict, available: list) -> list
                  else active["check_arguments"])
     try:
         task_context.validate_repeatable_check(active["check_tool"], arguments)
-        return available
     except ValueError:
         focused = []
         for tool in available:
@@ -2080,6 +2256,41 @@ def acceptance_repair_tools(project: dict, state: dict, available: list) -> list
                     "the step; its actual check must still pass. Read source or run checks first if needed.")
             focused.append(tool)
         return focused
+    if not failed_structured_step(active):
+        return available
+    # A small model need not regenerate phase/title/checker wrappers just to
+    # repair mistaken IDs or expected data. Only this active typed contract is
+    # advertised; the global tools and periodic full-discovery turn stay intact.
+    steps_schema = next(tool["function"]["parameters"] for tool in TOOLS
+                        if tool["function"]["name"] == "task_steps")
+    branch = next(branch for branch in steps_schema["properties"]["steps"]["items"]["anyOf"]
+                  if branch["properties"].get("check_tool", {}).get("enum") == [active["check_tool"]])
+    check_schema = copy.deepcopy(branch["properties"]["check_arguments"])
+    for field in ("path", "function"):
+        if field in active["check_arguments"]:
+            check_schema["properties"][field]["const"] = active["check_arguments"][field]
+    focused = []
+    for tool in available:
+        if tool["function"]["name"] == "task_steps":
+            tool = copy.deepcopy(tool)
+            tool["function"]["parameters"] = {
+                "type": "object", "properties": {
+                    "action": {"type": "string", "enum": ["complete", "revise_check"]},
+                    "step_id": {"type": "integer", "const": active["id"]},
+                    "check_arguments": check_schema},
+                "required": ["action"], "additionalProperties": False,
+                "anyOf": [
+                    {"properties": {"action": {"const": "complete"}, "step_id": {}},
+                     "additionalProperties": False},
+                    {"properties": {"action": {"const": "revise_check"}, "step_id": {}, "check_arguments": {}},
+                     "required": ["check_arguments"], "additionalProperties": False}]}
+            tool["function"]["description"] = (
+                "complete runs the saved active check. revise_check repairs only its check_arguments after failure; "
+                "keep the original requirement and all needed cases. Same path/function, phase, title and checker stay fixed. "
+                "A revision does not pass or complete the step. Retained browser assertions need a separate explicit "
+                "check_webapp revision. Source/check tools remain available.")
+        focused.append(tool)
+    return focused
 
 
 def step_source_fingerprint(folder: Path, structured: bool = False):
@@ -2099,8 +2310,9 @@ def bind_step_completion(folder: Path, arguments: dict, planned_step: dict | Non
     Source edits remain allowed: the existing checker must validate them.
     """
     action = arguments.get("action")
+    narrow_revision = action == "revise_check"
     shorthand = (arguments == {"action": "complete"} or
-                 action in {"split", "revise"} and set(arguments) == {"action", "steps"})
+                 action in {"split", "revise"} and set(arguments) == {"action", "steps"} or narrow_revision)
     if not shorthand:
         return arguments
     import task_context
@@ -2110,6 +2322,10 @@ def bind_step_completion(folder: Path, arguments: dict, planned_step: dict | Non
     active = task_context.step_status(folder)["active"]
     if not active or task_context.step_check_identity(active) != task_context.step_check_identity(planned_step):
         raise ValueError("The active step or its acceptance check changed; read the fresh checkpoint before completing it")
+    if narrow_revision:
+        if (set(arguments) - {"action", "step_id", "check_arguments"}
+                or "step_id" in arguments and (type(arguments["step_id"]) is not int or arguments["step_id"] != planned_step["id"])):
+            raise ValueError("revise_check must target the exact active step shown; use only check_arguments and its step_id.")
     bound = {**arguments, "step_id": planned_step["id"],
              "_expected_check": task_context.step_check_identity(planned_step)}
     if action != "complete":
@@ -2155,6 +2371,23 @@ def step_exit_result(kind: str, result: str) -> str:
                 targets = inventory.get("targets", [])
                 if not isinstance(targets, list) or not targets:
                     continue
+                failed_targets = set()
+                for failure in (case.get("failures") or [])[:16]:
+                    text = str(failure)[:500]
+                    match = re.search(r"^'([^']{1,64})' visibility|#([A-Za-z][A-Za-z0-9_-]{0,63})", text)
+                    if match:
+                        failed_targets.add((match[1] or match[2]).casefold())
+                def relevance(target):
+                    if not isinstance(target, dict):
+                        return 2
+                    identity = str(target.get("id") or "").casefold()
+                    names = {identity, str(target.get("tag", "")).casefold(),
+                             str(target.get("role", "")).casefold()}
+                    return 0 if names & failed_targets or any(
+                        identity.endswith("-" + name) for name in failed_targets) else 1
+                # Keep the observed counterpart of each failed target ahead
+                # of unrelated controls when the durable SQL excerpt is tiny.
+                targets = sorted(targets[:16], key=relevance)
                 observed = [{"id": str(t["id"])[:48] if t.get("id") else None,
                              "tag": str(t.get("tag", ""))[:20]}
                             for t in targets[:5] if isinstance(t, dict)]
@@ -3962,6 +4195,8 @@ def run_slice(project: dict, complete=None) -> dict:
                                      "repair/check tools; full discovery tools return periodically.")
                 if function.get("name") == "task_steps" and not step_boundary:
                     args = bind_step_completion(folder, args, planned_step, planned_request_hash)
+                if function.get("name") == "check_webapp" and not step_boundary:
+                    args = bind_browser_assertion_revision(folder, args, planned_step, planned_request_hash)
                 signature = hashlib.sha256((
                     str(function.get("name") or "") + "\0" +
                     json.dumps(args, sort_keys=True, ensure_ascii=False)
@@ -3983,7 +4218,21 @@ def run_slice(project: dict, complete=None) -> dict:
                               "Inspect the earlier error or change the method or arguments.")
                 else:
                     step_check = step_check_context(folder, function.get("name", ""), args)
-                    result = execute_tool(folder, function.get("name", ""), args)
+                    if function.get("name") == "check_webapp" and "_active_browser_revision" in args:
+                        def revision_commit_allowed():
+                            import long_tasks
+
+                            try:
+                                return (read_state(project).get("status") not in {"paused", "stopped", "done"}
+                                        and user_request_stamp(folder) == request_before
+                                        and any(item.get("id") == project["id"] and item.get("folder")
+                                                and Path(item["folder"]).resolve() == folder.resolve()
+                                                for item in long_tasks.projects()))
+                            except (OSError, ValueError, TypeError, sqlite3.Error):
+                                return False
+                        result = execute_tool(folder, "check_webapp", args, before_step_commit=revision_commit_allowed)
+                    else:
+                        result = execute_tool(folder, function.get("name", ""), args)
                     if step_check:
                         import task_context
 
@@ -4009,6 +4258,10 @@ def run_slice(project: dict, complete=None) -> dict:
 
             task_context.record_action(folder, function.get("name", ""), result, args,
                                        request_hash=planned_request_hash)
+            if function.get("name") == "check_webapp" and "_active_browser_revision" in args:
+                latest = read_state(project)
+                if latest.get("status") in {"paused", "stopped", "done"}:
+                    return latest  # Do not overwrite a control change observed by the commit guard.
             outcome = task_context.action_outcome(function.get("name", ""), result)
             if function.get("name") == "create_game_starter" and outcome == "Completed":
                 created = json.loads(result)
@@ -4023,8 +4276,13 @@ def run_slice(project: dict, complete=None) -> dict:
                 elif args.get("action") == "plan" and outcome.startswith("Failed"):
                     state["uncreated_step_plan"] = {"request_hash": planned_request_hash, "error": result[:700]}
             if function.get("name") == "task_steps" and outcome == "Completed":
-                step_boundary = args.get("action") in {"plan", "split", "revise", "scope"} or (
+                step_boundary = args.get("action") in {"plan", "split", "revise", "revise_check", "scope"} or (
                     args.get("action") == "complete" and json.loads(result).get("passed") is True)
+            if function.get("name") == "check_webapp" and outcome == "Completed":
+                try:
+                    step_boundary = step_boundary or json.loads(result).get("active_step_check_aligned") is True
+                except (ValueError, AttributeError):
+                    pass
             read_cycle_notice = remember_read_cycle(
                 state, function.get("name", ""), args, result, outcome) or read_cycle_notice
             remember_checker_verdict(state, function.get("name", ""), args, result)

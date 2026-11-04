@@ -72,6 +72,50 @@ def test_failed_browser_target_inventory_survives_bounded_sql_evidence(tmp_path)
     assert task_context.step_status(tmp_path)["done"] == 0
 
 
+def test_failed_target_counterparts_are_prioritized_in_small_sql_excerpt(tmp_path):
+    active = task_context.plan_steps(tmp_path, [queue_step("Show form and table", "exit 9")])["active"]
+    inventory = [{"id": f"unrelated-{i}", "tag": "input"} for i in range(8)]
+    inventory += [{"id": "expense-form", "tag": "form"}, {"id": "expense-table", "tag": "table"}]
+    verdict = {"passed": False, "cases": [{"passed": False, "case": 1,
+        "failures": ["'form' visibility was wrong: expected visible, observed hidden or missing",
+                     "'table' visibility was wrong: expected visible, observed hidden or missing"],
+        "target_inventory": {"targets": inventory}}]}
+    result = native_agent.step_exit_result("check_webapp", json.dumps(verdict))
+    task_context.record_step_check(tmp_path, active["id"], task_context.request_identity(tmp_path),
+                                   result, unchanged=True)
+    evidence = task_context.step_status(tmp_path)["active"]["evidence"]
+    assert "expense-form" in evidence and "expense-table" in evidence
+    if "unrelated-" in evidence:
+        assert evidence.index("expense-table") < evidence.index("unrelated-")
+    assert task_context.step_status(tmp_path)["done"] == 0
+
+
+def test_first_failed_browser_check_has_exact_owned_sequence_revision_reference(tmp_path, tmp_path_factory, monkeypatch):
+    supervisor = tmp_path_factory.mktemp("reference-supervisor")
+    monkeypatch.setattr(long_tasks, "projects", lambda: [{"id": "reference", "folder": str(tmp_path), "brief": "Verify form and table"}])
+    monkeypatch.setattr(long_tasks, "STATE", supervisor)
+    (tmp_path / "index.html").write_text('<h1 id="heading">Expenses</h1><form id="expense-form">'
+        '<button>Add expense</button></form><table id="expense-table"><tr><th>Amount</th></tr></table>')
+    first = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", {
+        "path": "index.html", "viewport_width": 900, "cases": [{"visible": ["heading"]}]}))
+    assert first["passed"], first
+    failed = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", {
+        "path": "index.html", "cases": [{"visible": ["form", "table"]}]}))
+    assert failed["passed"] is False and failed["failed_cases_retained"]
+    reference = failed["assertion_revision_reference"]
+    saved_path = tmp_path / ".local-ai/webapp-check.json"
+    suite = json.loads(saved_path.read_text())
+    assert reference["saved_sequence"] == 2 and reference["saved_case"] == 1
+    assert reference["suite_sha256"] == hashlib.sha256(saved_path.read_bytes()).hexdigest()
+    assert suite["checks"][1]["cases"][0]["visible"] == ["form", "table"]
+    corrected = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", {
+        **reference, "cases": [{"visible": ["expense-form", "expense-table"]}]}))
+    assert corrected["passed"] and corrected["verifier_check_passed"]
+    suite = json.loads(saved_path.read_text())
+    assert len(suite["checks"]) == 2
+    assert suite["checks"][0]["cases"][0]["visible"] == ["heading"]
+
+
 def test_step_completion_keeps_observed_target_inventory_for_next_model_turn(tmp_path):
     (tmp_path / "index.html").write_text('<form id="expense-form"><button>Add expense</button></form>')
     active = task_context.plan_steps(tmp_path, [{"phase": "Page", "title": "Show form",
@@ -1640,6 +1684,268 @@ def test_browser_suite_revision_cannot_be_stored_or_replayed_as_step_acceptance(
     assert "one-time checker action" in result
     assert called == ["task_steps"]
     assert task_context.step_status(folder)["active"]["attempts"] == 0
+
+
+def bound_browser_revision_fixture(tmp_path):
+    """Create one actual failed browser acceptance with its owned revision ref."""
+    item = project(tmp_path)
+    folder = Path(item["folder"])
+    source = '<form id="expense-form"><input id="amount"></form><table id="expense-table"><tr><td>Ready</td></tr></table>'
+    (folder / "index.html").write_text(source)
+    step = {"phase": "Layout", "title": "Show form and table", "check_tool": "check_webapp",
+            "check_arguments": {"path": "index.html", "cases": [{"visible": ["form", "table"]}]}}
+    active = task_context.plan_steps(folder, [step])["active"]
+    failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert not failed["passed"] and failed["assertion_revision_reference"]
+    revision = {**failed["assertion_revision_reference"], "cases": [{"visible": ["expense-form", "expense-table"]}]}
+    return item, folder, step, task_context.step_status(folder)["active"], revision, source
+
+
+@pytest.mark.parametrize("bound", [False, True])
+def test_explicit_browser_revision_aligns_only_worker_bound_sql_then_actual_complete_passes(tmp_path, bound):
+    item, folder, step, active, revision, source = bound_browser_revision_fixture(tmp_path / str(bound))
+    args = (native_agent.bind_browser_assertion_revision(folder, revision, active, task_context.request_identity(folder))
+            if bound else revision)
+    state = tmp_path / "state"
+    state.mkdir()
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state):
+        result = json.loads(native_agent.execute_tool(folder, "check_webapp", args))
+        assert result["passed"] and result["verifier_check_passed"]
+        current = task_context.step_status(folder)
+        assert current["done"] == 0 and current["active"]["attempts"] == 1
+        assert all(current["active"][key] == step[key] for key in ("phase", "title", "check_tool"))
+        if bound:
+            assert result["active_step_check_aligned"] is True
+            assert current["active"]["check_arguments"]["cases"] == revision["cases"]
+            completed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+            assert completed["passed"] and completed["done"] == 1 and completed["remaining"] == 0
+            assert "already used" in native_agent.execute_tool(folder, "check_webapp", args)
+        else:
+            assert "active_step_check_aligned" not in result
+            assert current["active"]["check_arguments"] == step["check_arguments"]
+    assert (folder / "index.html").read_text() == source
+
+
+@pytest.mark.parametrize("race", ["acceptance", "control", "request"])
+def test_bound_browser_revision_never_overwrites_newer_acceptance_or_request(tmp_path, race):
+    item, folder, step, active, revision, source = bound_browser_revision_fixture(tmp_path / race)
+    request = task_context.request_identity(folder)
+    bound = native_agent.bind_browser_assertion_revision(folder, revision, active, request)
+    if race == "acceptance":
+        task_context.revise_step(folder, active["id"], [{**step, "title": "Newer worker acceptance"}])
+    elif race == "request":
+        (folder / ".local-ai/USER-REQUESTS.md").write_text("Changed user instructions")
+    state = tmp_path / "state"
+    state.mkdir()
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state):
+        result = native_agent.execute_tool(folder, "check_webapp", bound,
+            before_step_commit=(lambda: False) if race == "control" else None)
+    if race == "request":
+        assert result.startswith("Tool error:") and "instructions changed" in result
+    else:
+        decoded = json.loads(result)
+        assert decoded["passed"] and decoded["active_step_check_aligned"] is False
+    with project_memory.connection(folder) as conn:
+        row = conn.execute("SELECT title,check_arguments,status FROM task_steps WHERE id=?", (active["id"],)).fetchone()
+    assert json.loads(row["check_arguments"]) == step["check_arguments"] and row["status"] == "active"
+    assert row["title"] == ("Newer worker acceptance" if race == "acceptance" else step["title"])
+    assert (folder / "index.html").read_text() == source
+    with pytest.raises(ValueError):
+        native_agent.bind_browser_assertion_revision(folder, {**revision, "_active_browser_revision": "forged"}, active, request)
+
+
+def test_browser_revision_link_requires_same_actions_viewport_and_retained_assertions(tmp_path):
+    item = project(tmp_path / "revision-scope")
+    folder = Path(item["folder"])
+    (folder / "index.html").write_text("<p>Ready</p>")
+    old = {"path": "index.html", "cases": [{"set": {"amount": "2"}, "expect": {"total": "2", "status": "Ready"},
+                                              "visible": ["form", "table"]}]}
+    active = {"check_arguments": {"path": "index.html", "cases": [{"set": {"amount": "2"},
+        "expect": {"total": "2"}, "visible": ["form"]}]}}
+    assert native_agent.browser_revision_matches_step(folder, active, old)
+    for altered in ({**old, "viewport_width": 800}, {**old, "path": "other.html"},
+                    {**old, "cases": [{**old["cases"][0], "set": {"amount": "3"}}]},
+                    {**old, "cases": [{**old["cases"][0], "expect": {"total": "9"}}]},
+                    {**old, "cases": [{**old["cases"][0], "visible": ["table"]}]}):
+        assert not native_agent.browser_revision_matches_step(folder, active, altered)
+    assert "missing, expired or already used" in native_agent.execute_tool(folder, "check_webapp", {
+        "path": "index.html", "saved_sequence": 1, "saved_case": 1, "suite_sha256": "0" * 64,
+        "cases": [{"visible": ["form"]}], "_active_browser_revision": "forged"})
+
+
+def test_bound_browser_revision_creates_native_batch_boundary_without_completing_step(tmp_path):
+    item, folder, step, active, revision, source = bound_browser_revision_fixture(tmp_path / "browser-revision-boundary")
+    state = tmp_path / "state"
+    state.mkdir()
+    def complete(payload):
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "explicit-repair", "function": {"name": "check_webapp", "arguments": json.dumps(revision)}},
+            {"id": "stale", "function": {"name": "write_file", "arguments": '{"path":"stale.txt","content":"wrong check"}'}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state):
+        native_agent.run_slice(item, complete=complete)
+    queue = task_context.step_status(folder)
+    assert queue["done"] == 0 and queue["active"]["check_arguments"]["cases"] == revision["cases"]
+    assert not (folder / "stale.txt").exists()
+    assert (folder / "index.html").read_text() == source
+
+
+def test_worker_pause_during_explicit_browser_revision_blocks_sql_alignment(tmp_path):
+    import webapp_check
+    item, folder, step, active, revision, source = bound_browser_revision_fixture(tmp_path / "pause-browser-revision")
+    state_folder = tmp_path / "state"
+    state_folder.mkdir()
+    check = webapp_check.check
+    def pause_after_check(*args, **kwargs):
+        result = check(*args, **kwargs)
+        state = native_agent.read_state(item)
+        state["status"] = "paused"
+        native_agent.save_state(item, state)
+        return result
+    def complete(payload):
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "explicit-repair", "function": {"name": "check_webapp", "arguments": json.dumps(revision)}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state_folder), patch.object(webapp_check, "check", side_effect=pause_after_check):
+        state = native_agent.run_slice(item, complete=complete)
+    assert state["status"] == "paused"
+    queue = task_context.step_status(folder)
+    assert queue["done"] == 0 and queue["active"]["check_arguments"] == step["check_arguments"]
+    assert (folder / "index.html").read_text() == source
+
+
+def failed_typed_revision_fixture(tmp_path):
+    """Persist a real failed Python acceptance attempt for narrow repair tests."""
+    item = project(tmp_path)
+    folder = Path(item["folder"])
+    (folder / "logic.py").write_text("def identity(value): return value\n")
+    step = {"phase": "Check", "title": "Identity examples", "check_tool": "check_python_function",
+            "check_arguments": {"path": "logic.py", "function": "identity", "cases": [{"args": [2], "expected": 3}]}}
+    active = task_context.plan_steps(folder, [step])["active"]
+    result = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert result["passed"] is False
+    return item, folder, step, task_context.step_status(folder)["active"]
+
+
+def test_failed_browser_step_can_revise_only_typed_arguments_then_pass_real_check(tmp_path):
+    from jsonschema import ValidationError, validate
+    item = project(tmp_path / "browser-argument-repair")
+    folder = Path(item["folder"])
+    source = '<form id="expense-form"><input id="amount"></form><table id="expense-table"><tr><td>Ready</td></tr></table>'
+    (folder / "index.html").write_text(source)
+    original = {"phase": "Layout", "title": "Show the expense form and table", "check_tool": "check_webapp",
+                "check_arguments": {"path": "index.html", "cases": [{"visible": ["form", "table"]}]}}
+    active = task_context.plan_steps(folder, [original])["active"]
+    failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert not failed["passed"] and failed["active"]["attempts"] == 1
+    assert failed["check_summary"]["cases"][0]["target_inventory"]["targets"]
+    global_tools = copy.deepcopy(native_agent.TOOLS)
+    focused = native_agent.acceptance_repair_tools(item, {"step_focus_turns": 1}, native_agent.TOOLS)
+    schema = next(tool["function"]["parameters"] for tool in focused if tool["function"]["name"] == "task_steps")
+    corrected = {"action": "revise_check", "check_arguments": {
+        "path": "index.html", "cases": [{"visible": ["expense-form", "expense-table"]}]}}
+    validate(corrected, schema)
+    validate({"action": "complete", "step_id": active["id"]}, schema)
+    for invalid in ({**corrected, "step_id": active["id"] + 1},
+                    {**corrected, "steps": [original]},
+                    {"action": "complete", "check_arguments": corrected["check_arguments"]},
+                    {**corrected, "check_arguments": {**corrected["check_arguments"], "path": "different.html"}}):
+        with pytest.raises(ValidationError):
+            validate(invalid, schema)
+    seen = task_context.step_status(folder)["active"]
+    bound = native_agent.bind_step_completion(folder, corrected, seen, task_context.request_identity(folder))
+    revised = json.loads(native_agent.execute_tool(folder, "task_steps", bound))
+    assert revised["done"] == 0 and revised["active"]["attempts"] == 1
+    assert all(revised["active"][key] == original[key] for key in ("phase", "title", "check_tool"))
+    assert revised["active"]["check_arguments"] == corrected["check_arguments"]
+    assert "not yet passed" in revised["active"]["evidence"]
+    assert native_agent.acceptance_repair_tools(item, {"step_focus_turns": 1}, native_agent.TOOLS) is native_agent.TOOLS
+    (tmp_path / "state").mkdir()
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", tmp_path / "state"):
+        # SQL acceptance and the independent retained suite are distinct. The
+        # shortcut deliberately does not rewrite already-retained assertions.
+        blocked = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+        assert not blocked["passed"] and blocked["done"] == 0
+        repaired_suite = json.loads(native_agent.execute_tool(folder, "check_webapp", {
+            **blocked["assertion_revision_reference"], "cases": corrected["check_arguments"]["cases"]}))
+        assert repaired_suite["passed"]
+        completed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert completed["passed"] and completed["done"] == 1 and completed["remaining"] == 0, completed
+    assert (folder / "index.html").read_text() == source
+    assert native_agent.TOOLS == global_tools
+
+
+def test_narrow_check_revision_rejects_noop_foreign_target_and_early_attempt(tmp_path):
+    item, folder, step, active = failed_typed_revision_fixture(tmp_path / "narrow-rules")
+    base = {"action": "revise_check", "step_id": active["id"], "check_arguments": step["check_arguments"]}
+    assert "saved step is unchanged" in native_agent.execute_tool(folder, "task_steps", base)
+    for field, value in (("path", "other.py"), ("function", "other")):
+        changed = {**base, "check_arguments": {**base["check_arguments"], field: value}}
+        assert "ordinary revise" in native_agent.execute_tool(folder, "task_steps", changed)
+    assert "only the active check_arguments" in native_agent.execute_tool(folder, "task_steps", {
+        **base, "check_tool": "check_webapp"})
+    assert task_context.step_status(folder)["active"]["check_arguments"] == step["check_arguments"]
+    # Deliberate target changes remain available through the ordinary repair
+    # contract; the narrow shortcut cannot silently retarget acceptance.
+    replacement = {**step, "check_arguments": {**step["check_arguments"], "path": "other.py"}}
+    assert json.loads(native_agent.execute_tool(folder, "task_steps", {
+        "action": "revise", "step_id": active["id"], "steps": [replacement]}))["done"] == 0
+    assert "failed structured acceptance attempt" in native_agent.execute_tool(folder, "task_steps", base)
+    assert native_agent.acceptance_repair_tools(item, {"step_focus_turns": 0}, native_agent.TOOLS) is native_agent.TOOLS
+
+
+@pytest.mark.parametrize("race", ["check", "request", "advance"])
+def test_narrow_revision_binds_explicit_and_implicit_ids_and_rejects_races(tmp_path, race):
+    for explicit in (False, True):
+        item, folder, step, active = failed_typed_revision_fixture(tmp_path / (race + str(explicit)))
+        request = task_context.request_identity(folder)
+        corrected = {**step["check_arguments"], "cases": [{"args": [2], "expected": 2}]}
+        args = {"action": "revise_check", "check_arguments": corrected}
+        if explicit:
+            args["step_id"] = active["id"]
+        bound = native_agent.bind_step_completion(folder, args, active, request)
+        if race == "check":
+            task_context.revise_step(folder, active["id"], [{**step, "title": "Newer acceptance"}])
+        elif race == "request":
+            (folder / ".local-ai/USER-REQUESTS.md").write_text("Changed user request")
+        else:
+            task_context.record_step_check(folder, active["id"], request, "Exit code: 0\n", unchanged=True)
+        with pytest.raises(ValueError):
+            native_agent.bind_step_completion(folder, args, active, request)
+        assert native_agent.execute_tool(folder, "task_steps", bound).startswith("Tool error:")
+        with project_memory.connection(folder) as conn:
+            saved = json.loads(conn.execute("SELECT check_arguments FROM task_steps WHERE id=?", (active["id"],)).fetchone()[0])
+            assert saved == step["check_arguments"]
+
+
+def test_narrow_revision_repeats_seen_check_comparison_inside_sql_transaction(tmp_path):
+    item, folder, step, active = failed_typed_revision_fixture(tmp_path / "revision-sql-race")
+    request = task_context.request_identity(folder)
+    corrected = {**step["check_arguments"], "cases": [{"args": [2], "expected": 2}]}
+    bound = native_agent.bind_step_completion(folder, {"action": "revise_check", "check_arguments": corrected}, active, request)
+    original_revise = task_context.revise_step
+    def raced(folder, step_id, steps, **kwargs):
+        original_revise(folder, step_id, [{**step, "title": "Other worker revised acceptance"}])
+        return original_revise(folder, step_id, steps, **kwargs)
+    with patch.object(task_context, "revise_step", side_effect=raced):
+        result = native_agent.execute_tool(folder, "task_steps", bound)
+    assert "acceptance check changed before revising" in result
+    current = task_context.step_status(folder)["active"]
+    assert current["title"] == "Other worker revised acceptance"
+    assert current["check_arguments"] == step["check_arguments"]
+
+
+def test_narrow_revision_is_a_queue_boundary_and_does_not_apply_stale_next_tool(tmp_path):
+    item, folder, step, active = failed_typed_revision_fixture(tmp_path / "revision-boundary")
+    corrected = {**step["check_arguments"], "cases": [{"args": [2], "expected": 2}]}
+    def complete(payload):
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "repair", "function": {"name": "task_steps", "arguments": json.dumps({
+                "action": "revise_check", "check_arguments": corrected})}},
+            {"id": "stale", "function": {"name": "write_file", "arguments": '{"path":"stale.txt","content":"wrong step"}'}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1):
+        native_agent.run_slice(item, complete=complete)
+    assert task_context.step_status(folder)["done"] == 0
+    assert task_context.step_status(folder)["active"]["check_arguments"] == corrected
+    assert not (folder / "stale.txt").exists()
 
 
 def test_complete_cannot_silently_ignore_replacement_steps(tmp_path):

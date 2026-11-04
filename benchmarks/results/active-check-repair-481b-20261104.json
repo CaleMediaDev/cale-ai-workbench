@@ -1,0 +1,34 @@
+{
+  "scenario": "active_checker_arguments_repair",
+  "seconds": 29.14,
+  "model_calls": 0,
+  "tool_calls": 0,
+  "prompt_tokens": 3963,
+  "completion_tokens": 719,
+  "tools_used": [],
+  "routes": [],
+  "router_call_attempts": 1,
+  "upstream_local_calls": 2,
+  "transport_actions": [
+    {
+      "json_object": true,
+      "action": "revise_check",
+      "has_check_arguments": true,
+      "json_schema_transport": false
+    },
+    {
+      "json_object": true,
+      "action": "complete",
+      "has_check_arguments": false,
+      "json_schema_transport": true
+    }
+  ],
+  "inference_error": "ToolArgumentError: Invalid arguments for tool task_steps: Schema rule enum: expected [\"revise_check\"]; received JSON string.",
+  "model_action": null,
+  "source_unchanged": true,
+  "source_sha256": "199d57e0cb814d072e301b0234c687d142399be5d189ef812ef12fc9898bffe9",
+  "real_acceptance_passed": false,
+  "sql_units_completed": 0,
+  "passed": false,
+  "limitation": "Seeded failing check on an existing correct page; not an unassisted app build."
+}

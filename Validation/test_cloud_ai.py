@@ -210,6 +210,118 @@ class CloudTests(unittest.TestCase):
         call = result["choices"][0]["message"]["tool_calls"][0]
         self.assertEqual(json.loads(call["function"]["arguments"]), valid)
 
+    def test_native_checker_schema_feedback_uses_relevant_branch_and_precise_path(self):
+        import native_agent
+
+        tool = next(item for item in native_agent.TOOLS if item["function"]["name"] == "task_steps")
+        request = {**REQUEST, "tools": [tool]}
+        step = {"phase": "Create", "title": "Check total", "check_tool": "check_webapp",
+                "check_arguments": {"path": "index.html", "cases": [{"expect": {"total": "10.00"}}]}}
+        missing = {key: value for key, value in step.items() if key != "check_arguments"}
+        extra = {**step, "check_command": "PRIVATE_BAD_VALUE" * 1000}
+        bad_cases = json.loads(json.dumps(step))
+        bad_cases["check_arguments"]["cases"][0]["expect"] = "PRIVATE_BAD_VALUE" * 1000
+        examples = [
+            ({"action": "plan", "steps": [missing]}, ["steps", 0, "check_arguments"], "required"),
+            ({"action": "plan", "steps": [extra]}, ["steps", 0, "check_command"], "additionalProperties"),
+            ({"action": "plan", "steps": [{**extra, "check_tool": "PRIVATE_BAD_VALUE"}]}, ["steps", 0, "check_tool"], "enum"),
+            ({"action": "plan", "steps": [bad_cases]}, ["steps", 0, "check_arguments", "cases", 0, "expect"], "type"),
+            ({"action": "complete", "step_id": 3, "steps": [step]}, ["steps"], "additionalProperties"),
+        ]
+        for arguments, expected_path, rule in examples:
+            with self.subTest(path=expected_path, action=arguments["action"]):
+                response = {"choices": [{"message": {"tool_calls": [{"id": "bad-check", "function": {
+                    "name": "task_steps", "arguments": json.dumps(arguments)}}]}}]}
+                with self.assertRaises(cloud.ToolArgumentError) as caught:
+                    cloud.valid_completion(response, request)
+                error = caught.exception
+                self.assertEqual(error.path, expected_path)
+                self.assertIn("Schema rule " + rule, error.problem)
+                self.assertNotIn("PRIVATE_BAD_VALUE", str(error))
+                self.assertNotIn("anyOf", str(error))
+                self.assertLess(len(error.problem), 400)
+                guarded = cloud.argument_repair_request(request, error)
+                self.assertLess(len(guarded["messages"][-1]["content"]), 1500)
+                if len(expected_path) > 1:
+                    properties = guarded["tools"][0]["function"]["parameters"]["properties"]
+                    self.assertEqual(properties["steps"]["maxItems"], 1)
+                    self.assertEqual(properties["action"]["enum"], ["plan"])
+                # Precise feedback never relaxes the original contract.
+                with self.assertRaises(cloud.ToolArgumentError):
+                    cloud.valid_completion(response, guarded)
+
+    def test_narrow_step_checker_repair_pins_valid_action_without_steps_array(self):
+        schema = {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["complete", "revise_check"]},
+            "check_arguments": {"type": "object", "properties": {"cases": {"type": "array"}},
+                                "required": ["cases"], "additionalProperties": False}},
+            "required": ["action"], "additionalProperties": False}
+        request = {**REQUEST, "tools": [{"type": "function", "function": {
+            "name": "task_steps", "parameters": schema}}]}
+        for action in ("revise_check", "unsupported_action"):
+            with self.subTest(action=action):
+                arguments = {"action": action, "check_arguments": {"cases": "bad array"}}
+                response = {"choices": [{"message": {"tool_calls": [{"id": "bad-check", "function": {
+                    "name": "task_steps", "arguments": json.dumps(arguments)}}]}}]}
+                with self.assertRaises(cloud.ToolArgumentError) as caught:
+                    cloud.valid_completion(response, request)
+                guarded = cloud.argument_repair_request(request, caught.exception)
+                repaired_schema = guarded["tools"][0]["function"]["parameters"]
+                expected = ["revise_check"] if action == "revise_check" else ["complete", "revise_check"]
+                self.assertEqual(repaired_schema["properties"]["action"]["enum"], expected)
+                self.assertNotIn("steps", repaired_schema["properties"])
+                self.assertEqual(schema["properties"]["action"]["enum"], ["complete", "revise_check"])
+                if action == "revise_check":
+                    from jsonschema import ValidationError, validate
+                    validate({"action": "revise_check", "check_arguments": {"cases": []}}, repaired_schema)
+                    with self.assertRaises(ValidationError):
+                        validate({"action": "complete"}, repaired_schema)
+
+    def test_local_step_repair_materializes_typed_branch_and_prunes_other_actions(self):
+        schema = {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["complete", "revise_check"]},
+            "step_id": {"type": "integer", "const": 7},
+            "check_arguments": {"type": "object", "properties": {"cases": {"type": "array"}},
+                                "required": ["cases"], "additionalProperties": False}},
+            "required": ["action", "step_id"], "additionalProperties": False,
+            "anyOf": [
+                {"properties": {"action": {"const": "complete"}, "step_id": {}},
+                 "required": ["action", "step_id"], "additionalProperties": False},
+                {"properties": {"action": {"const": "revise_check"}, "step_id": {}, "check_arguments": {}},
+                 "required": ["action", "step_id", "check_arguments"], "additionalProperties": False}]}
+        request = {**REQUEST, "tools": [{"type": "function", "function": {
+            "name": "task_steps", "parameters": schema}}]}
+        original = json.loads(json.dumps(request))
+        arguments = {"action": "revise_check", "step_id": 7, "check_arguments": {"cases": "bad array"}}
+        response = {"choices": [{"message": {"tool_calls": [{"id": "bad-check", "function": {
+            "name": "task_steps", "arguments": json.dumps(arguments)}}]}}]}
+        with self.assertRaises(cloud.ToolArgumentError) as caught:
+            cloud.valid_completion(response, request)
+        guarded = cloud.argument_repair_request(request, caught.exception)
+        guarded_before = json.loads(json.dumps(guarded))
+        repair = cloud.local_json_repair_request(guarded)
+        generated = repair["response_format"]["json_schema"]["schema"]
+        self.assertNotIn("anyOf", generated)
+        self.assertEqual(generated["properties"]["action"]["enum"], ["revise_check"])
+        self.assertEqual(generated["properties"]["check_arguments"], schema["properties"]["check_arguments"])
+        self.assertEqual(generated["properties"]["step_id"], {"type": "integer", "const": 7})
+        self.assertEqual(generated["required"], ["action", "step_id", "check_arguments"])
+        self.assertFalse(generated["additionalProperties"])
+        from jsonschema import ValidationError, validate
+        valid = {"action": "revise_check", "step_id": 7, "check_arguments": {"cases": []}}
+        validate(valid, generated)
+        validate(valid, guarded["tools"][0]["function"]["parameters"])
+        for invalid in ({"action": "complete", "step_id": 7}, arguments,
+                        {**valid, "step_id": 8}, {**valid, "extra": True}):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValidationError):
+                    validate(invalid, generated)
+                raw = {**ANSWER, "choices": [{"message": {"content": json.dumps(invalid)}}]}
+                with self.assertRaises(cloud.ToolArgumentError):
+                    cloud.validated_json_tool_reply(raw, guarded, repair)
+        self.assertEqual(request, original)
+        self.assertEqual(guarded, guarded_before)
+
     def test_json_repair_keeps_quoted_refusal_text_as_tool_data(self):
         guarded = {**REQUEST, "tools": [{"type": "function", "function": {"name": "save_quote",
             "parameters": {"type": "object", "properties": {"text": {"type": "string"}},

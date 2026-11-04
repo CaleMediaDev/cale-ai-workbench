@@ -419,20 +419,101 @@ class EmptyInferenceResponse(ValueError):
     """No user answer, refusal or tool action was returned; nothing may execute."""
 
 
+def argument_error_detail(error):
+    """Choose the failed union branch identified by the attempted operation.
+
+    jsonschema's outer anyOf error contains every checker schema. Returning a
+    relevant leaf gives the worker a useful path without printing that schema
+    or the rejected instance. This changes diagnostics, never validation.
+    """
+    for _ in range(12):
+        if error.validator not in {"anyOf", "oneOf"} or not error.context:
+            break
+        branches = error.validator_value
+        if not isinstance(branches, list) or not isinstance(error.instance, dict):
+            break
+        for key in ("action", "check_tool"):
+            if key not in error.instance:
+                continue
+            allowed = []
+            for branch in branches:
+                rule = branch.get("properties", {}).get(key, {}) if isinstance(branch, dict) else {}
+                if not isinstance(rule, dict):
+                    continue
+                for value in rule.get("enum", [rule["const"]] if "const" in rule else []):
+                    if value not in allowed:
+                        allowed.append(value)
+            if allowed and error.instance[key] not in allowed:
+                return ValidationError("Invalid operation discriminator", validator="enum",
+                    validator_value=allowed, instance=error.instance[key],
+                    path=[*error.absolute_path, key])
+        candidates = []
+        for index, branch in enumerate(branches):
+            if not isinstance(branch, dict):
+                continue
+            children = [child for child in error.context
+                        if child.schema_path and child.schema_path[0] == index]
+            if not children:
+                continue
+            properties = branch.get("properties", {})
+            matches = 0
+            conflicts = 0
+            for key in ("action", "check_tool"):
+                if key not in error.instance:
+                    continue
+                rule = properties.get(key, {})
+                if not isinstance(rule, dict):
+                    continue
+                allowed = rule.get("enum", [rule["const"]] if "const" in rule else None)
+                if allowed is not None:
+                    if error.instance[key] in allowed:
+                        matches += 1
+                    else:
+                        conflicts += 1
+            # Prefer an explicit action/checker match, then the branch needing
+            # the fewest corrections. Child order remains deterministic.
+            candidates.append(((matches, -conflicts, -len(children)), children))
+        if not candidates:
+            break
+        _score, children = max(candidates, key=lambda item: item[0])
+        error = children[0]
+    return error
+
+
 class ToolArgumentError(ValueError):
     """An offered tool's decoded arguments failed its declared JSON schema."""
 
     def __init__(self, name, error, arguments=None):
         self.tool = name
         self.arguments = arguments  # Transient repair context; never included in error text.
+        error = argument_error_detail(error)
         self.path = [item if type(item) is int else str(item)[:160] for item in list(error.absolute_path)[:16]]
         # Do not repeat a huge escaped bad value as an example for the model
         # to copy. The schema rule, expected shape and path are the evidence.
-        expected = json.dumps(error.validator_value, ensure_ascii=True)[:600]
         kind = ("null" if error.instance is None else "boolean" if type(error.instance) is bool else
                 "object" if isinstance(error.instance, dict) else "array" if isinstance(error.instance, list) else
                 "string" if isinstance(error.instance, str) else "number")
-        self.problem = f"Schema rule {error.validator}: expected {expected}; received JSON {kind}."
+        if error.validator == "required" and isinstance(error.instance, dict):
+            missing = [key for key in error.validator_value if key not in error.instance]
+            if missing:
+                self.path.append(str(missing[0])[:160])
+            detail = "missing required properties " + json.dumps(missing[:8], ensure_ascii=True)[:350]
+        elif error.validator == "additionalProperties" and isinstance(error.instance, dict):
+            properties = error.schema.get("properties", {})
+            patterns = error.schema.get("patternProperties", {})
+            extra = [key for key in error.instance if key not in properties
+                     and not any(re.search(pattern, key) for pattern in patterns)]
+            if extra:
+                self.path.append(str(extra[0])[:160])
+            detail = "unexpected properties " + json.dumps(extra[:8], ensure_ascii=True)[:350]
+        elif error.validator in {"type", "enum", "const", "minItems", "maxItems", "minimum", "maximum"}:
+            expected = json.dumps(error.validator_value, ensure_ascii=True)[:200]
+            detail = f"expected {expected}; received JSON {kind}"
+        else:
+            # Union/not schemas can contain thousands of characters and are
+            # already supplied in the offered tool contract.
+            detail = f"received JSON {kind}; must satisfy the declared argument shape"
+        self.problem = f"Schema rule {error.validator}: {detail}."
         super().__init__(f"Invalid arguments for tool {name}: {self.problem}")
 
 
@@ -447,6 +528,14 @@ def argument_repair_request(payload, error):
         raise error  # A correction cannot enable or select a forbidden tool.
     tools = copy.deepcopy(tools[:1])
     original = error.arguments
+    if error.tool == "task_steps" and isinstance(original, dict):
+        # A rejected checker definition still belongs to the attempted action.
+        # Narrow revise_check calls have no steps array; their JSON repair must
+        # not turn into a completion or another unrelated queue operation.
+        properties = tools[0]["function"]["parameters"].get("properties", {})
+        action = properties.get("action", {})
+        if original.get("action") in action.get("enum", []):
+            action["enum"] = [original["action"]]
     if (error.tool == "task_steps" and isinstance(original, dict)
             and error.path[:1] == ["steps"] and len(error.path) > 1
             and isinstance(original.get("steps"), list) and 1 <= len(original["steps"]) <= 8):
@@ -455,8 +544,6 @@ def argument_repair_request(payload, error):
         properties = tools[0]["function"]["parameters"]["properties"]
         count = len(original["steps"])
         properties["steps"].update(minItems=count, maxItems=count)
-        if original.get("action") in properties["action"].get("enum", []):
-            properties["action"]["enum"] = [original["action"]]
     feedback = json.dumps({"tool": error.tool, "argument_path": error.path,
                            "problem": error.problem}, ensure_ascii=True)
     budget = payload.get("max_tokens", payload.get("max_completion_tokens", 4096))
@@ -473,6 +560,61 @@ def argument_repair_request(payload, error):
     return repair
 
 
+def task_step_generation_schema(schema):
+    """Materialize native action shapes for grammars that omit intersections.
+
+    The declared schema combines typed common properties with anyOf branches
+    containing placeholders. Each generated alternative must carry both sets
+    of constraints, especially the already-pinned action. Limit this rewrite
+    to that known wrapper; arbitrary unions keep their original contract.
+    """
+    properties = schema.get("properties", {})
+    branches = schema.get("anyOf")
+    if (schema.get("type") != "object" or schema.get("additionalProperties") is not False
+            or not isinstance(branches, list) or not isinstance(properties, dict)):
+        return schema
+    alternatives = []
+    for branch in branches:
+        if (not isinstance(branch, dict) or set(branch) - {"properties", "required", "additionalProperties"}
+                or branch.get("additionalProperties") is not False
+                or not isinstance(branch.get("properties"), dict)
+                or set(branch["properties"]) - set(properties)):
+            return schema
+        branch_properties = branch["properties"]
+        if any(rule and (key != "action" or not isinstance(rule, dict)
+                         or set(rule) - {"enum", "const"})
+               for key, rule in branch_properties.items()):
+            return schema
+        action = copy.deepcopy(properties.get("action", {}))
+        selected = branch_properties.get("action", {})
+        if not isinstance(action, dict) or not isinstance(selected, dict):
+            return schema
+        allowed = None
+        for rule in (action, selected):
+            values = rule.get("enum")
+            if "const" in rule:
+                values = [rule["const"]] if values is None else [value for value in values if value == rule["const"]]
+            if values is not None:
+                allowed = list(values) if allowed is None else [value for value in allowed if value in values]
+        if allowed == []:
+            continue
+        if allowed is not None:
+            action.pop("const", None)
+            action["enum"] = allowed
+        required = list(dict.fromkeys([*schema.get("required", []), *branch.get("required", [])]))
+        if any(key not in branch_properties for key in required):
+            continue  # Required root field is forbidden by this branch.
+        materialized = copy.deepcopy({key: value for key, value in schema.items() if key != "anyOf"})
+        materialized["properties"] = {key: copy.deepcopy(properties[key]) for key in branch_properties}
+        if "action" in materialized["properties"]:
+            materialized["properties"]["action"] = action
+        materialized["required"] = required
+        alternatives.append(materialized)
+    if not alternatives:
+        return False  # An impossible intersection must never become permissive.
+    return alternatives[0] if len(alternatives) == 1 else {"anyOf": alternatives}
+
+
 def local_json_repair_request(guarded):
     """Use Ollama's JSON-schema output without relying on tool_choice support.
 
@@ -481,6 +623,8 @@ def local_json_repair_request(guarded):
     https://github.com/ollama/ollama/blob/main/docs/api/openai-compatibility.mdx
     """
     schema = guarded["tools"][0]["function"]["parameters"]
+    if guarded["tools"][0]["function"]["name"] == "task_steps":
+        schema = task_step_generation_schema(schema)
     repair = {**guarded, "tools": [], "response_format": {"type": "json_schema",
         "json_schema": {"name": "cale_tool_arguments", "schema": schema}},
         "messages": [*guarded["messages"], {"role": "user", "content": (

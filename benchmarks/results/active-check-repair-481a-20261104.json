@@ -1,0 +1,30 @@
+{
+  "scenario": "active_checker_arguments_repair",
+  "seconds": 28.25,
+  "model_calls": 1,
+  "tool_calls": 1,
+  "prompt_tokens": 3968,
+  "completion_tokens": 981,
+  "tools_used": [
+    "task_steps"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": "balanced",
+      "seconds": 28.25
+    }
+  ],
+  "router_call_attempts": 1,
+  "upstream_local_calls": 2,
+  "inference_error": "AssertionError: Model did not choose the checker repair operation",
+  "model_action": "complete",
+  "source_unchanged": true,
+  "source_sha256": "199d57e0cb814d072e301b0234c687d142399be5d189ef812ef12fc9898bffe9",
+  "real_acceptance_passed": false,
+  "sql_units_completed": 0,
+  "passed": false,
+  "limitation": "Seeded failing check on an existing correct page; not an unassisted app build."
+}

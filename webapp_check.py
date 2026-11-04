@@ -791,7 +791,7 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
             "normalized_inputs": normalized_inputs}
 
 
-def saved_suite(folder: Path, spec: dict, previous: dict | None = None) -> dict:
+def saved_suite(folder: Path, spec: dict, previous: dict | None = None, *, _replace_assertions: bool = False) -> dict:
     """Retain independent browser sequences, not concatenated stateful cases."""
     import task_context
 
@@ -817,7 +817,9 @@ def saved_suite(folder: Path, spec: dict, previous: dict | None = None) -> dict:
     incoming = canonical(spec)
     checks = [canonical(check) for check in checks]
     old = next((check for check in checks if batch_key(check) == batch_key(incoming)), None)
-    if old:
+    if _replace_assertions and old is None:
+        raise ValueError("An assertion revision must preserve its saved input sequence and page")
+    if old and not _replace_assertions:
         merged = {**copy.deepcopy(old), **copy.deepcopy(incoming)}
         merged["cases"] = []
         for previous_case, new_case in zip(old["cases"], incoming["cases"], strict=True):
@@ -981,8 +983,28 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
     if any(name in supplied[0] and (name not in old or supplied[0][name] != old[name])
            for name in ("reload", "set", "click", "keys", "wait_ms")):
         raise ValueError("Assertion revisions cannot change input actions; repeated actions must exactly match the saved case")
-    batch["cases"][number - 1] = {**{name: copy.deepcopy(old[name]) for name in
-        ("reload", "set", "click", "keys", "wait_ms") if name in old}, **copy.deepcopy(supplied[0])}
+    correction = copy.deepcopy(supplied[0])
+    repaired = {**copy.deepcopy(old), **correction}
+    for field in ("expect", "state"):
+        if field in old or field in correction:
+            repaired[field] = {**old.get(field, {}), **correction.get(field, {})}
+    # Explicit visibility lists can correct mistaken IDs. Other assertion
+    # fields and cases survive; only direct hidden/visible contradictions are
+    # removed, just as in ordinary accumulation.
+    hidden_now = set(correction.get("hidden", []))
+    visible_now = set(correction.get("visible", [])) | {
+        name for name, value in correction.get("expect", {}).items() if value != ""}
+    for name in hidden_now:
+        if name not in correction.get("expect", {}) or repaired.get("expect", {}).get(name) != "":
+            repaired.get("expect", {}).pop(name, None)
+    for field, opposite in (("visible", hidden_now), ("hidden", visible_now)):
+        if field in repaired:
+            repaired[field] = [name for name in repaired[field] if name not in opposite]
+            if not repaired[field]:
+                repaired.pop(field)
+    if repaired.get("expect") == {}:
+        repaired.pop("expect")
+    batch["cases"][number - 1] = repaired
     validate_spec(folder, batch)
     return batch, {"saved_sequence": sequence, "saved_case": number,
                    "previous_sha256": digest, "request_hash": saved["request_hash"]}
@@ -1232,7 +1254,10 @@ def save_verifier(folder: Path, spec: dict, *, accumulate: bool = False,
             if (not spec_path.is_file() or hashlib.sha256(spec_path.read_bytes()).hexdigest() != expected_sha
                     or not isinstance(previous, dict) or previous.get("request_hash") != task_context.request_identity(folder)):
                 raise ValueError("Saved cases or instructions changed during the assertion revision; retry from current data")
-        spec = saved_suite(folder, spec, previous)
+        # A checksum-bound explicit revision already retained unrelated cases
+        # in prepare_assertion_revision. Ordinary accumulation unions targets;
+        # doing that here would resurrect the very mistaken IDs being repaired.
+        spec = saved_suite(folder, spec, previous, _replace_assertions=expected_sha is not None)
     raw = json.dumps(spec, indent=2, allow_nan=False).encode("utf-8")
     if len(raw) > 64000:
         raise ValueError("Saved browser checks must be under 64 KB")
