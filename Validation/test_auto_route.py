@@ -376,6 +376,21 @@ class AutoRouteTests(unittest.TestCase):
         messages.append({"role": "assistant", "tool_calls": [{"function": {"name": "read_file"}}]})
         self.assertEqual(task_size(messages), "balanced")
 
+    def test_bare_song_brief_review_stays_balanced_after_first_turn(self):
+        prompt = ("# Kanban task t_123: Tahoe anthem — review\n\n## Body\n" +
+                  project_prompt({
+                      "title": "Tahoe anthem", "folder": "C:/Tasks/music",
+                      "brief": "150 BPM wobbly dubstep anthem with female singing and three drops.",
+                  }))
+        messages = [{"role": "user", "content": prompt}]
+        self.assertEqual(task_size(messages), "deep")
+        messages.append({
+            "role": "assistant", "tool_calls": [
+                {"function": {"name": "read_file"}},
+            ],
+        })
+        self.assertEqual(task_size(messages), "balanced")
+
     def test_music_review_shortcut_does_not_downgrade_complex_app_work(self):
         for brief in (
             "Create a production-ready music app.",

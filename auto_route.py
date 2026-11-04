@@ -258,7 +258,7 @@ def task_size(messages):
         return "deep"
     if (
         review_worker
-        and SIMPLE_MUSIC.search(intent)
+        and (SIMPLE_MUSIC.search(intent) or bare_song_brief(intent))
         and not PROJECT_BUILD.search(intent)
         and not COMPLEX_PROJECT.search(intent)
         and not MUSIC_VIDEO.search(intent)
