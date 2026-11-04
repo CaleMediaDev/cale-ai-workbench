@@ -524,6 +524,31 @@ def test_stop_attempts_both_channels_even_if_one_close_reports_an_error(tmp_path
     assert not old.opened and player.outgoing is None
 
 
+def test_service_finalizes_stop_when_audio_cleanup_reports_an_error(tmp_path):
+    _, service, player, jobs, calls, generate = fixture(tmp_path)
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        current_id = service.current["id"]
+
+        def stop_with_error():
+            player.active = False
+            raise RuntimeError("Close failed")
+
+        service.stop()
+        with patch.object(player, "stop", side_effect=stop_with_error), pytest.raises(RuntimeError, match="Close failed"):
+            service.tick()
+
+        assert not player.active
+        assert not service.enabled and not service.paused
+        assert service.current is None
+        assert next(row for row in service._rows() if row["id"] == current_id)["status"] == "played"
+        assert service.snapshot()["message"].startswith("Radio stopped.")
+        service.tick()
+        assert len(player.played) == 1 and len(calls) == 2
+
+
 def test_worker_survives_failure_to_publish_its_retry_status(tmp_path):
     import sqlite3
 
