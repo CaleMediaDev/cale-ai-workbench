@@ -132,6 +132,8 @@ def document_text(path: Path, max_scanned_pages: int = 6) -> str:
         raise
     try:
         answer = json.loads(result.stdout.splitlines()[-1])
+        if not isinstance(answer, dict):
+            raise ValueError("Expected a scanned-PDF response object.")
     except (IndexError, ValueError) as exc:
         if text.strip():
             return text
