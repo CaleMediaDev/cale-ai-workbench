@@ -3272,3 +3272,87 @@ def test_subscription_connection_real_tk_requires_user_action_and_success_before
             panel.destroy()
     finally:
         window.destroy()
+
+
+def test_github_code_appears_in_real_cale_widgets_with_copy_and_no_terminal():
+    import ast
+    import re
+    import tkinter as tk
+    from tkinter import ttk
+    from types import SimpleNamespace
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        code = tk.StringVar(master=window)
+        status = tk.StringVar(master=window)
+        row = ttk.Frame(window)
+        field = ttk.Entry(row, textvariable=code, state="readonly")
+        field.pack()
+        copied = []
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        definitions = [next(item for item in ast.walk(tree) if isinstance(item, ast.FunctionDef) and item.name == name)
+                       for name in ("copy_github_code", "show_github_code")]
+        namespace = {"window": SimpleNamespace(clipboard_clear=lambda: copied.clear(), clipboard_append=copied.append),
+                     "github_code": code, "github_text": status, "github_code_row": row, "tk": tk, "re": re}
+        exec(compile(ast.Module(body=definitions, type_ignores=[]), "actual-github-code-ui", "exec"), namespace)
+        assert namespace["show_github_code"]("ABCD-1234")
+        assert field.get() == "ABCD-1234" and row.winfo_manager() == "pack"
+        assert copied == ["ABCD-1234"] and "browser" in status.get()
+        assert not namespace["show_github_code"]("ghp_private_token")
+        assert field.get() == "ABCD-1234" and copied == ["ABCD-1234"]
+    finally:
+        window.destroy()
+
+
+def test_github_login_from_closed_connections_opens_cale_panel_instead_of_terminal():
+    import ast
+    import queue
+    import tkinter as tk
+    from tkinter import ttk
+    from types import SimpleNamespace
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        code = tk.StringVar(master=window)
+        status = tk.StringVar(master=window)
+        events = queue.Queue()
+        calls = []
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        node = next(item for item in ast.walk(tree) if isinstance(item, ast.FunctionDef) and item.name == "connect_github")
+        namespace = {"window": window, "tk": tk, "ttk": ttk, "github_code": code, "github_text": status,
+                     "github_login_events": events, "copy_github_code": lambda: None,
+                     "webbrowser": SimpleNamespace(open=lambda url: calls.append(url)),
+                     "github_account": SimpleNamespace(connect=lambda on_code: on_code("ABCD-1234"))}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "actual-github-login-panel", "exec"), namespace)
+        namespace["connect_github"]()
+        panel = window.github_login_panel
+        assert isinstance(panel, tk.Toplevel) and panel.title() == "Connect GitHub"
+        assert events.get_nowait() == ("ABCD-1234", 1) and "browser" in status.get()
+        body = panel.winfo_children()[0]
+        browser_button = next(child for child in body.winfo_children() if isinstance(child, ttk.Button) and child.cget("text").startswith("Open GitHub"))
+        browser_button.invoke()
+        assert calls == ["https://github.com/login/device"]
+    finally:
+        window.destroy()
+
+
+def test_old_github_account_probe_cannot_finish_new_pending_login():
+    from types import SimpleNamespace
+    pending = SimpleNamespace(poll=lambda: None)
+    finished = SimpleNamespace(poll=lambda: 0)
+    failed = SimpleNamespace(poll=lambda: 1)
+    assert not task_module.github_account_refresh_allowed(pending, pending)
+    assert not task_module.github_account_refresh_allowed(pending, None)
+    assert not task_module.github_account_refresh_allowed(finished, False)
+    assert not task_module.github_account_refresh_allowed(finished, pending)
+    assert not task_module.github_account_refresh_allowed(failed, failed)
+    assert task_module.github_account_refresh_allowed(finished, finished)
+    assert task_module.github_account_refresh_allowed(None, None)

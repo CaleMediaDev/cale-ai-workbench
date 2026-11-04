@@ -7169,3 +7169,54 @@ def test_subscription_delegation_requires_registered_project_and_preserves_origi
         assert not (folder / ".local-ai/webapp-check.json").exists()
 
     assert usage_history.CURRENT_TASK.get() == previous_task
+
+
+def test_subscription_large_result_stays_valid_json_and_preserves_full_task_receipt(tmp_path):
+    import cloud_providers
+    folder = tmp_path / "large-subscription"
+    folder.mkdir()
+    project = {"id": "large-result", "folder": str(folder), "brief": "Keep the full response for later checks"}
+    actual = {"provider": "claude", "status": "finished", "exit_code": 0,
+              "output": {"result": "Quoted \"text\"\n" * 5000}, "usage": None, "verification": "agent_report_only"}
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task", create=True, return_value=actual):
+        text = native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "claude", "prompt": "Review one function"})
+    result = json.loads(text)
+    assert len(text) <= native_agent.MAX_TOOL_OUTPUT and result["output_truncated"]
+    assert result["verification"] == "agent_report_only" and result["usage"] is None
+    assert json.loads((folder / result["full_result_path"]).read_text(encoding="utf-8")) == actual
+
+
+def test_subscription_handoff_honors_existing_no_delegation_and_passes_current_rules(tmp_path):
+    import cloud_providers
+    folder = tmp_path / "scoped-subscription"
+    folder.mkdir()
+    project = {"id": "scoped-result", "folder": str(folder), "brief": "Build a game"}
+    rules = folder / "AGENTS.md"
+    rules.write_text("Do not configure new paid AI, invoke Codex, or delegate.", encoding="utf-8")
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task") as run:
+        result = native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "grok", "prompt": "Add sprites"})
+        assert "forbids delegation" in result
+        run.assert_not_called()
+    rules.write_text("Keep all work offline-compatible and preserve tests.", encoding="utf-8")
+    notes = folder / ".local-ai"
+    notes.mkdir()
+    (notes / "USER-REQUESTS.md").write_text("The player must use arrow keys.", encoding="utf-8")
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task", return_value={"status": "finished"}) as run:
+        native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "grok", "prompt": "Add sprites"})
+        actual = run.call_args.args[2]
+        assert "offline-compatible" in actual and "arrow keys" in actual and "Build a game" in actual
+
+
+@pytest.mark.parametrize("restriction", ["original", "followup"])
+def test_subscription_handoff_rejects_explicit_original_or_later_no_delegation(tmp_path, restriction):
+    import cloud_providers
+    folder = tmp_path / restriction
+    folder.mkdir()
+    project = {"id": "no-delegation", "folder": str(folder), "brief": "Build an app. Do not delegate." if restriction == "original" else "Build an app."}
+    if restriction == "followup":
+        (folder / ".local-ai").mkdir()
+        (folder / ".local-ai/USER-REQUESTS.md").write_text("Never delegate this task.", encoding="utf-8")
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task") as run:
+        result = native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "grok", "prompt": "Build the UI"})
+        assert "forbids delegation" in result
+        run.assert_not_called()

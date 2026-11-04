@@ -2453,3 +2453,21 @@ class SubscriptionAgentTests(unittest.TestCase):
                 self.assertNotIn('--always-approve',command);self.assertNotIn('--yolo',command)
                 self.assertNotIn('bypassPermissions',command)
                 self.assertFalse(any(arg.startswith(('Bash(','MCPTool(','WebFetch(')) for arg in command))
+
+
+def test_official_connection_helper_runs_without_console_or_terminal_input(tmp_path):
+    import subprocess
+    import sys
+    import cloud_providers
+    from unittest.mock import patch
+    actual = subprocess.Popen
+    with patch.object(subprocess, "Popen", wraps=actual) as launched:
+        code, output, errors = cloud_providers._agent_process(
+            [sys.executable, "-c", "print('browser sign-in helper')"], cwd=tmp_path, timeout=10)
+    assert code == 0 and "browser sign-in helper" in output
+    options = launched.call_args.kwargs
+    assert options["stdin"] == subprocess.DEVNULL
+    assert options["stdout"] is not None and options["stderr"] is not None
+    assert not options.get("shell", False)
+    if sys.platform == "win32":
+        assert options["creationflags"] & subprocess.CREATE_NO_WINDOW

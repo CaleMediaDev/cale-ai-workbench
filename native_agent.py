@@ -656,18 +656,49 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             prompt = arguments["prompt"]
             if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 16000:
                 raise ValueError("Give the agent one bounded project task")
+            def forbids_delegation(content):
+                return ("Do not configure new paid AI, invoke Codex, or delegate." in content
+                    or re.search(r"\b(?:do not|never)\s+delegate\b", content, re.I))
+            if forbids_delegation(str(project.get("brief", ""))):
+                raise ValueError("The original request forbids delegation; continue with its configured worker")
+            instructions = []
+            for relative in ("AGENTS.md", ".local-ai/USER-REQUESTS.md"):
+                document = project_path(folder, relative)
+                if not document.is_file():
+                    continue
+                with document.open(encoding="utf-8-sig") as stream:
+                    content = stream.read(24001)
+                if len(content) > 24000:
+                    raise ValueError("Project instructions exceed this bounded handoff; continue with the normal worker")
+                if forbids_delegation(content):
+                    raise ValueError(relative + " forbids delegation; continue with its configured worker")
+                instructions.append(relative + ":\n" + content)
+            authority = ("Project rules and later user instructions override the requested step.\n" +
+                "\n\n".join(instructions) + "\n\n") if instructions else ""
             import usage_history
 
             task_token = usage_history.CURRENT_TASK.set(project["id"])
             try:
                 result = cloud_providers.run_subscription_task(arguments["provider"], folder,
-                    "Original project request:\n" + str(project.get("brief", ""))[:16000] +
+                    authority + "Original project request:\n" + str(project.get("brief", "")) +
                     "\n\nCurrent requested step:\n" + prompt +
                     "\n\nPreserve existing data and checks. Report actual edits and checks; do not claim whole-task completion.",
                     timeout=arguments.get("timeout", 300))
             finally:
                 usage_history.CURRENT_TASK.reset(task_token)
-            return json.dumps(result, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
+            encoded = json.dumps(result, ensure_ascii=False)
+            if len(encoded) > MAX_TOOL_OUTPUT:
+                relative = ".local-ai/subscription-result-" + os.urandom(12).hex() + ".json"
+                receipt = project_path(folder, relative)
+                receipt.parent.mkdir(parents=True, exist_ok=True)
+                receipt.write_text(encoded, encoding="utf-8")
+                # Retain actual output for follow-up tools without returning
+                # broken/truncated JSON or inventing a verification result.
+                result = {key: result.get(key) for key in
+                    ("provider", "status", "exit_code", "usage", "verification")}
+                result.update(output_preview=encoded[:1500], output_truncated=True, full_result_path=relative)
+                encoded = json.dumps(result, ensure_ascii=False)
+            return encoded
         if name == "task_steps":
             import task_context
 

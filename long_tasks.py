@@ -49,6 +49,11 @@ DEFAULT_ENGINE = "native"
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
+def github_account_refresh_allowed(active_process, checked_process) -> bool:
+    """An old account probe cannot complete a newer browser login."""
+    return checked_process is active_process and (active_process is None or active_process.poll() == 0)
+
+
 def take_ai_connection_request(state_folder: Path) -> str | None:
     """Consume only an installer-selected provider, never a command or URL."""
     marker = state_folder / "open-supercharge"
@@ -862,7 +867,7 @@ def add_project(title, folder, brief, waiting_for_setup=False, pending_media=Non
         rules.write_text(
             "# Local project\n\nPreserve existing data and tests. Keep .local-ai/PLAN.md and PROGRESS.md current. "
             "Work toward the user's full request in verified milestones. Run real behavior tests after the last edit. "
-            "Use Cale's configured AI route: local Ollama, user-connected free cloud, or the user's enabled ChatGPT plan. Obey this task's local-only setting when selected. Do not configure new paid AI, invoke Codex, or delegate. A connected GitHub account may store this code in a private repository; never publish it publicly or send external messages without the user's request.\n",
+            "Use Cale's configured AI route: local Ollama, user-connected free cloud, or the user's enabled ChatGPT plan. Explicitly enabled Claude Code and Grok Build subscriptions may handle bounded project steps through delegate_subscription_task. Obey this task's local-only setting and all project rules. Do not configure new paid APIs or bypass the official agents' permissions. Independently verify delegated edits against the original checks. A connected GitHub account may store this code in a private repository; never publish it publicly or send external messages without the user's request.\n",
             encoding="utf-8",
         )
     with database() as conn:
@@ -4383,13 +4388,55 @@ def gui():
         value="Connect your own GitHub account to save projects online."
     )
     github_events = queue.Queue()
+    github_login_events = queue.Queue()
+    github_code = tk.StringVar(value="")
+
+    def copy_github_code():
+        if github_code.get():
+            window.clipboard_clear()
+            window.clipboard_append(github_code.get())
+            github_text.set("Code copied. Paste it into GitHub's browser page and approve the connection.")
+
+    def show_github_code(code):
+        if not isinstance(code, str) or not re.fullmatch(r"[A-Z0-9]{4}-[A-Z0-9]{4}", code):
+            return False
+        github_code.set(code)
+        github_code_row.pack(anchor="w", pady=(4, 8))
+        try:
+            copy_github_code()
+        except tk.TclError:
+            github_text.set("Paste the code shown here into GitHub's browser page and approve the connection.")
+        return True
 
     def connect_github():
         try:
-            github_account.connect()
-            github_text.set(
-                "Finish the GitHub approval in the browser. The sign-in window shows the code if needed."
-            )
+            # Donation controls can start this flow while More connections is
+            # collapsed. Keep the browser/code instructions visible in Cale.
+            panel = getattr(window, "github_login_panel", None)
+            if panel is None or not panel.winfo_exists():
+                panel = tk.Toplevel(window)
+                panel.title("Connect GitHub")
+                panel.transient(window)
+                window.github_login_panel = panel
+                body = ttk.Frame(panel, padding=24)
+                body.pack(fill="both", expand=True)
+                ttk.Label(body, text="Connect your GitHub", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+                ttk.Label(body, textvariable=github_text, wraplength=520).pack(anchor="w", pady=(10, 12))
+                ttk.Entry(body, textvariable=github_code, state="readonly", width=16, font=("Segoe UI", 18)).pack(anchor="w", pady=(0, 12))
+                ttk.Button(body, text="Copy code", command=copy_github_code).pack(anchor="w", pady=(0, 8))
+                ttk.Button(body, text="Open GitHub in my browser", command=lambda: webbrowser.open("https://github.com/login/device"), style="Accent.TButton").pack(anchor="w")
+                ttk.Button(body, text="Close", command=panel.destroy).pack(anchor="w", pady=(12, 0))
+            panel.lift()
+            active_login = getattr(window, "github_login_process", None)
+            if active_login is not None and active_login.poll() is None:
+                github_text.set("Finish this GitHub sign-in in your browser. Use the code shown here if asked.")
+                return
+            github_code.set("")
+            window.github_login_generation = getattr(window, "github_login_generation", 0) + 1
+            generation = window.github_login_generation
+            window.github_login_process = github_account.connect(
+                on_code=lambda code: github_login_events.put((code, generation)))
+            github_text.set("Opening GitHub in your browser. If it asks for a code, Cale will show and copy it here.")
         except Exception as exc:
             github_text.set(str(exc))
 
@@ -4403,6 +4450,11 @@ def gui():
     ttk.Label(
         optional_section, textvariable=github_text, style="Muted.TLabel", wraplength=720
     ).pack(anchor="w", pady=(6, 2))
+    github_code_row = ttk.Frame(optional_section)
+    ttk.Entry(github_code_row, textvariable=github_code, state="readonly", width=14).pack(side="left", padx=(0, 8))
+    ttk.Button(github_code_row, text="Copy code", command=copy_github_code).pack(side="left", padx=(0, 8))
+    ttk.Button(github_code_row, text="Open GitHub", command=lambda: webbrowser.open("https://github.com/login/device")).pack(side="left")
+
     ttk.Label(
         optional_section,
         text="Save code in your repositories. Publish suitable static sites with GitHub Pages.",
@@ -7316,15 +7368,27 @@ def gui():
                 and monitor_restart_needed()):
             window.monitor_restart_at = time.monotonic()
             start_monitor()
+        while not github_login_events.empty():
+            code, generation = github_login_events.get_nowait()
+            if generation == getattr(window, "github_login_generation", 0):
+                show_github_code(code)
         if not github_events.empty():
-            account = github_events.get_nowait()
-            if account:
+            account, generation, checked_login = github_events.get_nowait()
+            active_login = getattr(window, "github_login_process", None)
+            if (account and generation == getattr(window, "github_login_generation", 0)
+                    and github_account_refresh_allowed(active_login, checked_login)):
                 github_text.set(
                     "Connected as @"
                     + account
                     + ". Your AI can use your repositories when you ask it to."
                 )
                 github_button.configure(text="GitHub connected")
+                window.github_login_process = None
+                github_code.set("")
+                github_code_row.pack_forget()
+                panel = getattr(window, "github_login_panel", None)
+                if panel is not None and panel.winfo_exists():
+                    panel.destroy()
         if (
             not getattr(window, "github_checking", False)
             and time.monotonic() - getattr(window, "github_checked_at", 0) > 20
@@ -7332,9 +7396,15 @@ def gui():
             window.github_checking = True
             window.github_checked_at = time.monotonic()
 
-            def check_github():
+            generation = getattr(window, "github_login_generation", 0)
+            active_login = getattr(window, "github_login_process", None)
+            checked_login = active_login if active_login is None or active_login.poll() == 0 else False
+            if active_login is not None and active_login.poll() not in (None, 0):
+                github_text.set("GitHub sign-in did not finish. Click Connect GitHub to try again.")
+
+            def check_github(generation=generation, checked_login=checked_login):
                 try:
-                    github_events.put(github_account.account())
+                    github_events.put((github_account.account(), generation, checked_login))
                 finally:
                     window.github_checking = False
 

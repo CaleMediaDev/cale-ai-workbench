@@ -1,0 +1,42 @@
+{
+  "release": "0.5.507",
+  "base": "f09ca8e109be2aebdc8cbb87f2b1654b487ec048",
+  "features": [
+    "First-install and Supercharge buttons for ChatGPT, Claude, Grok and OpenRouter; clicks selected before account UI readiness are queued while downloads continue.",
+    "Existing ChatGPT/OpenRouter browser flows retained. Claude/Grok download SHA512-pinned unmodified official Windows binaries on click, use vendor-owned isolated profiles and own browser sign-in; Workbench never reads or packages their session tokens.",
+    "Explicit Connect and use my plan action enables bounded project-agent delegation; connection display alone does not enable/spend. Claude/Grok are official project agents, not a subscription-token inference API proxy.",
+    "Delegated tasks preserve full original brief/current AGENTS/later instructions within bounded request limits. Explicit known no-delegation clauses and registered-project ownership are enforced before handoff. Original project verification remains separate.",
+    "Subscription execution respects offline/global local/global free-only/task local/current enable policies. API-key fallback removed, Claude user-only settings+subscription method, Grok API auth disabled/builtin model+provider config guards. Authorized project file edits enabled without broad shell/network permission bypass.",
+    "Actual reported token counts are attributed to the project and graph; unknown counts stay unknown. Oversized output is preserved in a private project receipt with valid bounded JSON returned. Oversized Windows argv is rejected, never silently truncated.",
+    "Sign-in helpers use hidden Windows process creation and no terminal input. Existing GitHub visible-console flow replaced by hidden official CLI flow and Cale code/copy/browser panel, accessible from donation controls as well as Supercharge. Matching process/generation and fresh account probe required before success; stale account/login events cannot clear current codes."
+  ],
+  "validation": {
+    "provider_author_final": "152 passed,36 subtests in15.64s on741ccbe",
+    "combined_cloud_desktop_usage_installer_updater_github": "393 passed,1 skipped,36 subtests in62.97s before final GitHub freshness/panel refinement",
+    "final_desktop_github_full_modules": "186 passed,1 Tk display initialization skipped in43.78s after final GitHub freshness/panel refinement",
+    "focused_new_desktop_github": "10 passed in2.14s; real Tk callbacks/visible panel/code copy and real owned child-process pipe exercised without account authorization",
+    "native_handoff": "5 passed in1.50s including original/followup refusal, task attribution, full instructions and valid large result receipts",
+    "cloud_updater": "183 passed,36 subtests in12.02s including actual CREATE_NO_WINDOW child execution",
+    "visual": "Actual Windows Forms first-run and42percent progress DrawToBitmap previews inspected; four buttons visible without clipping.",
+    "binary_smoke": "Actual pinned Claude2.1.318 and Grok1.0.70 install/version/help/full built argv-help exit0; Grok source-policy inspect confirms API auth disabled. No sign-in/inference performed.",
+    "independent_review": "No remaining release blockers after project-settings billing guard, authoritative instruction preservation and stale GitHub account/process fixes."
+  },
+  "official_sources": [
+    "https://learn.chatgpt.com/docs/auth?surface=cli",
+    "https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan",
+    "https://code.claude.com/docs/en/legal-and-compliance",
+    "https://code.claude.com/docs/en/permissions",
+    "https://docs.x.ai/build/overview",
+    "https://docs.x.ai/build/features/permissions",
+    "https://cli.github.com/manual/gh_auth_login"
+  ],
+  "runtime_manifest_files": 250,
+  "limits": [
+    "No live Claude/Grok subscription sign-in, entitlement or model task was performed; those require each user to complete vendor approval.",
+    "No fresh-PC full installation or broad performance benchmark claimed.",
+    "Vendor agent permissions are not an arbitrary-code sandbox; Cale still verifies requested artifacts independently.",
+    "Per-handoff limits are8agent turns, native tool10..300seconds, backend ceiling600seconds/1MB output and24000UTF16 Windows argv units. Long prompt handoff via files is future work.",
+    "One UI initialization skip in full sequence; the new GUI cases also passed individually in focused runs. No full all-project self-check claimed.",
+    "Experimental near-completion/browser coverage changes remain private and excluded."
+  ]
+}
