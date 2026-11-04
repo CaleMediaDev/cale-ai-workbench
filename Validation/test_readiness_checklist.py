@@ -361,6 +361,17 @@ def test_local_ai_probe_rejects_non_object_json_without_crashing(payload):
     }
 
 
+@pytest.mark.parametrize("eval_count", ["1e999", "-1e999"])
+def test_local_ai_probe_rejects_overflowing_token_counts(eval_count):
+    model = "cale-fast:latest"
+    payload = ('{"done":true,"eval_count":' + eval_count + '}').encode()
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(payload)):
+        result = readiness_checklist._probe_local_ai(model)
+    assert result["ok"] is False
+    assert result["model"] == model
+    assert "OverflowError" in result["detail"]
+
+
 @pytest.mark.parametrize("size", ["1e999", "-1e999"])
 def test_optional_checks_recover_from_overflowing_model_sizes(tmp_path, size):
     payload = ('{"models":[{"name":"cale-fast:latest","size":' + size + '}]}').encode()

@@ -158,7 +158,7 @@ def _probe_local_ai(model: str) -> dict:
         return {"ok": good, "model": model,
                 "detail": f"{model} answered a local test" if good
                           else f"{model} did not complete the local test"}
-    except (OSError, ValueError, TypeError, TimeoutError) as exc:
+    except (OSError, ValueError, TypeError, OverflowError, TimeoutError) as exc:
         return {"ok": False, "model": model,
                 "detail": f"{model} did not answer within 45 seconds ({type(exc).__name__})"}
 
