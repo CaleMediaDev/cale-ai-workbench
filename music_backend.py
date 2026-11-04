@@ -530,6 +530,8 @@ def project_jobs(task_id: str, folder: str | Path) -> list[dict]:
     for path in JOBS.glob("*.json"):
         try:
             info = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(info, dict):
+                continue  # A damaged record must not hide valid project jobs.
             output_path = info.get("output_path")
             owned_path = bool(output_path) and Path(str(output_path)).resolve().is_relative_to(project)
             if info.get("task_id") == task_id or owned_path:
