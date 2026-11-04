@@ -91,30 +91,32 @@ def download_installer(url, expected):
     temporary = INSTALLER.with_suffix(".partial")
     digest = hashlib.sha256()
     total = 0
-    with (
-        urlopen(
-            Request(url, headers={"User-Agent": "Cale-AI-Workbench"}), timeout=60
-        ) as response,
-        temporary.open("wb") as output,
-    ):
-        while chunk := response.read(1024 * 1024):
-            total += len(chunk)
-            if total > MAX_SIZE:
-                raise ValueError("Ollama installer exceeded the download limit.")
-            output.write(chunk)
-            digest.update(chunk)
-            if total % (100 * 1024 * 1024) < len(chunk):
-                save_download_status(
-                    STATUS,
-                    "working",
-                    f"Downloading Ollama update: {total / 1e9:.1f} GB",
-                    30,
-                )
-    if digest.hexdigest() != expected:
+    try:
+        with (
+            urlopen(
+                Request(url, headers={"User-Agent": "Cale-AI-Workbench"}), timeout=60
+            ) as response,
+            temporary.open("wb") as output,
+        ):
+            while chunk := response.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_SIZE:
+                    raise ValueError("Ollama installer exceeded the download limit.")
+                output.write(chunk)
+                digest.update(chunk)
+                if total % (100 * 1024 * 1024) < len(chunk):
+                    save_download_status(
+                        STATUS,
+                        "working",
+                        f"Downloading Ollama update: {total / 1e9:.1f} GB",
+                        30,
+                    )
+        if digest.hexdigest() != expected:
+            raise ValueError("Ollama installer SHA-256 did not match its pinned release.")
+        os.replace(temporary, INSTALLER)
+        return INSTALLER
+    finally:
         temporary.unlink(missing_ok=True)
-        raise ValueError("Ollama installer SHA-256 did not match its pinned release.")
-    os.replace(temporary, INSTALLER)
-    return INSTALLER
 
 
 def run():

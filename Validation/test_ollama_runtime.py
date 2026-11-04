@@ -66,6 +66,35 @@ class OllamaRuntimeTests(unittest.TestCase):
                     )
             self.assertFalse(installer.exists())
 
+    def test_interrupted_download_removes_partial_and_preserves_installer(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            installer = root / "OllamaSetup.exe"
+            installer.write_bytes(b"previous installer")
+            response = BytesIO()
+            with (
+                patch.object(ollama_runtime, "INSTALLER", installer),
+                patch.object(ollama_runtime, "STATUS", root / "status.json"),
+                patch.object(
+                    ollama_runtime.shutil,
+                    "disk_usage",
+                    return_value=SimpleNamespace(free=20 * 2**30),
+                ),
+                patch.object(ollama_runtime, "urlopen", return_value=response),
+                patch.object(
+                    response,
+                    "read",
+                    side_effect=[b"partial download", OSError("connection lost")],
+                ),
+            ):
+                with self.assertRaisesRegex(OSError, "connection lost"):
+                    ollama_runtime.download_installer(
+                        "https://github.com/ollama/ollama/releases/download/v0.40.13/OllamaSetup.exe",
+                        hashlib.sha256(b"complete installer").hexdigest(),
+                    )
+            self.assertFalse(installer.with_suffix(".partial").exists())
+            self.assertEqual(installer.read_bytes(), b"previous installer")
+
     def test_migration_only_for_portable_installs(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

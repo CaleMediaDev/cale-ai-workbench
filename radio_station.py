@@ -555,6 +555,7 @@ class Service:
                     self.message = "On air · next tracks are made in the background"
                 elif self.current and Path(self.current["path"]).is_file():
                     self._play_current()
+                    self.repeating = True
                     self.message = "On air · repeating this track while the next one finishes"
                 else:
                     self.message = "Buffering your first three-minute track…"

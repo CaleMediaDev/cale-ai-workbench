@@ -380,6 +380,30 @@ def test_service_stages_ready_audio_immediately_and_blends_eight_seconds_before_
         assert not old.opened and service.player.active.busy()
 
 
+def test_eof_fallback_repeat_blends_into_the_next_ready_track_immediately(tmp_path):
+    _, service, _, jobs, calls, generate = fixture(tmp_path)
+    moment = [0]
+    service.player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        original = service.current["id"]
+        # Miss the pre-EOF window, forcing playback to restart the cached song.
+        moment[0] = 180
+        service.tick()
+        assert service.current["id"] == original
+        assert service.player.busy() and not service.player.mixing
+        assert service.repeating
+        finish(jobs, calls, 1)
+        moment[0] = 181
+        service.tick()
+        assert service.player.mixing
+        assert service.player.outgoing.busy() and service.player.active.busy()
+        assert service.current["path"] == calls[1][1]
+        assert not service.repeating
+
+
 def test_generation_underrun_blends_into_a_cached_repeat_then_the_next_ready_track(tmp_path):
     _, service, _, jobs, calls, generate = fixture(tmp_path)
     moment = [0]

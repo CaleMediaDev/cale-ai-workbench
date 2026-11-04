@@ -42,9 +42,9 @@ def install():
             msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError:
             return
-        if not MEDIA_PYTHON.is_file():
-            return
         try:
+            if not MEDIA_PYTHON.is_file():
+                raise FileNotFoundError("The bundled media Python executable is missing.")
             save_download_status(STATUS, "working", "Checking the natural voice", 5)
             check = subprocess.run(
                 [str(MEDIA_PYTHON), "-c", "import kokoro_onnx"],
