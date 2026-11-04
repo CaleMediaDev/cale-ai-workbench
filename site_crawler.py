@@ -58,6 +58,7 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 result = await crawler.arun(url=url, config=settings)
                 if not result.success:
                     raise RuntimeError(str(result.error_message or "Crawl failed")[:300])
+                link_base = normalized_url(getattr(result, "url", None) or url, host)
                 markdown_result = result.markdown
                 if isinstance(markdown_result, str):
                     markdown = markdown_result
@@ -77,7 +78,7 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 for link in (result.links or {}).get("internal", []):
                     candidate = link.get("href", "")
                     try:
-                        candidate = normalized_url(urljoin(url, candidate), host)
+                        candidate = normalized_url(urljoin(link_base, candidate), host)
                     except (OSError, ValueError):
                         continue
                     if candidate not in queued and len(queued) < 100:

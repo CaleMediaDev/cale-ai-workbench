@@ -65,6 +65,42 @@ def test_crawl_saves_pages_and_searchable_memory(tmp_path, monkeypatch, second_h
     assert project_memory.search(tmp_path, "silver penguin", kind="file")
 
 
+def test_redirected_page_resolves_links_against_final_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+    monkeypatch.setattr(project_memory, "index_file", lambda *_: None)
+    start = "https://example.com/old"
+    final_url = "https://example.com/docs/"
+    seen = []
+
+    class FakeCrawler:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def arun(self, url, config):
+            seen.append(url)
+            return types.SimpleNamespace(
+                success=True, url=final_url if url == start else url,
+                markdown="Readable page", error_message="",
+                links={"internal": [{"href": "guide"}]} if url == start else {},
+            )
+
+    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
+        AsyncWebCrawler=FakeCrawler,
+        BrowserConfig=lambda **kwargs: kwargs,
+        CrawlerRunConfig=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    ))
+    result = asyncio.run(site_crawler.crawl_site(tmp_path, start, max_pages=2))
+    assert seen == [start, "https://example.com/docs/guide"]
+    assert result["errors"] == []
+    assert len(result["pages"]) == 2
+
+
 @pytest.mark.parametrize("failure", ["unsuccessful", "exception", "empty"])
 def test_failed_pages_consume_the_crawl_budget(tmp_path, monkeypatch, failure):
     monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
