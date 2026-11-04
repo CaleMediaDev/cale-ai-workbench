@@ -800,7 +800,6 @@ def web_sources(question: str, preferred_business: str = "") -> tuple[list[dict]
         relevant_home = preferred_business and name_matching_domain(preferred_business, url)
         if not host or (not supplied_urls and (host in seen_hosts or (home and not relevant_home))):
             continue
-        seen_hosts.add(host)
         try:
             page = read_webpage(url, question=question)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
@@ -808,6 +807,7 @@ def web_sources(question: str, preferred_business: str = "") -> tuple[list[dict]
         text = page.get("text", "").strip()
         if len(text) < (1 if supplied_urls else 100):
             continue
+        seen_hosts.add(host)
         pages.append({
             "title": page.get("title") or lead.get("title") or host,
             "url": page["source_url"],
