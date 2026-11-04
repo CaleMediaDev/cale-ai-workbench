@@ -175,11 +175,35 @@ def release_for_gpu_task() -> None:
                 str(Path(part).resolve()).casefold() == script for part in command
             ):
                 continue
-            process.terminate()
             try:
-                process.wait(timeout=5)
-            except psutil.TimeoutExpired:
-                process.kill()
+                descendants = process.children(recursive=True)
+            except psutil.Error:
+                # An inaccessible child list must not leave the known worker
+                # running when its parent can still be terminated.
+                descendants = []
+            for child in reversed(descendants):
+                try:
+                    child.terminate()
+                except psutil.Error:
+                    pass
+            try:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except psutil.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            finally:
+                _, alive = psutil.wait_procs(descendants, timeout=3)
+                for child in alive:
+                    try:
+                        child.kill()
+                    except psutil.Error:
+                        pass
+                if alive:
+                    # Killing is asynchronous. Allow bounded exit time before
+                    # another process starts allocating GPU model memory.
+                    psutil.wait_procs(alive, timeout=3)
         except (OSError, psutil.Error, ValueError):
             continue
 
