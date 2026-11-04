@@ -57,7 +57,7 @@ def sync(root: str | Path) -> dict:
     """Copy new/unchanged managed files, preserving local skill modifications."""
     root = Path(root).resolve(strict=True)
     destination = root / "data/skills"
-    if not destination.exists() and not destination.is_symlink():
+    if not destination.exists() and not destination.is_symlink() and not destination.is_junction():
         destination.mkdir(parents=True, exist_ok=True)
     marker = root / "data/.cale-skill-files.json"
     try:
@@ -74,10 +74,11 @@ def sync(root: str | Path) -> dict:
         target = destination / relative
         if (
             any(
-                parent.is_symlink() or (parent.exists() and not parent.is_dir())
+                parent.is_symlink() or parent.is_junction() or (parent.exists() and not parent.is_dir())
                 for parent in (destination / part for part in reversed(relative.parents))
             )
             or target.is_symlink()
+            or target.is_junction()
             or (target.exists() and not target.is_file())
         ):
             preserved += 1
