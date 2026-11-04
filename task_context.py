@@ -286,6 +286,17 @@ def step_status(folder: str | Path) -> dict:
         return _step_status(conn, request_identity(folder))
 
 
+def historical_step_status(folder: str | Path) -> dict:
+    """Inspect the latest prior workflow; older superseded rows are historical."""
+    with project_memory.connection(folder) as conn:
+        _schema(conn)
+        row = conn.execute("""SELECT COUNT(*) AS total,
+            COALESCE(SUM(status IN ('active','pending')),0) AS remaining
+            FROM task_steps WHERE request_hash=(SELECT request_hash FROM task_steps
+                WHERE request_hash<>? ORDER BY id DESC LIMIT 1)""", (request_identity(folder),)).fetchone()
+        return {"total": row["total"], "remaining": row["remaining"]}
+
+
 def validate_repeatable_check(tool: str, arguments: dict) -> None:
     """A durable acceptance check cannot replay a one-time suite mutation."""
     if tool == "run_command":
@@ -375,7 +386,8 @@ def _validate_steps(steps: list) -> list[tuple]:
 
 
 def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None,
-               expected_request: str | None = None, expected_check: str | None = None) -> dict:
+               expected_request: str | None = None, expected_check: str | None = None,
+               expected_empty: bool = False, before_commit=None) -> dict:
     """Atomically add a phase, or replace only the current unit with smaller units.
 
     Completed rows remain intact. BEGIN IMMEDIATE prevents two workers from
@@ -392,6 +404,10 @@ def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None,
         if request_identity(folder) != request_hash:
             raise ValueError("User instructions changed during phase planning.")
         current = _step_status(conn, request_hash)
+        if expected_empty and current["total"]:
+            raise ValueError("An initial plan already exists; read the current SQLite queue instead of appending stale work.")
+        if before_commit is not None and not before_commit():
+            raise ValueError("Task control or planning requirements changed; no initial plan was saved.")
         if split_id is None:
             if current["remaining"]:
                 raise ValueError("Finish the active batch before planning another phase; split the active step if needed.")
@@ -413,6 +429,8 @@ def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None,
                 (request_hash,position,phase,title,check_command,shell,check_tool,check_arguments,status,updated)
                 VALUES(?,?,?,?,?,?,?,?,?,?)""", (request_hash, position + offset, phase, title, check, shell, tool, arguments,
                                                  "active" if offset == 0 else "pending", time.time()))
+        if before_commit is not None and not before_commit():
+            raise ValueError("Task control or planning requirements changed during insertion; initial plan rolled back.")
         return _step_status(conn, request_hash)
 
 

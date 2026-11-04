@@ -1,5 +1,23 @@
 # Native worker reality check
 
+## Initial planning and incremental recovery, v0.5.486
+
+The fresh offline expense-app trial used the actual local router, without
+developer edits to the app or a supplied plan. It created four SQLite units
+before implementation. In 300 worker seconds it passed 10 of 15 independent
+browser behaviors but completed no units. Two 150-second resumes advanced to
+two, then three completed units. All three runs ended at their deadline; the
+saved verifier still fails. The retained receipts are
+`offline-expense-app-486-20261104.json`,
+`offline-expense-resume-486a-20261104.json`, and
+`offline-expense-resume-486b-20261104.json`.
+
+Blank, zero, negative and nonnumeric input validation and phone layout remain
+broken. The final unit also has an incorrect browser oracle expecting HTML
+markup as visible text, although independent deletion checks pass. A failed
+baseline verifier earns no mutation-testing credit. This is measurable
+checkpoint progress, not a complete-app pass or a five-minute success.
+
 ## Saved form-case recovery, v0.5.485
 
 `form_case_repair.py` isolates checker recovery on an already-correct tiny

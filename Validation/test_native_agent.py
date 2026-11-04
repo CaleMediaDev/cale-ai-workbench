@@ -2599,6 +2599,7 @@ def test_interactive_html_completion_requires_fresh_browser_check():
         assert "call check_webapp" in native_agent.prompt(item)
         page = folder / "index.html"
         page.write_text("<input id='number'><p id='total'>1</p>", encoding="utf-8")
+        prepare_existing_html_gate_fixture(folder, "index.html")
         (folder / ".local-ai/verify.ps1").write_text("exit 0", encoding="utf-8")
         (folder / ".local-ai/PLAN.md").write_text("- [x] Build and verify\n", encoding="utf-8")
         state = {"verify_passed": True}
@@ -2633,6 +2634,11 @@ def test_native_worker_rejects_premature_browser_verifier_write():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
         item["brief"] = "Build a single-file index.html app with inputs that update a total."
+        folder = Path(item["folder"])
+        (folder / "index.html").write_text("<input id='number'><p id='total'>1</p>")
+        prepare_existing_html_gate_fixture(folder, "index.html", complete=False)
+        with project_memory.connection(folder) as conn:
+            original_steps = [dict(row) for row in conn.execute("SELECT * FROM task_steps").fetchall()]
         response = {"choices": [{"message": {"role": "assistant", "tool_calls": [{
             "id": "early-verifier", "function": {"name": "write_file", "arguments": json.dumps({
                 "path": ".local-ai/verify.ps1", "content": "exit 0",
@@ -2643,6 +2649,8 @@ def test_native_worker_rejects_premature_browser_verifier_write():
         assert not (Path(item["folder"]) / ".local-ai/verify.ps1").exists()
         assert any("Run check_webapp" in message.get("content", "")
                    for message in state["messages"] if message["role"] == "tool")
+        with project_memory.connection(folder) as conn:
+            assert [dict(row) for row in conn.execute("SELECT * FROM task_steps").fetchall()] == original_steps
 
 
 def test_browser_check_evidence_accepts_json_encoded_cases():
@@ -2668,6 +2676,7 @@ def test_html_game_cannot_finish_with_static_hud_or_input_only_claims(tmp_path):
     folder=Path(item["folder"])
     page=folder/"game.html"
     page.write_text('<canvas></canvas><p id="score">0</p><p id="position">center</p>')
+    prepare_existing_html_gate_fixture(folder, "game.html")
     (folder/".local-ai/verify.ps1").write_text("exit 0")
     (folder/".local-ai/PLAN.md").write_text("- [x] Built\n")
     assert native_agent.game_browser_required(item)
@@ -2707,6 +2716,7 @@ def test_new_instruction_invalidates_saved_browser_and_verifier_checks():
         folder = Path(item["folder"])
         page = folder / "index.html"
         page.write_text("<input id='bill'><p id='total'>30</p>", encoding="utf-8")
+        prepare_existing_html_gate_fixture(folder, "index.html")
         (folder / ".local-ai/verify.ps1").write_text("exit 0", encoding="utf-8")
         (folder / ".local-ai/PLAN.md").write_text("- [x] Build and verify\n", encoding="utf-8")
         native_agent.save_state(item, {"status": "done", "verify_passed": True,
@@ -3382,6 +3392,7 @@ def test_verifier_exit_zero_does_not_overrule_missing_gameplay_evidence(tmp_path
     folder = Path(item["folder"])
     item["brief"]="Create a simple space shooter game"
     (folder/"game.html").write_text('<canvas></canvas>')
+    prepare_existing_html_gate_fixture(folder, "game.html")
     (folder/".local-ai/verify.ps1").write_text('exit 0')
     fresh=native_agent.fresh_messages([{"role":"system","content":"Build the game"}],folder,
         {"verify_passed":True},item)
@@ -4070,6 +4081,7 @@ def test_real_lives_gate_rejects_false_complete_with_default_verifier_and_prose(
     item["brief"] = "Build an offline space shooter with 5 lives on start and restart."
     folder = Path(item["folder"])
     design_tools.create_space_shooter(str(folder / "index.html"))
+    prepare_existing_html_gate_fixture(folder, "index.html")
     state = {"game_starter": {"path": "index.html"}, "verify_passed": True}
     # Even a claimed verifier pass and checked prose cannot pass the live gate.
     (folder / ".local-ai/PLAN.md").write_text("# Plan\n- [x] Five lives verified.")
@@ -5391,3 +5403,468 @@ def test_custom_browser_suite_json_is_editable_through_ordinary_worker_tools(tmp
     assert page.read_bytes() == original_source
     with project_memory.connection(folder) as conn:
         assert [dict(row) for row in conn.execute("SELECT * FROM task_steps").fetchall()] == original_sql
+
+
+def initial_planning_integration_fixture(tmp_path, name):
+    item = project(tmp_path / name)
+    item["brief"] = "Build a single-file index.html calculator app with a labeled units input and Compute button that shows units multiplied by five in total."
+    folder = Path(item["folder"])
+    (folder / "AGENTS.md").write_text("Keep arithmetic exact and verify actual form input behavior.")
+    steps = [
+        {"phase": "Interface", "title": "Show the labeled calculator controls", "check_tool": "check_webapp", "check_arguments": {
+            "path": "index.html", "cases": [{"visible": ["calculator", "units", "compute", "total"]}]}},
+        {"phase": "Calculation", "title": "Compute entered units times five", "check_tool": "check_webapp", "check_arguments": {
+            "path": "index.html", "cases": [{"set": {"units": "7.2"}, "click": ["compute"], "expect": {"total": "36"}}]}}]
+    runtime_state = tmp_path / "state"
+    runtime_state.mkdir()
+    return item, folder, steps, runtime_state
+
+
+def initial_planning_reply(name, arguments, call_id="initial-plan-action"):
+    return {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": call_id,
+        "function": {"name": name, "arguments": json.dumps(arguments)}}]}}]}
+
+
+@pytest.mark.parametrize("operation", ["write_file", "shell_plan"])
+def test_initial_planning_stage_rejects_implementation_and_untyped_browser_plan(tmp_path, operation):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, operation)
+    seen = []
+    def complete(payload):
+        seen.append(payload)
+        assert payload["_native_workload"] == "initial_step_planning"
+        assert not {"write_file", "edit_file", "run_command", "check_webapp"} & {
+            tool["function"]["name"] for tool in payload["tools"]}
+        if operation == "write_file":
+            return initial_planning_reply("write_file", {"path": "index.html", "content": "Do not create this before planning."})
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": [
+            queue_step("Fake first check", "exit 0"), queue_step("Fake second check", "exit 0")]})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    reply = next(message["content"] for message in state["messages"] if message.get("tool_call_id") == "initial-plan-action")
+    assert reply.startswith("Tool error:") and len(seen) == 1
+    assert not (folder / "index.html").exists() and task_context.step_status(folder)["total"] == 0
+    assert state["status"] == "continue"
+
+
+def test_initial_planning_saves_typed_queue_then_restores_implementation_tools(tmp_path):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "valid-first-plan")
+    seen = []
+    def complete(payload):
+        seen.append(payload)
+        if len(seen) == 1:
+            assert payload["_native_workload"] == "initial_step_planning"
+            assert not (folder / "index.html").exists()
+            return initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+        assert payload.get("_native_workload") != "initial_step_planning"
+        assert "write_file" in {tool["function"]["name"] for tool in payload["tools"]}
+        assert task_context.step_status(folder)["total"] == 2
+        return initial_planning_reply("write_file", {"path": "index.html", "content": "<!doctype html><p>Implementation begins after planning.</p>"})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        first = native_agent.run_slice(item, complete=complete)
+        queue = task_context.step_status(folder)
+        assert queue["total"] == 2 and queue["done"] == 0 and queue["active"]["check_arguments"] == steps[0]["check_arguments"]
+        assert not (folder / "index.html").exists() and first["status"] == "continue"
+        second = native_agent.run_slice(item, complete=complete)
+    assert (folder / "index.html").read_text().endswith("Implementation begins after planning.</p>")
+    assert len(seen) == 2 and second["status"] == "continue" and task_context.step_status(folder)["done"] == 0
+
+
+def test_initial_planning_ignored_instruction_cannot_finish_unplanned_app(tmp_path):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "ignored-first-plan")
+    def complete(payload):
+        assert payload["_native_workload"] == "initial_step_planning"
+        return {"choices": [{"message": {"role": "assistant", "content": "Finished. The calculator is ready."}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert state["status"] == "continue" and task_context.step_status(folder)["total"] == 0
+    assert not (folder / "index.html").exists() and not state.get("verify_passed")
+
+
+@pytest.mark.parametrize("exemption", ["existing_queue", "checker_maintenance", "explanation"])
+def test_initial_planning_preserves_existing_queue_and_nonbuild_workflows(tmp_path, exemption):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, exemption)
+    if exemption == "existing_queue":
+        task_context.plan_steps(folder, [queue_step("Preserve the existing phase", "exit 1")])
+    elif exemption == "checker_maintenance":
+        item["brief"] = "Repair the mistaken saved checker arguments for the existing index.html calculator input; preserve app source."
+        assert not native_agent.initial_plan_required(item)
+    else:
+        item["brief"] = "Explain how to build a single-file index.html app with an input and a button."
+        assert not native_agent.initial_plan_required(item)
+    before = task_context.step_status(folder)
+    def complete(payload):
+        assert payload.get("_native_workload") != "initial_step_planning"
+        assert "write_file" in {tool["function"]["name"] for tool in payload["tools"]}
+        return initial_planning_reply("write_file", {"path": "notes.txt", "content": "Ordinary work remains available."})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        native_agent.run_slice(item, complete=complete)
+    assert (folder / "notes.txt").read_text() == "Ordinary work remains available."
+    after = task_context.step_status(folder)
+    assert (after["total"], after["done"]) == (before["total"], before["done"])
+
+
+@pytest.mark.parametrize("race", ["rules", "followup", "brief", "stop", "completed_competing_plan"])
+def test_initial_planning_rejects_requirements_control_and_completed_competing_plan_races(tmp_path, race):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, race)
+    competitor_id = None
+    def complete(payload):
+        nonlocal competitor_id
+        assert payload["_native_workload"] == "initial_step_planning"
+        if race == "rules":
+            (folder / "AGENTS.md").write_text("Changed requirement: inspect the revised rules before planning.")
+        elif race == "followup":
+            (folder / ".local-ai/USER-REQUESTS.md").write_text("New user requirement: support a different calculation.")
+        elif race == "brief":
+            item["brief"] += " Also preserve this newly added requirement."
+        elif race == "stop":
+            checkpoint = native_agent.read_state(item)
+            checkpoint["status"] = "stopped"
+            native_agent.save_state(item, checkpoint)
+        else:
+            competitor = task_context.plan_steps(folder, [queue_step("Competing completed preparation", "exit 0")])
+            competitor_id = competitor["active"]["id"]
+            checked = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": competitor_id}))
+            assert checked["passed"] and checked["remaining"] == 0 and checked["total"] == 1
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    with project_memory.connection(folder) as conn:
+        rows = [dict(row) for row in conn.execute("SELECT * FROM task_steps ORDER BY id").fetchall()]
+    if race == "completed_competing_plan":
+        assert len(rows) == 1 and rows[0]["id"] == competitor_id and rows[0]["status"] == "done"
+    else:
+        assert rows == []
+    assert not (folder / "index.html").exists()
+    assert state["status"] == ("stopped" if race == "stop" else "continue")
+
+
+@pytest.mark.parametrize("history_complete,followup,requires_plan", [
+    (True, "Change the Compute button color to blue.", False),
+    (True, "Repair only the mistaken saved checker assertions; preserve the app source.", False),
+    (False, "Change the Compute button color to blue.", True),
+    (False, "Repair only the mistaken saved checker assertions; preserve the app source.", True),
+    (True, "Build a new single-file index.html app with inputs and a button for currency conversion.", True),
+])
+def test_initial_planning_uses_latest_numbered_followup_only_after_historical_phases_finish(tmp_path, history_complete, followup, requires_plan):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "history-followup")
+    task_context.plan_steps(folder, [queue_step("Prepare the original interface", "exit 0"),
+                                     queue_step("Verify the original calculation", "exit 0")])
+    first = task_context.step_status(folder)["active"]
+    assert json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": first["id"]}))["passed"]
+    if history_complete:
+        second = task_context.step_status(folder)["active"]
+        assert json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": second["id"]}))["passed"]
+    (folder / ".local-ai/USER-REQUESTS.md").write_text(
+        "## Request 1\nBuild the original calculator app with inputs.\n\n## Request 2\n" + followup + "\n")
+    history = task_context.historical_step_status(folder)
+    assert history["total"] == 2 and bool(history["remaining"]) is not history_complete
+    assert task_context.step_status(folder)["total"] == 0  # Follow-up has a fresh request identity.
+    assert native_agent.initial_plan_required(item) is requires_plan
+    seen = []
+    def complete(payload):
+        seen.append(payload)
+        assert (payload.get("_native_workload") == "initial_step_planning") is requires_plan
+        return initial_planning_reply("read_file", {"path": "AGENTS.md"})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert len(seen) == 1 and state["status"] == "continue"
+    assert task_context.historical_step_status(folder) == history and not (folder / "index.html").exists()
+
+
+@pytest.mark.parametrize("race", ["rules", "stop"])
+def test_initial_planning_transaction_window_change_after_insert_rolls_back_and_preserves_stop(tmp_path, race):
+    from contextlib import contextmanager
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "insert-window-" + race)
+    real_plan = task_context.plan_steps
+    real_connection = project_memory.connection
+    inserted = []
+    callbacks = []
+    @contextmanager
+    def traced_connection(*args, **kwargs):
+        with real_connection(*args, **kwargs) as conn:
+            conn.set_trace_callback(lambda sql: inserted.append(sql) if sql.lstrip().upper().startswith("INSERT INTO TASK_STEPS") else None)
+            yield conn
+    def plan_with_window_change(*args, **kwargs):
+        original_commit_guard = kwargs["before_commit"]
+        def change_after_inserts():
+            callbacks.append(len(inserted))
+            if len(callbacks) == 2:
+                assert len(inserted) == 2  # Both actual SQLite INSERTs ran in the open transaction.
+                if race == "rules":
+                    (folder / "AGENTS.md").write_text("Revised during the SQL transaction: inspect new requirements before planning.")
+                else:
+                    checkpoint = native_agent.read_state(item)
+                    checkpoint["status"] = "stopped"
+                    native_agent.save_state(item, checkpoint)
+            return original_commit_guard()
+        return real_plan(*args, **{**kwargs, "before_commit": change_after_inserts})
+    def complete(payload):
+        assert payload["_native_workload"] == "initial_step_planning"
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(task_context, "plan_steps", side_effect=plan_with_window_change), patch.object(project_memory, "connection", side_effect=traced_connection), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert callbacks == [0, 2]
+    with project_memory.connection(folder) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM task_steps").fetchone()[0] == 0
+    assert not (folder / "index.html").exists()
+    assert state["status"] == ("stopped" if race == "stop" else "continue")
+    assert native_agent.read_state(item)["status"] == state["status"]
+
+
+def test_initial_planning_retry_refreshes_system_rules_before_second_inference(tmp_path):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "planning-rule-retry")
+    marker = "NEW_RULE: Calculator must show the words Updated rules applied."
+    seen = []
+    def complete(payload):
+        seen.append(payload)
+        if len(seen) == 1:
+            assert marker not in payload["messages"][0]["content"]
+            (folder / "AGENTS.md").write_text(marker)
+        else:
+            assert marker in payload["messages"][0]["content"]
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert len(seen) == 2 and state["status"] == "continue"
+    assert task_context.step_status(folder)["total"] == 2
+
+
+def test_initial_planning_basis_capture_uses_matching_fresh_system_rules(tmp_path):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "planning-rule-capture")
+    marker = "NEW_CAPTURE_RULE: Keep the revised output requirement in every plan."
+    basis = native_agent.planning_basis
+    captures = []
+    def change_before_hash(project):
+        if not captures:
+            (folder / "AGENTS.md").write_text(marker)
+        value = basis(project)
+        captures.append(value)
+        return value
+    def complete(payload):
+        assert marker in payload["messages"][0]["content"]
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(native_agent, "planning_basis", side_effect=change_before_hash), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        native_agent.run_slice(item, complete=complete)
+    assert captures and task_context.step_status(folder)["total"] == 2
+
+
+@pytest.mark.parametrize("window", ["inference", "after_insert"])
+def test_initial_planning_preserves_concurrent_done_checkpoint(tmp_path, window):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "planning-done-" + window)
+    real_plan = task_context.plan_steps
+    callbacks = []
+    def mark_done():
+        state = native_agent.read_state(item)
+        state.update(status="done", answer="Concurrent owner completed the task.")
+        native_agent.save_state(item, state)
+    def plan_with_done_window(*args, **kwargs):
+        commit = kwargs["before_commit"]
+        def before_commit():
+            callbacks.append(True)
+            if len(callbacks) == 2:
+                mark_done()
+            return commit()
+        return real_plan(*args, **{**kwargs, "before_commit": before_commit})
+    def complete(payload):
+        if window == "inference":
+            mark_done()
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(task_context, "plan_steps", side_effect=plan_with_done_window), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert task_context.step_status(folder)["total"] == 0
+    if window == "after_insert":
+        assert len(callbacks) == 2
+    assert state["status"] == "done" and native_agent.read_state(item)["status"] == "done"
+    assert state["answer"] == "Concurrent owner completed the task."
+
+
+@pytest.mark.parametrize("followup", [
+    "Create an installation guide for the index.html app with forms.",
+    "Rewrite README to document the index.html app and its input forms.",
+])
+def test_initial_planning_completed_history_documentation_followup_is_exempt(tmp_path, followup):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "planning-doc-followup")
+    active = task_context.plan_steps(folder, [queue_step("Completed original build", "exit 0")])["active"]
+    assert json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))["passed"]
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("## Request 1\nOriginal build.\n\n## Request 2\n" + followup)
+    assert not native_agent.initial_plan_required(item)
+
+
+@pytest.mark.parametrize("brief,requires_plan", [
+    ("Create a tutorial about index.html forms and input buttons.", False),
+    ("For this task, use SQLite steps to repair the calculator before editing implementation.", True),
+    ("Plan the app in SQLite steps before writing code.", True),
+])
+def test_initial_planning_classifies_documentation_and_explicit_plan_requests(tmp_path, brief, requires_plan):
+    item = project(tmp_path / "planning-intent")
+    item["brief"] = brief
+    assert native_agent.initial_plan_required(item) is requires_plan
+
+
+def prepare_existing_html_gate_fixture(folder, filename, *, complete=True):
+    """Satisfy only SQL preparation, leaving every app/interaction gate unproven."""
+    assert (folder / filename).is_file()
+    command = f"if (Test-Path -LiteralPath '{filename}' -PathType Leaf) {{ exit 0 }} else {{ exit 1 }}"
+    active = task_context.plan_steps(folder, [{"phase": "Fixture preparation",
+        "title": "Confirm the existing HTML fixture file is available", "check_command": command,
+        "shell": "powershell"}])["active"]
+    if complete:
+        checked = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+        assert checked["passed"] and checked["done"] == 1, checked
+    return active
+
+
+def noneditable_repair_integration_fixture(tmp_path, name, *, tag_hint=False, target="display", user_editable=False):
+    item = project(tmp_path / name)
+    item["brief"] = ("Repair the saved acceptance checker. The user requires an editable total-display input; inspect source before removing that requirement."
+        if user_editable else "Repair the mistaken saved acceptance checker without changing this working calculator. Keep total-display a noneditable calculated display.")
+    folder = Path(item["folder"])
+    markup = {'display': '<div id="total-display">0</div>', 'unknown': '<div id="other-display">0</div>',
+        'label': '<label id="total-display" for="units">Units</label>',
+        'contenteditable': '<div id="total-display" contenteditable="true">0</div>'}[target]
+    source = '''<form id="calculator"><input id="units"><button id="compute">Compute</button></form>''' + markup + '''
+        <p id="result">0</p><script>document.getElementById('calculator').onsubmit=e=>{e.preventDefault();
+        document.getElementById('result').textContent=String(Number(document.getElementById('units').value)*5);};</script>'''
+    (folder / "index.html").write_text(source)
+    bad_case = {"set": {"units": "7.2", "total-display": "0"}, "click": ["compute"], "expect": {"result": "36"}}
+    if target in {"label", "contenteditable"}:
+        bad_case["expect"] = {"result": "Impossible expected output"}  # Actual fill succeeds; a different assertion fails.
+    if tag_hint:
+        bad_case["visible"] = ["form"]
+    bad = {"path": "index.html", "cases": [bad_case]}
+    active = task_context.plan_steps(folder, [{"phase": "Calculator", "title": "Verify submitted calculation", "check_tool": "check_webapp", "check_arguments": bad}])["active"]
+    failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert not failed["passed"]
+    active = task_context.step_status(folder)["active"]
+    notice = native_agent.active_step_repair_notice(item, {"step_focus_turns": 1})
+    runtime_state = tmp_path / "state"
+    runtime_state.mkdir()
+    return item, folder, source, bad, active, notice, runtime_state
+
+
+def test_noneditable_repair_actual_bad_fill_recovers_definition_without_source_edit_or_completion(tmp_path):
+    item, folder, source, bad, active, notice, runtime_state = noneditable_repair_integration_fixture(tmp_path, "bad-fill-repair")
+    observations = json.loads(notice["content"].rsplit("\n", 1)[1])
+    assert observations["candidate_noneditable_inputs"] == {"total-display": "div"}
+    revision = {**observations["assertion_revision_reference"], "revise_inputs": True,
+        "cases": [{"set": {"units": "7.2"}, "click": ["compute"], "expect": {"result": "36"}}]}
+    def complete(payload):
+        assert [tool["function"]["name"] for tool in payload["tools"]] == ["check_webapp"]
+        assert payload["_native_workload"] == "active_step_checker_repair"
+        return initial_planning_reply("check_webapp", revision, "bad-fill-real-repair")
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(native_agent, "configured_context", return_value=65536), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    result = json.loads(next(message["content"] for message in state["messages"] if message.get("tool_call_id") == "bad-fill-real-repair"))
+    assert result["repaired_case_passed"] and result["verifier_saved"] and result["active_step_check_aligned"]
+    queue = task_context.step_status(folder)
+    assert queue["done"] == 0 and queue["active"]["id"] == active["id"]
+    assert queue["active"]["check_arguments"]["cases"] == revision["cases"]
+    assert (folder / "index.html").read_text() == source
+
+
+def test_noneditable_repair_host_preserves_valid_original_inputs_and_clicks(tmp_path):
+    item, folder, source, bad, active, notice, runtime_state = noneditable_repair_integration_fixture(tmp_path, "bad-fill-preserve")
+    saved = folder / ".local-ai/webapp-check.json"
+    before = saved.read_bytes()
+    observations = json.loads(notice["content"].rsplit("\n", 1)[1])
+    def complete(payload):
+        parameters = payload["tools"][0]["function"]["parameters"]
+        case_schema = parameters["properties"]["cases"]["items"]
+        assert case_schema["properties"]["set"]["const"] == {"units": "7.2"}
+        assert case_schema["properties"]["click"]["const"] == ["compute"]
+        return initial_planning_reply("check_webapp", {**observations["assertion_revision_reference"], "revise_inputs": True,
+            "cases": [{"set": {"units": "999"}, "click": ["compute"], "expect": {"result": "4995"}}]}, "bad-fill-changed-input")
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(native_agent, "configured_context", return_value=65536), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    reply = next(message["content"] for message in state["messages"] if message.get("tool_call_id") == "bad-fill-changed-input")
+    assert "offered schema" in reply and saved.read_bytes() == before
+    assert task_context.step_status(folder)["active"]["check_arguments"] == bad
+    assert (folder / "index.html").read_text() == source
+
+
+@pytest.mark.parametrize("target", ["unknown", "label", "contenteditable"])
+def test_noneditable_repair_does_not_remove_unknown_associated_label_or_contenteditable_targets(tmp_path, target):
+    item, folder, source, bad, active, notice, runtime_state = noneditable_repair_integration_fixture(tmp_path, "bad-fill-skip-" + target, target=target)
+    observations = json.loads(notice["content"].rsplit("\n", 1)[1]) if notice else {}
+    assert "candidate_noneditable_inputs" not in observations
+    assert task_context.step_status(folder)["active"]["check_arguments"] == bad
+    assert (folder / "index.html").read_text() == source
+
+
+def test_noneditable_repair_observed_bad_fill_takes_priority_over_tag_alias_hint(tmp_path):
+    item, folder, source, bad, active, notice, runtime_state = noneditable_repair_integration_fixture(tmp_path, "bad-fill-priority", tag_hint=True)
+    observations = json.loads(notice["content"].rsplit("\n", 1)[1])
+    assert observations["candidate_noneditable_inputs"] == {"total-display": "div"}
+    assert "candidate_static_tag_ids" not in observations
+    request = native_agent.focused_step_repair_request(item, {"step_focus_turns": 1}, native_agent.TOOLS, notice, 65536)
+    assert [tool["function"]["name"] for tool in request["tools"]] == ["check_webapp"]
+    assert request["tools"][0]["function"]["parameters"]["properties"]["revise_inputs"]["const"] is True
+    assert task_context.step_status(folder)["active"]["check_arguments"] == bad
+
+
+def test_noneditable_repair_user_required_editable_control_explanation_restores_normal_tools(tmp_path):
+    item, folder, source, bad, active, notice, runtime_state = noneditable_repair_integration_fixture(tmp_path, "bad-fill-user-requirement", user_editable=True)
+    stages = []
+    def complete(payload):
+        stages.append(payload.get("_native_workload"))
+        if len(stages) == 1:
+            assert [tool["function"]["name"] for tool in payload["tools"]] == ["check_webapp"]
+            assert "user requires an editable total-display input" in payload["messages"][0]["content"]
+            return {"choices": [{"message": {"role": "assistant", "content": "The original request requires an editable control. This is a source bug; preserve that requirement and restore ordinary tools."}}]}
+        assert "edit_file" in {tool["function"]["name"] for tool in payload["tools"]}
+        return initial_planning_reply("read_file", {"path": "index.html"})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2), patch.object(native_agent, "configured_context", return_value=65536), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert stages == ["active_step_checker_repair", None] and state["status"] == "continue"
+    assert task_context.step_status(folder)["done"] == 0 and task_context.step_status(folder)["active"]["check_arguments"] == bad
+    assert (folder / "index.html").read_text() == source
+
+
+def test_initial_planning_completed_html_followup_allows_explicit_sqlite_python_cli_acceptance(tmp_path):
+    from jsonschema import validate
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "html-to-python-cli")
+    original = task_context.plan_steps(folder, [queue_step("Complete previous HTML preparation", "exit 0")])["active"]
+    assert json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": original["id"]}))["passed"]
+    (folder / ".local-ai/USER-REQUESTS.md").write_text(
+        "## Request 1\nBuild the original index.html calculator.\n\n## Request 2\n"
+        "Build a Python CLI calculator in cli.py. Use SQLite steps and verify add(left,right) and multiply(left,right).")
+    assert native_agent.initial_plan_required(item)
+    python_steps = [{"phase": "Python CLI", "title": title, "check_tool": "check_python_function", "check_arguments": {
+        "path": "cli.py", "function": function, "cases": [{"args": [2, 3], "expected": expected}]}}
+        for title, function, expected in (("Add supplied values", "add", 5), ("Multiply supplied values", "multiply", 6))]
+    offered = native_agent.initial_plan_tools(item, native_agent.TOOLS)
+    schema = next(tool["function"]["parameters"] for tool in offered if tool["function"]["name"] == "task_steps")
+    arguments = {"action": "plan", "steps": python_steps}
+    validate(arguments, schema)
+    def complete(payload):
+        assert payload["_native_workload"] == "initial_step_planning"
+        return initial_planning_reply("task_steps", arguments)
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        native_agent.run_slice(item, complete=complete)
+    queue = task_context.step_status(folder)
+    assert queue["total"] == 2 and queue["done"] == 0 and queue["active"]["check_tool"] == "check_python_function"
+    assert not (folder / "cli.py").exists()
+
+
+def test_initial_planning_completed_latest_workflow_ignores_abandoned_older_request_units(tmp_path):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "abandoned-request-history")
+    abandoned = task_context.plan_steps(folder, [queue_step("Old abandoned request A", "exit 1")])["active"]
+    requests = folder / ".local-ai/USER-REQUESTS.md"
+    requests.write_text("## Request 1\nBuild replacement app B.\n")
+    replacement = task_context.plan_steps(folder, [queue_step("Complete replacement request B", "exit 0")])["active"]
+    assert json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": replacement["id"]}))["passed"]
+    requests.write_text("## Request 1\nBuild replacement app B.\n\n## Request 2\nChange the button color to blue.\n")
+    with project_memory.connection(folder) as conn:
+        before = [dict(row) for row in conn.execute("SELECT * FROM task_steps ORDER BY id").fetchall()]
+    assert len(before) == 2 and before[0]["id"] == abandoned["id"] and before[0]["status"] == "active"
+    assert before[1]["id"] == replacement["id"] and before[1]["status"] == "done"
+    assert task_context.step_status(folder)["total"] == 0
+    assert not native_agent.initial_plan_required(item)
+    def complete(payload):
+        assert payload.get("_native_workload") != "initial_step_planning"
+        return initial_planning_reply("write_file", {"path": "color-note.txt", "content": "A small follow-up can proceed."})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert state["status"] == "continue" and (folder / "color-note.txt").is_file()
+    with project_memory.connection(folder) as conn:
+        assert [dict(row) for row in conn.execute("SELECT * FROM task_steps ORDER BY id").fetchall()] == before

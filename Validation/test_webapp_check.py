@@ -397,6 +397,7 @@ def test_focused_json_check_runs_generated_verifier_and_finishes(tmp_path,plan):
     (tmp_path/"index.html").write_text(PAGE,encoding="utf-8")
     notes = tmp_path / ".local-ai"
     notes.mkdir()
+    prepare_existing_html_review_fixture(tmp_path, "index.html")
     (notes/"PLAN.md").write_text(plan)
     (notes/"PROGRESS.md").write_text('The requested page was built; completing its actual input checks now.')
     item={"id":"focused-test","folder":str(tmp_path),
@@ -428,6 +429,7 @@ def test_focused_json_cannot_choose_another_tool_or_run_arbitrary_text(tmp_path)
     (tmp_path/"index.html").write_text(PAGE,encoding="utf-8")
     notes = tmp_path / ".local-ai"
     notes.mkdir()
+    prepare_existing_html_review_fixture(tmp_path, "index.html")
     item={"id":"focused-test","folder":str(tmp_path),
           "brief":"Build a single-file index.html app with an input that updates the total."}
     native_agent.save_state(item,{"status":"continue","turns":1,"premature_finishes":1})
@@ -540,6 +542,7 @@ document.getElementById('restart').onclick=()=>{
 };</script></body></html>'''
     page = tmp_path / "game.html"
     page.write_text(source, encoding="utf-8")
+    prepare_existing_html_review_fixture(tmp_path, "game.html")
     spec = {"path": "game.html", "cases": [
         {"keys": [{"key": "ArrowRight", "hold_ms": 150}, {"key": "Space"}],
          "wait_ms": 50, "expect": {"position": "right", "shots": "1", "held": "released"}},
@@ -836,6 +839,7 @@ def test_numeric_example_check_does_not_guess_ambiguous_or_nonnumeric_requiremen
 def test_missing_numeric_case_blocks_handoff_until_actual_browser_case_is_added(tmp_path):
     source = PAGE.replace('n>0', 'n>0&&Number.isInteger(n)').replace('<input id="bill"', '<input id="bill" type="number"')
     (tmp_path / "index.html").write_text(source)
+    prepare_existing_html_review_fixture(tmp_path, "index.html")
     item = {"id": "coverage", "folder": str(tmp_path),
             "brief": "Build an index.html app with a Bill input. Bill zero and 4.5 are invalid."}
     with patch.object(long_tasks, "projects", return_value=[item]):
@@ -1893,3 +1897,14 @@ def test_expanded_suite_limits_reject_overflow_without_dropping_old_checks(tmp_p
     with pytest.raises(ValueError, match="128 retained"):
         webapp_check.saved_suite(tmp_path, {"path": "index.html", "cases": [
             {"set": {"bill": "999"}, "expect": {"answer": "any"}} for _ in range(12)]}, previous)
+
+
+def prepare_existing_html_review_fixture(folder, filename):
+    """Record only actual file availability; browser/security gates stay unproven."""
+    assert (folder / filename).is_file()
+    command = f"if (Test-Path -LiteralPath '{filename}' -PathType Leaf) {{ exit 0 }} else {{ exit 1 }}"
+    active = task_context.plan_steps(folder, [{"phase": "Fixture preparation",
+        "title": "Confirm the existing HTML fixture is available for browser review",
+        "check_command": command, "shell": "powershell"}])["active"]
+    checked = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert checked["passed"] and checked["done"] == 1, checked
