@@ -33,6 +33,7 @@ ERRORS = {}
 DISCOVERY_MAX_PAGES = 32
 DISCOVERY_MAX_TOOLS = 2000
 DISCOVERY_SECONDS = 15
+PREVIEW_SECONDS = 5
 LOCAL_CATALOG = {
     "local.start_3d_job": {
         "description": "Generate a real local 3D model with TripoSR from an image, or draw a local reference from a prompt first. Auto-installs isolated dependencies and verified weights; no account. Needs one NVIDIA GPU with 6 GB VRAM. Export GLB, OBJ or STL. Poll local.model_3d_job_status; do not start duplicate jobs while it downloads. Vertex colors, no UV/PBR textures or rigging.",
@@ -454,7 +455,11 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
     group, name = tool.split(".", 1)
     result = await SESSIONS[group].call_tool(name, arguments=arguments)
     if group == "devtools" and name != "take_screenshot" and not result.is_error:
-        await mirror_chrome_page(project_folder)
+        try:
+            async with asyncio.timeout(PREVIEW_SECONDS):
+                await mirror_chrome_page(project_folder)
+        except TimeoutError:
+            pass  # Optional preview must not hold up a successful browser action.
     value = result.model_dump(by_alias=True, exclude_none=True)
     raw = json.dumps(value, ensure_ascii=False)
     if len(raw) > 24000:
