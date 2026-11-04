@@ -59,7 +59,11 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                 page.close()
         selected = {scan_indices[position] for position in sampled_pages(len(scan_indices), max_pages)}
         if selected:
-            from media_worker import recognize_image
+            try:
+                from media_worker import recognize_image
+            except ImportError:
+                # An unavailable vision worker must not discard native text.
+                selected.clear()
 
         passages = []
         for index in range(total):
