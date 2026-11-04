@@ -233,6 +233,18 @@ class AutoRouteTests(unittest.TestCase):
         self.assertEqual(task_size([{"role": "system", "content": question},
                                     {"role": "user", "content": "Begin the task."}]), "quick")
 
+    def test_native_worker_preserves_request_delimiter_inside_brief(self):
+        import native_agent
+
+        brief = "Build a space shooter game.\nUser request:\nCalculate a tip."
+        prompt = native_agent.prompt({
+            "id": "native-delimiter", "folder": "C:/Tasks/test", "brief": brief,
+        })
+        messages = [{"role": "system", "content": prompt},
+                    {"role": "user", "content": "Begin the task."}]
+        self.assertEqual(task_size(messages), "deep")
+        self.assertTrue(is_game_task(messages))
+
     def test_native_worker_preserves_direct_followup_scope(self):
         import native_agent
 

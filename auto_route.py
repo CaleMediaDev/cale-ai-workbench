@@ -205,7 +205,7 @@ def _task_intent(messages):
                           if isinstance(msg, dict) and msg.get("role") == "system"
                           and message_text(msg.get("content")).startswith(
                               "You are Cale's native project worker.")), "")
-    native_brief = (native_prompt.rsplit("\nUser request:\n", 1)[1].strip()
+    native_brief = (native_prompt.split("\nUser request:\n", 1)[1].strip()
                     if "\nUser request:\n" in native_prompt else "")
     project = PROJECT_REQUEST.search(beginning) or PROJECT_REQUEST.search(request)
     if native_brief:
