@@ -8,6 +8,7 @@ before calling an endpoint or relying on its data.
 from __future__ import annotations
 
 import json
+import tempfile
 import time
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -44,9 +45,10 @@ def _catalog() -> tuple[list[dict], bool]:
             data = parsed
             fresh = True
             CACHE.parent.mkdir(parents=True, exist_ok=True)
-            temp = CACHE.with_suffix(".tmp")
-            temp.write_bytes(raw)
-            temp.replace(CACHE)
+            with tempfile.TemporaryDirectory(prefix="public-apis-", dir=CACHE.parent) as directory:
+                temp = Path(directory) / CACHE.name
+                temp.write_bytes(raw)
+                temp.replace(CACHE)
         except Exception:
             if data is None:
                 raise RuntimeError("The public API catalog is unavailable while offline.") from None

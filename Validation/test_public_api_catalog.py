@@ -114,6 +114,41 @@ def test_catalog_recovers_from_excessively_nested_cache(tmp_path):
     assert cache.read_bytes() == downloaded
 
 
+def test_catalog_overlapping_refreshes_do_not_share_temporary_files(tmp_path):
+    cache = tmp_path / "apis.json"
+    cache.write_text("[]", encoding="utf-8")
+    expired = cache.stat().st_mtime + public_api_catalog.MAX_AGE + 1
+    outer_snapshot = [{"name": "Outer"}]
+    inner_snapshot = [{"name": "Inner snapshot with a much longer name"}]
+    outer_raw = json.dumps(outer_snapshot).encode("utf-8")
+    inner_raw = json.dumps(inner_snapshot).encode("utf-8")
+    interleaved = False
+
+    def overlapping_write(path, raw):
+        nonlocal interleaved
+        with path.open("wb") as handle:
+            if not interleaved:
+                interleaved = True
+                inner_data, inner_fresh = public_api_catalog._catalog()
+                assert inner_data == inner_snapshot
+                assert inner_fresh is True
+                assert cache.read_bytes() == inner_raw
+            return handle.write(raw)
+
+    with patch.object(public_api_catalog, "CACHE", cache), \
+         patch.object(public_api_catalog.time, "time", return_value=expired), \
+         patch.object(public_api_catalog, "urlopen") as open_url, \
+         patch.object(type(cache), "write_bytes", new=overlapping_write):
+        response = open_url.return_value.__enter__.return_value
+        response.read.side_effect = [outer_raw, inner_raw]
+        data, fresh = public_api_catalog._catalog()
+
+    assert open_url.call_count == 2
+    assert data == outer_snapshot
+    assert fresh is True
+    assert cache.read_bytes() == outer_raw
+
+
 def test_catalog_uses_download_when_cache_replacement_fails(tmp_path):
     cache = tmp_path / "apis.json"
     original = json.dumps([{"name": "Old snapshot"}]).encode("utf-8")
