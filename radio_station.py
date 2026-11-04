@@ -239,8 +239,10 @@ class Player:
             self.prepared.set_volume(0)
             self.prepared.open(path)
         except Exception:
-            self.prepared.stop()
-            self.prepared = None
+            try:
+                self.prepared.stop()
+            finally:
+                self.prepared = None
             raise
 
     def blend(self, path, seconds=FADE_SECONDS):
