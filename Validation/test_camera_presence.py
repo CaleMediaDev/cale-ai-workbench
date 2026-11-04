@@ -122,6 +122,21 @@ class CameraPresenceTests(unittest.TestCase):
         self.assertEqual(tracker.observe([face], 6.5), [])
         self.assertEqual(tracker.observe([face], 20), [])
 
+    def test_greeting_resets_counters_to_prevent_repeated_greetings(self):
+        tracker = VisitorTracker(cooldown=10)
+        face = [1.0, 0.0]
+        # First greeting
+        self.assertEqual(tracker.observe([face], 0), [])
+        self.assertEqual(tracker.observe([face], 0.5), [face])
+        # Should not greet again immediately after
+        self.assertEqual(tracker.observe([face], 1), [])
+        self.assertEqual(tracker.observe([face], 1.5), [])
+        # After cooldown, should be able to greet again if person leaves and returns
+        for now in (2, 3, 4, 5):
+            tracker.observe([], now)
+        self.assertEqual(tracker.observe([face], 6), [])
+        self.assertEqual(tracker.observe([face], 11), [face])
+
     def test_group_greeting_invites_one_at_a_time_enrollment(self):
         line = greeting_line(["Alex", None])
         self.assertIn("Alex", line)

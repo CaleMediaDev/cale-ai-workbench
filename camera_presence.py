@@ -105,6 +105,9 @@ class VisitorTracker:
                         if track["misses"] == 0 and now - track["last_seen"] <= 1.5
                         else 1
                     )
+                # Reset counters after successful greeting to avoid repeated greetings
+                track["hits"] = 0
+                track["misses"] = 0
                 track["last_seen"] = now
                 track["feature"] = feature
                 track["misses"] = 0
@@ -118,6 +121,9 @@ class VisitorTracker:
                 track["pending_greeting"] = False
                 track["last_greeted"] = now
                 greetings.append(feature)
+        # Prune tracks that have been absent too long after a greeting
+        self.tracks = [track for track in self.tracks
+                       if now - track["last_seen"] <= max(self.cooldown, 30)]
         for index, track in enumerate(self.tracks):
             if index not in matched:
                 track["misses"] += 1
