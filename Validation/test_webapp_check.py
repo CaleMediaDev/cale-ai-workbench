@@ -2004,9 +2004,21 @@ def test_semantic_browser_preflight_preserves_future_page_and_normalized_adjacen
         {"reload": True, "expect": {"total-display": "$7.25"}},
     ]}
     before = copy.deepcopy(spec)
-    with patch.object(webapp_check, "_project_file", side_effect=AssertionError("pure preflight must not inspect source")):
+    source_reads = []
+    def protect_pages(method):
+        def guarded(path, *args, **kwargs):
+            if path.suffix.lower() in {".html", ".htm"}:
+                source_reads.append(path)
+                raise AssertionError("Planning must not read page content")
+            return method(path, *args, **kwargs)
+        return guarded
+    # Containment resolution is allowed; source inspection and execution are not.
+    with (patch.object(webapp_check, "check", side_effect=AssertionError("Planning must not run a browser")),
+          patch.object(Path, "read_text", protect_pages(Path.read_text)),
+          patch.object(Path, "read_bytes", protect_pages(Path.read_bytes))):
         webapp_check.validate_spec_data(webapp_check.normalize_spec(spec))
         queue = task_context.plan_steps(tmp_path, [{"phase": "Totals", "title": "Calculate requested dollars", "check_tool": "check_webapp", "check_arguments": spec}])
+    assert source_reads == []
     assert queue["total"] == 1 and queue["done"] == 0
     assert queue["active"]["check_arguments"] == spec == before
     assert not (tmp_path / "future.html").exists()
