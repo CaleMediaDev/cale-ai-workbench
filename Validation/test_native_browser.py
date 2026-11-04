@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+from types import SimpleNamespace
 from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -12,6 +13,110 @@ import pytest
 
 import native_agent
 import native_browser
+
+
+def test_javascript_error_capture_is_bounded_deduplicated_and_drained():
+    class ObservedPage:
+        def __init__(self):
+            self.events = {}
+
+        def on(self, event, callback):
+            self.events[event] = callback
+
+    class Error:
+        def __init__(self, message):
+            self.message = message
+
+        def __str__(self):
+            raise AssertionError("Do not collect error stacks")
+
+    page = ObservedPage()
+    try:
+        native_browser._watch_page(page)
+        report = page.events["pageerror"]
+        report(Error("missing helper\n    at private stack"))
+        report(Error("missing helper"))
+        report(Error("x" * 1000))
+        for number in range(20):
+            report(Error(f"failure {number}"))
+        result = json.loads(native_browser._response(page, {"title": "App"}))
+        assert len(result["javascript_errors"]) == native_browser.MAX_PAGE_ERRORS
+        assert result["javascript_errors"][0] == "missing helper"
+        assert max(map(len, result["javascript_errors"])) <= native_browser.MAX_PAGE_ERROR_LENGTH
+        assert result["javascript_errors_truncated"] is True
+        assert "Untrusted" in result["javascript_errors_note"]
+        assert json.loads(native_browser._response(page, {}))["javascript_errors"] == []
+        report(Error("child frame failure"))
+        page.events["framenavigated"](SimpleNamespace(parent_frame=page))
+        assert native_browser._PAGE_ERRORS[page]["messages"]
+        page.events["framenavigated"](SimpleNamespace(parent_frame=None))
+        assert json.loads(native_browser._response(page, {}))["javascript_errors"] == []
+        page.events["close"](page)
+        assert page not in native_browser._PAGE_ERRORS
+        assert "console" not in page.events
+    finally:
+        native_browser._PAGE_ERRORS.pop(page, None)
+
+
+def test_local_button_javascript_error_is_observed_and_fixed_reload_is_clean(tmp_path):
+    pytest.importorskip("playwright")
+    source = tmp_path / "index.html"
+    source.write_text('<title>App</title><input aria-label="Name">'
+                      '<button onclick="escapeHtml()">Run</button><p id="result"></p>', encoding="utf-8")
+    try:
+        opened = native_agent.execute_tool(tmp_path, "browser_open_project", {"path": "index.html"})
+        if opened.startswith("Tool error:") and "Executable doesn't exist" in opened:
+            pytest.skip("Chromium runtime is not installed in this test environment")
+        assert json.loads(opened)["javascript_errors"] == []
+        controls = json.loads(native_browser.execute(tmp_path, "snapshot", {}))["controls"]
+        name = next(row["ref"] for row in controls if row["label"] == "Name")
+        button = next(row["ref"] for row in controls if row["label"] == "Run")
+        native_browser.execute(tmp_path, "type", {"ref": name, "text": "private-field-sentinel"})
+        clicked = native_agent.execute_tool(tmp_path, "browser_click", {"ref": button})
+        result = json.loads(clicked)
+        assert any("escapeHtml is not defined" in error for error in result["javascript_errors"])
+        assert "private-field-sentinel" not in clicked
+        assert "passed" not in result
+        assert json.loads(native_browser.execute(tmp_path, "read", {}))["javascript_errors"] == []
+        # Leave an undrained old-document error, then replace the broken source.
+        page = native_browser._page(tmp_path)
+        page.evaluate("setTimeout(() => {throw new Error('old document')}, 0)")
+        page.wait_for_timeout(30)
+        source.write_text('<title>Fixed</title><button onclick="document.querySelector(\'p\').textContent=\'Done\'">Run</button><p></p>', encoding="utf-8")
+        assert json.loads(native_browser.execute(tmp_path, "open_project", {"path": "index.html"}))["javascript_errors"] == []
+        controls = json.loads(native_browser.execute(tmp_path, "snapshot", {}))["controls"]
+        assert json.loads(native_browser.execute(tmp_path, "click", {"ref": controls[0]["ref"]}))["javascript_errors"] == []
+        assert json.loads(native_browser.execute(tmp_path, "read", {}))["text"] == "Run\n\nDone"
+    finally:
+        native_browser.close()
+
+
+def test_existing_and_future_pages_observe_errors_and_context_close_cleans_state(tmp_path):
+    pytest.importorskip("playwright")
+    try:
+        page = native_browser._page(tmp_path, local=True)
+        context = page.context
+        page.set_content("<body>Initial page</body>")
+        page.evaluate("setTimeout(() => {throw new Error('initial failure')}, 0)")
+        page.wait_for_timeout(30)
+        assert json.loads(native_browser.execute(tmp_path, "read", {}))["javascript_errors"] == ["initial failure"]
+        (tmp_path / "startup.html").write_text(
+            '<body>Startup<script>throw new Error("startup failure")</script></body>', encoding="utf-8")
+        assert json.loads(native_browser.execute(tmp_path, "open_project", {"path": "startup.html"}))["javascript_errors"] == ["startup failure"]
+        future = context.new_page()
+        future.set_content("<body>Future page</body>")
+        future.evaluate("console.error('noisy widget'); setTimeout(() => {throw new Error('future failure')}, 0)")
+        future.wait_for_timeout(30)
+        assert json.loads(native_browser.execute(tmp_path, "read", {}))["javascript_errors"] == ["future failure"]
+        future.close()
+        assert future not in native_browser._PAGE_ERRORS
+        assert page in native_browser._PAGE_ERRORS
+        context.close()
+        assert page not in native_browser._PAGE_ERRORS
+        assert (str(tmp_path.resolve()), True) not in native_browser._CONTEXTS
+    finally:
+        native_browser.close()
+    assert not native_browser._PAGE_ERRORS
 
 
 def test_rejected_file_url_does_not_start_a_browser(tmp_path):
