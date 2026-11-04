@@ -21,6 +21,12 @@ TEXT_SUFFIXES = frozenset({".md", ".txt", ".py", ".js", ".mjs", ".cjs", ".jsx", 
 DOCUMENT_SUFFIXES = frozenset({".pdf", ".docx", ".xlsx", ".pptx"})
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 DOCUMENT_CHUNK_CHARS = 16_000
+# Only project_documents' derived pre-snapshot records are retired. Explicit
+# notes/skills and caller-defined extractor revisions retain their identities.
+LEGACY_DOCUMENT_EXTRACTORS = tuple(
+    f"extractor:{version}-vision{vision}"
+    for version in ("v1", "v2") for vision in (0, 1)
+)
 SKIP_DIRS = frozenset({".git", ".local-ai", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".next", ".cache"})
 DEFAULT_FILES = (
     "AGENTS.md", "README.md", "pyproject.toml", "package.json",
@@ -56,6 +62,7 @@ def connection(folder: str | Path):
         source_hash TEXT NOT NULL DEFAULT '', created REAL NOT NULL, updated REAL NOT NULL
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS memories_kind_updated ON memories(kind, updated DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS memories_document_source ON memories(source_path,tags) WHERE kind='document'")
     conn.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
         id UNINDEXED, title, body, tags, tokenize='unicode61'
     )""")
@@ -277,6 +284,25 @@ def _refresh_file_record(root: Path, row, checked_documents: dict | None = None)
     """
     if row["kind"] == "document":
         relative = row["source_path"]
+        if row["tags"] in LEGACY_DOCUMENT_EXTRACTORS:
+            # Hash equality cannot validate old extracted text after a transient
+            # source edit. Retire only this recalled source's legacy chunks;
+            # the next explicit document inspect rebuilds verified v3 text.
+            key = ("legacy-extractor", relative)
+            if checked_documents is None or key not in checked_documents:
+                with connection(root) as conn:
+                    placeholders = ",".join("?" for _ in LEGACY_DOCUMENT_EXTRACTORS)
+                    predicate = "kind='document' AND source_path=? AND tags IN (" + placeholders + ")"
+                    values = (relative, *LEGACY_DOCUMENT_EXTRACTORS)
+                    ids = [item[0] for item in conn.execute("SELECT id FROM memories WHERE " + predicate, values)]
+                    for identifier in ids:
+                        deleted = conn.execute("DELETE FROM memories WHERE id=? AND " + predicate,
+                                               (identifier, *values))
+                        if deleted.rowcount:
+                            conn.execute("DELETE FROM memory_fts WHERE id=?", (identifier,))
+                if checked_documents is not None:
+                    checked_documents[key] = True
+            return True
         if checked_documents is not None and relative in checked_documents:
             return checked_documents[relative]
         try:
@@ -403,9 +429,12 @@ def get(folder: str | Path, memory_id: str) -> dict:
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     if row is None:
         raise ValueError("Memory was not found in this project.")
+    legacy_document = row["kind"] == "document" and row["tags"] in LEGACY_DOCUMENT_EXTRACTORS
     if _refresh_file_record(root, row):
         with connection(root) as conn:
             row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
         if row is None:
+            if legacy_document:
+                raise ValueError("This document memory is outdated; use inspect_project_file on its source to rebuild it.")
             raise ValueError("Memory source file was removed or is no longer safe to read.")
     return dict(row)

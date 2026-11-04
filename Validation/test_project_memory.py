@@ -12,6 +12,46 @@ from unittest.mock import patch
 import project_memory as memory
 
 
+def test_legacy_extracted_hits_are_invalidated_lazily_without_scanning_or_erasing_notes(tmp_path):
+    import pytest
+
+    for operation in ("get", "search"):
+        root = tmp_path / operation
+        root.mkdir()
+        source = root / "old.pdf"
+        other = root / "unrelated.pdf"
+        source.write_bytes(b"original bytes")
+        other.write_bytes(b"unrelated bytes")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        memory.index_document_text(root, source, "stale zebra evidence", digest, revision="v2-vision0")
+        memory.index_document_text(root, other, "unrelated evidence",
+                                   hashlib.sha256(other.read_bytes()).hexdigest(), revision="v2-vision1")
+        note = memory.save(root, "note", "User note", "User-authored content stays", source_path="old.pdf")
+        text = root / "keep.txt"
+        text.write_text("Original plain file", encoding="utf-8")
+        memory.index_file(root, text)
+        # Even a concurrently rebuilt current-version row for this same source
+        # is preserved: invalidation only owns known legacy derived records.
+        with memory.connection(root) as conn:
+            memory._put(conn, "document:old.pdf:current", "document", "Current extraction",
+                        "current verified content", "extractor:v3-vision0", "old.pdf", digest)
+        with patch("file_chat.document_text", side_effect=AssertionError("Memory lookup must not extract")), \
+             patch.object(Path, "rglob", side_effect=AssertionError("Memory lookup must not scan")):
+            if operation == "get":
+                with pytest.raises(ValueError, match="inspect_project_file"):
+                    memory.get(root, "document:old.pdf:1")
+            else:
+                assert memory.search(root, "stale zebra", kind="document") == []
+        with memory.connection(root) as conn:
+            identifiers = {row[0] for row in conn.execute("SELECT id FROM memories")}
+            fts = {row[0] for row in conn.execute("SELECT id FROM memory_fts")}
+        assert "document:old.pdf:1" not in identifiers | fts
+        assert {note["id"], "file:keep.txt", "document:unrelated.pdf:1", "document:old.pdf:current"} <= identifiers
+        assert identifiers == fts
+        assert memory.get(root, note["id"])["body"] == "User-authored content stays"
+        assert memory.get(root, "document:old.pdf:current")["body"] == "current verified content"
+
+
 class ProjectMemoryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

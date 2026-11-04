@@ -19,7 +19,7 @@ import project_memory
 MAX_SOURCE_BYTES = 50 * 1024 * 1024
 MAX_EXTRACTED_CHARS = 5_000_000
 MAX_EXCERPT_CHARS = 10_000
-CACHE_VERSION = "v2"  # v1 translated line endings and could change pagination offsets.
+CACHE_VERSION = "v3"  # Re-extract pre-snapshot caches; v1 also translated line endings.
 SUPPORTED = file_chat.IMAGES | file_chat.PLAIN_TEXT | file_chat.DOCUMENTS
 
 

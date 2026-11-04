@@ -5868,3 +5868,51 @@ def test_initial_planning_completed_latest_workflow_ignores_abandoned_older_requ
     assert state["status"] == "continue" and (folder / "color-note.txt").is_file()
     with project_memory.connection(folder) as conn:
         assert [dict(row) for row in conn.execute("SELECT * FROM task_steps ORDER BY id").fetchall()] == before
+
+
+@pytest.mark.parametrize("field", ["visible", "hidden"])
+@pytest.mark.parametrize("target", ['<input id="units">', 'role=alert', 'units\n'])
+def test_initial_planning_visibility_rejects_markup_and_role_selectors_without_sql_mutation(tmp_path, field, target):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "planned-visibility-ids")
+    steps[0]["check_arguments"]["cases"] = [{field: [target]}]
+    original_tools = copy.deepcopy(native_agent.TOOLS)
+    def complete(payload):
+        assert payload["_native_workload"] == "initial_step_planning"
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps}, "bad-planned-visibility")
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    reply = next(message["content"] for message in state["messages"] if message.get("tool_call_id") == "bad-planned-visibility")
+    assert "offered schema" in reply and task_context.step_status(folder)["total"] == 0
+    assert not (folder / "index.html").exists() and native_agent.TOOLS == original_tools
+
+
+def test_initial_planning_visibility_accepts_ids_and_preserves_literal_markup_expectations(tmp_path):
+    from jsonschema import validate
+    import webapp_check
+    item, folder, original_steps, runtime_state = initial_planning_integration_fixture(tmp_path, "planned-literal-markup")
+    item["brief"] = "Build a single-file index.html app with an input editor and Show button that displays the entered HTML markup as literal text in preview."
+    literal = '<input id="sample">'
+    steps = [
+        {"phase": "Interface", "title": "Show the editor controls", "check_tool": "check_webapp", "check_arguments": {
+            "path": "index.html", "cases": [{"visible": ["editor", "show", "preview"], "hidden": ["validation-error"]}]}},
+        {"phase": "Preview", "title": "Display entered markup as literal text", "check_tool": "check_webapp", "check_arguments": {
+            "path": "index.html", "cases": [{"set": {"editor": literal}, "click": ["show"], "expect": {"preview": literal}}]}}]
+    original_tools = copy.deepcopy(native_agent.TOOLS)
+    public = next(tool["function"]["parameters"] for tool in native_agent.TOOLS if tool["function"]["name"] == "check_webapp")
+    validate({"path": "index.html", "cases": [{"visible": [literal, "role=alert"]}]}, public)
+    def complete(payload):
+        assert payload["_native_workload"] == "initial_step_planning"
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    queue = task_context.step_status(folder)
+    assert queue["total"] == 2 and queue["done"] == 0 and state["status"] == "continue"
+    assert queue["active"]["check_arguments"]["cases"] == steps[0]["check_arguments"]["cases"]
+    with project_memory.connection(folder) as conn:
+        saved = json.loads(conn.execute("SELECT check_arguments FROM task_steps WHERE title=?", (steps[1]["title"],)).fetchone()[0])
+    assert saved["cases"][0]["expect"]["preview"] == literal
+    (folder / "index.html").write_text("""<input id="editor"><button id="show">Show</button><output id="preview"></output>
+        <p id="validation-error" hidden>Error</p><script>document.getElementById('show').onclick=()=>{
+        document.getElementById('preview').textContent=document.getElementById('editor').value;};</script>""")
+    assert webapp_check.check(folder, saved)["passed"]  # Literal markup remains actual visible text.
+    assert native_agent.TOOLS == original_tools and task_context.step_status(folder)["done"] == 0

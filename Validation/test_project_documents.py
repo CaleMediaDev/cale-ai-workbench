@@ -9,6 +9,40 @@ import project_documents
 import project_memory
 
 
+def test_snapshot_upgrade_ignores_v2_cache_and_rebuilds_only_derived_chunks(tmp_path):
+    source = tmp_path / "notes.pdf"
+    source.write_bytes(b"stable original PDF bytes")
+    digest = project_documents._digest(source)
+    old_cache = tmp_path / ".local-ai/document-cache" / f"v2-{digest}-pdf-0.txt"
+    old_cache.parent.mkdir(parents=True)
+    old_cache.write_text("stale poisoned zebra passage", encoding="utf-8")
+    project_memory.index_document_text(tmp_path, source, "stale poisoned zebra passage",
+                                       digest, revision="v2-vision0")
+    note = project_memory.save(tmp_path, "note", "My decision", "Keep the handwritten explanation",
+                               source_path="notes.pdf")
+    snapshots = []
+
+    def extract(snapshot, max_scanned_pages):
+        assert snapshot != source and snapshot.read_bytes() == source.read_bytes()
+        snapshots.append(snapshot)
+        return "verified fresh zebra passage"
+
+    with patch.object(file_chat, "ROOT", tmp_path), patch.object(file_chat, "document_text", side_effect=extract) as reader:
+        first = project_documents.inspect(tmp_path, "notes.pdf")
+        second = project_documents.inspect(tmp_path, "notes.pdf")
+    assert first["text"] == second["text"] == "verified fresh zebra passage"
+    assert not first["cached"] and second["cached"]
+    assert reader.call_count == 1 and not snapshots[0].exists()
+    assert not project_memory.search(tmp_path, "stale poisoned", kind="document")
+    assert project_memory.search(tmp_path, "verified fresh", kind="document")
+    assert project_memory.get(tmp_path, note["id"])["body"] == "Keep the handwritten explanation"
+    with project_memory.connection(tmp_path) as conn:
+        rows = conn.execute("SELECT tags,source_hash FROM memories WHERE kind='document'").fetchall()
+    assert rows and all(row["tags"] == "extractor:v3-vision0" and row["source_hash"] == digest for row in rows)
+    assert old_cache.read_text(encoding="utf-8") == "stale poisoned zebra passage"
+    assert source.read_bytes() == b"stable original PDF bytes"
+
+
 def test_inspector_reads_real_pdf_and_reuses_the_extraction(tmp_path):
     source = tmp_path / "research.pdf"
     stream = b"BT /F1 12 Tf 72 720 Td (The release date is November second.) Tj ET"

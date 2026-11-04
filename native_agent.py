@@ -3554,10 +3554,23 @@ def initial_plan_tools(project: dict, available: list) -> list:
             branch["properties"]["check_arguments"]["description"] = (
                 "set maps editable HTML IDs to strings; filling does not submit. Put any required click "
                 "and the observed outcome in that same case. expect maps output IDs to literal visible "
-                "text, not roles or row-count instructions. visible/hidden check IDs or text. "
-                "Use rendered text rather than HTML markup; tag/role names are not selectors. "
+                "text, not roles or row-count instructions. visible/hidden list actual element IDs only, "
+                "not markup or selectors. Use expect with an output ID for rendered literal text, "
+                "including HTML markup displayed as text. "
                 "Create required rows/items through real inputs before testing their actions. "
                 "New pages may choose IDs during planning, then implement those exact controls.")
+    # Tighten only newly planned browser acceptance. Public checks and repair
+    # contracts still support their existing literal-text visibility behavior.
+    for branch in parameters["properties"]["steps"]["items"]["anyOf"]:
+        if branch["properties"].get("check_tool", {}).get("enum") != ["check_webapp"]:
+            continue
+        cases = branch["properties"]["check_arguments"]["properties"]["cases"]
+        for field in ("visible", "hidden"):
+            identity = cases["items"]["properties"][field]["items"]
+            identity["pattern"] = r"^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+            # JSON Schema's $ may match before a final newline; the helper's
+            # fullmatch does not. Reject every non-ID character explicitly.
+            identity["not"] = {"pattern": r"[^A-Za-z0-9_-]"}
     tool["function"]["description"] = (
         "Create the first SQLite phase before implementation. Plan small, meaningful units with real "
         "repeatable acceptance from the original request. Planning does not pass their checks. "
