@@ -21,7 +21,16 @@ MAX_AGE = 86400
 
 def _catalog() -> tuple[list[dict], bool]:
     """Refresh daily; keep the last good snapshot when the PC is offline."""
-    fresh = CACHE.is_file() and time.time() - CACHE.stat().st_mtime < MAX_AGE
+    data = None
+    fresh = False
+    try:
+        cached = json.loads(CACHE.read_text(encoding="utf-8"))
+        if not isinstance(cached, list):
+            raise ValueError("Unexpected public API catalog format.")
+        data = cached
+        fresh = time.time() - CACHE.stat().st_mtime < MAX_AGE
+    except (OSError, ValueError):
+        pass
     if not fresh:
         try:
             request = Request(SOURCE, headers={"User-Agent": "Cale-AI-Workbench/1.0"})
@@ -36,13 +45,11 @@ def _catalog() -> tuple[list[dict], bool]:
             temp = CACHE.with_suffix(".tmp")
             temp.write_bytes(raw)
             temp.replace(CACHE)
+            data = parsed
             fresh = True
         except Exception:
-            if not CACHE.is_file():
+            if data is None:
                 raise RuntimeError("The public API catalog is unavailable while offline.") from None
-    data = json.loads(CACHE.read_text(encoding="utf-8"))
-    if not isinstance(data, list):
-        raise ValueError("Unexpected public API catalog format.")
     return data, fresh
 
 
