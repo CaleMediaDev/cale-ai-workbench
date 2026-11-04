@@ -49,7 +49,8 @@ def sync(root: str | Path) -> dict:
     """Copy new/unchanged managed files, preserving local skill modifications."""
     root = Path(root).resolve(strict=True)
     destination = root / "data/skills"
-    destination.mkdir(parents=True, exist_ok=True)
+    if not destination.exists() and not destination.is_symlink():
+        destination.mkdir(parents=True, exist_ok=True)
     marker = root / "data/.cale-skill-files.json"
     try:
         previous = json.loads(marker.read_text(encoding="utf-8"))
