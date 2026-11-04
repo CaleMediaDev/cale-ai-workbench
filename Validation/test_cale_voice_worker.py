@@ -50,3 +50,31 @@ def test_prompt_initialization_diagnostics_do_not_corrupt_json_output():
     ]
     assert "Extracting reference voice" in diagnostics.getvalue()
     generate.assert_called_once_with(model, prompt, "hello", "voice.wav")
+
+
+def test_failed_audio_write_preserves_existing_recording(tmp_path):
+    import sys
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    import pytest
+
+    target = tmp_path / "voice.wav"
+    target.write_bytes(b"previous recording")
+    model = Mock()
+    model.generate_voice_clone.return_value = ([[0.0]], 24000)
+
+    def failing_write(path, audio, sample_rate):
+        path = Path(path)
+        assert path.suffix == ".wav"
+        path.write_bytes(b"partial recording")
+        raise OSError("audio write failed")
+
+    soundfile = SimpleNamespace(write=Mock(side_effect=failing_write))
+    with patch.dict(sys.modules, {"soundfile": soundfile}):
+        with pytest.raises(OSError, match="audio write failed"):
+            cale_voice_worker.generate(model, object(), "hello", str(target))
+
+    soundfile.write.assert_called_once()
+    assert target.read_bytes() == b"previous recording"
+    assert list(tmp_path.iterdir()) == [target]

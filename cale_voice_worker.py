@@ -3,6 +3,7 @@
 import contextlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -42,7 +43,17 @@ def generate(model, voice_prompt, text: str, output_path: str) -> dict:
             language="English",
             voice_clone_prompt=voice_prompt,
         )
-    sf.write(target, audio[0], sample_rate)
+    # Keep an existing recording intact if encoding or writing fails.
+    # Preserve the suffix so soundfile can infer the requested audio format.
+    with tempfile.NamedTemporaryFile(
+        dir=target.parent, suffix=target.suffix, delete=False,
+    ) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        sf.write(temporary_path, audio[0], sample_rate)
+        temporary_path.replace(target)
+    finally:
+        temporary_path.unlink(missing_ok=True)
     return {"path": str(target), "engine": "Cale's local voice"}
 
 
