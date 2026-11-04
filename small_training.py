@@ -106,10 +106,15 @@ def predict_classifier(model_folder, text):
     vectorizer.idf_ = np.array(artifact["idf"])
     model = LogisticRegression()
     model.classes_ = np.array(artifact["classes"])
-    model.coef_ = np.array(artifact["coef"])
-    model.intercept_ = np.array(artifact["intercept"])
+    model.coef_ = np.array(artifact["coef"], dtype=float)
+    model.intercept_ = np.array(artifact["intercept"], dtype=float)
+    if not np.isfinite(model.coef_).all() or not np.isfinite(model.intercept_).all():
+        raise ValueError("Saved classifier weights must be finite; retrain the model.")
     model.n_features_in_ = len(vocabulary)
-    scores = model.predict_proba(vectorizer.transform([text]))[0]
+    with np.errstate(over="ignore", invalid="ignore"):
+        scores = model.predict_proba(vectorizer.transform([text]))[0]
+    if not np.isfinite(scores).all():
+        raise ValueError("Classifier probabilities must be finite; retrain the model.")
     return {
         "label": str(model.classes_[scores.argmax()]),
         "probabilities": {str(k): float(v) for k, v in zip(model.classes_, scores)},
