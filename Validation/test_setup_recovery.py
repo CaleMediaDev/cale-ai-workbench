@@ -203,6 +203,46 @@ def test_base_setup_repair_ignores_active_or_feature_setup(tmp_path, monkeypatch
         assert not setup_recovery.recover()
 
 
+def test_invalid_base_repair_attempts_do_not_crash_or_launch(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    progress = {
+        "status": "error", "current": "Setup needs attention: download failed",
+        "updated": 1,
+    }
+    progress_path = state / "install-progress.json"
+    progress_path.write_text(json.dumps(progress), encoding="utf-8")
+    record_path = state / "base-install-repair.json"
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery.time, "time", lambda: 10000)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    locking = MagicMock()
+    locking.LK_NBLCK = 1
+    locking.LK_UNLCK = 2
+    with patch.dict("sys.modules", {"msvcrt": locking}), patch.object(
+        setup_recovery.subprocess, "Popen"
+    ) as launch:
+        for attempts in (None, "invalid", {}, [], float("inf")):
+            record = {"attempts": attempts, "started": 1}
+            record_text = json.dumps(record)
+            record_path.write_text(record_text, encoding="utf-8")
+            assert setup_recovery.recover() is False
+            assert setup_recovery.repair_exhausted(progress) is False
+            # A valid initial record may become invalid before the locked read.
+            with patch.object(setup_recovery, "_read", side_effect=[
+                progress, {"attempts": 0, "started": 1}, progress, record,
+            ]):
+                assert setup_recovery.recover() is False
+            assert record_path.read_text(encoding="utf-8") == record_text
+            assert json.loads(progress_path.read_text(encoding="utf-8")) == progress
+        launch.assert_not_called()
+    assert locking.locking.call_count == 10
+    assert locking.locking.call_args.args[1:] == (locking.LK_UNLCK, 1)
+
+
 def test_success_clears_retry_count(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
