@@ -1014,7 +1014,7 @@ def recover_music_jobs() -> None:
             }
             _write_job(job_id, resumed)
             _launch_job(job_id)
-        except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError, OverflowError):
             continue  # One damaged record must not prevent recovery of others.
 
 
