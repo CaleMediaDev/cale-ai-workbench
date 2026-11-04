@@ -105,6 +105,9 @@ def calculate(question: str) -> str | None:
     )
     # Keep multiplication tokens separate so mixed/repeated symbols cannot form **.
     normalized = normalized.replace("×", " * ").replace("÷", "/").replace("^", "**")
+    # Reject unsupported floor division before any subtree can raise an error.
+    if "//" in normalized:
+        return None
     try:
         tree = ast.parse(normalized, mode="eval")
         return f"{expression} = {_display(_evaluate(tree.body, normalized))}"
