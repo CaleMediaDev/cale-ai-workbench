@@ -155,6 +155,21 @@ def test_success_clears_retry_count(tmp_path, monkeypatch):
     assert not record.exists()
 
 
+def test_bom_prefixed_completion_clears_retry_count(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    progress_path = state / "install-progress.json"
+    progress_path.write_text(json.dumps({"status": "complete"}), encoding="utf-8-sig")
+    record = state / "base-install-repair.json"
+    record.write_text('{"attempts":3}', encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+
+    assert not setup_recovery.recover()
+    assert not record.exists()
+    assert setup_recovery._read(progress_path) == {"status": "complete"}
+
+
 def test_stopped_installer_turns_stale_work_into_retry(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
