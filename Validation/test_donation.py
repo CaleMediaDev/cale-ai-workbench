@@ -1552,3 +1552,91 @@ def test_partial_publication_reuses_only_exact_artifact_branch(enabled, monkeypa
     else:
         assert models.publish_candidate(enabled, claimed, {"folder": str(folder)}, "TestDonor", lambda: None).endswith("/pull/2")
         assert [data["draft"] for path, data in posts if path.endswith("pulls")] == [True]
+
+class DonationInlineThread:
+    """Run the real scheduler body synchronously; inference/GitHub stay mocked."""
+    def __init__(self,target,args=(),daemon=True):self.target,self.args,self.running=target,args,False
+    def start(self):
+        self.running=True
+        try:self.target(*self.args)
+        finally:self.running=False
+    def is_alive(self):return self.running
+
+
+@pytest.mark.parametrize('failure',['429','usage_limit','transport'])
+def test_quota_exhausted_chatgpt_scheduler_immediately_uses_enabled_local(tmp_path,failure):
+    from urllib.error import HTTPError
+    donation.set_enabled(True,tmp_path,chatgpt_account=FINGERPRINT,github_account='donor',sources=['chatgpt','local'],intensity='medium')
+    service=donation.Service(tmp_path);resources=[];drafts=[]
+    def complete(payload,resource,intensity,cancel,on_usage):
+        resources.append(resource)
+        if resource=='chatgpt':
+            if failure=='429':raise HTTPError('https://chatgpt.example/',429,'quota',{'Retry-After':'120'},None)
+            raise RuntimeError('chatgpt_auth usage_limit reached' if failure=='usage_limit' else 'ChatGPT connection unavailable')
+        on_usage(RESULT,'ollama','main',False)
+        return RESULT
+    def public(path,revision):return json.dumps([JOB]) if path=='donation-tasks.json' else SOURCES[path]
+    with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
+         patch('chatgpt_auth.status',return_value={'sharing':True}),patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT),\
+         patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
+         patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
+         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal',side_effect=lambda *args: drafts.append(args) or 'https://example.invalid/draft'),\
+         patch.object(donation.threading,'Thread',DonationInlineThread):
+        service.tick()
+        assert resources==['chatgpt'] and service.next_attempt==0
+        service.tick()
+    assert resources==['chatgpt','local'] and len(drafts)==1
+    assert donation.resource_cooldown(tmp_path,'chatgpt')>0 and donation.resource_cooldown(tmp_path,'local')==0
+    assert donation.settings(tmp_path)['sources']==['chatgpt','local']
+    with closing(donation.connection(tmp_path)) as conn:
+        assert [tuple(row) for row in conn.execute('SELECT resource,status FROM runs ORDER BY started')]==[('chatgpt','failed'),('local','submitted')]
+
+
+def test_chatgpt_limit_does_not_enable_disabled_local_donations(tmp_path):
+    from urllib.error import HTTPError
+    donation.set_enabled(True,tmp_path,chatgpt_account=FINGERPRINT,github_account='donor',sources=['chatgpt'],intensity='medium')
+    service=donation.Service(tmp_path)
+    def public(path,revision):return json.dumps([JOB]) if path=='donation-tasks.json' else SOURCES[path]
+    with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
+         patch('chatgpt_auth.status',return_value={'sharing':True}),patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT),\
+         patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
+         patch.object(donation,'complete_donation',side_effect=HTTPError('https://chatgpt.example/',429,'quota',{'Retry-After':'120'},None)) as complete,\
+         patch.object(donation.threading,'Thread',DonationInlineThread):
+        service.tick();service.tick()
+    assert complete.call_count==1 and service.next_attempt>time.monotonic()
+    assert donation.settings(tmp_path)['sources']==['chatgpt']
+
+def test_github_429_is_shared_global_wait_not_chatgpt_or_local_quota(tmp_path):
+    from urllib.error import HTTPError
+    donation.set_enabled(True,tmp_path,chatgpt_account=FINGERPRINT,github_account='donor',sources=['chatgpt','local'],intensity='medium')
+    service=donation.Service(tmp_path)
+    with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
+         patch('chatgpt_auth.status',return_value={'sharing':True}),patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT),\
+         patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
+         patch.object(donation,'gh_api',side_effect=HTTPError('https://api.github.com/',429,'limit',{'Retry-After':'120'},None)) as github,\
+         patch.object(donation,'complete_donation') as complete,patch.object(donation.threading,'Thread',DonationInlineThread):
+        service.tick()
+        assert github.call_count==1
+        donation.Service(tmp_path).tick()  # Shared GitHub cooldown covers another lane/service too.
+        assert github.call_count==1
+    complete.assert_not_called()
+    assert donation.resource_cooldown(tmp_path,'github')>100
+    assert donation.resource_cooldown(tmp_path,'chatgpt')==donation.resource_cooldown(tmp_path,'local')==0
+
+
+def test_cloud_pinned_child_never_turns_into_parallel_local_worker(tmp_path):
+    from urllib.error import HTTPError
+    donation.set_enabled(True,tmp_path,chatgpt_account=FINGERPRINT,github_account='donor',sources=['chatgpt','local'],intensity='medium')
+    service=donation.Service(tmp_path,_lane=True,_resource='chatgpt')
+    def public(path,revision):return json.dumps([JOB]) if path=='donation-tasks.json' else SOURCES[path]
+    with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
+         patch('chatgpt_auth.status',return_value={'sharing':True}),patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT),\
+         patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
+         patch.object(donation,'complete_donation',side_effect=HTTPError('https://chatgpt.example/',429,'quota',{},None)) as complete,\
+         patch.object(donation.threading,'Thread',DonationInlineThread):
+        service.tick();service.tick()
+    assert complete.call_count==1 and complete.call_args.args[1]=='chatgpt'
+    assert service.next_attempt>time.monotonic() and service.resource=='chatgpt'

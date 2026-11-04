@@ -280,6 +280,17 @@ def local_completion(payload: dict, intensity: str, cancel, on_usage):
     return result
 
 
+def inference_retry_seconds(error):
+    """Only callers at the inference boundary may blame an AI resource."""
+    if isinstance(error, HTTPError) and error.code == 429:
+        try:
+            seconds = float(error.headers.get("Retry-After", "300"))
+            return max(30, min(86400, seconds)) if 0 < seconds < float("inf") else 300
+        except (ValueError, TypeError, AttributeError):
+            return 300
+    return 300 if re.search(r"usage_limit|rate_limit|quota", str(error), re.I) else 60
+
+
 def leaderboard(root: Path = ROOT) -> dict:
     """Read rankings from distinct, verified merged PR numbers, never donor claims."""
     with closing(connection(root)) as conn:
@@ -861,6 +872,11 @@ class Service:
                 raise InterruptedError("Foreground activity paused donation work")
         try:
             check_cancel()
+            github_wait = resource_cooldown(self.root, "github")
+            if github_wait:
+                self.next_attempt = time.monotonic() + github_wait
+                self.message = "GitHub is cooling down · preserving contribution work until it is available."
+                return
             login = github_account.account()
             if not login:
                 self.message = "Connect GitHub to submit code for review."
@@ -1033,7 +1049,26 @@ class Service:
                     if not history_recorded:
                         usage_history.record_completion(result, source)
                     usage_recorded.add(event)
-            result = complete_donation(payload, resource, consent["intensity"], cancel.is_set, account_usage)
+            try:
+                result = complete_donation(payload, resource, consent["intensity"], cancel.is_set, account_usage)
+            except (InterruptedError, sqlite3.Error):
+                raise  # Cancellation/shared ledger failure is not an AI account failure.
+            except Exception as error:
+                # Quota/transport failure belongs only to this explicitly chosen
+                # inference source, not GitHub or other donated resources.
+                seconds = inference_retry_seconds(error)
+                resource_cooldown(self.root, resource, seconds)
+                finish(self.root, run_id, "failed")
+                current = settings(self.root)
+                alternatives = [source for source in permitted_sources(current, self.root)
+                    if source != resource and (not self.resource or source == self.resource)
+                    and not resource_cooldown(self.root, source)]
+                self.next_attempt = (0 if current["enabled"] and alternatives
+                    and current["intensity"] in {"medium", "full_blast"} else
+                    max(self.next_attempt, time.monotonic() + seconds))
+                self.message = (resource.replace("_", " ") + " is temporarily unavailable · "
+                    + ("trying another enabled source." if self.next_attempt == 0 else "waiting for its cooldown."))
+                return
             check_cancel()
             text = result["choices"][0]["message"].get("content") or ""
             proposal, edited = validate_proposal(text, sources)
@@ -1066,14 +1101,14 @@ class Service:
                     seconds = float(error.headers.get("Retry-After", "300"))
                 except (ValueError, TypeError, AttributeError):
                     seconds = 300
-                resource_cooldown(self.root, resource, seconds)
+                if not 0 < seconds < float("inf"):
+                    seconds = 300
+                resource_cooldown(self.root, "github", seconds)
             self.next_attempt = time.monotonic() + max(30, min(86400, seconds))
             self.message = "Account limit or connection delay · waiting before retrying."
         except Exception as error:
             if run_id:
                 finish(self.root, run_id, "failed")
-            if resource and re.search(r"usage_limit|rate_limit", str(error), re.I):
-                resource_cooldown(self.root, resource, 300)
             self.failures += 1
             self.next_attempt = max(self.next_attempt, time.monotonic() + min(600, 30 * 2 ** min(self.failures, 5)))
             self.message = "Connection or account temporarily unavailable · retrying automatically."
