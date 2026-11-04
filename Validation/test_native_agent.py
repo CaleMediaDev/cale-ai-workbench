@@ -6917,7 +6917,8 @@ def test_recovery_budget_notice_preserves_unfinished_goal_and_does_not_request_h
     episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
     for _ in range(6):assert task_context.reserve_recovery_turn(folder,episode['id'],goal,episode['current_check'])
     messages=[];state={}
-    assert native_agent.capability_recovery_request(item,state,messages,native_agent.TOOLS) is None
+    with patch('long_tasks.projects',return_value=[item]):
+        assert native_agent.capability_recovery_request(item,state,messages,native_agent.TOOLS) is None
     assert 'original goal is still unfinished' in messages[-1]['content'] and 'another eligible approach' in messages[-1]['content']
     assert task_context.step_status(folder)['done']==0 and 'status' not in state
 
@@ -6940,10 +6941,86 @@ def test_recovery_stage_keeps_original_check_schema_small_and_immutable(tmp_path
     item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
     active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
     episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
-    payload=native_agent.capability_recovery_request(item,{},[],native_agent.TOOLS)
+    with patch('long_tasks.projects',return_value=[item]):
+        payload=native_agent.capability_recovery_request(item,{},[],native_agent.TOOLS)
     tool=next(t for t in payload['tools'] if t['function']['name']=='task_steps')
     assert tool['function']['parameters']['properties']['action']['enum']==['complete','status']
     assert tool['function']['parameters']['properties']['step_id']['const']==active['id']
     assert len(json.dumps(tool))<1000
     assert 'revise_check' not in json.dumps(tool)
     assert next(t for t in native_agent.TOOLS if t['function']['name']=='task_steps')['function']['parameters']!=tool['function']['parameters']
+
+
+def test_recovery_rechecks_live_registered_owner_after_model_response(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    owners=[item]
+    def deleted(payload):
+        assert payload.get('_native_capability_recovery');owners.clear()
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'edit','function':{'name':'write_file','arguments':'{"path":"after-delete.txt","content":"must not write"}'}}]}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',side_effect=lambda:list(owners)):
+        native_agent.run_slice(item,complete=deleted)
+    assert not (folder/'after-delete.txt').exists()
+
+
+def test_recovery_claim_requires_environmental_unavailability_not_policy_refusal(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'I cannot create ransomware or help you harm another person.')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'I cannot run malware in this environment.')
+    assert native_agent.capability_claim_with_unmet_goal(item,'I cannot access local files or tools in this environment.')
+
+
+def test_recovery_merges_static_tools_when_existing_catalog_is_stale_empty(tmp_path):
+    import capability_index
+    path=capability_index.database_path(tmp_path);path.parent.mkdir();path.touch()
+    with patch.object(native_agent,'ROOT',tmp_path),patch.object(capability_index,'search',return_value=[]):
+        rows=native_agent.capability_local_search('expression helper')
+    assert any('expression_helper' in row['name'] for row in rows)
+
+
+def test_no_queue_recovery_replays_real_original_checker_and_reopens_same_budget_after_failure(tmp_path):
+    import long_tasks
+    item=project(tmp_path/'direct');item['brief']='Repair double_value in logic.py using its existing acceptance.'
+    folder=Path(item['folder']);(folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    (folder/'logic.py').write_text('from local_math import double\ndef double_value(x):\n    return double(x)\n')
+    args={'path':'logic.py','function':'double_value','cases':[{'args':[2],'expected':4},{'args':[0],'expected':0}]}
+    with patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',tmp_path/'runtime'),patch.object(native_agent,'capability_local_search',return_value=[]) as search:
+        before=native_agent.capability_recovery_before(item,'check_python_function',args)
+        failed=native_agent.execute_tool(folder,'check_python_function',args)
+        assert task_context.action_outcome('check_python_function',failed)=='Failed'
+        native_agent.capability_recovery_observe(item,{},'check_python_function',args,failed,'Failed',before)
+        episode=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),None)
+        payload=native_agent.capability_recovery_request(item,{},[],native_agent.TOOLS)
+        assert 'check_python_function' in {t['function']['name'] for t in payload['tools']}
+        (folder/'local_math.py').write_text('def double(x):\n    return x*2\n')
+        before=native_agent.capability_recovery_before(item,'check_python_function',args)
+        passed=native_agent.execute_tool(folder,'check_python_function',args)
+        assert json.loads(passed)['passed'] is True
+        native_agent.capability_recovery_observe(item,{},'check_python_function',args,passed,'Completed',before)
+        recovered=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),None)
+        assert recovered['status']=='recovered'
+        (folder/'local_math.py').write_text('import another_missing_local\ndef double(x):\n    return x*2\n')
+        before=native_agent.capability_recovery_before(item,'check_python_function',args)
+        failed_again=native_agent.execute_tool(folder,'check_python_function',args)
+        assert task_context.action_outcome('check_python_function',failed_again)=='Failed'
+        native_agent.capability_recovery_observe(item,{},'check_python_function',args,failed_again,'Failed',before)
+        reopened=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),None)
+        assert reopened['status']!='recovered' and reopened['id']==episode['id'] and reopened['turns']==recovered['turns']
+        assert search.call_count==1
+
+
+def test_recovery_response_cannot_execute_unbounded_tool_batch(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    def many(payload):
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':str(i),'function':{'name':'write_file',
+            'arguments':json.dumps({'path':str(i)+'.txt','content':'bounded'})}} for i in range(25)]}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]):
+        state=native_agent.run_slice(item,complete=many)
+    assert len(list(folder.glob('*.txt')))<=4
+    replies=[message for message in state['messages'] if message.get('role')=='tool']
+    assert len(replies)==25 and any('recovery action budget' in message['content'] for message in replies)

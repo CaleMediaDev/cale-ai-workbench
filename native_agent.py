@@ -4725,7 +4725,8 @@ def capability_recovery_before(project,name,arguments,active=None):
     import task_context
     folder=Path(project['folder'])
     active=active if active is not None else task_context.step_status(folder)['active']
-    structured=bool(active and active.get('check_tool')!='run_command')
+    structured=(name in {'check_python_function','check_javascript_function','check_webapp','check_document_report'}
+                or bool(active and active.get('check_tool')!='run_command'))
     checker=(name=='task_steps' and arguments.get('action')=='complete'
              or name in {'check_python_function','check_javascript_function','check_webapp','check_document_report','run_verifier'})
     return {'goal_hash':capability_goal_hash(project),'request_hash':task_context.request_identity(folder),
@@ -4734,18 +4735,24 @@ def capability_recovery_before(project,name,arguments,active=None):
 
 
 def capability_local_search(query):
-    """Search existing local registrations without starting/installing backends."""
+    """Merge cached and current static LOCAL registrations, never start backends."""
     import capability_index
-    if capability_index.database_path(ROOT).is_file():
-        return capability_index.search(ROOT,query,limit=6)
     import toolbox_mcp
-    words=set(re.findall(r'[a-z0-9_]+',query.lower()))
-    entries=[]
-    for name,spec in toolbox_mcp.LOCAL_CATALOG.items():
+    from itertools import islice
+    words=set(re.findall(r'[a-z0-9]+',query.lower()))
+    indexed=[]
+    if capability_index.database_path(ROOT).is_file():
+        try:indexed=capability_index.search(ROOT,query,limit=6)
+        except (OSError,ValueError,sqlite3.Error):pass
+    entries={str(item.get('name','')):item for item in indexed[:6] if isinstance(item,dict)}
+    for name,spec in islice(toolbox_mcp.LOCAL_CATALOG.items(),256):
         description=spec.get('description','')
-        score=len(words.intersection(re.findall(r'[a-z0-9_]+',(name+' '+description).lower())))
-        if score:entries.append((score,{'name':name,'kind':'tool','description':description}))
-    return [item for _,item in sorted(entries,key=lambda pair:-pair[0])[:6]]
+        if words.intersection(re.findall(r'[a-z0-9]+',(name+' '+description).lower())):
+            entries[name]={'name':name,'kind':'tool','description':description}
+    def relevance(item):
+        name=str(item.get('name',''));description=str(item.get('description',''))
+        return len(words.intersection(re.findall(r'[a-z0-9]+',(name+' '+description).lower())))+2*len(words.intersection(re.findall(r'[a-z0-9]+',name.lower())))
+    return sorted(entries.values(),key=relevance,reverse=True)[:6]
 
 
 def capability_recovery_observe(project,state,name,arguments,result,outcome,before,*,read_stall=False,capability_claim=False):
@@ -4808,13 +4815,24 @@ def capability_recovery_observe(project,state,name,arguments,result,outcome,befo
     state['capability_recovery_id']=episode['id']
 
 
+def capability_recovery_owner_matches(project):
+    """A deleted/moved/changed registry task cannot authorize recovery actions."""
+    import long_tasks
+    try:
+        return any(item.get('id')==project['id'] and item.get('folder')
+            and Path(item['folder']).resolve()==Path(project['folder']).resolve()
+            and item.get('brief')==project.get('brief')
+            and (not item.get('status') or item['status'] in {'queued','working','checking'})
+            for item in long_tasks.projects())
+    except (OSError,ValueError,TypeError,sqlite3.Error):return False
+
+
 def capability_recovery_basis_matches(project,basis):
     import task_context
-    if capability_goal_hash(project)!=basis['goal_hash']:return False
+    if not capability_recovery_owner_matches(project) or capability_goal_hash(project)!=basis['goal_hash']:return False
     active=task_context.step_status(project['folder'])['active']
     return (active['id'] if active else 0)==basis['step_id'] and (
         task_context.step_check_identity(active)==basis['check_hash'] if active else True)
-
 
 
 def capability_claim_with_unmet_goal(project,message):
@@ -4825,11 +4843,13 @@ def capability_claim_with_unmet_goal(project,message):
     """
     import task_context
     text=str(message or '').strip()
-    direct=r"(?is)^(?:I (?:can(?:not|['’]t)|do not have|don't have|am unable)|I['’]m unable)\b"
-    qualified=r"(?is)^I can .{0,180}\bbut I (?:cannot|can['’]t|am unable)\b"
-    if not (re.match(direct,text) or re.match(qualified,text)):return False
-    if re.search(r'(?i)\b(?:policy|permission|credentials|unauthorized|sign in|api key)\b',text[:400]):return False
-    if not re.search(r'(?i)\b(?:access|render|tools?|files?|browser|install|execute|run|create)\b',text[:220]):return False
+    if not re.match(r"(?is)^I(?:\s|['’]m\s)",text):return False
+    if re.search(r'(?i)\b(?:policy|permission|credentials|unauthorized|sign in|api key|ransomware|malware|harm|harmful|unsafe|illegal|abuse)\b',text[:400]):return False
+    denial=r"(?:cannot|can['’]t|am unable to|['’]m unable to|do not have|don't have)"
+    access=denial+r"\s+(?:directly\s+)?(?:access|read|open|write|use)\s+(?:to\s+)?(?:(?:your|local|the|any)\s+){0,2}(?:files?|folders?|tools?|browser|filesystem)\b"
+    media=denial+r"\s+(?:directly\s+)?(?:(?:render|generate)\s+(?:audio|video|images?|files?)|(?:execute|run)\s+(?:code|commands?|tools?)|create\s+(?:a\s+)?(?:background\s+)?(?:music\s+)?tasks?)\b"
+    environment=re.search(r'(?i)\b(?:here|in this chat|in this environment|tools? (?:are |is )?unavailable|no tool runtime)\b',text[:400])
+    if not (re.search(access,text[:400],re.I) or environment and re.search(media,text[:400],re.I)):return False
     folder=Path(project['folder'])
     queue=task_context.step_status(folder)
     unmet=bool(queue['remaining'] or initial_plan_required(project) and not queue['total']
@@ -4844,6 +4864,8 @@ def capability_recovery_request(project,state,messages,available_tools):
     goal=capability_goal_hash(project);active=task_context.step_status(project['folder'])['active']
     episode=task_context.recovery_episode(project['folder'],goal,active)
     if not episode or episode['status'] in {'recovered','superseded'} or not episode['catalog']:return None
+    if not capability_recovery_owner_matches(project):
+        return {'_capability_recovery_reload':True}
     if episode['turns']>=task_context.RECOVERY_TURNS:
         if state.get('capability_recovery_budget_notice')!=episode['id']:
             methods=sorted({item['method'] for item in episode['methods']})
@@ -4859,6 +4881,14 @@ def capability_recovery_request(project,state,messages,available_tools):
     if active:
         names.add(active['check_tool'])
         if active['check_tool']=='check_webapp':names.add('inspect_webapp')
+    else:
+        try:
+            spec=json.loads(episode['check_spec'])
+            checker=spec.get('check_tool') if isinstance(spec,dict) else None
+            if (checker in {'check_python_function','check_javascript_function','check_webapp','check_document_report'}
+                    and task_context._recovery_hash(spec)==episode['original_check']):
+                names.add(checker)
+        except (ValueError,TypeError):pass
     existing={tool['function']['name']:tool for tool in available_tools}
     tools=[copy.deepcopy(existing.get(tool['function']['name'],tool)) for tool in TOOLS if tool['function']['name'] in names]
     if active:
@@ -4873,7 +4903,7 @@ def capability_recovery_request(project,state,messages,available_tools):
     data={key:episode[key] for key in ('trigger','component','turns','original_check','current_check','methods')}
     data['local_catalog']=json.loads(episode['catalog'])
     notice=("[Durable capability recovery: take a concrete tool action] The original task and acceptance remain authoritative. "
-        "The host already searched existing LOCAL capabilities. First reuse a relevant installed tool/skill; otherwise build "
+        "The host already searched existing LOCAL capabilities. Perform at most four tool calls this turn. First reuse a relevant installed tool/skill; otherwise build "
         "a small project-local helper/script and TEST it, then rerun the original saved acceptance and continue the next unit. "
         "Inspect actual imports/APIs; never shadow a third-party package with a fake stub. If necessary inspect relevant GitHub "
         "source/license/dependencies before integrating; fetching/HTTP success is not permission to execute repository code. "
@@ -5111,6 +5141,12 @@ def run_slice(project: dict, complete=None) -> dict:
         if planning:
             available_tools = initial_plan_tools(project, available_tools)
         recovery_request = None if needs_initial_plan else capability_recovery_request(project,state,messages,available_tools)
+        if recovery_request and recovery_request.get('_capability_recovery_reload'):
+            latest=read_state(project)
+            if latest.get('status') in {'paused','stopped','done'}:return latest
+            state.update(status='continue',current='Task ownership or instructions changed; this obsolete slice ended without acting')
+            save_state(project,state)
+            return state
         if recovery_request:
             focus=None
             available_tools=recovery_request['tools']
@@ -5319,7 +5355,7 @@ def run_slice(project: dict, complete=None) -> dict:
             return state
         read_cycle_notice = False
         step_boundary = False
-        for item in calls:
+        for call_index,item in enumerate(calls):
             state["premature_finishes"] = 0
             latest = read_state(project)
             if latest.get("status") in ("paused", "stopped", "done"):
@@ -5331,6 +5367,8 @@ def run_slice(project: dict, complete=None) -> dict:
             queue_result = None
             recovery_before = None
             try:
+                if request.get('_native_capability_recovery') is not None and call_index>=4:
+                    raise ValueError('The recovery action budget permits at most four tool calls per turn; extra calls were not executed.')
                 args = json.loads(function.get("arguments") or "{}")
                 if not isinstance(args, dict):
                     raise ValueError("Arguments must be an object")

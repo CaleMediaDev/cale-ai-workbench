@@ -909,7 +909,7 @@ def recovery_episode(folder,goal_hash,active,*,trigger="",component="",blocked_t
         _recovery_schema(conn)
         conn.execute("UPDATE capability_recoveries SET status='superseded',updated=? WHERE "
                      "(goal_hash!=? OR step_id!=?) AND status NOT IN ('recovered','superseded')",(time.time(),goal_hash,step_id))
-        row=conn.execute('SELECT id FROM capability_recoveries WHERE id=?',(identifier,)).fetchone()
+        row=conn.execute('SELECT id,status,original_check FROM capability_recoveries WHERE id=?',(identifier,)).fetchone()
         if row is None and trigger:
             if trigger not in {'missing_capability','repeated_failure','read_stall','capability_claim'}:
                 raise ValueError('Unknown observed recovery trigger')
@@ -931,10 +931,16 @@ def recovery_episode(folder,goal_hash,active,*,trigger="",component="",blocked_t
             conn.execute('DELETE FROM capability_recoveries WHERE id NOT IN '
                          '(SELECT id FROM capability_recoveries ORDER BY updated DESC LIMIT 16)')
             conn.execute('DELETE FROM capability_recovery_attempts WHERE episode NOT IN (SELECT id FROM capability_recoveries)')
-        elif row is not None and active:
+        elif row is not None:
+            if (row['status']=='recovered' and trigger in {'missing_capability','repeated_failure'}):
+                spec=({'check_tool':blocked_tool,'check_arguments':blocked_arguments or {}}
+                      if not active and blocked_tool in {'check_python_function','check_javascript_function','check_webapp','check_document_report'} else {})
+                failed_check=current if active else _recovery_hash(spec) if spec else ''
+                if failed_check==row['original_check']:
+                    conn.execute("UPDATE capability_recoveries SET status='working',proof='',updated=? WHERE id=?",(time.time(),identifier))
             # A check revision is recorded but cannot renew budgets or prove the
             # earlier acceptance. Only its original identity earns recovery.
-            conn.execute('UPDATE capability_recoveries SET current_check=? WHERE id=?',(current,identifier))
+            if active:conn.execute('UPDATE capability_recoveries SET current_check=? WHERE id=?',(current,identifier))
         row=conn.execute("SELECT id,goal_hash,step_id,request_hash,original_check,current_check,"
             "substr(check_spec,1,64001) AS check_spec,trigger,component,status,substr(catalog,1,8001) AS catalog,"
             "turns,substr(proof,1,2001) AS proof FROM capability_recoveries WHERE id=?",(identifier,)).fetchone()
