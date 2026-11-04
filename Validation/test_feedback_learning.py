@@ -107,6 +107,35 @@ def test_schema_initialization_failure_closes_connection(tmp_path, monkeypatch):
     connection.commit.assert_not_called()
 
 
+def test_rating_change_replaces_only_same_generation_review(tmp_path):
+    reviewed = task("changed-vote", "Techno synth bass", title="Techno synth bass")
+    feedback_learning.record(tmp_path, reviewed, 1)
+    feedback_learning.record(tmp_path, reviewed, -1, "Use electronic drums")
+    reviews = feedback_learning.for_task(tmp_path, "changed-vote")
+    assert len(reviews) == 1
+    assert reviews[0]["rating"] == -1
+    assert "Use electronic drums" in feedback_learning.guidance(
+        tmp_path, "music", "Techno synth bass"
+    )
+
+    current_id = feedback_learning.record(tmp_path, reviewed, 1)
+    assert feedback_learning.record(tmp_path, reviewed, 1) == current_id
+    reviews = feedback_learning.for_task(tmp_path, "changed-vote")
+    assert len(reviews) == 1
+    assert reviews[0]["rating"] == 1
+    assert reviews[0]["note"] == ""
+    learned = feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    assert "Similar task the user liked: Techno synth bass" in learned
+    assert "Use electronic drums" not in learned
+
+    next_generation = dict(reviewed, generation=1)
+    feedback_learning.record(tmp_path, next_generation, -1, "Use a slower tempo")
+    reviews = feedback_learning.for_task(tmp_path, "changed-vote")
+    assert {(row["generation"], row["rating"]) for row in reviews} == {
+        (0, 1), (1, -1)
+    }
+
+
 def test_review_requires_comment_for_thumbs_down(tmp_path):
     import pytest
 
