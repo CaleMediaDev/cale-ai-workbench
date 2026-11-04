@@ -5,6 +5,7 @@ import io
 import os
 import unittest
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import numpy as np
 import psutil
@@ -141,6 +142,51 @@ class CameraPresenceTests(unittest.TestCase):
         self.assertIn("Alex", line)
         self.assertIn("one at a time", line)
         self.assertIn("Who are you?", line)
+
+    def test_malformed_enrollment_structure_does_not_stop_watcher(self):
+        import camera_presence
+
+        request = Mock()
+        request.is_file.return_value = True
+        request.read_text.return_value = "null"
+        model = Mock()
+        model.features.return_value = []
+        camera = Mock()
+        camera.isOpened.return_value = True
+        camera.read.return_value = (True, np.zeros((8, 8, 3), dtype=np.uint8))
+        cascade = Mock()
+        cascade.empty.return_value = False
+        cv2 = SimpleNamespace(
+            data=SimpleNamespace(haarcascades="."),
+            CascadeClassifier=Mock(return_value=cascade),
+            VideoCapture=Mock(return_value=camera),
+            CAP_DSHOW=0,
+            COLOR_BGR2GRAY=1,
+            cvtColor=lambda *_args: np.zeros((8, 8), dtype=np.uint8),
+        )
+        modules = {
+            "cv2": cv2,
+            "camera_network": SimpleNamespace(
+                camera_source=lambda source: source,
+                greeting_camera=lambda: 0,
+            ),
+            "face_identity": SimpleNamespace(
+                ENROLL_REQUEST=request,
+                FaceModel=Mock(return_value=model),
+                enroll=Mock(),
+            ),
+        }
+        with patch.dict("sys.modules", modules), patch.multiple(
+            camera_presence,
+            allowed=Mock(side_effect=[True, True, False]),
+            emit=Mock(),
+            preview_frame=Mock(return_value=""),
+        ), patch.object(camera_presence.time, "sleep"):
+            self.assertEqual(camera_presence.watch(), 0)
+
+        request.unlink.assert_called_once_with(missing_ok=True)
+        camera.release.assert_called_once_with()
+        model.features.assert_called_once()
 
     def test_enrollment_rejects_multiple_visible_faces(self):
         model = FaceModel.__new__(FaceModel)
