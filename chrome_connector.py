@@ -16,7 +16,7 @@ def installed_version() -> str:
     manifest = PLUGIN / "plugin.yaml"
     if not manifest.is_file():
         return ""
-    match = re.search(r"^version:\s*([\w.\-]+)\s*$", manifest.read_text(encoding="utf-8"), re.M)
+    match = re.search(r"^version:[ \t]*([\w.\-]+)[ \t]*(?:#[^\r\n]*)?\r?$", manifest.read_text(encoding="utf-8"), re.M)
     return match.group(1) if match else ""
 
 

@@ -8,10 +8,14 @@ import pytest
 import chrome_connector
 
 
-def test_pairing_uses_matching_local_companion(tmp_path, monkeypatch):
+@pytest.mark.parametrize("version_line", [
+    "version: 0.2.6\n",
+    "version: 0.2.6 # local companion\n",
+])
+def test_pairing_uses_matching_local_companion(tmp_path, monkeypatch, version_line):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
-    (plugin / "plugin.yaml").write_text("name: hermes-connector\nversion: 0.2.6\n", encoding="utf-8")
+    (plugin / "plugin.yaml").write_text("name: hermes-connector\n" + version_line, encoding="utf-8")
     monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
     monkeypatch.setattr(chrome_connector, "ROOT", tmp_path)
     calls = []
