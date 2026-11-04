@@ -104,6 +104,19 @@ class ContextWindowTests(unittest.TestCase):
                         info, 128 * 2**30, 7 * 2**30
                     )
 
+    def test_missing_architecture_cannot_select_largest_auxiliary_limit(self):
+        limits = [("qwen.context_length", 65536), ("clip.context_length", 262144)]
+        for entries in (limits, list(reversed(limits))):
+            with self.subTest(entries=entries):
+                info = {
+                    "parameters": "num_ctx 262144\n",
+                    "model_info": dict(entries),
+                }
+                with self.assertRaisesRegex(ValueError, "native context limit"):
+                    context_window.desired_context(
+                        info, 128 * 2**30, 7 * 2**30
+                    )
+
     def test_configured_window_cannot_substitute_for_missing_native_limit(self):
         for metadata in ({}, {"model_info": {}}):
             with self.subTest(metadata=metadata):
