@@ -956,3 +956,63 @@ def test_review_discovery_budget_failure_closes_backend_and_preserves_next(monke
                     assert ("rea", "cancelled-list") in cleanup
             assert ("devtools", "session") in cleanup and ("devtools", "stdio") in cleanup
     asyncio.run(asyncio.wait_for(check(), timeout=.25))
+
+
+def clinc_normalization_fixture(tmp_path,monkeypatch):
+    import hashlib
+    import small_training as training
+    official={"train":[["shared TEST","a"],["shared val","a"],["unique train","a"],
+                       [" UNIQUE   TRAIN ","a"],["conflict","a"],["CONFLICT","b"]],
+              "oos_train":[["oos training","oos"]],
+              "val":[["shared val","a"],[" SHARED test ","b"]],"oos_val":[["oos val","oos"]],
+              "test":[["shared test","b"],["official duplicate","a"],["official duplicate","b"]],
+              "oos_test":[["oos test","oos"]]}
+    payloads={"LICENSE":b"Synthetic fixture license", "data/data_full.json":json.dumps(official).encode()}
+    entry={"repository":"example/clinc-fixture","commit":"a"*40,"purpose":"test fixture", "license":"fixture",
+           "license_path":"LICENSE","attribution":"Synthetic fixture, not a public benchmark result",
+           "files":{name:hashlib.sha256(data).hexdigest() for name,data in payloads.items()}}
+    monkeypatch.setattr(training,"GITHUB_DATASETS",{"clinc150":entry})
+    monkeypatch.setattr(training,"_github_dataset_bytes",lambda url,limit:payloads[url.split("a"*40+"/",1)[1]])
+    monkeypatch.setattr("pc_offline.offline",lambda:False)
+    source=tmp_path/"downloaded"
+    training.download_training_dataset("clinc150",source)
+    return training,source,official,payloads
+
+
+def test_clinc_normalization_preserves_official_test_and_reports_exact_leak_filtering(tmp_path,monkeypatch):
+    import csv,hashlib
+    training,source,official,payloads=clinc_normalization_fixture(tmp_path,monkeypatch)
+    output=tmp_path/"prepared"
+    result=training.normalize_training_dataset("clinc150",source,output)
+    with (output/"classifier.csv").open(newline="",encoding="utf-8") as stream:rows=list(csv.DictReader(stream))
+    test=[(row["text"],row["label"]) for row in rows if row["split"]=="test"]
+    assert test==[tuple(pair) for pair in official["test"]+official["oos_test"]]
+    assert result["normalized_counts"]=={"train":2,"validation":2,"test":4}
+    assert result["filtered_rows"]=={"train_overlap_test":1,"train_overlap_validation":1,
+        "train_conflicting_labels":2,"train_duplicate":1,"validation_overlap_test":1}
+    assert (source/"files/data/data_full.json").read_bytes()==payloads["data/data_full.json"]
+    assert result["raw_sha256"]==hashlib.sha256(payloads["data/data_full.json"]).hexdigest()
+    assert result["official_test_untouched"] and not result["trained"] and not result["activated"]
+    assert "dataset_folder" not in result["source"]
+    assert training.normalize_training_dataset("clinc150",source,output)["cached"]
+
+
+def test_clinc_normalization_rejects_changed_raw_and_derived_data_without_overwrite(tmp_path,monkeypatch):
+    training,source,official,payloads=clinc_normalization_fixture(tmp_path,monkeypatch)
+    output=tmp_path/"prepared";training.normalize_training_dataset("clinc150",source,output)
+    target=output/"test.csv";target.write_text("my changed heldout")
+    with pytest.raises(ValueError,match="preserve"):
+        training.normalize_training_dataset("clinc150",source,output)
+    assert target.read_text()=="my changed heldout"
+    (source/"files/data/data_full.json").write_bytes(b'{}')
+    with pytest.raises(ValueError,match="modified|incomplete"):
+        training.normalize_training_dataset("clinc150",source,tmp_path/"new")
+    assert not (tmp_path/"new").exists()
+
+
+def test_clinc_preparation_tool_keeps_reviewed_raw_and_prepares_splits_in_project(tmp_path,monkeypatch):
+    training,source,official,payloads=clinc_normalization_fixture(tmp_path,monkeypatch)
+    monkeypatch.setattr(toolbox_mcp,"registered_project",lambda path:tmp_path)
+    result=asyncio.run(toolbox_mcp.acquire_training_dataset("registered","clinc150"))
+    assert result["normalized"]["dataset_path"].startswith(str(tmp_path))
+    assert not result["normalized"]["trained"]

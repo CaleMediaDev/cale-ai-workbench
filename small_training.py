@@ -150,6 +150,127 @@ def download_training_dataset(dataset_id, output_folder):
     return dict(manifest, dataset_folder=str(folder), cached=False)
 
 
+
+def _bounded_bytes(path, limit):
+    with Path(path).open("rb") as stream:
+        data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("Training data exceeds its read budget")
+    return data
+
+
+def _text_key(text):
+    return " ".join(text.casefold().split())
+
+
+def normalize_training_dataset(dataset_id, dataset_folder, output_folder):
+    """Prepare pinned CLINC splits without fitting or touching official test rows.
+
+    Exact casefold/whitespace matches with test are removed from train/val;
+    train also excludes original validation texts. This prevents exact-text
+    leakage, not semantic/paraphrase overlap. Raw source files stay unchanged.
+    """
+    if dataset_id != "clinc150" or dataset_id not in GITHUB_DATASETS:
+        raise ValueError("Only the reviewed CLINC split format is supported")
+    source = Path(dataset_folder).resolve()
+    entry = GITHUB_DATASETS[dataset_id]
+    provenance = _cached_dataset(source, dataset_id, entry)
+    raw = _bounded_bytes(source / "files/data/data_full.json", MAX_DATASET_FILE_BYTES)
+    if hashlib.sha256(raw).hexdigest() != entry["files"]["data/data_full.json"]:
+        raise ValueError("Dataset changed during normalization")
+    official = json.loads(raw)
+    names = ("train", "oos_train", "val", "oos_val", "test", "oos_test")
+    if not isinstance(official, dict) or set(official) != set(names):
+        raise ValueError("CLINC needs its six official train/val/test and OOS splits")
+    rows = {}
+    total = 0
+    for split in names:
+        values = official[split]
+        if not isinstance(values, list):
+            raise ValueError("Each CLINC split must be a list")
+        total += len(values)
+        if total > 50000:
+            raise ValueError("CLINC row budget exceeded")
+        rows[split] = []
+        for index, item in enumerate(values):
+            if (not isinstance(item, list) or len(item) != 2
+                    or not all(isinstance(value,str) for value in item)
+                    or not item[0].strip() or len(item[0]) > 4096
+                    or not item[1].strip() or len(item[1]) > 128
+                    or (split.startswith("oos_") and item[1] != "oos")):
+                raise ValueError("Malformed CLINC text/label row")
+            rows[split].append({"text":item[0], "label":item[1],
+                                "source_split":split, "source_row":index})
+    test = rows["test"] + rows["oos_test"]
+    validation = rows["val"] + rows["oos_val"]
+    training = rows["train"] + rows["oos_train"]
+    test_keys = {_text_key(row["text"]) for row in test}
+    val_keys = {_text_key(row["text"]) for row in validation}
+    labels_by_text = {}
+    for row in training:
+        labels_by_text.setdefault(_text_key(row["text"]), set()).add(row["label"])
+    filtered = {"train_overlap_test":0, "train_overlap_validation":0,
+                "train_conflicting_labels":0, "train_duplicate":0, "validation_overlap_test":0}
+    train, seen = [], set()
+    for row in training:
+        key = _text_key(row["text"])
+        reason = ("train_overlap_test" if key in test_keys else
+                  "train_overlap_validation" if key in val_keys else
+                  "train_conflicting_labels" if len(labels_by_text[key]) > 1 else
+                  "train_duplicate" if key in seen else "")
+        if reason:
+            filtered[reason] += 1
+        else:
+            train.append(row)
+            seen.add(key)
+    val = []
+    for row in validation:
+        if _text_key(row["text"]) in test_keys:
+            filtered["validation_overlap_test"] += 1
+        else:
+            val.append(row)
+    partitions = {"train":train, "validation":val, "test":test}
+    payloads = {}
+    columns = ["text","label","split","source_split","source_row"]
+    combined = []
+    for split, values in partitions.items():
+        typed = [dict(row,split=split) for row in values]
+        combined.extend(typed)
+        buffer = io.StringIO(newline="")
+        writer = csv.DictWriter(buffer,fieldnames=columns);writer.writeheader();writer.writerows(typed)
+        payloads[split+".csv"] = buffer.getvalue().encode("utf-8")
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer,fieldnames=columns);writer.writeheader();writer.writerows(combined)
+    payloads["classifier.csv"] = buffer.getvalue().encode("utf-8")
+    if sum(map(len,payloads.values())) > MAX_DATASET_BYTES:
+        raise ValueError("Normalized dataset exceeds its write budget")
+    manifest = {"format_version":1,"dataset_id":dataset_id,"source":{key:value for key,value in provenance.items() if key not in {"dataset_folder","cached"}},
+                "raw_sha256":hashlib.sha256(raw).hexdigest(),
+                "official_counts":{name:len(rows[name]) for name in names},
+                "normalized_counts":{name:len(values) for name,values in partitions.items()},
+                "filtered_rows":filtered,"official_test_untouched":True,
+                "duplicate_policy":"casefold plus collapsed whitespace; train excludes original val and test; val excludes test",
+                "files":{name:hashlib.sha256(data).hexdigest() for name,data in payloads.items()},
+                "trained":False,"activated":False,
+                "limitation":"Public intent benchmark only; not evidence of Cale tool-use or task success."}
+    folder = Path(output_folder).resolve()
+    report_bytes = json.dumps(manifest,sort_keys=True,indent=2).encode("utf-8")
+    if folder.exists() and any(folder.iterdir()):
+        if (folder/"normalization.json").is_symlink() or _bounded_bytes(folder/"normalization.json",64000) != report_bytes:
+            raise ValueError("Normalized output changed; preserve it and choose a new folder")
+        for name,digest in manifest["files"].items():
+            path=folder/name
+            if path.is_symlink() or hashlib.sha256(_bounded_bytes(path,MAX_DATASET_BYTES)).hexdigest()!=digest:
+                raise ValueError("Normalized output changed; preserve it and choose a new folder")
+        cached=True
+    else:
+        folder.mkdir(parents=True,exist_ok=True)
+        for name,data in {**payloads,"normalization.json":report_bytes}.items():
+            with (folder/name).open("xb") as stream:stream.write(data)
+        cached=False
+    return {**manifest,"dataset_path":str(folder/"classifier.csv"),
+            "normalization_sha256":hashlib.sha256(report_bytes).hexdigest(),"cached":cached}
+
 def fresh_folder(path):
     folder = Path(path).resolve()
     if folder.exists() and any(folder.iterdir()):

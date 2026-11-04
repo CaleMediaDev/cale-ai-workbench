@@ -1113,7 +1113,14 @@ async def acquire_training_dataset(project_folder: str, dataset_id: str) -> dict
     destination = (root / ".local-ai/training-datasets" / (dataset_id + "-" + entry["commit"][:12])).resolve()
     if not destination.is_relative_to(root):
         raise ValueError("Training data must stay inside the task folder")
-    return await asyncio.to_thread(small_training.download_training_dataset, dataset_id, destination)
+    result = await asyncio.to_thread(small_training.download_training_dataset, dataset_id, destination)
+    if dataset_id == "clinc150":
+        normalized = (destination / "normalized").resolve()
+        if not normalized.is_relative_to(root):
+            raise ValueError("Normalized data must stay inside the task folder")
+        result["normalized"] = await asyncio.to_thread(
+            small_training.normalize_training_dataset, dataset_id, destination, normalized)
+    return result
 
 
 @server.tool()
