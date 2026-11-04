@@ -6327,3 +6327,124 @@ def test_default_source_first_guidance_survives_existing_narrower_tools_note(tmp
     with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(native_agent, "repair_tools", return_value=available), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
         state = native_agent.run_slice(item, complete=complete)
     assert state["status"] == "continue" and not (folder / "index.html").exists()
+
+
+def test_row_counts_host_schema_supports_public_planning_and_repair_counts(tmp_path):
+    from jsonschema import ValidationError, validate
+    item = project(tmp_path / "count-schema")
+    item["brief"] = "Build an index.html expense app using SQLite steps."
+    folder = Path(item["folder"])
+    schema = next(tool["function"]["parameters"] for tool in native_agent.TOOLS if tool["function"]["name"] == "check_webapp")
+    arguments = {"path": "index.html", "cases": [{"click": ["add"], "row_counts": {"rows": 2}}]}
+    validate(arguments, schema)
+    for counts in ({"rows": True}, {"rows": -1}, {"rows": 10001}, {"rows": 1.5}, {"rows.length": 1}, {"rows\n": 1}):
+        with pytest.raises(ValidationError):
+            validate({**arguments, "cases": [{"row_counts": counts}]}, schema)
+    planned = [{"phase": "Layout", "title": "Empty table", "check_tool": "check_webapp", "check_arguments": {
+        "path": "index.html", "cases": [{"row_counts": {"rows": 0}}]}},
+        {"phase": "Add", "title": "Add one expense", "check_tool": "check_webapp", "check_arguments": arguments}]
+    focused = native_agent.initial_plan_tools(item, native_agent.TOOLS)
+    plan_schema = next(tool["function"]["parameters"] for tool in focused if tool["function"]["name"] == "task_steps")
+    validate({"action": "plan", "steps": planned}, plan_schema)
+    active = task_context.plan_steps(folder, planned)["active"]
+    task_context.record_step_check(folder, active["id"], task_context.request_identity(folder), 'Exit code: 1\nExpected rows', unchanged=True)
+    repair_tools = native_agent.acceptance_repair_tools(item, {"step_focus_turns": 1}, native_agent.TOOLS)
+    repair = next(tool["function"]["parameters"] for tool in repair_tools if tool["function"]["name"] == "task_steps")
+    validate({"action": "revise_check", "check_arguments": planned[0]["check_arguments"]}, repair)
+    description = next(tool["function"]["description"] for tool in native_agent.TOOLS if tool["function"]["name"] == "check_webapp")
+    assert "row_counts:{tbodyId:2}" in description and "table includes headers" in description
+
+
+def test_row_counts_host_revision_keeps_original_count_assertions(tmp_path):
+    folder = tmp_path
+    (folder / "index.html").write_text("<table id='rows'></table>", encoding="utf-8")
+    planned = {"path": "index.html", "cases": [{"click": ["add"], "row_counts": {"rows": 1}}]}
+    active = {"check_arguments": planned}
+    assert native_agent.browser_revision_matches_step(folder, active, copy.deepcopy(planned))
+    for case in ({"click": ["add"]}, {"click": ["add"], "row_counts": {"rows": 2}},
+                 {"click": ["other"], "row_counts": {"rows": 1}}):
+        assert not native_agent.browser_revision_matches_step(folder, active, {"path": "index.html", "cases": [case]})
+
+
+def test_row_counts_host_effect_credit_requires_asserted_changed_target_and_fresh_page(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text("<button id='add'>Add</button><table id='rows'></table>", encoding="utf-8")
+    arguments = {"path": "index.html", "cases": [{"row_counts": {"rows": 0}}, {"click": ["add"], "row_counts": {"rows": 1}}]}
+    verdict = {"passed": True, "page_sha256": hashlib.sha256(page.read_bytes()).hexdigest(),
+               "interactions": [{"case": 2, "targets": ["rows:rows"]}]}
+    evidence = native_agent.browser_check_evidence(tmp_path, arguments, json.dumps(verdict))
+    assert evidence["browser_verified"] and evidence["browser_interactions"] == [{"case": 2, "targets": ["rows:rows"], "actions": ["click"]}]
+    wrong_target = {**verdict, "interactions": [{"case": 2, "targets": ["rows:unasserted"]}]}
+    assert native_agent.browser_check_evidence(tmp_path, arguments, json.dumps(wrong_target)) == {}
+    assert native_agent.browser_check_evidence(tmp_path, arguments, json.dumps({**verdict, "passed": False})) == {}
+    assert native_agent.browser_check_evidence(tmp_path, arguments, json.dumps({**verdict, "interactions": []})) == {}
+    page.write_text("Changed after evidence", encoding="utf-8")
+    assert native_agent.browser_check_evidence(tmp_path, arguments, json.dumps(verdict)) == {}
+
+
+def test_row_counts_host_invalid_acceptance_prompt_teaches_counts_without_loosening_scope(tmp_path):
+    from jsonschema import ValidationError, validate
+    item, folder, source, active, replacement, runtime_state = invalid_definition_scope_fixture(tmp_path, "row-count-repair")
+    before = task_context.step_status(folder)
+    state = {"step_focus_turns": 1}
+    available = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+    request = native_agent.focused_step_repair_request(item, state, available, None, 65536)
+    assert request and [tool["function"]["name"] for tool in request["tools"]] == ["task_steps"]
+    encoded = json.dumps(request)
+    assert "row_counts:{tbodyId:2}" in encoded and "table includes headers" in encoded and "tbody data only" in encoded
+    assert "JS expressions" in encoded
+    counted = {**replacement, "check_arguments": {"path": "index.html", "cases": [{"row_counts": {"expense-table": 1}}]}}
+    schema = request["tools"][0]["function"]["parameters"]
+    valid = {"action": "revise", "step_id": active["id"], "steps": [counted]}
+    validate(valid, schema)
+    for invalid in ({**valid, "action": "complete"}, {**valid, "step_id": active["id"] + 1},
+                    {**valid, "steps": [{**counted, "title": "Changed requirement"}]}):
+        with pytest.raises(ValidationError):
+            validate(invalid, schema)
+    assert task_context.step_status(folder) == before and (folder / "index.html").read_text() == source
+
+
+def test_row_counts_host_actual_table_header_counts_and_current_source_evidence(tmp_path):
+    import webapp_check
+    page = tmp_path / "index.html"
+    page.write_text("<button id='add' onclick=\"document.querySelector('tbody').insertRow().insertCell().textContent='Expense'\">Add</button>"
+                    "<table id='ledger'><thead><tr><th>Expense</th></tr></thead><tbody id='entries'></tbody></table>", encoding="utf-8")
+    arguments = {"path": "index.html", "cases": [
+        {"row_counts": {"entries": 0, "ledger": 1}},
+        {"click": ["add"], "row_counts": {"entries": 1, "ledger": 2}},
+        {"click": ["add"], "row_counts": {"entries": 2, "ledger": 3}}]}
+    verdict = webapp_check.check(tmp_path, arguments)
+    raw = json.dumps(verdict)
+    assert verdict["passed"] and verdict["cases"][2]["row_counts"]["ledger"]["actual"] == 3
+    assert verdict["cases"][2]["row_counts"]["entries"]["actual"] == 2
+    evidence = native_agent.browser_check_evidence(tmp_path, arguments, raw)
+    assert evidence["browser_verified"] and {item["case"] for item in evidence["browser_interactions"]} == {2, 3}
+    assert all(set(item["targets"]) == {"rows:entries", "rows:ledger"} for item in evidence["browser_interactions"])
+    page.write_text(page.read_text().replace("Expense'", "Changed'"), encoding="utf-8")
+    assert native_agent.browser_check_evidence(tmp_path, arguments, raw) == {}
+
+
+def test_row_counts_host_repair_budget_renews_only_when_base_checker_contract_changes(tmp_path):
+    item, folder, source, active, replacement, runtime_state = invalid_definition_scope_fixture(tmp_path, "contract-aware-budget")
+    before = task_context.step_status(folder)
+    state = {"step_focus_turns": 1}
+    available = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+    assert native_agent.focused_step_repair_request(item, state, available, None, 65536)
+    assert native_agent.focused_step_repair_request(item, state, available, None, 65536)
+    assert state["step_repair_focus"]["count"] == 2
+    old_key = state["step_repair_focus"]["key"]
+    assert native_agent.focused_step_repair_request(item, state, available, None, 65536) is None
+    # Narrowed per-turn descriptions are not new host capabilities.
+    dynamic = copy.deepcopy(available)
+    dynamic[0]["function"]["description"] += " Dynamic turn note."
+    assert native_agent.focused_step_repair_request(item, state, dynamic, None, 65536) is None
+    changed = copy.deepcopy(native_agent.TOOLS)
+    check = next(tool for tool in changed if tool["function"]["name"] == "check_webapp")
+    check["function"]["parameters"]["properties"]["new_read_only_capability"] = {"type": "boolean"}
+    with patch.object(native_agent, "TOOLS", changed):
+        offered = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+        assert native_agent.focused_step_repair_request(item, state, offered, None, 65536)
+        assert state["step_repair_focus"]["count"] == 1 and state["step_repair_focus"]["key"] != old_key
+        assert native_agent.focused_step_repair_request(item, state, offered, None, 65536)
+        assert native_agent.focused_step_repair_request(item, state, offered, None, 65536) is None
+    assert task_context.step_status(folder) == before and (folder / "index.html").read_text() == source

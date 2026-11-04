@@ -131,7 +131,8 @@ TOOLS = [
                                  "[{set:{length:'4'},click:['Calculate'],expect:{result:'12'}}]. set maps editable HTML IDs to "
                                  'strings; selects dropdown values or labels. Filling does not submit. expect maps output IDs to '
                                  'literal visible text, not roles or counts. visible/hidden list IDs or text; use visible for '
-                                 "canvas/image presence. click uses IDs, exact button names, or {button:'Delete',row_text:'Paper'} for "
+                                 'canvas/image presence. row_counts:{tbodyId:2} checks DOM row totals: table includes headers; tbody data only. No JS expressions. '
+                                 "click uses IDs, exact button names, or {button:'Delete',row_text:'Paper'} for "
                                  "one matching table row. keys uses [{key:'ArrowRight',hold_ms:200}]; hold_ms<=1000, wait_ms<=2000, "
                                  'combined waits<=10000ms. Assert changed outcomes. reload:true keeps storage in the same isolated '
                                  "profile. state reads own plain data paths, e.g. {'game.player.x':{gt:300}}; no calls, expressions or "
@@ -168,6 +169,9 @@ TOOLS = [
                                                                                                           'maximum': 2000},
                                                                                               'expect': {'type': 'object',
                                                                                                          'additionalProperties': {'type': 'string'}},
+                                                                                              'row_counts': {'type': 'object', 'maxProperties': 20,
+                                                                                                             'propertyNames': {'pattern': '^[A-Za-z][A-Za-z0-9_-]{0,63}$', 'not': {'pattern': '[^A-Za-z0-9_-]'}},
+                                                                                                             'additionalProperties': {'type': 'integer', 'minimum': 0, 'maximum': 10000}},
                                                                                               'state': {'type': 'object'},
                                                                                               'visible': {'type': 'array',
                                                                                                           'items': {'type': 'string'}},
@@ -789,6 +793,7 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                                 "case must pass in sequence before saving; other failures remain. "
                                 "Filling a form does not submit; click its button. "
                                 "expect contains literal visible text, not roles or row-count instructions. "
+                                "Use row_counts:{tbodyId:2}; table includes headers, tbody data only, no JS expressions. "
                                 "Then complete this step again.")
                 elif kind == "run_verifier":
                     value["verifier_check_passed"] = value["passed"]
@@ -1046,6 +1051,7 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                         "If the saved actions are mistaken, use this same reference with revise_inputs:true and "
                         "cases=[one corrected case]. Filling a form does not submit it; click its actual button. "
                         "expect values are literal visible text, not role names or row-count instructions. "
+                        "Use row_counts:{tbodyId:2}; table includes headers, tbody data only, no JS expressions. "
                         "Original requirements and unrelated cases remain binding. The corrected case must pass "
                         "in sequence before saving. Other failed cases remain failed; no step completes from a repair.")
             if (result.get("own_batch_passed") is True or result.get("repaired_case_passed") is True) and (
@@ -1823,6 +1829,7 @@ def prompt(project: dict) -> str:
         "cases is a JSON array; visible/hidden are siblings beside expect. Saved input sequences "
         "accumulate and each starts from a fresh page; reuse a sequence to correct its expectations. "
         "An empty expect value asserts cleared DOM text; hidden asserts invisibility even if text remains. "
+        "Use row_counts:{tbodyId:2} for DOM rows, not expect or JS expressions; table includes headers, tbody data only. "
         "Choose the outcome required by the user. "
         "For canvas/game data not shown as DOM text, export the actual live state and assert it "
         "with state={'game.player.x':{'gt':300}} after a Right key action, or "
@@ -2085,7 +2092,7 @@ def fresh_messages(messages: list, folder: Path, state: dict | None = None,
                     for case in cases[:24] if isinstance(cases, list) else []:
                         if not isinstance(case, dict):
                             continue
-                        for field in ("set", "expect"):
+                        for field in ("set", "expect", "row_counts"):
                             if isinstance(case.get(field), dict):
                                 names.update(case[field])
                         for field in ("visible", "hidden", "click"):
@@ -2394,7 +2401,7 @@ def browser_revision_matches_step(folder: Path, active: dict, old_sequence: dict
             for key, default in (("reload", False), ("set", {}), ("click", []), ("keys", []), ("wait_ms", 0)):
                 if current.get(key, default) != retained.get(key, default):
                     return False
-            for key in ("expect", "state"):
+            for key in ("expect", "state", "row_counts"):
                 if any(name not in retained.get(key, {}) or retained[key][name] != value
                        for name, value in current.get(key, {}).items()):
                     return False
@@ -2976,10 +2983,16 @@ def focused_step_repair_request(project: dict, state: dict, available: list, not
             recent = task_context.checker_failures(folder, active["check_arguments"]["path"], limit=1)
             if recent and recent[0].get("path") == active["check_arguments"]["path"]:
                 data["recent_check_failure"] = str(recent[0].get("details", ""))[:1000]
+        # A newly available checker capability can repair an exhausted legacy
+        # definition. Stable base contracts renew this bounded budget once;
+        # dynamic narrowed schemas and unrelated release numbers do not.
+        contract = sorted((tool for tool in TOOLS if tool["function"]["name"] in {"task_steps", "check_webapp"}),
+                          key=lambda tool: tool["function"]["name"])
+        contract_hash = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         key = hashlib.sha256((task_context.request_identity(folder) + "\0"
             + task_context.step_check_identity(active) + "\0"
             + hashlib.sha256(page.read_bytes()).hexdigest()
-            + "\0" + json.dumps(basis, sort_keys=True)).encode()).hexdigest()
+            + "\0" + json.dumps(basis, sort_keys=True) + "\0" + contract_hash).encode()).hexdigest()
         previous = state.get("step_repair_focus") or {}
         count = int(previous.get("count", 0)) if previous.get("key") == key else 0
         if count >= 2:
@@ -3046,7 +3059,8 @@ def focused_step_repair_request(project: dict, state: dict, available: list, not
                 "test forgot to submit a form. Read the original requirements and observed control IDs. "
                 "Filling does not submit. If submission is required, use check_webapp with the supplied "
                 "reference, revise_inputs:true and one corrected case containing the real click action "
-                "and observable assertions. expect means literal visible text, not roles or row counts. "
+                "and observable assertions. expect means literal visible text; use row_counts:{tbodyId:2} for DOM rows. "
+                "table includes headers; tbody data only. No JS expressions. "
                 "Do not put a simulated click in application source. Do not drop requirements or claim completion. "
                 "Only the real checked case can authorize a saved definition repair; other failures remain. "
                 "If the source is wrong or evidence is insufficient, explain briefly to restore normal tools. "
@@ -3076,7 +3090,8 @@ def focused_step_repair_request(project: dict, state: dict, available: list, not
                     branch["properties"]["check_arguments"]["description"] = (
                         "set maps editable HTML IDs to fill values; filling does not submit. "
                         "click lists actual IDs or exact button names. expect maps output IDs to literal "
-                        "visible text, not selectors, roles or row-count instructions. Put the actual "
+                        "visible text, not selectors or roles. Use row_counts:{tbodyId:2} for row totals; "
+                        "table includes headers, tbody data only, not JS expressions. Put the actual "
                         "input, submit action and observable outcome in the same case. "
                         "Example: {set:{length:'4'},click:['Calculate'],expect:{result:'12'}}.")
         messages = [{"role": "system", "content": (
@@ -3246,7 +3261,7 @@ def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
         cases = webapp_check.normalize_spec(arguments).get("cases", [])
         if (verdict.get("passed") is not True or not isinstance(cases, list)
                 or len(cases) < 2
-                or not any(case.get("expect") or case.get("visible") or case.get("hidden") or case.get("state")
+                or not any(case.get("expect") or case.get("visible") or case.get("hidden") or case.get("state") or case.get("row_counts")
                            for case in cases)):
             return {}
         interactions = verdict.get("interactions", [])
@@ -3264,6 +3279,7 @@ def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
                 continue
             actions = [kind for kind in ("reload", "set", "click", "keys") if cases[number-1].get(kind)]
             allowed = {"text:" + name for name in cases[number-1].get("expect", {})}
+            allowed.update("rows:" + name for name in cases[number-1].get("row_counts", {}))
             allowed.update("visibility:" + name for field in ("visible", "hidden")
                            for name in cases[number-1].get(field, []))
             webapp_check.validate_state_assertions(cases[number-1].get("state", {}))
@@ -3570,14 +3586,14 @@ def initial_plan_tools(project: dict, available: list) -> list:
         ]}
         outcome = {"anyOf": [
             {"required": [field], "properties": {field: {"minProperties": 1}}}
-            for field in ("expect", "state")
+            for field in ("expect", "state", "row_counts")
         ] + [
             {"required": [field], "properties": {field: {"minItems": 1}}}
             for field in ("visible", "hidden")
         ]}
         steps["contains"] = {"description": (
             "Include at least one browser unit with a nonempty set/click/keys or reload:true action "
-            "and a nonempty expect/state/visible/hidden outcome in that same unit's cases. "
+            "and a nonempty expect/state/row_counts/visible/hidden outcome in that same unit's cases. "
             "Static layout-only units may remain."),
             "required": ["check_tool", "check_arguments"], "properties": {
             "check_tool": {"const": "check_webapp"},
@@ -3587,8 +3603,9 @@ def initial_plan_tools(project: dict, available: list) -> list:
             branch["properties"]["check_arguments"]["description"] = (
                 "set maps editable HTML IDs to strings; filling does not submit. Put any required click "
                 "and the observed outcome in that same case. expect maps output IDs to literal visible "
-                "text, not roles or row-count instructions. visible/hidden list actual element IDs only, "
-                "not markup or selectors. Use expect with an output ID for rendered literal text, "
+                "text, not roles or row-count instructions. Use row_counts:{tbodyId:2} for row totals; "
+                "table includes headers, tbody data only. No JS expressions. visible/hidden list actual "
+                "element IDs only, not markup or selectors. Use expect with an output ID for rendered literal text, "
                 "including HTML markup displayed as text. "
                 "Create required rows/items through real inputs before testing their actions. "
                 "New pages may choose IDs during planning, then implement those exact controls. "
