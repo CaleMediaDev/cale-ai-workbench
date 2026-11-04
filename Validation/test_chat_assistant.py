@@ -542,6 +542,16 @@ def test_whitespace_padded_revision_still_offers_finished_task(text):
     assert chat_assistant.choose_task(text, candidates) == tasks[0]
 
 
+def test_oversized_numeric_task_selection_does_not_crash():
+    tasks = [
+        {"id": "a", "title": "Build bakery site"},
+        {"id": "b", "title": "Research suppliers"},
+    ]
+    assert chat_assistant.choose_task("9" * 5000, tasks) is None
+    assert chat_assistant.choose_task("2", tasks) == tasks[1]
+    assert chat_assistant.choose_task("２", tasks) == tasks[1]
+
+
 def test_multiple_tasks_require_a_clear_followup_target():
     tasks = [{"id": "a", "title": "Build bakery site"}, {"id": "b", "title": "Research suppliers"}]
     assert chat_assistant.choose_task("also add a contact page", tasks) is None
