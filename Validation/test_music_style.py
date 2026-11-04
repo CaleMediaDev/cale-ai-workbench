@@ -186,6 +186,27 @@ def test_explicit_instrumental_request_does_not_gain_vocal_cues():
     assert music_style.requires_sustained_vocals(request)
 
 
+def test_vocal_exclusions_use_the_shared_negation_vocabulary():
+    for negation in ("no", "without", "not", "avoid", "exclude", "skip",
+                     "don't want", "do not want"):
+        for sound in ("vocals", "singing"):
+            request = "Katy Perry-style techno, " + negation + " any " + sound
+            assert music_style.vocal_intent(request) == "none"
+            assert not music_style.requires_sustained_vocals(request)
+            assert not music_style.unambiguous_vocal_song(request)
+            caption = music_style.enhance(request)
+            assert "female lead vocals" not in caption
+            assert "clear sung verses and chorus" not in caption
+            assert "Sparse chopped vocal syllables" not in caption
+            assert "drum machine" in caption
+            assert music_style.enhance(caption) == caption
+
+    texture = "Katy Perry-style wordless vocals, avoid lyrics"
+    assert music_style.vocal_intent(texture) == "female"
+    assert not music_style.requires_sustained_vocals(texture)
+    assert "Sparse chopped vocal syllables" in music_style.enhance(texture)
+
+
 def test_explicit_bpm_is_parsed_for_music_engine():
     assert music_style.requested_bpm("Heavy dubstep at 150 BPM") == 150
     assert music_style.requested_bpm("80-bpm synth groove") == 80
