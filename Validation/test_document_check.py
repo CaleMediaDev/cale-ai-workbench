@@ -97,6 +97,25 @@ def test_document_check_rejects_numeric_evidence_prefixes(tmp_path, suffix, loca
     assert expected_error in result["errors"]
 
 
+@pytest.mark.parametrize("exact_total", [True, False])
+def test_document_check_uses_exact_arithmetic_for_large_amounts(tmp_path, exact_total):
+    folder = _project(tmp_path)
+    base = "1" + "0" * 28
+    total = str(int(base) + 1) if exact_total else base
+    (folder / "terms.txt").write_text(
+        f"Base fee: ${base}\nExtra fee: $1\n", encoding="utf-8")
+    (folder / "summary.md").write_text(
+        f"Total payable: ${total}\n", encoding="utf-8")
+    spec = {"source_path": "terms.txt", "report_path": "summary.md",
+            "calculations": [{"operation": "add",
+                              "source_texts": [f"Base fee: ${base}", "Extra fee: $1"],
+                              "report_text": f"Total payable: ${total}"}]}
+    result = document_check.check(folder, spec)
+    assert result["passed"] is exact_total
+    assert result["errors"] == ([] if exact_total else [
+        "Calculation 1: report amount differs from source arithmetic"])
+
+
 def test_document_check_rejects_source_change_during_extraction(tmp_path):
     folder = _project(tmp_path)
     original_inspect = document_check.project_documents.inspect

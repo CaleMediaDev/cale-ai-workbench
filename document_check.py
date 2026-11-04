@@ -8,7 +8,7 @@ import json
 import os
 import re
 import sys
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from pathlib import Path
 
 import project_documents
@@ -125,7 +125,12 @@ def check(folder: Path, requested: dict) -> dict:
             errors.append(f"Calculation {number}: source amounts were not found")
             continue
         left, right = (_money(phrase) for phrase in phrases)
-        expected = left + right if calculation["operation"] == "add" else left - right
+        with localcontext() as context:
+            # Dollar operands have at most two decimal places. Allow for
+            # aligning their scales and an additional carry without rounding.
+            context.prec = max(len(left.as_tuple().digits),
+                               len(right.as_tuple().digits)) + 3
+            expected = left + right if calculation["operation"] == "add" else left - right
         if _money(calculation["report_text"]) != expected:
             errors.append(f"Calculation {number}: report amount differs from source arithmetic")
         if not _present(output, calculation["report_text"]):
