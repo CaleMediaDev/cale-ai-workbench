@@ -51,7 +51,7 @@ def search_public_apis(query: str, max_results: int = 10) -> dict:
     terms = [word.casefold() for word in query.split() if len(word) > 1]
     if not terms or len(query) > 120:
         raise ValueError("Describe the public data or API you need in 2 to 120 characters.")
-    if not 1 <= max_results <= 20:
+    if not isinstance(max_results, int) or not 1 <= max_results <= 20:
         raise ValueError("Result count must be between 1 and 20.")
     data, fresh = _catalog()
     matches = []
