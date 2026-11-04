@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -51,6 +52,8 @@ def generate(model, voice_prompt, text: str, output_path: str) -> dict:
         )
     if len(audio) == 0 or len(audio[0]) == 0:
         raise ValueError("Voice generation returned an empty waveform")
+    if not all(math.isfinite(sample) for sample in audio[0]):
+        raise ValueError("Voice generation returned non-finite waveform samples")
     # Keep an existing recording intact if encoding or writing fails.
     # Preserve the suffix so soundfile can infer the requested audio format.
     with tempfile.NamedTemporaryFile(
