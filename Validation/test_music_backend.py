@@ -1214,6 +1214,31 @@ def test_sdk_failure_retries_same_saved_music_job_once(tmp_path):
             music_backend.resume_failed_sdk_job(job_id)
 
 
+@pytest.mark.parametrize("failure", [
+    OSError("Worker launch failed"),
+    RuntimeError("The local Toolbox runtime is missing."),
+])
+def test_sdk_retry_launch_failure_is_saved_as_error(tmp_path, failure):
+    job_id = "e" * 32
+    record = {
+        "job_id": job_id, "status": "error",
+        "current": "No module named 'openai.types.shared_params.response_format_json_object'",
+        "output_path": str(tmp_path / "song.mp3"),
+        "server_task_id": "saved-server-task",
+    }
+    with (patch.object(music_backend, "JOBS", tmp_path / "jobs"),
+          patch.object(music_backend, "_launch_job", side_effect=failure) as launch):
+        music_backend._write_job(job_id, record)
+        with pytest.raises(type(failure), match=str(failure)):
+            music_backend.resume_failed_sdk_job(job_id)
+        saved = music_backend.music_job_status(job_id)
+    launch.assert_called_once_with(job_id)
+    assert saved["status"] == "error"
+    assert saved["current"] == str(failure)
+    assert saved["server_task_id"] == "saved-server-task"
+    assert saved["sdk_retries"] == 1
+
+
 def test_music_worker_saves_runtime_and_traceback_for_failed_render(tmp_path):
     jobs = tmp_path / "music-jobs"
     output = tmp_path / "song.mp3"
