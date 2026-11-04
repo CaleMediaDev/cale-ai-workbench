@@ -184,6 +184,33 @@ def test_run_preserves_original_exception_when_destination_becomes_directory(tmp
     assert (output / "keep.txt").read_text() == "preserve me"
 
 
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_run_preserves_original_exception_when_cleanup_is_denied(tmp_path, monkeypatch, interrupted):
+    output = tmp_path / "edited.mp4"
+    error = KeyboardInterrupt() if interrupted else subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1)
+    cleanup_attempts = []
+
+    def failed_process(command, **kwargs):
+        assert command[-1] == str(output)
+        output.write_bytes(b"partial video")
+        raise error
+
+    def cannot_delete(path, **kwargs):
+        cleanup_attempts.append(path)
+        raise PermissionError("Output is locked")
+
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", failed_process)
+    monkeypatch.setattr(type(output), "unlink", cannot_delete)
+
+    with pytest.raises(type(error)) as caught:
+        video_edit._run([], output, timeout=1)
+
+    assert caught.value is error
+    assert cleanup_attempts == [output]
+    assert output.read_bytes() == b"partial video"
+
+
 def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeypatch):
     output = tmp_path / "edited.mp4"
     real_run = subprocess.run
