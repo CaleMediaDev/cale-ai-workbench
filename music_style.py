@@ -41,9 +41,9 @@ EXPLICIT_LEAD = re.compile(
     r"(?:male|female|lead|layered|backing|deep|gritty)\s+vocals?|"
     r"vocal\s+(?:verses?|chorus|hook)|rap\s+verses?)\b", re.I,
 )
-VOCAL_FREE = re.compile(r"\b(?:no|without)\s+vocals\b", re.I)
+VOCAL_FREE = re.compile(r"\b(?:no|without)\s+(?:vocals|singing)\b", re.I)
 NO_VOCALS = re.compile(
-    r"\b(?:no vocals|without vocals|no singing|no lyrics|without lyrics)\b", re.I,
+    r"\b(?:no vocals|without vocals|no singing|without singing|no lyrics|without lyrics)\b", re.I,
 )
 WHOLE_INSTRUMENTAL = re.compile(
     r"\b(?:instrumental\s+(?:song|track|beat|music|piece|version|only)|"
