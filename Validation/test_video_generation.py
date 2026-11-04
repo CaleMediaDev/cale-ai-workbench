@@ -167,6 +167,34 @@ def test_worker_log_failure_is_visible_and_preserves_request(tmp_path):
         assert status["progress_percent"] is None
 
 
+def test_concurrent_job_writes_use_independent_temporary_files(tmp_path):
+    job_id = "a" * 32
+    record = tmp_path / f"{job_id}.json"
+    original_replace = Path.replace
+    publications = []
+
+    def publish_after_competing_write(path, target):
+        if Path(target) == record:
+            publications.append(path)
+            if len(publications) == 1:
+                competing = video_generation._write(job_id, detail="competing writer")
+                assert json.loads(record.read_text(encoding="utf-8")) == competing
+        return original_replace(path, target)
+
+    with patch.object(video_generation, "JOBS", tmp_path), patch.object(
+        Path, "replace", publish_after_competing_write
+    ):
+        result = video_generation._write(job_id, detail="original writer")
+
+    assert len(publications) == 2
+    assert publications[0] != publications[1]
+    assert all(not path.exists() for path in publications)
+    assert not list(tmp_path.glob("*.tmp"))
+    assert json.loads(record.read_text(encoding="utf-8")) == result
+    assert result["job_id"] == job_id
+    assert result["detail"] == "original writer"
+
+
 def test_video_status_reports_latest_sampler_progress(tmp_path):
     job_id = "a" * 32
     with patch.object(video_generation, "JOBS", tmp_path):
