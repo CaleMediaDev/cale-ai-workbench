@@ -70,6 +70,23 @@ class ProjectPreviewTests(unittest.TestCase):
         ):
             self.assertEqual(preview.safe_loopback_url(url), "", url)
 
+    def test_malformed_ipv6_authority_falls_back_to_static_html(self):
+        self.assertEqual(
+            preview.safe_loopback_url("http://[::1]:3000/"),
+            "http://[::1]:3000/",
+        )
+        malformed = "http://[::1]invalid:3000/"
+        self.assertEqual(preview.safe_loopback_url(malformed), "")
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary).resolve()
+            fallback = folder / "index.html"
+            fallback.write_text("hello", encoding="utf-8")
+            (folder / ".local-ai").mkdir()
+            (folder / ".local-ai/preview.json").write_text(
+                json.dumps({"url": malformed}), encoding="utf-8"
+            )
+            self.assertEqual(preview.source(folder), fallback.as_uri())
+
     def test_symlink_loop_does_not_block_static_html_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary).resolve()
@@ -132,3 +149,15 @@ class ProjectPreviewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_malformed_authority_rejected_when_legacy_parser_returns_it():
+    from urllib.parse import SplitResult
+    malformed = "http://[::1]invalid:3000/"
+    # Older urllib implementations returned these hostname/port fields.
+    # Require the app boundary to reject the complete malformed authority
+    # even when its parser dependency does not reject it first.
+    parsed = SplitResult("http", "[::1]invalid:3000", "/", "", "")
+    assert parsed.hostname == "::1" and parsed.port == 3000
+    with patch.object(preview, "urlsplit", return_value=parsed):
+        assert preview.safe_loopback_url(malformed) == ""
