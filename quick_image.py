@@ -173,7 +173,7 @@ def start_image_job(root: Path, prompt: str, output_path: str) -> dict:
     _write_job(root, job_id, info)
     try:
         _launch_job(root, job_id)
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         _write_job(root, job_id, {**info, "status": "error", "current": str(exc)[:300]})
         raise
     return {"job_id": job_id, "status": "queued", "output_path": str(target)}
