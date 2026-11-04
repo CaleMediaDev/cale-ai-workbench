@@ -78,7 +78,9 @@ def record(root: str | Path, task: dict, rating: int, note: str = "") -> int:
         conn.execute("""INSERT INTO feedback
             (task_id,generation,kind,rating,title,brief,note,created)
             VALUES (?,?,?,?,?,?,?,?)
-            ON CONFLICT(task_id,generation,rating) DO UPDATE SET note=excluded.note""",
+            ON CONFLICT(task_id,generation,rating) DO UPDATE SET
+                kind=excluded.kind, title=excluded.title, brief=excluded.brief,
+                note=excluded.note""",
             (str(task["id"]), int(task.get("generation", 0)), kind_for(task), rating,
              str(task.get("title", ""))[:200], str(task.get("brief", ""))[:4000],
              note, time.time()),

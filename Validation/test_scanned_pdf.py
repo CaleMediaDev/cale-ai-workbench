@@ -82,6 +82,57 @@ def test_native_pdf_does_not_require_vision_worker(tmp_path):
     document.close.assert_called_once_with()
 
 
+def test_text_layer_error_falls_back_to_vision_and_preserves_native_text(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    class PdfiumError(Exception):
+        pass
+
+    pdf = tmp_path / "damaged-text.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    native_textpage = Mock()
+    native_textpage.get_text_range.return_value = "Order A-1742"
+    native_page = Mock()
+    native_page.get_textpage.return_value = native_textpage
+    damaged_textpage = Mock()
+    damaged_textpage.get_text_range.side_effect = PdfiumError("unreadable text layer")
+    image = Mock()
+    bitmap = Mock()
+    bitmap.to_pil.return_value = image
+    damaged_page = Mock()
+    damaged_page.get_textpage.return_value = damaged_textpage
+    damaged_page.get_size.return_value = (600, 800)
+    damaged_page.render.return_value = bitmap
+    document = Mock()
+    document.__len__ = Mock(return_value=2)
+    document.__getitem__ = Mock(side_effect=lambda index: [native_page, damaged_page][index])
+    recognize = Mock(return_value={"description": "INVOICE 4817"})
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(
+            PdfDocument=Mock(return_value=document), PdfiumError=PdfiumError
+        ),
+        "media_worker": SimpleNamespace(recognize_image=recognize),
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert "[Page 1; selectable text]\nOrder A-1742" in result["text"]
+    assert "[Page 2; vision transcription]\nINVOICE 4817" in result["text"]
+    assert result["pages_read"] == [1, 2]
+    assert result["scanned_pages"] == [2]
+    assert result["has_scans"] is True
+    assert result["partial"] is False
+    recognize.assert_called_once()
+    native_page.render.assert_not_called()
+    native_textpage.close.assert_called_once_with()
+    damaged_textpage.close.assert_called_once_with()
+    native_page.close.assert_called_once_with()
+    assert damaged_page.close.call_count == 2
+    image.close.assert_called_once_with()
+    bitmap.close.assert_called_once_with()
+    document.close.assert_called_once_with()
+
+
 def test_page_selection_spans_long_document():
     assert scanned_pdf.sampled_pages(1, 6) == [0]
     assert scanned_pdf.sampled_pages(10, 4) == [0, 3, 6, 9]

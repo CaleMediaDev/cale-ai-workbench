@@ -184,7 +184,9 @@ def validated_recommendations(document):
         origin = item.get("origin", "")
         previous = CATALOG.get(profile)
         if not (
-            re.fullmatch(r"cale-[a-z0-9-]{3,40}", alias)
+            isinstance(alias, str)
+            and isinstance(source, str)
+            and re.fullmatch(r"cale-[a-z0-9-]{3,40}", alias)
             and re.fullmatch(
                 r"[a-z0-9][a-z0-9._-]{1,50}:[a-z0-9][a-z0-9._-]{1,50}", source
             )
@@ -239,7 +241,7 @@ def candidate_approved(item):
         approvals = json.loads((ROOT / "LongTasks/model-approvals.json").read_text())
     except (OSError, ValueError):
         return False
-    return approvals.get(item["alias"]) == item["source"]
+    return isinstance(approvals, dict) and approvals.get(item["alias"]) == item["source"]
 
 
 def approve_candidate(item):
@@ -248,6 +250,8 @@ def approve_candidate(item):
     try:
         approvals = json.loads(path.read_text())
     except (OSError, ValueError):
+        approvals = {}
+    if not isinstance(approvals, dict):
         approvals = {}
     approvals[item["alias"]] = item["source"]
     temporary = path.with_suffix(f".{os.getpid()}.tmp")

@@ -106,6 +106,23 @@ class BusinessContactTests(unittest.TestCase):
         self.assertIn("NEEDLE", page["text"])
         self.assertNotIn("Selected excerpts", page["text"])
 
+    def test_exact_find_maps_casefolded_offsets_to_original_text(self):
+        body = "NEEDLE " + "ß" * 16000 + "Needle at the end."
+        expected_match = body.index("Needle")
+        with patch.object(
+            web_tools, "fetch",
+            return_value=("https://example.org/details", body, "text/plain", 200),
+        ):
+            for start in (7, expected_match):
+                with self.subTest(start_char=start):
+                    page = web_tools.read_webpage(
+                        "https://example.org/details", find="needle", start_char=start
+                    )
+                    self.assertTrue(page["find_matched"])
+                    self.assertEqual(page["start_char"], expected_match - 1000)
+                    self.assertIn("Needle at the end.", page["text"])
+                    self.assertEqual(page["text"], body[expected_match - 1000:])
+
     def test_search_falls_back_after_brave_rate_limit(self):
         html = (
             '<a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.gov%2Fstory">'

@@ -62,6 +62,23 @@ def test_mastering_timeout_removes_partial_output_and_preserves_inputs(tmp_path)
     assert reference.read_bytes() == b"reference"
 
 
+def test_mastering_rejects_hard_linked_reference(tmp_path):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    source.write_bytes(b"source")
+    reference.hardlink_to(source)
+
+    with patch.object(music_mastering, "install") as install:
+        with pytest.raises(ValueError, match="different reference"):
+            music_mastering.master_music(str(source), str(reference), str(output))
+        install.assert_not_called()
+
+    assert not output.exists()
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"source"
+
+
 def test_mastering_rejects_overwrite_and_same_reference(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"

@@ -38,7 +38,7 @@ def _download_target(folder: Path, filename: str) -> Path:
     target = destination / name
     stem, suffix = target.stem, target.suffix
     number = 2
-    while target.exists():
+    while target.exists() or target.is_symlink():
         target = destination / f"{stem}-{number}{suffix}"
         number += 1
     return target

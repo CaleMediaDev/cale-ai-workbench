@@ -203,6 +203,14 @@ class ProjectMemoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             memory.save(self.folder, "file", "Fake", "No")
 
+    def test_search_preserves_unicode_terms_without_casefold_expansion(self):
+        saved = memory.save(self.folder, "note", "Travel directions",
+                            "Follow the Straße to the station.")
+        for query in ("Straße", "straße"):
+            with self.subTest(query=query):
+                found = memory.search(self.folder, query, kind="note")
+                self.assertEqual([row["id"] for row in found], [saved["id"]])
+
     def test_search_treats_query_as_text_not_fts_syntax(self):
         memory.save(self.folder, "component", "Search API", "The database stores app components.")
         self.assertTrue(memory.search(self.folder, '"Search" OR component*'))

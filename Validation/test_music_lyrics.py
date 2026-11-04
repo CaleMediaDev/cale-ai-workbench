@@ -67,6 +67,22 @@ def test_save_rejects_infinite_end_without_leaving_partial_output(tmp_path):
     assert source.read_bytes() == b"original"
 
 
+@pytest.mark.parametrize("start,end", [(1.0, 1e308), (1e308, 1.1e308)])
+def test_save_rejects_millisecond_overflow_without_partial_output(tmp_path, start, end):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    target = tmp_path / "lyrics"
+    transcription = {"segments": [
+        {"start": start, "end": end, "text": "Hello world"},
+    ]}
+
+    with pytest.raises(RuntimeError, match="No clear lyrics"):
+        music_lyrics.save(source, source, target, transcription)
+
+    assert not target.exists()
+    assert source.read_bytes() == b"original"
+
+
 def test_lyric_tool_protects_existing_files_and_reports_unclear_vocals(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")

@@ -16,9 +16,13 @@ HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 def ready():
-    return (VOICE / "kokoro-v1.0.int8.onnx").is_file() and (
-        VOICE / "voices-v1.0.bin"
-    ).is_file()
+    return all(
+        path.is_file() and path.stat().st_size > 0
+        for path in (
+            VOICE / "kokoro-v1.0.int8.onnx",
+            VOICE / "voices-v1.0.bin",
+        )
+    )
 
 
 def whisper_ready():

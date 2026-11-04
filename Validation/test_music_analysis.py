@@ -34,3 +34,27 @@ def test_analysis_rejects_nonfinite_duration_before_loading(tmp_path, monkeypatc
         librosa_stub.get_duration = lambda *, path: duration
         with pytest.raises(ValueError, match="no playable duration"):
             music_analysis.analyze_music(str(source))
+
+
+def test_analysis_rejects_nonfinite_samples_before_feature_extraction(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import pytest
+
+    source = tmp_path / "invalid-samples.wav"
+    source.touch()
+
+    def unexpected_harmonic(*args, **kwargs):
+        pytest.fail("Invalid samples must not reach harmonic processing")
+
+    librosa_stub = SimpleNamespace(
+        get_duration=lambda *, path: 1.0,
+        effects=SimpleNamespace(harmonic=unexpected_harmonic),
+    )
+    monkeypatch.setitem(sys.modules, "librosa", librosa_stub)
+    for invalid_sample in (float("nan"), float("inf"), float("-inf")):
+        signal = np.array([0.1, invalid_sample, -0.1])
+        librosa_stub.load = lambda *args, **kwargs: (signal, 22050)
+        with pytest.raises(ValueError, match="nonfinite samples"):
+            music_analysis.analyze_music(str(source))

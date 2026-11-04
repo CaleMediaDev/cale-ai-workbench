@@ -379,7 +379,8 @@ def snapshot(root: Path = ROOT) -> dict:
 
     vision_alias = str(_json(media / "settings.json").get("vision_model") or "cale-vision")
     vision_installed = media_python and any(
-        name.split(":", 1)[0] == vision_alias for name in tag_names
+        (name == vision_alias if ":" in vision_alias else
+         name.split(":", 1)[0] == vision_alias) for name in tag_names
     )
     vision_probe = probes.get("vision", {})
     vision_had_probe = bool(vision_probe)

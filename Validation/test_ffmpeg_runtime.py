@@ -37,18 +37,29 @@ def test_missing_ffmpeg_is_installed_and_validated(tmp_path):
         assert ffmpeg_runtime.working(tmp_path)
 
 
-def test_undecodable_version_output_is_a_failed_health_check(tmp_path):
+@pytest.mark.parametrize("stdout,returncode,expected", [
+    (b"ffmpeg version 7.0\n", 0, True),
+    (b"ffmpeg version 7.0\nconfiguration: --extra-version=\xff\n", 0, True),
+    (b"ffmpeg version 7.0\n", 1, False),
+    (b"not ffmpeg\n", 0, False),
+])
+def test_version_health_check_uses_bytes(tmp_path, stdout, returncode, expected):
     target = ffmpeg_runtime.executable(tmp_path)
     target.parent.mkdir(parents=True)
-    target.write_bytes(b"invalid executable")
-    decode_error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+    target.write_bytes(b"mock executable")
 
-    with patch.object(ffmpeg_runtime.subprocess, "run", side_effect=decode_error) as run:
-        assert ffmpeg_runtime.working(tmp_path) is False
+    def probe(args, **kwargs):
+        # Model subprocess decoding: the metadata is not valid UTF-8, but
+        # that must not prevent recognition of the ASCII version banner.
+        output = stdout.decode("utf-8") if kwargs.get("text") else stdout
+        return subprocess.CompletedProcess(args, returncode, output, b"")
+
+    with patch.object(ffmpeg_runtime.subprocess, "run", side_effect=probe) as run:
+        assert ffmpeg_runtime.working(tmp_path) is expected
 
     run.assert_called_once_with(
         [str(target), "-version"], capture_output=True,
-        text=True, timeout=10, creationflags=ffmpeg_runtime.HIDE,
+        text=False, timeout=10, creationflags=ffmpeg_runtime.HIDE,
     )
 
 

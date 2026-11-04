@@ -25,6 +25,22 @@ class ContextWindowTests(unittest.TestCase):
             65536,
         )
 
+    def test_memory_below_minimum_context_budget_is_rejected(self):
+        info = {"model_info": {"qwen.context_length": 262144}}
+        for ram_gib in (8, 16, 22):
+            with self.subTest(ram_gib=ram_gib):
+                with self.assertRaisesRegex(ValueError, "Insufficient memory"):
+                    context_window.desired_context(
+                        info, ram_gib * 2**30, 7 * 2**30
+                    )
+
+    def test_exact_minimum_context_memory_budget_is_accepted(self):
+        info = {"model_info": {"qwen.context_length": 262144}}
+        self.assertEqual(
+            context_window.desired_context(info, 23 * 2**30, 7 * 2**30),
+            65536,
+        )
+
     def test_architecture_ceiling_is_respected(self):
         info = {"model_info": {"qwen.context_length": 131072}}
         self.assertEqual(

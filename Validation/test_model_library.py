@@ -405,6 +405,21 @@ class AutoModelTests(unittest.TestCase):
             library.approve_candidate(model)
             self.assertTrue(library.candidate_approved(model))
 
+    def test_candidate_approval_recovers_from_non_object_json(self):
+        model = {"alias": "cale-test-model", "source": "test:latest", "candidate": True}
+        for value in (None, [], ["old-model"], "invalid", 42, True):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                path = root / "LongTasks/model-approvals.json"
+                path.parent.mkdir()
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with patch.object(library, "ROOT", root):
+                    self.assertFalse(library.candidate_approved(model))
+                    library.approve_candidate(model)
+                    self.assertTrue(library.candidate_approved(model))
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                                 {model["alias"]: model["source"]})
+
     def test_recommendation_cannot_replace_bundled_candidate(self):
         document = {
             "schema": 1,
@@ -486,6 +501,37 @@ class AutoModelTests(unittest.TestCase):
             self.assertEqual(library.refresh_catalog(), {})
             self.assertNotIn("feed_model", catalog)
             self.assertIn("main", catalog)
+
+    def test_non_string_feed_identifiers_fall_back_to_cached_profile(self):
+        old_feed = {"schema": 1, "models": {"feed_model": {
+            "label": "Working", "alias": "cale-feed-model",
+            "source": "qwen3.5:35b", "origin": "https://ollama.com/library/qwen3.5",
+            "license": "Apache-2.0", "download_gb": 22, "ram_gb": 48,
+            "context": 65536, "auto": True,
+        }}}
+        for field in ("alias", "source"):
+            for value in (None, 42, [], {}):
+                with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as folder:
+                    root = Path(folder)
+                    cache = root / "LongTasks/model-recommendations.json"
+                    cache.parent.mkdir()
+                    cache.write_text(json.dumps(old_feed), encoding="utf-8")
+                    bad_feed = json.loads(json.dumps(old_feed))
+                    bad_feed["models"]["feed_model"][field] = value
+                    catalog = {
+                        "main": {"alias": "base"},
+                        "feed_model": dict(old_feed["models"]["feed_model"]),
+                    }
+                    with (
+                        patch.object(library, "ROOT", root),
+                        patch.object(library, "CATALOG", catalog),
+                        patch.object(library, "urlopen", return_value=io.BytesIO(
+                            json.dumps(bad_feed).encode())),
+                    ):
+                        accepted = library.refresh_catalog()
+                    self.assertEqual(accepted["feed_model"]["alias"], "cale-feed-model")
+                    self.assertEqual(catalog["feed_model"]["source"], "qwen3.5:35b")
+                    self.assertEqual(json.loads(cache.read_text(encoding="utf-8")), old_feed)
 
     def test_bad_feed_update_keeps_last_cached_working_profile(self):
         old_model = {"alias": "cale-feed-model", "source": "qwen3.5:35b"}

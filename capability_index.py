@@ -116,6 +116,8 @@ def _registered_tools(root: Path) -> list[dict]:
                      "schema": spec["inputSchema"]})
     try:
         snapshot = json.loads(specialist_snapshot_path(root).read_text(encoding="utf-8"))
+        if not isinstance(snapshot, dict):
+            return rows
         for spec in snapshot.get("tools", []):
             if (isinstance(spec, dict) and isinstance(spec.get("name"), str)
                     and spec["name"].startswith(("rea.", "devtools."))

@@ -35,8 +35,12 @@ def _phrase(value: str) -> str:
 
 def _present(text: str, phrase: str) -> bool:
     normalized = " ".join(text.split())
-    return bool(re.search(r"(?<![A-Za-z0-9])" + re.escape(_phrase(phrase)) +
-                          r"(?![A-Za-z0-9])", normalized))
+    phrase = _phrase(phrase)
+    boundary = r"(?![A-Za-z0-9])"
+    if phrase[-1].isdigit():
+        boundary = r"(?![A-Za-z0-9]|[.,][0-9])"
+    return bool(re.search(r"(?<![A-Za-z0-9])" + re.escape(phrase) +
+                          boundary, normalized))
 
 
 def _money(text: str) -> Decimal:

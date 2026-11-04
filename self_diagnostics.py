@@ -179,14 +179,18 @@ def _schedule_locked(root: Path, state: Path, now: float | None) -> bool:
     python = root / "Toolbox/python/Scripts/python.exe"
     if not python.is_file() or not (root / "Validation/test_long_tasks.py").is_file():
         return False
-    process = subprocess.Popen(
-        [str(python), str(root / "self_diagnostics.py"), "--run"],
-        cwd=root,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=HIDE,
-    )
+    try:
+        process = subprocess.Popen(
+            [str(python), str(root / "self_diagnostics.py"), "--run"],
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=HIDE,
+        )
+    except OSError:
+        # No supervisor started; preserve the report and allow a later retry.
+        return False
     import psutil
 
     try:

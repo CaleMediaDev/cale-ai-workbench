@@ -206,7 +206,17 @@ def read_webpage(url: str, find: str = "", start_char: int = 0, question: str = 
             line for part in prefix.splitlines() if (line := " ".join(part.split()))
         )
         start_char = max(0, len(prefix) - 300)
-    match = text.casefold().find(find.casefold(), start_char) if find else -1
+    match = -1
+    if find:
+        folded_start = len(text[:start_char].casefold())
+        folded_match = text.casefold().find(find.casefold(), folded_start)
+        if folded_match >= 0:
+            folded_offset = 0
+            for index, char in enumerate(text):
+                folded_offset += len(char.casefold())
+                if folded_offset > folded_match:
+                    match = index
+                    break
     if match >= 0:
         start_char = max(0, match - 1000)
     end_char = min(len(text), start_char + 14000)

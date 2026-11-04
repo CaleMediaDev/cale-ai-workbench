@@ -64,6 +64,8 @@ def inspect(folder: str | Path, path: str, question: str = "",
     if cached:
         with cache.open("r", encoding="utf-8", newline="") as cached_text:
             text = cached_text.read()
+        if _digest(source) != digest:
+            raise RuntimeError("The document changed while it was being read; try again")
     else:
         if source.suffix.casefold() in file_chat.PLAIN_TEXT:
             text = source.read_text(encoding="utf-8-sig", errors="replace")

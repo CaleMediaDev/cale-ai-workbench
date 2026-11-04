@@ -107,3 +107,27 @@ def test_non_object_worker_messages_trigger_cleanup(tmp_path, lines):
             cale_voice.speak("Hello", tmp_path / "speech.wav", play=False)
         stop.assert_called_once_with()
         timer.assert_not_called()
+
+
+@pytest.mark.parametrize("answer", [
+    '{}',
+    '{"path": null}',
+    '{"path": ""}',
+    '{"path": 123}',
+])
+@pytest.mark.parametrize("play", [False, True])
+def test_invalid_audio_path_triggers_cleanup(tmp_path, answer, play):
+    with (patch.object(cale_voice, "ROOT", tmp_path),
+          patch.object(cale_voice, "ready", return_value=True),
+          patch.object(cale_voice, "_worker", None),
+          patch.object(cale_voice, "_idle_timer", None),
+          patch.object(cale_voice, "_generation", 0),
+          patch.object(cale_voice.subprocess, "Popen"),
+          patch.object(cale_voice, "_line_with_timeout",
+                       side_effect=['{"ready": true}', answer]),
+          patch.object(cale_voice, "_stop_worker") as stop,
+          patch.object(cale_voice.threading, "Timer") as timer):
+        with pytest.raises(RuntimeError, match="could not finish this update"):
+            cale_voice.speak("Hello", tmp_path / "speech.wav", play=play)
+        stop.assert_called_once_with()
+        timer.assert_not_called()
