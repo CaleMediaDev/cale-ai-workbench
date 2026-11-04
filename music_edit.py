@@ -7,6 +7,7 @@ These tools write new files, leaving recordings and generated songs intact.
 from __future__ import annotations
 
 import math
+import os
 import subprocess
 import tempfile
 import wave
@@ -63,9 +64,12 @@ def _run(arguments: list[str], output: Path) -> None:
                         raise RuntimeError("Local audio edit produced an incomplete WAV frame.")
             except (wave.Error, EOFError) as exc:
                 raise RuntimeError("Local audio edit produced an invalid WAV file.") from exc
-        # Unlike replace(), a hard link refuses to overwrite a destination
-        # created while FFmpeg was running. Cleanup removes only our staging file.
-        output.hardlink_to(staged)
+        # Windows rename refuses existing destinations and supports removable
+        # filesystems without hard links. POSIX rename would overwrite.
+        if os.name == "nt":
+            staged.rename(output)
+        else:
+            output.hardlink_to(staged)
 
 
 def edit_music(source_path: str, output_path: str, start_seconds: float = 0,
