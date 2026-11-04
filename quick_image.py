@@ -236,7 +236,11 @@ def resume_image_job(root: Path, job_id: str) -> dict:
     resumed = {**info, "status": "queued", "current": "Resuming local image",
                "worker_pid": None, "created": time.time()}
     _write_job(root, job_id, resumed)
-    _launch_job(root, job_id)
+    try:
+        _launch_job(root, job_id)
+    except (OSError, RuntimeError) as exc:
+        _write_job(root, job_id, {**resumed, "status": "error", "current": str(exc)[:300]})
+        raise
     return resumed
 
 
