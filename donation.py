@@ -57,7 +57,7 @@ def settings(root: Path = ROOT) -> dict:
                 "intensity": value.get("intensity") if isinstance(value.get("intensity"), str) and value.get("intensity") in PROFILES else "slow",
                 "chatgpt_account": str(value.get("chatgpt_account") or ""),
                 "free_account": str(value.get("free_account") or ""),
-                "model_training": value.get("model_training") is True and "local" in sources,
+                "model_training": value.get("model_training") is True and valid and "local" in sources,
                 "github_account": str(value.get("github_account") or "")}
     except (OSError, ValueError, AttributeError):
         return {"enabled": False, "sources": ["local"], "intensity": "slow",

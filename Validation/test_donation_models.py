@@ -62,6 +62,16 @@ def test_training_requires_local_source(tmp_path):
                              chatgpt_account="a"*64, model_training=True)
 
 
+@pytest.mark.parametrize("sources", [42, None, "local", {"local": True}])
+def test_malformed_sources_never_authorize_training_or_crash_settings(tmp_path, sources):
+    path = tmp_path/"LongTasks/donation-settings.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"enabled": True, "model_training": True, "sources": sources}))
+    config = donation.settings(tmp_path)
+    assert config["enabled"] is False
+    assert config["model_training"] is False
+
+
 def test_claim_is_atomic_and_persists_across_restarts_without_tokens(enabled, monkeypatch):
     monkeypatch.setattr(donation, "local_available", lambda: pytest.fail("CPU training must not probe Ollama"))
     with ThreadPoolExecutor(max_workers=4) as pool:
