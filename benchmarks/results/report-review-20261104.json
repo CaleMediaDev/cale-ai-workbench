@@ -1,0 +1,48 @@
+{
+  "release": "0.5.471",
+  "tested_source_commit": "232f82a49964f4020301af01a79d193be9a382b6",
+  "reviewed_pull_requests": [
+    79,
+    98,
+    97,
+    95,
+    96,
+    99,
+    100,
+    57,
+    55,
+    52,
+    34,
+    29,
+    24,
+    22,
+    14,
+    23,
+    21,
+    25,
+    12,
+    6,
+    62
+  ],
+  "duplicate_reports": [
+    77
+  ],
+  "validation": {
+    "command": "python -m pytest -q Validation --maxfail=3",
+    "exit_code": 0,
+    "passed": 1488,
+    "skipped": 4,
+    "subtests_passed": 147,
+    "seconds": 423.79
+  },
+  "maintainer_adaptations": {
+    "62": "Normalize whitespace and retain useful bounded social replies rather than substitute canned speech.",
+    "14": "Correct the submitted atempo range comment using official FFmpeg documentation.",
+    "29": "Retain exact-decimal regression coverage alongside existing donated regression tests."
+  },
+  "limitations": [
+    "Four tests skipped; see local full-suite output for details.",
+    "Unit/integration validation does not prove arbitrary end-to-end app-building ability.",
+    "Release metadata and source-package evidence were added after this tested source commit; runtime implementation remains unchanged."
+  ]
+}

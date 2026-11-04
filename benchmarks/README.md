@@ -1,5 +1,13 @@
 # Native worker reality check
 
+## Community report review
+
+The [v0.5.471 review evidence](results/report-review-20261104.json) records
+21 accepted contributions and one duplicate report. The complete Validation
+suite passed 1,488 tests and 147 subtests, with four skipped, in 423.79 seconds.
+This establishes regression coverage for the tested source snapshot; it is
+not an end-to-end demonstration that the local model can build arbitrary apps.
+
 ## Failed-click repair evidence
 
 The [expense replay](results/click-diagnostics-20261103.json) retains all 28
