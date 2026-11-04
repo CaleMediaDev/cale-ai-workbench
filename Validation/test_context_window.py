@@ -24,6 +24,17 @@ class ContextWindowTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "model weight size"):
                         context_window.model_bytes("main")
 
+    def test_invalid_model_weights_are_rejected_before_budgeting(self):
+        for size in (-7 * 2**30, 0, True, 1.5, "9663676416", None):
+            with self.subTest(size=size):
+                with patch.object(context_window, "urlopen") as mocked_urlopen:
+                    response = mocked_urlopen.return_value.__enter__.return_value
+                    with patch.object(context_window.json, "load", return_value={
+                        "models": [{"name": "main:latest", "size": size}],
+                    }):
+                        with self.assertRaisesRegex(ValueError, "model weight size"):
+                            context_window.model_bytes("main")
+
     def test_large_machine_uses_full_native_window(self):
         info = {"model_info": {"qwen.context_length": 262144}}
         self.assertEqual(
