@@ -88,6 +88,23 @@ def test_countdown_invalid_timestamps_leave_observations_unchanged(tmp_path):
     )
 
 
+def test_countdown_backward_timestamp_does_not_double_count_active_time(tmp_path):
+    db = tmp_path / "projects.db"
+    task_eta.countdown(db, "task", 10, "working", 1000)
+    task_eta.countdown(db, "task", 30, "working", 1030)
+    assert task_eta.countdown(db, "task", 50, "working", 1060) == (
+        "About 1m 07s to review"
+    )
+    assert task_eta.countdown(db, "task", 50, "working", 1050) == (
+        "Estimating time…"
+    )
+    # Only ten seconds have elapsed since the last valid observation, not
+    # twenty seconds measured from the rejected backward timestamp.
+    assert task_eta.countdown(db, "task", 50, "working", 1070) == (
+        "About 57s to review"
+    )
+
+
 def test_pause_preserves_work_before_pause_and_excludes_paused_time(tmp_path):
     db = tmp_path / "projects.db"
     task_eta.countdown(db, "task", 10, "working", 1000)
