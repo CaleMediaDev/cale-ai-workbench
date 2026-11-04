@@ -35,6 +35,8 @@ def _hash(data: bytes) -> str:
 
 def _sources(root: Path):
     bundled = root / "vendor/agent-skills"
+    if bundled.is_symlink():
+        return
     for name, category in SKILLS.items():
         folder = bundled / name
         if folder.is_symlink():
