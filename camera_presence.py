@@ -78,10 +78,11 @@ class VisitorTracker:
         self.tracks = []
 
     def observe(self, features, now):
-        # Keep recently departed faces long enough to avoid repeated greetings
-        # when someone briefly turns away from the camera.
+        # Keep visible faces until an observed miss, even after a long gap
+        # between observations. Retain recently departed faces for cooldown.
         self.tracks = [track for track in self.tracks
-                       if now - track["last_seen"] <= max(self.cooldown, 30)]
+                       if track["misses"] == 0
+                       or now - track["last_seen"] <= max(self.cooldown, 30)]
         greetings = []
         features = features[:8]
         matched = set()
