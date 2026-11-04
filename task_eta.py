@@ -136,8 +136,6 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
     now = time.time() if now is None else now
     percent = max(0, min(100, int(percent)))
     active = status in ("working", "checking")
-    if status in ("ready_for_review", "accepted"):
-        return ""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     # sqlite3's context manager commits but does not close the connection.
     # On Windows, an open handle can prevent task-folder cleanup or updates.

@@ -51,6 +51,25 @@ def test_pause_does_not_advance_active_clock(tmp_path):
     assert task_eta.countdown(db, "task", 70, "working", 2030).startswith("About ")
 
 
+def test_completion_does_not_advance_active_clock_on_resume(tmp_path):
+    db = tmp_path / "projects.db"
+    for status in ("ready_for_review", "accepted"):
+        task_eta.countdown(db, status, 10, "working", 1000)
+        task_eta.countdown(db, status, 30, "working", 1030)
+        assert task_eta.countdown(db, status, 50, "working", 1060) == (
+            "About 1m 07s to review"
+        )
+        assert task_eta.countdown(db, status, 100, status, 1065) == ""
+        # Resume within the restart threshold: the completed interval must
+        # not be mistaken for active work, even if progress is revised.
+        assert task_eta.countdown(db, status, 50, "working", 1080) == (
+            "About 1m 07s to review"
+        )
+        assert task_eta.countdown(db, status, 50, "working", 1090) == (
+            "About 57s to review"
+        )
+
+
 def test_stalled_and_completed_tasks(tmp_path):
     db = tmp_path / "projects.db"
     task_eta.countdown(db, "task", 10, "working", 1000)
