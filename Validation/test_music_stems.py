@@ -8,6 +8,40 @@ import pytest
 import music_stems
 
 
+def test_failed_runtime_rebuild_is_retried(tmp_path):
+    engine = tmp_path / "audio-separator"
+    engine.mkdir()
+    marker = engine / ".cale-installed"
+    marker.write_text(music_stems.VERSION, encoding="ascii")
+    python = engine / ".venv" / "Scripts" / "python.exe"
+    package_attempts = 0
+
+    def rebuild(command, **_kwargs):
+        nonlocal package_attempts
+        if command[1] == "venv":
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.write_bytes(b"python")
+        else:
+            package_attempts += 1
+            if package_attempts == 1:
+                raise music_stems.subprocess.CalledProcessError(1, command)
+
+    with patch.object(music_stems, "ENGINE", engine), patch.object(
+        music_stems.shutil, "disk_usage", return_value=type("Usage", (), {"free": 10 * 1024**3})()
+    ), patch.object(music_stems.music_backend, "_tool", return_value="uv"), patch.object(
+        music_stems.subprocess, "run", side_effect=rebuild
+    ) as run:
+        with pytest.raises(music_stems.subprocess.CalledProcessError):
+            music_stems.install()
+        assert python.is_file()
+        assert not marker.exists()
+
+        assert music_stems.install() == python
+        assert package_attempts == 2
+        assert run.call_count == 4
+        assert marker.read_text(encoding="ascii") == music_stems.VERSION
+
+
 def test_separation_requires_existing_audio_and_empty_output(tmp_path):
     source = tmp_path / "song.mp3"
     source.write_bytes(b"music")
