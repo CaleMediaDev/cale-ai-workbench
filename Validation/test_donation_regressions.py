@@ -60,6 +60,14 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class CalculatorPrecisionTests(unittest.TestCase):
+    def test_oversized_percentage_result_falls_back_without_raising(self):
+        for currency in ("", "$"):
+            expression = "100 percent of " + currency + "9" * 101
+            with self.subTest(currency=currency):
+                self.assertLessEqual(len(expression), 160)
+                self.assertIsNone(calculate(expression))
+        self.assertEqual(calculate("25 percent of $80"), "25 percent of $80 = $20")
+
     def test_long_terminating_decimal_is_exact(self):
         expression = "1 / (2^100)^2"
         result = calculate(expression)

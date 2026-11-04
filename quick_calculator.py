@@ -80,8 +80,11 @@ def calculate(question: str) -> str | None:
         return None
     percent = PERCENT.fullmatch(expression)
     if percent:
-        left, right = (Fraction(Decimal(part.replace(",", "").replace("$", ""))) for part in percent.groups())
-        answer = _display(_bounded(left * right / 100))
+        try:
+            left, right = (Fraction(Decimal(part.replace(",", "").replace("$", ""))) for part in percent.groups())
+            answer = _display(_bounded(left * right / 100))
+        except ValueError:
+            return None
         return f"{expression} = {'$' if '$' in percent.group(2) else ''}{answer}"
     if not ALLOWED.fullmatch(expression) or not any(op in expression for op in "+-*/^×÷"):
         return None
