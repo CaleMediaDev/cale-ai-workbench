@@ -265,6 +265,21 @@ class ProjectMemoryTests(unittest.TestCase):
                 found = memory.search(self.folder, query, kind="note")
                 self.assertEqual([row["id"] for row in found], [saved["id"]])
 
+    def test_loose_search_filters_term_coverage_before_candidate_limit(self):
+        # Rare title matches rank above the common body terms, but do not
+        # satisfy the two-term coverage required by this three-term query.
+        for number in range(6):
+            memory.save(self.folder, "note", "Alpha", f"Single match {number}.")
+        for term in ("beta", "gamma"):
+            for number in range(30):
+                memory.save(self.folder, "note", "Background",
+                            f"{term} background passage {number}.")
+        saved = memory.save(self.folder, "note", "Combined passage", "beta gamma")
+
+        found = memory.search(self.folder, "alpha beta gamma", kind="note", limit=1)
+
+        self.assertEqual([row["id"] for row in found], [saved["id"]])
+
     def test_search_treats_query_as_text_not_fts_syntax(self):
         memory.save(self.folder, "component", "Search API", "The database stores app components.")
         self.assertTrue(memory.search(self.folder, '"Search" OR component*'))

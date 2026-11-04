@@ -354,10 +354,20 @@ def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> li
                 exact = matches(" AND ".join('"' + word + '"' for word in words))
                 if exact:
                     return exact
-                loose = matches(" OR ".join('"' + word + '"' for word in words))
                 # Quoted/asterisk input may be a literal example of FTS syntax;
                 # keep useful plain-text matches while never executing it raw.
                 minimum = 1 if len(words) == 1 or re.search(r'["*]', query) else 2
+                if minimum == 1:
+                    expression = " OR ".join('"' + word + '"' for word in words)
+                else:
+                    # Require coverage before LIMIT: single-term hits must not
+                    # crowd qualifying results out of the candidate window.
+                    expression = " OR ".join(
+                        f'("{left}" AND "{right}")'
+                        for position, left in enumerate(words)
+                        for right in words[position + 1:]
+                    )
+                loose = matches(expression)
                 return [row for row in loose if len(set(words) & {
                     word.lower() for word in WORD.findall(
                         row["title"] + " " + row["body"] + " " + row["tags"]
