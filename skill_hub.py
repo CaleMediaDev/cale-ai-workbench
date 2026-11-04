@@ -61,7 +61,11 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
         name = str(row.get("name", ""))[:100]
         description = str(row.get("description", ""))[:500]
         haystack = (name + " " + description).casefold()
-        if IDENTIFIER.fullmatch(identifier) and any(term in haystack for term in terms):
+        if (
+            IDENTIFIER.fullmatch(identifier)
+            and identifier.split("/", 1)[0] == source
+            and any(term in haystack for term in terms)
+        ):
             SEEN[identifier] = time.monotonic()
             safe.append({
                 "identifier": identifier,

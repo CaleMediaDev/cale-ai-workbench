@@ -52,6 +52,31 @@ class SkillHubTests(unittest.TestCase):
         self.assertEqual(set(skill_hub.SEEN), {identifier})
         self.assertEqual(skill_hub.INSPECTED, {})
 
+    def test_search_rejects_identifiers_from_another_registry(self):
+        identifier = "skills-sh/example/accessibility"
+        other_identifier = "github/example/accessibility"
+        payload = json.dumps([
+            {
+                "identifier": other_identifier,
+                "name": "accessibility",
+                "source": "skills-sh",
+            },
+            {
+                "identifier": identifier,
+                "name": "accessibility",
+                "source": "skills.sh",
+            },
+        ])
+        with patch.object(skill_hub, "_run", return_value=payload):
+            result = skill_hub.search("accessibility", source="skills-sh")
+        self.assertEqual(result["source"], "skills-sh")
+        self.assertEqual(
+            [match["identifier"] for match in result["matches"]],
+            [identifier],
+        )
+        self.assertEqual(set(skill_hub.SEEN), {identifier})
+        self.assertEqual(skill_hub.INSPECTED, {})
+
     def test_failed_reinspection_invalidates_previous_inspection(self):
         identifier = "skills-sh/example/workflows/accessibility"
         for outcome, error in (
