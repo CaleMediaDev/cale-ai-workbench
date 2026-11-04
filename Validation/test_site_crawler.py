@@ -20,8 +20,17 @@ def test_url_scope_and_stable_path(tmp_path, monkeypatch):
     assert site_crawler.page_path(tmp_path, url) == site_crawler.page_path(tmp_path, url)
 
 
-def test_crawl_saves_pages_and_searchable_memory(tmp_path, monkeypatch):
-    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+@pytest.mark.parametrize("second_href", [
+    "https://example.com/second", "/second", "second", "../second",
+])
+def test_crawl_saves_pages_and_searchable_memory(tmp_path, monkeypatch, second_href):
+    def check_absolute_url(url):
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("An absolute HTTP URL is required")
+        return parsed, ["93.184.215.14"]
+
+    monkeypatch.setattr(site_crawler, "check_url", check_absolute_url)
     seen = []
 
     class FakeCrawler:
@@ -37,7 +46,7 @@ def test_crawl_saves_pages_and_searchable_memory(tmp_path, monkeypatch):
         async def arun(self, url, config):
             seen.append(url)
             assert config.check_robots_txt
-            links = [{"href": "https://example.com/second"}, {"href": "https://other.example/no"}]
+            links = [{"href": second_href}, {"href": "https://other.example/no"}]
             return types.SimpleNamespace(
                 success=True, markdown=types.SimpleNamespace(fit_markdown="A distinctive silver penguin"),
                 links={"internal": links}, error_message="",
