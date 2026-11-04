@@ -233,7 +233,7 @@ def probe_game_coding(source, root):
         try:
             document = json.loads(result.get("message", {}).get("content", ""))
             checks = grade_game_code(document.get("code"), root)
-        except (ValueError, AttributeError, RecursionError):
+        except (ValueError, TypeError, AttributeError, RecursionError):
             checks = {"valid_code": False}
         samples.append(
             {
@@ -267,7 +267,7 @@ def probe_game_coding(source, root):
     try:
         html = json.loads(built.get("message", {}).get("content", "")).get("html")
         build_checks = grade_game_html(html, root)
-    except (ValueError, AttributeError, RecursionError):
+    except (ValueError, TypeError, AttributeError, RecursionError):
         build_checks = {"valid_html": False}
     build_passed = len(build_checks) == 13 and all(
         v is True for v in build_checks.values()
