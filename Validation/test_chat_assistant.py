@@ -450,6 +450,15 @@ def test_combined_hyphenated_song_durations_keep_both_components(prompt):
     assert chat_assistant.music_request(prompt)["duration_seconds"] == 90
 
 
+@pytest.mark.parametrize("unit", ["sec", "secs", "second", "seconds"])
+def test_single_second_abbreviations_preserve_duration_and_validate_range(unit):
+    assert chat_assistant.music_request(
+        f"Make a 45 {unit} jingle"
+    )["duration_seconds"] == 45
+    with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
+        chat_assistant.music_request(f"Make a 5 {unit} song")
+
+
 def test_spoken_song_durations_keep_the_requested_length():
     for request, seconds in (
         ("Make a three-minute song", 180),
