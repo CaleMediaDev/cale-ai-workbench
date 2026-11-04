@@ -333,6 +333,34 @@ def test_old_translated_cache_is_not_reused_after_newline_fix(tmp_path):
     assert old.is_file()
 
 
+def test_inspector_rejects_image_changes_during_description(tmp_path):
+    source = tmp_path / "diagram.png"
+    source.write_bytes(b"original image source")
+
+    def describe_then_change(path, question):
+        assert path == source
+        assert question == "What is shown?"
+        source.write_bytes(b"updated image source")
+        return "original image description"
+
+    with patch.object(file_chat, "image_description", side_effect=describe_then_change):
+        try:
+            project_documents.inspect(tmp_path, "diagram.png", question="What is shown?")
+        except RuntimeError as exc:
+            assert "document changed" in str(exc)
+        else:
+            raise AssertionError("Changed image returned stale description")
+
+    with patch.object(file_chat, "image_description", return_value="updated image description") as describe:
+        fresh = project_documents.inspect(tmp_path, "diagram.png", question="What is shown?")
+        describe.assert_called_once_with(source, "What is shown?")
+
+    assert fresh["text"] == "updated image description"
+    assert fresh["kind"] == "image" and not fresh["cached"]
+    assert source.read_bytes() == b"updated image source"
+    assert not (tmp_path / ".local-ai/document-cache").exists()
+
+
 def test_inspector_rejects_paths_outside_task_folder(tmp_path):
     root = tmp_path / "task"
     root.mkdir()
