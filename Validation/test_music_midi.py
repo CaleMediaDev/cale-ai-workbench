@@ -292,3 +292,36 @@ def test_unexpected_note_csv_is_preserved_for_diagnosis(tmp_path):
         music_midi.normalize_note_events(path)
     assert path.read_text() == "unknown,format\n1,2\n"
     assert not path.with_suffix(".csv.tmp").exists()
+
+
+@pytest.mark.parametrize("bends", ["NaN", "Infinity", "-Infinity", "1e309", "[NaN]", "[1, Infinity]"])
+def test_nonfinite_pitch_bends_do_not_replace_original_csv(tmp_path, bends):
+    path = tmp_path / "notes.csv"
+    original = (",".join(music_midi.NOTE_COLUMNS) + "\n"
+                + "0.0,1.0,69,85," + bends + "\n").encode("utf-8")
+    path.write_bytes(original)
+    with pytest.raises(ValueError):
+        music_midi.normalize_note_events(path)
+    assert path.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_invalid_pitch_bends_publish_no_transcription_outputs(tmp_path):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"original audio")
+    target = tmp_path / "notes"
+
+    def render(args, **kwargs):
+        staging = Path(args[-1])
+        (staging / "guitar.mid").write_bytes(b"MThd generated")
+        (staging / "notes.csv").write_text(
+            ",".join(music_midi.NOTE_COLUMNS) + "\n0,1,69,85,NaN\n", encoding="utf-8")
+        return type("Done", (), {"returncode": 0})()
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path("python.exe")), \
+         patch.object(music_midi.subprocess, "run", side_effect=render):
+        with pytest.raises(ValueError):
+            music_midi.transcribe_to_midi(str(source), str(target))
+    assert list(target.iterdir()) == []
+    assert source.read_bytes() == b"original audio"
