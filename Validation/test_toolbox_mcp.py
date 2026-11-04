@@ -572,6 +572,64 @@ def test_backend_discovery_includes_tools_from_later_pages():
     asyncio.run(check())
 
 
+def test_stalled_backend_initialization_times_out_and_preserves_next_backend():
+    closed = []
+
+    @asynccontextmanager
+    async def fake_stdio(params):
+        group = "rea" if "rea.mjs" in " ".join(params.args) else "devtools"
+        try:
+            yield group, object()
+        finally:
+            closed.append((group, "stdio"))
+
+    class FakeSession:
+        def __init__(self, group):
+            self.group = group
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            closed.append((self.group, "session"))
+
+        async def initialize(self):
+            if self.group == "rea":
+                await asyncio.Future()
+            else:
+                assert closed == [("rea", "session"), ("rea", "stdio")]
+
+        async def list_tools(self):
+            assert self.group == "devtools"
+            tool = SimpleNamespace(
+                name="healthy",
+                model_dump=lambda **_kwargs: {"name": "healthy"},
+            )
+            return SimpleNamespace(tools=[tool])
+
+    async def check():
+        with (patch.object(toolbox_mcp, "DISCOVERY_SECONDS", 0.01),
+              patch.object(toolbox_mcp, "stdio_client", fake_stdio),
+              patch.object(toolbox_mcp, "ClientSession",
+                           lambda group, *_args, **_kwargs: FakeSession(group)),
+              patch.dict(toolbox_mcp.SESSIONS, {}, clear=True),
+              patch.dict(toolbox_mcp.CATALOG, {}, clear=True),
+              patch.dict(toolbox_mcp.ERRORS, {}, clear=True)):
+            async with toolbox_mcp.lifespan(None):
+                status = toolbox_mcp.toolbox_status()
+                assert status["backends"]["rea"]["available"] is False
+                assert "TimeoutError" in status["backends"]["rea"]["error"]
+                assert status["backends"]["devtools"]["available"] is True
+                assert set(toolbox_mcp.CATALOG) == {"devtools.healthy"}
+                assert toolbox_mcp.toolbox_schema("local.make_music")
+            assert closed == [
+                ("rea", "session"), ("rea", "stdio"),
+                ("devtools", "session"), ("devtools", "stdio"),
+            ]
+
+    asyncio.run(asyncio.wait_for(check(), timeout=1))
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):

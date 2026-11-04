@@ -318,7 +318,8 @@ async def lifespan(_server):
                         list_roots_callback=project_roots,
                     )
                 )
-                await session.initialize()
+                async with asyncio.timeout(DISCOVERY_SECONDS):
+                    await session.initialize()
                 tools = await _discover_tools(session)
             except BaseException as exc:
                 ERRORS[group] = str(exc) or type(exc).__name__
