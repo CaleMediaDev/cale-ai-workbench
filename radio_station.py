@@ -91,16 +91,20 @@ def save_station(name, prompt, instrumental=True, *, root=ROOT, station_id=None)
 
 
 def ensure_stations(root=ROOT):
-    """Add built-ins and migrate only the exact old instrumental Club preset."""
-    existing = stations(root)
-    club = DEFAULT_STATIONS[0]
-    for row in existing:
-        if row["name"] == club[0] and row["prompt"] == LEGACY_CLUB and row["instrumental"] == 1:
-            save_station(*club, root=root, station_id=row["id"])
-    names = {row["name"].casefold() for row in existing}
-    for name, prompt, instrumental in DEFAULT_STATIONS:
-        if name.casefold() not in names:
-            save_station(name, prompt, instrumental, root=root)
+    """Atomically add built-ins and migrate the exact old Club preset."""
+    with closing(database(root)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute("SELECT * FROM stations ORDER BY rowid").fetchall()
+        club = DEFAULT_STATIONS[0]
+        for row in existing:
+            if row["name"] == club[0] and row["prompt"] == LEGACY_CLUB and row["instrumental"] == 1:
+                conn.execute("UPDATE stations SET prompt=?,instrumental=? WHERE id=?",
+                             (club[1], int(club[2]), row["id"]))
+        names = {row["name"].casefold() for row in existing}
+        for name, prompt, instrumental in DEFAULT_STATIONS:
+            if name.casefold() not in names:
+                conn.execute("INSERT INTO stations(id,name,prompt,instrumental) VALUES(?,?,?,?)",
+                             (uuid.uuid4().hex, name, prompt, int(instrumental)))
 
 
 def local_token_totals(root=ROOT):
