@@ -439,8 +439,19 @@ def _render_job(job_id: str, data: dict) -> None:
                     if rendered.suffix.lower() == ".mp4":
                         # Exclusively create the destination: another process may
                         # have created it since the existence check above.
-                        with rendered.open("rb") as source, destination.open("xb") as target:
-                            shutil.copyfileobj(source, target)
+                        with rendered.open("rb") as source:
+                            target = destination.open("xb")
+                            try:
+                                with target:
+                                    shutil.copyfileobj(source, target)
+                            except BaseException:
+                                # Do not leave a truncated export blocking a retry.
+                                # Exclusive creation above must succeed before cleanup.
+                                try:
+                                    destination.unlink()
+                                except OSError:
+                                    pass
+                                raise
                     else:
                         subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-i", str(rendered),
                                         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", str(destination)],
