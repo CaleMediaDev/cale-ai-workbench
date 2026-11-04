@@ -290,6 +290,29 @@ def test_installer_flag_must_follow_script(monkeypatch, script_arguments):
     assert runtime_features._installer_running(12345) is bool(script_arguments)
 
 
+@pytest.mark.parametrize("prefix", [
+    ["-uW", "ignore"],
+    ["-uX", "utf8"],
+    ["-uWignore"],
+    ["-uXutf8"],
+])
+def test_installer_detection_handles_bundled_value_taking_options(monkeypatch, prefix):
+    import psutil
+
+    script = str(runtime_features.Path(runtime_features.__file__).resolve())
+
+    class InstallerProcess:
+        def cmdline(self):
+            return ["python", *prefix, script, "--install"]
+
+        def cwd(self):
+            pytest.fail("An absolute script path must not require cwd lookup")
+
+    monkeypatch.setattr(psutil, "Process", lambda pid: InstallerProcess())
+
+    assert runtime_features._installer_running(12345)
+
+
 def test_missing_pip_is_bootstrapped(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_features, "PROGRESS", tmp_path / "install-progress.json")
     calls = []
