@@ -11,8 +11,10 @@ import project_memory
 import site_crawler
 
 
-@pytest.mark.parametrize("bad_href", [123, b"/broken"])
-def test_malformed_link_target_does_not_abort_crawl(tmp_path, monkeypatch, bad_href):
+@pytest.mark.parametrize("bad_link", [
+    {"href": 123}, {"href": b"/broken"}, None, "/broken", 123, [],
+])
+def test_malformed_link_target_does_not_abort_crawl(tmp_path, monkeypatch, bad_link):
     monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
     indexed = []
     monkeypatch.setattr(project_memory, "index_file", lambda project, path: indexed.append(path))
@@ -34,7 +36,7 @@ def test_malformed_link_target_does_not_abort_crawl(tmp_path, monkeypatch, bad_h
             seen.append(url)
             return types.SimpleNamespace(
                 success=True, markdown="Readable content", error_message="",
-                links={"internal": [{"href": bad_href}, {"href": "/child"}]} if url == start else {},
+                links={"internal": [bad_link, {"href": "/child"}]} if url == start else {},
             )
 
     monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
