@@ -51,6 +51,17 @@ class ToneAdaptationTests(unittest.TestCase):
             with patch("cloud_ai.post", return_value=result):
                 self.assertEqual(tone_adaptation.social_reply("Hello"), "I heard you. What do you need?")
 
+    def test_word_limit_is_enforced_even_below_character_limit(self):
+        for word_count in (34, 35, 40):
+            with self.subTest(word_count=word_count):
+                content = " ".join(["Hi"] * word_count)
+                self.assertLessEqual(len(content), 240)
+                result = {"choices": [{"message": {"content": content}}]}
+                with patch("cloud_ai.post", return_value=result):
+                    answer = tone_adaptation.social_reply("Hello")
+                expected = content if word_count < 35 else "I heard you. What do you need?"
+                self.assertEqual(answer, expected)
+
     def test_next_speaker_does_not_inherit_previous_rudeness(self):
         result = {"choices": [{"message": {"content": "Glad I could help!"}}]}
         with patch("cloud_ai.post", return_value=result) as post:
