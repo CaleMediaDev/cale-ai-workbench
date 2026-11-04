@@ -54,7 +54,10 @@ def total_time(created: float, updated: float, status: str,
             if not math.isfinite(end) or end < start:
                 return "—"
     else:
-        end = now
+        try:
+            end = float(now)
+        except (TypeError, ValueError, OverflowError):
+            return "—"
     if not math.isfinite(end):
         return "—"
     return _duration(max(0, end - start))
