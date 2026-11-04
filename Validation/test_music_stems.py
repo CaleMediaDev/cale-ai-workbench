@@ -191,6 +191,46 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
     assert source.read_bytes() == b"music"
 
 
+def test_relative_symlinks_do_not_count_as_stems(tmp_path):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+
+    # Check platform support before invoking the separation code.
+    probe = tmp_path / "probe.wav"
+    try:
+        probe.symlink_to(source)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symbolic links are unavailable")
+    probe.unlink()
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        for name in ("song_(Vocals).wav", "song_(Instrumental).wav"):
+            link = staging / name
+            # Valid in staging, but dangling if moved one directory upward.
+            link.symlink_to("../../song.mp3")
+            assert link.is_file()
+            assert link.stat().st_size > 0
+        return SimpleNamespace(returncode=0)
+
+    with patch.object(
+        music_stems.music_backend, "_setup_lock", side_effect=nullcontext
+    ), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext
+    ), patch.object(
+        music_stems, "install", return_value=Path("python.exe")
+    ), patch.object(music_stems.subprocess, "run", side_effect=render):
+        with pytest.raises(RuntimeError, match="did not produce both"):
+            music_stems.separate_stems(str(source), str(output))
+
+    assert list(output.iterdir()) == []
+    assert source.read_bytes() == b"music"
+
+
 @pytest.mark.parametrize("wav_count", [0, 1])
 def test_auxiliary_files_do_not_count_as_stems(tmp_path, wav_count):
     from contextlib import nullcontext
