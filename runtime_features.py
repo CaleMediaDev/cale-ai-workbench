@@ -75,7 +75,25 @@ def _installer_running(pid=None) -> bool:
                     continue
                 # An absolute script is sufficient even when cwd is protected.
                 # Options such as -u must not force a cwd lookup before it.
-                candidates = [Path(part) for part in command[1:]]
+                # Only the interpreter's script argument identifies the program.
+                # Paths passed to another script, module, or inline command do not.
+                candidates = []
+                arguments = iter(command[1:])
+                for argument in arguments:
+                    if argument in ("-c", "-m", "-"):
+                        break
+                    if argument in ("-W", "-X"):
+                        next(arguments, None)
+                        continue
+                    if argument == "--":
+                        script_argument = next(arguments, None)
+                        if script_argument is not None:
+                            candidates = [Path(script_argument)]
+                        break
+                    if argument.startswith("-"):
+                        continue
+                    candidates = [Path(argument)]
+                    break
                 if any(part.is_absolute() and part.resolve() == script for part in candidates):
                     return True
                 relative = [part for part in candidates if not part.is_absolute()
