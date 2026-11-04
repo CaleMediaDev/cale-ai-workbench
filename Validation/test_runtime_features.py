@@ -140,6 +140,29 @@ def test_dead_feature_installer_is_restarted_after_short_delay(tmp_path, monkeyp
     assert json.loads(progress.read_text(encoding="utf-8"))["attempts"] == 2
 
 
+@pytest.mark.parametrize("pid", [float("inf"), float("-inf")])
+def test_stale_setup_recovers_from_infinite_pid(tmp_path, monkeypatch, pid):
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({
+        "status": "working", "updated": 0,
+        "attempts": 1, "owner": "runtime_features", "pid": pid,
+    }), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "ROOT", tmp_path)
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ready", lambda: False)
+    monkeypatch.setattr(runtime_features.time, "time", lambda: 1000)
+    launches = []
+    monkeypatch.setattr(runtime_features.subprocess, "Popen", lambda *args, **kwargs: launches.append(args))
+
+    assert runtime_features.start_background()
+
+    assert len(launches) == 1
+    current = json.loads(progress.read_text(encoding="utf-8"))
+    assert current["status"] == "working"
+    assert current["attempts"] == 2
+    assert current["updated"] == 1000
+
+
 def test_live_feature_installer_is_not_restarted(tmp_path, monkeypatch):
     progress = tmp_path / "install-progress.json"
     progress.write_text(json.dumps({
