@@ -99,6 +99,55 @@ def test_disk_transfer_speed_rejects_counter_rollback_and_recovers():
         assert system_gauges.disk_transfer_speed(current, following, 2) == (1, 0.5)
 
 
+def test_disk_counter_runtime_failure_is_isolated_and_recovers(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    readings = iter([
+        SimpleNamespace(read_bytes=1_000_000, write_bytes=2_000_000),
+        RuntimeError("couldn't find any physical disk"),
+        SimpleNamespace(read_bytes=9_000_000, write_bytes=6_000_000),
+        SimpleNamespace(read_bytes=13_000_000, write_bytes=8_000_000),
+    ])
+    times = iter([10.0, 12.0, 14.0, 16.0])
+
+    def disk_counters():
+        reading = next(readings)
+        if isinstance(reading, Exception):
+            raise reading
+        return reading
+
+    monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(
+        disk_io_counters=disk_counters,
+        net_io_counters=lambda: SimpleNamespace(bytes_recv=0, bytes_sent=0),
+        net_if_stats=lambda: {},
+    ))
+    monkeypatch.setattr(system_gauges, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(system_gauges, "_cpu_times", lambda: None)
+    monkeypatch.setattr(system_gauges, "_ram_percent", lambda: 37)
+    monkeypatch.setattr(system_gauges, "_gpu_percent", lambda: 41)
+    monkeypatch.setattr(system_gauges, "_drive_space", lambda: (25, 100))
+    monkeypatch.setattr(system_gauges.time, "monotonic", lambda: next(times))
+
+    sampler = system_gauges.HardwareSampler()
+    first = sampler.sample()
+    assert first["drive_read_mbps"] is None
+    failed = sampler.sample()
+    assert failed["drive_read_mbps"] is None
+    assert failed["drive_write_mbps"] is None
+    assert failed["ram"] == 37
+    assert failed["gpu"] == 41
+    assert failed["drive"] == 25
+    assert failed["net_down_mbps"] == 0
+    assert sampler.previous_disk is None
+    primed = sampler.sample()
+    assert primed["drive_read_mbps"] is None
+    assert primed["drive_write_mbps"] is None
+    recovered = sampler.sample()
+    assert recovered["drive_read_mbps"] == 2
+    assert recovered["drive_write_mbps"] == 1
+
+
 def test_network_bandwidth_includes_link_load():
     assert system_gauges.network_bandwidth(
         (0, 0), (12_500_000, 2_500_000), 1, 200
