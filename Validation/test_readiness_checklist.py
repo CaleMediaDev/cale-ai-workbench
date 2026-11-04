@@ -193,6 +193,30 @@ def test_real_local_completion_verifies_a_currently_installed_model(tmp_path):
     assert rows["Local AI"]["state"] == "ready"
 
 
+def test_file_index_requires_a_match_for_the_existing_files_own_row(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    known = tmp_path / "shared.txt"
+    known.touch()
+    database = state / "computer-files.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE entries (name TEXT, path TEXT, kind TEXT)")
+        connection.execute("CREATE VIRTUAL TABLE entry_fts USING fts5(name)")
+        connection.execute(
+            "INSERT INTO entries(rowid,name,path,kind) VALUES (1,?,?, 'file')",
+            (known.name, str(known)))
+        # A stale, unrelated row shares the search token but does not prove
+        # that the existing file can be found through its own index entry.
+        connection.execute(
+            "INSERT INTO entry_fts(rowid,name) VALUES (2, 'shared-old.txt')")
+    assert not readiness_checklist._file_index_responds(state)
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO entry_fts(rowid,name) VALUES (1, ?)", (known.name,))
+    assert readiness_checklist._file_index_responds(state)
+
+
 def test_completed_scan_marker_does_not_hide_a_missing_search_database(tmp_path):
     state = tmp_path / "LongTasks"
     state.mkdir()

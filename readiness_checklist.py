@@ -122,19 +122,19 @@ def _file_index_responds(state: Path) -> bool:
         with sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True,
                              timeout=2) as connection:
             rows = connection.execute(
-                "SELECT name,path FROM entries WHERE kind='file' LIMIT 100"
+                "SELECT rowid,name,path FROM entries WHERE kind='file' LIMIT 100"
             ).fetchall()
             if not rows:
                 # A completed scan of an empty drive is still a valid index.
                 connection.execute("SELECT rowid FROM entry_fts LIMIT 1").fetchone()
                 return True
-            for name, path in rows:
+            for rowid, name, path in rows:
                 words = re.findall(r"[^\W_]+", name, re.UNICODE)
                 if not words or not Path(path).is_file():
                     continue
                 match = connection.execute(
-                    "SELECT rowid FROM entry_fts WHERE entry_fts MATCH ? LIMIT 1",
-                    (f'"{words[0]}"',),
+                    "SELECT rowid FROM entry_fts WHERE entry_fts MATCH ? AND rowid=? LIMIT 1",
+                    (f'"{words[0]}"', rowid),
                 ).fetchone()
                 if match:
                     return True
