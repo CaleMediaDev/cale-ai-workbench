@@ -3143,3 +3143,59 @@ def test_paused_install_hold_donation_resumes_without_changing_consent(tmp_path)
         service.thread.join(2)
         run.assert_called_once()
         assert donation.settings(tmp_path) == consent
+
+
+def test_donation_activity_reaches_real_tk_chat_history_voice_and_link(tmp_path):
+    import ast
+    import re
+    import uuid
+    import tkinter as tk
+    import donation_ui
+    import pytest
+    from types import SimpleNamespace
+    try:
+        window=tk.Tk()
+    except tk.TclError as error:
+        pytest.skip('Tk display unavailable: '+str(error))
+    window.withdraw()
+    try:
+        conversation=tk.Text(window)
+        conversation.pack()
+        conversation.insert('end',''.join(f'Older chat line {n}\n' for n in range(100)))
+        window.update_idletasks()
+        conversation.yview_moveto(0)
+        first_visible=conversation.index('@0,0')
+        assert conversation.yview()[1]<0.98
+        spoken=[]
+        tree=ast.parse((ROOT/'long_tasks.py').read_text(encoding='utf-8-sig'))
+        definitions=[next(node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef) and node.name==name)
+                     for name in ('show_chat','assistant_reply')]
+        namespace={'conversation':conversation,'re':re,'uuid':uuid,'webbrowser':SimpleNamespace(open=lambda link:None),
+                   'speak_update':spoken.append,'save_chat':task_module.save_chat}
+        exec(compile(ast.Module(body=definitions,type_ignores=[]),'actual-desktop-chat','exec'),namespace)
+        # Exercise the actual wiring expression too: this is the same callback
+        # passed to Controls by the desktop, not a separate UI-only message sink.
+        call=next(node for node in ast.walk(tree) if isinstance(node,ast.Call)
+                  and isinstance(node.func,ast.Attribute) and node.func.attr=='Controls'
+                  and isinstance(node.func.value,ast.Name) and node.func.value.id=='donation_ui')
+        callback=next(arg.value for arg in call.keywords if arg.arg=='on_activity')
+        reply=eval(compile(ast.Expression(callback),'actual-donation-callback','eval'),namespace)
+        events=[{'run_id':'example','phase':'submitted','pr_url':'https://github.com/CaleMediaDev/cale-ai-workbench/pull/42'}]
+        service=SimpleNamespace(root=tmp_path,drain_events=lambda:[events.pop()] if events else [])
+        header=tk.Frame(window)
+        control=donation_ui.Controls(header,window,service,lambda:None,lambda:None,on_activity=reply)
+        control.last_counter=time.monotonic()
+        with patch.object(task_module,'STATE',tmp_path):
+            window.after(0,control.refresh)
+            window.update()
+            history=task_module.chat_history()
+        assert len(history)==1 and history[0]['role']=='assistant' and history[0]['private']
+        assert 'I sent a draft contribution report' in conversation.get('1.0','end')
+        assert spoken==[history[0]['content']]
+        assert conversation.index('@0,0')==first_visible  # Background updates never steal older history.
+        links=[tag for tag in conversation.tag_names() if tag.startswith('link-')]
+        assert len(links)==1 and conversation.tk.call(conversation._w,'tag','bind',links[0],'<Button-1>')
+        assert conversation.get(*conversation.tag_ranges(links[0]))=='https://github.com/CaleMediaDev/cale-ai-workbench/pull/42'
+        assert control.popup is None  # Main chat updates while donation dialog is closed.
+    finally:
+        window.destroy()

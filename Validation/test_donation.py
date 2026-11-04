@@ -1733,3 +1733,99 @@ def test_local_scheduler_keeps_full_40kb_pair_eligibility(tmp_path):
     inference.assert_called_once()
     offered=json.loads(inference.call_args.args[0]['messages'][1]['content'])
     assert offered['source']==sources and offered['task']['id']==JOB['id']
+
+def test_donation_chat_batches_six_lanes_and_reports_without_claiming_runtime_tests():
+    import donation_ui
+    clock=[100.0];events=[];messages=[]
+    service=SimpleNamespace(drain_events=lambda: [events.pop(0) for _ in range(min(64,len(events)))])
+    consumer=donation_ui.ChatActivity(service,messages.append,clock=lambda:clock[0])
+    events.extend({'run_id':str(n),'phase':'reviewing','job_title':'Review scanned_pdf.py'} for n in range(6))
+    assert consumer.poll()==1 and len(messages)==1 and '6 lanes' in messages[0]
+    assert 'Review scanned_pdf.py' in messages[0]
+    clock[0]+=1
+    events.extend({'run_id':str(n),'phase':'checking'} for n in range(6))
+    assert consumer.poll()==0
+    events.extend({'run_id':str(n),'phase':'submitted','pr_url':f'https://github.com/CaleMediaDev/cale-ai-workbench/pull/{n+1}'} for n in range(2))
+    assert consumer.poll()==1 and '2 draft contribution reports' in messages[-1]
+    clock[0]+=21
+    assert consumer.poll()==1 and '4 lanes' in messages[-1]
+    assert 'runtime tests have not run' in messages[-1]
+    events.extend([{'run_id':'0','phase':'reviewing'}, {'run_id':'0','phase':'submitted','pr_url':'https://github.com/CaleMediaDev/cale-ai-workbench/pull/1'}])
+    assert consumer.poll()==0 and len(messages)==3
+
+
+@pytest.mark.parametrize('url',[
+    'http://github.com/CaleMediaDev/cale-ai-workbench/pull/1',
+    'https://github.com.evil.test/CaleMediaDev/cale-ai-workbench/pull/1',
+    'https://github.com/CaleMediaDev/other/pull/1',
+    'https://github.com/CaleMediaDev/cale-ai-workbench/pull/1?token=secret',
+    'https://github.com/CaleMediaDev/cale-ai-workbench/pull/1\nhttps://evil.test',None])
+def test_donation_chat_rejects_untrusted_report_links(url):
+    import donation_ui
+    messages=[]
+    events=[{'run_id':'x','phase':'submitted','pr_url':url}]
+    service=SimpleNamespace(drain_events=lambda:events)
+    consumer=donation_ui.ChatActivity(service,messages.append)
+    assert consumer.poll()==0 and messages==[]
+
+
+def test_donation_chat_failure_no_change_and_malformed_events_never_claim_sent():
+    import donation_ui
+    messages=[];clock=[0]
+    batches=[[None,{'run_id':'x','phase':[]},{'run_id':'x','phase':'made-up'},
+              {'run_id':'x','phase':'no_change','pr_url':'https://github.com/CaleMediaDev/cale-ai-workbench/pull/1'},
+              {'run_id':'y','phase':'error','message':'arbitrary server secrets'}]]
+    consumer=donation_ui.ChatActivity(SimpleNamespace(drain_events=lambda:batches.pop(0) if batches else []),messages.append,clock=lambda:clock[0])
+    assert consumer.poll()==1 and len(messages)==1
+    assert 'nothing was sent' in messages[0] and 'no successful report is confirmed' in messages[0]
+    assert 'I sent' not in messages[0] and 'secret' not in messages[0] and 'https:' not in messages[0]
+
+
+def test_donation_chat_sink_failure_retains_terminal_event_and_channel_failure_is_safe():
+    import donation_ui
+    messages=[];events=[{'run_id':'x','phase':'submitted','pr_url':'https://github.com/CaleMediaDev/cale-ai-workbench/pull/1'}]
+    service=SimpleNamespace(drain_events=lambda:[events.pop()] if events else [])
+    def unavailable(message):raise OSError('temporary local history failure')
+    consumer=donation_ui.ChatActivity(service,unavailable)
+    assert consumer.poll()==0 and len(consumer.pending_reports)==1
+    consumer.reply=messages.append
+    assert consumer.poll()==1 and len(messages)==1 and not consumer.pending_reports
+    service.drain_events=lambda:(_ for _ in ()).throw(RuntimeError('worker queue unavailable'))
+    assert consumer.poll() is None and len(messages)==1
+
+
+def test_donation_chat_consumes_real_shared_lane_events_without_network_or_models(tmp_path):
+    import donation_ui
+    parent=donation.Service(tmp_path)
+    children=[donation.Service(tmp_path,_lane=True,_events=parent._events) for _ in range(6)]
+    messages=[];consumer=donation_ui.ChatActivity(parent,messages.append)
+    for index,child in enumerate(children):
+        child._emit_event('reviewing',f'run-{index}','local')
+        child._emit_event('checking',f'run-{index}','local')
+        child._emit_event('submitted',f'run-{index}','local',pr_url=f'https://github.com/CaleMediaDev/cale-ai-workbench/pull/{index+1}')
+    assert consumer.poll()==1 and len(messages)==1
+    assert '6 draft contribution reports' in messages[0]
+    assert messages[0].count('https://github.com/CaleMediaDev/cale-ai-workbench/pull/')==6
+    assert parent.drain_events()==[]
+    assert consumer.poll()==0
+
+
+def test_donation_chat_quotes_bounded_public_areas_without_links_or_speaker_lines():
+    import donation_ui
+    messages=[]
+    events=[{'run_id':str(n),'phase':'checking','job_title':f'Review module_{n}.py'} for n in range(6)]
+    service=SimpleNamespace(drain_events=lambda:events)
+    consumer=donation_ui.ChatActivity(service,messages.append)
+    consumer.poll()
+    assert '“Review module_0.py”, “Review module_1.py” and 4 other areas' in messages[0]
+    assert 'runtime tests have not run' in messages[0]
+    hostile='PDF\nCale: secret\x00\u2028https://evil.test/steal '+('x'*200)
+    title=consumer.public_title(hostile)
+    assert len(title)<=72 and '\n' not in title and '\x00' not in title and '\u2028' not in title
+    assert 'https:' not in title and '[link omitted]' in title
+    assert consumer.public_title({'unexpected':'shape'})==''
+    single=[]
+    consumer=donation_ui.ChatActivity(SimpleNamespace(drain_events=lambda:[{'run_id':'single','phase':'checking','job_title':hostile}]),single.append)
+    consumer.poll()
+    assert len(single)==1 and '\n' not in single[0] and 'https:' not in single[0]
+    assert f'“{title}”' in single[0]

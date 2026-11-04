@@ -1,6 +1,7 @@
 """Small, plain-language donation controls shared by the desktop header/dialog."""
 
 import queue
+import re
 import threading
 import time
 import tkinter as tk
@@ -12,12 +13,139 @@ import donation
 import github_account
 
 
+class ChatActivity:
+    """Turn bounded, factual worker events into quiet main-chat updates.
+
+    Only the Tk caller invokes the sink. No account checks, database access or
+    model calls occur here; worker-provided prose never becomes chat content.
+    """
+
+    def __init__(self, service, reply, clock=time.monotonic):
+        self.service, self.reply, self.clock = service, reply, clock
+        self.seen = {}
+        self.urls = {}
+        self.pending_reports = {}
+        self.titles = {}
+        self.pending = {}
+        self.last_progress = float("-inf")
+
+    @staticmethod
+    def report_url(value):
+        if not isinstance(value, str) or not re.fullmatch(
+                r"https://github\.com/CaleMediaDev/cale-ai-workbench/pull/[1-9][0-9]{0,9}", value):
+            return None
+        return value
+
+    @staticmethod
+    def remember(cache, key):
+        cache[key] = True
+        while len(cache) > 512:
+            cache.pop(next(iter(cache)))
+
+    @staticmethod
+    def public_title(value):
+        """Quote public job context as data, never as links or speaker lines."""
+        if not isinstance(value, str):
+            return ""
+        value = re.sub(r"https?://\S+", "[link omitted]", value[:512], flags=re.I)
+        value = re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]", " ", value)
+        return " ".join(value.split()).replace('"', "'")[:72]
+
+    def poll(self):
+        """Drain once without blocking; batch six lanes instead of six voices."""
+        drain = getattr(self.service, "drain_events", None)
+        if not callable(drain):
+            return  # Older service instances remain usable during development.
+        try:
+            events = drain()
+        except Exception:
+            return  # A worker channel must not break/reschedule the Tk poll.
+        if not isinstance(events, list):
+            return
+        phases = {"reviewing", "checking", "submitting", "submitted", "no_change",
+                  "waiting", "error", "training", "trained"}
+        for event in events[:64]:
+            if not isinstance(event, dict) or not isinstance(event.get("phase"), str) or event["phase"] not in phases:
+                continue
+            run, phase = event.get("run_id"), event["phase"]
+            if not isinstance(run, str) or not run or len(run) > 128:
+                continue
+            title = self.public_title(event.get("job_title"))
+            if title:
+                self.titles[run] = title
+                while len(self.titles) > 512:
+                    self.titles.pop(next(iter(self.titles)))
+            if phase == "submitted":
+                url = self.report_url(event.get("pr_url"))
+                if url and url not in self.urls:
+                    self.pending_reports[url] = self.titles.get(run, "")
+                    while len(self.pending_reports) > 128:
+                        self.pending_reports.pop(next(iter(self.pending_reports)))
+                    self.pending.pop(run, None)
+                continue
+            key = (run, phase)
+            if key in self.seen:
+                continue
+            self.remember(self.seen, key)
+            self.pending[run] = phase
+            while len(self.pending) > 64:
+                self.pending.pop(next(iter(self.pending)))
+        count = 0
+        reports = list(self.pending_reports)[:64]
+        if reports:
+            # Up to 64 validated results remain one compact chat message. The
+            # producer drains at most six concurrent lanes in normal operation.
+            noun = "a draft contribution report" if len(reports) == 1 else f"{len(reports)} draft contribution reports"
+            try:
+                self.reply(f"I sent {noun} to GitHub for maintainer review:\n" + "\n".join(
+                    (f'“{self.pending_reports[url]}” — ' if self.pending_reports[url] else "") + url for url in reports))
+            except Exception:
+                return 0  # Retain this bounded batch for the next Tk tick.
+            for url in reports:
+                self.remember(self.urls, url)
+                self.pending_reports.pop(url, None)
+            self.last_progress = self.clock()
+            count += 1
+        if self.pending and self.clock() - self.last_progress >= 20:
+            current = list(self.pending.values())
+            descriptions = {
+                "reviewing": "reviewing public Cale code",
+                "checking": "checking proposed edits for valid syntax and exact patches (runtime tests have not run)",
+                "submitting": "sending a draft for maintainer review",
+                "training": "training a small specialist on reviewed public data",
+                "trained": "recorded a local specialist experiment; it is not activated",
+                "no_change": "finished a review without a reliable code change; nothing was sent",
+                "waiting": "waiting for an available permitted AI source",
+                "error": "paused after a contribution error; no successful report is confirmed",
+            }
+            lines = []
+            for phase in descriptions:
+                if phase not in current:
+                    continue
+                labels = list(dict.fromkeys(self.titles[run] for run, value in self.pending.items()
+                                            if value == phase and self.titles.get(run)))
+                areas = ", ".join(f'“{label}”' for label in labels[:2])
+                if len(labels) > 2:
+                    areas += f" and {len(labels) - 2} other areas"
+                line = f"{current.count(phase)} {'lane' if current.count(phase) == 1 else 'lanes'}: {descriptions[phase]}"
+                lines.append(line + (" · " + areas if areas else ""))
+            try:
+                self.reply("Donation activity · " + "; ".join(lines) + ".")
+            except Exception:
+                return count
+            self.pending.clear()
+            self.last_progress = self.clock()
+            count += 1
+        return count
+
+
 class Controls:
     """Show resource choices, intensity, reported tokens and accepted-fix rankings."""
 
-    def __init__(self, header, window, service, connect_github, connect_chatgpt, connect_free=None):
+    def __init__(self, header, window, service, connect_github, connect_chatgpt, connect_free=None, on_activity=None):
         self.window = window
         self.service = service
+        self.chat_activity = ChatActivity(service, on_activity) if on_activity else None
         self.connect_github = connect_github
         self.connect_chatgpt = connect_chatgpt
         self.connect_free = connect_free or (lambda: webbrowser.open("https://openrouter.ai"))
@@ -41,6 +169,9 @@ class Controls:
 
     def refresh(self):
         """Refresh cheap local state; account network probes stay off the UI thread."""
+        activity = getattr(self, "chat_activity", None)
+        if activity:
+            activity.poll()
         now = time.monotonic()
         if now - self.last_counter >= 5:
             self.last_counter = now

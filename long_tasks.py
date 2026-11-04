@@ -3989,7 +3989,8 @@ def gui():
     )
     rocket.pack(side="right")
     donation_controls = donation_ui.Controls(
-        header, window, donation_service, lambda: connect_github(), lambda: connect_chatgpt(), lambda: connect())
+        header, window, donation_service, lambda: connect_github(), lambda: connect_chatgpt(), lambda: connect(),
+        on_activity=lambda content: assistant_reply(content, private=True))
     window.bind_all("<KeyPress>", lambda _: donation_service.activity(), add="+")
     window.bind_all("<ButtonPress>", lambda _: donation_service.activity(), add="+")
     window.bind_all("<MouseWheel>", lambda _: donation_service.activity(), add="+")
