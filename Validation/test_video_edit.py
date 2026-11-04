@@ -110,6 +110,31 @@ def test_run_timeout_cleans_partial_output_only(tmp_path, monkeypatch, existing_
         assert video_edit._destination(str(output), []) == output
 
 
+@pytest.mark.parametrize("existing_output", [False, True])
+def test_run_interruption_cleans_partial_output_only(tmp_path, monkeypatch, existing_output):
+    output = tmp_path / "edited.mp4"
+    if existing_output:
+        output.write_bytes(b"existing video")
+    interruption = KeyboardInterrupt()
+
+    def interrupted(command, **kwargs):
+        assert command[-1] == str(output)
+        if not existing_output:
+            output.write_bytes(b"partial video")
+        raise interruption
+
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", interrupted)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        video_edit._run([], output)
+    assert caught.value is interruption
+    if existing_output:
+        assert output.read_bytes() == b"existing video"
+    else:
+        assert not output.exists()
+        assert video_edit._destination(str(output), []) == output
+
+
 @pytest.mark.parametrize("overwrite_refused", [False, True])
 def test_run_distinguishes_overwrite_refusal_from_output_filename(tmp_path, monkeypatch, overwrite_refused):
     output = tmp_path / "already exists.mp4"
