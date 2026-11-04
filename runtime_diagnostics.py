@@ -35,12 +35,14 @@ def record(state: Path, kind: str, detail: str, now: float | None = None) -> boo
     """Record a failure; return True once when an episode repeats."""
     if not kind or not kind.replace("_", "").isalnum():
         raise ValueError("A stable error category is required")
-    now = time.time() if now is None else now
     detail = " ".join(str(detail).split())[:MAX_DETAIL]
     with _open(state) as db:
         # Lock before reading so concurrent recorders cannot lose increments
         # or both report the same episode.
         db.execute("BEGIN IMMEDIATE")
+        # Sample the clock in transaction order so a delayed recorder cannot
+        # mistake another recorder's newer timestamp for a clock correction.
+        now = time.time() if now is None else now
         row = db.execute(
             "SELECT first_seen,last_seen,count,reported FROM issues WHERE kind=?", (kind,)
         ).fetchone()
