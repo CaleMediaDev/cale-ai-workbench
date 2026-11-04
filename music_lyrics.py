@@ -79,8 +79,18 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
     for path in (text, captions, timings):
         if path.exists():
             raise ValueError(f"Output already exists: {path}")
-    for path, content in zip((text, captions, timings), contents):
-        path.write_bytes(content)
+    created = []
+    try:
+        for path, content in zip((text, captions, timings), contents):
+            # Exclusive creation also protects files appearing after the checks.
+            with path.open("xb") as output:
+                created.append(path)
+                output.write(content)
+    except BaseException:
+        # Include the current file: a failed write may have saved only a prefix.
+        for path in reversed(created):
+            path.unlink(missing_ok=True)
+        raise
     return {"source": str(source), "vocal_path": str(vocal),
             "lyrics_path": str(text), "captions_path": str(captions),
             "timings_path": str(timings), "language": transcription.get("language"),
