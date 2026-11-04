@@ -144,7 +144,7 @@ def refresh_delay(snapshot: dict, refresh_seconds: int = 24 * 60 * 60,
 def scan_computer(state: str | Path, roots: list[str | Path] | None = None,
                   defer_if_busy: Callable[[], bool] | None = None) -> dict:
     """Catalog names and paths; defer routine rescans when user work begins."""
-    roots = [Path(root).absolute() for root in (local_roots() if roots is None else roots)]
+    roots = [Path(os.path.abspath(root)) for root in (local_roots() if roots is None else roots)]
     roots = [root for root in roots if root.is_dir() and not root.is_symlink()]
     scan_id = uuid.uuid4().hex
     files = folders = unreadable = processed = 0

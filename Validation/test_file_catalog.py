@@ -113,6 +113,33 @@ class FileCatalogTests(unittest.TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_parent_directory_root_alias_does_not_duplicate_or_escape_pruning(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            file_catalog, "enough_space", return_value=True
+        ):
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            child = root / "child"
+            child.mkdir(parents=True)
+            target = root / "report.txt"
+            target.write_text("", encoding="utf-8")
+
+            file_catalog.scan_computer(state, [child / ".."])
+            file_catalog.scan_computer(state, [root])
+
+            with file_catalog.database(state) as conn:
+                paths = [row["path"] for row in conn.execute(
+                    "SELECT path FROM entries WHERE kind='file'"
+                )]
+            self.assertEqual(paths, [str(target)])
+
+            target.unlink()
+            file_catalog.scan_computer(state, [root])
+            with file_catalog.database(state) as conn:
+                self.assertEqual(conn.execute(
+                    "SELECT COUNT(*) FROM entries WHERE kind='file'"
+                ).fetchone()[0], 0)
+
     def test_pruning_preserves_unscanned_sibling_with_shared_prefix(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(
             file_catalog, "enough_space", return_value=True
