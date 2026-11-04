@@ -100,7 +100,11 @@ class VisitorTracker:
                     track["hits"] = 1
                     track["pending_greeting"] = now - track["last_greeted"] >= self.cooldown
                 else:
-                    track["hits"] = track["hits"] + 1 if now - track["last_seen"] <= 1.5 else 1
+                    track["hits"] = (
+                        track["hits"] + 1
+                        if track["misses"] == 0 and now - track["last_seen"] <= 1.5
+                        else 1
+                    )
                 track["last_seen"] = now
                 track["feature"] = feature
                 track["misses"] = 0
