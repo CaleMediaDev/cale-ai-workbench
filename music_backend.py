@@ -971,6 +971,8 @@ def recover_music_jobs() -> None:
     for path in JOBS.glob("*.json"):
         try:
             info = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(info, dict):
+                continue  # A damaged record must not block recovery of other jobs.
             job_id = path.stem
             _job_path(job_id)
             if info.get("job_id") != job_id or info.get("status") not in ("queued", "working"):
