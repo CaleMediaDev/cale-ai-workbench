@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import subprocess
 import tempfile
+import wave
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -44,6 +45,13 @@ def _run(arguments: list[str], output: Path) -> None:
         result = subprocess.run(command, capture_output=True, text=True, timeout=3600, creationflags=HIDE)
         if result.returncode or not staged.is_file() or not staged.stat().st_size:
             raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local audio edit failed.")
+        if output.suffix.lower() == ".wav":
+            try:
+                with wave.open(str(staged), "rb") as audio:
+                    if audio.getnframes() == 0:
+                        raise RuntimeError("Local audio edit produced no audio frames.")
+            except (wave.Error, EOFError) as exc:
+                raise RuntimeError("Local audio edit produced an invalid WAV file.") from exc
         # Unlike replace(), a hard link refuses to overwrite a destination
         # created while FFmpeg was running. Cleanup removes only our staging file.
         output.hardlink_to(staged)
