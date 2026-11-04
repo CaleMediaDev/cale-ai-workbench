@@ -116,6 +116,44 @@ def test_space_shooter_browser_layout_keyboard_touch_pause_and_blur(tmp_path):
         browser.close()
 
 
+def test_touch_control_remains_held_until_last_pointer_releases(tmp_path):
+    from playwright.sync_api import sync_playwright
+
+    import design_tools
+
+    page_path = tmp_path / "game.html"
+    design_tools.create_space_shooter(str(page_path))
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.add_init_script("window.requestAnimationFrame=()=>0;")
+            page.goto(page_path.as_uri())
+            result = page.evaluate("""() => {
+                const button=document.getElementById('right');
+                // Synthetic pointers do not have native pointer capture.
+                button.setPointerCapture=()=>{};
+                const send=(type,pointerId)=>button.dispatchEvent(
+                    new PointerEvent(type,{pointerId,bubbles:true}));
+                game.reset();
+                send('pointerdown',1);
+                send('pointerdown',2);
+                send('pointerup',1);
+                // Capture loss for an already released pointer is harmless.
+                send('lostpointercapture',1);
+                const start=game.player.x;
+                frame(previous+50);
+                const afterFirstRelease=game.player.x;
+                send('pointercancel',2);
+                frame(previous+50);
+                return {start,afterFirstRelease,afterLastRelease:game.player.x};
+            }""")
+            assert result["afterFirstRelease"] > result["start"]
+            assert result["afterLastRelease"] == result["afterFirstRelease"]
+        finally:
+            browser.close()
+
+
 def test_default_starter_verifier_tests_actual_browser_physics_and_rejects_changed_mechanics(tmp_path):
     import design_tools
 
