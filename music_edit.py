@@ -39,8 +39,9 @@ def _run(arguments: list[str], output: Path) -> None:
     result = subprocess.run(command, capture_output=True, text=True, timeout=3600, creationflags=HIDE)
     if result.returncode or not output.is_file() or not output.stat().st_size:
         # FFmpeg's -n refuses to overwrite an output created during this call.
-        # Leave that file alone; only remove a partial file when FFmpeg failed.
-        if result.returncode and output.is_file() and "already exists" not in result.stderr.lower():
+        # Preserve that file, but remove failed or empty output to allow retrying.
+        if (output.is_file() and "already exists" not in result.stderr.lower()
+                and (result.returncode or not output.stat().st_size)):
             output.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local audio edit failed.")
 

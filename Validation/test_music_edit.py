@@ -82,6 +82,33 @@ def test_mix_music_renders_both_tracks_and_is_discoverable(tmp_path):
     assert duration(foreground) == pytest.approx(0.3)
 
 
+def test_edit_music_removes_empty_success_output_and_allows_retry(tmp_path, monkeypatch):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    tone(source)
+    original = source.read_bytes()
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        output.write_bytes(b"" if len(calls) == 1 else original)
+        return music_edit.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="Local audio edit failed"):
+        music_edit.edit_music(str(source), str(output))
+
+    assert not output.exists()
+    assert source.read_bytes() == original
+
+    result = music_edit.edit_music(str(source), str(output))
+    assert result["path"] == str(output)
+    assert output.read_bytes() == original
+    assert source.read_bytes() == original
+    assert len(calls) == 2
+
+
 def test_mix_music_refuses_to_replace_source(tmp_path):
     first = tmp_path / "first.wav"
     second = tmp_path / "second.wav"
