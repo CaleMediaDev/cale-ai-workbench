@@ -129,7 +129,7 @@ def _fast_model_loaded(model: str) -> bool:
         alias = model.removesuffix(":latest")
         return any(str(item.get("name", "")).removesuffix(":latest") == alias
                    for item in running)
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError, AttributeError):
         return False
 
 

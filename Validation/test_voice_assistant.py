@@ -242,6 +242,27 @@ class VoiceTests(unittest.TestCase):
         with patch.object(voice_assistant, "urlopen", side_effect=OSError):
             self.assertFalse(voice_assistant._fast_model_loaded("cale-fast"))
 
+    def test_malformed_model_status_preserves_immediate_speech_fallback(self):
+        fake = ModuleType("cloud_ai")
+        fake.FAST_MODEL = "cale-fast"
+        fake.post = Mock(side_effect=AssertionError("Malformed status must not start the model"))
+        for response in (b'null', b'[]', b'{"models":[null]}',
+                         b'{"models":[42]}'):
+            with self.subTest(response=response), (
+                patch.dict(sys.modules, {"cloud_ai": fake}),
+                patch.object(voice_assistant, "_heavy_gpu_active", return_value=False),
+                patch.object(voice_assistant, "urlopen",
+                             return_value=io.BytesIO(response)),
+            ):
+                self.assertEqual(
+                    voice_assistant.rephrase_status(
+                        "Recipe app. Checking files.",
+                        required=("Recipe app", "Checking files"),
+                    ),
+                    "Recipe app: Checking files.",
+                )
+        fake.post.assert_not_called()
+
     def test_loaded_model_check_requires_matching_explicit_tag(self):
         cases = (
             ("cale-fast:small", "cale-fast:large", False),
