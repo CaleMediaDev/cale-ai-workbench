@@ -692,11 +692,11 @@ class VoiceTests(unittest.TestCase):
                 f"wake-v1-{reference.stat().st_mtime_ns}.wav"
             )
             cached.parent.mkdir(parents=True)
-            # A valid RIFF/WAVE prefix followed by a truncated fmt chunk header.
+            # A valid RIFF/WAVE prefix followed by a truncated fmt chunk payload.
             cached.write_bytes(
                 b"RIFF" + (4096).to_bytes(4, "little") + b"WAVE"
                 + b"JUNK" + (1000).to_bytes(4, "little") + b"\0" * 1000
-                + b"fmt "
+                + b"fmt " + (16).to_bytes(4, "little") + b"\x01"
             )
             self.assertGreater(cached.stat().st_size, 1000)
             with self.assertRaises(EOFError):
