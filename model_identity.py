@@ -23,7 +23,7 @@ def configured_main_alias(root: Path) -> str:
         lines = (
             (Path(root) / "data/config.yaml").read_text(encoding="utf-8").splitlines()
         )
-    except OSError:
+    except (OSError, UnicodeError):
         return DEFAULT_MAIN
     in_model = False
     for line in lines:
