@@ -236,6 +236,30 @@ class FileCatalogTests(unittest.TestCase):
             self.assertEqual(file_catalog.search(state, "my budget")[0]["path"], str(target))
             self.assertEqual(file_catalog.search(state, "my budget spreadsheet from 2025"), [])
 
+    def test_stale_matches_do_not_hide_existing_lower_ranked_file(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            file_catalog, "enough_space", return_value=True
+        ):
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            stale = []
+            for number in range(65):
+                folder = root / f"old-{number}"
+                folder.mkdir()
+                path = folder / "report.txt"
+                path.write_text("", encoding="utf-8")
+                stale.append(path)
+            target = root / ("report " + "notes " * 30 + ".txt")
+            target.write_text("", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            for path in stale:
+                path.unlink()
+
+            results = file_catalog.search(state, "report", limit=1)
+
+            self.assertEqual([row["path"] for row in results], [str(target)])
+
     def test_filler_word_does_not_hide_compound_filename(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"
