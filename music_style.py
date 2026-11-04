@@ -24,6 +24,9 @@ NEGATED_SINGER = re.compile(
     rf"\b{NEGATION}\s+(?:a\s+)?(male|man|guy|boy|female|woman|girl)"
     r"\s+(?:lead\s+)?(?:voice|vocals?|singer)\b", re.I,
 )
+NEGATED_LEAD_VOCALS = re.compile(
+    rf"\b{NEGATION}\s+(?:any\s+)?lead\s+vocals?\b", re.I,
+)
 VOCAL_TEXTURE = re.compile(
     r"\b(?:vocal chops?|chopped vocals?|wordless vocals?|"
     r"(?:minimal|sparse|occasional) vocals?)\b", re.I,
@@ -109,6 +112,7 @@ def _clean_negations(prompt: str) -> tuple[str, bool, bool]:
     """Remove rejected sounds before ACE-Step sees words it may imitate."""
     rejected = [match.group(1).lower() for match in NEGATED_SINGER.finditer(prompt)]
     cleaned = NEGATED_SINGER.sub("", prompt)
+    cleaned = NEGATED_LEAD_VOCALS.sub("", cleaned)
     cleaned = NEGATED_GUITAR.sub("", cleaned)
     cleaned = re.sub(r"\s+([,.;!?])", r"\1", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,.;")
