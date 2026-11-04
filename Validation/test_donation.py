@@ -423,10 +423,79 @@ def test_leaderboard_continues_partial_history_without_double_credit(tmp_path):
         return [merged_fix(n) for n in range((page - 1) * 100 + 1, page * 100 + 1)] if page <= 10 else []
     with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1000):
         partial = donation.refresh_leaderboard(tmp_path, fetch=pages)
-    assert not partial["complete"] and partial["rows"][0]["accepted"] == 1000
+    assert not partial["complete"] and partial["rows"] == []
     with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1061):
         complete = donation.refresh_leaderboard(tmp_path, fetch=pages, force=True)
     assert complete["complete"] and complete["rows"][0]["accepted"] == 1000
+
+
+def test_complete_leaderboard_snapshot_removes_stale_credits(tmp_path):
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1000):
+        donation.refresh_leaderboard(tmp_path, fetch=lambda endpoint: [merged_fix(1), merged_fix(2)])
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1061):
+        result = donation.refresh_leaderboard(tmp_path, fetch=lambda endpoint: [merged_fix(1, merged_at=None)], force=True)
+    assert result["complete"] and result["rows"] == []
+
+
+def test_partial_snapshot_and_failed_page_preserve_previous_verified_counts(tmp_path):
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1000):
+        donation.refresh_leaderboard(tmp_path, fetch=lambda endpoint: [merged_fix(9999, "old", 9)])
+
+    def pages(endpoint):
+        page = int(endpoint.rsplit("page=", 1)[1])
+        if page == 11:
+            raise OSError("network interrupted")
+        return [merged_fix(n) for n in range((page - 1) * 100 + 1, page * 100 + 1)]
+
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1061):
+        partial = donation.refresh_leaderboard(tmp_path, fetch=pages, force=True)
+    assert not partial["complete"] and partial["rows"] == [{"login": "old", "accepted": 1}]
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1122):
+        with pytest.raises(OSError, match="interrupted"):
+            donation.refresh_leaderboard(tmp_path, fetch=pages, force=True)
+    assert donation.leaderboard(tmp_path)["rows"] == partial["rows"]
+    with donation.connection(tmp_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM leaderboard_pending").fetchone()[0] == 1000
+
+
+def test_changed_upstream_during_pagination_restarts_without_deleting_cache(tmp_path):
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1000):
+        donation.refresh_leaderboard(tmp_path, fetch=lambda endpoint: [merged_fix(1)])
+    anchors = iter([[merged_fix(1)], [merged_fix(2)]])
+    calls = []
+
+    def changed(endpoint):
+        calls.append(endpoint)
+        return next(anchors) if "sort=updated" in endpoint else []
+
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1061):
+        unstable = donation.refresh_leaderboard(tmp_path, fetch=changed, force=True)
+    assert not unstable["complete"] and unstable["rows"] == [{"login": "alice", "accepted": 1}]
+    assert len(calls) == 3
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1122):
+        stable = donation.refresh_leaderboard(tmp_path, fetch=lambda endpoint: [], force=True)
+    assert stable["complete"] and stable["rows"] == []
+
+
+@pytest.mark.parametrize("failure", [OSError("final anchor unavailable"), {"message": "API error"}])
+def test_final_snapshot_validation_failure_cannot_clear_cached_fixes(tmp_path, failure):
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1000):
+        donation.refresh_leaderboard(tmp_path, fetch=lambda endpoint: [merged_fix(1)])
+    calls = 0
+
+    def failing(endpoint):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            if isinstance(failure, Exception):
+                raise failure
+            return failure
+        return []
+
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.time, "time", return_value=1061):
+        with pytest.raises((OSError, ValueError)):
+            donation.refresh_leaderboard(tmp_path, fetch=failing, force=True)
+    assert donation.leaderboard(tmp_path)["rows"] == [{"login": "alice", "accepted": 1}]
 
 
 

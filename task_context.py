@@ -482,6 +482,12 @@ def revise_step(folder: str | Path, step_id: int, steps: list, *,
         if expected_check is not None and step_check_identity(queue["active"]) != expected_check:
             raise ValueError("The active acceptance check changed before revising; read the fresh checkpoint.")
         phase, title, check, shell, tool, arguments = values[0]
+        revised = dict(queue["active"], phase=phase, title=title, check_command=check,
+                       shell=shell, check_tool=tool, check_arguments=json.loads(arguments))
+        if step_check_identity(revised) == step_check_identity(queue["active"]):
+            raise ValueError("The saved step is unchanged; its previous check result is still valid evidence. "
+                             "Inspect the failing targets and source before making a real correction, "
+                             "or use complete to run the saved check again. Repeating revise is not progress.")
         conn.execute("""UPDATE task_steps SET phase=?,title=?,check_command=?,shell=?,check_tool=?,check_arguments=?,
             evidence='Acceptance check revised; not yet passed',updated=? WHERE id=?""",
             (phase, title, check, shell, tool, arguments, time.time(), step_id))

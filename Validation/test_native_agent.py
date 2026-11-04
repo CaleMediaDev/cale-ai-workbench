@@ -35,6 +35,27 @@ def queue_step(title, command, phase="Core"):
 
 
 @pytest.mark.parametrize("check", [
+    {"check_command": "exit 9"},
+    {"check_tool": "check_webapp", "check_arguments": {
+        "path": "index.html", "cases": [{"visible": ["heading"]}]}},
+])
+def test_noop_step_revision_keeps_failure_evidence_and_does_not_touch_database(tmp_path, check):
+    step = {"phase": "Core", "title": "Verify behavior", **check}
+    active = task_context.plan_steps(tmp_path, [step])["active"]
+    task_context.record_step_check(tmp_path, active["id"], task_context.request_identity(tmp_path),
+                                   "Exit code: 9\nMissing heading", unchanged=True)
+    before = task_context.step_status(tmp_path)
+    with pytest.raises(ValueError, match="saved step is unchanged"):
+        task_context.revise_step(tmp_path, active["id"], [step])
+    assert task_context.step_status(tmp_path) == before
+    corrected = {**step, "title": "Verify corrected behavior"}
+    after = task_context.revise_step(tmp_path, active["id"], [corrected])
+    assert after["active"]["title"] == corrected["title"]
+    assert after["active"]["attempts"] == before["active"]["attempts"]
+    assert "not yet passed" in after["active"]["evidence"]
+
+
+@pytest.mark.parametrize("check", [
     {"check_command": "Write-Output checked"},
     {"check_tool": "run_verifier"},
     {"check_tool": "check_python_function", "check_arguments": {"path": "logic.py", "function": "identity",

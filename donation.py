@@ -103,6 +103,8 @@ def connection(root: Path):
         merged TEXT NOT NULL)""")
     conn.execute("CREATE INDEX IF NOT EXISTS accepted_author ON accepted_fixes(author)")
     conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_sync (id INTEGER PRIMARY KEY, next_page INTEGER, checked REAL, complete INTEGER)")
+    conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_scan (id INTEGER PRIMARY KEY, token TEXT, anchor TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_pending (number INTEGER PRIMARY KEY, author INTEGER NOT NULL, login TEXT NOT NULL, merged TEXT NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS cooldowns(resource TEXT PRIMARY KEY, until REAL NOT NULL)")
     return conn
 
@@ -247,11 +249,11 @@ def leaderboard(root: Path = ROOT) -> dict:
 
 
 def refresh_leaderboard(root: Path = ROOT, fetch=None, force=False) -> dict:
-    """Fetch public canonical GitHub merge facts; cache and continue long histories.
+    """Reconcile a complete, stable public snapshot without erasing good cache.
 
     At most ten pages are fetched per refresh. Partial counts are explicitly
-    marked, and the next refresh continues rather than silently truncating.
-    Accepted PR numbers are unique; GitHub author IDs survive account renames.
+    staged separately until all pages succeed. A changed upstream anchor restarts
+    the scan: live pagination must not turn a moved page into a deleted credit.
     """
     import pc_offline
 
@@ -259,20 +261,45 @@ def refresh_leaderboard(root: Path = ROOT, fetch=None, force=False) -> dict:
         return {**leaderboard(root), "notice": "Offline · showing cached accepted fixes."}
     with closing(connection(root)) as conn:
         saved = conn.execute("SELECT next_page,checked,complete FROM leaderboard_sync WHERE id=1").fetchone()
+        scan = conn.execute("SELECT token,anchor FROM leaderboard_scan WHERE id=1").fetchone()
     if saved and time.time() - saved[1] < (60 if force or not saved[2] else 900):
         return leaderboard(root)
-    page_number = saved[0] if saved and not saved[2] else 1
     if fetch is None:
         def fetch(endpoint):
             with urlopen(Request("https://api.github.com/" + endpoint, headers={
                     "User-Agent": "Cale-AI-Workbench", "Accept": "application/vnd.github+json"}), timeout=15) as response:
                 return json.load(response)
-    complete = False
-    for _ in range(10):
-        pulls = fetch(f"repos/{UPSTREAM}/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=100&page={page_number}")
-        if not isinstance(pulls, list):
+    prefix = f"repos/{UPSTREAM}/pulls?state=all&base=main&"
+    anchor_endpoint = prefix + "sort=updated&direction=desc&per_page=100&page=1"
+
+    def fingerprint(pulls):
+        if not isinstance(pulls, list) or any(not isinstance(pr, dict) for pr in pulls):
             raise ValueError("GitHub did not return pull requests")
+        return hashlib.sha256(json.dumps(pulls, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    anchor = fingerprint(fetch(anchor_endpoint))
+    continuing = bool(saved and not saved[2] and scan and scan[1] == anchor)
+    page_number = saved[0] if continuing else 1
+    token = scan[0] if continuing else uuid.uuid4().hex
+    if not continuing:
         with closing(connection(root)) as conn, conn:
+            conn.execute("DELETE FROM leaderboard_pending")
+            conn.execute("INSERT INTO leaderboard_scan VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET token=excluded.token,anchor=excluded.anchor", (token, anchor))
+    for _ in range(10):
+        pulls = fetch(prefix + f"sort=created&direction=asc&per_page=100&page={page_number}")
+        fingerprint(pulls)  # Reject malformed pages before touching the cache.
+        complete = len(pulls) < 100
+        stable = not complete or fingerprint(fetch(anchor_endpoint)) == anchor
+        with closing(connection(root)) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT token FROM leaderboard_scan WHERE id=1").fetchone()
+            if not current or current[0] != token:
+                break  # A newer refresh owns the staging table.
+            if not stable:
+                conn.execute("DELETE FROM leaderboard_pending")
+                conn.execute("DELETE FROM leaderboard_scan")
+                conn.execute("INSERT INTO leaderboard_sync VALUES(1,1,?,0) ON CONFLICT(id) DO UPDATE SET next_page=1,checked=excluded.checked,complete=0", (time.time(),))
+                break
             names = {}
             for pr in pulls:
                 base, user, head = pr.get("base") or {}, pr.get("user") or {}, pr.get("head") or {}
@@ -286,11 +313,15 @@ def refresh_leaderboard(root: Path = ROOT, fetch=None, force=False) -> dict:
                         or not isinstance(login, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", login)):
                     continue
                 names[author] = login
-                conn.execute("INSERT INTO accepted_fixes VALUES(?,?,?,?) ON CONFLICT(number) DO UPDATE SET author=excluded.author,login=excluded.login,merged=excluded.merged",
+                conn.execute("INSERT INTO leaderboard_pending VALUES(?,?,?,?) ON CONFLICT(number) DO UPDATE SET author=excluded.author,login=excluded.login,merged=excluded.merged",
                              (number, author, login, pr["merged_at"]))
             for author, login in names.items():
-                conn.execute("UPDATE accepted_fixes SET login=? WHERE author=? AND login<>?", (login, author, login))
-            complete = len(pulls) < 100
+                conn.execute("UPDATE leaderboard_pending SET login=? WHERE author=? AND login<>?", (login, author, login))
+            if complete:
+                conn.execute("DELETE FROM accepted_fixes")
+                conn.execute("INSERT INTO accepted_fixes SELECT number,author,login,merged FROM leaderboard_pending")
+                conn.execute("DELETE FROM leaderboard_pending")
+                conn.execute("DELETE FROM leaderboard_scan")
             page_number += 1
             conn.execute("INSERT INTO leaderboard_sync VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET next_page=excluded.next_page,checked=excluded.checked,complete=excluded.complete",
                          (page_number, time.time(), int(complete)))
