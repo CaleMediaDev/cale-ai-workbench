@@ -257,6 +257,34 @@ def test_missing_toolbox_runtime_marks_started_job_as_error(tmp_path):
     assert quick_image.image_job_status(tmp_path, job_id)["status"] == "error"
 
 
+def test_missing_toolbox_runtime_marks_resumed_job_as_error(tmp_path):
+    import pytest
+
+    job_id = "f" * 32
+    output = tmp_path / "dog.png"
+    quick_image._write_job(tmp_path, job_id, {
+        "job_id": job_id, "status": "paused", "prompt": "a dog",
+        "output_path": str(output),
+    })
+
+    with pytest.raises(RuntimeError, match="Toolbox runtime is missing"):
+        quick_image.resume_image_job(tmp_path, job_id)
+
+    info = quick_image.image_job_status(tmp_path, job_id)
+    assert info["status"] == "error"
+    assert "Toolbox runtime is missing" in info["current"]
+    assert info["worker_pid"] is None
+    assert not output.exists()
+
+    # Ensure the queued-job grace period cannot hide an unintended retry.
+    info["created"] = 1
+    quick_image._write_job(tmp_path, job_id, info)
+    with patch.object(quick_image, "_launch_job") as launch:
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_not_called()
+    assert quick_image.image_job_status(tmp_path, job_id)["status"] == "error"
+
+
 def test_hold_image_job_handles_access_denied(tmp_path):
     import psutil
 
