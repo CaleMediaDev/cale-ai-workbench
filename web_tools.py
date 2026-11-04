@@ -287,7 +287,10 @@ def search_web(query: str) -> dict:
             target = link["url"]
             try:
                 parsed = urlsplit(target)
-                if parsed.hostname and parsed.hostname.endswith("duckduckgo.com"):
+                if parsed.hostname and (
+                    parsed.hostname == "duckduckgo.com"
+                    or parsed.hostname.endswith(".duckduckgo.com")
+                ):
                     target = parse_qs(parsed.query).get("uddg", [target])[0]
                     parsed = urlsplit(target)
             except ValueError:
