@@ -272,6 +272,10 @@ async def lifespan(_server):
         ],
     }
     async with AsyncExitStack() as stack:
+        # Also clear published backends if startup exits before reaching yield.
+        stack.callback(ERRORS.clear)
+        stack.callback(CATALOG.clear)
+        stack.callback(SESSIONS.clear)
         for group, args in specs.items():
             # Keep the other backend and our own local tools alive if one fails.
             params = StdioServerParameters(
@@ -308,12 +312,7 @@ async def lifespan(_server):
                 CATALOG[f"{group}.{tool.name}"] = tool.model_dump(
                     by_alias=True, exclude_none=True
                 )
-        try:
-            yield {}
-        finally:
-            SESSIONS.clear()
-            CATALOG.clear()
-            ERRORS.clear()
+        yield {}
 
 
 server = MCPServer(
