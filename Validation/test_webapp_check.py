@@ -1053,10 +1053,10 @@ if(valid)out.textContent='$'+(n*1.2).toFixed(2);}bill.addEventListener('input',u
         task_context.record_action(tmp_path, "check_webapp", passed_text, revision)
         assert "assertion sequence 1, case 2): Completed" in task_context.snapshot(tmp_path)
     stored = json.loads((tmp_path / ".local-ai/webapp-check.json").read_text())
-    repaired = stored["checks"][-1]["cases"]
+    repaired = stored["checks"][revision["saved_sequence"] - 1]["cases"]
     assert repaired[0] == bad["cases"][0]
     assert repaired[1] == {"set": {"bill": "0"}, "expect": {"error": "Invalid"}, "hidden": ["answer"]}
-    assert stored["checks"][0] == incoming
+    assert stored["checks"][1] == incoming
     assert (tmp_path / "index.html").read_text() == source
     spec = tmp_path / ".local-ai/webapp-check.json"
     spec.write_text(spec.read_text() + " ")
@@ -1146,8 +1146,8 @@ def test_explicit_visibility_id_revision_replaces_wrong_targets_and_preserves_ot
         result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", revision))
     assert result["passed"] and result["verifier_check_passed"]
     after = json.loads(spec_file.read_text())
-    repaired = after["checks"][-1]
-    assert after["checks"][0] == before["checks"][1]
+    repaired = after["checks"][revision["saved_sequence"] - 1]
+    assert after["checks"][1] == before["checks"][1]
     assert repaired["cases"][1] == original["cases"][1]
     assert repaired["cases"][0] == {**original["cases"][0], "visible": ["expense-form", "expense-table"]}
     assert (tmp_path / "index.html").read_text() == source
@@ -2362,3 +2362,92 @@ def test_retarget_namespace_identity_does_not_remove_same_named_other_observable
     assert candidate == {"expect": {"status": "Ready"}, "row_counts": {"items": 3, "entries": 3},
                          "state": {"game.items": 3}, "visible": ["items"], "hidden": ["absent"]}
     assert old["expect"]["items"] == "wrong"
+
+
+
+def seed_ordinary_partial_case(folder):
+    import hashlib
+    source = folder / "index.html"
+    source.write_text('<input id="entry"><p id="actual">Ready</p>')
+    spec = {"path": "index.html", "cases": [
+        {"set": {"entry": "Alpha"}, "visible": ["wrong"], "expect": {"actual": "Ready"}, "hidden": ["notCreated"]},
+        {"expect": {"bad": "oops"}},
+    ]}
+    assert webapp_check.save_verifier(folder, spec, accumulate=True)
+    saved = folder / ".local-ai/webapp-check.json"
+    raw = saved.read_bytes()
+    args = {"path": "index.html", "saved_sequence": 1, "saved_case": 1,
+            "suite_sha256": hashlib.sha256(raw).hexdigest(), "cases": [{"visible": ["actual"]}]}
+    return source, saved, raw, spec, args
+
+
+def test_ordinary_partial_assertion_repair_persists_selected_case_without_waiving_later_failure(tmp_path):
+    source, saved, raw, spec, args = seed_ordinary_partial_case(tmp_path)
+    before_source = source.read_bytes()
+    with patch.object(long_tasks, "projects", return_value=[{"id": "partial", "folder": str(tmp_path)}]):
+        result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", args))
+    assert result.get("repaired_case_passed") is True and result.get("verifier_saved") is True
+    assert not result["own_batch_passed"] and not result["passed"] and not result["verifier_check_passed"]
+    suite = json.loads(saved.read_text())
+    expected = {**spec["cases"][0], "visible": ["actual"]}
+    assert suite["checks"][0]["cases"] == [expected, spec["cases"][1]]
+    assert source.read_bytes() == before_source and task_context.step_status(tmp_path)["done"] == 0
+
+
+def test_bound_ordinary_partial_assertion_updates_sql_definition_but_cannot_complete_bad_batch(tmp_path):
+    source, saved, raw, spec, args = seed_ordinary_partial_case(tmp_path)
+    before_source = source.read_bytes()
+    active = task_context.plan_steps(tmp_path, [{"phase": "UI", "title": "Check requested UI", "check_tool": "check_webapp", "check_arguments": spec}])["active"]
+    bound = native_agent.bind_browser_assertion_revision(tmp_path, args, active, task_context.request_identity(tmp_path))
+    with patch.object(long_tasks, "projects", return_value=[{"id": "partial", "folder": str(tmp_path)}]):
+        result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", bound))
+        queue = task_context.step_status(tmp_path)
+        assert result.get("active_step_check_aligned") is True
+        assert queue["done"] == 0 and queue["active"]["check_arguments"]["cases"][0]["visible"] == ["actual"]
+        assert queue["active"]["check_arguments"]["cases"][1] == spec["cases"][1]
+        complete = json.loads(native_agent.execute_tool(tmp_path, "task_steps", {"action": "complete", "step_id": queue["active"]["id"]}))
+    assert not complete["passed"] and task_context.step_status(tmp_path)["done"] == 0
+    assert source.read_bytes() == before_source
+
+
+
+def test_ordinary_partial_failed_selected_case_does_not_save_or_align(tmp_path):
+    source, saved, raw, spec, args = seed_ordinary_partial_case(tmp_path)
+    before_source = source.read_bytes()
+    verifier = tmp_path / ".local-ai/verify.ps1"
+    before_verifier = verifier.read_bytes()
+    active = task_context.plan_steps(tmp_path, [{"phase": "UI", "title": "Check requested UI", "check_tool": "check_webapp", "check_arguments": spec}])["active"]
+    args["cases"] = [{"visible": ["stillMissing"]}]
+    bound = native_agent.bind_browser_assertion_revision(tmp_path, args, active, task_context.request_identity(tmp_path))
+    with patch.object(long_tasks, "projects", return_value=[{"id": "partial", "folder": str(tmp_path)}]):
+        result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", bound))
+    assert result["repaired_case_passed"] is False and not result.get("verifier_saved")
+    assert result["active_step_check_aligned"] is False
+    assert saved.read_bytes() == raw and verifier.read_bytes() == before_verifier
+    assert source.read_bytes() == before_source and task_context.step_status(tmp_path)["active"] == active
+
+
+@pytest.mark.parametrize("race", ["request", "source", "suite", "custom_verifier"])
+def test_ordinary_partial_actual_candidate_respects_newer_request_source_suite_and_owner(tmp_path, race):
+    source, saved, raw, _spec, args = seed_ordinary_partial_case(tmp_path)
+    verifier = tmp_path / ".local-ai/verify.ps1"
+    original_verifier = verifier.read_bytes()
+    real_check = webapp_check.check
+    expected = {}
+    def check_then_change(folder, candidate, *extra, **kwargs):
+        checked = real_check(folder, candidate, *extra, **kwargs)
+        assert checked["cases"][0]["passed"] and not checked["passed"]
+        if race == "request": (tmp_path / ".local-ai/USER-REQUESTS.md").write_text("New user request")
+        elif race == "source": source.write_text(source.read_text() + "<!-- source changed -->")
+        elif race == "suite": saved.write_bytes(raw + b"\n")
+        else: verifier.write_text("# User-owned verifier\nexit 0")
+        expected["suite"] = saved.read_bytes()
+        expected["verifier"] = verifier.read_bytes()
+        return checked
+    with patch.object(webapp_check, "check", side_effect=check_then_change), patch.object(long_tasks, "projects", return_value=[{"id": "partial", "folder": str(tmp_path)}]):
+        result = native_agent.execute_tool(tmp_path, "check_webapp", args)
+    if not result.startswith("Tool error:"):
+        parsed = json.loads(result)
+        assert not parsed["passed"] and not parsed.get("verifier_saved")
+    assert saved.read_bytes() == expected["suite"] and verifier.read_bytes() == expected["verifier"]
+    assert task_context.step_status(tmp_path)["done"] == 0

@@ -1171,8 +1171,10 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
     validate_spec(folder, batch)
     metadata = {"saved_sequence": sequence, "saved_case": number,
                 "previous_sha256": digest, "request_hash": saved["request_hash"]}
-    if revise_inputs:
-        metadata["replace_sequence"] = sequence
+    # Every explicit revision changes at most this one selected case. Reuse
+    # the selected-case pass and checked-page guards even when only assertions
+    # change; another unfinished case must not prevent saving a real repair.
+    metadata["replace_sequence"] = sequence
     return batch, metadata
 
 
