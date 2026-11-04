@@ -52,6 +52,21 @@ def test_lyric_tool_uses_vocal_stem_and_writes_editable_captions(tmp_path):
     ]
 
 
+def test_save_rejects_infinite_end_without_leaving_partial_output(tmp_path):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    target = tmp_path / "lyrics"
+    transcription = {"segments": [
+        {"start": 1.0, "end": float("inf"), "text": "Hello world"},
+    ]}
+
+    with pytest.raises(RuntimeError, match="No clear lyrics"):
+        music_lyrics.save(source, source, target, transcription)
+
+    assert not target.exists()
+    assert source.read_bytes() == b"original"
+
+
 def test_lyric_tool_protects_existing_files_and_reports_unclear_vocals(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
