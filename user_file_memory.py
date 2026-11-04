@@ -407,7 +407,20 @@ def get(state: str | Path, path: str) -> dict:
     # scans the selected library only when it needs to discover missing text.
     ingest(state, [path])
     with _connection(state) as conn:
-        row = conn.execute("SELECT path,content,indexed_at FROM files WHERE path=?", (path,)).fetchone()
+        row = conn.execute("SELECT path,content,indexed_at,version FROM files WHERE path=?", (path,)).fetchone()
     if row is None or not row["content"]:
         raise ValueError("That file is no longer in memory. Select it again.")
-    return dict(row)
+    # Enumeration can skip a source that disappears after the initial check,
+    # leaving its previous database row untouched. Never return that stale row.
+    try:
+        current = (
+            not source.is_symlink() and _safe_file_path(source) and source.is_file()
+            and source.suffix.casefold() in SUPPORTED
+            and source.stat().st_size <= _file_limit(source)
+            and _file_version(source) == row["version"]
+        )
+    except (OSError, ValueError, RuntimeError):
+        current = False
+    if not current:
+        raise ValueError("That file is no longer in memory. Select it again.")
+    return {key: row[key] for key in ("path", "content", "indexed_at")}
