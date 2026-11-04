@@ -73,6 +73,22 @@ def test_run_timeout_cleans_partial_output_only(tmp_path, monkeypatch, existing_
         assert video_edit._destination(str(output), []) == output
 
 
+def test_run_removes_empty_output_after_successful_process(tmp_path, monkeypatch):
+    output = tmp_path / "edited.mp4"
+
+    def empty_output(command, **kwargs):
+        assert command[-1] == str(output)
+        output.write_bytes(b"")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", empty_output)
+    with pytest.raises(RuntimeError, match="Video edit failed"):
+        video_edit._run([], output)
+    assert not output.exists()
+    assert video_edit._destination(str(output), []) == output
+
+
 def test_edit_video_extreme_speed_chains_atempo(tmp_path):
     """Speed 0.25 and 4.0 should work by chaining atempo filters."""
     clip = tmp_path / "clip.mp4"
