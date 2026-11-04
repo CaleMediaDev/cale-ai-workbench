@@ -366,6 +366,7 @@ def test_worker_diagnostic_decoding_does_not_mask_result(tmp_path, returncode):
         (staging / "song_(Vocals).wav").write_bytes(b"vocals")
         (staging / "song_(Instrumental).wav").write_bytes(b"instrumental")
         # Exercise actual subprocess decoding, not a pre-decoded mock result.
+        kwargs["encoding"] = "utf-8"  # Reproduce the worker's invalid UTF-8 on every host locale.
         return original_run(
             [music_stems.sys.executable, "-c",
              "import os, sys; os.write(2, b'diagnostic: \\xff'); "
