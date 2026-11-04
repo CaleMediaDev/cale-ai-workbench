@@ -34,9 +34,10 @@ class ToneAdaptationTests(unittest.TestCase):
             self.assertEqual(tone_adaptation.social_reply("Hello"),
                              "I heard you. What do you need?")
 
-    def test_token_truncated_reply_uses_fallback(self):
+    def test_interrupted_reply_uses_fallback(self):
         for finish_reason, content, expected in (
             ("length", "I was going to say that", "I heard you. What do you need?"),
+            ("content_filter", "I was going to say that", "I heard you. What do you need?"),
             ("stop", "Glad I could help!", "Glad I could help!"),
         ):
             with self.subTest(finish_reason=finish_reason):

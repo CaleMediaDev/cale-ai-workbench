@@ -42,7 +42,7 @@ def social_reply(utterance: str) -> str:
             timeout=20,
         )
         choice = result["choices"][0]
-        if choice.get("finish_reason") == "length":
+        if choice.get("finish_reason") in ("length", "content_filter"):
             return "I heard you. What do you need?"
         content = choice["message"].get("content")
         # Protocol data is not speech: never read Python/JSON representations.
