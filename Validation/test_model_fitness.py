@@ -219,6 +219,38 @@ def test_game_probe_requires_two_complete_independent_passes():
         assert saved["candidate:7b"]["build"]["passed"] is False
 
 
+def test_game_probe_nested_completion_json_is_saved_as_failed_samples():
+    nested = "[" * (sys.getrecursionlimit() + 100) + "0"
+    nested += "]" * (sys.getrecursionlimit() + 100)
+    replies = [
+        {"modelfile": "FROM sha256-" + "a" * 64},
+        *[{"message": {"content": nested}} for _ in range(3)],
+    ]
+    with tempfile.TemporaryDirectory() as folder:
+        with (
+            patch.object(model_library, "post", side_effect=replies) as post,
+            patch.object(model_fitness, "grade_game_code") as grade_code,
+            patch.object(model_fitness, "grade_game_html") as grade_html,
+            patch.object(model_fitness, "gpu_vram_gb", return_value=12),
+            patch.object(model_library, "total_ram_gb", return_value=32),
+        ):
+            result = model_fitness.probe_game_coding("candidate:7b", folder)
+        assert post.call_count == 4
+        grade_code.assert_not_called()
+        grade_html.assert_not_called()
+        assert result["passed"] is False
+        assert [sample["checks"] for sample in result["samples"]] == [
+            {"valid_code": False},
+            {"valid_code": False},
+        ]
+        assert result["build"]["passed"] is False
+        assert result["build"]["checks"] == {"valid_html": False}
+        saved = json.loads(
+            (Path(folder) / "LongTasks/game-model-probes.json").read_text()
+        )
+        assert saved["candidate:7b"] == result
+
+
 def test_small_functions_alone_do_not_promote_new_game_builder():
     catalog = {
         "old": {"alias": "cale-fast", "source": "old:9b"},
