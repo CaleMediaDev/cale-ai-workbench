@@ -158,6 +158,8 @@ class Page(HTMLParser):
                 self.anchor = {"url": target, "parts": []}
         if tag in ("p", "div", "section", "br", "li", "h1", "h2", "h3", "tr"):
             self.text.append("\n")
+        elif tag in ("td", "th"):
+            self.text.append(" ")
 
     def handle_endtag(self, tag):
         if tag in ("script", "style", "noscript", "svg"):
@@ -166,6 +168,8 @@ class Page(HTMLParser):
             return
         if tag in ("p", "div", "section", "li", "h1", "h2", "h3", "tr"):
             self.text.append("\n")
+        elif tag in ("td", "th"):
+            self.text.append(" ")
         if tag == "title":
             self.in_title = False
         if tag == "a" and self.anchor:
