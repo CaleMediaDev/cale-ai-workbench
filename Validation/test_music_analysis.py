@@ -54,10 +54,14 @@ def test_analysis_records_same_chord_returning_after_silence(tmp_path, monkeypat
     source = tmp_path / "chord-gap.wav"
     source.touch()
     sample_rate = 22050
-    frames_per_segment = round(4 * sample_rate / 512)
-    chroma = np.zeros((12, 3 * frames_per_segment))
-    for start in (0, 2 * frames_per_segment):
-        chroma[[0, 4, 7], start:start + frames_per_segment] = 1.0
+    # The silent interval spans actual four/eight-second frame boundaries.
+    # Multiplying a rounded four-second interval puts one returning chord
+    # frame inside the intended silent interval at this sample rate.
+    def boundary(seconds):
+        return round(seconds * sample_rate / 512)
+    chroma = np.zeros((12, boundary(12)))
+    for start, end in ((boundary(0), boundary(4)), (boundary(8), boundary(12))):
+        chroma[[0, 4, 7], start:end] = 1.0
 
     librosa_stub = SimpleNamespace(
         get_duration=lambda *, path: 12.0,
@@ -125,3 +129,33 @@ def test_analysis_rejects_nonfinite_samples_before_feature_extraction(tmp_path, 
         librosa_stub.load = lambda *args, **kwargs: (signal, 22050)
         with pytest.raises(ValueError, match="nonfinite samples"):
             music_analysis.analyze_music(str(source))
+
+
+def test_analysis_chord_segment_boundaries_do_not_accumulate_rounding_drift(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    source = tmp_path / "long-chord-change.wav"
+    source.touch()
+    sample_rate = 22050
+    duration = 180
+    change_frame = round(176 * sample_rate / 512)
+    chroma = np.zeros((12, 1 + duration * sample_rate // 512))
+    chroma[[0, 4, 7], :change_frame] = 1.0
+    chroma[[2, 7, 11], change_frame:] = 1.0
+
+    librosa_stub = SimpleNamespace(
+        get_duration=lambda *, path: float(duration),
+        load=lambda *args, **kwargs: (np.full(duration * sample_rate, 0.1), sample_rate),
+        effects=SimpleNamespace(harmonic=lambda signal: signal),
+        feature=SimpleNamespace(chroma_stft=lambda **kwargs: chroma),
+        beat=SimpleNamespace(beat_track=lambda **kwargs: (0.0, np.array([]))),
+    )
+    monkeypatch.setitem(sys.modules, "librosa", librosa_stub)
+
+    result = music_analysis.analyze_music(str(source))
+
+    assert result["chord_changes"] == [
+        {"at_seconds": 0.0, "chord": "C major"},
+        {"at_seconds": 176.0, "chord": "G major"},
+    ]
