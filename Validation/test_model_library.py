@@ -119,6 +119,31 @@ class AutoModelTests(unittest.TestCase):
             standard.assert_called_once()
             delete.assert_called_once_with("old:large")
 
+    def test_retired_source_cleanup_accepts_404_but_retries_other_http_errors(self):
+        from urllib.error import HTTPError
+
+        for code, expected_removed, expected_pending in (
+            (404, 1, []),
+            (500, 0, ["old:large"]),
+        ):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                error = HTTPError("http://localhost/api/delete", code,
+                                  "delete failed", {}, None)
+                with (patch.object(library, "ROOT", root),
+                      patch.object(library, "CATALOG", {"main": {"alias": "cale-local"}}),
+                      patch.object(library, "post", return_value={
+                          "capabilities": ["tools"], "parameters": "num_ctx 131072\n"}),
+                      patch.object(library, "ensure_main_standard", return_value=True),
+                      patch.object(library, "owned_sources", return_value={"old:large"}),
+                      patch.object(library, "delete_model", side_effect=error) as delete):
+                    library.record_main_source("new:balanced", False)
+                    library.queue_retired_main_source("old:large")
+                    self.assertEqual(library.cleanup_retired_main_sources(), expected_removed)
+                    pending = root / "LongTasks/retired-main-sources.json"
+                    self.assertEqual(json.loads(pending.read_text()), expected_pending)
+                delete.assert_called_once_with("old:large")
+
     def test_owned_sources_recovers_from_non_string_list_entries(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
