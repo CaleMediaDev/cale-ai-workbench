@@ -95,6 +95,34 @@ def test_busy_index_is_not_moved_or_rebuilt():
         assert capability_index.health(root)["ok"]
 
 
+def test_non_object_specialist_snapshot_does_not_block_refresh():
+    from types import SimpleNamespace
+
+    async def list_tools():
+        return []
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        _, tools = fixture(root)
+        tool = tools[0]
+        modules = {
+            "native_agent": SimpleNamespace(TOOLS=[{"function": {
+                "name": tool["name"], "description": tool["description"],
+                "parameters": tool["schema"]}}]),
+            "toolbox_mcp": SimpleNamespace(
+                server=SimpleNamespace(list_tools=list_tools), LOCAL_CATALOG={}),
+        }
+        snapshot = capability_index.specialist_snapshot_path(root)
+        snapshot.parent.mkdir(parents=True)
+        with patch.dict("sys.modules", modules):
+            for value in (None, [], "invalid", 42):
+                snapshot.write_text(json.dumps(value), encoding="utf-8")
+                result = capability_index.sync(root)
+                assert result["skills"] == 1 and result["tools"] == 1
+                assert capability_index.search(root, "accessible", kind="skill")
+                assert capability_index.search(root, "image", kind="tool")[0]["name"] == "make_image"
+
+
 def test_specialist_snapshot_joins_fast_tool_index():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
