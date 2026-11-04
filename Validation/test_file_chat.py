@@ -137,6 +137,26 @@ def test_image_non_object_worker_response_reports_reader_failure(payload):
             file_chat.image_description(Path("garden.png"), "What is shown?")
 
 
+@pytest.mark.parametrize("suffix", [".pdf", ".docx"])
+def test_native_conversion_failure_only_falls_back_for_pdf(suffix):
+    converter_module = Mock()
+    converter_module.MarkItDown.return_value.convert.side_effect = RuntimeError("Native conversion failed")
+    result = Mock(returncode=0, stdout='{"has_scans": true, "text": "Recovered scanned content."}')
+    with (
+        patch.dict("sys.modules", {"markitdown": converter_module}),
+        patch.object(file_chat.Path, "is_file", return_value=True),
+        patch.object(file_chat.subprocess, "run", return_value=result) as worker,
+    ):
+        if suffix == ".pdf":
+            assert file_chat.document_text(Path("report" + suffix)) == "Recovered scanned content."
+            worker.assert_called_once()
+            assert '"action": "read_scanned_pdf"' in worker.call_args.kwargs["input"]
+        else:
+            with pytest.raises(RuntimeError, match="Native conversion failed"):
+                file_chat.document_text(Path("report" + suffix))
+            worker.assert_not_called()
+
+
 @pytest.mark.parametrize("worker_text", ['""', '"   "', "null"])
 def test_pdf_empty_scan_result_preserves_native_text(worker_text):
     converter_module = Mock()
