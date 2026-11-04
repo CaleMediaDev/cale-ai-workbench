@@ -49,8 +49,8 @@ def install():
     """Install the pinned synthesizer and verified weights once per PC."""
     import msvcrt
 
-    STATUS.parent.mkdir(exist_ok=True)
     try:
+        STATUS.parent.mkdir(exist_ok=True)
         lock_file = (STATUS.parent / "natural-voice.lock").open("a+b")
     except OSError as exc:
         save_download_status(STATUS, "error", str(exc)[:400], 0)
