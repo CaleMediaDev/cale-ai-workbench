@@ -225,6 +225,34 @@ the same request, page, input sequence and original active check; changes after
 the check, stale bindings and unrelated sequences cannot advance progress. Alignment itself
 does not complete the step: its acceptance check must still run and pass.
 
+Mistaken browser input actions have a separate explicit repair mode:
+`check_webapp` takes the same saved sequence/case/checksum reference,
+`revise_inputs:true`, and one corrected case. It replays the real sequence,
+including that case's input prefix. Only an actually passing selected case can
+replace its saved definition; other cases, sequences and failed verdicts remain.
+Input actions and mistaken assertions can be corrected together, avoiding a
+deadlock when neither correction could pass on its own. Source changes, stale
+references, changed instructions, custom verifiers and collisions with another
+saved input sequence reject the replacement. A worker-bound repair can align
+the same active SQLite definition without completing it. Neither the revision
+flag nor its one-time reference can be stored as repeatable step acceptance.
+Generated browser suites stay behind this checker API rather than raw file edits.
+
+An invalid legacy acceptance command can also trigger a bounded focused repair.
+For a small, single HTML page, Cale supplies observed control IDs and the full
+original request and short project rules. The model can revise only that active
+definition, with its phase/title fixed. The focused prompt retains browser test
+semantics: filling does not submit, clicks are explicit, and expected strings
+mean literal visible text. The actual checker still decides whether behavior
+passes; oversized requirements and exhausted focused attempts restore the normal
+reading/editing workflow.
+
+Failed form checks that fill known controls but never click or press a key can
+also receive a short checker-only decision turn. The observed form/submit IDs
+are a hypothesis, not proof that submission is necessary. The offered repair is
+pinned to one saved case and cannot edit source. After at most two focused
+attempts, or an explanation that source/evidence needs work, normal tools return.
+
 A browser step now records its own batch verdict separately from the retained
 project-wide verifier. Real passing checks can advance one small step while
 later incomplete features remain failed; the whole project still needs the

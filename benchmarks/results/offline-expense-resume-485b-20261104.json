@@ -1,0 +1,150 @@
+{
+  "scenario": "offline_expense_app",
+  "brief": "Create index.html, a complete single-file offline expense log for a small business.\nUse no accounts, external libraries, fonts, or network requests. Make it readable on a phone.\nThe form has accessible labels Description, Amount, and Category. Category choices are\nSupplies, Travel, Meals, and Other. Its button says Add expense. Show an expense table\nwith Description, Amount, Category, and a Delete button on each expense row.\nShow Total: $0.00 initially; display dollars with two decimal places and keep the total\ncorrect after adding and deleting entries. Reject a blank description, zero or negative\namount, and nonnumeric amounts, showing an accessible inline error with role=alert.\nDescriptions are plain text even when they contain HTML characters. Save entries on\nthis computer with localStorage. Reloading must preserve added entries and deletions.\nBuild actual working files using small SQLite steps for form validation, the expense\ntable/totals, and persistence. Save and run a repeatable verifier that exercises real\nform input and checks persistence across page reload. Keep PLAN.md and PROGRESS.md accurate.\n",
+  "seconds": 150.04,
+  "model_calls": 8,
+  "tool_calls": 8,
+  "prompt_tokens": 83452,
+  "completion_tokens": 3914,
+  "tools_used": [
+    "check_webapp",
+    "check_webapp",
+    "read_file",
+    "check_webapp",
+    "read_file",
+    "check_webapp",
+    "check_webapp",
+    "read_file"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": "balanced",
+      "seconds": 15.8
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": "balanced",
+      "seconds": 33.7
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 16.14
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 11.97
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 13.2
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 14.63
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 14.16
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 9.82
+    }
+  ],
+  "router_call_attempts": 9,
+  "upstream_local_calls": 10,
+  "time_budget_exhausted": true,
+  "token_usage_incomplete": true,
+  "inference_budget_seconds": 150.0,
+  "grade_seconds": 35.56,
+  "total_seconds": 185.61,
+  "resumed": true,
+  "initial_turns": 113,
+  "initial_source_sha256": "47115614fc3924d421261036a9183b630b1dfaa48f71f5aec954d2841249b8de",
+  "checkpoint_status": "running",
+  "inference_error": "TimeoutError: timed out",
+  "grade": {
+    "browser": {
+      "checks": {},
+      "errors": [
+        "TimeoutError: Locator.evaluate: Timeout 30000ms exceeded.\nCall log:\n  - waiting for get_by_label(re.compile(r\"^Category\\s*:?\\s*$\", re.IGNORECASE))\n"
+      ],
+      "remote_requests": [],
+      "passed": false
+    },
+    "verifier_passes_correct": false,
+    "verifier_rejects_missing_javascript": false,
+    "mutation_status": "not_run_baseline_verifier_failed",
+    "steps": {
+      "total": 4,
+      "done": 1,
+      "remaining": 3
+    },
+    "passed": false
+  },
+  "run_outcome": "failed",
+  "independent_check_diagnostics": []
+}

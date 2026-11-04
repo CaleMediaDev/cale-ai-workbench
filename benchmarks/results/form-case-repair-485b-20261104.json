@@ -1,0 +1,102 @@
+{
+  "scenario": "isolated_form_case_repair",
+  "seconds": 31.22,
+  "model_calls": 2,
+  "tool_calls": 2,
+  "prompt_tokens": 10823,
+  "completion_tokens": 892,
+  "tools_used": [
+    "check_webapp",
+    "check_webapp"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": "balanced",
+      "seconds": 12.81
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 11.14
+    }
+  ],
+  "operations": [
+    {
+      "tool": "check_webapp",
+      "action": null,
+      "revise_inputs": false,
+      "passed": false,
+      "active_step_check_aligned": false,
+      "tool_error": false
+    },
+    {
+      "tool": "task_steps",
+      "action": "complete",
+      "revise_inputs": false,
+      "passed": false,
+      "active_step_check_aligned": false,
+      "tool_error": false
+    },
+    {
+      "tool": "check_webapp",
+      "action": null,
+      "revise_inputs": true,
+      "passed": true,
+      "active_step_check_aligned": true,
+      "tool_error": false
+    },
+    {
+      "tool": "check_webapp",
+      "action": null,
+      "revise_inputs": false,
+      "passed": true,
+      "active_step_check_aligned": false,
+      "tool_error": false
+    },
+    {
+      "tool": "task_steps",
+      "action": "complete",
+      "revise_inputs": false,
+      "passed": true,
+      "active_step_check_aligned": false,
+      "tool_error": false
+    },
+    {
+      "tool": "check_webapp",
+      "action": null,
+      "revise_inputs": true,
+      "passed": false,
+      "active_step_check_aligned": false,
+      "tool_error": true
+    }
+  ],
+  "router_call_attempts": 2,
+  "upstream_local_calls": 2,
+  "inference_error": null,
+  "checkpoint_status": "continue",
+  "initial_failed_attempts": 1,
+  "source_sha256": "f8649d574835f01fed95871af128bb38f0adc614751b3ac3cd2189e493b23d61",
+  "worker_turns_per_slice": 1,
+  "checkpoint_current": "check_webapp: Tool error: ValueError: Use the saved sequence index from the failed checker result",
+  "completion_issue": "Run check_webapp on the saved HTML page with actual input changes, expected visible results or exported live state, invalid states, and mobile fit. Fix failures and rerun it after the last page edit.",
+  "steps": {
+    "total": 1,
+    "done": 1,
+    "remaining": 0
+  },
+  "grade": {
+    "source_unchanged": true,
+    "saved_case_submits_and_expects_36": true,
+    "sql_definition_aligned": true,
+    "sql_unit_completed": true,
+    "real_output_36": true,
+    "global_verifier_passed": true
+  },
+  "passed": true,
+  "limitation": "Seeded mistaken no-submit checker on an existing correct tiny app; not an app build."
+}

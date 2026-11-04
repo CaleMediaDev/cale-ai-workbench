@@ -493,7 +493,16 @@ class ToolArgumentError(ValueError):
         kind = ("null" if error.instance is None else "boolean" if type(error.instance) is bool else
                 "object" if isinstance(error.instance, dict) else "array" if isinstance(error.instance, list) else
                 "string" if isinstance(error.instance, str) else "number")
-        if error.validator == "required" and isinstance(error.instance, dict):
+        forbidden = error.validator_value.get("enum") if isinstance(error.validator_value, dict) else None
+        if (name == "task_steps" and error.validator == "not"
+                and len(self.path) == 3 and self.path[0] == "steps"
+                and type(self.path[1]) is int and self.path[2] == "check_command"
+                and isinstance(forbidden, list)
+                and all(tool in forbidden for tool in ("write_file", "check_webapp", "task_steps"))
+                and isinstance(error.instance, str) and error.instance in forbidden):
+            detail = ("Cale tool names are not shell commands. Use check_tool with its typed "
+                      "check_arguments, or a real repeatable shell command")
+        elif error.validator == "required" and isinstance(error.instance, dict):
             missing = [key for key in error.validator_value if key not in error.instance]
             if missing:
                 self.path.append(str(missing[0])[:160])

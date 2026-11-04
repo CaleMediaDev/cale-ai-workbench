@@ -1,5 +1,40 @@
 # Native worker reality check
 
+## Saved form-case recovery, v0.5.485
+
+`form_case_repair.py` isolates checker recovery on an already-correct tiny
+calculator. Its saved case fills `7.2`, forgets Compute, and expects the wrong
+literal text. The actual local worker must repair that case, run real browser
+acceptance and the retained verifier, complete the SQLite unit, and preserve
+the source bytes. The model receives the original behavior requirement, not
+a supplied repair call. Run it explicitly with the installed runtime:
+
+```powershell
+python benchmarks/form_case_repair.py --runtime-root ..\Hermes-Agent --output result.json --max-seconds 60
+```
+
+The `form-case-repair-485a-20261104.json` receipt retains an overall failure:
+the repair and all six independent component checks succeeded, but the default
+multi-turn worker continued follow-up work and hit its inference deadline.
+The subsequent `485b` receipt uses one-inference slices so its controller can
+observe the component boundary. It passed in 31.22 seconds with two local
+calls, a completed SQL unit, unchanged source and a passing real verifier.
+The checkpoint still says `continue`; the ordinary whole-project browser gate
+requires additional interaction coverage. This is an isolated repair result,
+not an unassisted app build or a general speed claim.
+
+The resumed expense-app receipts `484`, `485a` and `485b` remain failed at one
+of four SQLite units. Their independent browser grader cannot find the correctly
+associated Category label. The new repair API does not establish that the
+model can finish this larger task. Its failed receipts remain alongside the
+component result so passing a smaller probe cannot substitute for app quality.
+
+`offline-expense-app-485-20261104.json` is also a failed fresh build, with the
+original brief and no seeded source. Its 300-second inference budget expired;
+no SQLite units were created despite that explicit requirement. The independent
+browser checks and saved verifier failed. Mandatory initial planning and broader
+task completion remain work to do; the isolated repair pass does not resolve them.
+
 ## Community report review
 
 The [v0.5.471 review evidence](results/report-review-20261104.json) records
