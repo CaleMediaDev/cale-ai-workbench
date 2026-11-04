@@ -125,7 +125,7 @@ def start_background(root: Path = ROOT) -> None:
 
     def repair() -> None:
         try:
-            ensure(root)
+            ensure(resolved_root)
         except (OSError, RuntimeError, subprocess.TimeoutExpired):
             pass  # The checklist remains in attention; retry after five minutes.
         else:
