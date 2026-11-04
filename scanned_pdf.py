@@ -24,8 +24,6 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
     """Combine native page text with bounded local vision transcription."""
     import pypdfium2 as pdfium
 
-    from media_worker import recognize_image
-
     source = Path(path).expanduser().resolve(strict=True)
     if not source.is_file() or source.suffix.casefold() != ".pdf":
         raise ValueError("Choose an existing PDF file.")
@@ -49,6 +47,9 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
             finally:
                 page.close()
         selected = {scan_indices[position] for position in sampled_pages(len(scan_indices), max_pages)}
+        if selected:
+            from media_worker import recognize_image
+
         passages = []
         for index in range(total):
             if index in native:
