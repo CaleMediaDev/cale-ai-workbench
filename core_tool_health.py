@@ -82,7 +82,7 @@ def _agent_launcher_works(root: Path) -> bool:
 def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     """Probe actual executables, cached briefly to keep the desktop responsive."""
     global _cached_root, _cached_missing, _last_check
-    root = Path(root)
+    root = Path(root).resolve()
     if not fresh and root == _cached_root and time.monotonic() - _last_check < CHECK_INTERVAL:
         return list(_cached_missing)
     box = root / "Toolbox"
