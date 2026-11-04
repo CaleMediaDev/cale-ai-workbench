@@ -80,7 +80,7 @@ def record(root: str | Path, task: dict, rating: int, note: str = "") -> int:
             VALUES (?,?,?,?,?,?,?,?)
             ON CONFLICT(task_id,generation,rating) DO UPDATE SET
                 kind=excluded.kind, title=excluded.title, brief=excluded.brief,
-                note=excluded.note""",
+                note=excluded.note, created=excluded.created""",
             (str(task["id"]), int(task.get("generation", 0)), kind_for(task), rating,
              str(task.get("title", ""))[:200], str(task.get("brief", ""))[:4000],
              note, time.time()),
