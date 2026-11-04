@@ -21,8 +21,6 @@ def social_reply(utterance: str) -> str:
     if not words:
         return "I'm listening. What's up?"
 
-    from cloud_ai import FAST_MODEL, post
-
     messages = [
         {"role": "system", "content": (
             "You are Cale, a male local desktop assistant talking to someone in the room. "
@@ -35,6 +33,8 @@ def social_reply(utterance: str) -> str:
         {"role": "user", "content": words[:500]},
     ]
     try:
+        from cloud_ai import FAST_MODEL, post
+
         result = post(
             "http://127.0.0.1:11434/v1/chat/completions",
             {"model": FAST_MODEL, "messages": messages, "stream": False,
@@ -49,6 +49,6 @@ def social_reply(utterance: str) -> str:
             answer = " ".join(content.strip().strip('"').split())
             if answer and len(answer) <= 240 and len(answer.split()) < 35:
                 return answer
-    except (KeyError, IndexError, TypeError, AttributeError, OSError, ValueError, TimeoutError):
+    except (ImportError, KeyError, IndexError, TypeError, AttributeError, OSError, ValueError, TimeoutError):
         pass
     return "I heard you. What do you need?"

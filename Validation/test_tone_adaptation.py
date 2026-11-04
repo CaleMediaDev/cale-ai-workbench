@@ -24,6 +24,11 @@ class ToneAdaptationTests(unittest.TestCase):
         self.assertIn("You are useless.", messages[-1]["content"])
         self.assertIn("rude", messages[0]["content"])
 
+    def test_missing_model_dependency_leaves_a_short_reply(self):
+        with patch.dict("sys.modules", {"cloud_ai": None}):
+            self.assertEqual(tone_adaptation.social_reply("Hello"),
+                             "I heard you. What do you need?")
+
     def test_model_failure_leaves_a_short_reply(self):
         with patch("cloud_ai.post", side_effect=OSError("offline")):
             self.assertEqual(tone_adaptation.social_reply("Hello"),
