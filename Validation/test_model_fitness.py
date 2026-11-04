@@ -269,6 +269,23 @@ def test_game_grader_has_time_and_node_permission_limits():
     assert "timeout:1000" in run.call_args.args[0][-1]
 
 
+def test_game_grader_outer_timeout_marks_code_invalid():
+    with (
+        patch("shutil.which", return_value="node"),
+        patch.object(
+            model_fitness.subprocess,
+            "run",
+            side_effect=model_fitness.subprocess.TimeoutExpired("node", 8),
+        ) as run,
+    ):
+        assert model_fitness.grade_game_code(
+            "Promise.resolve().then(function spin(){Promise.resolve().then(spin);});",
+            Path("missing"),
+        ) == {"valid_code": False}
+    run.assert_called_once()
+    assert run.call_args.kwargs["timeout"] == 8
+
+
 def test_repeated_slow_completions_disqualify_model():
     with patch.object(model_fitness, "measured_speed", return_value=2.2):
         assert not model_fitness.suitable("cale-qwen35", 20.6, 128, 12)
