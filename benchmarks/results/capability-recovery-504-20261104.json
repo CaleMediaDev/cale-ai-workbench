@@ -13,6 +13,8 @@
   },
   "actual_local_model_trial": {
     "model": "cale-qwen36",
+    "model_role": "helper generation",
+    "resume_model": "cale-qwen35",
     "scenario": "Existing billing module imports an absent local helper; original tax rounding and formatting acceptances include half-cent and fractional-cent inputs",
     "helper_seeded": false,
     "model_stub": false,
