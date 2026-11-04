@@ -304,6 +304,43 @@ def test_preview_backend_errors_preserve_successful_browser_result(tmp_path):
         asyncio.run(check(failing_stage))
 
 
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_failed_browser_capture_removes_temporary_image(tmp_path, cancelled):
+    image = tmp_path / ".local-ai/browser.png"
+    image.parent.mkdir()
+    image.write_bytes(b"previous preview")
+    captures = []
+
+    class FakeSession:
+        async def call_tool(self, name, arguments):
+            if name == "list_pages":
+                return SimpleNamespace(
+                    is_error=False,
+                    content=[SimpleNamespace(text="1: https://example.com [selected]")],
+                )
+            assert name == "take_screenshot"
+            temporary = image.parent / arguments["filePath"]
+            captures.append(temporary)
+            temporary.write_bytes(b"incomplete capture")
+            if cancelled:
+                raise asyncio.CancelledError()
+            raise OSError("Screenshot transport failed after writing")
+
+    async def check():
+        with (patch.dict(toolbox_mcp.SESSIONS, {"devtools": FakeSession()}, clear=True),
+              patch.object(toolbox_mcp, "registered_project", return_value=tmp_path)):
+            if cancelled:
+                with pytest.raises(asyncio.CancelledError):
+                    await toolbox_mcp.mirror_chrome_page(str(tmp_path))
+            else:
+                await toolbox_mcp.mirror_chrome_page(str(tmp_path))
+        assert len(captures) == 1
+        assert not captures[0].exists()
+        assert image.read_bytes() == b"previous preview"
+
+    asyncio.run(check())
+
+
 def test_concurrent_browser_previews_publish_their_own_captures(tmp_path):
     async def check():
         first_written = asyncio.Event()
