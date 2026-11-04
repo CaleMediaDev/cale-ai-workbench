@@ -74,7 +74,8 @@ def ensure(root: Path = ROOT) -> Path:
                       "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"]
             found = subprocess.run(locate, capture_output=True, text=True,
                                    timeout=30, creationflags=HIDE)
-            if found.returncode or not Path(found.stdout.strip()).is_file():
+            source = Path(shutil.which(found.stdout.strip()) or found.stdout.strip())
+            if found.returncode or not source.is_file():
                 install = subprocess.run(
                     [str(python), "-m", "pip", "install", "--disable-pip-version-check",
                      "imageio-ffmpeg==0.6.0"], capture_output=True, text=True,
@@ -85,7 +86,7 @@ def ensure(root: Path = ROOT) -> Path:
                                        (install.stderr or install.stdout)[-300:])
                 found = subprocess.run(locate, capture_output=True, text=True,
                                        timeout=30, creationflags=HIDE)
-            source = Path(found.stdout.strip())
+            source = Path(shutil.which(found.stdout.strip()) or found.stdout.strip())
             if found.returncode or not source.is_file():
                 raise RuntimeError("The FFmpeg package did not provide an executable")
             staged = target.with_name(f"ffmpeg.{os.getpid()}.tmp.exe")

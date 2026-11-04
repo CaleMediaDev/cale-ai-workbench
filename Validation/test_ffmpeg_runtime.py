@@ -37,6 +37,36 @@ def test_missing_ffmpeg_is_installed_and_validated(tmp_path):
         assert ffmpeg_runtime.working(tmp_path)
 
 
+def test_ensure_resolves_discovered_ffmpeg_command_on_path(tmp_path):
+    from unittest.mock import MagicMock
+
+    python = tmp_path / "Toolbox/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"mock Python runtime")
+    source = tmp_path / "system-bin/ffmpeg.exe"
+    source.parent.mkdir()
+    source.write_bytes(b"mock FFmpeg executable")
+    discovered = subprocess.CompletedProcess([], 0, "ffmpeg\n", "")
+
+    with patch.dict(sys.modules, {"msvcrt": MagicMock()}), \
+            patch.object(ffmpeg_runtime, "working", side_effect=[False, False, True]), \
+            patch.object(ffmpeg_runtime.shutil, "which", return_value=str(source)) as which, \
+            patch.object(ffmpeg_runtime.subprocess, "run", return_value=discovered) as run:
+        target = ffmpeg_runtime.ensure(tmp_path)
+
+    assert target == ffmpeg_runtime.executable(tmp_path)
+    assert target.read_bytes() == source.read_bytes()
+    assert which.call_count == 2
+    which.assert_called_with("ffmpeg")
+    # Only discovery is needed: do not invoke pip for an executable on PATH.
+    run.assert_called_once_with(
+        [str(python), "-c",
+         "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"],
+        capture_output=True, text=True, timeout=30,
+        creationflags=ffmpeg_runtime.HIDE,
+    )
+
+
 @pytest.mark.parametrize("stdout,returncode,expected", [
     (b"ffmpeg version 7.0\n", 0, True),
     (b"ffmpeg version 7.0\nconfiguration: --extra-version=\xff\n", 0, True),
