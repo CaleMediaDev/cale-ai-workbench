@@ -99,6 +99,8 @@ def image_description(path: Path, question: str) -> str:
     )
     try:
         answer = json.loads(result.stdout.splitlines()[-1])
+        if not isinstance(answer, dict):
+            raise ValueError("Expected an image response object.")
     except (IndexError, ValueError) as exc:
         raise RuntimeError("The local image reader did not respond.") from exc
     if result.returncode or "error" in answer:

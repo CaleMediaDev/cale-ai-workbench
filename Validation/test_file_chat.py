@@ -117,6 +117,17 @@ def test_long_file_answer_discloses_omitted_sections(tmp_path):
 
 
 @pytest.mark.parametrize("payload", ["null", "[]", "42", '"text"'])
+def test_image_non_object_worker_response_reports_reader_failure(payload):
+    result = Mock(returncode=0, stdout=payload)
+    with (
+        patch.object(file_chat.Path, "is_file", return_value=True),
+        patch.object(file_chat.subprocess, "run", return_value=result),
+    ):
+        with pytest.raises(RuntimeError, match="The local image reader did not respond"):
+            file_chat.image_description(Path("garden.png"), "What is shown?")
+
+
+@pytest.mark.parametrize("payload", ["null", "[]", "42", '"text"'])
 @pytest.mark.parametrize("native_text", ["Native PDF content.", ""])
 def test_pdf_non_object_worker_response_uses_existing_recovery(payload, native_text):
     converter_module = Mock()
