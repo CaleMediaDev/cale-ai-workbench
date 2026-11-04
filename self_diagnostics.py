@@ -28,6 +28,7 @@ MAX_SECONDS = 20 * 60
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 LOW_PRIORITY = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
 HISTORY_LIMIT = 3
+HISTORY_READ_BYTES = 32000
 _ACTIVITY_REASONS = {"active_projects", "project_db_unavailable", "activity_unknown"}
 _SQLITE_ERRORS = {"Error", "DatabaseError", "DataError", "IntegrityError", "InterfaceError",
                   "InternalError", "NotSupportedError", "OperationalError", "ProgrammingError"}
@@ -107,8 +108,14 @@ def _retain_previous_attempt(state: Path, report: dict) -> None:
                 item["log_tail"] = _safe_log_lines(stream.read(8192).decode("utf-8", "replace").splitlines())
         target = state / "self-check-history.json"
         try:
-            previous = _read(target) if target.is_file() and target.stat().st_size <= 32000 else {}
-        except (RecursionError, OverflowError):
+            # Bound the actual read, not a prior stat: another writer can
+            # replace or grow optional history between inspection and open.
+            with target.open("rb") as stream:
+                raw = stream.read(HISTORY_READ_BYTES + 1)
+            previous = json.loads(raw.decode("utf-8")) if len(raw) <= HISTORY_READ_BYTES else {}
+            if not isinstance(previous, dict):
+                previous = {}
+        except (OSError, ValueError, RecursionError, OverflowError):
             previous = {}  # Damaged optional history must not hide this attempt.
         rows = previous.get("attempts", [])
         rows = rows[-HISTORY_LIMIT:] if isinstance(rows, list) else []

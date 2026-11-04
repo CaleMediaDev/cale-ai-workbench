@@ -140,6 +140,53 @@ def test_malformed_optional_history_never_prevents_validation_launch(tmp_path):
         assert json.loads(retained)["attempts"][-1]["checked_at"] == 1
 
 
+def test_history_growth_is_bounded_at_read_and_oversized_bytes_are_not_decoded(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    history = state / "self-check-history.json"
+    history.write_text("{}")
+    (state / "self-check.json").write_text(json.dumps({
+        "version": diagnostics.version(root), "status": "deferred", "checked_at": 1}))
+    marker = "OVERSIZED_HISTORY_MARKER"
+    grown = (json.dumps({"unused": marker, "attempts": []}) + " " * 64000).encode()
+    real_open, real_loads = Path.open, json.loads
+    read_sizes, decoded_oversized = [], []
+
+    class ObservedReader:
+        def __init__(self, stream):
+            self.stream = stream
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+        def read(self, size=-1):
+            read_sizes.append(size)
+            return self.stream.read(size)
+
+    def growing_open(path, mode="r", *args, **kwargs):
+        if path == history and mode in {"r", "rb"}:
+            # Replace a small, already-inspected file immediately before read.
+            with real_open(path, "wb") as stream:
+                stream.write(grown)
+            return ObservedReader(real_open(path, mode, *args, **kwargs))
+        return real_open(path, mode, *args, **kwargs)
+
+    def tracked_loads(value, *args, **kwargs):
+        if marker in (value.decode() if isinstance(value, bytes) else value):
+            decoded_oversized.append(True)
+        return real_loads(value, *args, **kwargs)
+
+    with patch.object(Path, "open", growing_open), patch.object(diagnostics.json, "loads", tracked_loads), patch.object(
+            diagnostics, "active_projects", return_value=False), patch.object(diagnostics.subprocess,
+            "Popen", return_value=SimpleNamespace(pid=123)) as launch, patch("psutil.Process") as proc:
+        proc.return_value.create_time.return_value = 100
+        assert diagnostics.schedule(root, state, now=100)
+    launch.assert_called_once()
+    assert not decoded_oversized
+    assert read_sizes == [32001]
+    assert history.stat().st_size < 32000 and marker not in history.read_text()
+
+
 class SelfDiagnosticsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
