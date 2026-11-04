@@ -183,9 +183,12 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
         )
         # A restarted or revised plan may lower progress. Retire old samples so
         # an unrelated previous estimate cannot contaminate the new one.
-        if row and percent < previous:
+        restarted = bool(row and percent < previous)
+        if restarted:
             conn.execute("DELETE FROM task_eta_samples WHERE task_id=?", (task_id,))
-        if active and percent > previous and percent < 95:
+        # The lowered progress is the first observation of the revised run.
+        # Keep it as the new baseline rather than waiting for another increase.
+        if active and (percent > previous or restarted) and percent < 95:
             conn.execute("""INSERT OR REPLACE INTO task_eta_samples
                 (task_id,percent,active_seconds,observed) VALUES(?,?,?,?)""",
                 (task_id, percent, elapsed, now),
