@@ -1,0 +1,20 @@
+{
+  "release": "0.5.498",
+  "source_before_metadata": "d5caff5d892dfde2cfa0c8ef850a24270291e0fa",
+  "accepted_prs": [
+    {"number": 629, "head": "e6179fa434f1c70d8d56528e9f03d47e45a6fe76", "merge": "4ab802de9398d2a6465f5bf0adaaf1be0a2bdd34", "baseline": "Added regression fails with FileNotFoundError on interleaved setup writers.", "candidate": "Full music suite: 98 passed."},
+    {"number": 590, "head": "2dd572431f9dbc9b8422ae605e17d545a3976a10", "merge": "7a374d5bec32d50ac00482c1f3740b1d35707f51", "baseline": "Real browser snapshot regression fails because a form control named labels shadows the labels property."},
+    {"number": 607, "original_head": "a19a73ba5ea13f010d1252bed214bf99bc1c0685", "head": "580453dde44e825fad737b286bfd166d43a4f458", "merge": "d5caff5d892dfde2cfa0c8ef850a24270291e0fa", "correction": "Test only: Python 3.13 decodes the original 1100-level input successfully; a bounded 8000-level input reaches its real nesting guard.", "baseline": "Corrected regression fails with real JSON RecursionError.", "candidate": "Full routing suite: 54 passed, 39 subtests."}
+  ],
+  "combined_validation": {
+    "command": "python -m pytest -q Validation/test_music_backend.py Validation/test_native_browser.py Validation/test_auto_route.py",
+    "exit_code": 0,
+    "passed": 185,
+    "skipped": 2,
+    "subtests_passed": 39,
+    "seconds": 23.29,
+    "counts_overlap_prior_focused_runs": true
+  },
+  "excluded": "Private assertion-repair facade, ownership-priority, typed-target and requested-note experiments. End-to-end local expense task still failed its last trial; no completion claim.",
+  "runtime_manifest_entries": 250
+}
