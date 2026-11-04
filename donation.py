@@ -286,6 +286,12 @@ def local_completion(payload: dict, intensity: str, cancel, on_usage):
     return result
 
 
+def proposal_cooldown_key(resource, job, revision, scope_sha):
+    """One resource/job/pinned source family, never a global model quarantine."""
+    identity = json.dumps([job["id"], scope_sha or revision], separators=(",", ":"))
+    return "proposal:" + resource + ":" + hashlib.sha256(identity.encode()).hexdigest()
+
+
 def valid_proposal_url(url):
     """A successful submission names an actual PR in the canonical upstream."""
     return isinstance(url, str) and bool(re.fullmatch(
@@ -538,6 +544,8 @@ def allowed_path(path: str) -> bool:
 
 def validate_proposal(text: str, sources: dict[str, str]) -> tuple[dict, dict[str, str]]:
     """Apply bounded exact edits in memory and parse changed Python; run no code."""
+    if not isinstance(text, str):
+        raise ValueError("Contribution must be JSON text")
     text = text.strip()
     if text.startswith("```json") and text.endswith("```"):
         text = text[7:-3].strip()
@@ -1060,6 +1068,8 @@ class Service:
                 check_cancel()
                 candidate_blobs = candidate.get("_scope_blobs", blobs)
                 fingerprint = scope_fingerprint(candidate, candidate_blobs)
+                if resource_cooldown(self.root, proposal_cooldown_key(resource, candidate, revision, fingerprint)):
+                    continue
                 backfill_reviewed_scope(self.root, candidate, check_cancel)
                 if scope_suppressed(self.root, candidate["id"], fingerprint):
                     continue
@@ -1121,7 +1131,19 @@ class Service:
             check_cancel()
             text = result["choices"][0]["message"].get("content") or ""
             self._emit_event("checking", run_id, resource, job_title=job.get("title", ""))
-            proposal, edited = validate_proposal(text, sources)
+            try:
+                proposal, edited = validate_proposal(text, sources)
+            except (ValueError, SyntaxError):
+                # Bad exact edits/JSON/Python are not GitHub or ledger outages.
+                # Keep actual usage and failure status; try another approved
+                # area instead of sleeping the whole continuous worker.
+                finish(self.root, run_id, "failed")
+                resource_cooldown(self.root, proposal_cooldown_key(resource, job, revision, fingerprint), 300)
+                self._emit_event("error", run_id, resource, job_title=job.get("title", ""))
+                if consent["intensity"] in {"medium", "full_blast"}:
+                    self.next_attempt = 0
+                self.message = "Proposed edits failed validation · trying another public review area."
+                return
             if not edited:
                 finish(self.root, run_id, "no_change")
                 self._emit_event("no_change", run_id, resource, job_title=job.get("title", ""))

@@ -1868,3 +1868,43 @@ def test_donation_chat_names_only_known_human_resource_labels(resource,label):
     consumer=donation_ui.ChatActivity(SimpleNamespace(drain_events=lambda:[{'run_id':'x','phase':'reviewing','job_title':'Review PDF export','resource':resource}]),messages.append)
     consumer.poll()
     assert f'using {label}' in messages[0] and 'lane' not in messages[0]
+def test_invalid_local_proposal_cools_only_job_scope_then_reviews_other_area(tmp_path):
+    donation.set_enabled(True,tmp_path,github_account='donor',sources=['local'],intensity='medium')
+    service=donation.Service(tmp_path);jobs=[{**JOB,'id':'area-one'},{**JOB,'id':'area-two'}];seen=[]
+    def complete(payload,*args):
+        job=json.loads(payload['messages'][1]['content'])['task'];seen.append(job['id'])
+        return {'choices':[{'message':{'content':'INVALID_PATCH_JSON' if len(seen)==1 else '{"changes":[]}'}}]}
+    def public(path,revision):return json.dumps(jobs) if path=='donation-tasks.json' else SOURCES[path]
+    with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
+         patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
+         patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
+         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal') as publish,\
+         patch.object(donation.threading,'Thread',DonationInlineThread):
+        service.tick()
+        assert service.next_attempt==0 and service.failures==0
+        service.tick()
+        assert len(seen)==2 and seen[0]!=seen[1]
+        service.tick()  # Failed area cools; no-change area retains normal reservation.
+        assert len(seen)==2
+    publish.assert_not_called()
+    with closing(donation.connection(tmp_path)) as conn:
+        assert [r[0] for r in conn.execute('SELECT status FROM runs ORDER BY started')]==['failed','no_change']
+        keys=[r[0] for r in conn.execute("SELECT resource FROM cooldowns WHERE resource LIKE 'proposal:local:%'")]
+    assert len(keys)==1 and donation.resource_cooldown(tmp_path,'local')==0
+    assert donation.resource_cooldown(tmp_path,keys[0])>0
+
+def test_proposal_cooldown_is_bound_to_resource_job_and_full_source_scope(tmp_path):
+    first=donation.proposal_cooldown_key('local',JOB,'a'*40,'b'*64)
+    assert first==donation.proposal_cooldown_key('local',JOB,'c'*40,'b'*64)
+    assert first!=donation.proposal_cooldown_key('local',JOB,'a'*40,'d'*64)
+    assert first!=donation.proposal_cooldown_key('chatgpt',JOB,'a'*40,'b'*64)
+    assert first!=donation.proposal_cooldown_key('local',{**JOB,'id':'other'},'a'*40,'b'*64)
+    donation.resource_cooldown(tmp_path,first,300)
+    assert donation.resource_cooldown(tmp_path,donation.proposal_cooldown_key('local',JOB,'c'*40,'b'*64))>0
+    assert donation.resource_cooldown(tmp_path,donation.proposal_cooldown_key('local',JOB,'a'*40,'d'*64))==0
+
+
+def test_non_text_proposal_is_rejected_as_validation_without_an_attribute_error():
+    with pytest.raises(ValueError,match='JSON text'):
+        donation.validate_proposal({'changes':[]},SOURCES)
