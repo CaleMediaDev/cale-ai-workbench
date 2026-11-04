@@ -82,6 +82,46 @@ def test_native_pdf_does_not_require_vision_worker(tmp_path):
     document.close.assert_called_once_with()
 
 
+def test_unavailable_vision_worker_preserves_native_text_and_reports_omission(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    pdf = tmp_path / "mixed-without-worker.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    native_textpage = Mock()
+    native_textpage.get_text_bounded.return_value = "Native order"
+    scan_textpage = Mock()
+    scan_textpage.get_text_bounded.return_value = ""
+    native_page = Mock()
+    native_page.get_textpage.return_value = native_textpage
+    scan_page = Mock()
+    scan_page.get_textpage.return_value = scan_textpage
+    document = Mock()
+    document.__len__ = Mock(return_value=2)
+    document.__getitem__ = Mock(side_effect=lambda index: [native_page, scan_page][index])
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(PdfDocument=Mock(return_value=document)),
+        "media_worker": None,
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert "[Page 1; selectable text]\nNative order" in result["text"]
+    assert "[1 scanned pages were not read: 2.]" in result["text"]
+    assert "[Page 2; vision transcription]" not in result["text"]
+    assert result["pages_read"] == [1]
+    assert result["scanned_pages"] == [2]
+    assert result["has_scans"] is True
+    assert result["partial"] is True
+    native_page.render.assert_not_called()
+    scan_page.render.assert_not_called()
+    native_textpage.close.assert_called_once_with()
+    scan_textpage.close.assert_called_once_with()
+    native_page.close.assert_called_once_with()
+    scan_page.close.assert_called_once_with()
+    document.close.assert_called_once_with()
+
+
 def test_text_layer_error_falls_back_to_vision_and_preserves_native_text(tmp_path):
     import sys
     from unittest.mock import Mock
