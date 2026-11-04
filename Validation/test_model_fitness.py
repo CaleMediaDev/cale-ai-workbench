@@ -187,6 +187,26 @@ def test_game_ranking_uses_matching_weights_hardware_quality_and_wall_time():
             assert rank() == ["new", "cale-fast"]
 
 
+def test_game_ranking_nested_cache_falls_back_and_allows_retry():
+    catalog = {
+        "old": {"alias": "cale-fast", "source": "old:9b"},
+        "new": {"alias": "new", "source": "new:e4b", "coding_probe": True},
+    }
+    depth = max(5000, sys.getrecursionlimit() + 100)
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        (root / "LongTasks").mkdir()
+        path = root / "LongTasks/game-model-probes.json"
+        path.write_text("[" * depth + "0" + "]" * depth, encoding="utf-8")
+        assert model_fitness.rank_game_models(
+            ["new", "cale-fast"], catalog, root
+        ) == ["cale-fast"]
+        path.write_text("{}", encoding="utf-8")
+        assert model_fitness.rank_game_models(
+            ["new", "cale-fast"], catalog, root
+        ) == ["cale-fast"]
+
+
 def test_game_probe_requires_two_complete_independent_passes():
     with tempfile.TemporaryDirectory() as folder:
         checks = {str(i): True for i in range(13)}
