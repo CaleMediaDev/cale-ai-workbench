@@ -11,6 +11,7 @@ import sqlite3
 import time
 import json
 import statistics
+import math
 from contextlib import closing
 from pathlib import Path
 
@@ -42,8 +43,11 @@ def total_time(created: float, updated: float, status: str,
     if start <= 0:
         return "—"
     if status in ("ready_for_review", "accepted", "stopped"):
-        end = float(finished or 0) or last_change
-        if end < start:
+        try:
+            end = float(finished or 0) or last_change
+        except (TypeError, ValueError, OverflowError):
+            end = last_change
+        if not math.isfinite(end) or end < start:
             end = last_change
     else:
         end = now
