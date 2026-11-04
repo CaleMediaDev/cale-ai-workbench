@@ -1,0 +1,252 @@
+{
+  "scenario": "offline_expense_app",
+  "brief": "Create index.html, a complete single-file offline expense log for a small business.\nUse no accounts, external libraries, fonts, or network requests. Make it readable on a phone.\nThe form has accessible labels Description, Amount, and Category. Category choices are\nSupplies, Travel, Meals, and Other. Its button says Add expense. Show an expense table\nwith Description, Amount, Category, and a Delete button on each expense row.\nShow Total: $0.00 initially; display dollars with two decimal places and keep the total\ncorrect after adding and deleting entries. Reject a blank description, zero or negative\namount, and nonnumeric amounts, showing an accessible inline error with role=alert.\nDescriptions are plain text even when they contain HTML characters. Save entries on\nthis computer with localStorage. Reloading must preserve added entries and deletions.\nBuild actual working files using small SQLite steps for form validation, the expense\ntable/totals, and persistence. Save and run a repeatable verifier that exercises real\nform input and checks persistence across page reload. Keep PLAN.md and PROGRESS.md accurate.\n",
+  "seconds": 300.02,
+  "model_calls": 17,
+  "tool_calls": 17,
+  "prompt_tokens": 169860,
+  "completion_tokens": 8432,
+  "tools_used": [
+    "list_files",
+    "task_steps",
+    "write_file",
+    "task_steps",
+    "read_file",
+    "task_steps",
+    "check_webapp",
+    "read_file",
+    "check_webapp",
+    "check_webapp",
+    "check_webapp",
+    "task_steps",
+    "task_steps",
+    "task_steps",
+    "task_steps",
+    "read_file",
+    "task_steps"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": "balanced",
+      "seconds": 8.11
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": "balanced",
+      "seconds": 42.55
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 53.51
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 26.89
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 6.19
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 7.7
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 12.93
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 8.67
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 14.52
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 13.15
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 12.27
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 9.35
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 9.45
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 11.34
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 12.8
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 7.28
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 19.91
+    }
+  ],
+  "router_call_attempts": 18,
+  "upstream_local_calls": 21,
+  "step_transport_shapes": [
+    [
+      {
+        "type": "str",
+        "length": 2162,
+        "first": "[",
+        "decode_error": "Expecting property name enclosed in double quotes",
+        "decode_position": 290
+      }
+    ]
+  ],
+  "time_budget_exhausted": true,
+  "token_usage_incomplete": true,
+  "inference_budget_seconds": 300.0,
+  "grade_seconds": 4.98,
+  "total_seconds": 304.99,
+  "resumed": false,
+  "initial_turns": 0,
+  "initial_source_sha256": null,
+  "checkpoint_status": "running",
+  "inference_error": "TimeoutError: timed out",
+  "grade": {
+    "browser": {
+      "checks": {
+        "requested_category_choices": true,
+        "initial_empty": true,
+        "reject_blank": false,
+        "reject_negative": false,
+        "reject_zero": false,
+        "reject_nonnumeric": false,
+        "adds_two_and_totals": true,
+        "category_visible": true,
+        "reload_keeps_entries": true,
+        "delete_updates_total": true,
+        "reload_keeps_deletion": true,
+        "description_plain_text": true,
+        "decimal_totals": true,
+        "mobile_fit": false,
+        "no_remote_requests": true
+      },
+      "errors": [],
+      "remote_requests": [],
+      "passed": false
+    },
+    "verifier_passes_correct": false,
+    "verifier_rejects_missing_javascript": false,
+    "mutation_status": "not_run_baseline_verifier_failed",
+    "steps": {
+      "total": 8,
+      "done": 1,
+      "remaining": 7
+    },
+    "passed": false
+  },
+  "run_outcome": "failed",
+  "independent_check_diagnostics": []
+}

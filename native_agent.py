@@ -3555,10 +3555,14 @@ def initial_plan_tools(project: dict, available: list) -> list:
                 "set maps editable HTML IDs to strings; filling does not submit. Put any required click "
                 "and the observed outcome in that same case. expect maps output IDs to literal visible "
                 "text, not roles or row-count instructions. visible/hidden check IDs or text. "
+                "Use rendered text rather than HTML markup; tag/role names are not selectors. "
+                "Create required rows/items through real inputs before testing their actions. "
                 "New pages may choose IDs during planning, then implement those exact controls.")
     tool["function"]["description"] = (
         "Create the first SQLite phase before implementation. Plan small, meaningful units with real "
         "repeatable acceptance from the original request. Planning does not pass their checks. "
+        "Cover every requested behavior, including invalid input, layout and reload behavior when requested; "
+        "file creation or control visibility alone does not test an interactive feature. "
         "Use discovery only when existing interfaces or requirements need inspection.")
     return offered
 
@@ -4754,7 +4758,12 @@ def run_slice(project: dict, complete=None) -> dict:
                 "[Required initial planning stage] No SQLite units exist for this request. Read any necessary "
                 "existing interfaces, then use task_steps action=plan to create small phases with meaningful "
                 "repeatable acceptance derived from the original request. HTML apps use typed check_webapp "
-                "cases. Do not write implementation, run shell commands, fake successful checks or hand off "
+                "cases. Account for the whole brief: happy paths and requested invalid-input, layout and "
+                "reload behaviors need actual acceptance cases, not only a file/control existence check. "
+                "Keep each phase small; later phases may depend on earlier implementation. For each browser "
+                "sequence, prepare the required data through its controls before asserting actions on it. "
+                "Use actual rendered text or chosen element IDs, not HTML markup or tag/role instructions. "
+                "Do not write implementation, run shell commands, fake successful checks or hand off "
                 "before creating this queue. A plan records work still to do; it is not a passing result. "
                 "Normal implementation tools return after a valid plan has been saved.")}]
         elif not focus:
