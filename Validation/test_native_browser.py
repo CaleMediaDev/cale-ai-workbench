@@ -192,6 +192,27 @@ def test_download_filename_collision_search_continues_past_999(tmp_path):
     assert (destination / "report-999.txt").read_text(encoding="utf-8") == "saved"
 
 
+def test_download_filename_skips_dangling_symlink(tmp_path):
+    destination = tmp_path / "Downloads"
+    destination.mkdir()
+    missing = tmp_path / "missing.txt"
+    occupied = destination / "report.txt"
+    try:
+        occupied.symlink_to(missing)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation is not available")
+    assert occupied.is_symlink()
+    assert not occupied.exists()
+
+    target = native_browser._download_target(tmp_path, "report.txt")
+
+    assert target == destination / "report-2.txt"
+    assert occupied.is_symlink()
+    assert occupied.readlink() == missing
+    assert not missing.exists()
+    assert not target.exists()
+
+
 def test_download_filename_stays_in_project_and_does_not_overwrite(tmp_path):
     first = native_browser._download_target(tmp_path, "../secret.txt")
     assert first.parent == tmp_path / "Downloads"
