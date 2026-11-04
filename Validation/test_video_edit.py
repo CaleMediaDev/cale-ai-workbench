@@ -11,6 +11,42 @@ import toolbox_mcp
 import video_edit
 
 
+def test_replacing_soundtrack_preserves_compatible_video_packets(tmp_path):
+    executable = imageio_ffmpeg.get_ffmpeg_exe()
+    source, audio, output = (tmp_path / name for name in ("source.mp4", "soundtrack.wav", "voiced.mp4"))
+    subprocess.run([executable, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+        "testsrc2=s=160x90:r=10:d=0.5", "-c:v", "libx264", "-crf", "30", "-preset", "medium", str(source)],
+        check=True, capture_output=True, timeout=30)
+    subprocess.run([executable, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+        "sine=frequency=600:duration=1", str(audio)], check=True, capture_output=True, timeout=30)
+
+    def video_hash(path):
+        return subprocess.run([executable, "-hide_banner", "-loglevel", "error", "-i", str(path),
+            "-map", "0:v:0", "-c:v", "copy", "-f", "streamhash", "-hash", "sha256", "pipe:1"],
+            check=True, capture_output=True, timeout=30).stdout
+
+    original = video_hash(source)
+    video_edit.add_video_audio(str(source), str(audio), str(output))
+    assert video_hash(output) == original
+
+
+def test_soundtrack_replacement_does_not_retry_unrelated_io_failure(tmp_path, monkeypatch):
+    source, audio, output = (tmp_path / name for name in ("source.mp4", "soundtrack.wav", "voiced.mp4"))
+    source.write_bytes(b"video")
+    audio.write_bytes(b"audio")
+    attempts = []
+
+    def inaccessible(arguments, destination):
+        attempts.append(arguments)
+        raise RuntimeError("Permission denied")
+
+    monkeypatch.setattr(video_edit, "_run", inaccessible)
+    with pytest.raises(RuntimeError, match="Permission denied"):
+        video_edit.add_video_audio(str(source), str(audio), str(output))
+    assert len(attempts) == 1
+    assert not output.exists()
+
+
 def _clip(path, color):
     subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
                     "-f", "lavfi", "-i", f"color=c={color}:s=160x90:r=10:d=0.5",
@@ -87,6 +123,40 @@ def test_run_removes_empty_output_after_successful_process(tmp_path, monkeypatch
         video_edit._run([], output)
     assert not output.exists()
     assert video_edit._destination(str(output), []) == output
+
+
+def test_replace_soundtrack_accepts_vp8_webm(tmp_path):
+    executable = imageio_ffmpeg.get_ffmpeg_exe()
+    source = tmp_path / "source.webm"
+    audio = tmp_path / "soundtrack.wav"
+    output = tmp_path / "voiced.mp4"
+    subprocess.run([
+        executable, "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "color=c=red:s=160x90:r=10:d=1",
+        "-c:v", "libvpx", str(source),
+    ], check=True, capture_output=True, timeout=30)
+    subprocess.run([
+        executable, "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "sine=frequency=600:duration=1", str(audio),
+    ], check=True, capture_output=True, timeout=30)
+    original = source.read_bytes()
+
+    result = video_edit.add_video_audio(str(source), str(audio), str(output))
+
+    assert result["path"] == str(output)
+    video = subprocess.run([
+        executable, "-hide_banner", "-loglevel", "error", "-i", str(output),
+        "-map", "0:v:0", "-frames:v", "1", "-pix_fmt", "rgb24",
+        "-f", "rawvideo", "pipe:1",
+    ], check=True, capture_output=True, timeout=30)
+    assert len(video.stdout) == 160 * 90 * 3
+    soundtrack = subprocess.run([
+        executable, "-hide_banner", "-loglevel", "error", "-i", str(output),
+        "-map", "0:a:0", "-ac", "1", "-ar", "8000",
+        "-f", "s16le", "pipe:1",
+    ], check=True, capture_output=True, timeout=30)
+    assert len(soundtrack.stdout) > 8000
+    assert source.read_bytes() == original
 
 
 def test_edit_video_original_layout_pads_odd_dimensions(tmp_path):
