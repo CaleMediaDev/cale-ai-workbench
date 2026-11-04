@@ -35,6 +35,28 @@ def test_skills_and_tools_are_indexed_searched_and_refreshed():
             assert "Check contrast" in capability_index.read_skill(root, result[0]["id"])["content"]
 
 
+def test_identical_installed_skill_replaces_bundled_path():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        bundled, tools = fixture(root)
+        content = bundled.read_bytes()
+        expected_text = bundled.read_text(encoding="utf-8-sig")
+        installed = root / "data/skills" / bundled.parent.name / "SKILL.md"
+        with patch.object(capability_index, "_registered_tools", return_value=tools):
+            capability_index.sync(root)
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(content)
+            assert capability_index.sync(root)["updated"] == 1
+            result = capability_index.search(root, "accessible", kind="skill")[0]
+            assert result["path"] == installed.relative_to(root).as_posix()
+            bundled.unlink()
+            live = capability_index.read_skill(root, result["id"])
+            assert live["path"] == str(installed.resolve())
+            assert installed.read_bytes() == content
+            assert live["content"] == expected_text
+            assert capability_index.sync(root)["updated"] == 0
+
+
 def test_damaged_index_is_preserved_and_rebuilt():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)

@@ -174,6 +174,34 @@ def test_conflict_does_not_copy_other_files(tmp_path):
     assert not (tmp_path / "src/vendor/ai-ui/LICENSE").exists()
 
 
+def test_blocked_kit_parent_does_not_copy_earlier_files(tmp_path, monkeypatch):
+    import design_tools
+
+    kit = tmp_path / "kit"
+    (kit / "src/z").mkdir(parents=True)
+    (kit / "src/a.astro").write_text("early component", encoding="utf-8")
+    (kit / "src/z/component.astro").write_text("nested component", encoding="utf-8")
+    (kit / "LICENSE").write_text("fixture license", encoding="utf-8")
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", kit)
+
+    project = tmp_path / "project"
+    destination = project / "src/vendor/ai-ui"
+    destination.mkdir(parents=True)
+    (project / "package.json").write_text(
+        json.dumps({"dependencies": {"astro": "^5"}}), encoding="utf-8"
+    )
+    blocker = destination / "z"
+    blocker.write_text("keep this file", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="no files were changed"):
+        add_astro_ai_ui(str(project))
+
+    assert blocker.read_text(encoding="utf-8") == "keep this file"
+    assert not (destination / "a.astro").exists()
+    assert not (destination / "LICENSE").exists()
+    assert list(destination.iterdir()) == [blocker]
+
+
 def test_3d_scene_rejects_unbounded_or_invalid_geometry():
     import media_worker
 

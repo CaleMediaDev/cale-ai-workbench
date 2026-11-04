@@ -877,6 +877,19 @@ def test_direct_browser_step_check_advances_once_with_valid_json_and_keeps_sourc
     assert (tmp_path / "index.html").read_bytes() == original
 
 
+@pytest.mark.parametrize("expected, passed", [("Completed successfully", True), ("Missing result", False)])
+def test_text_assertion_searches_beyond_diagnostic_preview(tmp_path, expected, passed):
+    (tmp_path / "index.html").write_text(
+        '<p id="result">' + 'prefix ' * 40 + 'Completed successfully</p>',
+        encoding="utf-8",
+    )
+    result = webapp_check.check(tmp_path, {
+        "path": "index.html", "cases": [{"expect": {"result": expected}}],
+    })
+    assert result["passed"] is passed
+    assert result["cases"][0]["passed"] is passed
+
+
 def test_failed_text_check_reports_actual_value():
     pytest.importorskip("playwright")
     with tempfile.TemporaryDirectory() as temporary:

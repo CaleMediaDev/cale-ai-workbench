@@ -55,6 +55,8 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
     safe = []
     terms = re.findall(r"[a-z0-9]+", query.casefold())
     for row in rows[:limit]:
+        if not isinstance(row, dict):
+            continue
         identifier = str(row.get("identifier", ""))
         name = str(row.get("name", ""))[:100]
         description = str(row.get("description", ""))[:500]
