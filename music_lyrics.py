@@ -57,7 +57,8 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
         if (words and math.isfinite(start) and math.isfinite(end)
                 and math.isfinite(start * 1000) and math.isfinite(end * 1000)
                 and end > start >= 0
-                and round(end * 1000) > round(start * 1000)):
+                and round(end * 1000) > round(start * 1000)
+                and (not rows or start >= rows[-1]["end"])):
             rows.append({"start": start, "end": end, "text": words})
     if not rows:
         raise RuntimeError("No clear lyrics were detected in the isolated vocal track.")
