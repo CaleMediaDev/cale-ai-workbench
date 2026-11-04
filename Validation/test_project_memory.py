@@ -102,6 +102,41 @@ class ProjectMemoryTests(unittest.TestCase):
                     ("file:app.py",),
                 ).fetchone()[0], 0)
 
+    def test_unresolvable_document_source_is_evicted_without_aborting_recall(self):
+        source = self.folder / "manual.pdf"
+        source.write_bytes(b"original document bytes")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        kept = memory.save(self.folder, "note", "Kept note", "loopmarker valid evidence")
+        identifier = "document:manual.pdf:1"
+        original_resolve = Path.resolve
+
+        def resolve(path, *args, **kwargs):
+            if path == source:
+                raise RuntimeError("Symlink loop")
+            return original_resolve(path, *args, **kwargs)
+
+        for operation in ("get", "search"):
+            with self.subTest(operation=operation):
+                memory.index_document_text(
+                    self.folder, source, "loopmarker obsolete evidence", digest,
+                    revision="v3-vision0",
+                )
+                with patch.object(Path, "resolve", resolve):
+                    if operation == "get":
+                        with self.assertRaisesRegex(ValueError, "source file was removed"):
+                            memory.get(self.folder, identifier)
+                    else:
+                        found = memory.search(self.folder, "loopmarker")
+                        self.assertEqual([row["id"] for row in found], [kept["id"]])
+                with memory.connection(self.folder) as conn:
+                    for table in ("memories", "memory_fts"):
+                        self.assertEqual(conn.execute(
+                            f"SELECT COUNT(*) FROM {table} WHERE id=?",
+                            (identifier,),
+                        ).fetchone()[0], 0)
+                self.assertEqual(memory.get(self.folder, kept["id"])["body"],
+                                 "loopmarker valid evidence")
+
     def test_second_edit_during_search_hides_old_project_memory(self):
         source = self.folder / "app.py"
         source.write_text("old_widget", encoding="utf-8")
