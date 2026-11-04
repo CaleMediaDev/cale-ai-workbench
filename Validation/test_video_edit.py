@@ -48,6 +48,31 @@ def test_agent_can_trim_join_and_replace_soundtrack(tmp_path):
         video_edit.edit_video(str(first), str(first))
 
 
+@pytest.mark.parametrize("existing_output", [False, True])
+def test_run_timeout_cleans_partial_output_only(tmp_path, monkeypatch, existing_output):
+    output = tmp_path / "edited.mp4"
+    if existing_output:
+        output.write_bytes(b"existing video")
+    timeout_error = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1)
+
+    def timed_out(command, **kwargs):
+        assert command[-1] == str(output)
+        if not existing_output:
+            output.write_bytes(b"partial video")
+        raise timeout_error
+
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", timed_out)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        video_edit._run([], output, timeout=1)
+    assert caught.value is timeout_error
+    if existing_output:
+        assert output.read_bytes() == b"existing video"
+    else:
+        assert not output.exists()
+        assert video_edit._destination(str(output), []) == output
+
+
 def test_edit_video_extreme_speed_chains_atempo(tmp_path):
     """Speed 0.25 and 4.0 should work by chaining atempo filters."""
     clip = tmp_path / "clip.mp4"
