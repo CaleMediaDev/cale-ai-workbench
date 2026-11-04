@@ -145,8 +145,8 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
     now = time.time() if now is None else now
     percent = max(0, min(100, int(percent)))
     active = status in ("working", "checking")
-    if status in ("ready_for_review", "accepted"):
-        return ""
+    # Persist terminal observations too: resuming must not count time spent
+    # completed, and reduced progress must retire the previous run's samples.
     try:
         now = float(now)
     except (TypeError, ValueError, OverflowError):

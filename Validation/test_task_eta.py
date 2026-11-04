@@ -98,6 +98,27 @@ def test_pause_does_not_advance_active_clock(tmp_path):
     assert task_eta.countdown(db, "task", 70, "working", 2030).startswith("About ")
 
 
+def test_resuming_completed_tasks_rebuilds_progress_samples(tmp_path):
+    db = tmp_path / "projects.db"
+    for status in ("ready_for_review", "accepted"):
+        task_eta.countdown(db, status, 10, "working", 1000)
+        task_eta.countdown(db, status, 30, "working", 1030)
+        assert task_eta.countdown(db, status, 50, "working", 1060) == (
+            "About 1m 07s to review"
+        )
+        assert task_eta.countdown(db, status, 100, status, 1070) == ""
+        # Resumption lowers progress from completion, retiring old samples.
+        assert task_eta.countdown(db, status, 50, "working", 1100) == (
+            "Estimating time…"
+        )
+        assert task_eta.countdown(db, status, 70, "working", 1130) == (
+            "Estimating time…"
+        )
+        assert task_eta.countdown(db, status, 90, "working", 1160) == (
+            "About 7s to review"
+        )
+
+
 def test_stalled_and_completed_tasks(tmp_path):
     db = tmp_path / "projects.db"
     task_eta.countdown(db, "task", 10, "working", 1000)
