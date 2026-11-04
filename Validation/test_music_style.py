@@ -102,6 +102,17 @@ def test_clear_vocal_request_is_distinct_from_negated_or_instrumental_brief():
         "Make an instrumental song with a male rapper")
 
 
+def test_past_feedback_does_not_veto_current_vocal_request():
+    request = "Make a song with female lead vocals"
+    for complaint in ("There were no vocals", "It sounded like an instrumental track"):
+        prompt = request + "\nPast user feedback:\n- Improve: " + complaint
+        assert music_style.unambiguous_vocal_song(prompt)
+    for request in ("No vocals, even with a singer reference",
+                    "Make an instrumental track with a female singer reference"):
+        prompt = request + "\nPast user feedback:\n- Improve: Add lead vocals"
+        assert not music_style.unambiguous_vocal_song(prompt)
+
+
 def test_explicit_bpm_is_parsed_for_music_engine():
     assert music_style.requested_bpm("Heavy dubstep at 150 BPM") == 150
     assert music_style.requested_bpm("80-bpm synth groove") == 80
