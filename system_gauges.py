@@ -196,7 +196,7 @@ class HardwareSampler:
 
             counters = psutil.disk_io_counters()
             current_disk = (counters.read_bytes, counters.write_bytes) if counters else None
-        except (ImportError, AttributeError, OSError):
+        except (ImportError, AttributeError, OSError, RuntimeError):
             current_disk = None
         elapsed = now - self.previous_disk_time if self.previous_disk_time is not None else 0
         drive_read, drive_write = disk_transfer_speed(self.previous_disk, current_disk, elapsed)
