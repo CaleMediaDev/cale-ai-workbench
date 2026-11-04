@@ -254,7 +254,8 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
         vision = (_media_probe(root, "recognize_image", path=str(sample),
                                question="Describe the main visible shape or colors briefly.")
                   if sample.is_file() else {"ok": False, "detail": "Vision test image is missing"})
-        description = str(vision.get("data", {}).get("description", "")).strip()
+        description = vision.get("data", {}).get("description", "")
+        description = description.strip() if isinstance(description, str) else ""
         result["vision"] = {
             "ok": bool(vision["ok"] and description),
             "detail": ("Bundled image was described offline" if vision["ok"] and description else
