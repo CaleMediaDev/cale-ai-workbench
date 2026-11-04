@@ -151,6 +151,8 @@ def add_video_audio(source_path: str, audio_path: str, output_path: str,
     output = _destination(output_path, [source, audio])
     gain = _number(audio_gain_db, -60, 24, "Audio gain")
     args = ["-i", str(source), "-i", str(audio), "-map", "0:v:0", "-map", "1:a:0",
-            "-c:v", "copy", "-c:a", "aac", "-af", f"volume={gain:g}dB",
+            "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-af", f"volume={gain:g}dB",
             "-shortest", "-movflags", "+faststart"]
     return {**_run(args, output), "edit": "replace soundtrack", "source": str(source)}
