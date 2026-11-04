@@ -68,7 +68,10 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
         )
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Audio separation failed.")
-    files = sorted(path for path in target.iterdir() if path.is_file() and path.stat().st_size > 0)
+    files = sorted(
+        path for path in target.iterdir()
+        if path.suffix.lower() == ".wav" and path.is_file() and path.stat().st_size > 0
+    )
     if len(files) < 2:
         raise RuntimeError("Audio separator did not produce both vocal and instrumental tracks.")
     return {"source": str(source), "output_dir": str(target),

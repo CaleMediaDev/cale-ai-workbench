@@ -44,3 +44,28 @@ def test_separation_returns_only_real_nonempty_stems(tmp_path):
     assert len(result["files"]) == 2
     assert all(Path(path).stat().st_size for path in result["files"])
     assert source.read_bytes() == b"music"
+
+
+@pytest.mark.parametrize("wav_count", [0, 1])
+def test_auxiliary_files_do_not_count_as_stems(tmp_path, wav_count):
+    from contextlib import nullcontext
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+
+    def render(*_args, **_kwargs):
+        (output / "separator.log").write_text("completed")
+        (output / "metadata.json").write_text("{}")
+        if wav_count:
+            (output / "song_(Vocals).wav").write_bytes(b"vocals")
+        return type("Result", (), {"returncode": 0})()
+
+    with patch.object(music_stems.music_backend, "_setup_lock", return_value=nullcontext()), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", return_value=nullcontext()
+    ), patch.object(music_stems, "install", return_value=Path("python.exe")), patch.object(
+        music_stems.subprocess, "run", side_effect=render
+    ):
+        with pytest.raises(RuntimeError, match="did not produce both"):
+            music_stems.separate_stems(str(source), str(output))
+    assert source.read_bytes() == b"music"
