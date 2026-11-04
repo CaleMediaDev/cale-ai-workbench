@@ -67,6 +67,18 @@ def test_music_eta_uses_completed_local_songs_and_explains_overrun(tmp_path):
     assert task_eta.music_countdown({**current, "status": "complete"}, now=2100) == ""
 
 
+def test_music_countdown_rejects_nonfinite_estimates_and_timestamps():
+    for invalid in (float("nan"), float("inf"), float("-inf"),
+                    "nan", "inf", "-inf"):
+        for field in ("estimated_seconds", "requested_at", "created"):
+            job = {"status": "working", "estimated_seconds": 60,
+                   "created": 1000}
+            job[field] = invalid
+            assert task_eta.music_countdown(job, now=1030) == (
+                "Estimating from recent songs…"
+            ), (field, invalid)
+
+
 def test_short_vocal_eta_prefers_similar_songs_over_scaled_long_renders(tmp_path):
     jobs = tmp_path / "music-jobs"
     jobs.mkdir()
