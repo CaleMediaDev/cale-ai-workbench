@@ -212,7 +212,10 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
         for start in range(0, len(rows), 4096):
             batch = rows[start:start + 4096]
             matrix = vectorizer.transform(_features(batch, model["schema"]))
-            scores = matrix @ weights.T + biases
+            with np.errstate(over="ignore", invalid="ignore"):
+                scores = matrix @ weights.T + biases
+            if not np.isfinite(scores).all():
+                raise ValueError("Prediction scores overflowed; cannot produce finite predictions.")
             if model["problem_type"] == "regression":
                 predictions = [f"{number:.6g}" for number in scores[:, 0]]
             elif len(classes) == 2:
