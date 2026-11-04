@@ -96,8 +96,16 @@ def install():
 
 
 def _line_with_timeout(stream, seconds: int, cancel: threading.Event | None = None) -> str:
-    output: queue.Queue[str] = queue.Queue(maxsize=1)
-    threading.Thread(target=lambda: output.put(stream.readline()), daemon=True).start()
+    output: queue.Queue[str | Exception] = queue.Queue(maxsize=1)
+
+    def read_line():
+        try:
+            result = stream.readline()
+        except (OSError, ValueError) as exc:
+            result = exc
+        output.put(result)
+
+    threading.Thread(target=read_line, daemon=True).start()
     deadline = time.monotonic() + seconds
     while True:
         if cancel is not None and cancel.is_set():
@@ -106,9 +114,12 @@ def _line_with_timeout(stream, seconds: int, cancel: threading.Event | None = No
         if remaining <= 0:
             raise queue.Empty
         try:
-            return output.get(timeout=min(remaining, 0.1))
+            result = output.get(timeout=min(remaining, 0.1))
         except queue.Empty:
             continue
+        if isinstance(result, Exception):
+            raise result
+        return result
 
 
 def _stop_worker():
