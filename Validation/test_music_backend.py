@@ -1051,6 +1051,34 @@ def test_recovery_skips_non_object_record_and_recovers_next_job(tmp_path, bad_re
         assert json.loads(bad_path.read_text(encoding="utf-8")) == bad_record
 
 
+def test_recovery_skips_overflowing_timestamp_and_recovers_next_job(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    bad_id = "a" * 32
+    good_id = "b" * 32
+    bad_path = jobs / (bad_id + ".json")
+    good_path = jobs / (good_id + ".json")
+    bad_record = {
+        "job_id": bad_id, "status": "queued", "created": 10**400,
+        "output_path": str(tmp_path / "bad.mp3"),
+    }
+    bad_path.write_text(json.dumps(bad_record), encoding="utf-8")
+    good_path.write_text(json.dumps({
+        "job_id": good_id, "status": "working", "created": 0,
+        "output_path": str(tmp_path / "good.mp3"),
+    }), encoding="utf-8")
+    with (patch.object(music_backend, "JOBS", jobs),
+          patch.object(Path, "glob", return_value=[bad_path, good_path]),
+          patch.object(music_backend, "_worker_running", return_value=False),
+          patch.object(music_backend, "_launch_job") as launch):
+        music_backend.recover_music_jobs()
+        launch.assert_called_once_with(good_id)
+        recovered = music_backend.music_job_status(good_id)
+        assert recovered["status"] == "queued"
+        assert recovered["recoveries"] == 1
+        assert music_backend.music_job_status(bad_id) == bad_record
+
+
 def test_recovery_skips_null_timestamp_and_recovers_next_job(tmp_path):
     jobs = tmp_path / "music-jobs"
     jobs.mkdir()
