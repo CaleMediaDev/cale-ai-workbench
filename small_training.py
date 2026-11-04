@@ -1,6 +1,10 @@
 """Bounded local training with held-out evaluation and separate model artifacts."""
 
 import csv
+import math
+import threading
+from array import array
+from collections import Counter, OrderedDict
 import hashlib
 import io
 import json
@@ -350,32 +354,119 @@ def train_classifier(
     return dict(report, model_folder=str(folder))
 
 
-def predict_classifier(model_folder, text):
-    import numpy as np
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.linear_model import LogisticRegression
 
-    artifact = json.loads((Path(model_folder) / "model.json").read_text())
-    if artifact.get("kind") != "text_classifier":
-        raise ValueError("Not a text classifier.")
+CLASSIFIER_MAX_BYTES = 96 * 1024 * 1024
+CLASSIFIER_CACHE_LIMIT = 2
+_CLASSIFIER_CACHE = OrderedDict()
+_CLASSIFIER_LOCK = threading.RLock()
+
+
+def _classifier_signature(path):
+    info = path.stat()
+    return (info.st_size,info.st_mtime_ns,info.st_ctime_ns,info.st_ino)
+
+
+def _classifier_number(value, *, idf=False):
+    if type(value) not in (int,float) or not math.isfinite(value):
+        raise ValueError("Classifier weights must be finite numbers")
+    if (idf and not 1 <= value <= 1_000_000) or (not idf and abs(value) > 1e100):
+        raise ValueError("Classifier weights exceed supported numerical bounds")
+    return float(value)
+
+
+def _load_classifier(model_folder):
+    """Load safe JSON once per unchanged artifact, with a bounded process cache.
+
+    Predictions report the hash actually loaded. No pickle, generated code,
+    numpy, sklearn reconstruction or fitting is involved in inference.
+    """
+    path = (Path(model_folder)/"model.json").resolve()
+    signature = _classifier_signature(path)
+    if signature[0] > CLASSIFIER_MAX_BYTES:
+        raise ValueError("Classifier artifact exceeds its read budget")
+    key = str(path)
+    with _CLASSIFIER_LOCK:
+        cached = _CLASSIFIER_CACHE.get(key)
+        if cached is not None and cached[0] == signature:
+            _CLASSIFIER_CACHE.move_to_end(key)
+            return cached[1]
+        raw = _bounded_bytes(path,CLASSIFIER_MAX_BYTES)
+        if _classifier_signature(path) != signature:
+            raise ValueError("Classifier artifact changed while loading")
+        try:
+            artifact = json.loads(raw)
+            if not isinstance(artifact,dict) or artifact.get("kind") != "text_classifier":
+                raise ValueError("Not a supported text classifier")
+            vocabulary = artifact["vocabulary"]
+            classes = artifact["classes"]
+            if (not isinstance(vocabulary,dict) or not 1 <= len(vocabulary) <= 20000
+                    or any(not isinstance(term,str) or not 0 < len(term) <= 8192
+                           or type(index) is not int for term,index in vocabulary.items())
+                    or set(vocabulary.values()) != set(range(len(vocabulary)))):
+                raise ValueError("Classifier vocabulary must use contiguous bounded indices")
+            if (not isinstance(classes,list) or not 2 <= len(classes) <= 256
+                    or any(not isinstance(label,str) or not 0 < len(label) <= 128 for label in classes)
+                    or len(set(classes)) != len(classes)):
+                raise ValueError("Classifier needs distinct bounded class labels")
+            config = {"ngram_range":[1,2],"sublinear_tf":True,"lowercase":True,"norm":"l2"}
+            if (artifact.get("format_version",1) != 1
+                    or json.dumps(artifact.get("feature_config",config),sort_keys=True) != json.dumps(config,sort_keys=True)):
+                raise ValueError("Unsupported classifier feature configuration")
+            idf,coef,intercept = artifact["idf"],artifact["coef"],artifact["intercept"]
+            row_count = 1 if len(classes)==2 else len(classes)
+            if (not isinstance(idf,list) or len(idf)!=len(vocabulary)
+                    or not isinstance(coef,list) or len(coef)!=row_count
+                    or not isinstance(intercept,list) or len(intercept)!=row_count
+                    or any(not isinstance(row,list) or len(row)!=len(vocabulary) for row in coef)):
+                raise ValueError("Classifier weight dimensions do not match its features/classes")
+            loaded = {"vocabulary":vocabulary,"classes":tuple(classes),
+                      "idf":array('d',(_classifier_number(v,idf=True) for v in idf)),
+                      "coef":tuple(array('d',(_classifier_number(v) for v in row)) for row in coef),
+                      "intercept":tuple(_classifier_number(v) for v in intercept),
+                      "model_sha256":hashlib.sha256(raw).hexdigest()}
+        except (KeyError,TypeError,OverflowError,RecursionError) as error:
+            raise ValueError("Malformed classifier artifact") from error
+        _CLASSIFIER_CACHE[key] = (signature,loaded)
+        _CLASSIFIER_CACHE.move_to_end(key)
+        while len(_CLASSIFIER_CACHE) > CLASSIFIER_CACHE_LIMIT:
+            _CLASSIFIER_CACHE.popitem(last=False)
+        return loaded
+
+
+def predict_classifier(model_folder, text):
+    """CPU-only portable TF-IDF/logistic inference; probabilities match training.
+
+    Empty/OOV text uses intercept probabilities, as sklearn does. This predicts
+    an intent label, not authorization to execute a tool or spend an allowance.
+    """
+    if not isinstance(text,str) or len(text)>16384:
+        raise ValueError("Classifier text must be a string of at most 16384 characters")
+    artifact = _load_classifier(model_folder)
+    words = re.findall(r"(?u)\b\w\w+\b",text.lower())
+    terms = words + [words[i]+" "+words[i+1] for i in range(len(words)-1)]
     vocabulary = artifact["vocabulary"]
-    if len(vocabulary) > 20000:
-        raise ValueError("Model exceeds the supported vocabulary size.")
-    vectorizer = TfidfVectorizer(
-        vocabulary=vocabulary, ngram_range=(1, 2), sublinear_tf=True
-    )
-    vectorizer.fit([" ".join(vocabulary)])
-    vectorizer.idf_ = np.array(artifact["idf"])
-    model = LogisticRegression()
-    model.classes_ = np.array(artifact["classes"])
-    model.coef_ = np.array(artifact["coef"])
-    model.intercept_ = np.array(artifact["intercept"])
-    model.n_features_in_ = len(vocabulary)
-    scores = model.predict_proba(vectorizer.transform([text]))[0]
-    return {
-        "label": str(model.classes_[scores.argmax()]),
-        "probabilities": {str(k): float(v) for k, v in zip(model.classes_, scores)},
-    }
+    counts = Counter(vocabulary[term] for term in terms if term in vocabulary)
+    values = {index:(1+math.log(count))*artifact["idf"][index] for index,count in counts.items()}
+    norm = math.sqrt(sum(value*value for value in values.values()))
+    if norm:
+        values = {index:value/norm for index,value in values.items()}
+    decisions = [bias+sum(row[index]*value for index,value in values.items())
+                 for row,bias in zip(artifact["coef"],artifact["intercept"])]
+    if len(artifact["classes"])==2:
+        decision = decisions[0]
+        if decision>=0:
+            probability=1/(1+math.exp(-decision))
+        else:
+            exp=math.exp(decision);probability=exp/(1+exp)
+        scores=[1-probability,probability]
+    else:
+        maximum=max(decisions)
+        exp=[math.exp(value-maximum) for value in decisions]
+        total=sum(exp);scores=[value/total for value in exp]
+    best=max(range(len(scores)),key=scores.__getitem__)
+    return {"label":artifact["classes"][best],
+            "probabilities":dict(zip(artifact["classes"],scores)),
+            "model_sha256":artifact["model_sha256"]}
 
 
 def train_adapter(dataset_path, output_folder, max_steps=60):

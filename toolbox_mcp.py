@@ -1144,9 +1144,8 @@ async def train_text_classifier(
 @server.tool()
 async def classify_text(model_folder: str, text: str) -> dict:
     """Predict a label with a locally trained text classifier and show class probabilities."""
-    return await media_run(
-        "predict_classifier", 90, model_folder=model_folder, text=text
-    )
+    import small_training
+    return await asyncio.to_thread(small_training.predict_classifier,model_folder,text)
 
 
 @server.tool()

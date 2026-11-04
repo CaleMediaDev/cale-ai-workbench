@@ -1016,3 +1016,85 @@ def test_clinc_preparation_tool_keeps_reviewed_raw_and_prepares_splits_in_projec
     result=asyncio.run(toolbox_mcp.acquire_training_dataset("registered","clinc150"))
     assert result["normalized"]["dataset_path"].startswith(str(tmp_path))
     assert not result["normalized"]["trained"]
+
+
+def classifier_reference_fixture(folder,class_count=3):
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.linear_model import LogisticRegression
+    texts=[];labels=[]
+    themes=[("billing","invoice payment money"),("music","song melody rhythm"),("travel","flight ticket airport")]
+    for label,theme in themes[:class_count]:
+        for index in range(8):texts.append(theme+" request "+str(index));labels.append(label)
+    vectorizer=TfidfVectorizer(ngram_range=(1,2),max_features=20000,sublinear_tf=True)
+    classifier=LogisticRegression(max_iter=1000,class_weight="balanced",random_state=42)
+    classifier.fit(vectorizer.fit_transform(texts),labels)
+    artifact={"kind":"text_classifier","vocabulary":{k:int(v) for k,v in vectorizer.vocabulary_.items()},
+              "idf":vectorizer.idf_.tolist(),"coef":classifier.coef_.tolist(),
+              "intercept":classifier.intercept_.tolist(),"classes":classifier.classes_.tolist()}
+    folder.mkdir(exist_ok=True);(folder/"model.json").write_text(json.dumps(artifact),encoding="utf-8")
+    return vectorizer,classifier,artifact
+
+
+@pytest.mark.parametrize("class_count",[2,3])
+def test_portable_classifier_matches_real_sklearn_probabilities_without_runtime_imports(tmp_path,monkeypatch,class_count):
+    import builtins
+    import small_training as training
+    vectorizer,classifier,artifact=classifier_reference_fixture(tmp_path,class_count)
+    samples=["invoice invoice PAYMENT money","song melody","airport flight","","x unknownword", "CAFÉ naïve invoice", "invoice-payment\nMONEY"]
+    expected=classifier.predict_proba(vectorizer.transform(samples))
+    original=builtins.__import__
+    def no_runtime_ml(name,*args,**kwargs):
+        if name.split('.')[0] in {"sklearn","numpy"}:raise AssertionError("Portable inference imported ML runtime")
+        return original(name,*args,**kwargs)
+    monkeypatch.setattr(builtins,"__import__",no_runtime_ml)
+    for text,reference in zip(samples,expected):
+        result=training.predict_classifier(tmp_path,text)
+        assert list(result["probabilities"])==classifier.classes_.tolist()
+        assert all(abs(actual-float(wanted))<=1e-12 for actual,wanted in zip(result["probabilities"].values(),reference))
+        assert result["label"]==classifier.classes_[reference.argmax()]
+        assert len(result["model_sha256"])==64
+
+
+def test_classifier_cache_is_bounded_reuses_json_and_invalidates_modified_artifacts(tmp_path,monkeypatch):
+    import small_training as training
+    training._CLASSIFIER_CACHE.clear()
+    folders=[tmp_path/str(i) for i in range(3)]
+    for folder in folders:classifier_reference_fixture(folder,2)
+    original=training._bounded_bytes;reads=[]
+    def counted(path,limit):reads.append(str(path));return original(path,limit)
+    monkeypatch.setattr(training,"_bounded_bytes",counted)
+    first=training.predict_classifier(folders[0],"invoice")
+    training.predict_classifier(folders[0],"song")
+    assert len(reads)==1
+    for folder in folders[1:]:training.predict_classifier(folder,"invoice")
+    assert len(training._CLASSIFIER_CACHE)==2
+    training.predict_classifier(folders[0],"invoice")
+    assert len(reads)==4
+    artifact=json.loads((folders[0]/"model.json").read_text())
+    artifact["intercept"][0]+=3
+    (folders[0]/"model.json").write_text(json.dumps(artifact)+" ")
+    changed=training.predict_classifier(folders[0],"invoice")
+    assert changed["model_sha256"]!=first["model_sha256"] and len(reads)==5
+
+
+@pytest.mark.parametrize("mutation",["index","shape","nan","boolean","classes","feature_config"])
+def test_portable_classifier_rejects_malformed_artifacts(tmp_path,mutation):
+    import small_training as training
+    _,_,artifact=classifier_reference_fixture(tmp_path,2)
+    if mutation=="index":artifact["vocabulary"][next(iter(artifact["vocabulary"]))]=True
+    elif mutation=="shape":artifact["coef"][0].pop()
+    elif mutation=="nan":artifact["idf"][0]=float('nan')
+    elif mutation=="boolean":artifact["intercept"][0]=True
+    elif mutation=="classes":artifact["classes"][1]=artifact["classes"][0]
+    elif mutation=="feature_config":artifact["feature_config"]={"ngram_range":[1,3]}
+    (tmp_path/"model.json").write_text(json.dumps(artifact))
+    with pytest.raises(ValueError):training.predict_classifier(tmp_path,"invoice")
+
+
+def test_classify_tool_uses_cpu_thread_not_media_worker(tmp_path,monkeypatch):
+    import small_training as training
+    classifier_reference_fixture(tmp_path,2)
+    async def no_media(*args,**kwargs):pytest.fail("Classifier started media subprocess")
+    monkeypatch.setattr(toolbox_mcp,"media_run",no_media)
+    result=asyncio.run(toolbox_mcp.classify_text(str(tmp_path),"invoice payment"))
+    assert result["label"]=="billing"
