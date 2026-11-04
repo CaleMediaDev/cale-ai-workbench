@@ -95,6 +95,40 @@ class OllamaRuntimeTests(unittest.TestCase):
             self.assertFalse(installer.with_suffix(".partial").exists())
             self.assertEqual(installer.read_bytes(), b"previous installer")
 
+    def test_skips_migration_completed_before_lock_acquisition(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            bundled = root / "Toolbox/ollama/ollama.exe"
+            bundled.parent.mkdir(parents=True)
+            bundled.touch()
+            native = root / "native.exe"
+
+            def acquire_lock(*args):
+                # Another worker completed after the initial eligibility check.
+                native.touch()
+
+            with (
+                patch.object(ollama_runtime, "ROOT", root),
+                patch.object(
+                    ollama_runtime, "STATUS", root / "LongTasks/ollama-upgrade.json"
+                ),
+                patch.object(ollama_runtime, "native_path", return_value=native),
+                patch.object(
+                    ollama_runtime.msvcrt, "locking", side_effect=acquire_lock
+                ),
+                patch.object(ollama_runtime, "busy", return_value=False) as busy,
+                patch.object(
+                    ollama_runtime,
+                    "pinned_installer",
+                    side_effect=RuntimeError("Unexpected installer lookup"),
+                ) as pinned_installer,
+                patch.object(ollama_runtime, "save_download_status") as save_status,
+            ):
+                ollama_runtime.run()
+                busy.assert_not_called()
+                pinned_installer.assert_not_called()
+                save_status.assert_not_called()
+
     def test_migration_only_for_portable_installs(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

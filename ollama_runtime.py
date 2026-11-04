@@ -135,6 +135,8 @@ def run():
         except OSError:
             return
         try:
+            if not migration_needed():
+                return
             while busy():
                 save_download_status(
                     STATUS,
