@@ -36,6 +36,8 @@ def install() -> Path:
     env = os.environ.copy()
     env["UV_PYTHON_INSTALL_DIR"] = str(ROOT / "Media" / "runtime")
     env["UV_CACHE_DIR"] = str(ROOT / "Media" / "uv-cache")
+    # A rebuild must not retain a success marker if either subprocess fails.
+    marker.unlink(missing_ok=True)
     subprocess.run(
         [uv, "venv", str(ENGINE / ".venv"), "--python", "3.11"],
         env=env, check=True, timeout=300, creationflags=HIDE,
