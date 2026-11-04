@@ -62,9 +62,13 @@ def inspect(folder: str | Path, path: str, question: str = "",
              f"{CACHE_VERSION}-{digest}-{source.suffix.lower().lstrip('.')}-{int(vision)}.txt")
     cached = cache.is_file()
     if cached:
-        with cache.open("r", encoding="utf-8", newline="") as cached_text:
-            text = cached_text.read()
-    else:
+        try:
+            with cache.open("r", encoding="utf-8", newline="") as cached_text:
+                text = cached_text.read()
+        except UnicodeDecodeError:
+            # Cached text is disposable; recover from the authoritative source.
+            cached = False
+    if not cached:
         if source.suffix.casefold() in file_chat.PLAIN_TEXT:
             text = source.read_text(encoding="utf-8-sig", errors="replace")
         else:
