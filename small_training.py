@@ -33,6 +33,7 @@ GITHUB_DATASETS = {
 }
 MAX_DATASET_FILE_BYTES = 8 * 1024 * 1024
 MAX_DATASET_BYTES = 32 * 1024 * 1024
+CLASSIFIER_MAX_TEXT_CHARS = 16384
 
 
 class _GitHubDataRedirect(HTTPRedirectHandler):
@@ -299,7 +300,7 @@ def _classifier_rows(dataset_path,text_column,label_column):
         if not isinstance(text,str) or not isinstance(label,str):
             raise ValueError("Malformed classifier CSV row")
         text,label=text.strip(),label.strip()
-        if not text or not label or len(text)>16384 or len(label)>128:
+        if not text or not label or len(text)>CLASSIFIER_MAX_TEXT_CHARS or len(label)>128:
             raise ValueError("Classifier rows need bounded nonempty text and labels")
         split=row.get("split") if explicit else "train"
         if split not in partitions:
@@ -486,7 +487,7 @@ def _load_classifier(model_folder):
             vocabulary = artifact["vocabulary"]
             classes = artifact["classes"]
             if (not isinstance(vocabulary,dict) or not 1 <= len(vocabulary) <= 20000
-                    or any(not isinstance(term,str) or not 0 < len(term) <= 8192
+                    or any(not isinstance(term,str) or not 0 < len(term) <= CLASSIFIER_MAX_TEXT_CHARS
                            or type(index) is not int for term,index in vocabulary.items())
                     or set(vocabulary.values()) != set(range(len(vocabulary)))):
                 raise ValueError("Classifier vocabulary must use contiguous bounded indices")
@@ -525,7 +526,7 @@ def predict_classifier(model_folder, text):
     Empty/OOV text uses intercept probabilities, as sklearn does. This predicts
     an intent label, not authorization to execute a tool or spend an allowance.
     """
-    if not isinstance(text,str) or len(text)>16384:
+    if not isinstance(text,str) or len(text)>CLASSIFIER_MAX_TEXT_CHARS:
         raise ValueError("Classifier text must be a string of at most 16384 characters")
     artifact = _load_classifier(model_folder)
     words = re.findall(r"(?u)\b\w\w+\b",text.lower())
