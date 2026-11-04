@@ -60,7 +60,9 @@ def native_context(info):
         int(value) for key, value in model_info.items()
         if key.endswith(".context_length") and isinstance(value, int) and value > 0
     ]
-    return max(values, default=configured_context(info))
+    if not values:
+        raise ValueError("Cannot determine native context limit from model metadata")
+    return max(values)
 
 
 def model_bytes(model):
