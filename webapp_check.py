@@ -378,7 +378,106 @@ def project_only_route(folder: Path):
     return handle
 
 
-def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None) -> dict:
+def click_listener_observation(page, control, target, project_root: Path) -> dict:
+    """Read listeners without installing handlers, changing DOM, or dispatching events.
+
+    This is a before-attempt observation, not proof that any handler ran.
+    Native/default behavior and truncated/unsupported scopes remain possible.
+    CDP backend IDs exclude unrelated descendants from ancestor observations.
+    """
+    session = None
+    group = "cale-click-diagnostic"
+    try:
+        info = control.evaluate("""el => {
+            if(el.getRootNode()!==document) return {unsupported:'shadow-root target'};
+            function selector(node) {
+                const parts=[];
+                for(let n=node;n && n.nodeType===1;n=n.parentElement) {
+                    if(parts.length===40) return null;
+                    let index=1;
+                    for(let s=n.previousElementSibling;s;s=s.previousElementSibling) index++;
+                    parts.unshift(CSS.escape(n.localName)+':nth-child('+index+')');
+                }
+                return parts.join('>');
+            }
+            const scopes=[];
+            let n=el;
+            for(;n && scopes.length<10;n=n.parentElement) {
+                scopes.push({selector:selector(n),scope:(n.localName+(n.id?'#'+n.id:'')).slice(0,64)});
+            }
+            if(el.form && !el.form.contains(el)) scopes.push({selector:selector(el.form),scope:'associated form'});
+            return {scopes,truncated:!!n,tag:el.localName,type:(el.type||'').slice(0,32),disabled:!!el.disabled};
+        }""")
+        if info.get("unsupported"):
+            return {"target": target, "unavailable": info["unsupported"]}
+        session = page.context.new_cdp_session(page)
+        scripts = {}
+        def parsed_script(event):
+            if len(scripts) < 2048:
+                url = event.get("url", "")
+                scripts[event["scriptId"]] = {"url": url if len(url) <= 2048 else "",
+                                              "executionContextAuxData": {"isDefault": event.get("executionContextAuxData", {}).get("isDefault")}}
+        session.on("Debugger.scriptParsed", parsed_script)
+        # Classify source ownership; runtime/automation listeners may also
+        # exist in the default world. Never pause application execution.
+        session.send("Debugger.setSkipAllPauses", {"skip": True})
+        session.send("Debugger.enable")
+        root = session.send("DOM.getDocument", {"depth": 0})["root"]
+        scopes = []
+        for scope in info["scopes"]:
+            if not scope["selector"]:
+                return {"target": target, "unavailable": "DOM path exceeds diagnostic limit"}
+            node = session.send("DOM.querySelector", {"nodeId": root["nodeId"], "selector": scope["selector"]})
+            if not node.get("nodeId"):
+                return {"target": target, "unavailable": "DOM changed before listener observation"}
+            detail = session.send("DOM.describeNode", {"nodeId": node["nodeId"], "depth": 0})["node"]
+            obj = session.send("DOM.resolveNode", {"nodeId": node["nodeId"], "objectGroup": group})["object"]
+            scopes.append((scope["scope"], obj["objectId"], detail["backendNodeId"]))
+        document = session.send("DOM.resolveNode", {"nodeId": root["nodeId"], "objectGroup": group})["object"]
+        window = session.send("Runtime.evaluate", {"expression": "window", "objectGroup": group})["result"]
+        scopes.extend((("document", document["objectId"], root["backendNodeId"]), ("window", window["objectId"], None)))
+        related = {"click", "mousedown", "mouseup", "pointerdown", "pointerup", "keydown", "keyup", "submit", "touchstart", "touchend"}
+        count, unclassified, listeners = 0, 0, []
+        for scope, object_id, backend_id in scopes:
+            observed = session.send("DOMDebugger.getEventListeners", {"objectId": object_id, "depth": 1, "pierce": False})
+            for listener in observed.get("listeners", []):
+                if listener.get("type") not in related or (backend_id is not None and listener.get("backendNodeId") != backend_id):
+                    continue
+                script = scripts.get(listener.get("scriptId"), {})
+                default_world = script.get("executionContextAuxData", {}).get("isDefault")
+                if default_world is not True:
+                    if default_world is not False:
+                        unclassified += 1
+                    continue
+                url = urlparse(script.get("url", ""))
+                path = Path(url2pathname(url.path)).resolve() if url.scheme == "file" else None
+                if not path or not path.is_relative_to(project_root.resolve()):
+                    unclassified += 1
+                    continue
+                count += 1
+                if len(listeners) < 3:
+                    handler = listener.get("originalHandler") or listener.get("handler") or {}
+                    source_path = path.relative_to(project_root.resolve()).as_posix()
+                    listeners.append({"scope": scope, "type": listener["type"], "source_path": source_path[:160],
+                                      "line": int(listener.get("lineNumber", 0))+1, "source_preview": str(handler.get("description", ""))[:90]})
+        return {"target": target, "at": "before_click_attempt", "tag": info["tag"], "type": info["type"], "disabled": info["disabled"],
+                "scopes_checked": len(scopes), "ancestors_truncated": info["truncated"], "project_listener_count": count, "other_listener_count": unclassified, "listeners": listeners,
+                "limit": "Only project-file-backed handlers counted. Other listeners may be runtime, evaluated app, or automation code. Presence does not prove dispatch or rule out native behavior."}
+    except Exception as error:
+        return {"target": target, "unavailable": type(error).__name__}
+    finally:
+        if session is not None:
+            try:
+                session.send("Runtime.releaseObjectGroup", {"objectGroup": group})
+            except Exception:
+                pass
+            try:
+                session.detach()
+            except Exception:
+                pass  # Optional diagnostics must never alter the behavior verdict.
+
+
+def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, _probe_cases=(), _diagnose=2) -> dict:
     """Exercise a local page offline and report each actual browser assertion."""
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
@@ -428,6 +527,7 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None) 
 
             for number, case in enumerate(spec["cases"], 1):
                 failures = []
+                click_observations = []
                 suggested_hidden = []
                 before = asserted_state(case)
                 if case.get("reload"):
@@ -467,7 +567,7 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None) 
                             else:
                                 raise
                 # Replay actual user input: reload, fill, click, keys, wait, assertions.
-                for element_id in case.get("click", []):
+                for click_index, element_id in enumerate(case.get("click", [])):
                     if isinstance(element_id, dict):
                         # Both labels are data, not selectors or regular
                         # expressions. Repeated row names/buttons remain an
@@ -487,6 +587,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None) 
                         failures.append(f"Missing or ambiguous click target {element_id!r}; use a unique ID or exact button name")
                         continue
                     try:
+                        if number in _probe_cases and click_index >= len(case["click"])-2:
+                            click_observations.append(click_listener_observation(page, control, element_id, folder))
                         control.click(timeout=5_000)
                     except PlaywrightError as exc:
                         failures.append(f"Could not click {element_id!r}: {str(exc)[:200]}")
@@ -569,6 +671,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None) 
                                          ("reload", "set", "click", "keys", "wait_ms") if name in case}
                     if suggested_hidden:
                         outcome["suggested_assertions"] = {"hidden": suggested_hidden}
+                    if click_observations:
+                        outcome["click_diagnostics"] = {"observations": click_observations}
                 results.append(outcome)
                 actions = [kind for kind in ("reload", "set", "click", "keys") if case.get(kind)]
                 changed = [name for name, value in after.items() if before.get(name) != value]
@@ -578,6 +682,25 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None) 
                 destination = folder / ".local-ai" / "browser.png"
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(destination), timeout=8_000)
+            # A separate fresh context preserves the original verdict and
+            # avoids adding CDP overhead or instrumentation to passing tests.
+            targets = [case["case"] for case in results if not case["passed"]
+                       and spec["cases"][case["case"]-1].get("click")
+                       and not any(reason.startswith(("Could not click", "Missing or ambiguous click target", "Missing or ambiguous row text"))
+                                   for reason in case["failures"])][:max(0, min(2, int(_diagnose)))]
+            if _diagnose and targets and hashlib.sha256(page_path.read_bytes()).hexdigest() == page_hash:
+                replay_spec = {**spec, "cases": spec["cases"][:max(targets)]}
+                try:
+                    replay = check(folder, replay_spec, _browser=browser, _probe_cases=targets, _diagnose=False)
+                    for number in targets:
+                        observed = replay["cases"][number-1]
+                        confirmed = (not observed["passed"] and observed["failures"] == results[number-1]["failures"]
+                                     and replay["page_sha256"] == page_hash and replay["javascript_errors"] == errors)
+                        results[number-1]["click_diagnostics"] = {
+                            "replay_confirmed": confirmed,
+                            "observations": observed.get("click_diagnostics", {}).get("observations", []) if confirmed else []}
+                except Exception as error:
+                    results[targets[0]-1]["click_diagnostics"] = {"replay_confirmed": False, "unavailable": type(error).__name__}
         finally:
             if _browser is None:
                 browser.close()
@@ -708,7 +831,7 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
         try:
             for spec in checks:
                 spec = normalize_spec(spec)
-                result = check(folder, spec, _browser=browser)
+                result = check(folder, spec, _browser=browser, _diagnose=min(2, max(0, failures_left)))
                 failures = [case for case in result["cases"] if not case["passed"]][:failures_left]
                 for failure in failures:
                     case = spec["cases"][failure["case"] - 1]
@@ -806,6 +929,13 @@ def serialize_result(result: dict, limit: int = 16000) -> str:
         inputs = case.get("inputs", {})
         if len(json.dumps(inputs)) > 1000:
             case["inputs"] = {"preview": json.dumps(inputs, ensure_ascii=False)[:700], "truncated": True}
+        diagnostic = case.get("click_diagnostics")
+        if isinstance(diagnostic, dict):
+            diagnostic["observations"] = diagnostic.get("observations", [])[:1]
+            for observation in diagnostic["observations"]:
+                observation["listeners"] = observation.get("listeners", [])[:2]
+                for listener in observation["listeners"]:
+                    listener.pop("source_preview", None)
     for field in ("errors", "javascript_errors"):
         if field in value:
             value[field] = [str(reason)[:400] for reason in value[field][:4]]

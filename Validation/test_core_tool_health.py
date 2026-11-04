@@ -1,7 +1,6 @@
 """Core tool health uses runnable checks and repairs only after setup."""
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 

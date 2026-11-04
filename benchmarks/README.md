@@ -1,5 +1,16 @@
 # Native worker reality check
 
+## Failed-click repair evidence
+
+The [expense replay](results/click-diagnostics-20261103.json) retains all 28
+assertions and still reports four failures. Separate offline diagnostic replays
+observe a source-backed form submit handler but no source-backed handlers on
+the rebuilt Delete buttons. Source and assertion hashes remain unchanged.
+Listener presence does not prove dispatch; runtime/evaluated handlers and
+native actions remain possible. Evidence reaches structured step summaries and
+SQLite failure memory without resetting repeated-failure counters. This is
+better repair evidence, not proof that a model can now finish the app.
+
 ## Typed JavaScript logic repair
 
 `javascript_logic_repair.py --runtime-root C:\path\to\AIWorkbench --keep-folder C:\path\to\new-folder`

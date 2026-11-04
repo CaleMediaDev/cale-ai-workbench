@@ -1002,6 +1002,26 @@ def test_coalesced_failure_keeps_actual_inputs_in_durable_diagnostic(tmp_path):
     assert result["cases"][1]["inputs"] == {"set": {"bill": "10"}}
 
 
+def test_click_evidence_survives_memory_without_resetting_repeated_failure(tmp_path):
+    arguments = {"path": "index.html", "cases": [{"click": "Delete", "expect": {"total": "0"}}]}
+    case = {"case": 1, "passed": False, "failures": ["total expected 0, got 10"], "inputs": {"click": "Delete"}}
+    verdict = {"passed": False, "cases": [case]}
+    task_context.record_action(tmp_path, "check_webapp", json.dumps(verdict), arguments)
+    case["click_diagnostics"] = {"replay_confirmed": True, "observations": [{
+        "project_listener_count": 1, "other_listener_count": 7,
+        "listeners": [{"source_path": "index.html", "line": 42, "source_preview": "PRIVATE_SOURCE_BODY"}]}]}
+    task_context.record_action(tmp_path, "check_webapp", json.dumps(verdict), arguments)
+    saved = task_context.checker_failures(tmp_path, "index.html")[0]
+    assert saved["repeats"] == 2
+    assert "1 project-file-backed listeners" in saved["details"] and "index.html:42" in saved["details"]
+    assert "PRIVATE_SOURCE_BODY" not in saved["details"]
+    # Optional malformed or changing observations cannot erase the actual failure.
+    case["click_diagnostics"]["observations"] = [None]
+    task_context.record_action(tmp_path, "check_webapp", json.dumps(verdict), arguments)
+    saved = task_context.checker_failures(tmp_path, "index.html")[0]
+    assert saved["repeats"] == 3 and "total expected 0" in saved["details"]
+
+
 def test_large_browser_failures_return_valid_json_without_changing_verdict(tmp_path):
     (tmp_path / "index.html").write_text('<p id="answer">' + 'a' * 200 + '</p>')
     arguments = {"path": "index.html", "cases": [{"expect": {"answer": 'b' * 200}} for _ in range(12)]}
@@ -1167,6 +1187,91 @@ select.onchange=()=>out.textContent=select.value; select.onchange();</script>"""
         {"set": {"kind": "Supplies"}, "expect": {"chosen": "supplies"}}]})
     assert result["passed"]
     assert len(result["interactions"]) == 2
+
+
+def test_dynamic_button_failure_reports_missing_listener_without_changing_source(tmp_path):
+    source = """<button id="add">Add row</button><table><tbody id="rows"></tbody></table><p id="count">0</p>
+    <script>
+    document.querySelectorAll('.remove').forEach(button=>button.onclick=()=>{
+        button.closest('tr').remove();document.getElementById('count').textContent='0'});
+    document.getElementById('add').onclick=()=>{
+        document.getElementById('rows').insertAdjacentHTML('beforeend',
+            '<tr><td>New item</td><td><button class="remove">Delete</button></td></tr>');
+        document.getElementById('count').textContent='1';};
+    </script>"""
+    path = tmp_path / "index.html"
+    path.write_text(source)
+    spec = {"path": "index.html", "cases": [
+        {"click": ["add"], "expect": {"count": "1"}},
+        {"click": [{"button": "Delete", "row_text": "New item"}], "expect": {"count": "0"}}]}
+    result = webapp_check.check(tmp_path, spec)
+    assert not result["passed"] and result["cases"][0]["passed"]
+    diagnostic = result["cases"][1]["click_diagnostics"]
+    assert diagnostic["replay_confirmed"], diagnostic
+    observed = diagnostic["observations"][0]
+    assert observed["project_listener_count"] == 0 and observed["scopes_checked"] >= 5, observed
+    assert observed["other_listener_count"] > 0  # Automation handlers are never mislabeled as app code.
+    assert observed["at"] == "before_click_attempt" and not observed["listeners"]
+    assert path.read_text() == source
+
+
+@pytest.mark.parametrize("binding,expected_scope,expected_type", [
+    ("document.getElementById('remove').onclick=()=>{};", "button#remove", "click"),
+    ("document.getElementById('rows').addEventListener('click',()=>{});", "tbody#rows", "click"),
+    ("document.addEventListener('click',()=>{});", "document", "click"),
+    ("window.addEventListener('click',()=>{});", "window", "click"),
+    ("document.getElementById('form').onsubmit=event=>event.preventDefault();", "form#form", "submit"),
+])
+def test_failed_click_observes_direct_delegated_and_form_listeners(tmp_path, binding, expected_scope, expected_type):
+    (tmp_path / "index.html").write_text('''<form id="form"><table><tbody id="rows"><tr>
+        <td>Paper</td><td><button id="remove">Delete</button></td></tr></tbody></table></form>
+        <p id="count">1</p><script>'''+binding+"</script>")
+    result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [
+        {"click": ["remove"], "expect": {"count": "0"}}]})
+    assert not result["passed"]
+    diagnostic = result["cases"][0]["click_diagnostics"]
+    assert diagnostic["replay_confirmed"], diagnostic
+    observed = diagnostic["observations"][0]
+    assert observed["project_listener_count"] == 1, observed
+    assert observed["listeners"][0]["scope"] == expected_scope
+    assert observed["listeners"][0]["type"] == expected_type
+
+
+def test_unrelated_descendant_listener_is_not_misreported_as_delegation(tmp_path):
+    (tmp_path / "index.html").write_text('''<button id="dead">Delete</button>
+        <button id="other" onclick="this.textContent='done'">Other</button><p id="count">1</p>''')
+    result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [
+        {"click": ["dead"], "expect": {"count": "0"}}]})
+    observed = result["cases"][0]["click_diagnostics"]["observations"][0]
+    assert observed["project_listener_count"] == 0, observed
+
+
+def test_passing_click_does_not_replay_or_probe_listeners(tmp_path):
+    (tmp_path / "index.html").write_text('''<button id="go" onclick="document.getElementById('count').textContent='0'">Delete</button><p id="count">1</p>''')
+    with patch.object(webapp_check, "click_listener_observation", side_effect=AssertionError("Passing checks do not need diagnostics")) as probe:
+        result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"click": ["go"], "expect": {"count": "0"}}]})
+    assert result["passed"]
+    probe.assert_not_called()
+
+
+def test_optional_probe_failure_does_not_replace_the_failed_behavior_verdict(tmp_path):
+    (tmp_path / "index.html").write_text('<button id="dead">Delete</button><p id="count">1</p>')
+    with patch.object(webapp_check, "click_listener_observation", side_effect=RuntimeError("CDP unavailable")):
+        result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"click": ["dead"], "expect": {"count": "0"}}]})
+    assert not result["passed"] and not result["cases"][0]["passed"]
+    assert "displayed '1'" in result["cases"][0]["failures"][0]
+    assert result["cases"][0]["click_diagnostics"] == {"replay_confirmed": False, "unavailable": "RuntimeError"}
+
+
+def test_divergent_diagnostic_replay_cannot_replace_original_failure(tmp_path):
+    (tmp_path / "index.html").write_text('<button id="dead">Delete</button><p id="count">1</p>')
+    def divergent(page, control, target, project_root):
+        page.locator("#count").evaluate("el=>el.textContent='0'")
+        return {"project_listener_count": 0}
+    with patch.object(webapp_check, "click_listener_observation", side_effect=divergent):
+        result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"click": ["dead"], "expect": {"count": "0"}}]})
+    assert not result["passed"] and "displayed '1'" in result["cases"][0]["failures"][0]
+    assert result["cases"][0]["click_diagnostics"] == {"replay_confirmed": False, "observations": []}
 
 
 def test_click_accepts_an_exact_accessible_button_name_without_an_id(tmp_path):

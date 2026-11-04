@@ -1511,6 +1511,21 @@ def test_structured_step_summary_keeps_failures_without_quoted_verifier_transcri
     assert not failed["passed"] and "runtime unavailable" in str(failed["check_summary"]["errors"])
 
 
+def test_structured_step_preserves_failed_click_diagnostic(tmp_path):
+    folder = Path(project(tmp_path / "click-summary")["folder"])
+    (folder / "index.html").write_text('<button id="delete">Delete</button><p id="total">10</p>')
+    step = {"phase": "Fix", "title": "Delete updates total", "check_tool": "check_webapp",
+            "check_arguments": {"path": "index.html", "cases": [{"click": ["delete"], "expect": {"total": "0.00"}}]}}
+    active = task_context.plan_steps(folder, [step])["active"]
+    result = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert not result["passed"]
+    assert result["check_summary"]["cases"], json.dumps(result)
+    diagnostic = result["check_summary"]["cases"][0]["click_diagnostics"]
+    assert diagnostic["replay_confirmed"]
+    assert diagnostic["observations"][0]["project_listener_count"] == 0
+    assert "0 project-file-backed listeners" in task_context.checker_failures(folder, "index.html")[0]["details"]
+
+
 def test_step_acceptance_revised_during_check_cannot_receive_older_success(tmp_path):
     folder = Path(project(tmp_path / "racing-check")["folder"])
     original = {"phase": "Build", "title": "First", "check_command": "exit 0"}

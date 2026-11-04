@@ -1,0 +1,85 @@
+{
+  "source_and_assertions_unchanged": true,
+  "seconds": 6.79,
+  "passed": false,
+  "case_count": 28,
+  "failed_case_count": 4,
+  "suite_sha256": "7f08aa8e084cced7586148c8acf122782fbfb5f6382b9c17c8751c8d3e13ee63",
+  "click_evidence": [
+    {
+      "sequence": 2,
+      "case": 3,
+      "replay_confirmed": true,
+      "observations": [
+        {
+          "target": "Add expense",
+          "at": "before_click_attempt",
+          "tag": "button",
+          "type": "submit",
+          "disabled": false,
+          "scopes_checked": 6,
+          "ancestors_truncated": false,
+          "project_listener_count": 1,
+          "other_listener_count": 7,
+          "listeners": [
+            {
+              "scope": "form#f",
+              "type": "submit",
+              "source_path": "index.html",
+              "line": 53,
+              "source_preview": "function(ev) {\n        ev.preventDefault();\n        const errorEl = document.getElementByI"
+            }
+          ],
+          "limit": "Only project-file-backed handlers counted. Other listeners may be runtime, evaluated app, or automation code. Presence does not prove dispatch or rule out native behavior."
+        }
+      ]
+    },
+    {
+      "sequence": 5,
+      "case": 3,
+      "replay_confirmed": true,
+      "observations": [
+        {
+          "target": {
+            "button": "Delete",
+            "row_text": "Wash supplies"
+          },
+          "at": "before_click_attempt",
+          "tag": "button",
+          "type": "submit",
+          "disabled": false,
+          "scopes_checked": 9,
+          "ancestors_truncated": false,
+          "project_listener_count": 0,
+          "other_listener_count": 7,
+          "listeners": [],
+          "limit": "Only project-file-backed handlers counted. Other listeners may be runtime, evaluated app, or automation code. Presence does not prove dispatch or rule out native behavior."
+        }
+      ]
+    },
+    {
+      "sequence": 8,
+      "case": 5,
+      "replay_confirmed": true,
+      "observations": [
+        {
+          "target": {
+            "button": "Delete",
+            "row_text": "Fuel"
+          },
+          "at": "before_click_attempt",
+          "tag": "button",
+          "type": "submit",
+          "disabled": false,
+          "scopes_checked": 9,
+          "ancestors_truncated": false,
+          "project_listener_count": 0,
+          "other_listener_count": 7,
+          "listeners": [],
+          "limit": "Only project-file-backed handlers counted. Other listeners may be runtime, evaluated app, or automation code. Presence does not prove dispatch or rule out native behavior."
+        }
+      ]
+    }
+  ],
+  "interpretation": "CPU-only replay of the unfinished expense fixture. Missing project-file-backed deletion handlers observed; no automatic model repair was attempted or proven."
+}

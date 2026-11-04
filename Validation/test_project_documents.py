@@ -1,7 +1,6 @@
 """Project documents stay local, scoped, and fresh after source edits."""
 
 import os
-from pathlib import Path
 from unittest.mock import patch
 
 import file_chat

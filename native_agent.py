@@ -679,7 +679,7 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     value["check_verdict"] = {"passed": value["passed"]}
                     value["check_summary"] = {
                         "cases": [{key: case[key] for key in
-                                   ("case", "path", "function", "saved_sequence", "inputs", "failures") if key in case}
+                                   ("case", "path", "function", "saved_sequence", "inputs", "failures", "click_diagnostics") if key in case}
                                   for case in verdict.get("cases", []) if case.get("passed") is False][:2],
                         "errors": verdict.get("errors", [])[:2] or
                             ([checked[:1200]] if not verdict else [])}

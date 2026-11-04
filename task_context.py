@@ -629,6 +629,7 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
         if len(path) > 1024:
             return None
         details = []
+        click_notes = []
         supplied_cases = arguments.get("cases", [])
         if tool == "check_webapp":
             import webapp_check
@@ -654,6 +655,20 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
                               for key in ("reload", "set", "click", "keys", "wait_ms")
                               if supplied_cases[number-1].get(key)}
                 context = " inputs=" + json.dumps(inputs, sort_keys=True)[:240] if inputs or actual_inputs else ""
+                diagnostic = case.get("click_diagnostics", {})
+                if tool == "check_webapp" and isinstance(diagnostic, dict) and diagnostic.get("replay_confirmed") is True:
+                    observations = diagnostic.get("observations", [])
+                    for observation in (observations[:2] if isinstance(observations, list) else []):
+                        if not isinstance(observation, dict):
+                            continue
+                        count, other = observation.get("project_listener_count"), observation.get("other_listener_count")
+                        if type(count) is int and type(other) is int and count >= 0 and other >= 0:
+                            listeners = observation.get("listeners", [])
+                            locations = [str(item.get("source_path", ""))[:120]+":"+str(item.get("line", ""))[:8]
+                                         for item in (listeners[:2] if isinstance(listeners, list) else []) if isinstance(item, dict)]
+                            click_notes.append(f"Case {number} before replayed click: {count} project-file-backed listeners, {other} other/runtime/evaluated listeners"
+                                               + (" at " + ", ".join(locations) if locations else "")
+                                               + "; presence does not prove dispatch or exclude native actions.")
                 for reason in case.get("failures", [])[:3]:
                     if isinstance(reason, str):
                         function = (" " + str(case.get("path", "")) + ":" + str(case.get("function", ""))
@@ -686,12 +701,15 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
         detail = (reference + " | ".join(details[:4]))[:1400]
         if not detail and not verdict["passed"]:
             detail = "Checker returned failed without detailed assertions; inspect its saved spec/result."
+        identity_detail = detail
+        if click_notes:
+            detail = detail[:950] + " | Click observation: " + " | ".join(click_notes)[:420]
         if not isinstance(request_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", request_hash):
             request_hash = request_identity(root)
         # An edit that leaves the same assertion broken is not recovery.
         # Reset only when the problem, test, request or passing verdict changes.
         signature = hashlib.sha256((json.dumps(arguments, sort_keys=True) + "\0" +
-            request_hash + "\0" + detail).encode("utf-8")).hexdigest()
+            request_hash + "\0" + identity_detail).encode("utf-8")).hexdigest()
         return (tool, path, request_hash, int(verdict["passed"]), detail, signature)
     except (OSError, ValueError, TypeError, AttributeError):
         return None
