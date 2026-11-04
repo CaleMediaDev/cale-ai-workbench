@@ -141,8 +141,33 @@ class TableMLTests(unittest.TestCase):
                     output = root / f"{kind}.csv"
                     with self.assertRaisesRegex(ValueError, "Prediction scores overflowed"):
                         predict_table_model(str(model), str(prediction), str(output))
-                    with output.open(newline="", encoding="utf-8") as stream:
-                        self.assertEqual(list(csv.DictReader(stream)), [])
+                    self.assertFalse(output.exists())
+
+    def test_late_prediction_failure_removes_partial_output_and_allows_retry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            model.write_text(json.dumps({
+                "format": "cale-table-model-v1", "problem_type": "regression",
+                "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
+                "feature_names": ["size"], "coefficients": [[1e308]],
+                "intercepts": [0], "classes": [], "target_column": "value",
+                "metric": "holdout_mean_absolute_error", "holdout_score": 1,
+                "baseline_score": 2,
+            }), encoding="utf-8")
+            prediction = root / "new.csv"
+            output = root / "predicted.csv"
+            # The first batch is written successfully; the next batch overflows.
+            prediction.write_text("size\n" + "0\n" * 4096 + "2\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Prediction scores overflowed"):
+                predict_table_model(str(model), str(prediction), str(output))
+            self.assertFalse(output.exists())
+
+            prediction.write_text("size\n0\n", encoding="utf-8")
+            result = predict_table_model(str(model), str(prediction), str(output))
+            self.assertEqual(result["rows"], 1)
+            with output.open(newline="", encoding="utf-8") as stream:
+                self.assertEqual([row["prediction"] for row in csv.DictReader(stream)], ["0"])
 
     def test_malformed_model_is_rejected_before_writing(self):
         with tempfile.TemporaryDirectory() as folder:
