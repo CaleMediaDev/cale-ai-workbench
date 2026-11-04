@@ -77,9 +77,9 @@ class Controls:
         self.chat_button.configure(text="Reconnect ChatGPT" if self.chat_ready else "2. Connect ChatGPT")
         enabled = donation.settings(self.service.root)["enabled"]
         selected = [key for key, variable in self.source_vars.items() if variable.get()]
-        self.enable_button.configure(text="Stop donating" if enabled else ("Start donating continuously" if self.intensity.get() == "full_blast" else "Start donating when idle"),
+        self.enable_button.configure(text="Stop donating" if enabled else ("Start donating continuously" if self.intensity.get() in {"medium", "full_blast"} else "Start donating when idle"),
                                      state="normal" if enabled or self.ready_to_start() else "disabled")
-        self.state_text.set(("On · " + self.service.message) if enabled else "Off · donations use no AI until you start them.")
+        self.state_text.set(("On · " + self.service.status_message()) if enabled else "Off · donations use no AI until you start them.")
         self.intensity_text.set(donation.intensity_description(self.intensity.get()))
         for key, button in self.intensity_buttons.items():
             button.configure(style="SelectedMode.TButton" if key == self.intensity.get() else "Mode.TButton")
@@ -121,7 +121,7 @@ class Controls:
             self.service.cancel.set()
         self.service.activity()
         self.service.next_attempt = 0
-        self.service.message = (("Continuous donations enabled." if self.intensity.get() == "full_blast" else "Starts when Cale is idle at your chosen intensity.") if not enabled else "Off.")
+        self.service.message = (("Continuous donations enabled." if self.intensity.get() in {"medium", "full_blast"} else "Starts when Cale is idle at your chosen intensity.") if not enabled else "Off.")
         self.refresh()
 
     def open(self):
@@ -209,8 +209,8 @@ class Controls:
         self.enable_button.pack(anchor="w", ipady=5)
         ttk.Label(outer, textvariable=self.state_text, wraplength=585).pack(anchor="w", pady=(10, 10))
         ttk.Label(outer, text=(
-            "Slow and Medium pause for your tasks and chat. Slow uses smaller local models and longer rests; "
-            "Full Blast keeps working alongside your tasks, without daily or open-draft cutoffs, within account limits. "
+            "Slow pauses for your tasks. Medium runs continuously, one review at a time. "
+            "Full Blast runs up to three parallel reviews, with shared account-limit cooldowns and duplicate-work protection. "
             "A request already in flight may still use tokens. Local mode blocks cloud donations; offline pauses all contributions."),
             style="Muted.TLabel", wraplength=585, justify="left").pack(anchor="w")
         ttk.Label(outer, textvariable=self.counter).pack(anchor="w", pady=(14, 3))

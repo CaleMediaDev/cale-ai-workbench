@@ -295,7 +295,7 @@ def test_upgrade_preserves_existing_chatgpt_only_consent_and_usage(tmp_path):
     assert donation.source_totals(tmp_path) == {"chatgpt": 75}
 
 
-@pytest.mark.parametrize("intensity,limit", [("slow", 1), ("medium", 4)])
+@pytest.mark.parametrize("intensity,limit", [("slow", 1)])
 def test_intensity_caps_remain_durable_across_resources(tmp_path, intensity, limit):
     for number in range(limit):
         assert donation.claim_run(tmp_path, str(number), donation.SOURCES[number % 3], intensity)
@@ -496,7 +496,7 @@ def test_full_blast_gets_past_twelve_runs_and_three_pending_drafts_then_continue
           patch("github_account.account", return_value="donor"),
           patch("chatgpt_auth.status", return_value={"sharing": True}),
           patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT),
-          patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision: jobs),
+          patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kwargs: jobs),
           patch.object(donation, "public_file", side_effect=public),
           patch.object(donation, "gh_api", side_effect=api),
           patch.object(donation, "complete_donation", return_value={"choices": [{"message": {
@@ -537,7 +537,7 @@ def test_full_blast_keeps_inflight_work_on_activity_but_explicit_stop_cancels(tm
           patch("github_account.account", return_value="donor"),
           patch("chatgpt_auth.status", return_value={"sharing": True}),
           patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT),
-          patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision: jobs),
+          patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kwargs: jobs),
           patch.object(donation, "public_file", side_effect=public),
           patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
           patch.object(donation, "complete_donation", side_effect=complete),
@@ -548,6 +548,75 @@ def test_full_blast_keeps_inflight_work_on_activity_but_explicit_stop_cancels(tm
     donation.set_enabled(False, tmp_path)
     service.tick(busy=True)
     assert service.cancel.is_set()
+
+
+def test_medium_is_continuous_serial_without_old_daily_or_draft_caps(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    service = donation.Service(tmp_path)
+    with patch("pc_offline.offline", return_value=False), patch.object(service, "_run") as run:
+        assert service.allowed(busy=True)
+        for _ in range(3):
+            service.tick(busy=True)
+            service.thread.join(2)
+        assert run.call_count == 3 and not service.children
+    for number in range(20):
+        assert donation.claim_run(tmp_path, str(number), "local", "medium")
+    assert donation.PROFILES["medium"]["open"] is None
+
+
+def test_full_blast_three_lanes_overlap_and_all_stop_on_opt_out(tmp_path):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+                         github_account="donor", sources=["chatgpt"], intensity="full_blast")
+    service = donation.Service(tmp_path)
+    entered = threading.Barrier(4)
+    release = threading.Event()
+    def work(worker, cancel):
+        entered.wait(timeout=3)
+        release.wait(timeout=3)
+    with patch("pc_offline.offline", return_value=False), patch.object(donation.Service, "_run", autospec=True, side_effect=work):
+        service.tick(busy=True)
+        entered.wait(timeout=3)
+        workers = [service, *service.children]
+        assert len(workers) == 3 and all(worker.thread.is_alive() for worker in workers)
+        assert "3 reviews running" in service.status_message()
+        donation.set_enabled(False, tmp_path)
+        service.tick(busy=True)
+        assert all(worker.cancel.is_set() for worker in workers)
+        release.set()
+        for worker in workers:
+            worker.thread.join(2)
+
+
+def test_parallel_lanes_cannot_claim_the_same_public_revision_job(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    # Initialize schema before racing the actual transactional claim path.
+    with closing(donation.connection(tmp_path)):
+        pass
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(lambda _: donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", COMMIT["sha"]), range(3)))
+    assert sum(bool(result) for result in results) == 1
+    donation.finish(tmp_path, next(result for result in results if result), "no_change")
+    assert not donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", COMMIT["sha"])
+    assert donation.claim_run(tmp_path, "different-area", "chatgpt", "full_blast", COMMIT["sha"])
+    assert donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "c"*40)
+
+
+def test_account_cooldown_is_shared_by_other_lanes(tmp_path):
+    donation.resource_cooldown(tmp_path, "chatgpt", 120)
+    assert donation.resource_cooldown(tmp_path, "chatgpt") > 100
+    assert donation.resource_cooldown(tmp_path, "free_cloud") == 0
+    donation.resource_cooldown(tmp_path, "chatgpt", 5)
+    assert donation.resource_cooldown(tmp_path, "chatgpt") > 100
+
+
+def test_full_blast_can_review_larger_public_pairs_without_expanding_sensitive_paths():
+    tree = {"tree": [{"type": "blob", "path": path, "size": size} for path, size in
+        [("music_backend.py", 60000), ("Validation/test_music_backend.py", 65000),
+         ("chatgpt_auth.py", 20000), ("Validation/test_chatgpt_auth.py", 20000)]]}
+    with patch.object(donation, "gh_api", return_value=tree):
+        assert not donation.continuous_jobs([], COMMIT["sha"])
+        jobs = donation.continuous_jobs([], COMMIT["sha"], source_budget=160000)
+    assert len(jobs) == 1 and jobs[0]["paths"] == ["music_backend.py", "Validation/test_music_backend.py"]
 
 
 

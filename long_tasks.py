@@ -3669,10 +3669,12 @@ def gui():
     import ollama_runtime
     import pc_offline
     import project_preview
+    import radio_station
     import readiness_checklist
     import self_update
     import voice_assistant
     donation_service = donation.Service(ROOT)
+    radio_service = radio_station.Service(ROOT)
     from cloud_ai import (
         connect_account,
         credentials,
@@ -5683,6 +5685,7 @@ def gui():
         window.after(350, poll_chat)
 
     window.after(350, poll_chat)
+    radio_station.Controls(main_page, window, radio_service)
     task_heading = ttk.Frame(main_page)
     task_heading.pack(fill="x", pady=(0, 12))
     ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 20, "bold")).pack(side="left")
@@ -7037,6 +7040,7 @@ def gui():
                                          or setup.get("status") != "complete"
                                          or any(item["status"] == "waiting_for_setup" for item in all_projects)))
         donation_controls.refresh()
+        radio_service.suspended = bool(updating or pending_update or not setup or setup.get("status") != "complete")
         upgrading = ollama_runtime.model_download_running() or any(
             state.get("status") in ("working", "waiting")
             for state in (voice_setup, ollama_setup)
@@ -7263,6 +7267,7 @@ def gui():
 
     def close_window():
         """Never leave a camera greeting worker running after the UI closes."""
+        radio_service.close()
         if greeting_until[0] > time.time():
             greeting_config.write_text(json.dumps({"until": 0}), encoding="utf-8")
             camera_consent.write_text(json.dumps({"until": 0}), encoding="utf-8")

@@ -1,0 +1,9 @@
+{
+  "description": "Two sequential real 180-second instrumental ACE-Step renders, audio-only. RTX 3060 12 GB, existing warm local engine. Not a guarantee for other hardware or vocal/lyric generation.",
+  "tracks": [
+    {"station": "melodic techno", "render_seconds": 60.1, "audio_seconds": 180.0, "audible_decode_passed": true},
+    {"station": "ambient downtempo", "render_seconds": 56.1, "audio_seconds": 180.0, "audible_decode_passed": true}
+  ],
+  "windows_play_pause_resume_skip_stop_passed": true,
+  "cloud_inference_used": false
+}

@@ -3,7 +3,8 @@
 Credentials stay with their existing local account managers. The model receives
 only pinned public source files, returns exact text edits, and cannot run tools.
 Edits are syntax-checked and submitted as draft PRs; this module never merges or
-executes donated code. Slow/Medium yield to foreground activity; Full Blast runs alongside it.
+executes donated code. Slow yields to foreground activity; Medium and Full Blast
+run alongside it. Full Blast adds two ChatGPT review lanes when opted in.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import time
 import uuid
 from contextlib import closing
 from pathlib import Path, PurePosixPath
+from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -32,8 +34,8 @@ DAY_SECONDS = 86400
 SOURCES = ("local", "free_cloud", "chatgpt")
 PROFILES = {
     "slow": {"idle": 300, "interval": 3600, "daily": 1, "open": 1, "size": "quick", "output": 2048},
-    "medium": {"idle": 120, "interval": 900, "daily": 4, "open": 2, "size": "balanced", "output": 4096},
-    "full_blast": {"idle": 0, "interval": 0, "daily": None, "open": None, "size": "deep", "output": 6144},
+    "medium": {"idle": 0, "interval": 0, "daily": None, "open": None, "size": "deep", "output": 6144},
+    "full_blast": {"idle": 0, "interval": 0, "daily": None, "open": None, "size": "deep", "output": 12288},
 }
 
 
@@ -90,6 +92,8 @@ def connection(root: Path):
     for name, default in (("resource", "chatgpt"), ("intensity", "slow")):
         if name not in columns:
             conn.execute(f"ALTER TABLE runs ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
+    if "revision" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN revision TEXT NOT NULL DEFAULT ''")
     conn.execute("""CREATE TABLE IF NOT EXISTS receipts (
         run TEXT NOT NULL, event TEXT NOT NULL, tokens INTEGER NOT NULL,
         source TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(run,event))""")
@@ -98,7 +102,17 @@ def connection(root: Path):
         merged TEXT NOT NULL)""")
     conn.execute("CREATE INDEX IF NOT EXISTS accepted_author ON accepted_fixes(author)")
     conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_sync (id INTEGER PRIMARY KEY, next_page INTEGER, checked REAL, complete INTEGER)")
+    conn.execute("CREATE TABLE IF NOT EXISTS cooldowns(resource TEXT PRIMARY KEY, until REAL NOT NULL)")
     return conn
+
+
+def resource_cooldown(root, resource, seconds=None):
+    with closing(connection(root)) as conn, conn:
+        if seconds is not None:
+            conn.execute("INSERT INTO cooldowns VALUES(?,?) ON CONFLICT(resource) DO UPDATE SET until=MAX(until,excluded.until)",
+                         (resource, time.time()+max(1, min(86400, seconds))))
+        row = conn.execute("SELECT until FROM cooldowns WHERE resource=?", (resource,)).fetchone()
+        return max(0, row[0]-time.time()) if row else 0
 
 
 def total_tokens(root: Path = ROOT) -> int:
@@ -107,18 +121,22 @@ def total_tokens(root: Path = ROOT) -> int:
         return conn.execute("SELECT COALESCE(SUM(tokens),0) FROM runs").fetchone()[0]
 
 
-def claim_run(root: Path, job: str, resource="chatgpt", intensity="slow") -> str:
+def claim_run(root: Path, job: str, resource="chatgpt", intensity="slow", revision="") -> str:
     """Atomically reserve an attempt under the selected intensity's rolling cap."""
     if resource not in SOURCES or intensity not in PROFILES:
         raise ValueError("Invalid donation resource or intensity")
     with closing(connection(root)) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
+        if revision and conn.execute("""SELECT 1 FROM runs WHERE job=? AND revision=?
+            AND status IN ('requested','received','submitted','no_change') AND started>?""",
+            (job, revision, time.time()-1800)).fetchone():
+            return ""
         limit = PROFILES[intensity]["daily"]
         if limit is not None and conn.execute("SELECT COUNT(*) FROM runs WHERE started>?", (time.time() - DAY_SECONDS,)).fetchone()[0] >= limit:
             return ""
         run_id = uuid.uuid4().hex
-        conn.execute("INSERT INTO runs(id,started,status,job,resource,intensity) VALUES(?,?,?,?,?,?)",
-                     (run_id, time.time(), "requested", job, resource, intensity))
+        conn.execute("INSERT INTO runs(id,started,status,job,resource,intensity,revision) VALUES(?,?,?,?,?,?,?)",
+                     (run_id, time.time(), "requested", job, resource, intensity, revision))
         return run_id
 
 
@@ -452,14 +470,16 @@ def intensity_description(intensity: str) -> str:
     """Describe the actual scheduler policy in the donation controls."""
     profile = PROFILES[intensity]
     if intensity == "full_blast":
-        return "Continuous, alongside your tasks · no daily attempt or open-draft cutoff"
+        return "Continuous · up to 3 parallel reviews · local/free stay single-lane · account limits apply"
+    if intensity == "medium":
+        return "Continuous · one review at a time · alongside your tasks · account limits apply"
     wait = f"{profile['idle'] // 60} minutes"
     attempts = "attempt" if profile["daily"] == 1 else "attempts"
     drafts = "draft" if profile["open"] == 1 else "drafts"
     return f"{wait} idle · {profile['daily']} {attempts}/day · up to {profile['open']} open {drafts}"
 
 
-def continuous_jobs(jobs: list, revision: str) -> list:
+def continuous_jobs(jobs: list, revision: str, *, source_budget=35_000) -> list:
     """Extend the maintainer queue with bounded public production/test pairs.
 
     Each area has a stable ID, so an existing draft blocks duplicate proposals
@@ -484,7 +504,7 @@ def continuous_jobs(jobs: list, revision: str) -> list:
                 or "/" in path or not path.endswith(".py")):
             continue
         test = "Validation/test_" + path
-        if test not in files or sum(files[name].get("size", 200001) for name in (path, test)) > 35_000:
+        if test not in files or sum(files[name].get("size", 200001) for name in (path, test)) > source_budget:
             continue
         slug = re.sub(r"[^a-z0-9-]", "-", Path(path).stem.lower()).strip("-") or "module"
         identity = "review-" + slug[:44] + "-" + hashlib.sha256(path.encode()).hexdigest()[:8]
@@ -498,15 +518,18 @@ def continuous_jobs(jobs: list, revision: str) -> list:
 class Service:
     """GUI-owned scheduler; no model or GitHub calls run on the UI thread."""
 
-    def __init__(self, root: Path = ROOT):
+    def __init__(self, root: Path = ROOT, *, _lane=False, _resource=None):
         self.root = root
         self.last_activity = time.monotonic()
         self.cancel = threading.Event()
         self.thread = None
+        self.lane = _lane
+        self.resource = _resource
+        self.children = []
         self.next_attempt = 0.0
         self.suspended = False
         consent = settings(root)
-        self.continuous = consent["enabled"] and consent["intensity"] == "full_blast"
+        self.continuous = consent["enabled"] and consent["intensity"] in {"medium", "full_blast"}
         self.failures = 0
         self.message = (("Continuous donation work is enabled." if self.continuous else "Waiting for Cale to be idle.")
                         if consent["enabled"] else "Off · help improve Cale when you choose.")
@@ -517,18 +540,33 @@ class Service:
         if not self.continuous:
             self.cancel.set()
 
+    def status_message(self):
+        active = sum(bool(worker.thread and worker.thread.is_alive()) for worker in [self, *self.children])
+        return (f"{active} review{'s' if active != 1 else ''} running · " if active else "") + self.message
+
     def allowed(self, busy=False) -> bool:
-        """Honor consent/privacy and setup holds; Full Blast permits foreground work."""
+        """Honor consent/privacy and setup holds; continuous modes permit foreground work."""
         consent = settings(self.root)
         return (consent["enabled"] and not self.suspended
-                and (not busy or consent["intensity"] == "full_blast") and bool(permitted_sources(consent, self.root))
+                and (not busy or consent["intensity"] in {"medium", "full_blast"}) and bool(permitted_sources(consent, self.root))
                 and time.monotonic() - self.last_activity >= PROFILES[consent["intensity"]]["idle"])
 
     def tick(self, busy=False, suspended=False):
         """Start the next unit, yielding to setup/updates and idle-mode activity."""
         consent = settings(self.root)
-        self.continuous = consent["enabled"] and consent["intensity"] == "full_blast"
+        self.continuous = consent["enabled"] and consent["intensity"] in {"medium", "full_blast"}
         self.suspended = bool(suspended)
+        if not self.lane:
+            # Extra lanes spend only the explicitly donated ChatGPT resource.
+            # Local/free work remains serial to respect GPU/provider limits.
+            if consent["intensity"] == "full_blast" and "chatgpt" in consent["sources"]:
+                if not self.children:
+                    self.children = [Service(self.root, _lane=True, _resource="chatgpt") for _ in range(2)]
+                for child in self.children:
+                    child.tick(busy=busy, suspended=suspended)
+            else:
+                for child in self.children:
+                    child.cancel.set()
         if not self.allowed(busy):
             self.cancel.set()
             if settings(self.root)["enabled"]:
@@ -554,6 +592,7 @@ class Service:
         import usage_history
 
         run_id = ""
+        resource = ""
         # A temporarily empty queue/disconnected source is polled at most once
         # a minute; successful work below removes this wait in Full Blast.
         self.next_attempt = max(self.next_attempt, time.monotonic() + 60)
@@ -581,18 +620,25 @@ class Service:
                     return
                 previous = conn.execute("SELECT resource FROM runs ORDER BY started DESC LIMIT 1").fetchone()
             available = permitted_sources(consent, self.root)
+            if self.resource:
+                available = [source for source in available if source == self.resource]
             available = [source for source in available if
                          (source != "local" or local_available()) and
                          (source != "chatgpt" or chatgpt_auth.status().get("sharing")) and
                          (source != "free_cloud" or free_fingerprint())]
+            available = [source for source in available if not resource_cooldown(self.root, source)]
+            if "local" in available:
+                from readiness_checklist import _heavy_gpu_active
+                if _heavy_gpu_active(self.root):
+                    available.remove("local")  # Keep radio/music/image rendering ahead of donated GPU work.
             if not available:
-                self.message = "Connect a selected AI source or wait for local setup."
+                self.message = "Waiting for a connected source, music/image GPU work, setup, or account cooldown."
                 return
             resource = available[(available.index(previous[0]) + 1) % len(available)] if previous and previous[0] in available else available[0]
             check_cancel()
             query = urlencode({"q": f'repo:{UPSTREAM} is:pr is:open author:{login} "[Donation]" in:title'})
             opened = gh_api("search/issues?" + query + "&per_page=100")
-            if consent["intensity"] == "full_blast":
+            if consent["intensity"] in {"medium", "full_blast"}:
                 total = int(opened.get("total_count", 0))
                 if total > 1000 or opened.get("incomplete_results"):
                     raise RuntimeError("Draft listing is incomplete; retry before proposing duplicates.")
@@ -617,14 +663,19 @@ class Service:
             jobs = json.loads(public_file("donation-tasks.json", revision))
             if not isinstance(jobs, list):
                 raise ValueError("Invalid public maintainer task list")
-            if consent["intensity"] == "full_blast":
-                jobs = continuous_jobs(jobs, revision)
+            source_budget = 160_000 if consent["intensity"] == "full_blast" and resource == "chatgpt" else 40_000
+            if consent["intensity"] in {"medium", "full_blast"}:
+                jobs = (continuous_jobs(jobs, revision, source_budget=source_budget) if source_budget > 40_000
+                        else continuous_jobs(jobs, revision))
             if not jobs:
                 self.message = "Waiting for a maintainer contribution task. Retrying automatically."
                 return
             index = (int(hashlib.sha256((login + str(int(time.time() // DAY_SECONDS))).encode()).hexdigest(), 16) + count) % len(jobs)
             pending_jobs = {match for item in opened.get("items", []) for match in
                             re.findall(r"<!-- cale-donation:([a-z0-9-]{1,60}) -->", str(item.get("body") or ""))}
+            with closing(connection(self.root)) as conn:
+                pending_jobs.update(row[0] for row in conn.execute("""SELECT job FROM runs WHERE revision=?
+                    AND status IN ('requested','received','submitted','no_change') AND started>?""", (revision, time.time()-1800)))
             job = next((jobs[(index + offset) % len(jobs)] for offset in range(len(jobs))
                         if isinstance(jobs[(index + offset) % len(jobs)], dict)
                         and jobs[(index + offset) % len(jobs)].get("id") not in pending_jobs), None)
@@ -640,11 +691,13 @@ class Service:
             for path in paths:
                 check_cancel()
                 sources[path] = public_file(path, revision)
-            if sum(map(len, sources.values())) > 40_000:
+            if sum(map(len, sources.values())) > source_budget:
                 raise ValueError("Maintainer task exceeds the public-source context budget")
             check_cancel()
-            run_id = claim_run(self.root, job["id"], resource, consent["intensity"])
+            run_id = claim_run(self.root, job["id"], resource, consent["intensity"], revision)
             if not run_id:
+                if self.continuous:
+                    self.next_attempt = time.monotonic() + 2
                 return
             self.message = f"Donating {resource.replace('_', ' ')} AI · reviewing public Cale code…"
             payload = {"messages": [
@@ -672,7 +725,7 @@ class Service:
                 finish(self.root, run_id, "no_change")
                 self.message = "Review complete · no reliable code change proposed this time."
                 self.failures = 0
-                if consent["intensity"] == "full_blast":
+                if consent["intensity"] in {"medium", "full_blast"}:
                     self.next_attempt = 0
                 return
             check_cancel()
@@ -681,16 +734,30 @@ class Service:
             finish(self.root, run_id, "submitted", url)
             self.message = "Thank you · your draft is waiting for maintainer review."
             self.failures = 0
-            if consent["intensity"] == "full_blast":
+            if consent["intensity"] in {"medium", "full_blast"}:
                 self.next_attempt = 0
         except InterruptedError:
             if run_id:
                 finish(self.root, run_id, "interrupted")
             self.message = "Paused · your own work comes first."
             self.next_attempt = time.monotonic() + PROFILES[settings(self.root)["intensity"]]["idle"]
-        except Exception:
+        except HTTPError as error:
             if run_id:
                 finish(self.root, run_id, "failed")
+            seconds = 60
+            if error.code == 429:
+                try:
+                    seconds = float(error.headers.get("Retry-After", "300"))
+                except (ValueError, TypeError, AttributeError):
+                    seconds = 300
+                resource_cooldown(self.root, resource, seconds)
+            self.next_attempt = time.monotonic() + max(30, min(86400, seconds))
+            self.message = "Account limit or connection delay · waiting before retrying."
+        except Exception as error:
+            if run_id:
+                finish(self.root, run_id, "failed")
+            if resource and re.search(r"usage_limit|rate_limit", str(error), re.I):
+                resource_cooldown(self.root, resource, 300)
             self.failures += 1
             self.next_attempt = max(self.next_attempt, time.monotonic() + min(600, 30 * 2 ** min(self.failures, 5)))
             self.message = "Connection or account temporarily unavailable · retrying automatically."
