@@ -324,9 +324,11 @@ class Player:
             if paused is not None:
                 self.fade_start += self.now()-paused
                 self.paused_at = None
-            self.advance_mix()
-            if paused is not None:
-                self.paused_at = self.now()
+            try:
+                self.advance_mix()
+            finally:
+                if paused is not None:
+                    self.paused_at = self.now()
         else:
             self.active.set_volume(self.volume)
 
