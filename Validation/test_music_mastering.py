@@ -134,7 +134,8 @@ def test_mastering_preserves_destination_created_during_render(tmp_path, worker_
 
 
 @pytest.mark.parametrize("destination_created", [False, True])
-def test_mastering_without_filesystem_hard_link_support(tmp_path, destination_created):
+@pytest.mark.parametrize("winerror", [None, 1, 50])
+def test_mastering_without_filesystem_hard_link_support(tmp_path, destination_created, winerror):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"
     output = tmp_path / "master.wav"
@@ -150,7 +151,12 @@ def test_mastering_without_filesystem_hard_link_support(tmp_path, destination_cr
             output.write_bytes(b"another operation's audio")
         return type("Result", (), {"returncode": 0})()
 
-    unsupported = OSError(music_mastering.errno.EOPNOTSUPP, "Hard links unsupported")
+    unsupported = OSError(
+        music_mastering.errno.EOPNOTSUPP if winerror is None else music_mastering.errno.EINVAL,
+        "Hard links unsupported",
+    )
+    if winerror is not None:
+        unsupported.winerror = winerror
     with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
         music_mastering, "install", return_value=Path("python.exe")
     ), patch.object(music_mastering.subprocess, "run", side_effect=render), patch.object(
