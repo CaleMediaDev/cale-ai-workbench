@@ -46,7 +46,7 @@ def social_reply(utterance: str) -> str:
             # Preserve a useful short reply when a model inserts line breaks,
             # rather than substituting the same canned fallback every time.
             answer = " ".join(content.strip().strip('"').split())
-            if answer and len(answer) <= 240:
+            if answer and len(answer) <= 240 and len(answer.split()) < 35:
                 return answer
     except (KeyError, IndexError, TypeError, AttributeError, OSError, ValueError, TimeoutError):
         pass
