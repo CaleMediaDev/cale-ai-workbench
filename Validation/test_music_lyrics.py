@@ -52,6 +52,18 @@ def test_lyric_tool_uses_vocal_stem_and_writes_editable_captions(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("instrumental_name", ["song_(No_Vocals).wav", "song_(No-Vocals).wav"])
+def test_vocal_file_excludes_no_vocals_stems(tmp_path, instrumental_name):
+    instrumental = tmp_path / instrumental_name
+    instrumental.write_bytes(b"instruments")
+    vocal = tmp_path / "song_(Vocals).wav"
+    vocal.write_bytes(b"vocals")
+
+    assert music_lyrics.vocal_file([str(instrumental), str(vocal)]) == vocal
+    with pytest.raises(RuntimeError, match="vocal track"):
+        music_lyrics.vocal_file([str(instrumental)])
+
+
 def test_save_rejects_infinite_end_without_leaving_partial_output(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
