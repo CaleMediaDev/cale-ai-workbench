@@ -31,6 +31,21 @@ def test_total_time_only_requires_updated_when_used_as_fallback():
         ) == "2m 05s"
 
 
+def test_total_time_handles_invalid_current_timestamps():
+    for invalid in ("invalid", "nan", "inf", "-inf",
+                    float("nan"), float("inf"), float("-inf")):
+        for status in ("working", "paused"):
+            assert task_eta.total_time(
+                1000, 1125, status, now=invalid,
+            ) == "—"
+        # Frozen lifetimes do not depend on the current timestamp.
+        for status in ("ready_for_review", "accepted", "stopped"):
+            assert task_eta.total_time(
+                1000, 1125, status, now=invalid,
+            ) == "2m 05s"
+    assert task_eta.total_time(1000, 1000, "working", now="1065") == "1m 05s"
+
+
 def test_total_time_rejects_terminal_fallback_before_creation():
     for status in ("ready_for_review", "accepted", "stopped"):
         for finished in (None, "invalid", float("nan"), 999):
