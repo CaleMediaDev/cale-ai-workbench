@@ -96,9 +96,17 @@ def sync(root: str | Path) -> dict:
         finally:
             temporary.unlink(missing_ok=True)
         managed[key] = _hash(data)
-    temporary = marker.with_name(marker.name + ".tmp")
-    temporary.write_text(json.dumps(managed, indent=2, sort_keys=True), encoding="utf-8")
-    os.replace(temporary, marker)
+    temporary_file = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=marker.parent,
+        prefix=marker.name + ".", suffix=".tmp", delete=False
+    )
+    temporary = Path(temporary_file.name)
+    try:
+        with temporary_file:
+            temporary_file.write(json.dumps(managed, indent=2, sort_keys=True))
+        os.replace(temporary, marker)
+    finally:
+        temporary.unlink(missing_ok=True)
     return {"installed": installed, "updated": updated, "preserved": preserved}
 
 
