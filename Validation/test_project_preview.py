@@ -108,6 +108,11 @@ class ProjectPreviewTests(unittest.TestCase):
                 with patch.object(Path, "resolve", side_effect=error):
                     self.assertEqual(preview.source("project"), "")
 
+    def test_project_root_with_embedded_nul_returns_no_preview(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            invalid_root = str(Path(temporary) / "project") + "\x00"
+            self.assertEqual(preview.source(invalid_root), "")
+
     def test_unreadable_declaration_check_falls_back_to_static_html(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary).resolve()
