@@ -16,7 +16,7 @@ def validate_config(config):
         raise ValueError("Long tasks require at least a 64K model context window.")
     models = {"main": config["model"], **config.get("auxiliary", {})}
     for name, setting in models.items():
-        if setting.get("enabled") is False:
+        if name != "main" and setting.get("enabled") is False:
             continue
         url = urlsplit(setting.get("base_url", ""))
         model = setting.get("default") if name == "main" else setting.get("model")
