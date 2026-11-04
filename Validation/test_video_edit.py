@@ -64,3 +64,33 @@ def test_edit_video_extreme_speed_chains_atempo(tmp_path):
         probe = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(path)],
                                capture_output=True, text=True)
         assert "Audio:" in probe.stderr
+
+
+@pytest.mark.parametrize("speed", [0.25, 4.0])
+@pytest.mark.parametrize("with_audio", [False, True])
+def test_speed_change_trims_requested_source_segment_before_retiming(tmp_path, speed, with_audio):
+    """A source interval of four seconds becomes 16s slow or 1s fast."""
+    executable = imageio_ffmpeg.get_ffmpeg_exe()
+    source, output = tmp_path / "source.mp4", tmp_path / "retimed.mp4"
+    args = [executable, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+            "color=c=red:s=160x90:r=20:d=6"]
+    if with_audio:
+        args += ["-f", "lavfi", "-i", "sine=frequency=440:duration=6", "-c:a", "aac"]
+    args += ["-c:v", "libx264", str(source)]
+    subprocess.run(args, check=True, capture_output=True, timeout=30)
+    video_edit.edit_video(str(source), str(output), start_seconds=1, duration_seconds=4, speed=speed)
+    # Decode actual video frames and PCM audio instead of trusting container
+    # duration, which can conceal a truncated or mismatched individual stream.
+    video = subprocess.run([executable, "-hide_banner", "-loglevel", "error", "-i", str(output),
+        "-map", "0:v:0", "-vf", "fps=20", "-pix_fmt", "gray", "-f", "rawvideo", "pipe:1"],
+        check=True, capture_output=True, timeout=30)
+    expected = 4 / speed
+    actual_video = len(video.stdout) / (160 * 90 * 20)
+    assert actual_video == pytest.approx(expected, abs=0.2)
+    if with_audio:
+        audio = subprocess.run([executable, "-hide_banner", "-loglevel", "error", "-i", str(output),
+            "-map", "0:a:0", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1"],
+            check=True, capture_output=True, timeout=30)
+        actual_audio = len(audio.stdout) / (8000 * 2)
+        assert actual_audio == pytest.approx(expected, abs=0.2)
+        assert abs(actual_video - actual_audio) < 0.2

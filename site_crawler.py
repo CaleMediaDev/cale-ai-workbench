@@ -29,10 +29,11 @@ def page_path(project: Path, url: str) -> Path:
 
 
 async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
-    """Read at most 20 same-host pages, save Markdown, and index it locally.
+    """Attempt at most 20 same-host pages, save Markdown, and index it locally.
 
     Crawl4AI runs in its own local Chromium. The crawl respects robots.txt and
     never signs in or uses a cloud extraction service. Pages are untrusted data.
+    Failed and unreadable pages consume the same visit budget as saved pages.
     """
     from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
 
@@ -47,7 +48,7 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
         exclude_external_links=True, verbose=False,
     )
     async with AsyncWebCrawler(config=BrowserConfig(headless=True, verbose=False)) as crawler:
-        while queue and len(pages) < limit:
+        while queue and len(visited) < limit:
             url = queue.popleft()
             if url in visited:
                 continue

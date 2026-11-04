@@ -56,6 +56,50 @@ def test_crawl_saves_pages_and_searchable_memory(tmp_path, monkeypatch):
     assert project_memory.search(tmp_path, "silver penguin", kind="file")
 
 
+@pytest.mark.parametrize("failure", ["unsuccessful", "exception", "empty"])
+def test_failed_pages_consume_the_crawl_budget(tmp_path, monkeypatch, failure):
+    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+    monkeypatch.setattr(project_memory, "index_file", lambda *_: None)
+    seen = []
+    start = "https://example.com"
+
+    class FakeCrawler:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def arun(self, url, config):
+            seen.append(url)
+            assert config.check_robots_txt
+            if url == start:
+                return types.SimpleNamespace(
+                    success=True, markdown="Index page", error_message="",
+                    links={"internal": [{"href": f"{start}/broken-{i}"} for i in range(40)]},
+                )
+            if failure == "exception":
+                raise RuntimeError("Page timed out")
+            return types.SimpleNamespace(
+                success=failure != "unsuccessful", markdown="", links={},
+                error_message="Page failed",
+            )
+
+    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
+        AsyncWebCrawler=FakeCrawler,
+        BrowserConfig=lambda **kwargs: kwargs,
+        CrawlerRunConfig=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    ))
+    result = asyncio.run(site_crawler.crawl_site(tmp_path, start, max_pages=2))
+    assert seen == [start, f"{start}/broken-0"]
+    assert len(result["pages"]) == 1
+    assert len(result["errors"]) == 1
+    assert result["errors"][0]["url"] == seen[1]
+
+
 @pytest.mark.parametrize("markdown, expected", [
     (types.SimpleNamespace(fit_markdown="", raw_markdown="Raw page content"), "Raw page content"),
     (types.SimpleNamespace(fit_markdown="Fitted content", raw_markdown="Raw content"), "Fitted content"),

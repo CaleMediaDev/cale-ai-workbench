@@ -712,9 +712,25 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     checked = execute_tool(folder, "run_command", {"command": game_verifier_command(folder), "shell": "powershell"})
                 else:
                     checked = execute_tool(folder, kind, check_args)
+                unit_checked = checked
                 if kind == "check_webapp":
-                    checked = browser_step_effect(folder, check_args, checked)
-                status_result = step_exit_result(kind, checked)
+                    checked = browser_step_effect(folder, check_args, checked, _unit_only=True)
+                    unit_checked = checked
+                    try:
+                        global_verdict = json.loads(checked)
+                        if isinstance(global_verdict, dict) and "own_batch_passed" in global_verdict:
+                            # A tiny phase checks its own saved batch. Retained
+                            # future phases remain global failures, not a
+                            # circular prerequisite for reaching those phases.
+                            unit_verdict = {**global_verdict, "passed": global_verdict["own_batch_passed"] is True,
+                                "errors": global_verdict.get("own_batch_errors", []) + global_verdict.get("step_errors", []),
+                                "javascript_errors": global_verdict.get("own_batch_javascript_errors", [])}
+                            if global_verdict.get("step_input_effect_proven") is False:
+                                unit_verdict["cases"] = []
+                            unit_checked = json.dumps(unit_verdict, ensure_ascii=False)
+                    except (ValueError, TypeError):
+                        pass
+                status_result = step_exit_result(kind, unit_checked)
                 if before_step_commit is not None and not before_step_commit():
                     raise ValueError("Task control or user instructions changed during automatic acceptance; no step advanced.")
                 if structured:
@@ -733,7 +749,7 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                         verdict = {}
                     if not isinstance(verdict, dict):
                         verdict = {}
-                    value["check_verdict"] = {"passed": value["passed"]}
+                    value["check_verdict"] = {"passed": verdict.get("passed") is True if kind == "check_webapp" else value["passed"]}
                     value["check_summary"] = {
                         "cases": [{key: case[key] for key in
                                    ("case", "path", "function", "saved_sequence", "inputs", "failures", "click_diagnostics", "target_inventory") if key in case}
@@ -742,6 +758,9 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                             ([checked[:1200]] if not verdict else [])}
                     if kind == "check_webapp":
                         value["check_summary"]["input_effect_proven"] = verdict.get("step_input_effect_proven")
+                        value["own_batch_passed"] = verdict.get("own_batch_passed") is True
+                        value["global_check_passed"] = verdict.get("passed") is True
+                        value["check_summary"]["unit_errors"] = (verdict.get("own_batch_errors", []) + verdict.get("step_errors", []))[:2]
                     value["check_path"] = check_args.get("path", "")
                     value["verifier_check_passed"] = value["passed"] and verdict.get("verifier_check_passed") is True
                     if kind == "check_webapp":
@@ -871,6 +890,13 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             if not request_unchanged:
                 result["passed"] = False
                 result.setdefault("errors", []).append("User instructions changed during the browser check; rerun it against the fresh request.")
+            # Preserve this isolated batch's actual browser verdict before the
+            # independent full retained suite adds failures for later phases.
+            # The global passed/verifier flags below keep their existing gate.
+            result["own_batch_passed"] = (result.get("passed") is True
+                and not result.get("javascript_errors") and not result.get("errors"))
+            result["own_batch_errors"] = list(result.get("errors", []))[:3]
+            result["own_batch_javascript_errors"] = list(result.get("javascript_errors", []))[:3]
             result["interaction_proven"] = bool(result.get("interactions"))
             if result["passed"] and not result["interaction_proven"]:
                 result["note"] = (
@@ -994,6 +1020,12 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                         "with this reference and cases=[one corrected assertion-only case]. A suggested hidden "
                         "assertion is appropriate only when the user requires hiding rather than clearing text. "
                         "The checker retains input actions and unrelated assertions; it does not repair source bugs.")
+            if result.get("own_batch_passed") is True and (
+                    check_request != task_context.request_identity(folder)
+                    or hashlib.sha256(project_path(folder, arguments["path"]).read_bytes()).hexdigest() != result.get("page_sha256")):
+                result["own_batch_passed"] = False
+                result["passed"] = False
+                result["own_batch_errors"].append("User instructions or HTML changed after this batch ran; rerun it.")
             if revision_binding and revision:
                 aligned, reason = align_browser_step_revision(folder, revision_binding, old_sequence, arguments,
                     result, before_step_commit=before_step_commit)
@@ -1996,14 +2028,109 @@ def fresh_messages(messages: list, folder: Path, state: dict | None = None,
             path = active["check_arguments"]["path"]
             source = project_path(folder, path)
             with source.open("rb") as stream:
-                raw = stream.read(6001)
+                raw = stream.read(24001)
+            excerpt = None
             if len(raw) <= 6000:
+                excerpt = {"source": raw.decode("utf-8-sig", errors="replace")}
+            elif len(raw) <= 24000 and source.suffix.lower() in {".html", ".htm", ".js", ".mjs", ".py"}:
+                source_lines = raw.decode("utf-8-sig", errors="replace").splitlines()
+                # Large/minified single lines still need read_file's bounded
+                # reader. Never insert a clipped prefix that hides the handler.
+                if len(source_lines) > 1:
+                    check = active["check_arguments"]
+                    names = set()
+                    function = check.get("function")
+                    if isinstance(function, str) and re.fullmatch(r"[A-Za-z_$][\w$]{0,63}", function):
+                        names.add(function)
+                    cases = check.get("cases", [])
+                    if isinstance(cases, str):
+                        cases = json.loads(cases)
+                    for case in cases[:24] if isinstance(cases, list) else []:
+                        if not isinstance(case, dict):
+                            continue
+                        for field in ("set", "expect"):
+                            if isinstance(case.get(field), dict):
+                                names.update(case[field])
+                        for field in ("visible", "hidden", "click"):
+                            if isinstance(case.get(field), list):
+                                names.update(name for name in case[field] if isinstance(name, str))
+                    details = str(active.get("evidence", ""))
+                    for failure in task_context.checker_failures(folder, path, limit=2):
+                        if str(failure.get("path", "")).casefold() == str(path).casefold():
+                            details += "\n" + str(failure.get("details", ""))
+                    # Extract identifiers only: actual test values, captured
+                    # document text and arbitrary prose are not source anchors.
+                    names.update(re.findall(r"#([A-Za-z][A-Za-z0-9_-]{0,63})\b", details))
+                    names.update(re.findall(r'''["']id["']\s*:\s*["']([A-Za-z][A-Za-z0-9_-]{0,63})["']''', details))
+                    names = sorted(name for name in names if isinstance(name, str)
+                                   and re.fullmatch(r"[A-Za-z_$][\w$-]{0,63}", name))[:32]
+                    target = re.compile(r"(?<![\w$-])(?:" + "|".join(map(re.escape, names)) + r")(?![\w$-])") if names else None
+                    html = source.suffix.lower() in {".html", ".htm"}
+                    rendered = {}
+                    anchors = []
+                    script = style = data_script = False
+                    handlers = definitions = 0
+                    for index, original in enumerate(source_lines):
+                        opening = re.search(r"<script\b[^>]*>", original, re.I) if html else None
+                        if opening:
+                            data_script = bool(re.search(r"\btype\s*=\s*[\"']?(?:application/(?:ld\+)?json|text/plain|importmap|speculationrules)", opening[0], re.I))
+                        in_code = not html or script and not data_script or style or bool(
+                            re.search(r"<style\b", original, re.I)) or bool(opening and not data_script)
+                        if html:
+                            script = (script or bool(re.search(r"<script\b", original, re.I))) and not bool(re.search(r"</script\s*>", original, re.I))
+                            style = (style or bool(re.search(r"<style\b", original, re.I))) and not bool(re.search(r"</style\s*>", original, re.I))
+                            if not script:
+                                data_script = False
+                        line = original
+                        if html and not in_code:
+                            # Only opening UI tags identify HTML targets. Omit
+                            # static prose and field/data values, including a
+                            # textarea's text; exact edits can use read_file.
+                            tags = re.findall(r"<[A-Za-z][^>]{0,1500}>", original)
+                            line = " ".join(tag for tag in tags if re.search(
+                                r"\bid\s*=|^<(?:form|table|input|select|textarea|button|label|canvas)\b", tag, re.I))
+                            line = re.sub(r'''\b(?:value|data-[\w-]+)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)''',
+                                          'data-omitted="[omitted]"', line, flags=re.I)
+                        if not line.strip() or line.lstrip().startswith(("#", "//", "/*", "*")):
+                            continue
+                        rendered[index] = line[:480] + (" … [line clipped; use read_file]" if len(line) > 480 else "")
+                        if target and target.search(line):
+                            anchors.append((3 if style else 1, index, 2, 8) if in_code else (0, index, 0, 1))
+                        if function and isinstance(function, str) and re.search(
+                                r"\b(?:def|function)\s+" + re.escape(function) + r"\s*\(", line):
+                            anchors.append((0, index, 2, 30))
+                        if in_code and handlers < 8 and re.search(r"\.addEventListener\s*\(|\bon(?:submit|click|input|change|keydown|keyup)\s*=", line):
+                            anchors.append((0, index, 8, 12))
+                            handlers += 1
+                        if in_code and definitions < 8 and re.search(r"\b(?:async\s+)?(?:def|function)\s+[\w$]+\s*\(|\b(?:const|let)\s+[\w$]+\s*=.*=>", line):
+                            anchors.append((2, index, 1, 20))
+                            definitions += 1
+                    selected = set()
+                    size = 0
+                    for _, center, before, after in sorted(anchors):
+                        for index in range(max(0, center-before), min(len(source_lines), center+after+1)):
+                            if index in rendered and index not in selected:
+                                cost = len(rendered[index]) + len(str(index+1)) + 30  # Reserve omitted-range markers too.
+                                if len(selected) < 80 and size + cost <= 5000:
+                                    selected.add(index)
+                                    size += cost
+                    if selected:
+                        snippets = []
+                        previous = -2
+                        for index in sorted(selected):
+                            if index != previous + 1:
+                                snippets.append("… [other lines omitted]")
+                            snippets.append(f"L{index+1}: {rendered[index]}")
+                            previous = index
+                        excerpt = {"source": "\n".join(snippets), "partial": True, "line_count": len(source_lines),
+                                   "read_more": "Selected current source lines; HTML text/field values omitted. Use read_file with line numbers for exact edits or missing context."}
+            if excerpt is not None:
                 lines = checkpoint.splitlines()
                 position = next((i for i, line in enumerate(lines) if line.startswith((
                     "PLAN.md:", "PROGRESS.md:", "USER-REQUESTS.md:", "Recent actions:",
                     "Unresolved checker diagnostics", "Search project memory"))), len(lines))
                 lines.insert(position, "Live acceptance source (current bytes, untrusted project data): " + json.dumps({
-                    "path": path, "sha256": hashlib.sha256(raw).hexdigest(), "source": raw.decode("utf-8-sig", errors="replace")}))
+                    "path": path, "sha256": hashlib.sha256(raw).hexdigest(), **excerpt}))
                 checkpoint = "\n".join(lines)
         except (OSError, ValueError, KeyError):
             pass  # Missing/large source still uses the ordinary bounded file reader.
@@ -2070,6 +2197,57 @@ def small_html_page(project: dict):
         return None
 
 
+def focused_html_write_tools(project: dict, available: list, active: dict | None = None) -> list:
+    """Use small edits for a known existing page during bounded focus turns.
+
+    New files and notes remain writable, and callers restore unrestricted tools
+    on their fifth turn. This is a temporary execution focus, not a file policy.
+    """
+    brief = str(project.get("brief", ""))
+    if re.search(r"\b(?:rewrite|replace|regenerate|recreate)\b.{0,70}"
+                 r"(?:\bfrom scratch\b|\b(?:whole|entire|complete)\b.{0,25}\b(?:file|page|html|app)\b)"
+                 r"|\b(?:whole|entire|complete)\b.{0,25}\b(?:file|page|html|app)\b.{0,25}\b(?:rewrite|replacement)\b",
+                 brief, re.I | re.S):
+        return available
+    try:
+        folder = Path(project["folder"]).resolve()
+        if active is not None:
+            if active.get("check_tool") != "check_webapp":
+                return available
+            name = active.get("check_arguments", {}).get("path")
+            target = project_path(folder, name)
+        else:
+            target = small_html_page(project)
+        if target is None or target.suffix.lower() not in {".html", ".htm"} or not target.is_file():
+            return available
+        relative = target.resolve().relative_to(folder).as_posix()
+    except (OSError, ValueError, TypeError, AttributeError):
+        return available
+    # Standard relative aliases resolve to the same file: ./index.html,
+    # .\index.html, mixed separators, repeated ./ segments and Windows case.
+    separator = r"[\\/]+(?:\.[\\/]+)*"
+    def segment_pattern(part):
+        # JSON Schema patterns use portable regex syntax, not Python's (?i).
+        return "".join("[" + char.lower() + char.upper() + "]"
+                       if os.name == "nt" and char.isascii() and char.isalpha() else re.escape(char)
+                       for char in part)
+    pattern = r"^(?:\.[\\/]+)*" + separator.join(segment_pattern(part) for part in relative.split("/")) + "$"
+    result = []
+    for tool in available:
+        if tool["function"]["name"] != "write_file":
+            result.append(tool)
+            continue
+        narrowed = copy.deepcopy(tool)
+        path = narrowed["function"]["parameters"]["properties"]["path"]
+        if "not" in path:
+            path.setdefault("allOf", []).append({"not": {"pattern": pattern}})
+        else:
+            path["not"] = {"pattern": pattern}
+        narrowed["function"]["description"] += " During this focused repair, use edit_file for the existing active HTML page; write_file still creates other files."
+        result.append(narrowed)
+    return result
+
+
 def repair_tools(project: dict, state: dict):
     """Focus small HTML repairs, periodically restoring discovery/specialist tools.
 
@@ -2087,7 +2265,10 @@ def repair_tools(project: dict, state: dict):
         return TOOLS
     state["repair_focus_turns"] = count + 1
     names = {"list_files", "read_file", "edit_file", "write_file", "search_text", "check_webapp", "run_verifier", "task_steps", "check_python_function", "check_javascript_function"}
-    return [tool for tool in TOOLS if tool["function"]["name"] in names]
+    available = [tool for tool in TOOLS if tool["function"]["name"] in names]
+    # A queued step owns the four-plus-one cycle in step_tools, including its
+    # escape turn. Avoid stacking independently timed write restrictions.
+    return available if task_context.step_status(project["folder"])["remaining"] else focused_html_write_tools(project, available)
 
 
 def step_tools(project: dict, state: dict, available: list) -> list:
@@ -2106,7 +2287,8 @@ def step_tools(project: dict, state: dict, available: list) -> list:
     core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text", "check_python_function", "check_javascript_function", "create_game_starter", "check_game_starter",
             "run_command", "run_verifier", "check_webapp", "check_document_report",
             "inspect_project_file", "transform_csv"}
-    return [tool for tool in available if tool["function"]["name"] in core]
+    focused = [tool for tool in available if tool["function"]["name"] in core]
+    return focused_html_write_tools(project, focused, queue.get("active"))
 
 
 def bind_browser_assertion_revision(folder: Path, arguments: dict, planned_step: dict | None,
@@ -2197,9 +2379,8 @@ def align_browser_step_revision(folder: Path, binding: dict, old_sequence: dict 
     """
     import task_context
 
-    if not (result.get("passed") is True and result.get("verifier_saved") is True
-            and result.get("verifier_check_passed") is True):
-        return False, "Explicit browser revision did not pass its owned verifier; SQLite acceptance unchanged."
+    if not (result.get("own_batch_passed") is True and result.get("verifier_saved") is True):
+        return False, "Explicit browser revision's own batch did not pass/save; SQLite acceptance unchanged."
     if not browser_revision_matches_step(folder, binding["active"], old_sequence):
         return False, "The selected saved sequence is not the active acceptance sequence; SQLite unchanged."
     if before_step_commit is not None and not before_step_commit():
@@ -2398,7 +2579,7 @@ def step_exit_result(kind: str, result: str) -> str:
                                  "Acceptance check failed: " + result[-1600:])
 
 
-def browser_step_effect(folder: Path, arguments: dict, result: str) -> str:
+def browser_step_effect(folder: Path, arguments: dict, result: str, *, _unit_only: bool = False) -> str:
     """Input acceptance needs a current observed effect, not just static labels.
 
     A retained positive control may cover a matching invariant target, but only
@@ -2409,7 +2590,8 @@ def browser_step_effect(folder: Path, arguments: dict, result: str) -> str:
     try:
         cases = webapp_check.normalize_spec(arguments)["cases"]
         verdict = json.loads(result)
-        if verdict.get("passed") is not True or not any(
+        pass_field = "own_batch_passed" if _unit_only and "own_batch_passed" in verdict else "passed"
+        if verdict.get(pass_field) is not True or not any(
                 case.get("reload") or case.get("set") or case.get("click") or case.get("keys") for case in cases):
             return result
         path = project_path(folder, arguments["path"])
@@ -2433,8 +2615,13 @@ def browser_step_effect(folder: Path, arguments: dict, result: str) -> str:
                 return webapp_check.serialize_result(verdict, MAX_TOOL_OUTPUT)
         verdict["assertions_passed"] = True
         verdict["step_input_effect_proven"] = False
-        verdict["passed"] = verdict["ok"] = False
-        verdict.setdefault("errors", []).append(
+        if _unit_only and "own_batch_passed" in verdict:
+            verdict["own_batch_passed"] = False
+            errors = verdict.setdefault("step_errors", [])
+        else:
+            verdict["passed"] = verdict["ok"] = False
+            errors = verdict.setdefault("errors", [])
+        errors.append(
             "Input-step coverage failed: add a required DOM or exported-state change, or a freshly "
             "replayed positive control for the same assertion target and HTML. All asserted values "
             "stayed unchanged after input. Keep valid invariant cases; static HUD labels do not "
@@ -2446,6 +2633,11 @@ def browser_step_effect(folder: Path, arguments: dict, result: str) -> str:
             verdict = json.loads(result)
         except (ValueError, TypeError):
             return result
+        if isinstance(verdict, dict) and _unit_only and "own_batch_passed" in verdict:
+            verdict["own_batch_passed"] = False
+            verdict["step_input_effect_proven"] = False
+            verdict["step_errors"] = ["Input-step coverage metadata could not be validated; rerun the actual browser check."]
+            return json.dumps(verdict, ensure_ascii=False)
         if isinstance(verdict, dict) and verdict.get("passed") is True:
             return json.dumps({"passed": False, "ok": False, "step_input_effect_proven": False,
                 "errors": ["Input-step coverage metadata could not be validated; rerun the actual browser check."]})
@@ -2506,6 +2698,91 @@ def step_check_context(folder: Path, name: str, arguments: dict):
     return {"step_id": active["id"], "request_hash": task_context.request_identity(folder),
             "fingerprint": step_source_fingerprint(folder, structured), "structured": structured,
             "check_sha256": task_context.step_check_identity(active)}
+
+
+def active_step_repair_notice(project: dict, state: dict):
+    """Expose a small, current checker-repair decision instead of a whole build.
+
+    A static tag/ID correspondence is a hint, never a replacement assertion or
+    proof of visibility. The model still compares the original requirement and
+    uses the explicit checksum-bound checker; actual browser checks decide.
+    """
+    import task_context
+    import webapp_check
+    from html.parser import HTMLParser
+
+    if not state.get("step_focus_turns"):
+        return None
+    folder = Path(project["folder"])
+    active = task_context.step_status(folder)["active"]
+    if not active or active.get("check_tool") != "check_webapp" or not failed_structured_step(active):
+        return None
+    try:
+        arguments = webapp_check.normalize_spec(active["check_arguments"])
+        page = project_path(folder, arguments["path"])
+        if page.suffix.lower() not in {".html", ".htm"} or page.stat().st_size > 24000:
+            return None
+        class Targets(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.nodes = []
+                self.truncated = False
+            def handle_starttag(self, tag, attrs):
+                if len(self.nodes) < 1000:
+                    identity = dict(attrs).get("id") or ""
+                    self.nodes.append((tag, identity if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", identity) else None))
+                else:
+                    self.truncated = True
+        parser = Targets()
+        parser.feed(page.read_text(encoding="utf-8-sig"))
+        if parser.truncated:
+            return None
+        identities = {identity for _, identity in parser.nodes if identity}
+        candidates = []
+        for number, case in enumerate(arguments["cases"], 1):
+            matches = {}
+            for token in case.get("visible", []):
+                nodes = [identity for tag, identity in parser.nodes if tag == token]
+                if token not in identities and len(nodes) == 1 and nodes[0]:
+                    matches[token] = nodes[0]
+            if matches:
+                candidates.append((number, matches))
+        if not candidates:
+            return None
+        saved = folder / ".local-ai/webapp-check.json"
+        verifier = folder / ".local-ai/verify.ps1"
+        for path in (saved, verifier):
+            if path.is_symlink() or not path.resolve().is_relative_to(folder.resolve()):
+                return None
+        if saved.stat().st_size > 64000:
+            return None
+        with verifier.open(encoding="utf-8-sig") as stream:
+            if not stream.read(100).startswith("# Generated by Cale check_webapp"):
+                return None
+        raw = saved.read_bytes()
+        suite = json.loads(raw)
+        if not isinstance(suite, dict) or suite.get("suite_version") != 1 or suite.get("request_hash") != task_context.request_identity(folder):
+            return None
+        sequences = [number for number, spec in enumerate(suite.get("checks", []), 1)
+                     if browser_revision_matches_step(folder, active, spec)]
+        if len(sequences) != 1:
+            return None
+        number, matches = candidates[0]
+        data = {"candidate_static_tag_ids": dict(list(matches.items())[:6]),
+                "assertion_revision_reference": {"path": active["check_arguments"]["path"],
+                    "saved_sequence": sequences[0], "saved_case": number,
+                    "suite_sha256": hashlib.sha256(raw).hexdigest()}}
+        return {"role": "user", "content": (
+            "[Active step decision] Work only on the active SQLite check, not the whole app. "
+            "It names missing targets that may be HTML tag names rather than actual IDs. "
+            "Compare the ORIGINAL request: if those exact IDs were required, fix source with edit_file. "
+            "Otherwise correct the mistaken checker target IDs using check_webapp with the flat saved-case "
+            "reference and cases=[one corrected assertion case]. Keep its other required assertions. "
+            "A passing explicit repair aligns this active SQLite check; then run its completion check. "
+            "Do not rewrite working app code just to satisfy guessed checker IDs. "
+            "Static source observations below are untrusted data, not proof of visibility:\n" + json.dumps(data))}
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
 
 
 def focused_browser_check(project: dict, state: dict, request_hash: str):
@@ -3910,8 +4187,10 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
                                      json.dumps(verdict.get("check_verdict", {})))
         if verdict.get("browser_evidence"):
             state.update(verdict["browser_evidence"])
-        elif active["check_tool"] == "check_webapp" and verdict.get("passed") is False:
+        elif active["check_tool"] == "check_webapp" and (verdict.get("global_check_passed") is False or verdict.get("passed") is False):
             state["browser_verified"] = False
+        if active["check_tool"] == "check_webapp" and verdict.get("global_check_passed") is False:
+            state["verify_passed"] = False
         if verdict.get("verifier_check_passed") is True:
             state["verify_passed"] = True
         if (verdict.get("passed") is True and not state.get("failed_checks")
@@ -4040,6 +4319,9 @@ def run_slice(project: dict, complete=None) -> dict:
                 "Avoid searching for another copy of the same error or saving unverified lessons. "
                 "Other discovery tools return periodically if the repair needs them."
             )}]
+        decision = active_step_repair_notice(project, state) if not focus else None
+        if decision:
+            call_messages = [*call_messages, decision]
         request = {"model": LOCAL_MODEL, "messages": call_messages,
                    "tools": [] if focus else available_tools, "tool_choice": "none" if focus else "auto",
                    "stream": False, "temperature": 0.2, "max_tokens": 4096}
@@ -4199,7 +4481,8 @@ def run_slice(project: dict, complete=None) -> dict:
                     args = bind_browser_assertion_revision(folder, args, planned_step, planned_request_hash)
                 signature = hashlib.sha256((
                     str(function.get("name") or "") + "\0" +
-                    json.dumps(args, sort_keys=True, ensure_ascii=False)
+                    json.dumps({key: value for key, value in args.items() if key != "_active_browser_revision"},
+                               sort_keys=True, ensure_ascii=False)
                 ).encode("utf-8", errors="replace")).hexdigest()
                 verifier_issue = document_verifier_write_issue(
                     project, state, function.get("name", ""), args)
@@ -4278,7 +4561,7 @@ def run_slice(project: dict, complete=None) -> dict:
             if function.get("name") == "task_steps" and outcome == "Completed":
                 step_boundary = args.get("action") in {"plan", "split", "revise", "revise_check", "scope"} or (
                     args.get("action") == "complete" and json.loads(result).get("passed") is True)
-            if function.get("name") == "check_webapp" and outcome == "Completed":
+            if function.get("name") == "check_webapp":
                 try:
                     step_boundary = step_boundary or json.loads(result).get("active_step_check_aligned") is True
                 except (ValueError, AttributeError):
@@ -4294,8 +4577,10 @@ def run_slice(project: dict, complete=None) -> dict:
                     if step_result.get("check_tool") == "check_webapp":
                         if step_result.get("browser_evidence"):
                             state.update(step_result["browser_evidence"])
-                        elif step_result.get("passed") is False:
+                        elif step_result.get("global_check_passed") is False or step_result.get("passed") is False:
                             state["browser_verified"] = False
+                        if step_result.get("global_check_passed") is False:
+                            state["verify_passed"] = False
                     if step_result.get("verifier_check_passed") is True:
                         state["verify_passed"] = True
                 except (ValueError, KeyError, AttributeError):
@@ -4329,6 +4614,7 @@ def run_slice(project: dict, complete=None) -> dict:
                     # passing check of the same unchanged page.
                     if verdict.get("passed") is False:
                         state["browser_verified"] = False
+                        state["verify_passed"] = False
                 try:
                     if evidence and json.loads(result).get("verifier_check_passed") is True:
                         state["verify_passed"] = True

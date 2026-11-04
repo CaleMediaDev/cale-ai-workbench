@@ -56,7 +56,11 @@ def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
 def edit_video(source_path: str, output_path: str, start_seconds: float = 0,
                duration_seconds: float | None = None, layout: str = "original",
                speed: float = 1) -> dict:
-    """Trim, resize for a social layout, and change playback speed."""
+    """Trim a source interval, resize, and change its playback speed.
+
+    duration_seconds measures source time after start_seconds, before speed
+    changes: four source seconds at speed 0.25 produce about sixteen seconds.
+    """
     source = _existing(source_path, VIDEO)
     output = _destination(output_path, [source])
     start = _number(start_seconds, 0, 86400, "Start")
@@ -65,9 +69,13 @@ def edit_video(source_path: str, output_path: str, start_seconds: float = 0,
     sizes = {"original": None, "wide": (1920, 1080), "vertical": (1080, 1920), "square": (1080, 1080)}
     if layout not in sizes:
         raise ValueError("Layout must be original, wide, vertical or square.")
-    args = ["-ss", f"{start:g}", "-i", str(source)]
+    args = ["-ss", f"{start:g}"]
     if duration is not None:
+        # Input -t limits the source interval. Output -t would truncate a
+        # slowed clip and let a sped-up clip read beyond the requested trim.
+        # https://ffmpeg.org/ffmpeg.html#Main-options
         args += ["-t", f"{duration:g}"]
+    args += ["-i", str(source)]
     filters = []
     if rate != 1:
         filters.append(f"setpts=PTS/{rate:g}")

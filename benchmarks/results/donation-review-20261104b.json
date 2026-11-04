@@ -1,0 +1,40 @@
+{
+  "review_method": "Source review and isolated in-memory behavior comparisons; no donated code merged or installed.",
+  "reviews": [
+    {
+      "number": 153,
+      "head": "972cc09453da7d094fe8cd839c47e6163be84872",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/153",
+      "status": "closed_without_merge",
+      "reason": "Behaviorally identical tail read; proposed test places its progress marker outside the retained 64 KB and fails both versions."
+    },
+    {
+      "number": 154,
+      "head": "1083ae3fa983f8cf11383ae8253a37b6c10ebf5e",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/154",
+      "status": "closed_without_merge",
+      "reason": "Regression: calculate(1/0) changes from the existing useful division-by-zero message to None."
+    },
+    {
+      "number": 155,
+      "head": "141e918ef7c3e3ec6fbce887e97c6e432f46a089",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/155",
+      "status": "closed_without_merge",
+      "reason": "Proposed probe test never creates its executable and never reaches subprocess; rejecting any stderr can reject healthy tools."
+    },
+    {
+      "number": 156,
+      "head": "791d19176334e0ccc1fd7bf43b1a5224b67788f6",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/156",
+      "status": "closed_without_merge",
+      "reason": "Comment-only changes do not repair the claimed existing atomic audio-write behavior."
+    },
+    {
+      "number": 157,
+      "head": "f5c8759a821d9cb70b6d64973cf2278eab3cbb6f",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/157",
+      "status": "closed_without_merge",
+      "reason": "Regression: unconditional hit-counter reset prevents the two-observation visitor greeting."
+    }
+  ]
+}

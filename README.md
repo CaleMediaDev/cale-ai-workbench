@@ -225,6 +225,14 @@ the same request, page, input sequence and original active check; changes after
 the check, stale bindings and unrelated sequences cannot advance progress. Alignment itself
 does not complete the step: its acceptance check must still run and pass.
 
+A browser step now records its own batch verdict separately from the retained
+project-wide verifier. Real passing checks can advance one small step while
+later incomplete features remain failed; the whole project still needs the
+retained verifier to pass. Input-effect, JavaScript, source-change and request
+guards remain part of step acceptance. Focused repair turns show bounded
+current source snippets around IDs and handlers, and use small edits for an
+existing HTML page. New-file writes and periodic unrestricted turns stay available.
+
 The browser helper retains up to 32 independent sequences and 128 cases, within
 its existing 64 KB specification and 10-second explicit-wait budgets. Replay
 uses one browser process and a fresh offline context per sequence: tests cannot
