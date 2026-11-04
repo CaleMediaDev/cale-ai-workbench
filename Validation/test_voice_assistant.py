@@ -250,6 +250,29 @@ class VoiceTests(unittest.TestCase):
                     "Recipe app. Checking files.",
                 )
 
+    def test_one_shot_media_call_requires_object_response(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Media/python/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            with (patch.object(voice_assistant, "ROOT", root),
+                  patch.object(voice_assistant.subprocess, "run") as run):
+                for response in ('null', '[]', '"unexpected"', '42', 'true'):
+                    with self.subTest(response=response):
+                        run.return_value = subprocess.CompletedProcess(
+                            args=[], returncode=0, stdout=response + '\n', stderr=''
+                        )
+                        with self.assertRaisesRegex(
+                            RuntimeError, "The local voice service did not respond"
+                        ):
+                            voice_assistant.media_call("transcribe")
+                run.return_value = subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout='{"text":"hello"}\n', stderr=''
+                )
+                self.assertEqual(voice_assistant.media_call("transcribe"),
+                                 {"text": "hello"})
+
     def test_listen_returns_trimmed_local_transcript(self):
         with patch.object(
             voice_assistant, "media_call", return_value={"text": "  Hello  "}
