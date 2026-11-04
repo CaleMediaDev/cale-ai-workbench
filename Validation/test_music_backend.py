@@ -59,7 +59,12 @@ def test_generates_instrumental_from_loopback_only(tmp_path):
     assert download.call_args.args[0].startswith(music_backend.BASE + "/v1/audio")
 
 
-def test_sends_explicit_tempo_as_numeric_music_setting(tmp_path):
+@pytest.mark.parametrize("prompt,tempo", [
+    ("Techno at 150 BPM", 150),
+    ("Techno with rich synths\nPast user feedback:\n- Similar task the user liked: Piano at 80 BPM", None),
+    ("Techno at 150 BPM\nPast user feedback:\n- Similar task the user liked: Piano at 80 BPM", 150),
+])
+def test_sends_only_current_request_tempo_as_numeric_music_setting(tmp_path, prompt, tempo):
     responses = iter([
         {"code": 200, "data": {"task_id": "tempo"}},
         {"code": 200, "data": [{"status": 1, "result": '[{"file":"/v1/audio?path=tempo"}]'}]},
@@ -69,8 +74,12 @@ def test_sends_explicit_tempo_as_numeric_music_setting(tmp_path):
                        side_effect=lambda *_args, **_kwargs: next(responses)) as request,
           patch.object(music_backend, "urlopen", return_value=io.BytesIO(b"audio")),
           patch.object(music_backend.time, "sleep")):
-        music_backend.generate_music("Techno at 150 BPM", str(tmp_path / "tempo.mp3"))
-    assert request.call_args_list[0].args[1]["bpm"] == 150
+        music_backend.generate_music(prompt, str(tmp_path / "tempo.mp3"))
+    submitted = request.call_args_list[0].args[1]
+    if tempo is None:
+        assert "bpm" not in submitted
+    else:
+        assert submitted["bpm"] == tempo
 
 
 def test_vocal_song_uses_loaded_music_planner(tmp_path):

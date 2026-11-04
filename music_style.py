@@ -78,7 +78,8 @@ def requested_bpm(prompt: str) -> int | None:
     A caption alone is a weaker hint. The model can still miss the beat, so
     this metadata never substitutes for checking the rendered audio.
     """
-    match = re.search(r"\b(\d{2,3})\s*-?\s*bpm\b", prompt, re.I)
+    request = prompt.split("Past user feedback", 1)[0]
+    match = re.search(r"\b(\d{2,3})\s*-?\s*bpm\b", request, re.I)
     if not match:
         return None
     value = int(match.group(1))
