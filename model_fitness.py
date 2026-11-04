@@ -297,7 +297,7 @@ def probe_game_coding(source, root):
         records = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(records, dict):
             records = {}
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         records = {}
     records[source] = report
     path.parent.mkdir(parents=True, exist_ok=True)
