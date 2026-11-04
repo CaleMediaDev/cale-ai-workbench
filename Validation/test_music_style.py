@@ -1,5 +1,7 @@
 """Singer and genre requests are explicit in the local generator caption."""
 
+import pytest
+
 import music_style
 
 
@@ -305,3 +307,24 @@ def test_lead_cue_from_old_feedback_does_not_override_current_chopped_texture():
     assert caption.startswith("Sparse chopped vocal syllables")
     assert "clear sung verses and chorus" not in caption
     assert not music_style.requires_sustained_vocals(caption)
+
+
+@pytest.mark.parametrize("rejected,intent", [("male", "female"), ("female", "male")])
+def test_curly_apostrophe_singer_exclusion_preserves_requested_voice(rejected, intent):
+    request = f"Make a pop song, I don\u2019t want {rejected} vocals"
+    assert music_style.vocal_intent(request) == intent
+    caption = music_style.enhance(request)
+    assert f"expressive {intent} lead vocals" in caption
+    assert f"expressive {rejected} lead vocals" not in caption
+
+
+def test_curly_apostrophe_guitar_exclusion_keeps_electronic_caption():
+    caption = music_style.enhance("Make techno, I don\u2019t want guitars", instrumental=True)
+    assert caption.startswith("Entirely electronic production")
+    assert "guitar" not in caption.casefold()
+
+
+def test_curly_apostrophe_vocal_exclusion_does_not_request_full_singing():
+    request = "Make electronic music, I don\u2019t want vocals"
+    assert music_style.vocal_intent(request) == "none"
+    assert not music_style.requires_sustained_vocals(request)
