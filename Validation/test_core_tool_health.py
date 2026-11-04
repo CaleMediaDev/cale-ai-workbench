@@ -31,6 +31,36 @@ def test_browser_runtime_failure_is_visible_even_when_node_runs(tmp_path, monkey
     assert core_tool_health.missing(tmp_path, fresh=True) == ["Local browser runtime"]
 
 
+def test_missing_resolves_relative_root_for_browser_probe(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "installation"
+    node = root / "Toolbox/node-v26.13.0-win-x64/node.exe"
+    node.parent.mkdir(parents=True)
+    node.touch()
+    probe = root / "browser_probe.js"
+    probe.touch()
+    ghidra = root / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+    ghidra.parent.mkdir(parents=True)
+    ghidra.touch()
+    monkeypatch.setattr(core_tool_health, "_runnable", lambda path, *args: True)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
+    launches = []
+
+    def run(args, **kwargs):
+        launches.append((args, kwargs))
+        cwd = Path(kwargs["cwd"])
+        executable = cwd / args[0]
+        script = cwd / args[1]
+        return SimpleNamespace(returncode=0 if executable.is_file() and script.is_file() else 1)
+
+    monkeypatch.setattr(core_tool_health.subprocess, "run", run)
+    assert core_tool_health.missing(Path("installation"), fresh=True) == []
+    assert len(launches) == 1
+    args, kwargs = launches[0]
+    assert kwargs["cwd"] == root
+    assert args == [str(node), str(probe), str(root), str(root / "Toolbox")]
+
+
 def test_agent_sdk_probe_uses_managed_install_facts(tmp_path, monkeypatch):
     facts = tmp_path / "data/installs/current/facts.json"
     facts.parent.mkdir(parents=True)
