@@ -126,6 +126,27 @@ def test_inspector_preserves_extracted_line_endings_in_cache(tmp_path):
     assert extract.call_count == 1
 
 
+def test_inspector_rebuilds_invalid_utf8_cache(tmp_path):
+    source = tmp_path / "notes.pdf"
+    source.write_bytes(b"PDF fixture")
+    text = "Recovered document text"
+    with patch.object(file_chat, "ROOT", tmp_path), patch.object(
+        file_chat, "document_text", return_value=text,
+    ) as extract, patch.object(project_memory, "index_document_text"):
+        first = project_documents.inspect(tmp_path, "notes.pdf")
+        cache = next((tmp_path / ".local-ai/document-cache").glob("*.txt"))
+        cache.write_bytes(b"\xff\xfeinvalid UTF-8")
+        recovered = project_documents.inspect(tmp_path, "notes.pdf")
+        reused = project_documents.inspect(tmp_path, "notes.pdf")
+
+    assert first["text"] == recovered["text"] == reused["text"] == text
+    assert not first["cached"] and not recovered["cached"]
+    assert reused["cached"]
+    assert extract.call_count == 2
+    assert cache.read_text(encoding="utf-8") == text
+    assert source.read_bytes() == b"PDF fixture"
+
+
 def test_old_translated_cache_is_not_reused_after_newline_fix(tmp_path):
     source = tmp_path / "notes.pdf"
     source.write_bytes(b"PDF fixture")
