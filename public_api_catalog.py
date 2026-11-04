@@ -25,11 +25,11 @@ def _catalog() -> tuple[list[dict], bool]:
     fresh = False
     try:
         cached = json.loads(CACHE.read_text(encoding="utf-8"))
-        if not isinstance(cached, list):
+        if not isinstance(cached, list) or not all(isinstance(entry, dict) for entry in cached):
             raise ValueError("Unexpected public API catalog format.")
         data = cached
         fresh = time.time() - CACHE.stat().st_mtime < MAX_AGE
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         pass
     if not fresh:
         try:
@@ -39,7 +39,7 @@ def _catalog() -> tuple[list[dict], bool]:
             if len(raw) > MAX_BYTES:
                 raise ValueError("Public API catalog exceeded its download limit.")
             parsed = json.loads(raw.decode("utf-8"))
-            if not isinstance(parsed, list):
+            if not isinstance(parsed, list) or not all(isinstance(entry, dict) for entry in parsed):
                 raise ValueError("Unexpected public API catalog format.")
             data = parsed
             fresh = True
