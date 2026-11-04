@@ -201,11 +201,14 @@ class HardwareSampler:
         try:
             net_counters = psutil.net_io_counters()
             current_net = (net_counters.bytes_recv, net_counters.bytes_sent) if net_counters else None
+        except (NameError, AttributeError, OSError):
+            current_net = None
+        try:
             link_speeds = [item.speed for item in psutil.net_if_stats().values()
                            if item.isup and item.speed > 0]
             link_mbps = max(link_speeds, default=None)
         except (NameError, AttributeError, OSError):
-            current_net, link_mbps = None, None
+            link_mbps = None
         net_elapsed = now - self.previous_net_time if self.previous_net_time is not None else 0
         net_down, net_up, net_load = network_bandwidth(
             self.previous_net, current_net, net_elapsed, link_mbps
