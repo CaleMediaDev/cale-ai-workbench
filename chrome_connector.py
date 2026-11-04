@@ -21,7 +21,12 @@ def installed_version() -> str:
         contents = manifest.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError):
         return ""
-    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]*(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", dedent(contents), re.M)
+    # YAML comments may be less indented than the root mapping.
+    mapping_lines = "\n".join(
+        line for line in contents.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]*(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", dedent(mapping_lines), re.M)
     return match.group(2) if match else ""
 
 
