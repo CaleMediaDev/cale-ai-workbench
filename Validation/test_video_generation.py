@@ -234,6 +234,52 @@ def test_mp4_export_preserves_destination_created_after_exists_check(tmp_path):
     assert rendered.read_bytes() == b"rendered video" * 200
 
 
+def test_failed_mp4_copy_removes_partial_destination(tmp_path):
+    job_id = "d" * 32
+    runtime = tmp_path / "runtime"
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    rendered = runtime / "ComfyUI" / "output" / "render.mp4"
+    rendered.parent.mkdir(parents=True)
+    content = b"rendered video" * 200
+    rendered.write_bytes(content)
+    destination = tmp_path / "clip.mp4"
+    history = {
+        "prompt-1": {
+            "status": {"completed": True},
+            "outputs": {"58": {"videos": [{"filename": "render.mp4"}]}},
+        }
+    }
+    data = {
+        "prompt": "A calm forest", "seconds": 2, "layout": "wide",
+        "image_path": "", "output_path": str(destination),
+    }
+
+    def fail_after_partial_copy(source, target):
+        target.write(source.read(100))
+        raise OSError("export write failed")
+
+    with patch.object(video_generation, "RUNTIME", runtime), patch.object(
+        video_generation, "JOBS", jobs
+    ), patch.object(video_generation, "_write") as write, patch.object(
+        video_generation, "_free_port", return_value=8188
+    ), patch.object(video_generation, "_workflow", return_value={}), patch.object(
+        video_generation, "_request",
+        side_effect=[{}, {"prompt_id": "prompt-1"}, history],
+    ), patch.object(video_generation.subprocess, "Popen") as launch, patch.object(
+        video_generation.shutil, "copyfileobj", side_effect=fail_after_partial_copy
+    ):
+        launch.return_value.poll.return_value = None
+        with pytest.raises(OSError, match="export write failed"):
+            video_generation._render_job(job_id, data)
+        assert not any(call.kwargs.get("state") == "complete" for call in write.call_args_list)
+        launch.return_value.terminate.assert_called_once()
+        launch.return_value.wait.assert_called_once_with(timeout=20)
+
+    assert not destination.exists()
+    assert rendered.read_bytes() == content
+
+
 def test_render_cleanup_waits_for_killed_server(tmp_path):
     job_id = "c" * 32
     events = []
