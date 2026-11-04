@@ -49,14 +49,47 @@ class NaturalVoiceTests(unittest.TestCase):
                         SimpleNamespace(returncode=1),
                         SimpleNamespace(returncode=0),
                         SimpleNamespace(returncode=0),
+                        SimpleNamespace(returncode=0),
                     ],
                 ) as run,
             ):
                 natural_voice.install()
             self.assertEqual(json.loads(status.read_text())["status"], "complete")
-            self.assertEqual(run.call_count, 3)
+            self.assertEqual(run.call_count, 4)
             self.assertIn("kokoro-onnx==0.6.1", run.call_args_list[1].args[0])
-            self.assertIn("--download-voice", run.call_args_list[2].args[0])
+            self.assertEqual(run.call_args_list[2].args[0],
+                             [str(media_python), "-c", "import kokoro_onnx"])
+            self.assertIn("--download-voice", run.call_args_list[3].args[0])
+
+    def test_successful_pip_does_not_hide_persistent_engine_import_failure(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            media_python = root / "python.exe"
+            media_python.touch()
+            status = root / "voice-status.json"
+            fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=lambda *args: None)
+            import_command = [str(media_python), "-c", "import kokoro_onnx"]
+            with (
+                patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+                patch.object(natural_voice, "MEDIA_PYTHON", media_python),
+                patch.object(natural_voice, "STATUS", status),
+                patch.object(natural_voice, "ready", return_value=True),
+                patch.object(natural_voice, "whisper_ready", return_value=True),
+                patch.object(
+                    natural_voice.subprocess,
+                    "run",
+                    side_effect=[
+                        SimpleNamespace(returncode=1),
+                        SimpleNamespace(returncode=0),
+                        natural_voice.subprocess.CalledProcessError(1, import_command),
+                    ],
+                ) as run,
+            ):
+                natural_voice.install()
+            self.assertEqual(json.loads(status.read_text())["status"], "error")
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(run.call_args_list[2].args[0], import_command)
+            self.assertTrue(run.call_args_list[2].kwargs["check"])
 
     def test_missing_whisper_weights_are_restored_without_redownloading_voice(self):
         with tempfile.TemporaryDirectory() as folder:
