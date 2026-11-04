@@ -48,6 +48,18 @@ class SelfDiagnosticsTests(unittest.TestCase):
             self.assertTrue(diagnostics.schedule(self.root, self.state, now=101))
             launch.assert_called_once()
 
+    def test_active_projects_handles_uri_reserved_characters_in_path(self):
+        state = self.state / "projects#archive"
+        state.mkdir()
+        with closing(sqlite3.connect(state / "projects.db")) as connection:
+            connection.execute("CREATE TABLE projects (status TEXT)")
+            connection.execute("INSERT INTO projects VALUES ('ready_for_review')")
+            connection.commit()
+            self.assertFalse(diagnostics.active_projects(state))
+            connection.execute("UPDATE projects SET status='working'")
+            connection.commit()
+            self.assertTrue(diagnostics.active_projects(state))
+
     def test_failed_check_retries_then_backs_off_for_a_week(self):
         proc = SimpleNamespace(pid=123)
         with (patch.object(diagnostics.subprocess, "Popen", return_value=proc) as launch,

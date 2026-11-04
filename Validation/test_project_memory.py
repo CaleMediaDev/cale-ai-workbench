@@ -129,6 +129,29 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertFalse(memory.search(self.folder, "private"))
         self.assertFalse(memory.search(self.folder, "hidden_package_marker"))
 
+    def test_alias_eligibility_checks_resolved_filename_without_symlink_privilege(self):
+        source = self.folder / "credentials.json"
+        source.write_text('{"value":"excludedaliasmarker"}', encoding="utf-8")
+        alias = self.folder / "ordinary.md"
+        root = self.folder.resolve()
+        with patch.object(Path, "resolve", return_value=source):
+            self.assertFalse(memory._eligible(root, alias))
+
+    def test_code_scan_rejects_symlink_to_excluded_filename(self):
+        source = self.folder / "credentials.json"
+        source.write_text('{"value":"excludedaliasmarker"}', encoding="utf-8")
+        alias = self.folder / "ordinary.md"
+        try:
+            alias.symlink_to(source)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Symlinks unavailable: {exc}")
+
+        result = memory.index(self.folder, include_code=True)
+        self.assertEqual(result["indexed"], 0)
+        self.assertEqual(memory.search(self.folder, "excludedaliasmarker"), [])
+        with self.assertRaises(ValueError):
+            memory.index_file(self.folder, alias)
+
     def test_project_scan_and_explicit_index_reject_nested_secret_folder(self):
         private = self.folder / "secrets"
         private.mkdir()

@@ -109,7 +109,10 @@ def _text(path: Path) -> str:
         return ("[AI-generated local image description; verify against the original image.]\n" + description) if description else ""
     if suffix in AUDIO:
         result = _media_call("transcribe_audio", path)
-        transcript = result["text"].strip()
+        transcript = result["text"]
+        if not isinstance(transcript, str):
+            raise RuntimeError("The local media reader returned an invalid transcript.")
+        transcript = transcript.strip()
         return ("[Offline audio transcript; verify against the original recording.]\n" + transcript) if transcript else ""
     if suffix in VIDEO:
         result = _media_call(

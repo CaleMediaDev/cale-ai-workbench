@@ -29,15 +29,15 @@ def _db(root: str | Path) -> Path:
 @contextmanager
 def _connect(root: str | Path):
     conn = sqlite3.connect(_db(root), timeout=20)
-    conn.row_factory = sqlite3.Row
-    conn.execute("""CREATE TABLE IF NOT EXISTS feedback (
-        id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, generation INTEGER NOT NULL,
-        kind TEXT NOT NULL, rating INTEGER NOT NULL, title TEXT NOT NULL,
-        brief TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created REAL NOT NULL,
-        UNIQUE(task_id, generation, rating)
-    )""")
-    conn.execute("CREATE INDEX IF NOT EXISTS feedback_kind ON feedback(kind, created DESC)")
     try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("""CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, generation INTEGER NOT NULL,
+            kind TEXT NOT NULL, rating INTEGER NOT NULL, title TEXT NOT NULL,
+            brief TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created REAL NOT NULL,
+            UNIQUE(task_id, generation, rating)
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS feedback_kind ON feedback(kind, created DESC)")
         yield conn
         conn.commit()
     finally:

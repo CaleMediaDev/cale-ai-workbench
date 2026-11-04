@@ -414,6 +414,36 @@ class UserFileMemoryTests(unittest.TestCase):
             )
         self.assertEqual(worker.call_count, 2)
 
+    def test_null_audio_transcript_hides_stale_text_and_allows_retry(self):
+        recording = self.root / "a-recording.wav"
+        note = self.root / "b-note.txt"
+        recording.write_bytes(b"original audio")
+        with patch.object(user_file_memory, "_media_call",
+                          return_value={"text": "obsolete transcript"}):
+            user_file_memory.ingest(self.state, [str(recording)])
+        recording.write_bytes(b"changed audio fixture")
+        note.write_text("retained notebook", encoding="utf-8")
+        with patch.object(user_file_memory, "_media_call", side_effect=[
+            {"text": None}, {"text": "recovered transcript"},
+        ]) as worker:
+            result = user_file_memory.ingest(self.state, [str(recording), str(note)])
+            self.assertEqual(result, {"indexed": 1, "unchanged": 0, "skipped": 1})
+            with user_file_memory._connection(self.state) as conn:
+                failed = conn.execute(
+                    "SELECT version,content FROM files WHERE path=?", (str(recording),)
+                ).fetchone()
+                self.assertEqual(tuple(failed), ("", ""))
+                self.assertEqual(conn.execute(
+                    "SELECT COUNT(*) FROM file_fts WHERE path=?", (str(recording),)
+                ).fetchone()[0], 0)
+            self.assertEqual(
+                user_file_memory.search(self.state, "notebook")[0]["path"], str(note)
+            )
+            self.assertEqual(
+                user_file_memory.search(self.state, "recovered")[0]["path"], str(recording)
+            )
+        self.assertEqual(worker.call_count, 2)
+
     def test_video_memory_labels_sampled_frames(self):
         video = self.root / "walkthrough.mp4"
         video.write_bytes(b"video fixture")

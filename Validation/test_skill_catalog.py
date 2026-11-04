@@ -37,6 +37,23 @@ class SkillCatalogTests(unittest.TestCase):
         self.assertIn("New upstream", installed.read_text(encoding="utf-8"))
         self.assertTrue((self.root / "data/skills/references/security-checklist.md").is_file())
 
+    def test_preserves_local_dangling_skill_symlink(self):
+        skill_catalog.sync(self.root)
+        installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
+        local_target = self.root / "local-skill.md"
+        installed.unlink()
+        try:
+            installed.symlink_to(local_target)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Symlinks unavailable: {exc}")
+
+        result = skill_catalog.sync(self.root)
+
+        self.assertEqual(result, {"installed": 0, "updated": 0, "preserved": 1})
+        self.assertTrue(installed.is_symlink())
+        self.assertEqual(installed.readlink(), local_target)
+        self.assertFalse(local_target.exists())
+
     def test_preserves_local_skill_edits(self):
         skill_catalog.sync(self.root)
         installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"

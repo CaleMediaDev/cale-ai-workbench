@@ -1,7 +1,7 @@
 """Selected files answer small questions locally without creating tasks."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -114,3 +114,21 @@ def test_long_file_answer_discloses_omitted_sections(tmp_path):
         answer = file_chat.answer_from_files("What is the answer?", [str(path)])
     assert "Selected passages only" in answer
     assert "long.txt" in answer
+
+
+@pytest.mark.parametrize("payload", ["null", "[]", "42", '"text"'])
+@pytest.mark.parametrize("native_text", ["Native PDF content.", ""])
+def test_pdf_non_object_worker_response_uses_existing_recovery(payload, native_text):
+    converter_module = Mock()
+    converter_module.MarkItDown.return_value.convert.return_value.text_content = native_text
+    result = Mock(returncode=0, stdout=payload)
+    with (
+        patch.dict("sys.modules", {"markitdown": converter_module}),
+        patch.object(file_chat.Path, "is_file", return_value=True),
+        patch.object(file_chat.subprocess, "run", return_value=result),
+    ):
+        if native_text:
+            assert file_chat.document_text(Path("report.pdf")) == native_text
+        else:
+            with pytest.raises(RuntimeError, match="local scanned-PDF reader did not respond"):
+                file_chat.document_text(Path("report.pdf"))
