@@ -41,12 +41,12 @@ def _catalog() -> tuple[list[dict], bool]:
             parsed = json.loads(raw.decode("utf-8"))
             if not isinstance(parsed, list):
                 raise ValueError("Unexpected public API catalog format.")
+            data = parsed
+            fresh = True
             CACHE.parent.mkdir(parents=True, exist_ok=True)
             temp = CACHE.with_suffix(".tmp")
             temp.write_bytes(raw)
             temp.replace(CACHE)
-            data = parsed
-            fresh = True
         except Exception:
             if data is None:
                 raise RuntimeError("The public API catalog is unavailable while offline.") from None
