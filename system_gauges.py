@@ -204,7 +204,7 @@ class HardwareSampler:
         try:
             net_counters = psutil.net_io_counters()
             current_net = (net_counters.bytes_recv, net_counters.bytes_sent) if net_counters else None
-        except (NameError, AttributeError, OSError):
+        except (NameError, AttributeError, OSError, RuntimeError):
             current_net = None
         try:
             link_speeds = [item.speed for item in psutil.net_if_stats().values()
