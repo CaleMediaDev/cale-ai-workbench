@@ -236,6 +236,36 @@ class FileCatalogTests(unittest.TestCase):
             self.assertEqual(file_catalog.search(state, "my budget")[0]["path"], str(target))
             self.assertEqual(file_catalog.search(state, "my budget spreadsheet from 2025"), [])
 
+    def test_stale_search_hits_do_not_hide_existing_match(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            file_catalog, "enough_space", return_value=True
+        ):
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            stale = []
+            for number in range(50):
+                folder = root / f"group-{number}"
+                folder.mkdir()
+                path = folder / "needle.txt"
+                path.write_text("", encoding="utf-8")
+                stale.append(path)
+            target_folder = root / "group-live"
+            target_folder.mkdir()
+            target = target_folder / "needle expanded document filename.txt"
+            target.write_text("", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+
+            # Shorter names rank ahead of the surviving, longer filename.
+            initial = file_catalog.search(state, "needle", limit=30)
+            self.assertEqual(len(initial), 30)
+            self.assertNotIn(str(target), {row["path"] for row in initial})
+            for path in stale:
+                path.unlink()
+
+            results = file_catalog.search(state, "needle", limit=1)
+            self.assertEqual([row["path"] for row in results], [str(target)])
+
     def test_filler_word_does_not_hide_compound_filename(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"

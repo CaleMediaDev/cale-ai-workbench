@@ -274,16 +274,20 @@ def search(state: str | Path, query: str, limit: int = 10) -> list[dict]:
             rows = conn.execute(
                 """SELECT entries.path,entries.name,entries.kind
                 FROM entry_fts JOIN entries ON entries.id=entry_fts.rowid
-                WHERE entry_fts MATCH ? ORDER BY bm25(entry_fts,8.0,1.0)
-                LIMIT ?""",
-                (expression, candidate_limit),
-            ).fetchall()
+                WHERE entry_fts MATCH ? ORDER BY bm25(entry_fts,8.0,1.0)""",
+                (expression,),
+            )
             found = []
-            for row in rows:
-                if Path(row["path"]).exists():
-                    found.append(dict(row))
-                else:
-                    conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
+            try:
+                for row in rows:
+                    if Path(row["path"]).exists():
+                        found.append(dict(row))
+                        if len(found) >= candidate_limit:
+                            break
+                    else:
+                        conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
+            finally:
+                rows.close()
             return found
 
         def score(row: dict) -> tuple[int, int]:
