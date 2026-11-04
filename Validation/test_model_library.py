@@ -405,6 +405,22 @@ class AutoModelTests(unittest.TestCase):
             library.approve_candidate(model)
             self.assertTrue(library.candidate_approved(model))
 
+    def test_non_object_approvals_fail_closed_and_can_be_repaired(self):
+        model = {"alias": "cale-test-model", "source": "test:latest", "candidate": True}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root / "LongTasks/model-approvals.json"
+            path.parent.mkdir()
+            with patch.object(library, "ROOT", root):
+                for value in (None, [], ["unexpected"], "unexpected", 42, True):
+                    with self.subTest(value=value):
+                        path.write_text(json.dumps(value), encoding="utf-8")
+                        self.assertFalse(library.candidate_approved(model))
+                        library.approve_candidate(model)
+                        self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                                         {model["alias"]: model["source"]})
+                        self.assertTrue(library.candidate_approved(model))
+
     def test_recommendation_cannot_replace_bundled_candidate(self):
         document = {
             "schema": 1,
