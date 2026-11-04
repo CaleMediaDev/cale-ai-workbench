@@ -65,6 +65,48 @@ def test_crawl_saves_pages_and_searchable_memory(tmp_path, monkeypatch, second_h
     assert project_memory.search(tmp_path, "silver penguin", kind="file")
 
 
+@pytest.mark.parametrize("redirected_url, expected_child", [
+    ("https://example.com/docs/", "https://example.com/docs/child"),
+    (None, "https://example.com/child"),
+])
+def test_relative_links_use_redirect_destination(tmp_path, monkeypatch, redirected_url, expected_child):
+    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+    monkeypatch.setattr(project_memory, "index_file", lambda *_: None)
+    start = "https://example.com/old"
+    seen = []
+
+    class FakeCrawler:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def arun(self, url, config):
+            seen.append(url)
+            return types.SimpleNamespace(
+                success=True, markdown="Readable content", error_message="",
+                redirected_url=redirected_url if url == start else None,
+                links={"internal": [
+                    {"href": "https://other.example/outside"},
+                    {"href": "child"},
+                ]} if url == start else {},
+            )
+
+    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
+        AsyncWebCrawler=FakeCrawler,
+        BrowserConfig=lambda **kwargs: kwargs,
+        CrawlerRunConfig=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    ))
+    result = asyncio.run(site_crawler.crawl_site(tmp_path, start, max_pages=2))
+    assert seen == [start, expected_child]
+    assert result["errors"] == []
+    assert [page["url"] for page in result["pages"]] == seen
+
+
 @pytest.mark.parametrize("failure", ["unsuccessful", "exception", "empty"])
 def test_failed_pages_consume_the_crawl_budget(tmp_path, monkeypatch, failure):
     monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
