@@ -31,8 +31,8 @@ def working(root: Path = ROOT) -> bool:
         return False
     try:
         result = subprocess.run([str(target), "-version"], capture_output=True,
-                                text=True, timeout=10, creationflags=HIDE)
-        return result.returncode == 0 and result.stdout.startswith("ffmpeg version")
+                                text=False, timeout=10, creationflags=HIDE)
+        return result.returncode == 0 and result.stdout.startswith(b"ffmpeg version")
     except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
         return False
 
