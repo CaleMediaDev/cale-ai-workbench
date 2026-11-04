@@ -235,6 +235,14 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
 
 def _checked_model(model: dict) -> tuple[list[str], list[list[float]], list[float], list[str]]:
     """Reject malformed JSON before allocating a matrix or writing an output."""
+    def finite_number(value):
+        if not isinstance(value, (int, float)):
+            return False
+        try:
+            return math.isfinite(value)
+        except OverflowError:
+            return False
+
     if not isinstance(model, dict) or model.get("format") != "cale-table-model-v1":
         raise ValueError("This is not a Cale table model.")
     schema = model.get("schema")
@@ -247,9 +255,8 @@ def _checked_model(model: dict) -> tuple[list[str], list[list[float]], list[floa
         isinstance(column, str) and isinstance(spec, dict)
         and spec.get("kind") in ("number", "category")
         and (spec.get("kind") != "number" or (
-            isinstance(spec.get("median"), (int, float))
-            and isinstance(spec.get("scale"), (int, float))
-            and math.isfinite(spec["median"]) and math.isfinite(spec["scale"])
+            finite_number(spec.get("median"))
+            and finite_number(spec.get("scale"))
             and spec["scale"] > 0))
         for column, spec in schema.items()
     ):
@@ -276,16 +283,16 @@ def _checked_model(model: dict) -> tuple[list[str], list[list[float]], list[floa
     expected_metric = ("holdout_accuracy" if kind == "classification"
                        else "holdout_mean_absolute_error")
     if model.get("metric") != expected_metric or not all(
-        isinstance(model.get(key), (int, float)) and math.isfinite(model[key])
+        finite_number(model.get(key))
         for key in ("holdout_score", "baseline_score")
     ):
         raise ValueError("Saved model has an invalid holdout score.")
     if not all(
         isinstance(row, list) and len(row) == len(names)
-        and all(isinstance(value, (int, float)) and math.isfinite(value) for value in row)
+        and all(finite_number(value) for value in row)
         for row in coefficients
     ) or not all(
-        isinstance(value, (int, float)) and math.isfinite(value) for value in intercepts
+        finite_number(value) for value in intercepts
     ):
         raise ValueError("Saved model contains invalid or nonfinite weights.")
     return names, coefficients, intercepts, classes

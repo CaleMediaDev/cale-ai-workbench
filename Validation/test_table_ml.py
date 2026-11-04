@@ -121,6 +121,38 @@ class TableMLTests(unittest.TestCase):
                 predict_table_model(str(model), str(prediction), str(output))
             self.assertFalse(output.exists())
 
+    def test_oversized_model_numbers_are_rejected_before_writing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            prediction = root / "new.csv"
+            prediction.write_text("size\n2\n", encoding="utf-8")
+            output = root / "predicted.csv"
+            for field in ("median", "scale", "coefficients", "intercepts",
+                          "holdout_score", "baseline_score"):
+                with self.subTest(field=field):
+                    data = {
+                        "format": "cale-table-model-v1", "problem_type": "regression",
+                        "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
+                        "feature_names": ["size"], "coefficients": [[1]],
+                        "intercepts": [0], "classes": [], "target_column": "value",
+                        "metric": "holdout_mean_absolute_error", "holdout_score": 1,
+                        "baseline_score": 2,
+                    }
+                    oversized = 10 ** 400
+                    if field in ("median", "scale"):
+                        data["schema"]["size"][field] = oversized
+                    elif field == "coefficients":
+                        data[field] = [[oversized]]
+                    elif field == "intercepts":
+                        data[field] = [oversized]
+                    else:
+                        data[field] = oversized
+                    model.write_text(json.dumps(data), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "invalid|nonfinite"):
+                        predict_table_model(str(model), str(prediction), str(output))
+                    self.assertFalse(output.exists())
+
     def test_reused_weak_model_carries_quality_warning(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
