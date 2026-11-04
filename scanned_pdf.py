@@ -14,7 +14,9 @@ def sampled_pages(total: int, limit: int) -> list[int]:
     """Include both ends and spread the remaining budget through the PDF."""
     if total <= 0:
         return []
-    count = min(total, max(1, min(int(limit), 20)))
+    count = min(total, max(0, min(int(limit), 20)))
+    if count == 0:
+        return []
     if count == 1:
         return [0]
     return sorted({round(index * (total - 1) / (count - 1)) for index in range(count)})

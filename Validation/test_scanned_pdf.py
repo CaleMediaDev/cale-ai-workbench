@@ -48,6 +48,49 @@ def test_failed_scan_export_closes_image_resources(tmp_path):
     recognize.assert_not_called()
 
 
+def test_zero_scan_budget_preserves_native_text_without_transcription(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    pdf = tmp_path / "mixed.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    native_textpage = Mock()
+    native_textpage.get_text_range.return_value = "Order A-1742"
+    scanned_textpage = Mock()
+    scanned_textpage.get_text_range.return_value = ""
+    native_page = Mock()
+    native_page.get_textpage.return_value = native_textpage
+    scanned_page = Mock()
+    scanned_page.get_textpage.return_value = scanned_textpage
+    document = Mock()
+    document.__len__ = Mock(return_value=2)
+    document.__getitem__ = Mock(side_effect=[native_page, scanned_page])
+    recognize = Mock()
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(PdfDocument=Mock(return_value=document)),
+        "media_worker": SimpleNamespace(recognize_image=recognize),
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf), max_pages=0)
+
+    assert scanned_pdf.sampled_pages(2, 0) == []
+    assert scanned_pdf.sampled_pages(2, -1) == []
+    assert result["pages_read"] == [1]
+    assert result["scanned_pages"] == [2]
+    assert result["has_scans"] is True
+    assert result["partial"] is True
+    assert "[Page 1; selectable text]\nOrder A-1742" in result["text"]
+    assert "1 scanned pages were not read: 2." in result["text"]
+    native_page.render.assert_not_called()
+    scanned_page.render.assert_not_called()
+    recognize.assert_not_called()
+    native_textpage.close.assert_called_once_with()
+    scanned_textpage.close.assert_called_once_with()
+    native_page.close.assert_called_once_with()
+    scanned_page.close.assert_called_once_with()
+    document.close.assert_called_once_with()
+
+
 def test_page_selection_spans_long_document():
     assert scanned_pdf.sampled_pages(1, 6) == [0]
     assert scanned_pdf.sampled_pages(10, 4) == [0, 3, 6, 9]
