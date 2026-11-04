@@ -277,10 +277,13 @@ def search_web(query: str) -> dict:
         results, seen = [], set()
         for link in page.links:
             target = link["url"]
-            parsed = urlsplit(target)
-            if parsed.hostname and parsed.hostname.endswith("duckduckgo.com"):
-                target = parse_qs(parsed.query).get("uddg", [target])[0]
+            try:
                 parsed = urlsplit(target)
+                if parsed.hostname and parsed.hostname.endswith("duckduckgo.com"):
+                    target = parse_qs(parsed.query).get("uddg", [target])[0]
+                    parsed = urlsplit(target)
+            except ValueError:
+                continue
             if parsed.scheme not in ("http", "https") or not parsed.hostname or not link["title"]:
                 continue
             if parsed.hostname in ("brave.com", "duckduckgo.com") or parsed.hostname.endswith((".brave.com", ".duckduckgo.com")):
