@@ -145,8 +145,8 @@ def _stop_check(process: subprocess.Popen) -> None:
                 pass
         try:
             process.terminate()
-        except ProcessLookupError:
-            # The parent may exit while its children still need cleanup.
+        except (ProcessLookupError, PermissionError):
+            # An exited or inaccessible parent must not prevent child cleanup.
             pass
         _, alive = psutil.wait_procs(children, timeout=5)
         for child in alive:
