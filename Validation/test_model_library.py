@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import model_library as library
 import configure_install
+import model_library as library
 
 
 class AutoModelTests(unittest.TestCase):
@@ -830,6 +830,23 @@ class AutoModelTests(unittest.TestCase):
                 ],
                 "complete",
             )
+
+    def test_download_status_creates_missing_ancestor_directories(self):
+        with tempfile.TemporaryDirectory() as folder:
+            status = Path(folder) / "missing" / "nested" / "download.json"
+            with patch.object(library.time, "time", return_value=1234):
+                library.save_download_status(
+                    status, "working", "Downloading model", 25,
+                    {"source": "example:latest"},
+                )
+            self.assertEqual(json.loads(status.read_text(encoding="utf-8")), {
+                "status": "working",
+                "current": "Downloading model",
+                "percent": 25,
+                "updated": 1234,
+                "source": "example:latest",
+            })
+            self.assertEqual(list(status.parent.iterdir()), [status])
 
     def test_custom_ollama_store_controls_disk_check(self):
         with tempfile.TemporaryDirectory() as folder:

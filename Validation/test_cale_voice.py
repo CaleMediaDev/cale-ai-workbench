@@ -56,6 +56,25 @@ def test_stopping_launcher_also_stops_gpu_child():
     assert cale_voice._worker is None
 
 
+def test_stopping_worker_kills_it_if_termination_times_out():
+    worker = Mock(pid=100)
+    worker.poll.return_value = None
+    worker.wait.side_effect = [
+        cale_voice.subprocess.TimeoutExpired("voice-worker", 3),
+        0,
+    ]
+    with (patch.object(cale_voice, "_worker", worker),
+          patch("psutil.Process") as process,
+          patch("psutil.wait_procs", return_value=([], []))):
+        process.return_value.children.return_value = []
+        cale_voice._stop_worker()
+        assert cale_voice._worker is None
+    worker.terminate.assert_called_once_with()
+    worker.kill.assert_called_once_with()
+    assert worker.wait.call_count == 2
+    worker.wait.assert_called_with(timeout=3)
+
+
 def test_music_releases_only_this_installations_voice_worker(tmp_path):
     own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
     other = Mock(pid=101, info={"cmdline": ["python.exe", str(tmp_path / "other.py")]})

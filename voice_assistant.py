@@ -154,12 +154,12 @@ def _quick_status_variation(original: str, previous: list[str], facts: list[str]
 
 def _heavy_gpu_active() -> bool:
     """Ignore stale GPU lease files after their worker has exited."""
+    import psutil
+
     for kind in ("music", "image"):
         for marker in (ROOT / "LongTasks").glob(f"{kind}-gpu-active-*.json"):
             try:
                 pid = int(marker.stem.rsplit("-", 1)[-1])
-                import psutil
-
                 saved = marker.stat().st_mtime
                 process = psutil.Process(pid)
                 if (0 <= time.time() - saved < 8000 and process.is_running()

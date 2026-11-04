@@ -246,6 +246,51 @@ def test_preview_backend_errors_preserve_successful_browser_result(tmp_path):
         asyncio.run(check(failing_stage))
 
 
+def test_exceptional_lifespan_exit_clears_closed_backend_registries():
+    closed = []
+
+    @asynccontextmanager
+    async def fake_stdio(params):
+        if "rea.mjs" in " ".join(params.args):
+            raise OSError("REA could not start")
+        yield (object(), object())
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            closed.append(True)
+
+        async def initialize(self):
+            pass
+
+        async def list_tools(self):
+            tool = SimpleNamespace(
+                name="inspect_page",
+                model_dump=lambda **_kwargs: {"description": "Inspect a browser page"},
+            )
+            return SimpleNamespace(tools=[tool])
+
+    async def check():
+        with (patch.object(toolbox_mcp, "stdio_client", fake_stdio),
+              patch.object(toolbox_mcp, "ClientSession",
+                           lambda *_args, **_kwargs: FakeSession())):
+            with pytest.raises(RuntimeError, match="lifespan consumer failed"):
+                async with toolbox_mcp.lifespan(None):
+                    assert "devtools" in toolbox_mcp.SESSIONS
+                    assert "devtools.inspect_page" in toolbox_mcp.CATALOG
+                    assert "rea" in toolbox_mcp.ERRORS
+                    raise RuntimeError("lifespan consumer failed")
+        assert closed == [True]
+        assert toolbox_mcp.SESSIONS == {}
+        assert toolbox_mcp.CATALOG == {}
+        assert toolbox_mcp.ERRORS == {}
+        assert toolbox_mcp.toolbox_status()["backends"]["devtools"]["available"] is False
+
+    asyncio.run(check())
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):

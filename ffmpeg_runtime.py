@@ -33,7 +33,7 @@ def working(root: Path = ROOT) -> bool:
         result = subprocess.run([str(target), "-version"], capture_output=True,
                                 text=True, timeout=10, creationflags=HIDE)
         return result.returncode == 0 and result.stdout.startswith("ffmpeg version")
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
         return False
 
 

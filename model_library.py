@@ -911,7 +911,7 @@ def repair_main_alias(ram=None, vram=None, *, alias=None):
 def save_download_status(path, state, current, percent=0, metadata=None):
     """Write one UI status snapshot atomically so readers never see partial JSON."""
     path = Path(path)
-    path.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(
         json.dumps(

@@ -302,10 +302,12 @@ async def lifespan(_server):
                 CATALOG[f"{group}.{tool.name}"] = tool.model_dump(
                     by_alias=True, exclude_none=True
                 )
-        yield {}
-        SESSIONS.clear()
-        CATALOG.clear()
-        ERRORS.clear()
+        try:
+            yield {}
+        finally:
+            SESSIONS.clear()
+            CATALOG.clear()
+            ERRORS.clear()
 
 
 server = MCPServer(
