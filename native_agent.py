@@ -698,6 +698,16 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                             f"{active['id']} and steps=[one corrected step including all its acceptance cases]. "
                             "Then complete that step again. Editing generated checker JSON does not revise "
                             "the acceptance cases saved in SQLite.")
+                        reference = verdict.get("assertion_revision_reference")
+                        if kind == "check_webapp" and isinstance(reference, dict) and len(json.dumps(reference)) <= 800:
+                            value["assertion_revision_reference"] = reference
+                            value["next_action"] = (
+                                "A retained browser sequence failed. Compare that saved case with the original request. "
+                                "Fix source for a real defect. For a mistaken assertion, call check_webapp using the flat "
+                                "path, saved_sequence, saved_case and suite_sha256 fields from assertion_revision_reference "
+                                "plus cases=[one corrected assertion-only case]. Do not wrap these fields. The checker "
+                                "preserves saved inputs and unrelated assertions. Revising this SQLite step alone does "
+                                "not repair the retained case. Then complete this step again.")
                 elif kind == "run_verifier":
                     value["verifier_check_passed"] = value["passed"]
                 value = compact_step_progress(value)
@@ -870,6 +880,14 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     result["revision"] = revision
                     if result.get("verifier_saved"):
                         result["checked_sequence"] = len(json.loads(raw).get("checks", []))
+                    elif (result.get("passed") is False and request_unchanged
+                          and result["suite_sha256"] == revision["previous_sha256"]):
+                        # A rejected candidate leaves the saved suite intact.
+                        # Preserve its sequence identity for the next attempt.
+                        result["revision_attempt_failed"] = True
+                        result["cases"] = [{**case, "path": arguments["path"],
+                                            "saved_sequence": revision["saved_sequence"]}
+                                           for case in result.get("cases", [])]
                 failures = [case for case in result.get("cases", []) if case.get("passed") is False
                             and type(case.get("saved_sequence")) is int]
                 if failures:

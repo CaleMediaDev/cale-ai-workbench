@@ -953,6 +953,61 @@ if(valid)out.textContent='$'+(n*1.2).toFixed(2);}bill.addEventListener('input',u
     assert native_agent.browser_check_evidence(tmp_path, revision, passed_text) == {}
 
 
+def test_rejected_repair_retains_original_failure_and_recovers_with_real_browser(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    source = (tmp_path / "index.html").read_bytes()
+    assert webapp_check.save_verifier(tmp_path, {"path": "index.html", "cases": [
+        {"set": {"bill": "80"}, "expect": {"answer": "95.00"}}]}, accumulate=True)
+    incoming = {"path": "index.html", "cases": [{"set": {"bill": "50"}, "expect": {"answer": "60.00"}}]}
+    active = task_context.plan_steps(tmp_path, [{"phase": "Check", "title": "Verify tax",
+        "check_tool": "check_webapp", "check_arguments": incoming}])["active"]
+    item = {"id": "repair-regression", "folder": str(tmp_path)}
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        failure = json.loads(native_agent.execute_tool(tmp_path, "task_steps", {"action": "complete", "step_id": active["id"]}))
+        assert not failure["passed"] and failure["done"] == 0
+        reference = failure["assertion_revision_reference"]
+        assert "Revising this SQLite step alone" in failure["next_action"]
+        saved = tmp_path / ".local-ai/webapp-check.json"
+        original = saved.read_bytes()
+        wrong = {**reference, "cases": [{"expect": {"answer": "97.00"}}]}
+        text = native_agent.execute_tool(tmp_path, "check_webapp", wrong)
+        rejected = json.loads(text)
+        assert rejected["revision_attempt_failed"] and not rejected["passed"]
+        assert rejected["assertion_revision_reference"] == reference
+        task_context.record_action(tmp_path, "check_webapp", text, wrong)
+        changed = {**reference, "cases": [{"set": {"bill": "10"}, "expect": {"answer": "12.00"}}]}
+        error = native_agent.execute_tool(tmp_path, "check_webapp", changed)
+        assert error.startswith("Tool error:")
+        task_context.record_action(tmp_path, "check_webapp", error, changed)
+        checkpoint = task_context.snapshot(tmp_path)
+        assert reference["suite_sha256"] in checkpoint
+        assert "saved_sequence" in checkpoint and "97.00" in checkpoint
+        assert "Checker request error (no new verdict)" in checkpoint
+        assert saved.read_bytes() == original
+        corrected = {**reference, "cases": [{"expect": {"answer": "96.00"}}]}
+        text = native_agent.execute_tool(tmp_path, "check_webapp", corrected)
+        assert json.loads(text)["verifier_check_passed"]
+        task_context.record_action(tmp_path, "check_webapp", text, corrected)
+        final = json.loads(native_agent.execute_tool(tmp_path, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert final["passed"] and final["done"] == 1
+    assert not task_context.checker_failures(tmp_path, "check_webapp")
+    assert (tmp_path / "index.html").read_bytes() == source
+
+
+@pytest.mark.parametrize("invalidate", ["new_request", "passed"])
+def test_repair_request_errors_do_not_resurrect_superseded_failure(tmp_path, invalidate):
+    args = {"path": "index.html"}
+    task_context.record_action(tmp_path, "check_webapp", json.dumps({"passed": False, "cases": [
+        {"case": 1, "passed": False, "failures": ["Old behavior sentinel"]}]}), args)
+    if invalidate == "new_request":
+        (tmp_path / ".local-ai/USER-REQUESTS.md").write_text("Different requirement")
+    else:
+        task_context.record_action(tmp_path, "check_webapp", '{"passed":true}', args)
+    task_context.record_action(tmp_path, "check_webapp", "Tool error: malformed checker arguments", args)
+    summary = task_context.snapshot(tmp_path)
+    assert "malformed checker arguments" in summary and "Old behavior sentinel" not in summary
+
+
 def test_case_revision_rejects_stale_input_edits_custom_verifiers_and_changed_instructions(tmp_path):
     import hashlib
 

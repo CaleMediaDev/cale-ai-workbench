@@ -756,6 +756,16 @@ def record_action(folder: str | Path, tool: str, result: str, arguments: dict | 
             (SELECT id FROM task_events ORDER BY id DESC LIMIT 100)""")
         diagnostic = _checker_diagnostic(Path(folder), tool, result, arguments, request_hash)
         if diagnostic is not None:
+            if result.startswith("Tool error:"):
+                previous = conn.execute("""SELECT request_hash,passed,details FROM task_check_results
+                    WHERE checker=? AND path=?""", diagnostic[:2]).fetchone()
+                if previous and not previous["passed"] and previous["request_hash"] == diagnostic[2]:
+                    # An error string supplies no new checker verdict. Keep
+                    # the last failure and saved-case reference for this request.
+                    detail = (previous["details"][:1000]
+                              + " | Checker request error (no new verdict): " + diagnostic[4][:300])[:1400]
+                    diagnostic = (*diagnostic[:4], detail,
+                                  hashlib.sha256((diagnostic[5] + "\0" + detail).encode()).hexdigest())
             conn.execute("""INSERT INTO task_check_results
                 (checker,path,request_hash,passed,details,signature,repeats,updated)
                 VALUES(?,?,?,?,?,?,1,?) ON CONFLICT(checker,path) DO UPDATE SET
