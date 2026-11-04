@@ -8,6 +8,34 @@ import web_tools
 
 
 class BusinessContactTests(unittest.TestCase):
+    def test_reader_preserves_definition_list_terms_and_values(self):
+        body = '<dl><dt>Phone</dt><dd>555-0100</dd><dt>Hours</dt><dd>9 to 5</dd></dl>'
+        with patch.object(web_tools, "fetch", return_value=(
+            "https://example.org/contact", body, "text/html", 200,
+        )):
+            page = web_tools.read_webpage("https://example.org/contact")
+        self.assertEqual(page["text"], "Phone\n555-0100\nHours\n9 to 5")
+
+    def test_reader_preserves_lower_heading_and_quotation_boundaries(self):
+        body = '<h4>Delivery</h4>Tomorrow<blockquote>Quoted terms</blockquote>After quote'
+        with patch.object(web_tools, "fetch", return_value=(
+            "https://example.org/terms", body, "text/html", 200,
+        )):
+            page = web_tools.read_webpage("https://example.org/terms")
+        self.assertEqual(page["text"], "Delivery\nTomorrow\nQuoted terms\nAfter quote")
+
+    def test_reader_keeps_table_cells_distinct_without_source_whitespace(self):
+        body = (
+            '<table><tr><th>Item</th><th>Quantity</th><th>Price</th></tr>'
+            '<tr><td>Apples</td><td>10</td><td>20</td></tr>'
+            '<tr><td>Pears</td><td><strong>3</strong></td><td>$4</td></tr></table>'
+        )
+        with patch.object(web_tools, "fetch", return_value=(
+            "https://example.org/prices", body, "text/html", 200,
+        )):
+            page = web_tools.read_webpage("https://example.org/prices")
+        self.assertEqual(page["text"], "Item Quantity Price\nApples 10 20\nPears 3 $4")
+
     def test_web_reader_uses_bundled_curl_when_windows_omits_it(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory
