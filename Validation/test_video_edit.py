@@ -48,6 +48,36 @@ def test_agent_can_trim_join_and_replace_soundtrack(tmp_path):
         video_edit.edit_video(str(first), str(first))
 
 
+def test_edit_video_timeout_removes_partial_output_for_retry(tmp_path, monkeypatch):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source remains unchanged")
+    output = tmp_path / "edited.mp4"
+    calls = []
+    timeout_error = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=7200)
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        assert command[-1] == str(output)
+        if len(calls) == 1:
+            output.write_bytes(b"partial MP4")
+            raise timeout_error
+        output.write_bytes(b"complete MP4")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(video_edit.subprocess, "run", fake_run)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        video_edit.edit_video(str(source), str(output))
+    assert caught.value is timeout_error
+    assert not output.exists()
+    assert source.read_bytes() == b"source remains unchanged"
+
+    result = video_edit.edit_video(str(source), str(output))
+    assert len(calls) == 2
+    assert result["path"] == str(output)
+    assert result["bytes"] == len(b"complete MP4")
+    assert output.read_bytes() == b"complete MP4"
+
+
 def test_edit_video_extreme_speed_chains_atempo(tmp_path):
     """Speed 0.25 and 4.0 should work by chaining atempo filters."""
     clip = tmp_path / "clip.mp4"

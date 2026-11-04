@@ -44,8 +44,14 @@ def _number(value: float, minimum: float, maximum: float, name: str) -> float:
 def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
     command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner",
                "-loglevel", "error", "-n", *arguments, str(output)]
-    result = subprocess.run(command, capture_output=True, text=True,
-                            timeout=timeout, creationflags=HIDE)
+    output_existed = output.exists()
+    try:
+        result = subprocess.run(command, capture_output=True, text=True,
+                                timeout=timeout, creationflags=HIDE)
+    except subprocess.TimeoutExpired:
+        if not output_existed and output.is_file():
+            output.unlink(missing_ok=True)
+        raise
     if result.returncode or not output.is_file() or not output.stat().st_size:
         if result.returncode and output.is_file() and "already exists" not in result.stderr.lower():
             output.unlink(missing_ok=True)
