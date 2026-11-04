@@ -62,6 +62,8 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
             rows.append({"start": start, "end": end, "text": words})
     if not rows:
         raise RuntimeError("No clear lyrics were detected in the isolated vocal track.")
+    timings_content = json.dumps({"language": transcription.get("language"),
+                                  "segments": rows}, ensure_ascii=False, indent=2) + "\n"
     target.mkdir(parents=True, exist_ok=True)
     text = target / "lyrics.txt"
     captions = target / "lyrics.srt"
@@ -74,9 +76,7 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
         f"{index}\n{_srt_time(row['start'])} --> {_srt_time(row['end'])}\n{row['text']}"
         for index, row in enumerate(rows, 1)
     ) + "\n", encoding="utf-8")
-    timings.write_text(json.dumps({"language": transcription.get("language"),
-                                   "segments": rows}, ensure_ascii=False, indent=2) + "\n",
-                       encoding="utf-8")
+    timings.write_text(timings_content, encoding="utf-8")
     return {"source": str(source), "vocal_path": str(vocal),
             "lyrics_path": str(text), "captions_path": str(captions),
             "timings_path": str(timings), "language": transcription.get("language"),
