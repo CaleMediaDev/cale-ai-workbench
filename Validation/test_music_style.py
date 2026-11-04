@@ -286,6 +286,19 @@ def test_explicit_lead_and_chops_keep_full_lead_caption_idempotent():
         assert music_style.requires_sustained_vocals(caption)
 
 
+def test_old_chopped_feedback_does_not_override_current_sung_verses():
+    request = "Female singer with sung verses and chorus"
+    expected = music_style.enhance(request)
+    for complaint in ("There were vocal chops", "There were only short hooks"):
+        feedback = "\nPast user feedback: " + complaint
+        caption = music_style.enhance(request + feedback)
+        assert caption == expected + feedback
+        assert "female lead vocals throughout, clear sung verses and chorus" in caption
+        assert "short female vocal hooks" not in caption
+        assert music_style.requires_sustained_vocals(caption)
+        assert music_style.enhance(caption) == caption
+
+
 def test_lead_cue_from_old_feedback_does_not_override_current_chopped_texture():
     request = "Heavy dubstep with vocal chops, without any male lead vocals"
     caption = music_style.enhance(request + "\nPast user feedback: Add female lead vocals")
