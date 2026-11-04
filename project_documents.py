@@ -62,7 +62,8 @@ def inspect(folder: str | Path, path: str, question: str = "",
              f"{CACHE_VERSION}-{digest}-{source.suffix.lower().lstrip('.')}-{int(vision)}.txt")
     cached = cache.is_file()
     if cached:
-        text = cache.read_text(encoding="utf-8")
+        with cache.open("r", encoding="utf-8", newline="") as cached_text:
+            text = cached_text.read()
     else:
         if source.suffix.casefold() in file_chat.PLAIN_TEXT:
             text = source.read_text(encoding="utf-8-sig", errors="replace")
@@ -74,7 +75,7 @@ def inspect(folder: str | Path, path: str, question: str = "",
             raise ValueError("The extracted text is too large for this task reader")
         cache.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=cache.parent,
+            mode="w", encoding="utf-8", newline="", dir=cache.parent,
             prefix=cache.name + ".", suffix=".tmp", delete=False,
         ) as output:
             temporary = Path(output.name)
