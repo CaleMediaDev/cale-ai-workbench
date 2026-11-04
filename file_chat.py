@@ -144,7 +144,10 @@ def document_text(path: Path, max_scanned_pages: int = 6) -> str:
         if text.strip():
             return text  # Keep ordinary PDFs readable if optional vision is unavailable.
         raise RuntimeError(str(answer.get("error", "Could not read the scanned PDF.")))
-    return str(answer.get("text", "")) if answer.get("has_scans") or not text.strip() else text
+    scanned_text = str(answer.get("text") or "")
+    if scanned_text.strip() and (answer.get("has_scans") or not text.strip()):
+        return scanned_text
+    return text
 
 
 def file_excerpt(path: Path, question: str) -> str:

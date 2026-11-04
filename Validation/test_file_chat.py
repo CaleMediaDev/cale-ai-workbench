@@ -127,6 +127,19 @@ def test_image_non_object_worker_response_reports_reader_failure(payload):
             file_chat.image_description(Path("garden.png"), "What is shown?")
 
 
+@pytest.mark.parametrize("worker_text", ['""', '"   "', "null"])
+def test_pdf_empty_scan_result_preserves_native_text(worker_text):
+    converter_module = Mock()
+    converter_module.MarkItDown.return_value.convert.return_value.text_content = "Native PDF content."
+    result = Mock(returncode=0, stdout='{"has_scans": true, "text": ' + worker_text + '}')
+    with (
+        patch.dict("sys.modules", {"markitdown": converter_module}),
+        patch.object(file_chat.Path, "is_file", return_value=True),
+        patch.object(file_chat.subprocess, "run", return_value=result),
+    ):
+        assert file_chat.document_text(Path("report.pdf")) == "Native PDF content."
+
+
 @pytest.mark.parametrize("payload", ["null", "[]", "42", '"text"'])
 @pytest.mark.parametrize("native_text", ["Native PDF content.", ""])
 def test_pdf_non_object_worker_response_uses_existing_recovery(payload, native_text):
