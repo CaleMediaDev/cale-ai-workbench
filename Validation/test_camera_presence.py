@@ -188,6 +188,58 @@ class CameraPresenceTests(unittest.TestCase):
         camera.release.assert_called_once_with()
         model.features.assert_called_once()
 
+    def test_watcher_survives_enrollment_request_cleanup_failure(self):
+        import camera_presence
+
+        request = Mock()
+        request.is_file.side_effect = [True, False]
+        request.read_text.return_value = "null"
+        request.unlink.side_effect = PermissionError("request is locked")
+        model = Mock()
+        model.features.return_value = []
+        camera = Mock()
+        camera.isOpened.return_value = True
+        camera.read.return_value = (True, np.zeros((8, 8, 3), dtype=np.uint8))
+        cascade = Mock()
+        cascade.empty.return_value = False
+        cv2 = SimpleNamespace(
+            data=SimpleNamespace(haarcascades="."),
+            CascadeClassifier=Mock(return_value=cascade),
+            VideoCapture=Mock(return_value=camera),
+            CAP_DSHOW=0,
+            COLOR_BGR2GRAY=1,
+            cvtColor=lambda *_args: np.zeros((8, 8), dtype=np.uint8),
+        )
+        modules = {
+            "cv2": cv2,
+            "camera_network": SimpleNamespace(
+                camera_source=lambda source: source,
+                greeting_camera=lambda: 0,
+            ),
+            "face_identity": SimpleNamespace(
+                ENROLL_REQUEST=request,
+                FaceModel=Mock(return_value=model),
+                enroll=Mock(),
+            ),
+        }
+        events = Mock()
+        with patch.dict("sys.modules", modules), patch.multiple(
+            camera_presence,
+            allowed=Mock(side_effect=[True, True, True, False]),
+            emit=events,
+            preview_frame=Mock(return_value=""),
+        ), patch.object(camera_presence.time, "sleep"):
+            self.assertEqual(camera_presence.watch(), 0)
+
+        request.unlink.assert_called_once_with(missing_ok=True)
+        self.assertEqual(camera.read.call_count, 2)
+        self.assertEqual(model.features.call_count, 2)
+        events.assert_any_call(
+            "notice", "The face enrollment request could not be removed."
+        )
+        events.assert_any_call("stopped", "Camera greeting is off.")
+        camera.release.assert_called_once_with()
+
     def test_watcher_recovers_from_frame_read_exception(self):
         import camera_presence
 
