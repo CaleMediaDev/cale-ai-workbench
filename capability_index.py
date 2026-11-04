@@ -58,7 +58,7 @@ def _database(root: str | Path):
 
 def _description(body: str, name: str) -> str:
     """Use front matter when present; otherwise use the first real sentence."""
-    match = re.search(r"(?m)^description:[^\S\r\n]*(\S[^\r\n]*)$", body[:4000])
+    match = re.search(r"(?m)^description:[^\S\r\n]*(\S[^\r\n]*)\r?$", body[:4000])
     if match:
         return match.group(1).strip(" '\"\r")[:500]
     lines = [line.strip("# ") for line in body.splitlines()
