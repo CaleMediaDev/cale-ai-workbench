@@ -50,6 +50,13 @@ def _run(arguments: list[str], output: Path) -> None:
                 with wave.open(str(staged), "rb") as audio:
                     if audio.getnframes() == 0:
                         raise RuntimeError("Local audio edit produced no audio frames.")
+                    remaining = audio.getnframes()
+                    frame_size = audio.getnchannels() * audio.getsampwidth()
+                    while remaining:
+                        frames = min(remaining, 65536)
+                        if len(audio.readframes(frames)) != frames * frame_size:
+                            raise RuntimeError("Local audio edit produced a truncated WAV file.")
+                        remaining -= frames
             except (wave.Error, EOFError) as exc:
                 raise RuntimeError("Local audio edit produced an invalid WAV file.") from exc
         # Unlike replace(), a hard link refuses to overwrite a destination
