@@ -226,6 +226,26 @@ def test_stopped_installer_turns_stale_work_into_retry(tmp_path, monkeypatch):
     assert len(launches) == 1
 
 
+def test_invalid_progress_timestamp_does_not_crash_or_restart_setup(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    progress_path = state / "install-progress.json"
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    with patch.object(setup_recovery.subprocess, "Popen") as launch:
+        for updated in (None, "not-a-timestamp", {}, []):
+            progress = {
+                "status": "working", "current": "Downloading the AI model",
+                "updated": updated,
+            }
+            progress_path.write_text(json.dumps(progress), encoding="utf-8")
+            assert setup_recovery.recover() is False
+            assert json.loads(progress_path.read_text(encoding="utf-8")) == progress
+        launch.assert_not_called()
+    assert not (state / "base-install-repair.json").exists()
+
+
 def test_slow_live_installer_is_not_restarted(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
