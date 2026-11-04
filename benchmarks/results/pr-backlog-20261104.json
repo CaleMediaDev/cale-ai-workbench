@@ -1,0 +1,1578 @@
+{
+  "version": "0.5.484",
+  "scope": "PRs 158 through 260; later arrivals remain a separate queue.",
+  "counts": {
+    "merged": 93,
+    "closed": 10
+  },
+  "method": "Exact-head source review and isolated focused before/after regression checks; combined checks run before release. Platform-dependent skips and alternate mocked proofs are retained as limitations.",
+  "limitations": [
+    "PR163 POSIX integration was not run on Windows; flock contention was separately exercised with a mocked POSIX branch.",
+    "PR189 and PR201 real Windows symlink tests require privileges; PR201 also has an independent dangling-link guard proof.",
+    "PR243 submitted depth test passes on the baseline under Python 3.13; an independently forced decoder RecursionError demonstrates the fallback change.",
+    "PR256 fails intermittently on concurrent Windows marker replacement and was rejected."
+  ],
+  "reviews": [
+    {
+      "number": 158,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/158",
+      "reviewed_head": "2d300a901ebe06c654a0808ae544ef3ddcd2e03e",
+      "disposition": "merged",
+      "reason": "Catch overflowing installer PIDs so background setup recovers.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "31 passed in 0.38s"
+        ]
+      },
+      "merge_commit": "31c788f6edba841d6fbc37975ecf5f5e6c8f3052"
+    },
+    {
+      "number": 159,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/159",
+      "reviewed_head": "9b8d6630d77e9a04e88536693b5fa25cd6c3113b",
+      "disposition": "merged",
+      "reason": "Reject incompatible downloaded encoding before replacing the UTF-8 cache.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "3 passed in 0.97s"
+        ]
+      },
+      "merge_commit": "bf3757525376b8dcf6ea94c7436d2ffc630801fe"
+    },
+    {
+      "number": 160,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/160",
+      "reviewed_head": "b4326dcbf503e796d2139b846fd6ff316099eefa",
+      "disposition": "merged",
+      "reason": "Decode actual image pixels before recovering an image job as complete.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "7 passed in 0.27s"
+        ]
+      },
+      "merge_commit": "4057a79268a609c56104b97c972b14ecee4983ee"
+    },
+    {
+      "number": 161,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/161",
+      "reviewed_head": "cc4eeafb91ec04b4a9c5e210548636e706ebb72b",
+      "disposition": "merged",
+      "reason": "Keep radio worker alive when retry-status publication also fails.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "29 passed in 4.87s"
+        ]
+      },
+      "merge_commit": "8b757ac48a516b0fa27c112a9a0020066ac61995"
+    },
+    {
+      "number": 162,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/162",
+      "reviewed_head": "b84b36f5067b11bbf6a816eaf2d5f9a58221b9b0",
+      "disposition": "merged",
+      "reason": "Reject malformed Ollama tags without aborting readiness checks.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "39 passed in 0.69s"
+        ]
+      },
+      "merge_commit": "64a92a862a63850d8895cdbccb25a75eb1ae8a51"
+    },
+    {
+      "number": 163,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/163",
+      "reviewed_head": "78e56151eced4a74bb963941d5147d41b9f97e49",
+      "disposition": "merged",
+      "reason": "Serialize POSIX report launches using a real flock API; mock-backed branch contention proof passes. Actual POSIX integration remains untested on this Windows host.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 0,
+        "after_exit": 0,
+        "summary": [
+          "9 passed, 1 skipped in 0.31s"
+        ]
+      },
+      "merge_commit": "97464fd9c8d5424d343af7b7c05206f343c36b9c"
+    },
+    {
+      "number": 164,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/164",
+      "reviewed_head": "b1f077a91d80abdea2fd8ae5bfa97e36655a4739",
+      "disposition": "merged",
+      "reason": "Use readable raw Markdown when fitted Markdown is whitespace-only.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "10 passed in 1.07s"
+        ]
+      },
+      "merge_commit": "5ecc6fc79ac60947ae07de429bbb326478173cdc"
+    },
+    {
+      "number": 165,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/165",
+      "reviewed_head": "24176bf5672d76459067a1bcfb9f3085a44b3606",
+      "disposition": "merged",
+      "reason": "Preserve local directories occupying managed skill-file paths and continue syncing others.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "3 passed, 1 skipped in 0.37s"
+        ]
+      },
+      "merge_commit": "efeca858d7b4665ad269ce4a6c9fb26ad5326493"
+    },
+    {
+      "number": 166,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/166",
+      "reviewed_head": "90693c44f18b5638621214553d5513abd5a43085",
+      "disposition": "merged",
+      "reason": "Reject identifiers from another registry even when source fields are misleading.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "5 passed, 2 subtests passed in 0.09s"
+        ]
+      },
+      "merge_commit": "36abd11e6870079e914f08c83630c4847de252d4"
+    },
+    {
+      "number": 167,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/167",
+      "reviewed_head": "059cfb9a98d5290a03451d56620805144e900cb9",
+      "disposition": "merged",
+      "reason": "Return failure and release repair lock when installer launch fails; preserve backoff.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "13 passed in 2.00s"
+        ]
+      },
+      "merge_commit": "25516d6b76aa25f79ad621619755c08f12788d82"
+    },
+    {
+      "number": 168,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/168",
+      "reviewed_head": "8e80a6647cdbdc3b4cf0629bfd7b9d120c339574",
+      "disposition": "merged",
+      "reason": "Enforce the existing under-35-word bound even for short-character replies.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "8 passed, 15 subtests passed in 0.24s"
+        ]
+      },
+      "merge_commit": "ee17d77b3f139ddb4046232644bc43b3dda06d4b"
+    },
+    {
+      "number": 169,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/169",
+      "reviewed_head": "5a536628e39e092d00ddb27b47be04342297f186",
+      "disposition": "merged",
+      "reason": "Do not abort independent MCP backends if failed-backend cleanup raises.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "16 passed in 1.29s"
+        ]
+      },
+      "merge_commit": "c3026af8df0775edae9428af18e0269ac133569d"
+    },
+    {
+      "number": 170,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/170",
+      "reviewed_head": "805e8480404848df6adee5a06122a6843c410f31",
+      "disposition": "merged",
+      "reason": "Report disk counter rollback as unavailable rather than misleading zero throughput.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "8 passed in 0.09s"
+        ]
+      },
+      "merge_commit": "7175027116f80666b61ec8ba4df2a3dc7fad2fa4"
+    },
+    {
+      "number": 171,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/171",
+      "reviewed_head": "89fa1ad891f742cbb3e4656147539c9d4d07c5a2",
+      "disposition": "merged",
+      "reason": "Retain visual video memory and indexing batch when optional transcript is null.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "28 passed, 1 skipped, 2 subtests passed in 2.90s"
+        ]
+      },
+      "merge_commit": "01d3ca2b50fa00311096df7038f486907b208943"
+    },
+    {
+      "number": 172,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/172",
+      "reviewed_head": "fd531a7d3bc45feb77bcf5be1c4200e36fec56b4",
+      "disposition": "merged",
+      "reason": "Clean partial video output after FFmpeg timeout while preserving pre-existing output.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "8 passed in 3.18s"
+        ]
+      },
+      "merge_commit": "b846075f47d7b10d670d5a197d88b02c03999da3"
+    },
+    {
+      "number": 173,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/173",
+      "reviewed_head": "331efb95c0d2eaeebf8eb67ea2c14e4075ea9491",
+      "disposition": "merged",
+      "reason": "Reject overflowing numeric model fields with validation errors before output.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "9 passed, 6 subtests passed in 2.37s"
+        ]
+      },
+      "merge_commit": "ae5a62abbad689f9b7b3e581de868d86327e9ac1"
+    },
+    {
+      "number": 174,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/174",
+      "reviewed_head": "96bcf1f6195b5024031ac100a07e4c8b3151589e",
+      "disposition": "merged",
+      "reason": "Reject non-object JSON from one-shot voice workers with the established retryable error.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "41 passed, 9 subtests passed in 1.04s"
+        ]
+      },
+      "merge_commit": "7f2d78e66518b385211ffa877edd46539b989cee"
+    },
+    {
+      "number": 175,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/175",
+      "reviewed_head": "2ee399a7db1d1fd1bacc8f6ab1b95e76acc14614",
+      "disposition": "merged",
+      "reason": "Return an estimating label instead of crashing for nonfinite duration or start timestamps.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "9 passed in 1.31s"
+        ]
+      },
+      "merge_commit": "b4e02f2b49080a86f0682ea8a00220f09133f0dc"
+    },
+    {
+      "number": 176,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/176",
+      "reviewed_head": "ffeccf3d894de545051a75988d7bff15ee643fac",
+      "disposition": "merged",
+      "reason": "Rehashes source before returning cached extracted text; reproduces a source-change race without altering files.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "7 passed in 2.70s"
+      },
+      "merge_commit": "e65280f689c9d4c9f9d780067870a983a7f67a00"
+    },
+    {
+      "number": 177,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/177",
+      "reviewed_head": "c8d32ecf363268a3425881d79f6c2ac1aa0a5e1d",
+      "disposition": "merged",
+      "reason": "Honors explicit current no-vocals requests before singer/style cues while preserving vocal texture and feedback behavior.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "13 passed in 0.11s"
+      },
+      "merge_commit": "4a6fe52d6bb5dea5d24c8e19234dd204e7698b0d"
+    },
+    {
+      "number": 178,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/178",
+      "reviewed_head": "de7fd4d05baf7994942ec75b6c94c12f3bfd73ad",
+      "disposition": "merged",
+      "reason": "Rejects finite seconds that overflow millisecond conversion before creating lyric artifacts.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "5 passed in 0.99s"
+      },
+      "merge_commit": "bb23ab2eb3b3ec72571d1cfa10c23e673df2a260"
+    },
+    {
+      "number": 179,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/179",
+      "reviewed_head": "a10b01ff0d3fc31a5b828163bddc30cf3fdf86ff",
+      "disposition": "merged",
+      "reason": "Starts retry cooldown after background repair finishes, preventing immediate retries after long failures.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "10 passed in 0.22s"
+      },
+      "merge_commit": "ee2a86bf4dc54ee4842c17b2c705c51cc9738fa0"
+    },
+    {
+      "number": 180,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/180",
+      "reviewed_head": "19476478fb4f86df81e673bd842ea30dd3bfad87",
+      "disposition": "merged",
+      "reason": "Removes a validated-empty FFmpeg output after a zero exit so an authorized retry is not blocked; preserves existing-output refusal.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "16 passed in 1.43s"
+      },
+      "merge_commit": "6389d744fd7d3a95e1027e8c7cb972da8c720ecb"
+    },
+    {
+      "number": 181,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/181",
+      "reviewed_head": "884752744b02e9dcece731a1c1f3fab08aeb42d3",
+      "disposition": "merged",
+      "reason": "Rejects a context budget that cannot meet the existing minimum instead of silently overcommitting memory; exact boundary covered.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "10 passed, 3 subtests passed in 0.15s"
+      },
+      "merge_commit": "aa0ee5d0ee2b84f6aacb91502e13cdc951d304d1"
+    },
+    {
+      "number": 182,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/182",
+      "reviewed_head": "dfcff58cae57b4bd28f203fe6f44adec0bad6cb0",
+      "disposition": "closed",
+      "reason": "Broad TOOL_WORK exclusion also catches the explicitly fast folder question. New test fails its own quick-folder assertion; focused suite has6failures,38passed,34subtests. Narrow the added condition before accepting.",
+      "review_recommendation": "needs_work",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 1,
+        "summary": "6 failed, 38 passed, 34 subtests passed in 2.58s"
+      }
+    },
+    {
+      "number": 183,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/183",
+      "reviewed_head": "ef702995dd173e8bae3a9aede8783fdff3eeb932",
+      "disposition": "merged",
+      "reason": "Matches SQLite unicode61 source tokens without casefold expansion; fixes sharp-s exact-term retrieval while preserving existing search tests.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "15 passed, 1 skipped, 2 subtests passed in 1.93s"
+      },
+      "merge_commit": "84d4ebc7c7c093984f4790b1c9a71a1ed7eb2fae"
+    },
+    {
+      "number": 184,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/184",
+      "reviewed_head": "0bffd43de973c2a4a439ed5eb5de0b60e379e4e6",
+      "disposition": "merged",
+      "reason": "Refreshes the saved task kind/title/brief when idempotently updating feedback so stale genres no longer receive new notes.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "5 passed in 0.27s"
+      },
+      "merge_commit": "1ec1def84552a391bbf7aa11a90452972452c3e4"
+    },
+    {
+      "number": 185,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/185",
+      "reviewed_head": "02b0369a9f3e07a881e0dea5502ef3392e61df40",
+      "disposition": "merged",
+      "reason": "Rejects missing, empty or non-string voice-worker paths inside the existing worker-cleanup error boundary.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "17 passed in 1.90s"
+      },
+      "merge_commit": "36ac8dbc2074cec454431a1cead267ee96988f18"
+    },
+    {
+      "number": 186,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/186",
+      "reviewed_head": "d2eec4f7bb46e12a107ce7e0da3734345a779472",
+      "disposition": "merged",
+      "reason": "Skips non-object specialist snapshots while preserving local tool/skill index rows.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "6 passed in 1.63s"
+      },
+      "merge_commit": "23277b8c6fcd25bbb25a6bb20b6ff90f686e7087"
+    },
+    {
+      "number": 187,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/187",
+      "reviewed_head": "ca85301bbf2edd14bef4ccaa6eb5b67f99ea64c6",
+      "disposition": "merged",
+      "reason": "Reads companion YAML with utf-8-sig so a BOM does not hide its version line.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "7 passed in 0.14s"
+      },
+      "merge_commit": "a4d78a0e60c403e3ca8275be8735ab738a6af3b5"
+    },
+    {
+      "number": 188,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/188",
+      "reviewed_head": "a8a7f194e10892fe42654df0d60c63a24f7e9046",
+      "disposition": "merged",
+      "reason": "Renamed the reserved pytest request parameter to prompt; 70 tests pass, and four duration regressions fail before the production fix.",
+      "review_recommendation": "accept_after_test_repair",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "70 passed; root corrected head 9850204fa0e7a7e62e6554b49d3f36eb4327390c"
+      },
+      "final_head": "9850204fa0e7a7e62e6554b49d3f36eb4327390c",
+      "merge_commit": "bddaac692c34cdd24b8dc3738bdbe75cde43f01c"
+    },
+    {
+      "number": 189,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/189",
+      "reviewed_head": "e6e6f8cf723ab48309b6ea98d6475f3d2ca740c2",
+      "disposition": "merged",
+      "reason": "Preflights dangling symlink destinations before any kit copy; correct narrow guard. Symlink regression skipped on this Windows account;21 other focused checks pass.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 0,
+        "after_exit": 0,
+        "summary": "21 passed, 1 skipped in 12.12s"
+      },
+      "merge_commit": "b7ac77d705109451ea03a861c75c3e656e64fc59"
+    },
+    {
+      "number": 190,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/190",
+      "reviewed_head": "3785234a500add194070a2941a1a61e811544bb8",
+      "disposition": "merged",
+      "reason": "Rejects non-object image-reader JSON through its established RuntimeError recovery path.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "22 passed in 0.38s"
+      },
+      "merge_commit": "1e09e350e543a76ece3047d4952f075494976d90"
+    },
+    {
+      "number": 191,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/191",
+      "reviewed_head": "385f11ce20ac23dbd42fc0a68224de58506652b8",
+      "disposition": "merged",
+      "reason": "Falls back on undecodable saved model configuration instead of crashing alias resolution.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "5 passed, 2 subtests passed in 0.11s"
+      },
+      "merge_commit": "13263294a28189260f78f16eef148ca95d681df4"
+    },
+    {
+      "number": 192,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/192",
+      "reviewed_head": "7ade38fb700e0bb8b5a674ae3842c99642ef37c7",
+      "disposition": "merged",
+      "reason": "Converts failed Node grader subprocess exits into a failed sample, allowing subsequent samples to run.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "19 passed in 0.46s"
+      },
+      "merge_commit": "5e9cc331085c487a8a20ae2459afcd3a0d97972e"
+    },
+    {
+      "number": 193,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/193",
+      "reviewed_head": "d1d3cb8ec89ece97ccf22c7815f73e373a5f595d",
+      "disposition": "closed",
+      "reason": "Fixes stale candidate masking but removes candidate scan bound; whole-PC queries can stat and accumulate every stale match. Needs bounded scanning/deferred cleanup before accepting.",
+      "review_recommendation": "needs_work",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "13 passed in 3.31s"
+      }
+    },
+    {
+      "number": 194,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/194",
+      "reviewed_head": "ae7ff6f2d1db001b387c9455bdbd8ce4c2e1ea95",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "...................................................................      [100%]\n67 passed in 2.61s\n"
+      },
+      "merge_commit": "200ccddd1a421757973c9bad5ca8b2102239a2bc"
+    },
+    {
+      "number": 195,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/195",
+      "reviewed_head": "b5abcfcfeb45b1888ca2b679842f8d6224527502",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "...............................................                  [100%]\n47 passed, 8 subtests passed in 6.03s\n"
+      },
+      "merge_commit": "17f6c1c7bbc4ef41bc770c373b33b430abfca187"
+    },
+    {
+      "number": 196,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/196",
+      "reviewed_head": "6233177f5bb1960ef99386318070395e5b61ec4b",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": ".....                                                                    [100%]\n5 passed in 1.15s\n"
+      },
+      "merge_commit": "94b964e3c31707f987ec02aa808be22698a9e7b2"
+    },
+    {
+      "number": 197,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/197",
+      "reviewed_head": "2a866c0995ca2164665f4f9f24bc53aba2e48850",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "....                                                                     [100%]\n4 passed in 0.21s\n"
+      },
+      "merge_commit": "330e2afe7afd00eaea665e46298bda9ace24f7dc"
+    },
+    {
+      "number": 198,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/198",
+      "reviewed_head": "8098db0bfb71c71c326a09e5271d7145bef947c0",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": ".......                                                                  [100%]\n7 passed in 0.34s\n"
+      },
+      "merge_commit": "19b08ac96d3eb17107ca867c6dbf1a7159a4ca57"
+    },
+    {
+      "number": 199,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/199",
+      "reviewed_head": "972355dc7b416575095fe5383e307156020dcb50",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "......                                                                   [100%]\n6 passed in 2.94s\n"
+      },
+      "merge_commit": "3f805f91bd9e98f8690e3da80d7a832363be9bfa"
+    },
+    {
+      "number": 200,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/200",
+      "reviewed_head": "c8c5bc8c91af593264a0722dff7ebf0b35c6a4f1",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": ".....                                                                    [100%]\n5 passed in 1.31s\n"
+      },
+      "merge_commit": "6868ec0c7d93a9040efa49b7f4eaa3110979dca1"
+    },
+    {
+      "number": 201,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/201",
+      "reviewed_head": "b438a9b5ba329921a59cd55d570452f2fef29dbe",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 0,
+        "after_exit": 0,
+        "summary": "......s.                                                                 [100%]\n7 passed, 1 skipped in 5.27s\n"
+      },
+      "merge_commit": "8e2a8c3de978264c8395a076b888aaadf0efbaf0"
+    },
+    {
+      "number": 202,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/202",
+      "reviewed_head": "b8f82f16bf6e369cb0e919bb0e5695666883d9d6",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": ".....                                                                  [100%]\n5 passed, 2 subtests passed in 0.23s\n"
+      },
+      "merge_commit": "2498a8cad06dac392e20421931392e1b8f1b2c48"
+    },
+    {
+      "number": 203,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/203",
+      "reviewed_head": "99e0ac0a64574c6c2e233c4eec8212fdd3a1241c",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "...s...                                                              [100%]\n6 passed, 1 skipped, 4 subtests passed in 0.16s\n"
+      },
+      "merge_commit": "8f603ab1889dba34914818976d1af85cff6e9faa"
+    },
+    {
+      "number": 204,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/204",
+      "reviewed_head": "b10daa133373dc2c2fe72ae18c32e91e0ba3729f",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "................                                                       [100%]\n16 passed, 2 subtests passed in 0.96s\n"
+      },
+      "merge_commit": "56517a8b7f406645436bcedcff62475cdff969fb"
+    },
+    {
+      "number": 205,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/205",
+      "reviewed_head": "895d976a3aa9ef3bf9d8255abce0ab555533bdf2",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "..............                                                           [100%]\n14 passed in 5.31s\n"
+      },
+      "merge_commit": "51d6144385ee236f4a922e4e28b8270c35d14ed0"
+    },
+    {
+      "number": 206,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/206",
+      "reviewed_head": "ecd6104d71da39e36fef1009c523266e4049bd58",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "......                                                                   [100%]\n6 passed in 1.37s\n"
+      },
+      "merge_commit": "02e079a270b32b19951b8711cfe392e869bd8f04"
+    },
+    {
+      "number": 207,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/207",
+      "reviewed_head": "669a353d59380e9e36ac4abd7e53039b098dc666",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "...... [100%]\n6 passed, 77 subtests passed in 0.33s\n"
+      },
+      "merge_commit": "dcf16df8f323b8c93688d732674f42bfbd727ac2"
+    },
+    {
+      "number": 208,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/208",
+      "reviewed_head": "68cd29bcc4c0d16c981aa8636ab563621dce9a54",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "............                                                             [100%]\n12 passed in 4.14s\n"
+      },
+      "merge_commit": "09a4e60df5e9fd86fb807d1b53a405ef9e120fae"
+    },
+    {
+      "number": 209,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/209",
+      "reviewed_head": "6fbf4fcf438ed4557178065596e2f0bc936b4035",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "..............                                                           [100%]\n14 passed in 0.32s\n"
+      },
+      "merge_commit": "646b6e6e6fa2792536167d19c8fbb5c87ee65e06"
+    },
+    {
+      "number": 210,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/210",
+      "reviewed_head": "91c94c16ac13b627959a3e1d4e0ae3ad7922e3ab",
+      "disposition": "merged",
+      "reason": "Focused correctness fix with a before/after regression comparison.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": ".....                                                                    [100%]\n5 passed in 0.16s\n"
+      },
+      "merge_commit": "df0926b6b88dd927cfd1ab8a7699d3c75492e2c5"
+    },
+    {
+      "number": 211,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/211",
+      "reviewed_head": "3719355ba707df5807b44c30daad0336100eb973",
+      "disposition": "merged",
+      "reason": "Reject float/string/null result counts before reading the public API catalog.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "6 passed in 0.92s"
+        ]
+      },
+      "merge_commit": "8c526747aee16dbf287e1d2e00cb05bf6fb6010d"
+    },
+    {
+      "number": 212,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/212",
+      "reviewed_head": "2ecaa2c636bb90b56bd925e4b3182f56ee30a875",
+      "disposition": "merged",
+      "reason": "Reject nonfinite timestamps without damaging diagnostic episodes.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "12 passed in 1.40s"
+        ]
+      },
+      "merge_commit": "511008e2523321ef7bd9c71296676112d8c958c0"
+    },
+    {
+      "number": 213,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/213",
+      "reviewed_head": "52821161f9c959e4d9fddc1e739b42dcb0a7f37d",
+      "disposition": "merged",
+      "reason": "Skip malformed created timestamps inside the per-job boundary, preserving valid sorted jobs.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "70 passed in 2.48s"
+        ]
+      },
+      "merge_commit": "69b2f39516d178174d01600013d77a93d84a1d57"
+    },
+    {
+      "number": 214,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/214",
+      "reviewed_head": "5fa71037a9bb6b5d2110aed52711400f5a262d8a",
+      "disposition": "merged",
+      "reason": "Refresh fresh-but-corrupt API cache rather than repeatedly failing to read it.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "4 passed in 0.91s"
+        ]
+      },
+      "merge_commit": "53d190372d86de3e98dab9519676fc3d742c2ec8"
+    },
+    {
+      "number": 215,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/215",
+      "reviewed_head": "0a910e0fc5b2a18a0c3af88fd91c0b8460c46402",
+      "disposition": "merged",
+      "reason": "Decode image pixels before returning a direct generation result.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "8 passed in 0.25s"
+        ]
+      },
+      "merge_commit": "5582e7bb84a03416227922e7d23e151c40cce7a7"
+    },
+    {
+      "number": 216,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/216",
+      "reviewed_head": "eda9b2a86f44170d432571dca85f0cb7124e9de0",
+      "disposition": "merged",
+      "reason": "Match explicitly tagged vision model names without accepting a different tag.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "42 passed in 0.59s"
+        ]
+      },
+      "merge_commit": "30b36b5ab800c88a33b8c2b0aef03a26ae4e0e2b"
+    },
+    {
+      "number": 217,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/217",
+      "reviewed_head": "ebab9a1be1919079d8a660975b63afeead1d5f17",
+      "disposition": "merged",
+      "reason": "Record launch failure as failed progress and preserve setup backoff; caller still receives the original exception.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "32 passed in 0.42s"
+        ]
+      },
+      "merge_commit": "a2f9e6d118b18767864650be62d4e3b68d485614"
+    },
+    {
+      "number": 218,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/218",
+      "reviewed_head": "26c36d12e90a3fc56145e2722b19a697a31ea46e",
+      "disposition": "merged",
+      "reason": "Finalize stopped radio state even when audio cleanup raises.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "30 passed in 4.12s"
+        ]
+      },
+      "merge_commit": "d2bf0da8d2c6466097811a8b648abb4bc133a40c"
+    },
+    {
+      "number": 219,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/219",
+      "reviewed_head": "2fa66fd44500fb9c2bba281518854c2af9ccc562",
+      "disposition": "merged",
+      "reason": "Release a preloaded deck after failed crossfade startup while retaining the current channel.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "30 passed in 3.91s"
+        ]
+      },
+      "merge_commit": "b1ef88124072a46ec790197cd32595e9c6e85f26"
+    },
+    {
+      "number": 220,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/220",
+      "reviewed_head": "528b99afce24b055c22e43f294279165c0053ec3",
+      "disposition": "merged",
+      "reason": "Fall back to vision when PDFium cannot read a text layer, preserving selectable pages.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "7 passed in 2.36s"
+        ]
+      },
+      "merge_commit": "9e29c34c32db129ef47a62fad3bf33cf427f2b14"
+    },
+    {
+      "number": 221,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/221",
+      "reviewed_head": "81cf1bf55f67849e01694abf4620943f7f3311c6",
+      "disposition": "merged",
+      "reason": "Do not crash or infer stale setup from invalid progress timestamps.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "14 passed in 1.81s"
+        ]
+      },
+      "merge_commit": "d03a3a53dab7567be36313dacb1f6d78eed43476"
+    },
+    {
+      "number": 222,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/222",
+      "reviewed_head": "9edaa9843eeaaf6ec108aac59f9bf4dbdf61f0dd",
+      "disposition": "merged",
+      "reason": "Return failure without replacing the prior report if self-check supervisor launch is denied.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "10 passed, 1 skipped in 0.30s"
+        ]
+      },
+      "merge_commit": "fb7454903ef69e61ed4cf5280938c183071d393a"
+    },
+    {
+      "number": 223,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/223",
+      "reviewed_head": "2b226130e5f341e07ec560fa95034de9d3cc1320",
+      "disposition": "merged",
+      "reason": "Recover model approvals from non-object JSON without implicit approval.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "48 passed, 14 subtests passed in 5.42s"
+        ]
+      },
+      "merge_commit": "8e4c415c246b590eced3313486814e48585a1b9f"
+    },
+    {
+      "number": 224,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/224",
+      "reviewed_head": "e7f8033d7cdf6d9631d55285919a7d2910cf8ac4",
+      "disposition": "merged",
+      "reason": "Resolved overlapping PDF test additions while retaining both native-only PDF coverage and damaged text-layer fallback; eight combined tests pass.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "7 passed in 2.43s"
+        ]
+      },
+      "final_head": "bab258851e7ced815201aae21e512bffa99b45b6",
+      "merge_commit": "14deff4adbc34bf06e32ece883d2c2031ec293a2"
+    },
+    {
+      "number": 225,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/225",
+      "reviewed_head": "819ff4bd39f1d0529f1aba1aa4a1f09fc5f082de",
+      "disposition": "closed",
+      "reason": "Duplicate of earlier PR223: identical production fix and equivalent six-case regression coverage.",
+      "review_recommendation": "duplicate",
+      "duplicate_of": 223,
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "48 passed, 14 subtests passed in 5.26s"
+        ]
+      }
+    },
+    {
+      "number": 226,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/226",
+      "reviewed_head": "31f3f0acfe3575c5e33e94a8bd4f26d15c319f23",
+      "disposition": "closed",
+      "reason": "Equivalent production change already reviewed under earlier canonical PR; preserve one accepted fix.",
+      "review_recommendation": "reject_duplicate",
+      "duplicate_of": 223,
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "48 passed, 12 subtests passed in 5.25s"
+      }
+    },
+    {
+      "number": 227,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/227",
+      "reviewed_head": "f7a5e88ea3db410112fefc99a93ae8639cb9cfc5",
+      "disposition": "merged",
+      "reason": "Falls back to matching installed-script processes when a stale progress PID is gone, preventing duplicate repair.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "14 passed in 2.14s"
+      },
+      "merge_commit": "448511c57637c0f7aa8e20bf506512a0960a7e1f"
+    },
+    {
+      "number": 228,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/228",
+      "reviewed_head": "c4e89eb70d99f7211fd3c028e54094b3a05a4117",
+      "disposition": "merged",
+      "reason": "Declines uniform nonzero chroma before undefined zero-variance correlation.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "5 passed in 0.28s"
+      },
+      "merge_commit": "eb5f6e19ce38dc8a219ebdb5cf565e285ed2427f"
+    },
+    {
+      "number": 229,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/229",
+      "reviewed_head": "f9bd7014269ef33a624814895a7e9aac36d9df95",
+      "disposition": "merged",
+      "reason": "Uses floating-point intermediate WAVs instead of implicit16-bit quantization before mastering.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "6 passed in 1.86s"
+      },
+      "merge_commit": "c28037430570e7e67404ec92e71240d79913466b"
+    },
+    {
+      "number": 230,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/230",
+      "reviewed_head": "cafe5a639b8d87c2a646d81960ffab28011dc268",
+      "disposition": "closed",
+      "reason": "Equivalent production change already reviewed under earlier canonical PR; preserve one accepted fix.",
+      "review_recommendation": "reject_duplicate",
+      "duplicate_of": 228,
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "5 passed in 0.20s"
+      }
+    },
+    {
+      "number": 231,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/231",
+      "reviewed_head": "e2e389aac4317b9cd86bdfeebec980ab5fc359e4",
+      "disposition": "merged",
+      "reason": "Records chord re-entry after a silent/unrecognized segment instead of collapsing it into an earlier occurrence.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "5 passed in 0.22s"
+      },
+      "final_head": "dca3a2aa0ccd9f50d48c2b59945798e57c73d926",
+      "merge_commit": "23e059001ba92889a02e48ba97089382277e64a0"
+    },
+    {
+      "number": 232,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/232",
+      "reviewed_head": "8d6fd5a0b8261bd1c55f8dab567b44b6a47ad468",
+      "disposition": "closed",
+      "reason": "Equivalent production change already reviewed under earlier canonical PR; preserve one accepted fix.",
+      "review_recommendation": "reject_duplicate",
+      "duplicate_of": 228,
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "5 passed in 0.20s"
+      }
+    },
+    {
+      "number": 233,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/233",
+      "reviewed_head": "6ce1a70f2166d247879d342f4352e47f2439d38b",
+      "disposition": "merged",
+      "reason": "Rejoins CSV-split unquoted pitch-bend arrays before JSON parsing; normalized output is repeatable.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "9 passed in 0.39s"
+      },
+      "merge_commit": "a1086616f55aa7ca67c96e2cdd0c55cb7b16be31"
+    },
+    {
+      "number": 234,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/234",
+      "reviewed_head": "22c676488ba204cdf6cc1b72d7cbb34dfbf1d5d7",
+      "disposition": "merged",
+      "reason": "Invalidates a stale install-success marker before rebuilding a missing runtime, allowing retry after package failure.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "6 passed in 1.22s"
+      },
+      "merge_commit": "d68d3005edd757b3aac5a452cae612ef3cf939f5"
+    },
+    {
+      "number": 235,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/235",
+      "reviewed_head": "e32965d1cd7409300ff8f3779ff9a7f37cb2aa7b",
+      "disposition": "closed",
+      "reason": "Equivalent production change already reviewed under earlier canonical PR; preserve one accepted fix.",
+      "review_recommendation": "reject_duplicate",
+      "duplicate_of": 233,
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "9 passed in 0.33s"
+      }
+    },
+    {
+      "number": 236,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/236",
+      "reviewed_head": "161aa8ae59b97bf2454bf2f8929a6667ed026530",
+      "disposition": "merged",
+      "reason": "Uses an exclusively created unique temporary CSV so normalization cannot overwrite or delete an unrelated .csv.tmp file.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "9 passed in 0.36s"
+      },
+      "final_head": "7a2c9fadc2d4fc91c216059acc07c7df6170dc3e",
+      "merge_commit": "006e7ae8d0b8aad60e7534a01f21412db5c21c89"
+    },
+    {
+      "number": 237,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/237",
+      "reviewed_head": "6e6e91fd0de1b075eed64678f2a38ad815f5ea58",
+      "disposition": "merged",
+      "reason": "Bounds untrusted download names by UTF-8 bytes and preserves collision handling; one unrelated symlink test skips on Windows.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "9 passed, 1 skipped in 5.21s"
+      },
+      "merge_commit": "3f279ae562aae83df0bd318e38a2d00d485396e8"
+    },
+    {
+      "number": 238,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/238",
+      "reviewed_head": "212651d8dd2043fedbaf38d576c96c84598b32de",
+      "disposition": "merged",
+      "reason": "Cleans incomplete MP4 output on KeyboardInterrupt as well as timeout, preserving source audio and enabling retry.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "7 passed in 2.77s"
+      },
+      "merge_commit": "f9df5028b0c43d6af4a0b45b9356c6d86dee35a3"
+    },
+    {
+      "number": 239,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/239",
+      "reviewed_head": "1322987d20517d7f1d941a68e5cb715db5fbeb98",
+      "disposition": "merged",
+      "reason": "Renders stems in a staging directory and publishes only after validating success, leaving output empty after worker failure.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": "6 passed in 1.76s"
+      },
+      "merge_commit": "7eb16b461c790fbf7862bc184ffac4360f6b9f80"
+    },
+    {
+      "number": 240,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/240",
+      "reviewed_head": "7fc99e70287da5ed60ff0558dba0e9227682da87",
+      "disposition": "closed",
+      "reason": "Equivalent interrupt cleanup to earlier PR238; keep238.",
+      "review_recommendation": "duplicate",
+      "duplicate_of": 238,
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "7 passed in 2.75s"
+        ]
+      }
+    },
+    {
+      "number": 241,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/241",
+      "reviewed_head": "03d1359d49e5b9754cef4b1f86e9b0be24c30ad5",
+      "disposition": "closed",
+      "reason": "Duplicate UTF-8 filename bound of earlier PR237;237 additionally strips trailing spaces/dots after truncation.",
+      "review_recommendation": "duplicate",
+      "duplicate_of": 237,
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "9 passed, 1 skipped in 4.59s"
+        ]
+      }
+    },
+    {
+      "number": 242,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/242",
+      "reviewed_head": "d1d27e868a879378f737283cd924ddf56c1b2e6f",
+      "disposition": "merged",
+      "reason": "Treat empty Whisper config or weights as unready and repair them.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "6 passed, 4 subtests passed in 0.22s"
+        ]
+      },
+      "merge_commit": "688b75da007079cf17d5b2e33764f8f9180b1445"
+    },
+    {
+      "number": 243,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/243",
+      "reviewed_head": "a56ebc9ff05b87ec074a5dba3fccb773684c1c13",
+      "disposition": "merged",
+      "reason": "Catch decoder RecursionError and use static HTML fallback. Submitted depth regression also passes baseline on Python3.13; separate forced decoder-error proof fails baseline and passes patched.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 0,
+        "after_exit": 0,
+        "summary": [
+          "7 passed, 1 skipped, 4 subtests passed in 0.11s"
+        ]
+      },
+      "merge_commit": "294decc5f77ebef1bdb4fd8eefbb67cf6d74c780"
+    },
+    {
+      "number": 244,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/244",
+      "reviewed_head": "b29f259e8d2033863561cd64e443b550176ad036",
+      "disposition": "merged",
+      "reason": "Resolve relative links against their current page before unchanged same-host/public URL checks.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "13 passed in 1.17s"
+        ]
+      },
+      "merge_commit": "ae005c584b25fb7c486ec50f46794cdef9a613c9"
+    },
+    {
+      "number": 245,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/245",
+      "reviewed_head": "a1e69cb74b4eeeb241506eebd54cc8f54ee12e1f",
+      "disposition": "merged",
+      "reason": "Report network counter rollback as unavailable instead of zero traffic.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "9 passed in 0.09s"
+        ]
+      },
+      "merge_commit": "9b26279e6d99a1998424f357550565dbc1198530"
+    },
+    {
+      "number": 246,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/246",
+      "reviewed_head": "4cedd73a22fc5cc371d30e5635d605a251d2f3ae",
+      "disposition": "merged",
+      "reason": "Preserve obstructed or symlinked skill parent directories while syncing other files.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "4 passed, 1 skipped in 0.44s"
+        ]
+      },
+      "merge_commit": "1d8cb0f31ba023366113fbf108291f5af520490c"
+    },
+    {
+      "number": 247,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/247",
+      "reviewed_head": "53d06085288ced7be31aaef2414162766f2405aa",
+      "disposition": "merged",
+      "reason": "Require the search grant itself to remain unexpired when installing an inspected skill.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "6 passed, 2 subtests passed in 0.08s"
+        ]
+      },
+      "merge_commit": "62b8560d4aa41b66664fc7f59ade4b40cee6c6ff"
+    },
+    {
+      "number": 248,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/248",
+      "reviewed_head": "60233def68b55fc084c3788b765b72bbfab64b1c",
+      "disposition": "merged",
+      "reason": "Keep empty-input response available without importing the model dependency.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "9 passed, 17 subtests passed in 0.30s"
+        ]
+      },
+      "merge_commit": "93819bdc73412c2236611b40f9d5f81eaab0f888"
+    },
+    {
+      "number": 249,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/249",
+      "reviewed_head": "53695c79d9301d5fa4c6f9beb77f7f12b2de2aff",
+      "disposition": "merged",
+      "reason": "Reject non-list video frames so ingestion clears stale memory and continues batch.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "29 passed, 1 skipped, 2 subtests passed in 3.40s"
+        ]
+      },
+      "merge_commit": "b0e5d45e34ea6b51d6fbcd09cd3cbf1a3331d0aa"
+    },
+    {
+      "number": 250,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/250",
+      "reviewed_head": "bd8d3af4032a815ed844efd1edd07eeba945cc74",
+      "disposition": "merged",
+      "reason": "Reject numeric feature normalization overflow before prediction.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "10 passed, 6 subtests passed in 2.21s"
+        ]
+      },
+      "merge_commit": "aee656e3f8950d46ebdf101f53d8771a4ca2bfc3"
+    },
+    {
+      "number": 251,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/251",
+      "reviewed_head": "78dfc2c7c9c4aaea2a4d801460bed1e6e8b6bc18",
+      "disposition": "merged",
+      "reason": "Close partially started MCP backends on cancellation and rethrow cancellation.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "17 passed in 2.53s"
+        ]
+      },
+      "merge_commit": "bc9c6c97712cb86cd42b2e1c3275389dc6ff064b"
+    },
+    {
+      "number": 252,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/252",
+      "reviewed_head": "7d3554396dae487dabfbf64750d62fc07ca546e6",
+      "disposition": "merged",
+      "reason": "Clean newly created empty FFmpeg outputs after unsuccessful editing.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "9 passed in 3.08s"
+        ]
+      },
+      "merge_commit": "f53dd04124d673759efe49352e0949d4ffc9e97b"
+    },
+    {
+      "number": 253,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/253",
+      "reviewed_head": "21d879f414a1c42c58baa6b92b5d1881967c56d2",
+      "disposition": "merged",
+      "reason": "Match the exact loaded model tag rather than another tag of the same alias.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "42 passed, 15 subtests passed in 1.15s"
+        ]
+      },
+      "merge_commit": "1d1bb0a0ff7b175f6f57371b6edecfb0df773663"
+    },
+    {
+      "number": 254,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/254",
+      "reviewed_head": "43df8d6affbff5e586dc3d354bb46e8ebfeb18cb",
+      "disposition": "merged",
+      "reason": "Recheck source identity after publishing a document cache to avoid returning changed data.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "8 passed in 2.16s"
+        ]
+      },
+      "merge_commit": "9fcc532e067d177d164b1d05a1d9b47466defd67"
+    },
+    {
+      "number": 255,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/255",
+      "reviewed_head": "aeef2e8c3778b2b1f6eebbba048b86dc7c384f67",
+      "disposition": "merged",
+      "reason": "Preserve plain-text boundaries after closing HTML block elements.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "17 passed, 2 subtests passed in 0.82s"
+        ]
+      },
+      "merge_commit": "187adaf4e7021ec700558df7405716e3d06133b9"
+    },
+    {
+      "number": 256,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/256",
+      "reviewed_head": "a1cc94e0dadd963d6c9075c48196a46510c27d77",
+      "disposition": "closed",
+      "reason": "Concurrent marker replacement still raises Windows PermissionError. Full head suite failed; focused repeat runs passed once and failed twice. Unique temp names do not fully solve Windows concurrent rename contention.",
+      "review_recommendation": "needs_work",
+      "checks": {
+        "before_exit": 0,
+        "after_exit": 1,
+        "summary": [
+          "1 failed, 14 passed in 5.47s"
+        ]
+      }
+    },
+    {
+      "number": 257,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/257",
+      "reviewed_head": "5fd86fce1990fcaca6c533f23467773e2cef9a50",
+      "disposition": "merged",
+      "reason": "Validate complete thousands-separated numeric tokens before removing commas.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "7 passed, 85 subtests passed in 0.29s"
+        ]
+      },
+      "merge_commit": "e85eac289f8427d0af5e1bf6846afcc51eacd71b"
+    },
+    {
+      "number": 258,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/258",
+      "reviewed_head": "2b8d09212539af5ce213ac3728f387d631d45c75",
+      "disposition": "merged",
+      "reason": "Honor explicit whole-instrumental requests in vocal requirement and intent.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "14 passed in 0.12s"
+        ]
+      },
+      "merge_commit": "d36d2e0557066cc9d285b55a55edd668ab839b73"
+    },
+    {
+      "number": 259,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/259",
+      "reviewed_head": "d2d1cc5c8bc662ba26a95d2d6ded29e2ad4001a1",
+      "disposition": "merged",
+      "reason": "Do not require unused update timestamps for running or explicitly finished task durations.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "10 passed in 0.40s"
+        ]
+      },
+      "merge_commit": "f80de74882b448ec619e04ed91d3fbb69b71b838"
+    },
+    {
+      "number": 260,
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/260",
+      "reviewed_head": "29b40251c1dfde2cc909b90d4de83c03b32966b6",
+      "disposition": "merged",
+      "reason": "Reject lyric rows that round into zero-duration SRT captions.",
+      "review_recommendation": "accept",
+      "checks": {
+        "before_exit": 1,
+        "after_exit": 0,
+        "summary": [
+          "11 passed in 1.01s"
+        ]
+      },
+      "merge_commit": "81cdc4e90a33a6e1f8634ce7d714549268dd2183"
+    }
+  ],
+  "integration": {
+    "head": "93819bdc73412c2236611b40f9d5f81eaab0f888",
+    "files": 57,
+    "passed": 1308,
+    "skipped": 7,
+    "subtests_passed": 222,
+    "seconds": 309.95,
+    "final_head": "006e7ae8d0b8aad60e7534a01f21412db5c21c89",
+    "final_changed_music_suites_passed": 17
+  }
+}

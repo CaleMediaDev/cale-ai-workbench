@@ -250,6 +250,35 @@ class CloudTests(unittest.TestCase):
                 with self.assertRaises(cloud.ToolArgumentError):
                     cloud.valid_completion(response, guarded)
 
+    def test_native_plan_tool_name_is_not_a_repeatable_shell_check(self):
+        import native_agent
+
+        tool = next(item for item in native_agent.TOOLS if item["function"]["name"] == "task_steps")
+        request = {**REQUEST, "tools": [tool]}
+
+        def response(command):
+            arguments = {"action": "plan", "steps": [{"phase": "Repair", "title": "Verify result",
+                "check_command": command}]}
+            return {"choices": [{"message": {"tool_calls": [{"id": "bad-command", "function": {
+                "name": "task_steps", "arguments": json.dumps(arguments)}}]}}]}
+
+        for command in ("write_file", "edit_file", "check_webapp"):
+            with self.subTest(command=command):
+                with self.assertRaises(cloud.ToolArgumentError) as caught:
+                    cloud.valid_completion(response(command), request)
+                error = caught.exception
+                self.assertEqual(error.path, ["steps", 0, "check_command"])
+                self.assertIn("tool names are not shell commands", error.problem)
+                self.assertIn("check_tool", error.problem)
+                self.assertIn("typed check_arguments", error.problem)
+                self.assertIn("real repeatable shell command", error.problem)
+                self.assertNotIn(command, error.problem)
+                self.assertLess(len(error.problem), 250)
+                guarded = cloud.argument_repair_request(request, error)
+                with self.assertRaises(cloud.ToolArgumentError):
+                    cloud.valid_completion(response(command), guarded)
+        cloud.valid_completion(response("python verify.py"), request)
+
     def test_narrow_step_checker_repair_pins_valid_action_without_steps_array(self):
         schema = {"type": "object", "properties": {
             "action": {"type": "string", "enum": ["complete", "revise_check"]},

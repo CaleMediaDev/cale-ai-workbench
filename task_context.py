@@ -297,10 +297,10 @@ def validate_repeatable_check(tool: str, arguments: dict) -> None:
                 "Use that tool to implement changes. Revise this step with check_tool/check_arguments "
                 "(check_webapp for HTML, or run_verifier for an existing verifier), or a real read-only shell command.")
     if tool in {"check_python_function", "check_javascript_function", "check_webapp"} and any(
-            key in arguments for key in ("saved_case", "saved_sequence", "suite_sha256")):
+            key in arguments for key in ("saved_case", "saved_sequence", "suite_sha256", "revise_inputs")):
         raise ValueError("Saved-case revision is a one-time checker action, not repeatable step acceptance. "
                          "Correct the saved suite through its checker first; then revise this SQLite step "
-                         "with complete input/assertion cases and no saved_case, saved_sequence or suite_sha256.")
+                         "with complete input/assertion cases and no saved_case, saved_sequence, suite_sha256 or revise_inputs.")
 
 
 def _validate_steps(steps: list) -> list[tuple]:

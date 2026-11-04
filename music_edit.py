@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import subprocess
+import tempfile
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -35,14 +36,17 @@ def _output(value: str, sources: tuple[Path, ...]) -> Path:
 
 
 def _run(arguments: list[str], output: Path) -> None:
-    command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel", "error", "-n", *arguments, str(output)]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=3600, creationflags=HIDE)
-    if result.returncode or not output.is_file() or not output.stat().st_size:
-        # FFmpeg's -n refuses to overwrite an output created during this call.
-        # Preserve that file, but remove invalid outputs even after a zero exit.
-        if output.is_file() and "already exists" not in result.stderr.lower():
-            output.unlink(missing_ok=True)
-        raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local audio edit failed.")
+    # Keep partial audio private, including when subprocess.run times out.
+    # Staging beside the destination allows atomic, no-overwrite publication.
+    with tempfile.TemporaryDirectory(prefix=".music-edit-", dir=output.parent) as directory:
+        staged = Path(directory) / output.name
+        command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel", "error", "-n", *arguments, str(staged)]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=3600, creationflags=HIDE)
+        if result.returncode or not staged.is_file() or not staged.stat().st_size:
+            raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local audio edit failed.")
+        # Unlike replace(), a hard link refuses to overwrite a destination
+        # created while FFmpeg was running. Cleanup removes only our staging file.
+        output.hardlink_to(staged)
 
 
 def edit_music(source_path: str, output_path: str, start_seconds: float = 0,

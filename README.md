@@ -94,7 +94,7 @@ The header's **Donate AI power** button lets people opt into **local models**, *
 
 Medium now uses the previous continuous Full Blast pace: one deep review at a time, including while you use Cale. Full Blast allows up to six concurrent reviews when ChatGPT is among your explicitly donated sources, with a larger public-source budget. Local and free-cloud work remain single-lane; local work waits while music/image work holds the GPU. Slow uses smaller eligible local models and two CPU threads; Medium uses up to half the CPU threads and Full Blast uses all CPU threads for its one local lane. These are scheduling choices, not a promised percentage of a subscription allowance. Hardware fitness and account quota limits still apply. Installation and updates temporarily suspend all donation work, which then resumes automatically. Local mode blocks cloud donations, Free cloud only blocks ChatGPT donations, and offline mode pauses all contributions because GitHub is required.
 
-The worker reads `donation-tasks.json` and its approved source files from an exact commit of the public Cale repository. Medium and Full Blast also discover bounded production/test pairs in that public revision, excluding authentication, donation, accounting and update-policy modules. Transactional claims prevent parallel workers from reviewing the same area and revision together; recent unchanged reviews and areas with pending drafts are skipped. All lanes share account cooldowns after rate-limit errors. It retries automatically if accounts, GitHub or the queue are temporarily unavailable. It never includes user documents, private projects, chat history, or credentials in the model prompt. It applies bounded exact text edits in memory and parses Python syntax without executing generated code. Production changes must include a regression-test edit. A proposal goes to a new branch in the contributor's GitHub fork (or a separate branch for the repository owner) and becomes a **draft pull request** in CaleMediaDev/cale-ai-workbench. The automation never changes `main`, approves changes, merges, or releases. The owner reviews the code and runs relevant tests before accepting it.
+The worker reads `donation-tasks.json` and its approved source files from an exact commit of the public Cale repository. Medium and Full Blast also discover bounded production/test pairs in that public revision, excluding authentication, donation, accounting and update-policy modules. Transactional claims reserve each area across public revisions, so merging an unrelated fix cannot start duplicate reviews. Submitted drafts stay reserved until an authoritative GitHub pull-request check confirms closure; failed or incomplete checks retain the reservation. All lanes share a bounded three-draft refresh every 30 seconds. Expired in-flight attempts and recent unchanged reviews can retry after 30 minutes, while different areas continue in parallel. All lanes share account cooldowns after rate-limit errors. It retries automatically if accounts, GitHub or the queue are temporarily unavailable. It never includes user documents, private projects, chat history, or credentials in the model prompt. It applies bounded exact text edits in memory and parses Python syntax without executing generated code. Production changes must include a regression-test edit. A proposal goes to a new branch in the contributor's GitHub fork (or a separate branch for the repository owner) and becomes a **draft pull request** in CaleMediaDev/cale-ai-workbench. The automation never changes `main`, approves changes, merges, or releases. The owner reviews the code and runs relevant tests before accepting it.
 
 **Total tokens donated** is this installation's persistent sum of provider-reported input and output usage, including reviews that produce no change or proposals that fail validation. The dialog breaks totals down into Local, Free cloud and ChatGPT. Separate receipts count reported free-provider fallback calls without double-counting completions. Partial requests without reported usage are not estimated. In Slow, returning to Cale cancels further work and closes a streaming local request; an in-flight request can still consume resources. Stop and opt-out cancel all lanes in every mode. The local ledger is `LongTasks/donations.db`; credentials remain in their existing per-user protected stores.
 
@@ -224,6 +224,34 @@ align its matching active SQLite check to the corrected arguments. This requires
 the same request, page, input sequence and original active check; changes after
 the check, stale bindings and unrelated sequences cannot advance progress. Alignment itself
 does not complete the step: its acceptance check must still run and pass.
+
+Mistaken browser input actions have a separate explicit repair mode:
+`check_webapp` takes the same saved sequence/case/checksum reference,
+`revise_inputs:true`, and one corrected case. It replays the real sequence,
+including that case's input prefix. Only an actually passing selected case can
+replace its saved definition; other cases, sequences and failed verdicts remain.
+Input actions and mistaken assertions can be corrected together, avoiding a
+deadlock when neither correction could pass on its own. Source changes, stale
+references, changed instructions, custom verifiers and collisions with another
+saved input sequence reject the replacement. A worker-bound repair can align
+the same active SQLite definition without completing it. Neither the revision
+flag nor its one-time reference can be stored as repeatable step acceptance.
+Generated browser suites stay behind this checker API rather than raw file edits.
+
+An invalid legacy acceptance command can also trigger a bounded focused repair.
+For a small, single HTML page, Cale supplies observed control IDs and the full
+original request and short project rules. The model can revise only that active
+definition, with its phase/title fixed. The focused prompt retains browser test
+semantics: filling does not submit, clicks are explicit, and expected strings
+mean literal visible text. The actual checker still decides whether behavior
+passes; oversized requirements and exhausted focused attempts restore the normal
+reading/editing workflow.
+
+Failed form checks that fill known controls but never click or press a key can
+also receive a short checker-only decision turn. The observed form/submit IDs
+are a hypothesis, not proof that submission is necessary. The offered repair is
+pinned to one saved case and cannot edit source. After at most two focused
+attempts, or an explanation that source/evidence needs work, normal tools return.
 
 A browser step now records its own batch verdict separately from the retained
 project-wide verifier. Real passing checks can advance one small step while

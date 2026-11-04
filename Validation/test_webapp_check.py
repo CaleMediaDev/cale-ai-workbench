@@ -1029,10 +1029,12 @@ def test_rejected_repair_retains_original_failure_and_recovers_with_real_browser
         "check_tool": "check_webapp", "check_arguments": incoming}])["active"]
     item = {"id": "repair-regression", "folder": str(tmp_path)}
     with patch.object(long_tasks, "projects", return_value=[item]):
-        failure = json.loads(native_agent.execute_tool(tmp_path, "task_steps", {"action": "complete", "step_id": active["id"]}))
-        assert not failure["passed"] and failure["done"] == 0
+        failure = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", incoming))
+        assert not failure["passed"] and failure["own_batch_passed"]
+        assert task_context.step_status(tmp_path)["done"] == 0
+        assert task_context.step_status(tmp_path)["active"]["id"] == active["id"]
         reference = failure["assertion_revision_reference"]
-        assert "Revising this SQLite step alone" in failure["next_action"]
+        assert "assertion-only" in failure["revision_guidance"]
         saved = tmp_path / ".local-ai/webapp-check.json"
         original = saved.read_bytes()
         wrong = {**reference, "cases": [{"expect": {"answer": "97.00"}}]}
@@ -1135,6 +1137,198 @@ def test_case_revision_rejects_stale_input_edits_custom_verifiers_and_changed_in
     with pytest.raises(ValueError, match="custom verifier"):
         webapp_check.prepare_assertion_revision(tmp_path, revision)
     assert script.read_text() == 'exit 0\n'
+
+
+def _seed_saved_input_revision(folder):
+    """Save a mistaken input and expectation without editing the real app."""
+    import hashlib
+
+    (folder / "index.html").write_text(PAGE)
+    (folder / "other.html").write_text(PAGE)
+    mistaken = json.loads(json.dumps(SPEC))
+    mistaken["cases"][1] = {"set": {"bill": "8O"}, "expect": {"answer": "1 row"}, "hidden": ["error"]}
+    webapp_check.save_verifier(folder, mistaken, accumulate=True)
+    webapp_check.save_verifier(folder, {"path": "index.html", "viewport_width": 800,
+        "cases": [{"expect": {"answer": "120.00"}}]}, accumulate=True)
+    webapp_check.save_verifier(folder, {"path": "other.html",
+        "cases": [{"expect": {"answer": "120.00"}}]}, accumulate=True)
+    saved = folder / ".local-ai/webapp-check.json"
+    raw = saved.read_bytes()
+    arguments = {"path": "index.html", "saved_sequence": 1, "saved_case": 2,
+        "suite_sha256": hashlib.sha256(raw).hexdigest(), "revise_inputs": True,
+        "cases": [{"set": {"bill": "80"}, "expect": {"answer": "96.00"}}]}
+    return saved, raw, arguments
+
+
+def _checked_page_sha(folder):
+    import hashlib
+
+    return hashlib.sha256((folder / "index.html").read_bytes()).hexdigest()
+
+
+def test_opted_in_input_and_assertion_revision_retains_other_cases_and_sequences(tmp_path):
+    saved, raw, arguments = _seed_saved_input_revision(tmp_path)
+    before = json.loads(raw)
+    assert not webapp_check.check(tmp_path, before["checks"][0])["passed"]
+    for opt_in in ({}, {"revise_inputs": False}):
+        old_mode = {key: value for key, value in arguments.items() if key != "revise_inputs"}
+        with pytest.raises(ValueError, match="cannot change input actions"):
+            webapp_check.prepare_assertion_revision(tmp_path, {**old_mode, **opt_in})
+    repaired, revision = webapp_check.prepare_assertion_revision(tmp_path, arguments)
+    assert revision["replace_sequence"] == 1
+    assert repaired["cases"][0] == before["checks"][0]["cases"][0]
+    assert repaired["cases"][2] == before["checks"][0]["cases"][2]
+    assert repaired["cases"][1] == {"set": {"bill": "80"}, "expect": {"answer": "96.00"}, "hidden": ["error"]}
+    candidate = webapp_check.check(tmp_path, repaired)
+    assert candidate["passed"]
+    assert saved.read_bytes() == raw  # Preparing and checking a candidate never publishes it.
+    assert webapp_check.save_verifier(tmp_path, repaired, accumulate=True,
+        expected_sha=revision["previous_sha256"], replace_sequence=revision["replace_sequence"],
+        expected_page_sha=candidate["page_sha256"])
+    after = json.loads(saved.read_bytes())
+    assert after["checks"][0] == repaired
+    assert after["checks"][1:] == before["checks"][1:]
+    assert after["request_hash"] == before["request_hash"]
+    assert webapp_check.run_saved_checks(tmp_path, saved)["passed"]
+    assert (tmp_path / "index.html").read_text() == PAGE
+
+
+@pytest.mark.parametrize("invalid", ["stale", "request", "sequence", "case", "path", "viewport", "custom", "boolean"])
+def test_input_revision_preserves_existing_reference_and_ownership_guards(tmp_path, invalid):
+    saved, raw, arguments = _seed_saved_input_revision(tmp_path)
+    if invalid == "stale":
+        arguments["suite_sha256"] = "0" * 64
+    elif invalid == "request":
+        (tmp_path / ".local-ai/USER-REQUESTS.md").write_text("A new requirement")
+    elif invalid == "sequence":
+        arguments["saved_sequence"] = True
+    elif invalid == "case":
+        arguments["saved_case"] = 0
+    elif invalid == "path":
+        arguments["path"] = "other.html"
+    elif invalid == "viewport":
+        arguments["viewport_width"] = 800
+    elif invalid == "custom":
+        (tmp_path / ".local-ai/verify.ps1").write_text("exit 0\n")
+    else:
+        arguments["revise_inputs"] = "true"
+    with pytest.raises(ValueError):
+        webapp_check.prepare_assertion_revision(tmp_path, arguments)
+    assert saved.read_bytes() == raw
+
+
+@pytest.mark.parametrize("tamper", ["index", "boolean_index", "page", "viewport", "case_count", "other_case", "typed_other_case"])
+def test_input_revision_save_cannot_replace_a_different_scope(tmp_path, tamper):
+    saved, raw, arguments = _seed_saved_input_revision(tmp_path)
+    if tamper == "typed_other_case":
+        import hashlib
+
+        initial = json.loads(raw)
+        initial["checks"][0]["cases"][0]["state"] = {"game.ready": True}
+        saved.write_text(json.dumps(initial), encoding="utf-8")
+        raw = saved.read_bytes()
+        arguments["suite_sha256"] = hashlib.sha256(raw).hexdigest()
+    batch, revision = webapp_check.prepare_assertion_revision(tmp_path, arguments)
+    index = revision["replace_sequence"]
+    if tamper == "index":
+        index = 99
+    elif tamper == "boolean_index":
+        index = True
+    elif tamper == "page":
+        batch["path"] = "other.html"
+    elif tamper == "viewport":
+        batch["viewport_width"] = 800
+    elif tamper == "case_count":
+        batch["cases"].pop()
+    elif tamper == "other_case":
+        batch["cases"][0]["expect"]["answer"] = "tampered"
+    else:
+        batch["cases"][0]["state"]["game.ready"] = 1
+    with pytest.raises(ValueError):
+        webapp_check.save_verifier(tmp_path, batch, accumulate=True,
+            expected_sha=revision["previous_sha256"], replace_sequence=index,
+            expected_page_sha=_checked_page_sha(tmp_path))
+    assert saved.read_bytes() == raw
+
+
+def test_input_revision_save_requires_checksum_and_rejects_another_sequence_collision(tmp_path):
+    import hashlib
+
+    saved, _, arguments = _seed_saved_input_revision(tmp_path)
+    corrected, _ = webapp_check.prepare_assertion_revision(tmp_path, arguments)
+    webapp_check.save_verifier(tmp_path, corrected, accumulate=True)
+    raw = saved.read_bytes()
+    arguments["suite_sha256"] = hashlib.sha256(raw).hexdigest()
+    corrected, revision = webapp_check.prepare_assertion_revision(tmp_path, arguments)
+    for keywords in ({"replace_sequence": 1}, {"accumulate": True, "replace_sequence": 1}):
+        with pytest.raises(ValueError, match="checksum-bound"):
+            webapp_check.save_verifier(tmp_path, corrected, **keywords)
+    with pytest.raises(ValueError, match="collide"):
+        webapp_check.save_verifier(tmp_path, corrected, accumulate=True,
+            expected_sha=revision["previous_sha256"], replace_sequence=1,
+            expected_page_sha=_checked_page_sha(tmp_path))
+    assert saved.read_bytes() == raw
+
+
+@pytest.mark.parametrize("checked_hash", [None, "", "not-a-sha256", "0" * 64])
+def test_input_revision_save_requires_matching_checked_html_source(tmp_path, checked_hash):
+    saved, raw, arguments = _seed_saved_input_revision(tmp_path)
+    candidate, revision = webapp_check.prepare_assertion_revision(tmp_path, arguments)
+    with pytest.raises(ValueError, match="sha256|HTML source changed"):
+        webapp_check.save_verifier(tmp_path, candidate, accumulate=True,
+            expected_sha=revision["previous_sha256"], replace_sequence=1,
+            expected_page_sha=checked_hash)
+    assert saved.read_bytes() == raw
+
+
+@pytest.mark.parametrize("change_when", ["before_save", "while_staging"])
+def test_input_revision_source_race_preserves_suite_and_verifier(tmp_path, monkeypatch, change_when):
+    saved, raw, arguments = _seed_saved_input_revision(tmp_path)
+    candidate, revision = webapp_check.prepare_assertion_revision(tmp_path, arguments)
+    actual = webapp_check.check(tmp_path, candidate)
+    assert actual["passed"]
+    verifier = tmp_path / ".local-ai/verify.ps1"
+    original_verifier = verifier.read_bytes()
+    source = tmp_path / "index.html"
+    if change_when == "before_save":
+        source.write_text(PAGE + "\n<!-- changed after check -->")
+    else:
+        original_write = Path.write_bytes
+
+        def write_and_change(path, data):
+            result = original_write(path, data)
+            if path == saved.with_suffix(".tmp"):
+                source.write_text(PAGE + "\n<!-- changed during publication -->")
+            return result
+
+        monkeypatch.setattr(Path, "write_bytes", write_and_change)
+    with pytest.raises(ValueError, match="HTML source changed"):
+        webapp_check.save_verifier(tmp_path, candidate, accumulate=True,
+            expected_sha=revision["previous_sha256"], replace_sequence=1,
+            expected_page_sha=actual["page_sha256"])
+    assert saved.read_bytes() == raw
+    assert verifier.read_bytes() == original_verifier
+    assert not saved.with_suffix(".tmp").exists()
+
+
+def test_nonfillable_input_failure_keeps_earlier_case_outcomes(tmp_path):
+    import hashlib
+
+    source = PAGE.replace('<label for="bill">', '<label id="bill-label">')
+    (tmp_path / "index.html").write_text(source)
+    result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [
+        {"expect": {"answer": "120.00"}},
+        {"set": {"bill-label": "80"}, "expect": {"answer": "120.00"}},
+        {"set": {"bill": "80"}, "expect": {"answer": "96.00"}},
+    ]})
+    assert not result["passed"]
+    assert [case["passed"] for case in result["cases"]] == [True, False, True]
+    assert result["failed_case_count"] == 1
+    assert result["cases"][1]["failures"][0].startswith("Could not fill #bill-label:")
+    assert result["cases"][1]["inputs"] == {"set": {"bill-label": "80"}}
+    assert result["cases"][1]["target_inventory"]["targets"]
+    assert result["page_sha256"] == hashlib.sha256((tmp_path / "index.html").read_bytes()).hexdigest()
+    assert result["javascript_errors"] == []
 
 
 def test_case_revision_does_not_claim_success_if_verifier_ownership_changes(tmp_path):

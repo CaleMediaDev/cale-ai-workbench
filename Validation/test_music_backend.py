@@ -921,6 +921,28 @@ def test_audio_validation_decodes_song_and_rejects_silence_or_damage(tmp_path):
     assert not music_backend.audio_file_ok(audio)
 
 
+def test_stopping_paused_music_job_prevents_resume(tmp_path):
+    job_id = "c" * 32
+    record = {
+        "job_id": job_id, "status": "paused", "current": "Paused",
+        "server_task_id": "ace-123", "worker_pid": None,
+        "output_path": str(tmp_path / "song.mp3"),
+    }
+    with (patch.object(music_backend, "JOBS", tmp_path / "jobs"),
+          patch.object(music_backend, "_worker_running", return_value=False),
+          patch.object(music_backend, "_launch_job") as launch):
+        music_backend._write_job(job_id, record)
+        assert music_backend.pause_music_job(job_id) == record
+        stopped = music_backend.stop_music_job(job_id)
+        assert stopped["status"] == "stopped"
+        assert stopped["current"] == "Stopped by user"
+        assert stopped["server_task_id"] == "ace-123"
+        assert music_backend.music_job_status(job_id) == stopped
+        with pytest.raises(ValueError, match="Only a paused music job"):
+            music_backend.resume_music_job(job_id)
+        launch.assert_not_called()
+
+
 def test_paused_music_job_resumes_same_server_task(tmp_path):
     jobs = tmp_path / "jobs"
     jobs.mkdir()

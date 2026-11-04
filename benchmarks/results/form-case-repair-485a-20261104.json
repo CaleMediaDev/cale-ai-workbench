@@ -1,0 +1,136 @@
+{
+  "scenario": "isolated_form_case_repair",
+  "seconds": 61.88,
+  "model_calls": 5,
+  "tool_calls": 6,
+  "prompt_tokens": 28581,
+  "completion_tokens": 1510,
+  "tools_used": [
+    "check_webapp",
+    "check_webapp",
+    "read_file",
+    "read_file",
+    "list_files",
+    "list_files"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": "balanced",
+      "seconds": 13.97
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 16.61
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 7.19
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 7.77
+    },
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+        }
+      ],
+      "size_hint": null,
+      "seconds": 4.21
+    }
+  ],
+  "operations": [
+    {
+      "tool": "check_webapp",
+      "action": null,
+      "revise_inputs": false,
+      "passed": false,
+      "active_step_check_aligned": false,
+      "tool_error": false
+    },
+    {
+      "tool": "task_steps",
+      "action": "complete",
+      "revise_inputs": false,
+      "passed": false,
+      "active_step_check_aligned": false,
+      "tool_error": false
+    },
+    {
+      "tool": "check_webapp",
+      "action": null,
+      "revise_inputs": true,
+      "passed": true,
+      "active_step_check_aligned": true,
+      "tool_error": false
+    },
+    {
+      "tool": "check_webapp",
+      "action": null,
+      "revise_inputs": false,
+      "passed": true,
+      "active_step_check_aligned": false,
+      "tool_error": false
+    },
+    {
+      "tool": "task_steps",
+      "action": "complete",
+      "revise_inputs": false,
+      "passed": true,
+      "active_step_check_aligned": false,
+      "tool_error": false
+    },
+    {
+      "tool": "check_webapp",
+      "action": null,
+      "revise_inputs": false,
+      "passed": false,
+      "active_step_check_aligned": false,
+      "tool_error": true
+    }
+  ],
+  "router_call_attempts": 6,
+  "upstream_local_calls": 6,
+  "time_budget_exhausted": true,
+  "token_usage_incomplete": true,
+  "inference_error": "TimeoutError: timed out",
+  "checkpoint_status": "running",
+  "initial_failed_attempts": 1,
+  "source_sha256": "f8649d574835f01fed95871af128bb38f0adc614751b3ac3cd2189e493b23d61",
+  "steps": {
+    "total": 1,
+    "done": 1,
+    "remaining": 0
+  },
+  "grade": {
+    "source_unchanged": true,
+    "saved_case_submits_and_expects_36": true,
+    "sql_definition_aligned": true,
+    "sql_unit_completed": true,
+    "real_output_36": true,
+    "global_verifier_passed": true
+  },
+  "passed": false,
+  "limitation": "Seeded mistaken no-submit checker on an existing correct tiny app; not an app build."
+}

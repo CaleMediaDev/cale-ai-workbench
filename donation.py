@@ -33,6 +33,9 @@ IDLE_SECONDS = 120
 DAY_SECONDS = 86400
 SOURCES = ("local", "free_cloud", "chatgpt")
 FULL_BLAST_LANES = 6
+RESERVATION_SECONDS = 1800
+# Submitted drafts stay reserved until GitHub confirms review has finished.
+RESERVED_RUN = "(status='submitted' OR (status IN ('requested','received','no_change') AND CASE WHEN updated>0 THEN updated ELSE started END>?))"
 PROFILES = {
     "slow": {"idle": 300, "interval": 3600, "daily": 1, "open": 1, "size": "quick", "output": 2048},
     "medium": {"idle": 0, "interval": 0, "daily": None, "open": None, "size": "deep", "output": 6144},
@@ -84,7 +87,23 @@ def connection(root: Path):
     path = root / "LongTasks/donations.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=5)
-    conn.execute("PRAGMA journal_mode=WAL")
+    # Journal-mode changes can return BUSY immediately despite busy_timeout
+    # when several processes upgrade an old rollback-journal database at once.
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+                conn.execute("PRAGMA journal_mode=WAL")
+            break
+        except sqlite3.OperationalError as error:
+            if "locked" not in str(error).lower() or time.monotonic() >= deadline:
+                conn.close()
+                raise
+            time.sleep(.02)
+    # Six first-launch lanes can open an older ledger together. Read schema
+    # columns only after holding the migration lock, then release it before
+    # callers start their own transactional job claims.
+    conn.execute("BEGIN IMMEDIATE")
     conn.execute("""CREATE TABLE IF NOT EXISTS runs (
         id TEXT PRIMARY KEY, started REAL NOT NULL, status TEXT NOT NULL,
         tokens INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '',
@@ -95,6 +114,9 @@ def connection(root: Path):
             conn.execute(f"ALTER TABLE runs ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
     if "revision" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN revision TEXT NOT NULL DEFAULT ''")
+    for name in ("updated", "review_checked"):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {name} REAL NOT NULL DEFAULT 0")
     conn.execute("""CREATE TABLE IF NOT EXISTS receipts (
         run TEXT NOT NULL, event TEXT NOT NULL, tokens INTEGER NOT NULL,
         source TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(run,event))""")
@@ -106,6 +128,7 @@ def connection(root: Path):
     conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_scan (id INTEGER PRIMARY KEY, token TEXT, anchor TEXT)")
     conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_pending (number INTEGER PRIMARY KEY, author INTEGER NOT NULL, login TEXT NOT NULL, merged TEXT NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS cooldowns(resource TEXT PRIMARY KEY, until REAL NOT NULL)")
+    conn.commit()
     return conn
 
 
@@ -130,16 +153,16 @@ def claim_run(root: Path, job: str, resource="chatgpt", intensity="slow", revisi
         raise ValueError("Invalid donation resource or intensity")
     with closing(connection(root)) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
-        if revision and conn.execute("""SELECT 1 FROM runs WHERE job=? AND revision=?
-            AND status IN ('requested','received','submitted','no_change') AND started>?""",
-            (job, revision, time.time()-1800)).fetchone():
+        if conn.execute("SELECT 1 FROM runs WHERE job=? AND " + RESERVED_RUN,
+                        (job, time.time() - RESERVATION_SECONDS)).fetchone():
             return ""
         limit = PROFILES[intensity]["daily"]
         if limit is not None and conn.execute("SELECT COUNT(*) FROM runs WHERE started>?", (time.time() - DAY_SECONDS,)).fetchone()[0] >= limit:
             return ""
         run_id = uuid.uuid4().hex
-        conn.execute("INSERT INTO runs(id,started,status,job,resource,intensity,revision) VALUES(?,?,?,?,?,?,?)",
-                     (run_id, time.time(), "requested", job, resource, intensity, revision))
+        now = time.time()
+        conn.execute("INSERT INTO runs(id,started,status,job,resource,intensity,revision,updated) VALUES(?,?,?,?,?,?,?,?)",
+                     (run_id, now, "requested", job, resource, intensity, revision, now))
         return run_id
 
 
@@ -155,8 +178,8 @@ def record_result(root: Path, run_id: str, result: dict, event="main", source="c
         conn.execute("INSERT INTO receipts(run,event,tokens,source,model) VALUES(?,?,?,?,?) "
                      "ON CONFLICT(run,event) DO UPDATE SET tokens=excluded.tokens,source=excluded.source,model=excluded.model",
                      (run_id, event, tokens, source, model))
-        conn.execute("UPDATE runs SET tokens=(SELECT SUM(tokens) FROM receipts WHERE run=?),model=?,status='received' WHERE id=?",
-                     (run_id, model, run_id))
+        conn.execute("UPDATE runs SET tokens=(SELECT SUM(tokens) FROM receipts WHERE run=?),model=?,status='received',updated=? WHERE id=?",
+                     (run_id, model, time.time(), run_id))
 
 
 def source_totals(root: Path = ROOT) -> dict:
@@ -364,7 +387,45 @@ def complete_donation(payload, resource, intensity, cancel, on_usage):
 def finish(root: Path, run_id: str, status: str, url: str = "") -> None:
     """Update a run without altering its recorded usage."""
     with closing(connection(root)) as conn, conn:
-        conn.execute("UPDATE runs SET status=?,url=? WHERE id=?", (status, url, run_id))
+        conn.execute("UPDATE runs SET status=?,url=?,updated=? WHERE id=?", (status, url, time.time(), run_id))
+
+
+def refresh_pending_reviews(root: Path, fetch=None, check_cancel=lambda: None) -> None:
+    """Release reviewed drafts from authoritative PR facts, never search lag.
+
+    All lanes share one three-PR batch per 30 seconds. Failed requests preserve
+    reservations, and oldest-first checks eventually revisit every draft.
+    """
+    now = time.time()
+    with closing(connection(root)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        until = conn.execute("SELECT until FROM cooldowns WHERE resource='review_sync'").fetchone()
+        if until and until[0] > now:
+            return
+        rows = conn.execute("SELECT id,url,job FROM runs WHERE status='submitted' ORDER BY review_checked,started LIMIT 3").fetchall()
+        if not rows:
+            return
+        conn.execute("INSERT INTO cooldowns VALUES('review_sync',?) ON CONFLICT(resource) DO UPDATE SET until=excluded.until", (now + 30,))
+        conn.executemany("UPDATE runs SET review_checked=? WHERE id=?", [(now, row[0]) for row in rows])
+    fetch = gh_api if fetch is None else fetch
+    for run_id, url, job in rows:
+        check_cancel()
+        match = re.fullmatch(r"https://github\.com/" + re.escape(UPSTREAM) + r"/pull/([1-9][0-9]*)", url, re.I)
+        if not match:
+            continue
+        number = int(match.group(1))
+        try:
+            pr = fetch(f"repos/{UPSTREAM}/pulls/{number}")
+            if (not isinstance(pr, dict) or pr.get("number") != number or pr.get("state") != "closed"
+                    or pr.get("base", {}).get("repo", {}).get("full_name", "").casefold() != UPSTREAM.casefold()
+                    or pr.get("head", {}).get("ref") != "cale-donation-" + run_id[:16]
+                    or f"<!-- cale-donation:{job} -->" not in str(pr.get("body") or "")):
+                continue
+        except (OSError, ValueError, TypeError, AttributeError, RuntimeError):
+            continue
+        with closing(connection(root)) as conn, conn:
+            conn.execute("UPDATE runs SET status='reviewed',updated=? WHERE id=? AND status='submitted' AND url=?",
+                         (time.time(), run_id, url))
 
 
 def gh_api(endpoint: str, data: dict | None = None):
@@ -670,6 +731,7 @@ class Service:
                 return
             resource = available[(available.index(previous[0]) + 1) % len(available)] if previous and previous[0] in available else available[0]
             check_cancel()
+            refresh_pending_reviews(self.root, check_cancel=check_cancel)
             query = urlencode({"q": f'repo:{UPSTREAM} is:pr is:open author:{login} "[Donation]" in:title'})
             opened = gh_api("search/issues?" + query + "&per_page=100")
             if consent["intensity"] in {"medium", "full_blast"}:
@@ -708,8 +770,8 @@ class Service:
             pending_jobs = {match for item in opened.get("items", []) for match in
                             re.findall(r"<!-- cale-donation:([a-z0-9-]{1,60}) -->", str(item.get("body") or ""))}
             with closing(connection(self.root)) as conn:
-                pending_jobs.update(row[0] for row in conn.execute("""SELECT job FROM runs WHERE revision=?
-                    AND status IN ('requested','received','submitted','no_change') AND started>?""", (revision, time.time()-1800)))
+                pending_jobs.update(row[0] for row in conn.execute("SELECT job FROM runs WHERE " + RESERVED_RUN,
+                    (time.time() - RESERVATION_SECONDS,)))
             # Another lane may reserve a job after our pending snapshot. Try
             # the next area in this pass instead of idling and downloading the
             # same public source again on the next scheduler tick.

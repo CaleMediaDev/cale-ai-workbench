@@ -23,6 +23,14 @@ if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
     "README.md", "ARCHITECTURE.md",
+    "benchmarks/form_case_repair.py",
+    "benchmarks/results/form-case-repair-485a-20261104.json",
+    "benchmarks/results/form-case-repair-485b-20261104.json",
+    "benchmarks/results/offline-expense-resume-484-20261104.json",
+    "benchmarks/results/offline-expense-resume-485a-20261104.json",
+    "benchmarks/results/offline-expense-resume-485b-20261104.json",
+    "benchmarks/results/offline-expense-app-485-20261104.json",
+    "benchmarks/results/pr-backlog-20261104.json",
     "benchmarks/results/local-radio-20261103.json",
     "benchmarks/radio_crossfade.py",
     "benchmarks/results/radio-crossfade-20261103.json",

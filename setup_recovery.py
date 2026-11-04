@@ -78,7 +78,13 @@ def _installer_running(progress: dict) -> bool:
             except (OSError, TypeError, ValueError, psutil.Error):
                 continue
     except (OSError, TypeError, ValueError, psutil.Error):
-        return False
+        pass
+    if installer_pid:
+        # A replacement may still be initializing and have not published its
+        # PID yet. Also check for the installed script targeting this install.
+        legacy_progress = dict(progress)
+        legacy_progress.pop("pid", None)
+        return _installer_running(legacy_progress)
     return False
 
 

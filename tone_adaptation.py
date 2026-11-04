@@ -17,11 +17,12 @@ STYLE_GUIDE = (
 
 def social_reply(utterance: str) -> str:
     """Make one short on-device reply to a visitor who just spoke to Cale."""
-    from cloud_ai import FAST_MODEL, post
-
     words = str(utterance).strip()
     if not words:
         return "I'm listening. What's up?"
+
+    from cloud_ai import FAST_MODEL, post
+
     messages = [
         {"role": "system", "content": (
             "You are Cale, a male local desktop assistant talking to someone in the room. "

@@ -621,18 +621,22 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                             else:
                                 control.fill(value, timeout=5_000)
                         except PlaywrightError as exc:
-                            if (control.get_attribute("type") == "number" and
-                                    "Cannot type text into input[type=number]" in str(exc)):
-                                # A real browser rejects letters in a number
-                                # field. Test the resulting empty value rather
-                                # than encouraging the agent to change the
-                                # required input type just to satisfy a test.
-                                control.fill("", timeout=5_000)
-                                normalized_inputs.append(
-                                    f"#{element_id}: {value!r} cannot be typed into a number input; tested empty instead"
-                                )
-                            else:
-                                raise
+                            try:
+                                if (control.get_attribute("type") == "number" and
+                                        "Cannot type text into input[type=number]" in str(exc)):
+                                    # A real browser rejects letters in a number
+                                    # field. Preserve its type and test empty input.
+                                    control.fill("", timeout=5_000)
+                                    normalized_inputs.append(
+                                        f"#{element_id}: {value!r} cannot be typed into a number input; tested empty instead"
+                                    )
+                                    continue
+                            except PlaywrightError as fallback_error:
+                                exc = fallback_error
+                            # An invalid saved target is a failed case, not a
+                            # reason to discard earlier observed case outcomes.
+                            target_failed = True
+                            failures.append(f"Could not fill #{element_id}: {str(exc)[:200]}")
                 # Replay actual user input: reload, fill, click, keys, wait, assertions.
                 for click_index, element_id in enumerate(case.get("click", [])):
                     if isinstance(element_id, dict):
@@ -791,7 +795,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
             "normalized_inputs": normalized_inputs}
 
 
-def saved_suite(folder: Path, spec: dict, previous: dict | None = None, *, _replace_assertions: bool = False) -> dict:
+def saved_suite(folder: Path, spec: dict, previous: dict | None = None, *,
+                _replace_assertions: bool = False, _replace_sequence: int | None = None) -> dict:
     """Retain independent browser sequences, not concatenated stateful cases."""
     import task_context
 
@@ -816,10 +821,26 @@ def saved_suite(folder: Path, spec: dict, previous: dict | None = None, *, _repl
              for case in normalized.get("cases", [])]], sort_keys=True)
     incoming = canonical(spec)
     checks = [canonical(check) for check in checks]
+    if _replace_sequence is not None:
+        if type(_replace_sequence) is not int or not 1 <= _replace_sequence <= len(checks):
+            raise ValueError("Use the verified saved sequence index for an input revision")
+        selected = checks[_replace_sequence - 1]
+        old_settings = {key: value for key, value in selected.items() if key != "cases"}
+        new_settings = {key: value for key, value in incoming.items() if key != "cases"}
+        old_settings.setdefault("viewport_width", 375)
+        new_settings.setdefault("viewport_width", 375)
+        if old_settings != new_settings or len(selected["cases"]) != len(incoming["cases"]):
+            raise ValueError("An input revision must preserve its saved page, viewport, settings and case count")
+        if sum(json.dumps(old, sort_keys=True) != json.dumps(new, sort_keys=True)
+               for old, new in zip(selected["cases"], incoming["cases"], strict=True)) > 1:
+            raise ValueError("An input revision may change only one selected saved case")
+        if any(index != _replace_sequence - 1 and batch_key(check) == batch_key(incoming)
+               for index, check in enumerate(checks)):
+            raise ValueError("The revised inputs collide with another saved browser sequence")
     old = next((check for check in checks if batch_key(check) == batch_key(incoming)), None)
-    if _replace_assertions and old is None:
+    if _replace_assertions and _replace_sequence is None and old is None:
         raise ValueError("An assertion revision must preserve its saved input sequence and page")
-    if old and not _replace_assertions:
+    if old and not _replace_assertions and _replace_sequence is None:
         merged = {**copy.deepcopy(old), **copy.deepcopy(incoming)}
         merged["cases"] = []
         for previous_case, new_case in zip(old["cases"], incoming["cases"], strict=True):
@@ -847,7 +868,10 @@ def saved_suite(folder: Path, spec: dict, previous: dict | None = None, *, _repl
                     case.pop(field, None)
             merged["cases"].append(case)
         incoming = merged
-    checks = [check for check in checks if batch_key(check) != batch_key(incoming)] + [incoming]
+    if _replace_sequence is not None:
+        checks[_replace_sequence - 1] = incoming
+    else:
+        checks = [check for check in checks if batch_key(check) != batch_key(incoming)] + [incoming]
     if len({batch_key(check) for check in checks}) != len(checks):
         raise ValueError("Saved browser sequences must be unique")
     if len(checks) > MAX_SAVED_SEQUENCES or sum(len(check["cases"]) for check in checks) > MAX_SAVED_CASES:
@@ -947,9 +971,12 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
 
 
 def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dict]:
-    """Select one saved case by checksum; callers may change assertions only."""
+    """Revise one checksum-bound case; action changes require explicit opt-in."""
     import task_context
 
+    revise_inputs = arguments.get("revise_inputs", False)
+    if type(revise_inputs) is not bool:
+        raise ValueError("revise_inputs must be an explicit boolean")
     path = (folder / ".local-ai/webapp-check.json").resolve()
     if not path.is_relative_to(folder.resolve()) or not path.is_file() or path.stat().st_size > 64000:
         raise ValueError("A bounded saved browser suite is required for an assertion revision")
@@ -973,16 +1000,22 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
     validate_spec(folder, batch)
     if _project_file(folder, arguments.get("path")) != _project_file(folder, batch["path"]):
         raise ValueError("The revision path must match the selected saved sequence")
+    if (revise_inputs and "viewport_width" in arguments
+            and arguments["viewport_width"] != batch.get("viewport_width", 375)):
+        raise ValueError("The revision viewport must match the selected saved sequence")
     if type(number) is not int or not 1 <= number <= len(batch["cases"]):
         raise ValueError("Use the saved case index from the failed checker result")
     supplied = normalize_spec(arguments).get("cases")
     if (not isinstance(supplied, list) or len(supplied) != 1 or not isinstance(supplied[0], dict)
             or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "state", "reload", "set", "click", "keys", "wait_ms"}):
-        raise ValueError("An assertion revision needs one case correcting assertions; saved input actions cannot change")
+        raise ValueError("A saved-case repair needs exactly one corrected case, not the full case list. "
+                         "Input actions stay fixed unless you explicitly use revise_inputs:true.")
     old = batch["cases"][number - 1]
-    if any(name in supplied[0] and (name not in old or supplied[0][name] != old[name])
+    if not revise_inputs and any(name in supplied[0] and (name not in old or supplied[0][name] != old[name])
            for name in ("reload", "set", "click", "keys", "wait_ms")):
-        raise ValueError("Assertion revisions cannot change input actions; repeated actions must exactly match the saved case")
+        raise ValueError("Assertion revisions cannot change input actions; repeated actions must exactly match the saved case. "
+                         "If those actions are mistaken, explicitly use revise_inputs:true with one corrected case, "
+                         "preserving the original requirements and unrelated cases.")
     correction = copy.deepcopy(supplied[0])
     repaired = {**copy.deepcopy(old), **correction}
     for field in ("expect", "state"):
@@ -1006,8 +1039,11 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
         repaired.pop("expect")
     batch["cases"][number - 1] = repaired
     validate_spec(folder, batch)
-    return batch, {"saved_sequence": sequence, "saved_case": number,
-                   "previous_sha256": digest, "request_hash": saved["request_hash"]}
+    metadata = {"saved_sequence": sequence, "saved_case": number,
+                "previous_sha256": digest, "request_hash": saved["request_hash"]}
+    if revise_inputs:
+        metadata["replace_sequence"] = sequence
+    return batch, metadata
 
 
 def compact_target_inventory(case: dict, maximum: int = 4) -> None:
@@ -1221,12 +1257,25 @@ def resolve_saved_report(folder: Path, report: dict) -> dict:
 
 
 def save_verifier(folder: Path, spec: dict, *, accumulate: bool = False,
-                  expected_sha: str | None = None) -> bool:
-    """Seed a read-only project verifier, preserving a custom existing check."""
+                  expected_sha: str | None = None, replace_sequence: int | None = None,
+                  expected_page_sha: str | None = None) -> bool:
+    """Save retained checks without replacing a custom project verifier.
+
+    Input revisions require the caller's checked HTML hash. The caller must
+    establish the selected case's actual result; other retained cases may still
+    fail and are preserved for subsequent verification, never waived here.
+    """
     if expected_sha is not None and not accumulate:
         raise ValueError("Assertion revisions require an accumulated browser suite")
+    if replace_sequence is not None and (expected_sha is None or not accumulate):
+        raise ValueError("Input revisions require a checksum-bound accumulated browser suite")
+    if replace_sequence is not None and (
+            not isinstance(expected_page_sha, str) or not re.fullmatch(r"[a-f0-9]{64}", expected_page_sha)):
+        raise ValueError("Input revisions require the checked HTML source sha256")
     spec = normalize_spec(spec)
-    validate_spec(folder, spec)
+    page = validate_spec(folder, spec)
+    if replace_sequence is not None and hashlib.sha256(page.read_bytes()).hexdigest() != expected_page_sha:
+        raise ValueError("HTML source changed after the input revision was checked; rerun the candidate")
     folder = folder.resolve()
     notes = (folder / ".local-ai").resolve()
     if not notes.is_relative_to(folder):
@@ -1257,12 +1306,16 @@ def save_verifier(folder: Path, spec: dict, *, accumulate: bool = False,
         # A checksum-bound explicit revision already retained unrelated cases
         # in prepare_assertion_revision. Ordinary accumulation unions targets;
         # doing that here would resurrect the very mistaken IDs being repaired.
-        spec = saved_suite(folder, spec, previous, _replace_assertions=expected_sha is not None)
+        spec = saved_suite(folder, spec, previous, _replace_assertions=expected_sha is not None,
+                           _replace_sequence=replace_sequence)
     raw = json.dumps(spec, indent=2, allow_nan=False).encode("utf-8")
     if len(raw) > 64000:
         raise ValueError("Saved browser checks must be under 64 KB")
     staged = spec_path.with_suffix(".tmp")
     staged.write_bytes(raw)
+    if replace_sequence is not None and hashlib.sha256(page.read_bytes()).hexdigest() != expected_page_sha:
+        staged.unlink(missing_ok=True)
+        raise ValueError("HTML source changed before the input revision was saved; rerun the candidate")
     if expected_sha is not None and (hashlib.sha256(spec_path.read_bytes()).hexdigest() != expected_sha
             or previous["request_hash"] != task_context.request_identity(folder)):
         staged.unlink(missing_ok=True)
