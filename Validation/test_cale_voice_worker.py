@@ -222,6 +222,7 @@ def test_probe_renders_through_real_clone_generation_path_without_playback(tmp_p
     model.generate_voice_clone.return_value = ([[0.25] * 1600], 16000)
     events = []
     def fingerprint(snapshot):
+        print("Fingerprint diagnostics")
         events.append("fingerprint")
         return "fingerprint-before-loading"
     def loading():
@@ -236,7 +237,8 @@ def test_probe_renders_through_real_clone_generation_path_without_playback(tmp_p
     with (patch.object(cale_voice_worker, "ROOT", tmp_path),
           patch.object(cale_voice_worker, "load_model", side_effect=loading),
           patch.object(cale_voice_worker, "_MODEL_PATH", str(tmp_path / "model")),
-          patch.object(cale_voice, "_probe_runtime") as runtime,
+          patch.object(cale_voice, "_probe_runtime",
+                       side_effect=lambda root: print("Runtime check diagnostics")) as runtime,
           patch.object(cale_voice, "_voice_fingerprint", side_effect=fingerprint),
           patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=snapshot),
                                    "soundfile": SimpleNamespace(write=write)}),
@@ -251,5 +253,7 @@ def test_probe_renders_through_real_clone_generation_path_without_playback(tmp_p
     result = json.loads(stdout.getvalue())
     assert result["engine"] == "Cale's local voice" and result["fingerprint"] == "fingerprint-before-loading"
     assert "Audio encoder diagnostics" in stderr.getvalue()
+    assert "Runtime check diagnostics" in stderr.getvalue()
+    assert "Fingerprint diagnostics" in stderr.getvalue()
     with wave.open(str(output), "rb") as audio:
         assert audio.getnframes() == 1600

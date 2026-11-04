@@ -70,12 +70,12 @@ def main():
     # attest audio produced from an older snapshot or reference.
     probe = len(sys.argv) in (3, 4) and sys.argv[1] == "--probe"
     if probe:
-        from huggingface_hub import snapshot_download
-        import cale_voice
-        cale_voice._probe_runtime(ROOT)
         with contextlib.redirect_stdout(sys.stderr):
+            from huggingface_hub import snapshot_download
+            import cale_voice
+            cale_voice._probe_runtime(ROOT)
             local_snapshot = snapshot_download(MODEL_ID, local_files_only=True)
-        before = cale_voice._voice_fingerprint(str(local_snapshot))
+            before = cale_voice._voice_fingerprint(str(local_snapshot))
     model = load_model()
     # Extract the owner's voice once per worker. Re-encoding the same reference
     # for every short chat line adds avoidable seconds to spoken replies.
