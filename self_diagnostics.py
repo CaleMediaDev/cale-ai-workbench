@@ -140,16 +140,16 @@ def _stop_check(process: subprocess.Popen) -> None:
         for child in children:
             try:
                 child.terminate()
-            except psutil.NoSuchProcess:
-                # A child may exit after enumeration; still stop its siblings.
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # An exited or inaccessible child must not prevent sibling cleanup.
                 pass
         process.terminate()
         _, alive = psutil.wait_procs(children, timeout=5)
         for child in alive:
             try:
                 child.kill()
-            except psutil.NoSuchProcess:
-                # A child may exit after wait_procs; still kill its siblings.
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # An exited or inaccessible child must not prevent sibling cleanup.
                 pass
         process.wait(timeout=5)
     except (OSError, psutil.Error, subprocess.TimeoutExpired):

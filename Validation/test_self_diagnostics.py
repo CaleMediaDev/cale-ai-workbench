@@ -245,6 +245,30 @@ class SelfDiagnosticsTests(unittest.TestCase):
         process.wait.assert_called_once_with(timeout=5)
         process.kill.assert_not_called()
 
+    def test_stop_check_continues_when_a_child_denies_access(self):
+        import psutil
+
+        process = Mock(pid=123)
+        process.poll.return_value = None
+        inaccessible = Mock()
+        inaccessible.terminate.side_effect = psutil.AccessDenied(124)
+        inaccessible.kill.side_effect = psutil.AccessDenied(124)
+        sibling = Mock()
+        children = [inaccessible, sibling]
+        with (patch("psutil.Process") as parent,
+              patch("psutil.wait_procs", return_value=([], children)) as wait):
+            parent.return_value.children.return_value = children
+            diagnostics._stop_check(process)
+
+        inaccessible.terminate.assert_called_once_with()
+        sibling.terminate.assert_called_once_with()
+        process.terminate.assert_called_once_with()
+        wait.assert_called_once_with(children, timeout=5)
+        inaccessible.kill.assert_called_once_with()
+        sibling.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=5)
+        process.kill.assert_not_called()
+
     def test_deferred_check_only_preserves_current_release_failures(self):
         current = diagnostics.version(self.root)
         for previous_version, expected_failures in (("older", 0), (current, 2)):
