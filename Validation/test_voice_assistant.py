@@ -777,6 +777,31 @@ class VoiceTests(unittest.TestCase):
             ready.assert_not_called()
             playback.assert_called_once()
 
+    def test_unreadable_bundled_reference_falls_back_to_synthesis(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            assets = root / "assets"
+            assets.mkdir()
+            (assets / "cale-voice-reference.wav").write_bytes(b"original voice")
+            (assets / "cale-wake-ack.wav").write_bytes(b"wave" * 300)
+            fallback_result = {"path": "fallback.wav", "engine": "offline"}
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(Path, "read_bytes",
+                             side_effect=PermissionError("reference is unreadable")) as read,
+                patch.object(cale_voice, "ready", return_value=False),
+                patch.object(voice_assistant, "media_call",
+                             return_value=fallback_result) as synthesize,
+                patch.object(voice_assistant, "_play_file") as play,
+            ):
+                result = voice_assistant.say(voice_assistant.WAKE_ACK)
+            self.assertEqual(result, fallback_result)
+            read.assert_called_once()
+            synthesize.assert_called_once()
+            self.assertEqual(synthesize.call_args.args, ("speak",))
+            self.assertEqual(synthesize.call_args.kwargs["text"], voice_assistant.WAKE_ACK)
+            play.assert_called_once_with("fallback.wav", None)
+
     def test_corrupt_bundled_acknowledgement_falls_back_to_synthesis(self):
         import hashlib
 
