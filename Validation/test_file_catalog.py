@@ -51,6 +51,13 @@ class FileCatalogTests(unittest.TestCase):
             self.assertEqual(result["status"], "waiting_for_space")
             self.assertEqual(file_catalog.search(state, "kept")[0]["path"], str(kept))
 
+    def test_invalid_completion_timestamp_does_not_defer_or_abort_refresh(self):
+        for updated in (float("nan"), float("inf"), float("-inf"),
+                        "nan", "inf", "-inf", 10**400):
+            with self.subTest(updated=updated):
+                self.assertEqual(file_catalog.refresh_delay(
+                    {"status": "complete", "updated": updated}, now=1001), 0)
+
     def test_low_space_mid_scan_stops_before_pruning(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"

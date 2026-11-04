@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import math
 import os
 import re
 import shutil
@@ -134,7 +135,9 @@ def refresh_delay(snapshot: dict, refresh_seconds: int = 24 * 60 * 60,
         return 0.0
     try:
         completed_at = float(snapshot["updated"])
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return 0.0
+    if not math.isfinite(completed_at):
         return 0.0
     now = time.time() if now is None else now
     age = max(0.0, now - completed_at)
