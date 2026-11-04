@@ -203,14 +203,20 @@ def recover() -> bool:
             now = time.time()
             _write(record_path, {"attempts": attempts + 1, "started": now})
             log = STATE / "base-install-repair.log"
-            with log.open("ab") as output:
-                subprocess.Popen(
-                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                     "-File", str(script), "-Destination", str(ROOT),
-                     "-Profile", "auto", "-NoLaunch"],
-                    cwd=ROOT, stdin=subprocess.DEVNULL, stdout=output,
-                    stderr=subprocess.STDOUT, creationflags=HIDE,
-                )
+            try:
+                with log.open("ab") as output:
+                    subprocess.Popen(
+                        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                         "-File", str(script), "-Destination", str(ROOT),
+                         "-Profile", "auto", "-NoLaunch"],
+                        cwd=ROOT, stdin=subprocess.DEVNULL, stdout=output,
+                        stderr=subprocess.STDOUT, creationflags=HIDE,
+                    )
+            except OSError:
+                # No installer started. Preserve the retry budget, but retain
+                # backoff so an unavailable executable cannot cause a busy loop.
+                _write(record_path, {"attempts": attempts, "started": now})
+                return False
             return True
         finally:
             lock.seek(0)

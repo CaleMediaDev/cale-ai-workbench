@@ -143,6 +143,42 @@ def test_base_setup_repair_ignores_active_or_feature_setup(tmp_path, monkeypatch
         assert not setup_recovery.recover()
 
 
+def test_failed_launch_preserves_final_retry_and_backoff(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    # Exercise recovery independently of the host's Windows locking module.
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(
+        LK_NBLCK=1, LK_UNLCK=2, locking=lambda *args: None,
+    ))
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    (state / "install-progress.json").write_text(json.dumps({
+        "status": "error", "current": "Setup needs attention: download failed",
+        "updated": 1,
+    }), encoding="utf-8")
+    record = state / "base-install-repair.json"
+    record.write_text(json.dumps({"attempts": 2, "started": 1}), encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    clock = [10000]
+    monkeypatch.setattr(setup_recovery.time, "time", lambda: clock[0])
+    with patch.object(setup_recovery.subprocess, "Popen", side_effect=OSError("launch failed")) as launch:
+        assert not setup_recovery.recover()
+        assert json.loads(record.read_text()) == {"attempts": 2, "started": 10000}
+        assert not setup_recovery.recover()
+        assert launch.call_count == 1
+
+    clock[0] += setup_recovery.RETRY_DELAYS[2]
+    with patch.object(setup_recovery.subprocess, "Popen") as launch:
+        assert setup_recovery.recover()
+        launch.assert_called_once()
+    assert json.loads(record.read_text())["attempts"] == 3
+
+
 def test_success_clears_retry_count(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
