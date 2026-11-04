@@ -43,8 +43,10 @@ def _run(*arguments: str, timeout: int = 75) -> str:
 
 def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
     """Search one registry without downloading or installing a skill."""
+    if any(ord(char) < 32 for char in query):
+        raise ValueError("Use a short skill topic without control characters.")
     query = query.strip()
-    if not query or len(query) > 100 or any(ord(char) < 32 for char in query):
+    if not query or len(query) > 100:
         raise ValueError("Use a short skill topic without control characters.")
     if source not in SOURCES:
         raise ValueError("Choose skills-sh, official, or github.")
