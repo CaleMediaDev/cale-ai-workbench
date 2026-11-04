@@ -78,6 +78,8 @@ def analyze_music(source_path: str) -> dict:
     global_chroma = np.mean(chroma, axis=1)
     tempo, beat_frames = librosa.beat.beat_track(y=signal, sr=sample_rate, hop_length=512)
     bpm = float(np.asarray(tempo).reshape(-1)[0]) if len(beat_frames) >= 2 else None
+    if bpm is not None and (not np.isfinite(bpm) or bpm <= 0):
+        bpm = None
 
     segment_seconds = 4
     frames_per_segment = round(segment_seconds * sample_rate / 512)
