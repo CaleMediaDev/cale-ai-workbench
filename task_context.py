@@ -80,7 +80,9 @@ def _next_step(plan: str, progress: str) -> str:
     for line in plan.splitlines():
         match = re.match(r"\s*[-*]\s*\[\s\]\s*(.+)", line)
         if match:
-            return match.group(1).strip()[:500]
+            step = match.group(1).strip()
+            if step:
+                return step[:500]
     # Progress is often appended over weeks. The last explicit next action is
     # the current one, including notes written after a sentence on the line.
     for line in reversed(progress.splitlines()):

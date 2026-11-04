@@ -17,6 +17,19 @@ from task_eta import total_time
 
 
 class CheckpointFreshnessRegressionTests(unittest.TestCase):
+    def test_empty_plan_checkbox_does_not_hide_next_step(self):
+        with self.subTest(source="later plan item"):
+            self.assertEqual(
+                task_context._next_step(
+                    "- [ ]   \n- [ ] Verify the current milestone\n",
+                    "Next step: Review progress\n"),
+                "Verify the current milestone")
+        with self.subTest(source="progress fallback"):
+            self.assertEqual(
+                task_context._next_step(
+                    "- [ ]   \n", "Next step: Review progress\n"),
+                "Review progress")
+
     def test_equal_timestamp_priority_survives_plan_cache_refresh(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
