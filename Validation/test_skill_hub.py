@@ -205,6 +205,31 @@ class SkillHubTests(unittest.TestCase):
                 self.assertEqual(run.call_count, 2)
                 self.assertEqual(run.call_args.args, ("inspect", identifier))
 
+    def test_failed_install_requires_fresh_inspection_before_retry(self):
+        identifier = "skills-sh/example/workflows/accessibility"
+        for error in (
+            RuntimeError("Scan blocked"),
+            skill_hub.subprocess.TimeoutExpired("hermes", 120),
+        ):
+            with self.subTest(error=type(error).__name__):
+                now = skill_hub.time.monotonic()
+                skill_hub.SEEN[identifier] = now
+                skill_hub.INSPECTED[identifier] = now
+                with patch.object(skill_hub, "_run", side_effect=error) as run:
+                    with self.assertRaises(type(error)):
+                        skill_hub.install(identifier)
+                    self.assertNotIn(identifier, skill_hub.INSPECTED)
+                    with self.assertRaisesRegex(ValueError, "Search and inspect"):
+                        skill_hub.install(identifier)
+                    run.assert_called_once_with(
+                        "install", identifier, "--yes", timeout=120,
+                    )
+                with patch.object(
+                    skill_hub, "_run", side_effect=["Fresh preview", "Installed"]
+                ):
+                    skill_hub.inspect(identifier)
+                    self.assertEqual(skill_hub.install(identifier)["result"], "Installed")
+
     def test_rejects_unsearched_urls_and_blocked_scans(self):
         with self.assertRaises(ValueError):
             skill_hub.inspect("https://example.com/SKILL.md")

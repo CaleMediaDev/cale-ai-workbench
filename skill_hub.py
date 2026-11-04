@@ -100,7 +100,7 @@ def install(identifier: str) -> dict:
         or now - INSPECTED.get(identifier, -1e9) > MAX_AGE
     ):
         raise ValueError("Search and inspect this exact skill first.")
-    result = _run("install", identifier, "--yes", timeout=120)
     INSPECTED.pop(identifier, None)
+    result = _run("install", identifier, "--yes", timeout=120)
     return {"identifier": identifier, "result": result[-3000:].strip(),
             "scanner": "Hermes built-in scan; no force override"}
