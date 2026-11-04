@@ -116,6 +116,19 @@ class CameraPresenceTests(unittest.TestCase):
         for now in (1, 5, 10.5, 20, 30):
             self.assertEqual(tracker.observe([face], now), [])
 
+    def test_long_observation_gap_does_not_create_a_new_arrival(self):
+        tracker = VisitorTracker(cooldown=10)
+        face = [1.0, 0.0]
+        self.assertEqual(tracker.observe([face], 0), [])
+        self.assertEqual(tracker.observe([face], 0.5), [face])
+
+        # No observation reported a departure. A slow or stalled camera
+        # must not turn this visitor into a new arrival after track expiry.
+        self.assertEqual(tracker.observe([face], 31), [])
+        self.assertEqual(tracker.observe([face], 31.5), [])
+        self.assertEqual(len(tracker.tracks), 1)
+        self.assertEqual(tracker.tracks[0]["last_greeted"], 0.5)
+
     def test_return_after_departure_and_cooldown_is_greeted(self):
         tracker = VisitorTracker(cooldown=10)
         face = [1.0, 0.0]

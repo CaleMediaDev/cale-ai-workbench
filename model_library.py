@@ -317,7 +317,11 @@ def probe_tool_use(alias, reasoning_effort=None):
         timeout=240,
     )
     for call in result.get("message", {}).get("tool_calls", []) or []:
+        if not isinstance(call, dict):
+            continue
         function = call.get("function", {})
+        if not isinstance(function, dict):
+            continue
         args = function.get("arguments", {})
         if (
             function.get("name") == "multiply"

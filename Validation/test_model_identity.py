@@ -155,6 +155,18 @@ class ModelIdentityTests(unittest.TestCase):
                         configured_permissive_alias(root), "qwen3-coder-permissive"
                     )
 
+    def test_utf8_bom_preserves_legacy_model_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "data/config.yaml").write_bytes(
+                b"\xef\xbb\xbfmodel:\n  default: qwen3-coder-local\n"
+            )
+            self.assertEqual(configured_main_alias(root), "qwen3-coder-local")
+            self.assertEqual(
+                configured_permissive_alias(root), "qwen3-coder-permissive"
+            )
+
     def test_invalid_utf8_config_falls_back(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

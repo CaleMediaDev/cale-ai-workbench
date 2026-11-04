@@ -120,7 +120,9 @@ def add_astro_ai_ui(project_path: str) -> dict:
     for original, target in files:
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(original, target)
+            with original.open("rb") as input_stream, target.open("xb") as output:
+                shutil.copyfileobj(input_stream, output)
+            shutil.copystat(original, target)
             added.append(str(target))
     return {
         "kit": "michaelvereb/ai-ui 1.2.0 (MIT)",

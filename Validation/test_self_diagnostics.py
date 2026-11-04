@@ -222,6 +222,23 @@ class SelfDiagnosticsTests(unittest.TestCase):
         process.wait.assert_called_once_with(timeout=5)
         process.kill.assert_not_called()
 
+    def test_stop_check_cleans_children_when_parent_exits_before_terminate(self):
+        process = Mock(pid=123)
+        process.poll.side_effect = [None, 0]
+        process.terminate.side_effect = ProcessLookupError("parent exited")
+        child = Mock()
+        with (patch("psutil.Process") as parent,
+              patch("psutil.wait_procs", return_value=([], [child])) as wait):
+            parent.return_value.children.return_value = [child]
+            diagnostics._stop_check(process)
+
+        child.terminate.assert_called_once_with()
+        process.terminate.assert_called_once_with()
+        wait.assert_called_once_with([child], timeout=5)
+        child.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=5)
+        process.kill.assert_not_called()
+
     def test_stop_check_kills_siblings_when_a_child_exits_before_kill(self):
         import psutil
 

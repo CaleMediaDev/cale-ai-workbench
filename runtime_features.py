@@ -80,6 +80,14 @@ def _installer_running(pid=None) -> bool:
                 candidates = []
                 arguments = iter(command[1:])
                 for argument in arguments:
+                    # Short interpreter flags can be bundled (for example,
+                    # -uW ignore). The first value-taking option consumes
+                    # the remainder of the bundle, or the next argument.
+                    if argument.startswith("-") and not argument.startswith("--"):
+                        for index, option in enumerate(argument[1:], 1):
+                            if option in "cmWX":
+                                argument = "-" + argument[index:]
+                                break
                     if argument == "-" or argument.startswith(("-c", "-m")):
                         break
                     if argument in ("-W", "-X", "--check-hash-based-pycs"):

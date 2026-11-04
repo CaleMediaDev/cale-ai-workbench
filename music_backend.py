@@ -540,6 +540,8 @@ def project_jobs(task_id: str, folder: str | Path) -> list[dict]:
             owned_path = bool(output_path) and Path(str(output_path)).resolve().is_relative_to(project)
             if info.get("task_id") == task_id or owned_path:
                 created = float(info.get("created") or 0)
+                if not math.isfinite(created):
+                    continue  # Nonfinite timestamps cannot be ordered chronologically.
                 found.append((created, info))
         except (OSError, ValueError, TypeError, OverflowError):
             continue

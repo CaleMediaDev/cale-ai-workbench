@@ -434,7 +434,11 @@ def choose_task(text: str, tasks: list[dict], *, allow_single=True) -> dict | No
         return tasks[0]
     value = text.strip().casefold()
     if value.isdecimal():
-        index = int(value) - 1
+        try:
+            index = int(value) - 1
+        except ValueError:
+            # Python limits integer-string conversion for oversized replies.
+            return None
         return tasks[index] if 0 <= index < len(tasks) else None
     matches = [task for task in tasks
                if task["title"].strip() and task["title"].casefold() in value]

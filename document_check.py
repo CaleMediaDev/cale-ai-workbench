@@ -89,6 +89,7 @@ def validate_spec(folder: Path, spec: dict) -> tuple[Path, Path]:
     for calculation in calculations:
         if (not isinstance(calculation, dict)
                 or set(calculation) != {"operation", "source_texts", "report_text"}
+                or not isinstance(calculation["operation"], str)
                 or calculation["operation"] not in {"add", "subtract"}
                 or not isinstance(calculation["source_texts"], list)
                 or len(calculation["source_texts"]) != 2):

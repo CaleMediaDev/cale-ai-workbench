@@ -420,6 +420,28 @@ class VoiceTests(unittest.TestCase):
             finally:
                 timer.join()
 
+    def test_cancellable_media_worker_stops_after_communication_failure(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Media/python/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            failure = OSError("media pipe failed")
+            process = Mock()
+            process.communicate.side_effect = failure
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant.subprocess, "Popen", return_value=process),
+                patch.object(voice_assistant, "_stop_media_process") as stop,
+            ):
+                with self.assertRaises(OSError) as raised:
+                    voice_assistant.media_call(
+                        "record_audio", cancel=threading.Event(), seconds=8
+                    )
+                self.assertIs(raised.exception, failure)
+                process.communicate.assert_called_once()
+                stop.assert_called_once_with(process)
+
     def test_fallback_playback_stops_for_microphone_turn(self):
         with TemporaryDirectory() as folder:
             path = Path(folder) / "speech.wav"

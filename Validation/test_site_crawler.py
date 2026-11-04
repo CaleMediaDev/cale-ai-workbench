@@ -52,6 +52,54 @@ def test_malformed_link_target_does_not_abort_crawl(tmp_path, monkeypatch, bad_l
     assert all(path.exists() for path in indexed)
 
 
+@pytest.mark.parametrize("malformed_links", [
+    {"internal": None}, {"internal": 123}, {"internal": "broken"},
+    ["broken"], "broken",
+])
+def test_malformed_link_collection_preserves_queued_pages(tmp_path, monkeypatch, malformed_links):
+    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+    indexed = []
+    monkeypatch.setattr(project_memory, "index_file", lambda project, path: indexed.append(path))
+    start = "https://example.com"
+    malformed = start + "/malformed"
+    sibling = start + "/sibling"
+    seen = []
+
+    class FakeCrawler:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def arun(self, url, config):
+            seen.append(url)
+            if url == start:
+                links = {"internal": [{"href": malformed}, {"href": sibling}]}
+            elif url == malformed:
+                links = malformed_links
+            else:
+                links = {}
+            return types.SimpleNamespace(
+                success=True, markdown="Readable content", error_message="", links=links,
+            )
+
+    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
+        AsyncWebCrawler=FakeCrawler,
+        BrowserConfig=lambda **kwargs: kwargs,
+        CrawlerRunConfig=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    ))
+    result = asyncio.run(site_crawler.crawl_site(tmp_path, start, max_pages=3))
+    assert seen == [start, malformed, sibling]
+    assert result["errors"] == []
+    assert [page["url"] for page in result["pages"]] == seen
+    assert indexed == [site_crawler.page_path(tmp_path, url) for url in seen]
+    assert all(path.exists() for path in indexed)
+
+
 def test_url_scope_and_stable_path(tmp_path, monkeypatch):
     monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
     url = site_crawler.normalized_url("https://example.com/a#part", "example.com")
