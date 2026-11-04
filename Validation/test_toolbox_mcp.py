@@ -576,3 +576,63 @@ def test_failed_specialist_backend_keeps_other_tools_available():
         assert toolbox_mcp.toolbox_status()["backends"]["devtools"]["available"] is False
 
     asyncio.run(check())
+
+
+@pytest.mark.parametrize("mode,detail", [
+    ("cycle", "repeated cursor"), ("pages", "page limit"),
+    ("tools", "tool limit"), ("timeout", "TimeoutError"),
+])
+def test_review_discovery_budget_failure_closes_backend_and_preserves_next(monkeypatch, mode, detail):
+    cleanup = []
+    calls = []
+    monkeypatch.setattr(toolbox_mcp, "DISCOVERY_MAX_PAGES", 3, raising=False)
+    monkeypatch.setattr(toolbox_mcp, "DISCOVERY_MAX_TOOLS", 2, raising=False)
+    monkeypatch.setattr(toolbox_mcp, "DISCOVERY_SECONDS", .01, raising=False)
+    @asynccontextmanager
+    async def fake_stdio(params):
+        group = "rea" if "rea.mjs" in " ".join(params.args) else "devtools"
+        try:
+            yield group, object()
+        finally:
+            cleanup.append((group, "stdio"))
+    class FakeSession:
+        def __init__(self, group):
+            self.group = group
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_args):
+            cleanup.append((self.group, "session"))
+        async def initialize(self):
+            pass
+        async def list_tools(self, cursor=None):
+            calls.append((self.group, cursor))
+            if self.group == "devtools":
+                assert ("rea", "stdio") in cleanup and ("rea", "session") in cleanup
+                tool = SimpleNamespace(name="healthy", model_dump=lambda **_kwargs: {"name": "healthy"})
+                return SimpleNamespace(tools=[tool], next_cursor=None)
+            if mode == "timeout":
+                try:
+                    await asyncio.Future()
+                finally:
+                    cleanup.append((self.group, "cancelled-list"))
+            count = sum(group == "rea" for group, _cursor in calls)
+            if count > 8:
+                raise RuntimeError("External test guard stopped unbounded discovery")
+            tools = [object()] * 3 if mode == "tools" else []
+            next_cursor = "same" if mode == "cycle" else str(count)
+            return SimpleNamespace(tools=tools, next_cursor=next_cursor)
+    async def check():
+        with (patch.object(toolbox_mcp, "stdio_client", fake_stdio),
+              patch.object(toolbox_mcp, "ClientSession", lambda group, *_args, **_kw: FakeSession(group)),
+              patch.dict(toolbox_mcp.SESSIONS, {}, clear=True),
+              patch.dict(toolbox_mcp.CATALOG, {}, clear=True),
+              patch.dict(toolbox_mcp.ERRORS, {}, clear=True)):
+            async with toolbox_mcp.lifespan(None):
+                assert detail in toolbox_mcp.ERRORS["rea"]
+                assert set(toolbox_mcp.CATALOG) == {"devtools.healthy"}
+                assert "rea" not in toolbox_mcp.SESSIONS
+                assert len([group for group, _cursor in calls if group == "rea"]) <= 3
+                if mode == "timeout":
+                    assert ("rea", "cancelled-list") in cleanup
+            assert ("devtools", "session") in cleanup and ("devtools", "stdio") in cleanup
+    asyncio.run(asyncio.wait_for(check(), timeout=.25))
