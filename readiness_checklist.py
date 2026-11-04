@@ -196,6 +196,9 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
     result = {"version": (root / ".cale-ai-install").read_text(encoding="utf-8").strip()
               if (root / ".cale-ai-install").is_file() else "", "checked_at": time.time()}
     previous = _json(root / "LongTasks/readiness-probes.json")
+    for section in ("local_ai", "voice", "vision"):
+        if not isinstance(previous.get(section, {}), dict):
+            previous.pop(section)
     if previous.get("version") == result["version"] and previous.get("local_ai", {}).get("ok"):
         result["local_ai"] = previous["local_ai"]
     elif test_local and not _heavy_gpu_active(root):

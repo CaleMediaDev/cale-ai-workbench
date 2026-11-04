@@ -284,6 +284,24 @@ def test_malformed_ollama_tags_do_not_abort_readiness_checks(tmp_path, payload):
     assert saved == result
 
 
+@pytest.mark.parametrize("section", ["local_ai", "voice", "vision"])
+@pytest.mark.parametrize("value", [None, [], "unexpected", 1])
+def test_optional_checks_recover_from_malformed_cached_sections(tmp_path, section, value):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    cache = state / "readiness-probes.json"
+    cache.write_text(json.dumps({"version": "", section: value}), encoding="utf-8")
+
+    with patch.object(readiness_checklist, "_media_probe", return_value={"ok": False}):
+        result = readiness_checklist.run_optional_checks(tmp_path)
+
+    assert result["voice"]["ok"] is False
+    assert result["browser"]["ok"] is False
+    assert "local_ai" not in result
+    assert "vision" not in result
+    assert json.loads(cache.read_text(encoding="utf-8")) == result
+
+
 def test_local_ai_probe_requires_a_completed_generated_token():
     with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
             b'{"done":true,"eval_count":0}')):
