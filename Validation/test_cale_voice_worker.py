@@ -100,3 +100,34 @@ def test_failed_audio_write_preserves_existing_recording(tmp_path):
     soundfile.write.assert_called_once()
     assert target.read_bytes() == b"previous recording"
     assert list(tmp_path.iterdir()) == [target]
+
+
+def test_audio_writer_diagnostics_do_not_corrupt_json_output(tmp_path):
+    import sys
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    target = tmp_path / "voice.wav"
+    model = Mock()
+    model.generate_voice_clone.return_value = ([[0.0]], 24000)
+
+    def write(path, audio, sample_rate):
+        print("Audio writer diagnostic")
+        Path(path).write_bytes(b"complete recording")
+
+    request = json.dumps({"text": "hello", "output_path": str(target)}) + "\n"
+    with (patch.object(cale_voice_worker, "load_model", return_value=model),
+          patch.dict(sys.modules, {"soundfile": SimpleNamespace(write=write)}),
+          patch("sys.argv", ["cale_voice_worker.py"]),
+          patch("sys.stdin", io.StringIO(request)),
+          patch("sys.stdout", new_callable=io.StringIO) as output,
+          patch("sys.stderr", new_callable=io.StringIO) as diagnostics):
+        cale_voice_worker.main()
+
+    assert [json.loads(line) for line in output.getvalue().splitlines()] == [
+        {"ready": True},
+        {"path": str(target.resolve()), "engine": "Cale's local voice"},
+    ]
+    assert "Audio writer diagnostic" in diagnostics.getvalue()
+    assert target.read_bytes() == b"complete recording"
+    assert list(tmp_path.iterdir()) == [target]
