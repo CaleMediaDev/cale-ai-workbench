@@ -104,6 +104,37 @@ class SkillCatalogTests(unittest.TestCase):
         updated = self.root / "data/skills/software-development/observability-and-instrumentation/SKILL.md"
         self.assertEqual(updated.read_text(encoding="utf-8"), "Updated upstream")
 
+    def test_preserves_symlink_parent_without_probing_inaccessible_target(self):
+        skill_catalog.sync(self.root)
+        installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
+        installed.unlink()
+        folder = installed.parent
+        folder.rmdir()
+        private = self.root / "private"
+        private.mkdir()
+        try:
+            folder.symlink_to(private, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Symlinks unavailable: {exc}")
+        self.addCleanup(private.chmod, 0o700)
+        private.chmod(0)
+        try:
+            installed.is_symlink()
+        except PermissionError:
+            pass
+        else:
+            self.skipTest("Directory permissions are not enforced in this environment")
+        source = self.root / "vendor/agent-skills/observability-and-instrumentation/SKILL.md"
+        source.write_text("Updated upstream", encoding="utf-8")
+
+        result = skill_catalog.sync(self.root)
+
+        self.assertEqual(result, {"installed": 0, "updated": 1, "preserved": 1})
+        self.assertTrue(folder.is_symlink())
+        self.assertEqual(folder.readlink(), private)
+        updated = self.root / "data/skills/software-development/observability-and-instrumentation/SKILL.md"
+        self.assertEqual(updated.read_text(encoding="utf-8"), "Updated upstream")
+
     def test_preserves_local_file_at_staging_path(self):
         skill_catalog.sync(self.root)
         installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
