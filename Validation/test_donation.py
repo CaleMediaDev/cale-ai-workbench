@@ -878,9 +878,11 @@ def test_leaderboard_counts_trusted_integrations_once_and_ignores_claims(tmp_pat
     with patch("pc_offline.offline", return_value=False):
         result = donation.refresh_leaderboard(tmp_path, fetch=lambda _: pulls)
     assert result["complete"]
-    assert result["rows"] == [{"login":"alice", "accepted":4}]
+    assert result["rows"] == [{"login":"alice", "accepted":5}]
     with donation.connection(tmp_path) as conn:
-        assert {row[0] for row in conn.execute("SELECT number FROM accepted_fixes")} == {1, 2, 5, 9}
+        # GitHub can infer a merge when closing a draft whose original commits
+        # reached main through a maintainer integration (observed on PR378).
+        assert {row[0] for row in conn.execute("SELECT number FROM accepted_fixes")} == {1, 2, 5, 9, 11}
 
 
 @pytest.mark.parametrize("labels", [None, {}, 42, "cale-accepted-fix", ["cale-accepted-fix"],

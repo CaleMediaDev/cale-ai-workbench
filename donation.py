@@ -336,9 +336,10 @@ def refresh_leaderboard(root: Path = ROOT, fetch=None, force=False) -> dict:
                 # integration instead of GitHub's merge endpoint. Labels come
                 # from the canonical repository, never donor-controlled text.
                 accepted_at = pr.get("merged_at") or (pr.get("closed_at") if integrated else None)
-                # Direct integrations can retain GitHub's draft flag. A merged
-                # draft is inconsistent; an unlabeled draft is not accepted.
-                invalid_draft = pr.get("draft") and (not integrated or bool(pr.get("merged_at")))
+                # Closing a draft after its commits reach main can make GitHub
+                # infer merged_at without clearing draft. The maintainer-owned
+                # acceptance label still proves review; unlabeled drafts fail.
+                invalid_draft = pr.get("draft") and not integrated
                 if (pr.get("state") != "closed" or not isinstance(accepted_at, str) or not accepted_at or invalid_draft
                         or base.get("ref") != "main" or base.get("repo", {}).get("full_name", "").casefold() != UPSTREAM.casefold()
                         or not str(pr.get("title", "")).startswith("[Donation] ")

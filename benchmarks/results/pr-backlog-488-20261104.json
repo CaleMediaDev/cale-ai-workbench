@@ -1585,5 +1585,572 @@
     "new_416_419_root": "167 passed, 3 skipped, 39 subtests passed",
     "new_420_423_root": "63 passed, 1 skipped, 34 subtests passed",
     "new_411_415_private": "123 passed, 39 subtests passed in 16.51s"
+  },
+  "dispositions": [
+    {
+      "number": 369,
+      "reviewed_head": "9cef6cd8782240297e5b37492c96bf3e0a957786",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Normalizes padded integer tokens as decimal without rewriting fractional tokens or accepting malformed operators.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 370,
+      "reviewed_head": "0cf65a33556df0318acd9cfd11210a4ed4fcd76f",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Rejects WAVs whose readable frame bytes are shorter than their header before exclusive publication.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 371,
+      "reviewed_head": "1465e390160440a181acf32a204c5d86cd710216",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Rejects missing, zero, negative, boolean and non-integer model sizes before memory budgeting.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 372,
+      "reviewed_head": "042a584d46d2f09b762ffa452a7f6a04cf64af0b",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Valid staged-transcription retry fix adapted to publish exclusively and roll back only owned outputs; original replace publication overwrote concurrent user files.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 373,
+      "reviewed_head": "6ce77c2030960d58635bacad65942c1442acbe5d",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Captures a single immutable health-cache publication, keeping root eligibility and returned results consistent.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 374,
+      "reviewed_head": "f129b24995dc31f045a9a494c252b09b0331f41b",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Uses latest reviewed task generation rather than recency of an older generation when learning feedback.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 375,
+      "reviewed_head": "4af5665a24ff9607de5035116c86d40795c01a15",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Routes cv2 frame-read exceptions through existing bounded failed-read retry and camera cleanup.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 376,
+      "reviewed_head": "1b44e3c9e859596abf76eacebea2016bc77d4986",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Repopulates missing capability FTS entries even when source hashes and paths are unchanged.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 377,
+      "reviewed_head": "f95d7d28c0ab11821a3e3ebe0011b6cb288e5b94",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Evicts obsolete indexed file identities when a canonical path changes; supplemental mocked resolution verifies behavior where Windows symlinks are unavailable.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 378,
+      "reviewed_head": "cc2f733e75326631a996b1d9a47090cb3f8f92e2",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Treats a filesystem error probing the companion manifest as repair-required without launching its broker.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 379,
+      "reviewed_head": "734c959fc120f244219a4f9879dc4fa44f7eb7cf",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Clamps excerpt hint indexes for one-chunk small-budget input.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 380,
+      "reviewed_head": "8c3ab9dead1a92f2fb632d182dcf117ba2ba7f17",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Rejects malformed grouped dollar amounts rather than silently stripping arbitrary commas.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 381,
+      "reviewed_head": "a100fe063e9d2a99c31a7d0b91149e103dd247e5",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Uses unique private marker staging files and preserves user files at the old fixed temporary filename.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 382,
+      "reviewed_head": "6c5ca4ebf358e3b78db8340d753451b8355e291a",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Falls back to a grounded short spoken status for malformed local model response shapes.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 383,
+      "reviewed_head": "3df08eba33f8d01d13157f3de9d4f39fabb0fcc1",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Honors explicit no/without singing while preserving requested wordless-vocal texture behavior.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 384,
+      "reviewed_head": "ad27386d1798264f681328cbf25d699a68918fa8",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Finalizes HTMLParser input so trailing incomplete entities remain in reader/search content.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 385,
+      "reviewed_head": "c18056847f34a31eaa24acfdd120da4f4f8569cf",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Rejects a dangling final-component output symlink without following it to a missing target; supplemental mocked path guard verifies no installation/render starts.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 386,
+      "reviewed_head": "aaef16af1adc2596b61736e2dcef6d97315802ee",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Validates regular-file type and nonempty size from one stat snapshot, avoiding inconsistent readiness metadata.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 387,
+      "reviewed_head": "e959a7fa667b61b6a2ebebd27d3f9b262ee222c8",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Valid descendant cleanup adapted to retain parent termination on enumeration errors and bound waits after forced termination.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 388,
+      "reviewed_head": "eec665f4c13063ad5a064191d4bf7e1e72a8ca11",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Valid per-root repair isolation adapted to retain each roots cooldown across alternating calls and unrelated success, with a synchronized64-root cap.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 389,
+      "reviewed_head": "4c3c4443a562d527140ca2247cecf052644439ab",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Caps chord segment starts by actual analyzed sample duration as well as centered STFT frame extent.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 390,
+      "reviewed_head": "e08ced1ba0a854d30e952420c752e8ee0f8a38ff",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 391,
+      "reviewed_head": "c2cae6a632e576a2da8572b0fed2a0e0ead9953c",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 392,
+      "reviewed_head": "c31cf18dacda39a55d0696029f4069a6966fbb61",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 393,
+      "reviewed_head": "281fe3d68fe36e16a9d818206a66afcb760e42a1",
+      "disposition": "rejected",
+      "integration_commit": null,
+      "accepted_label": null,
+      "reason": "Removes SQL LIMIT; query limit1 expands46->5000 filesystem probes/0.059->2.983sec across5000 stale matches. Whole-index search work unbounded.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 394,
+      "reviewed_head": "8be495b860314ff07162b850f9689a23e0c36860",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 395,
+      "reviewed_head": "45fe477836d912753a0612f2332660195bb4ba80",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 396,
+      "reviewed_head": "fd4e3bd8534b37f79ffc3c3b4f3eeba4100d55ca",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 397,
+      "reviewed_head": "c87359b81a5ded7fd1e79eda29a6d000d3c56efc",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 398,
+      "reviewed_head": "04fffd2646b8ee74636dad7316cac6e94bc115c6",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 399,
+      "reviewed_head": "f6de6ff4effb3476060d714c9440d85754ff726a",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 400,
+      "reviewed_head": "694a6637f4df4769c6e8e57226fe49262de25102",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Original regressed valid --check-hash-based-pycs option with separate argument. Credited correction consumes flag value and handles attached -c/-m;7 supplemental cases,3 fail original;48 full module passed.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 401,
+      "reviewed_head": "d74a80fe91aa351a68077e814adc6749f731c01b",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 402,
+      "reviewed_head": "86a6bc1be2cb09091039ef30eeb02b11b69ed99c",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 403,
+      "reviewed_head": "029839d65db35102ff5b47eed359b37f7e925dcc",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 404,
+      "reviewed_head": "b50b09d845a8968c311a78a465f946ff5777279b",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Original unbounded repeated cursor pagination could stall startup. Credited correction max32pages/2000tools/15sec, cursor cycle/shape limits;4 independent budget/cancellation/cleanup regressions fail original;29 module tests pass.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 405,
+      "reviewed_head": "51b5f7c280cce83b82e41e025ef15b10dbc1b595",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 406,
+      "reviewed_head": "8276928d0cdc6ddabc7a1cf3f4d7acf85d4aad1a",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 407,
+      "reviewed_head": "62ba08531aa78107c3a93fab4f8b1a6fc184f2c8",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 408,
+      "reviewed_head": "e02088ca709e5bb48028d3ecb380784b4d3d3030",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77. Authored symlink test Windows-skips; portable exact-path symlink-observation proof red before (renderer called), green after (ValueError before renderer), source preserved.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 409,
+      "reviewed_head": "8dd276ae0185720c8365c6917b84e9f2f4284996",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 410,
+      "reviewed_head": "b847ebc4b156ecedf0d7fc8adb702adc1cae6349",
+      "disposition": "integrated",
+      "integration_commit": "d56f757ac7a3ce1c6ad60549e33259d5cf34334e",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 411,
+      "reviewed_head": "d16edc880c94bc1696359615bcb0244d9e8fd776",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Rejects raw boundary C0 controls before whitespace trimming; ordinary surrounding spaces remain valid.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 412,
+      "reviewed_head": "70e9cf39c066f7e18e49a7ece800c6f0c3812bf4",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Completes potentially failing lyric JSON serialization before creating a destination or writing text/captions.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 413,
+      "reviewed_head": "64260c21bf0cc48fa9c9346d6802c7d58fbbf7e8",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Adds necessary MP4 codec conversion while preserving the fast lossless compatible-video copy path; conversion retries only the observed unsupported-container error.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 414,
+      "reviewed_head": "4e6fc42f552002ae6339e0a01d0bdf011df845d1",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Converts non-MP4 output privately before exclusive publication, so encoder failures/timeouts leave no partial destination.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 415,
+      "reviewed_head": "95a34fd72dccf4536d660d98c9f48c22850e488c",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Handles overflowing numeric recommendation values through existing cached-catalog recovery.",
+      "state": "closed",
+      "github_merged": true
+    },
+    {
+      "number": 416,
+      "reviewed_head": "058ac4ea0b342ed149794c63c50ffe6ae4b2693f",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; regression red before and complete touched module green at exact head and current root f7e2c74.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 417,
+      "reviewed_head": "c3b02ec8953ace702f8be03e0ccdf68df09b2a77",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; regression red before and complete touched module green at exact head and current root f7e2c74.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 418,
+      "reviewed_head": "6cad7f4dacd80588a5500bb769d95352af3475c4",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; regression red before and complete touched module green at exact head and current root f7e2c74.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 419,
+      "reviewed_head": "a41d7f0152426ab295587fc26d178d7b8d8384c0",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Production diff reviewed; regression red before and complete touched module green at exact head and current root f7e2c74.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 420,
+      "reviewed_head": "1501536bf7ef3407eba588492e54a4de253a7b09",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Direct-child indentation prevents nested YAML defaults from selecting wrong local aliases; both misleading nested cases fail on parent.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 421,
+      "reviewed_head": "a79ae6e054c599fb770934cdae687afde307a709",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Outgoing deck reference must clear even when already-closed audio cleanup reports an exception; subsequent transition remains possible.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 422,
+      "reviewed_head": "bec8cee14aa646f53064df95a66de0baffbd15ce",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Defense in depth for older urllib parsers. Submitted test already passes this patched Python baseline; added controlled SplitResult compatibility case proves app rejects full malformed authority independent of parser rejection.",
+      "state": "closed",
+      "github_merged": false
+    },
+    {
+      "number": 423,
+      "reviewed_head": "0046edd47a846906f8cd8fd1588440efd5bd653d",
+      "disposition": "integrated",
+      "integration_commit": "2518e96e795681765e388637e40d1df57e5709a1",
+      "accepted_label": "cale-accepted-fix",
+      "reason": "Explicit token-limit truncation must use existing short fallback rather than speak incomplete model text.",
+      "state": "closed",
+      "github_merged": false
+    }
+  ],
+  "credit_followup_489": {
+    "before": 216,
+    "after": {
+      "rows": [
+        {
+          "login": "CaleMediaDev",
+          "accepted": 242
+        }
+      ],
+      "checked_at": 1793796250.1291938,
+      "complete": true
+    },
+    "regression": "GitHub can infer merged_at while draft remains true on closed integrated PR378; trusted acceptance labels must still count.",
+    "tests": "85 passed, 102 subtests passed; regression red before fix"
   }
 }
