@@ -37,6 +37,15 @@ class ToneAdaptationTests(unittest.TestCase):
                     self.assertEqual(tone_adaptation.social_reply("Hello"),
                                      "I heard you. What do you need?")
 
+    def test_multiline_model_content_leaves_a_short_reply(self):
+        for separator in ("\n", "\r", "\r\n", "\u2028", "\u2029"):
+            with self.subTest(separator=repr(separator)):
+                content = "Hello!" + separator + "What do you need?"
+                result = {"choices": [{"message": {"content": content}}]}
+                with patch("cloud_ai.post", return_value=result):
+                    self.assertEqual(tone_adaptation.social_reply("Hello"),
+                                     "I heard you. What do you need?")
+
     def test_next_speaker_does_not_inherit_previous_rudeness(self):
         result = {"choices": [{"message": {"content": "Glad I could help!"}}]}
         with patch("cloud_ai.post", return_value=result) as post:

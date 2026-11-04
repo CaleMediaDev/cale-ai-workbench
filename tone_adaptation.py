@@ -44,7 +44,7 @@ def social_reply(utterance: str) -> str:
         # Protocol data is not speech: never read Python/JSON representations.
         if isinstance(content, str):
             answer = content.strip().strip('"')
-            if answer and len(answer) <= 240 and "\n" not in answer:
+            if answer and len(answer) <= 240 and len(answer.splitlines()) == 1:
                 return answer
     except (KeyError, IndexError, TypeError, AttributeError, OSError, ValueError, TimeoutError):
         pass
