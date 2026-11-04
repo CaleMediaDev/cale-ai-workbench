@@ -352,6 +352,47 @@ def test_worker_retries_after_partial_ffmpeg_copy(tmp_path):
     separator_class.return_value.separate.assert_called_once_with("song.mp3")
 
 
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_worker_diagnostic_decoding_does_not_mask_result(tmp_path, returncode):
+    from contextlib import nullcontext
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+    original_run = music_stems.subprocess.run
+
+    def render(args, **kwargs):
+        staging = Path(args[-1])
+        (staging / "song_(Vocals).wav").write_bytes(b"vocals")
+        (staging / "song_(Instrumental).wav").write_bytes(b"instrumental")
+        # Exercise actual subprocess decoding, not a pre-decoded mock result.
+        return original_run(
+            [music_stems.sys.executable, "-c",
+             "import os, sys; os.write(2, b'diagnostic: \\xff'); "
+             f"sys.exit({returncode})"],
+            **kwargs,
+        )
+
+    with patch.object(
+        music_stems.music_backend, "_setup_lock", side_effect=nullcontext
+    ), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext
+    ), patch.object(
+        music_stems, "install", return_value=Path("python.exe")
+    ), patch.object(music_stems.subprocess, "run", side_effect=render):
+        if returncode:
+            with pytest.raises(RuntimeError, match="diagnostic: \ufffd"):
+                music_stems.separate_stems(str(source), str(output))
+            assert list(output.iterdir()) == []
+        else:
+            result = music_stems.separate_stems(str(source), str(output))
+            assert {Path(path).read_bytes() for path in result["files"]} == {
+                b"vocals", b"instrumental"
+            }
+
+    assert source.read_bytes() == b"music"
+
+
 @pytest.mark.parametrize("wav_count", [0, 1])
 def test_auxiliary_files_do_not_count_as_stems(tmp_path, wav_count):
     from contextlib import nullcontext
