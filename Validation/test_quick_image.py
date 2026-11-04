@@ -130,6 +130,17 @@ def test_prompt_clarification_falls_back_if_model_changes_subject_or_is_offline(
         assert quick_image.clarify_prompt(prompt) == prompt
 
 
+def test_prompt_clarification_falls_back_if_response_body_is_truncated():
+    from http.client import IncompleteRead
+
+    prompt = "a small red kite against a clear blue sky"
+    with patch.object(quick_image, "urlopen") as opened:
+        response = opened.return_value.__enter__.return_value
+        response.read.side_effect = IncompleteRead(b'{"message":', 20)
+        assert quick_image.clarify_prompt(prompt) == prompt
+        response.read.assert_called_once_with()
+
+
 def test_direct_image_job_survives_starting_process_and_verifies_pixels(tmp_path):
     python = tmp_path / "Toolbox/python/Scripts/python.exe"
     python.parent.mkdir(parents=True)

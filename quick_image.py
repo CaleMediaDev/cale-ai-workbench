@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import uuid
+from http.client import IncompleteRead
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -43,7 +44,7 @@ def clarify_prompt(prompt: str) -> str:
     try:
         with urlopen(request, timeout=15) as response:
             candidate = json.load(response)["message"]["content"].strip().strip('"')
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, IncompleteRead):
         return prompt
     if not candidate or len(candidate) > 600 or "\n" in candidate:
         return prompt
