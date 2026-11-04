@@ -98,6 +98,24 @@ def test_rejected_singer_does_not_turn_vocal_texture_into_sustained_singing():
         assert music_style.requires_sustained_vocals(request, lyrics="Sing this verse")
 
 
+def test_negated_gendered_lead_does_not_override_vocal_texture():
+    for gender in ("male", "female"):
+        request = "Heavy dubstep with vocal chops, no " + gender + " lead vocals"
+        assert not music_style.explicit_lead_vocals(request)
+        assert not music_style.unambiguous_vocal_song(request)
+        assert not music_style.requires_sustained_vocals(request)
+        caption = music_style.enhance(request)
+        assert "Sparse chopped vocal syllables" in caption
+        assert "clear sung verses and chorus" not in caption
+        assert "no " + gender + " lead vocals" not in caption
+        assert not music_style.requires_sustained_vocals(caption)
+
+        positive = "Heavy dubstep with " + gender + " lead vocals"
+        assert music_style.explicit_lead_vocals(positive)
+        assert music_style.requires_sustained_vocals(positive)
+        assert gender + " lead vocals throughout" in music_style.enhance(positive)
+
+
 def test_sparse_female_hook_does_not_get_full_verse_direction():
     request = ("Female singing voice, main vocal hook: waapy waaap. "
                "Very little conventional singing, with massive instrumental drops.")
