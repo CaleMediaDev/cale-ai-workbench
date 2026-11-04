@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from auto_route import (
     PROJECT_REQUEST,
+    is_game_task,
     model_order,
     prefer_different_weights,
     repair_messages,
@@ -18,6 +19,28 @@ from long_tasks import project_prompt
 
 
 class AutoRouteTests(unittest.TestCase):
+    def test_game_routing_uses_native_brief_instead_of_generic_worker_guidance(self):
+        import native_agent
+
+        for brief, expected in (("Build an offline expense tracker.", False),
+                                ("Build a space shooter game.", True)):
+            messages = [{"role": "system", "content": native_agent.prompt({
+                "id": "route-game", "folder": "C:/Tasks/test", "brief": brief})},
+                {"role": "user", "content": "Continue the next saved step."},
+                {"role": "tool", "content": "Shared documentation: canvas game platformer arcade."}]
+            self.assertEqual(is_game_task(messages), expected)
+
+    def test_game_routing_preserves_saved_project_and_real_followup_intent(self):
+        prompt = project_prompt({"title": "Task", "folder": "C:/Tasks/test",
+                                 "brief": "Build an expense tracker."})
+        messages = [{"role": "user", "content": prompt}]
+        self.assertFalse(is_game_task(messages))
+        messages.append({"role": "user", "content": "Now add an arcade game."})
+        self.assertTrue(is_game_task(messages))
+        self.assertFalse(is_game_task([
+            {"role": "system", "content": "You can build any game or shooter."},
+            {"role": "user", "content": "Calculate a tip."}]))
+
     def test_repair_preference_defers_every_alias_for_failed_weights_without_adding_models(self):
         candidates = ["main", "fast", "alternate"]
         weights = {"main": "a" * 64, "fast": "a" * 64, "alternate": "b" * 64}

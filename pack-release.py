@@ -34,6 +34,7 @@ extras = [
     "benchmarks/results/nested-plan-repair-20261104.json",
     "benchmarks/results/offline-expense-app-473-20261104.json",
     "benchmarks/test_inference_budget.py",
+    "benchmarks/test_donation_catalog.py",
     "benchmarks/results/local-server-retry-20261104.json",
     "benchmarks/results/offline-expense-app-474-20261104.json",
     "benchmarks/results/shell-checker-repair-20261104.json",

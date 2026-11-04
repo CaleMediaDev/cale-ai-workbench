@@ -1,9 +1,9 @@
 [
   {
-    "id": "checkpoint-recovery",
-    "title": "Improve saved task checkpoint recovery",
-    "instructions": "Inspect checkpoint document selection, freshness, and next-step extraction. Propose one real bug fix with a regression test if a gap can be demonstrated. Preserve privacy and existing storage compatibility.",
-    "paths": ["task_context.py", "Validation/test_donation_regressions.py"]
+    "id": "project-document-cache",
+    "title": "Keep document memory fresh after files change",
+    "instructions": "Inspect document cache invalidation, source hashing, pagination and error recovery. Find a demonstrated case where changed or failed extraction returns stale text. Preserve original files, bounded reads and storage compatibility; include a regression test.",
+    "paths": ["project_documents.py", "Validation/test_project_documents.py"]
   },
   {
     "id": "calculator-correctness",
@@ -15,6 +15,66 @@
     "id": "task-time-estimates",
     "title": "Improve task time estimates",
     "instructions": "Inspect elapsed time and countdown handling across pause, resume, completion, and bad or missing timestamps. Propose one demonstrated bug fix with a focused regression test.",
-    "paths": ["task_eta.py", "Validation/test_donation_regressions.py"]
+    "paths": ["task_eta.py", "Validation/test_task_eta.py"]
+  },
+  {
+    "id": "song-vocal-intent",
+    "title": "Honor requested vocals and music style",
+    "instructions": "Inspect singer, instrumental and genre parsing for a reproducible contradiction or missed negation. Preserve explicit user intent, distinguish vocal textures from full lyrics, and avoid claiming a rendered voice was measured. Add a regression test for a concrete fix.",
+    "paths": ["music_style.py", "Validation/test_music_style.py"]
+  },
+  {
+    "id": "song-audio-edit",
+    "title": "Make song edits preserve valid audio and originals",
+    "instructions": "Inspect trim, fade, gain and output validation for finite values, bad bounds and failed FFmpeg calls. Propose one demonstrated correctness fix and regression test. Preserve original audio and bounded subprocess execution; do not render songs or install packages.",
+    "paths": ["music_edit.py", "Validation/test_music_edit.py"]
+  },
+  {
+    "id": "song-caption-timing",
+    "title": "Keep lyric timestamps and saved text valid",
+    "instructions": "Inspect transcription result conversion and timestamp handling for invalid, overlapping or non-finite values and partial writes. Propose a demonstrated correction with a regression test. Preserve source audio, avoid rerunning transcription and do not claim generated audio has vocals from text alone.",
+    "paths": ["music_lyrics.py", "Validation/test_music_lyrics.py"]
+  },
+  {
+    "id": "ffmpeg-runtime-health",
+    "title": "Detect a usable FFmpeg runtime reliably",
+    "instructions": "Inspect executable discovery, health probing, failure caching and fallback behavior. Find one reproducible case that falsely reports a missing or healthy runtime. Add a regression test using mocks; do not widen download sources or execute installers.",
+    "paths": ["ffmpeg_runtime.py", "Validation/test_ffmpeg_runtime.py"]
+  },
+  {
+    "id": "tool-health-recovery",
+    "title": "Recover missing managed tools without repair loops",
+    "instructions": "Inspect managed-tool health cache, dependency probes and background repair coordination. Propose a demonstrated false-ready, stale-cache or retry-loop fix with a regression test. Preserve repair destinations, download policy and noninteractive behavior; do not execute repairs.",
+    "paths": ["core_tool_health.py", "Validation/test_core_tool_health.py"]
+  },
+  {
+    "id": "ollama-runtime-probe",
+    "title": "Distinguish a healthy local model server from a failed start",
+    "instructions": "Inspect local server probing, process startup and stale status handling for one demonstrable correctness or recovery bug. Add mocked regression coverage. Preserve loopback-only connections and existing package sources; do not download models or start servers.",
+    "paths": ["ollama_runtime.py", "Validation/test_ollama_runtime.py"]
+  },
+  {
+    "id": "bounded-context-history",
+    "title": "Preserve useful conversation history within context limits",
+    "instructions": "Inspect context estimation and message trimming for dropped task intent, orphaned tool responses or invalid budget arithmetic. Propose one demonstrated fix with a regression test. Preserve the model's actual context limit and do not change provider/account routing.",
+    "paths": ["context_window.py", "Validation/test_context_window.py"]
+  },
+  {
+    "id": "project-memory-search",
+    "title": "Keep fast project memory searchable and consistent",
+    "instructions": "Inspect SQLite writes, search ranking and bounded memory retrieval for reproducible stale, missing or inconsistent results. Add a focused regression test. Preserve storage compatibility, parameterized queries and local-only project data.",
+    "paths": ["project_memory.py", "Validation/test_project_memory.py"]
+  },
+  {
+    "id": "runtime-error-episodes",
+    "title": "Record real repeated failures without losing new episodes",
+    "instructions": "Inspect failure episode tracking, successful-operation resets, concurrency and clock changes for a demonstrated missed or duplicate notification. Add a regression test. Keep diagnostics local, bounded and free of audio or camera data; do not add telemetry or upload paths.",
+    "paths": ["runtime_diagnostics.py", "Validation/test_runtime_diagnostics.py"]
+  },
+  {
+    "id": "feedback-memory-quality",
+    "title": "Apply task feedback without reusing stale preferences",
+    "instructions": "Inspect feedback storage and retrieval for incorrect task matching, duplicate feedback or stale records. Propose a reproducible correction with a regression test. Keep feedback local and do not change permissions, consent or provider routing.",
+    "paths": ["feedback_learning.py", "Validation/test_feedback_learning.py"]
   }
 ]

@@ -38,7 +38,7 @@ import cloud_providers
 import pc_offline
 import routing_memory
 import routing_mode
-from auto_route import model_order, prefer_different_weights, repair_messages, task_size
+from auto_route import is_game_task, model_order, prefer_different_weights, repair_messages, task_size
 from model_identity import configured_main_alias, configured_permissive_alias
 from model_library import (
     CATALOG,
@@ -1230,7 +1230,7 @@ class Router:
             if chosen not in verified:
                 record("local", "Saved model is no longer suitable; using an eligible local model.",
                        chosen)
-        if profile == "main" and re.search(r"\b(game|shooter|platformer|arcade)\b", str(messages), re.I):
+        if profile == "main" and is_game_task(messages):
             import model_fitness
             selected = model_fitness.rank_game_models(
                 selected, CATALOG, ROOT, getattr(self, "model_weights", {}))

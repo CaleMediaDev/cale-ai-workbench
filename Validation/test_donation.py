@@ -564,11 +564,12 @@ def test_medium_is_continuous_serial_without_old_daily_or_draft_caps(tmp_path):
     assert donation.PROFILES["medium"]["open"] is None
 
 
-def test_full_blast_three_lanes_overlap_and_all_stop_on_opt_out(tmp_path):
+@pytest.mark.parametrize("stop", ["opt_out", "update"])
+def test_full_blast_six_lanes_overlap_and_all_stop_on_opt_out_or_update(tmp_path, stop):
     donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
                          github_account="donor", sources=["chatgpt"], intensity="full_blast")
     service = donation.Service(tmp_path)
-    entered = threading.Barrier(4)
+    entered = threading.Barrier(7)
     release = threading.Event()
     def work(worker, cancel):
         entered.wait(timeout=3)
@@ -577,14 +578,55 @@ def test_full_blast_three_lanes_overlap_and_all_stop_on_opt_out(tmp_path):
         service.tick(busy=True)
         entered.wait(timeout=3)
         workers = [service, *service.children]
-        assert len(workers) == 3 and all(worker.thread.is_alive() for worker in workers)
-        assert "3 reviews running" in service.status_message()
-        donation.set_enabled(False, tmp_path)
-        service.tick(busy=True)
+        assert len(workers) == 6 and all(worker.thread.is_alive() for worker in workers)
+        assert all(worker.resource == "chatgpt" for worker in service.children)
+        assert "6 reviews running" in service.status_message()
+        if stop == "opt_out":
+            donation.set_enabled(False, tmp_path)
+        service.tick(busy=True, suspended=(stop == "update"))
         assert all(worker.cancel.is_set() for worker in workers)
         release.set()
         for worker in workers:
             worker.thread.join(2)
+
+
+def test_claim_collision_moves_to_next_job_without_fetching_lost_source(tmp_path):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+                         github_account="donor", sources=["chatgpt"], intensity="full_blast")
+    service = donation.Service(tmp_path)
+    jobs = [{**JOB, "id": "area-first"}, {**JOB, "id": "area-second"}]
+    calls = []
+    real_claim = donation.claim_run
+
+    def claim(root, job, *args):
+        calls.append(("claim", job))
+        # Reproduce a different lane winning the first selection after this
+        # lane took its pending snapshot. The next claim uses real SQLite.
+        return "" if sum(kind == "claim" for kind, _ in calls) == 1 else real_claim(root, job, *args)
+
+    def public(path, revision):
+        calls.append(("read", path))
+        return json.dumps(jobs) if path == "donation-tasks.json" else SOURCES[path]
+
+    with (patch("pc_offline.offline", return_value=False),
+          patch("github_account.account", return_value="donor"),
+          patch("chatgpt_auth.status", return_value={"sharing": True}),
+          patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT),
+          patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kwargs: jobs),
+          patch.object(donation, "public_file", side_effect=public),
+          patch.object(donation, "claim_run", side_effect=claim),
+          patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
+          patch.object(donation, "complete_donation", return_value={"choices": [{"message": {
+              "content": '{"changes":[]}'}}]}) as inference):
+        service._run(threading.Event())
+    inference.assert_called_once()
+    assert len([call for call in calls if call[0] == "claim"]) == 2
+    source_reads = [index for index, call in enumerate(calls) if call[0] == "read" and call[1] != "donation-tasks.json"]
+    assert len(source_reads) == len(SOURCES)
+    assert min(source_reads) > max(index for index, call in enumerate(calls) if call[0] == "claim")
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs WHERE status='no_change'").fetchone()[0] == 1
+    assert service.next_attempt == 0
 
 
 def test_parallel_lanes_cannot_claim_the_same_public_revision_job(tmp_path):
@@ -617,6 +659,20 @@ def test_full_blast_can_review_larger_public_pairs_without_expanding_sensitive_p
         assert not donation.continuous_jobs([], COMMIT["sha"])
         jobs = donation.continuous_jobs([], COMMIT["sha"], source_budget=160000)
     assert len(jobs) == 1 and jobs[0]["paths"] == ["music_backend.py", "Validation/test_music_backend.py"]
+
+
+def test_explicit_jobs_too_large_for_source_do_not_block_smaller_reviews():
+    oversized = {"id": "large-task", "paths": ["large.py", "Validation/test_large.py"]}
+    small = {"id": "small-task", "paths": ["small.py", "Validation/test_small.py"]}
+    missing = {"id": "deleted-task", "paths": ["deleted.py"]}
+    tree = {"tree": [{"type": "blob", "path": path, "size": size} for path, size in
+        [("large.py", 30000), ("Validation/test_large.py", 20000),
+         ("small.py", 1000), ("Validation/test_small.py", 1000)]]}
+    with patch.object(donation, "gh_api", return_value=tree):
+        narrow = donation.continuous_jobs([oversized, small, missing], COMMIT["sha"], source_budget=40000)
+        wide = donation.continuous_jobs([oversized, small, missing], COMMIT["sha"], source_budget=160000)
+    assert narrow == [small]
+    assert wide == [oversized, small]
 
 
 

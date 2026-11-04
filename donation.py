@@ -4,7 +4,7 @@ Credentials stay with their existing local account managers. The model receives
 only pinned public source files, returns exact text edits, and cannot run tools.
 Edits are syntax-checked and submitted as draft PRs; this module never merges or
 executes donated code. Slow yields to foreground activity; Medium and Full Blast
-run alongside it. Full Blast adds two ChatGPT review lanes when opted in.
+run alongside it. Full Blast runs up to six reviews when ChatGPT is opted in.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ REVIEW_URL = f"https://github.com/{UPSTREAM}/pulls?q=is%3Apr+is%3Aopen+%22%5BDon
 IDLE_SECONDS = 120
 DAY_SECONDS = 86400
 SOURCES = ("local", "free_cloud", "chatgpt")
+FULL_BLAST_LANES = 6
 PROFILES = {
     "slow": {"idle": 300, "interval": 3600, "daily": 1, "open": 1, "size": "quick", "output": 2048},
     "medium": {"idle": 0, "interval": 0, "daily": None, "open": None, "size": "deep", "output": 6144},
@@ -470,7 +471,7 @@ def intensity_description(intensity: str) -> str:
     """Describe the actual scheduler policy in the donation controls."""
     profile = PROFILES[intensity]
     if intensity == "full_blast":
-        return "Continuous · up to 3 parallel reviews · local/free stay single-lane · account limits apply"
+        return f"Continuous · up to {FULL_BLAST_LANES} parallel reviews · local/free stay single-lane · account limits apply"
     if intensity == "medium":
         return "Continuous · one review at a time · alongside your tasks · account limits apply"
     wait = f"{profile['idle'] // 60} minutes"
@@ -497,7 +498,8 @@ def continuous_jobs(jobs: list, revision: str, *, source_budget=35_000) -> list:
     result = [job for job in jobs if isinstance(job, dict)
               and re.fullmatch(r"[a-z0-9-]{1,60}", str(job.get("id", "")))
               and isinstance(job.get("paths"), list) and 1 <= len(job["paths"]) <= 4
-              and all(allowed_path(path) for path in job["paths"])]
+              and all(allowed_path(path) and path in files for path in job["paths"])
+              and sum(files[path].get("size", 200001) for path in job["paths"]) <= source_budget]
     existing_paths = {path for job in result for path in job["paths"]}
     for path in sorted(files):
         if (path in excluded or path in existing_paths or not allowed_path(path)
@@ -561,7 +563,8 @@ class Service:
             # Local/free work remains serial to respect GPU/provider limits.
             if consent["intensity"] == "full_blast" and "chatgpt" in consent["sources"]:
                 if not self.children:
-                    self.children = [Service(self.root, _lane=True, _resource="chatgpt") for _ in range(2)]
+                    self.children = [Service(self.root, _lane=True, _resource="chatgpt")
+                                     for _ in range(FULL_BLAST_LANES - 1)]
                 for child in self.children:
                     child.tick(busy=busy, suspended=suspended)
             else:
@@ -676,17 +679,28 @@ class Service:
             with closing(connection(self.root)) as conn:
                 pending_jobs.update(row[0] for row in conn.execute("""SELECT job FROM runs WHERE revision=?
                     AND status IN ('requested','received','submitted','no_change') AND started>?""", (revision, time.time()-1800)))
-            job = next((jobs[(index + offset) % len(jobs)] for offset in range(len(jobs))
-                        if isinstance(jobs[(index + offset) % len(jobs)], dict)
-                        and jobs[(index + offset) % len(jobs)].get("id") not in pending_jobs), None)
+            # Another lane may reserve a job after our pending snapshot. Try
+            # the next area in this pass instead of idling and downloading the
+            # same public source again on the next scheduler tick.
+            job = None
+            for offset in range(len(jobs)):
+                candidate = jobs[(index + offset) % len(jobs)]
+                if not isinstance(candidate, dict) or candidate.get("id") in pending_jobs:
+                    continue
+                paths = candidate.get("paths", [])
+                if (not re.fullmatch(r"[a-z0-9-]{1,60}", str(candidate.get("id", ""))) or
+                        not isinstance(paths, list) or not 1 <= len(paths) <= 4 or
+                        not all(allowed_path(path) for path in paths)):
+                    raise ValueError("Invalid maintainer contribution task")
+                check_cancel()
+                run_id = claim_run(self.root, candidate["id"], resource, consent["intensity"], revision)
+                if run_id:
+                    job = candidate
+                    break
             if job is None:
                 self.message = "Available task proposals are waiting for maintainer review."
                 return
             paths = job.get("paths", [])
-            if (not re.fullmatch(r"[a-z0-9-]{1,60}", str(job.get("id", ""))) or
-                    not isinstance(paths, list) or not 1 <= len(paths) <= 4 or
-                    not all(allowed_path(path) for path in paths)):
-                raise ValueError("Invalid maintainer contribution task")
             sources = {}
             for path in paths:
                 check_cancel()
@@ -694,11 +708,6 @@ class Service:
             if sum(map(len, sources.values())) > source_budget:
                 raise ValueError("Maintainer task exceeds the public-source context budget")
             check_cancel()
-            run_id = claim_run(self.root, job["id"], resource, consent["intensity"], revision)
-            if not run_id:
-                if self.continuous:
-                    self.next_attempt = time.monotonic() + 2
-                return
             self.message = f"Donating {resource.replace('_', ' ')} AI · reviewing public Cale code…"
             payload = {"messages": [
                 {"role": "system", "content":

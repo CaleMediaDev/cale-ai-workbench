@@ -210,7 +210,7 @@ class Controls:
         ttk.Label(outer, textvariable=self.state_text, wraplength=585).pack(anchor="w", pady=(10, 10))
         ttk.Label(outer, text=(
             "Slow pauses for your tasks. Medium runs continuously, one review at a time. "
-            "Full Blast runs up to three parallel reviews, with shared account-limit cooldowns and duplicate-work protection. "
+            "Full Blast runs up to six parallel reviews, with shared account-limit cooldowns and duplicate-work protection. "
             "A request already in flight may still use tokens. Local mode blocks cloud donations; offline pauses all contributions."),
             style="Muted.TLabel", wraplength=585, justify="left").pack(anchor="w")
         ttk.Label(outer, textvariable=self.counter).pack(anchor="w", pady=(14, 3))

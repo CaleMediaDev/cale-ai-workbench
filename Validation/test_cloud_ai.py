@@ -57,6 +57,25 @@ def argument_reply(steps):
 
 
 class CloudTests(unittest.TestCase):
+    def test_non_game_worker_keeps_distinct_repair_model_eligible(self):
+        import native_agent
+
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        request = {**REQUEST, "messages": [
+            {"role": "system", "content": native_agent.prompt({
+                "id": "expense-route", "folder": "C:/Tasks/test",
+                "brief": "Build an offline expense tracker."})},
+            {"role": "user", "content": "Continue the next saved step."}]}
+        router = cloud.Router()
+        router.model_weights = {cloud.LOCAL_MODEL: "a" * 64, "alternate": "b" * 64}
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536, "alternate": 65536}
+        with (patch.object(router, "local_candidates", return_value=[cloud.LOCAL_MODEL, "alternate"]),
+              patch("model_fitness.rank_game_models") as game_rank,
+              patch.object(cloud, "post", return_value=ANSWER) as post):
+            router.complete(request, repair_avoid=[{"model": cloud.LOCAL_MODEL, "weights": "a" * 64}])
+        game_rank.assert_not_called()
+        self.assertEqual(post.call_args.args[1]["model"], "alternate")
+
     def test_native_step_list_transport_decodes_once_then_validates_same_schema(self):
         import native_agent
 

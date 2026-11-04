@@ -185,11 +185,8 @@ def repair_messages(messages):
     return [hint, *messages]
 
 
-def task_size(messages):
-    """Return quick, balanced, or deep from user intent and actual tool history."""
-    if any("[Completion gate: missing verifier]" in message_text(msg.get("content"))
-           for msg in messages[-12:] if isinstance(msg, dict)):
-        return "deep"
+def _task_intent(messages):
+    """Read the saved user brief without treating worker guidance as intent."""
     users = [
         message_text(msg.get("content"))
         for msg in messages
@@ -228,6 +225,21 @@ def task_size(messages):
             intent += "\n" + latest_real_user
     else:
         intent = request
+    return intent, beginning, request, project, all_user_text
+
+
+def is_game_task(messages):
+    """Apply game-model gates only when the user's task concerns a game."""
+    intent = _task_intent(messages)[0]
+    return bool(re.search(r"\b(game|shooter|platformer|arcade)\b", intent, re.I))
+
+
+def task_size(messages):
+    """Return quick, balanced, or deep from user intent and actual tool history."""
+    if any("[Completion gate: missing verifier]" in message_text(msg.get("content"))
+           for msg in messages[-12:] if isinstance(msg, dict)):
+        return "deep"
+    intent, beginning, request, project, all_user_text = _task_intent(messages)
     tool_calls = sum(
         len(msg.get("tool_calls") or [])
         for msg in messages
