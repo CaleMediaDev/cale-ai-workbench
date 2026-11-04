@@ -130,7 +130,7 @@ def repeated_tool_failures(messages):
                     and (evidence["failed_step_attempts"] >= 2
                          or evidence["repeated_check_failures"] >= 3)):
                 return True
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             pass
     recent = [message_text(msg.get("content")) for msg in messages
               if isinstance(msg, dict) and msg.get("role") == "tool"][-8:]
@@ -152,7 +152,7 @@ def repeated_tool_failures(messages):
             break
         try:
             result, _ = json.JSONDecoder().raw_decode(content.lstrip())
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             break
         if isinstance(result, dict) and (result.get("error") or
                                          result.get("isError") is True or
