@@ -249,6 +249,29 @@ class AutoRouteTests(unittest.TestCase):
         messages.append({"role": "tool", "content": "Exit code: 0\nBuild passed"})
         self.assertEqual(task_size(messages), "balanced")
 
+    def test_native_exit_codes_support_lf_and_crlf_and_clear_repair(self):
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=repr(newline)):
+                messages = [
+                    {"role": "user", "content": "Build and test a recipe app."},
+                    {"role": "assistant", "tool_calls": [
+                        {"function": {"name": "run_command"}},
+                    ]},
+                ]
+                messages.extend(
+                    {"role": "tool", "content": f"Exit code: {code}{newline}Build failed"}
+                    for code in (1, -1, 2)
+                )
+                self.assertTrue(repeated_tool_failures(messages))
+                self.assertEqual(task_size(messages), "deep")
+                self.assertIn("Do not repeat", repair_messages(messages)[0]["content"])
+                messages.append({
+                    "role": "tool", "content": f"Exit code: 0{newline}Build passed",
+                })
+                self.assertFalse(repeated_tool_failures(messages))
+                self.assertEqual(task_size(messages), "balanced")
+                self.assertIs(repair_messages(messages), messages)
+
     def test_missing_verifier_handoff_uses_deeper_model(self):
         messages = [{"role": "user", "content": "Build a recipe app."},
                     {"role": "user", "content": "[Completion gate: missing verifier] Create real checks."}]

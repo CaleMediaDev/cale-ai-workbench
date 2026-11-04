@@ -144,7 +144,7 @@ def repeated_tool_failures(messages):
         if content.startswith("Tool error:"):
             failures += 1
             continue
-        command = re.match(r"^Exit code: (-?\d+)(?:\n|$)", content)
+        command = re.match(r"^Exit code: (-?\d+)(?:\r?\n|$)", content)
         if command:
             if int(command.group(1)) != 0:
                 failures += 1

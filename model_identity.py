@@ -35,9 +35,11 @@ def configured_main_alias(root: Path) -> str:
         if in_model and not line[0].isspace():
             break
         if in_model:
-            match = re.fullmatch(r"\s+default:\s*([a-zA-Z0-9._-]+)\s*", line)
+            match = re.fullmatch(
+                r"\s+default:\s*(['\"]?)([a-zA-Z0-9._-]+)\1\s*", line
+            )
             if match:
-                candidate = match.group(1).lower()
+                candidate = match.group(2).lower()
                 return candidate if SAFE_ALIAS.fullmatch(candidate) else DEFAULT_MAIN
     return DEFAULT_MAIN
 

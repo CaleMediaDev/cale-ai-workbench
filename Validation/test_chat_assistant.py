@@ -249,6 +249,15 @@ def test_voice_replay_finds_saved_rap_without_another_model_call():
     assert chat_assistant.spoken_replay_target("say that again", history).startswith("Here")
 
 
+def test_voice_replay_skips_transient_local_check_message():
+    reply = {"role": "assistant", "content": "The lake is near the city."}
+    progress = {"role": "assistant", "content": "Let me check that locally…"}
+    assert chat_assistant.spoken_replay_target(
+        "say that again", [reply, progress]
+    ) == reply["content"]
+    assert chat_assistant.spoken_replay_target("say that again", [progress]) == ""
+
+
 def test_voice_replay_reads_unlabelled_generated_verse():
     history = [
         {"role": "assistant", "content": "The lake is bright tonight,\nThe city lights are in flight."},
