@@ -54,6 +54,26 @@ def test_ongoing_failures_do_not_extend_reported_episode(tmp_path):
     assert not diagnostics.record(tmp_path, "camera", "unavailable", now=new_start + 2)
 
 
+def test_failure_at_expiration_boundary_starts_new_episode(tmp_path):
+    start = 100
+    assert not diagnostics.record(tmp_path, "camera", "unavailable", now=start)
+    assert diagnostics.record(tmp_path, "camera", "unavailable", now=start + 1)
+
+    boundary = start + diagnostics.EPISODE_SECONDS
+    assert not diagnostics.record(tmp_path, "camera", "unavailable", now=boundary)
+    issue = diagnostics.issues(tmp_path)[0]
+    assert issue["first_seen"] == boundary
+    assert issue["last_seen"] == boundary
+    assert issue["count"] == 1
+    assert issue["reported"] == 0
+
+    assert diagnostics.record(tmp_path, "camera", "unavailable", now=boundary + 1)
+    assert not diagnostics.record(tmp_path, "camera", "unavailable", now=boundary + 2)
+    issue = diagnostics.issues(tmp_path)[0]
+    assert issue["count"] == 3
+    assert issue["reported"] == 1
+
+
 def test_issue_message_is_bounded_and_categories_are_validated(tmp_path):
     diagnostics.record(tmp_path, "speech", "x" * 1000, now=10)
     assert len(diagnostics.issues(tmp_path)[0]["detail"]) == diagnostics.MAX_DETAIL
