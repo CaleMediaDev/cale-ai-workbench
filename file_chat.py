@@ -112,7 +112,13 @@ def document_text(path: Path, max_scanned_pages: int = 6) -> str:
     """Extract documents and merge native/vision text in mixed-page PDFs."""
     from markitdown import MarkItDown
 
-    text = MarkItDown(enable_plugins=False).convert(str(path)).text_content or ""
+    try:
+        text = MarkItDown(enable_plugins=False).convert(str(path)).text_content or ""
+    except Exception:
+        if path.suffix.casefold() != ".pdf":
+            raise
+        # Native extraction failures must not prevent local scanned-PDF recovery.
+        text = ""
     if path.suffix.casefold() != ".pdf":
         return text
     python = ROOT / "Media/python/Scripts/python.exe"
