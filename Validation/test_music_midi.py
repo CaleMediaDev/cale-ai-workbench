@@ -11,6 +11,59 @@ import pytest
 import music_midi
 
 
+def test_staged_midi_publication_preserves_concurrent_output(tmp_path):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"original audio")
+    target = tmp_path / "notes"
+    destination = target / "guitar_basic_pitch.mid"
+
+    def render(args, **kwargs):
+        staging = Path(args[-1])
+        assert staging.parent == target
+        (staging / destination.name).write_bytes(b"MThd generated")
+        destination.write_bytes(b"another operation's MIDI")
+        return type("Done", (), {"returncode": 0})()
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path("python.exe")), \
+         patch.object(music_midi.subprocess, "run", side_effect=render):
+        with pytest.raises((ValueError, FileExistsError)):
+            music_midi.transcribe_to_midi(str(source), str(target))
+    assert destination.read_bytes() == b"another operation's MIDI"
+    assert list(target.iterdir()) == [destination]
+    assert source.read_bytes() == b"original audio"
+
+
+def test_failed_staged_publication_rolls_back_only_owned_midi(tmp_path):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"original audio")
+    target = tmp_path / "notes"
+    original_link = music_midi.os.link
+    attempts = []
+
+    def render(args, **kwargs):
+        staging = Path(args[-1])
+        (staging / "guitar.mid").write_bytes(b"MThd generated")
+        (staging / "z-extra.txt").write_bytes(b"generated metadata")
+        return type("Done", (), {"returncode": 0})()
+
+    def concurrent_second_publication(staged, destination):
+        attempts.append(destination)
+        if len(attempts) == 2:
+            destination.write_bytes(b"another operation's metadata")
+        return original_link(staged, destination)
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path("python.exe")), \
+         patch.object(music_midi.subprocess, "run", side_effect=render), \
+         patch.object(music_midi.os, "link", side_effect=concurrent_second_publication):
+        with pytest.raises(FileExistsError):
+            music_midi.transcribe_to_midi(str(source), str(target))
+    assert not (target / "guitar.mid").exists()
+    assert (target / "z-extra.txt").read_bytes() == b"another operation's metadata"
+    assert len(list(target.iterdir())) == 1
+
+
 def test_transcription_rejects_missing_or_wrong_audio(tmp_path):
     with pytest.raises(FileNotFoundError):
         music_midi.transcribe_to_midi(str(tmp_path / "missing.wav"), str(tmp_path / "notes"))
@@ -54,9 +107,11 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
     target = tmp_path / "notes"
 
     def render(args, **_kwargs):
-        assert args[-2:] == [str(source), str(target)]
-        (target / "guitar_basic_pitch.mid").write_bytes(b"MThd" + b"\x00" * 32)
-        (target / "guitar_note_events.csv").write_text(
+        assert args[-2] == str(source)
+        staging = Path(args[-1])
+        assert staging.parent == target
+        (staging / "guitar_basic_pitch.mid").write_bytes(b"MThd" + b"\x00" * 32)
+        (staging / "guitar_note_events.csv").write_text(
             "start_time_s,end_time_s,pitch_midi,velocity,pitch_bend\n\n"
             "0.0,1.0,69,85,1,2,3\n\n"
         )
@@ -73,6 +128,38 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
         row = next(csv.DictReader(stream))
     assert list(row) == music_midi.NOTE_COLUMNS
     assert json.loads(row["pitch_bend"]) == [1.0, 2.0, 3.0]
+
+
+def test_failed_transcription_with_partial_output_can_be_retried(tmp_path):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"audio")
+    target = tmp_path / "notes"
+    attempts = []
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        attempts.append(staging)
+        (staging / "guitar_basic_pitch.mid").write_bytes(b"MThd")
+        failed = len(attempts) == 1
+        return type("Done", (), {
+            "returncode": 1 if failed else 0,
+            "stdout": "", "stderr": "inference failed" if failed else "",
+        })()
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), patch.object(
+        music_midi, "install", return_value=Path("python.exe")
+    ), patch.object(music_midi.subprocess, "run", side_effect=render):
+        with pytest.raises(RuntimeError, match="inference failed"):
+            music_midi.transcribe_to_midi(str(source), str(target))
+        assert list(target.iterdir()) == []
+        result = music_midi.transcribe_to_midi(str(source), str(target))
+
+    assert len(attempts) == 2
+    assert all(not path.exists() for path in attempts)
+    assert Path(result["midi_path"]) == target / "guitar_basic_pitch.mid"
+    assert Path(result["midi_path"]).read_bytes() == b"MThd"
+    assert result["files"] == [result["midi_path"]]
+    assert source.read_bytes() == b"audio"
 
 
 @pytest.mark.parametrize("bends", ["1,2,3", "0"])
