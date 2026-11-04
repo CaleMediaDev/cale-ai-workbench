@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import runtime_diagnostics as diagnostics
 
@@ -40,6 +42,24 @@ def test_issue_message_is_bounded_and_categories_are_validated(tmp_path):
         pass
     else:
         raise AssertionError("Invalid category should be rejected")
+
+
+@pytest.mark.parametrize("timestamp", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("sample_clock", [False, True])
+def test_nonfinite_timestamp_does_not_discard_episode(tmp_path, monkeypatch, timestamp, sample_clock):
+    assert not diagnostics.record(tmp_path, "camera", "unavailable", now=100)
+    original = diagnostics.issues(tmp_path)
+
+    with pytest.raises(ValueError, match="finite failure timestamp"):
+        if sample_clock:
+            monkeypatch.setattr(diagnostics.time, "time", lambda: timestamp)
+            diagnostics.record(tmp_path, "camera", "unavailable")
+        else:
+            diagnostics.record(tmp_path, "camera", "unavailable", now=timestamp)
+
+    assert diagnostics.issues(tmp_path) == original
+    assert diagnostics.record(tmp_path, "camera", "unavailable", now=101)
+    assert not diagnostics.record(tmp_path, "camera", "unavailable", now=102)
 
 
 def test_backward_clock_starts_a_new_reportable_episode(tmp_path):

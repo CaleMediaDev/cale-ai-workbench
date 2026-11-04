@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from contextlib import contextmanager
+from math import isfinite
 from pathlib import Path
 
 EPISODE_SECONDS = 60 * 60
@@ -43,6 +44,8 @@ def record(state: Path, kind: str, detail: str, now: float | None = None) -> boo
         # Sample the clock in transaction order so a delayed recorder cannot
         # mistake another recorder's newer timestamp for a clock correction.
         now = time.time() if now is None else now
+        if not isfinite(now):
+            raise ValueError("A finite failure timestamp is required")
         row = db.execute(
             "SELECT first_seen,last_seen,count,reported FROM issues WHERE kind=?", (kind,)
         ).fetchone()
