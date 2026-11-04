@@ -16,6 +16,37 @@ def test_key_estimate_declines_empty_input():
     assert music_analysis._best_key(np.zeros(12)) is None
 
 
+def test_analysis_reports_only_finite_positive_tempos(tmp_path, monkeypatch):
+    import json
+    import sys
+    from types import SimpleNamespace
+
+    source = tmp_path / "tempo.wav"
+    source.touch()
+    librosa_stub = SimpleNamespace(
+        get_duration=lambda *, path: 1.0,
+        load=lambda *args, **kwargs: (np.full(22050, 0.1), 22050),
+        effects=SimpleNamespace(harmonic=lambda signal: signal),
+        feature=SimpleNamespace(chroma_stft=lambda **kwargs: np.zeros((12, 44))),
+        beat=SimpleNamespace(),
+    )
+    monkeypatch.setitem(sys.modules, "librosa", librosa_stub)
+
+    for tempo, expected in (
+        (float("nan"), None),
+        (float("inf"), None),
+        (float("-inf"), None),
+        (-120.0, None),
+        (0.0, None),
+        (120.0, 120.0),
+    ):
+        for estimate in (tempo, np.array([tempo])):
+            librosa_stub.beat.beat_track = lambda **kwargs: (estimate, np.array([0, 20]))
+            result = music_analysis.analyze_music(str(source))
+            assert result["tempo_bpm"] == expected
+            json.dumps(result, allow_nan=False)
+
+
 def test_analysis_records_same_chord_returning_after_silence(tmp_path, monkeypatch):
     import sys
     from types import SimpleNamespace
