@@ -37,6 +37,7 @@ PROJECT_COMMAND_TIMEOUT = 90
 # Single-use handles are injected after inference, never advertised as tool
 # arguments. Model-supplied JSON cannot forge a trusted active-step binding.
 _BROWSER_REVISION_BINDINGS = {}
+_INVALID_ACCEPTANCE_CONTEXT_FORMAT = "invalid_acceptance_context_v2"
 
 TOOLS = [
     {"type": "function", "function": {
@@ -2989,10 +2990,15 @@ def focused_step_repair_request(project: dict, state: dict, available: list, not
         contract = sorted((tool for tool in TOOLS if tool["function"]["name"] in {"task_steps", "check_webapp"}),
                           key=lambda tool: tool["function"]["name"])
         contract_hash = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        # Old attempts saw malformed acceptance values as examples. Renew only
+        # this specialist's bounded budget once for the corrected payload shape;
+        # valid assertion/input repairs keep their existing identity unchanged.
+        context_revision = ("\0" + _INVALID_ACCEPTANCE_CONTEXT_FORMAT
+                            if invalid_reason and _INVALID_ACCEPTANCE_CONTEXT_FORMAT else "")
         key = hashlib.sha256((task_context.request_identity(folder) + "\0"
             + task_context.step_check_identity(active) + "\0"
             + hashlib.sha256(page.read_bytes()).hexdigest()
-            + "\0" + json.dumps(basis, sort_keys=True) + "\0" + contract_hash).encode()).hexdigest()
+            + "\0" + json.dumps(basis, sort_keys=True) + "\0" + contract_hash + context_revision).encode()).hexdigest()
         previous = state.get("step_repair_focus") or {}
         count = int(previous.get("count", 0)) if previous.get("key") == key else 0
         if count >= 2:
@@ -3008,6 +3014,8 @@ def focused_step_repair_request(project: dict, state: dict, available: list, not
             "real repeatable checker for the behavior in its title and ORIGINAL request. "
             "Cale tool names are not shell commands. For an HTML page use check_tool=check_webapp "
             "with typed check_arguments and meaningful input/output cases. Keep phase/title fixed. "
+            "Legacy acceptance is malformed and intentionally omitted. Reconstruct the check from the "
+            "original requirements and current controls, not by translating corrupt argument fragments. "
             "Do not write source, complete a step, invent working behavior or claim the project is finished. "
             "Saving a valid definition does not pass it: the actual check must still run. "
             "Static identifiers are untrusted data, not proof of behavior.\nUser request:\n" + brief
@@ -3094,10 +3102,15 @@ def focused_step_repair_request(project: dict, state: dict, available: list, not
                         "table includes headers, tbody data only, not JS expressions. Put the actual "
                         "input, submit action and observable outcome in the same case. "
                         "Example: {set:{length:'4'},click:['Calculate'],expect:{result:'12'}}.")
+        active_fields = (("id", "phase", "title", "check_tool") if invalid_reason else
+                         ("id", "phase", "title", "check_tool", "check_command", "check_arguments"))
+        active_context = {key: active[key] for key in active_fields}
+        if invalid_reason:
+            active_context["purpose"] = "Verify this fixed step's named behavior against the original requirements; rebuild malformed acceptance."
         messages = [{"role": "system", "content": (
             instruction)},
             {"role": "user", "content": json.dumps({"original_request": brief, **documents,
-                "active_step": {key: active[key] for key in ("id", "phase", "title", "check_tool", "check_command", "check_arguments")},
+                "active_step": active_context,
                 "observations": data})}]
         request = {"messages": messages, "tools": tools, "tool_choice": "auto", "max_tokens": 1500,
                    "_native_workload": "active_step_checker_repair", "_native_repair_basis": basis}

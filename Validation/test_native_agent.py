@@ -6448,3 +6448,74 @@ def test_row_counts_host_repair_budget_renews_only_when_base_checker_contract_ch
         assert native_agent.focused_step_repair_request(item, state, offered, None, 65536)
         assert native_agent.focused_step_repair_request(item, state, offered, None, 65536) is None
     assert task_context.step_status(folder) == before and (folder / "index.html").read_text() == source
+
+
+def invalid_context_fixture(tmp_path):
+    item = project(tmp_path / "invalid-context")
+    item["brief"] = "Build a form that adds valid amounts and rejects negative amounts."
+    folder = Path(item["folder"])
+    (folder / "index.html").write_text('<form id="form"><input id="amount" type="number"><button id="add">Add</button></form><p id="error"></p>')
+    (folder / "AGENTS.md").write_text("Preserve existing application behavior.")
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("Also keep keyboard submission working.")
+    active = task_context.plan_steps(folder, [{"phase": "Add", "title": "Add valid input", "check_command": "exit 1"}])["active"]
+    broken = {"path": "index.html", "cases": [{"visible": ["STALE_ID_SENTINEL"],
+        "expect": {"rows.length": "MALFORMED_EXPECT_VALUE_SENTINEL"}}]}
+    with project_memory.connection(folder) as conn:
+        conn.execute("UPDATE task_steps SET check_tool='check_webapp',check_command=?,check_arguments=?,evidence=? WHERE id=?",
+            ("MALFORMED_COMMAND_SENTINEL", json.dumps(broken), "MALFORMED_EVIDENCE_SENTINEL", active["id"]))
+    return item, folder, task_context.step_status(folder)["active"]
+
+
+def test_invalid_acceptance_context_omits_corrupt_arguments_but_keeps_requirements(tmp_path):
+    item, folder, active = invalid_context_fixture(tmp_path)
+    before = task_context.step_status(folder)
+    source = (folder / "index.html").read_bytes()
+    state = {"step_focus_turns": 1}
+    offered = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+    request = native_agent.focused_step_repair_request(item, state, offered, None, 65536)
+    assert request
+    messages = json.dumps(request["messages"])
+    assert all(token not in messages for token in ("MALFORMED_EXPECT_VALUE_SENTINEL", "MALFORMED_COMMAND_SENTINEL", "MALFORMED_EVIDENCE_SENTINEL", "STALE_ID_SENTINEL"))
+    data = json.loads(request["messages"][1]["content"])
+    assert data["original_request"] == item["brief"]
+    assert "keyboard submission" in data["user_followups"] and "existing application behavior" in data["project_rules"]
+    assert data["active_step"]["id"] == active["id"] and data["active_step"]["title"] == active["title"]
+    assert data["active_step"]["phase"] == active["phase"] and data["active_step"]["check_tool"] == "check_webapp"
+    assert "purpose" in data["active_step"] and "check_arguments" not in data["active_step"] and "check_command" not in data["active_step"]
+    assert "rows.length" in data["observations"]["invalid_acceptance"]
+    assert {"id": "amount", "tag": "input", "type": "number"} in data["observations"]["static_controls"]
+    assert task_context.step_status(folder) == before and (folder / "index.html").read_bytes() == source
+
+
+def test_invalid_acceptance_context_new_format_renews_exhausted_budget_once(tmp_path):
+    item, folder, active = invalid_context_fixture(tmp_path)
+    before = task_context.step_status(folder)
+    state = {"step_focus_turns": 1}
+    offered = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+    with patch.object(native_agent, "_INVALID_ACCEPTANCE_CONTEXT_FORMAT", ""):
+        assert native_agent.focused_step_repair_request(item, state, offered, None, 65536)
+        assert native_agent.focused_step_repair_request(item, state, offered, None, 65536)
+        old_key = state["step_repair_focus"]["key"]
+        assert native_agent.focused_step_repair_request(item, state, offered, None, 65536) is None
+    assert native_agent.focused_step_repair_request(item, state, offered, None, 65536)
+    assert state["step_repair_focus"]["key"] != old_key and state["step_repair_focus"]["count"] == 1
+    assert native_agent.focused_step_repair_request(item, state, offered, None, 65536)
+    assert native_agent.focused_step_repair_request(item, state, offered, None, 65536) is None
+    assert task_context.step_status(folder) == before
+
+
+def test_invalid_acceptance_context_does_not_change_valid_input_repair_payload_or_budget(tmp_path):
+    item, folder, source, bad, active, notice, runtime_state = noneditable_repair_integration_fixture(tmp_path, "valid-input-context")
+    before = task_context.step_status(folder)
+    state = {"step_focus_turns": 1}
+    offered = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+    first = native_agent.focused_step_repair_request(item, state, offered, notice, 65536)
+    data = json.loads(first["messages"][1]["content"])
+    assert data["active_step"]["check_arguments"] == bad
+    assert data["active_step"]["check_arguments"]["cases"][0]["set"]["units"] == "7.2"
+    key = state["step_repair_focus"]["key"]
+    with patch.object(native_agent, "_INVALID_ACCEPTANCE_CONTEXT_FORMAT", "future-invalid-only-version"):
+        assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536)
+        assert state["step_repair_focus"]["key"] == key and state["step_repair_focus"]["count"] == 2
+        assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536) is None
+    assert task_context.step_status(folder) == before and (folder / "index.html").read_text() == source
