@@ -57,7 +57,7 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
         raise ValueError("Choose an existing WAV, MP3, FLAC, M4A or OGG source song.")
     if not reference.is_file() or reference.suffix.lower() not in SUPPORTED:
         raise ValueError("Choose an existing WAV, MP3, FLAC, M4A or OGG reference song.")
-    if source == reference:
+    if source.samefile(reference):
         raise ValueError("Choose a different reference song to match.")
     if output.suffix.lower() != ".wav":
         raise ValueError("The mastered output must be a WAV file.")
