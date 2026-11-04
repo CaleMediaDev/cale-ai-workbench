@@ -110,6 +110,13 @@ def calculate(question: str) -> str | None:
         return None
     try:
         tree = ast.parse(normalized, mode="eval")
+        # Reject unsupported syntax before any sibling subtree is evaluated.
+        allowed_nodes = (
+            ast.Expression, ast.Constant, ast.UnaryOp, ast.BinOp,
+            ast.UAdd, ast.USub, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow,
+        )
+        if any(not isinstance(node, allowed_nodes) for node in ast.walk(tree)):
+            return None
         return f"{expression} = {_display(_evaluate(tree.body, normalized))}"
     except (SyntaxError, ValueError, OverflowError):
         return None
