@@ -52,6 +52,25 @@ def test_document_check_saves_source_bound_read_only_verifier(tmp_path):
                           timeout=30).returncode != 0
 
 
+@pytest.mark.parametrize("location", ["source", "report"])
+@pytest.mark.parametrize("text", ["éPayment due", "Payment dueé"])
+def test_document_check_rejects_unicode_word_fragments(tmp_path, location, text):
+    folder = _project(tmp_path)
+    source_text = text if location == "source" else "Payment due"
+    report_text = text if location == "report" else "Payment due"
+    (folder / "terms.txt").write_text(source_text, encoding="utf-8")
+    (folder / "summary.md").write_text(report_text, encoding="utf-8")
+    spec = {"source_path": "terms.txt", "report_path": "summary.md",
+            "facts": [{"source_text": "Payment due", "report_text": "Payment due"}]}
+    with patch.object(document_check.project_documents, "inspect",
+                      return_value={"text": source_text}):
+        result = document_check.check(folder, spec)
+    expected = ("Fact 1: source evidence was not found" if location == "source"
+                else "Fact 1: report text was not found")
+    assert result["passed"] is False
+    assert result["errors"] == [expected]
+
+
 def test_document_check_rejects_wrong_amount_and_prefix_match(tmp_path):
     folder = _project(tmp_path)
     wrong = {**SPEC, "calculations": [{**SPEC["calculations"][0],

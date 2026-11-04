@@ -36,10 +36,10 @@ def _phrase(value: str) -> str:
 def _present(text: str, phrase: str) -> bool:
     normalized = " ".join(text.split())
     phrase = _phrase(phrase)
-    boundary = r"(?![A-Za-z0-9])"
+    boundary = r"(?![^\W_])"
     if phrase[-1].isdigit():
-        boundary = r"(?![A-Za-z0-9]|[.,][0-9])"
-    return bool(re.search(r"(?<![A-Za-z0-9])" + re.escape(phrase) +
+        boundary = r"(?![^\W_]|[.,][0-9])"
+    return bool(re.search(r"(?<![^\W_])" + re.escape(phrase) +
                           boundary, normalized))
 
 
