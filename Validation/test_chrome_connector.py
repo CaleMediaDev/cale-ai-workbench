@@ -30,6 +30,20 @@ def test_pairing_uses_matching_local_companion(tmp_path, monkeypatch, version_li
     assert calls[0][1]["capture_output"]
 
 
+@pytest.mark.parametrize("version_line", [
+    'version: "0.2.6"\n',
+    "version: '0.2.6'\n",
+    'version: "0.2.6" # local companion\n',
+])
+def test_installed_version_accepts_quoted_yaml(tmp_path, monkeypatch, version_line):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text(version_line, encoding="utf-8")
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    assert chrome_connector.installed_version() == "0.2.6"
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
