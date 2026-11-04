@@ -187,6 +187,24 @@ def test_media_probe_rejects_non_object_json_without_crashing(tmp_path, stdout, 
     assert result == {"ok": False, "detail": "Check failed"}
 
 
+@pytest.mark.parametrize("stdout", ["[]", "null", '"unexpected"', "1"])
+def test_optional_checks_save_results_when_browser_status_is_not_an_object(tmp_path, stdout):
+    plugin = tmp_path / "data/plugins/hermes-connector"
+    plugin.mkdir(parents=True)
+    completed = readiness_checklist.subprocess.CompletedProcess(
+        args=[], returncode=0, stdout=stdout, stderr="")
+    with (patch.object(readiness_checklist.subprocess, "run", return_value=completed),
+          patch.object(readiness_checklist, "_media_probe", return_value={"ok": False})):
+        result = readiness_checklist.run_optional_checks(tmp_path)
+    assert result["browser"] == {
+        "ok": False,
+        "detail": "Chrome extension is not connected yet",
+    }
+    saved = json.loads((tmp_path / "LongTasks/readiness-probes.json").read_text(
+        encoding="utf-8"))
+    assert saved == result
+
+
 def test_local_ai_probe_requires_a_completed_generated_token():
     with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
             b'{"done":true,"eval_count":0}')):
