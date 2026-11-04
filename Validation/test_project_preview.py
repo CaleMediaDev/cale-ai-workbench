@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import project_preview as preview
 
@@ -79,6 +80,22 @@ class ProjectPreviewTests(unittest.TestCase):
             except (OSError, NotImplementedError) as error:
                 self.skipTest(f"Symlinks unavailable: {error}")
             self.assertEqual(preview.source(folder), fallback.as_uri())
+
+    def test_declaration_stat_error_does_not_block_static_html_fallback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary).resolve()
+            fallback = folder / "index.html"
+            fallback.write_text("hello", encoding="utf-8")
+            declaration = folder / ".local-ai/preview.json"
+            original_is_file = Path.is_file
+
+            def is_file(path):
+                if path == declaration:
+                    raise PermissionError("Declaration directory is inaccessible")
+                return original_is_file(path)
+
+            with patch.object(Path, "is_file", new=is_file):
+                self.assertEqual(preview.source(folder), fallback.as_uri())
 
     def test_declaration_and_static_html_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:
