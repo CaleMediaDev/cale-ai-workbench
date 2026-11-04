@@ -80,6 +80,24 @@ def test_direct_image_job_survives_starting_process_and_verifies_pixels(tmp_path
     assert quick_image.image_job_status(tmp_path, job_id)["status"] == "complete"
 
 
+def test_image_job_missing_runtime_records_launch_failure(tmp_path):
+    output = tmp_path / "dog.png"
+    try:
+        quick_image.start_image_job(tmp_path, "a dog", str(output))
+        assert False, "Expected RuntimeError for missing Toolbox runtime"
+    except RuntimeError as exc:
+        assert str(exc) == "The local Toolbox runtime is missing."
+
+    jobs = list((tmp_path / "LongTasks/image-jobs").glob("*.json"))
+    assert len(jobs) == 1
+    info = quick_image.image_job_status(tmp_path, jobs[0].stem)
+    assert info["status"] == "error"
+    assert info["current"] == "The local Toolbox runtime is missing."
+    with patch.object(quick_image, "_launch_job") as launch:
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_not_called()
+
+
 def test_image_job_pause_and_resume_reuse_same_id(tmp_path):
     job_id = "a" * 32
     quick_image._write_job(tmp_path, job_id, {
