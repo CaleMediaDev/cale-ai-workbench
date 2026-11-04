@@ -1,0 +1,36 @@
+{
+  "release": "0.5.504",
+  "reviewed_candidate": "8926ee782d233fea469dfa3fb4c3971ca1cc3f71",
+  "base": "e53d07df1beaf86b6b44a1d5de3d27d923f17ba8",
+  "feature": "Durable goal-bound recovery through existing tools and tested project-local helpers",
+  "limits": {"reserved_recovery_turns": 6, "executed_scoped_calls_per_turn": 4, "distinct_method_receipts": 24, "runtime_manifest_files": 250},
+  "validation": {
+    "focused": "49 passed, 1 skipped, 8 subtests passed in 55.81s",
+    "independent_review": "11 passed, 1 file-symlink skip; real Windows directory junction guard passed",
+    "memory_module": "21 passed, 5 skipped, 8 subtests passed",
+    "updater": "30 passed in 0.86s",
+    "before_after_regressions": ["Missing module never triggered discovery on public503", "Permissions/authentication barriers wrongly entered generic recovery", "Generic recovery displaced an eligible checker specialist"]
+  },
+  "actual_local_model_trial": {
+    "model": "cale-qwen36",
+    "scenario": "Existing billing module imports an absent local helper; original tax rounding and formatting acceptances include half-cent and fractional-cent inputs",
+    "helper_seeded": false,
+    "model_stub": false,
+    "cloud_inference_permitted": false,
+    "first_run": {"seconds": 183.16, "model_calls": 6, "result": "Inference budget ended after original steps 2/2 and real verifier pass; overall task not yet finished", "known_prompt_tokens": 39603, "known_completion_tokens": 571, "usage_incomplete": true},
+    "persisted_resume": {"seconds": 79.66, "model_calls": 5, "initial_worker_turn": 6, "final_worker_turn": 11, "result": "Task done, original steps remain 2/2, notes written", "known_prompt_tokens": 42514, "known_completion_tokens": 485},
+    "state_or_budgets_reset": false,
+    "independent_final_verifier": "9/9 cases passed; process exit 0",
+    "additional_holdout": "100000 positive mill-valued subtotal/rate combinations passed against an independent Decimal rounding calculation",
+    "scope_limit": "One controlled local task and bounded input families; not a guarantee of general model correctness or first-attempt completion. Timings are two active runs, not continuous wall-clock time."
+  },
+  "invariants": [
+    "Original exact host acceptance with stable source/goal earns recovery; helper/process success alone does not",
+    "Original task completion gates remain separate",
+    "Existing focused checker specialists take priority without charging unused recovery turns",
+    "Deleted or changed task ownership prevents obsolete actions",
+    "Account, permission, offline, hardware and spending controls remain in force",
+    "No bundled keys, automatic model promotion or arbitrary fetched-repository execution",
+    "Experimental scalar browser redraft and JavaScript context changes are excluded"
+  ]
+}

@@ -4,7 +4,7 @@
 
 Created by [Cale Media](https://calemedia.com/). New general tasks use Cale's native worker with Ollama and the existing model router; older tasks can still finish through Hermes Agent.
 
-Release 0.5.503 simplifies home page scrolling. Task cards flow with the page instead of sitting inside a second scrolling panel. Chat history stays independently scrollable, with its scrollbar hidden when the conversation fits. The model-health fixes from 0.5.502 remain included; their [validation receipt](benchmarks/results/model-health-502-20261104.json) records the sustained-sampling and SQLite reader checks.
+Release 0.5.504 adds durable capability recovery: when a task encounters a missing tool or dependency, Cale can search its local tools, create and test a small helper, then retry the original acceptance checks. Recovery attempts survive restarts, and an eligible focused checker repair takes priority over broad source changes. Permission/account barriers, resource settings and the original completion checks remain in force. This helps Cale recover; it does not guarantee that a model-generated solution is correct for every possible input. The simpler home page scrolling from 0.5.503 and model-health fixes from 0.5.502 remain included.
 
 Model-building donations from 0.5.501 remain available. Select Local and “Also train small specialist models on CPU” in Donate AI power. Experiments use pinned public data, keep weak results local, and submit screened candidates as inactive draft contributions for review. Training time is shown separately from inference tokens. The [training evidence](benchmarks/results/model-donations-501-20261104.json) records the real worker check and its rejected candidate; no newly qualified routing model is installed.
 
