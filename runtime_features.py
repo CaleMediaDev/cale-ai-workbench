@@ -160,7 +160,10 @@ def start_background() -> bool:
             updated = 0
     except (TypeError, ValueError, OverflowError):
         updated = 0
-    age = time.time() - updated
+    now = time.time()
+    if updated > now:
+        updated = 0
+    age = now - updated
     try:
         attempts = max(0, int(current.get("attempts", 0)))
     except (TypeError, ValueError, OverflowError):
