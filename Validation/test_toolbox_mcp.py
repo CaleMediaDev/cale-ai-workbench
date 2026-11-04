@@ -58,6 +58,40 @@ def test_cancelled_media_call_stops_and_reaps_worker(tmp_path, already_exited):
     asyncio.run(check())
 
 
+@pytest.mark.parametrize("exit_state", ["running", "already_exited", "during_kill"])
+def test_media_timeout_reaps_worker_and_preserves_timeout(tmp_path, exit_state):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    cleanup = []
+
+    class FakeProcess:
+        returncode = 0 if exit_state == "already_exited" else None
+
+        async def communicate(self, data):
+            await asyncio.Future()
+
+        def kill(self):
+            cleanup.append("kill")
+            if exit_state == "during_kill":
+                raise ProcessLookupError("Worker exited just before kill")
+
+        async def wait(self):
+            cleanup.append("wait")
+            self.returncode = -1
+            return self.returncode
+
+    async def fake_spawn(*args, **kwargs):
+        return FakeProcess()
+
+    with (patch.object(toolbox_mcp, "ROOT", tmp_path),
+          patch.object(toolbox_mcp.asyncio, "create_subprocess_exec", fake_spawn)):
+        with pytest.raises(TimeoutError, match="Local generate_image exceeded 0 seconds"):
+            asyncio.run(toolbox_mcp.media_run("generate_image", timeout=0))
+
+    assert cleanup == (["wait"] if exit_state == "already_exited" else ["kill", "wait"])
+
+
 def test_3d_generation_and_cpu_geometry_are_discoverable_and_callable():
     found = toolbox_mcp.toolbox_search("3d model mesh")
     names = {item["name"] for item in found["tools"]}
