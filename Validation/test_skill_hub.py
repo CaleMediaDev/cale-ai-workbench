@@ -191,11 +191,30 @@ class SkillHubTests(unittest.TestCase):
                         skill_hub.install(identifier)
             run.assert_not_called()
 
+    def test_empty_preview_does_not_authorize_installation(self):
+        identifier = "skills-sh/example/accessibility"
+        payload = json.dumps([{"identifier": identifier, "name": "accessibility"}])
+        for preview in ("", " \r\n\t"):
+            with self.subTest(preview=repr(preview)):
+                with patch.object(skill_hub, "_run", side_effect=[payload, preview]) as run:
+                    skill_hub.search("accessibility")
+                    with self.assertRaisesRegex(ValueError, "empty"):
+                        skill_hub.inspect(identifier)
+                    self.assertNotIn(identifier, skill_hub.INSPECTED)
+                    with self.assertRaisesRegex(ValueError, "Search and inspect"):
+                        skill_hub.install(identifier)
+                    self.assertEqual(run.call_count, 2)
+                with patch.object(skill_hub, "_run", side_effect=["Skill preview", "Installed"]):
+                    self.assertEqual(skill_hub.inspect(identifier)["preview"], "Skill preview")
+                    self.assertEqual(skill_hub.install(identifier)["result"], "Installed")
+
     def test_failed_reinspection_invalidates_previous_inspection(self):
         identifier = "skills-sh/example/workflows/accessibility"
         for outcome, error in (
             (RuntimeError("Preview unavailable"), RuntimeError),
             ("x" * 30001, ValueError),
+            ("", ValueError),
+            (" \r\n\t", ValueError),
         ):
             with self.subTest(error=error.__name__):
                 skill_hub.SEEN[identifier] = skill_hub.time.monotonic()
