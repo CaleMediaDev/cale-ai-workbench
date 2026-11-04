@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 import win32crypt
-from jsonschema.exceptions import SchemaError
+from jsonschema.exceptions import SchemaError, ValidationError
 from jsonschema.validators import validator_for
 
 import cloud_providers
@@ -459,6 +459,53 @@ def argument_repair_request(payload, error):
     return repair
 
 
+def local_json_repair_request(guarded):
+    """Use Ollama's JSON-schema output without relying on tool_choice support.
+
+    The guarded single-tool request remains the authorization/validation
+    contract; the model only emits that tool's argument object here.
+    https://github.com/ollama/ollama/blob/main/docs/api/openai-compatibility.mdx
+    """
+    schema = guarded["tools"][0]["function"]["parameters"]
+    repair = {**guarded, "tools": [], "response_format": {"type": "json_schema",
+        "json_schema": {"name": "cale_tool_arguments", "schema": schema}},
+        "messages": [*guarded["messages"], {"role": "user", "content": (
+            "Return only the JSON argument object matching the output schema. "
+            "No function-name wrapper, tool call, code fence, or commentary. "
+            "The runtime validates it before calling the already-selected tool.")}]}
+    repair.pop("tool_choice", None)
+    return repair
+
+
+def validated_json_tool_reply(result, guarded, repair):
+    """Wrap only valid selected-tool arguments; never execute a partial reply."""
+    choices = result.get("choices", []) if isinstance(result, dict) else []
+    message = choices[0].get("message", {}) if choices and isinstance(choices[0], dict) else {}
+    # Tolerate an older backend returning an actual call, but still require
+    # the exact permitted function and its original schema.
+    if isinstance(message, dict) and message.get("tool_calls"):
+        return valid_completion(result, guarded)
+    result = valid_completion(result, repair)
+    name = guarded["tools"][0]["function"]["name"]
+    content = result["choices"][0]["message"]["content"]
+    arguments = None
+    try:
+        arguments = json.loads(content)
+        if not isinstance(arguments, dict):
+            raise ValueError("Expected an argument object")
+        encoded = json.dumps(arguments, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        if not isinstance(arguments, dict) and is_refusal(result):
+            return result  # Plain refusals remain text, never a tool effect.
+        raise ToolArgumentError(name, ValidationError("Invalid argument object", validator="type",
+            validator_value="object", instance=content)) from exc
+    reply = {**result, "choices": [{**result["choices"][0], "message": {
+        "role": "assistant", "content": None, "tool_calls": [{
+            "id": "argument-repair-"+secrets.token_hex(8), "type": "function",
+            "function": {"name": name, "arguments": encoded}}]}}]}
+    return valid_completion(reply, guarded)
+
+
 def valid_completion(result, request=None):
     """Validate model output before a worker can act on its tool calls."""
     if not isinstance(result, dict) or result.get("error") or not result.get("choices"):
@@ -657,7 +704,9 @@ def estimated_input_tokens(payload):
 
     messages = payload.get("messages", [])
     tools = payload.get("tools", [])
-    return max(1, content_tokens(messages) + content_tokens(tools) + 16 * len(messages))
+    output_schema = payload.get("response_format")
+    schema_tokens = len(json.dumps(output_schema, ensure_ascii=False).encode("utf-8")) // 3 if output_schema else 0
+    return max(1, content_tokens(messages) + content_tokens(tools) + schema_tokens + 16 * len(messages))
 
 
 def estimated_context(payload):
@@ -1244,14 +1293,15 @@ class Router:
                         "http://127.0.0.1:11434/v1/chat/completions", retry, timeout=120), payload)
                     recovered_empty = True
                 except ToolArgumentError as error:
-                    repair = argument_repair_request(local, error)
+                    guarded = argument_repair_request(local, error)
+                    repair = local_json_repair_request(guarded)
                     context = getattr(self, "model_contexts", {}).get(selected_model, 0)
                     if schema_repair_attempted or estimated_context(repair) > context:
                         raise
                     schema_repair_attempted = True
                     check_cancel()
-                    result = valid_completion(post(
-                        "http://127.0.0.1:11434/v1/chat/completions", repair, timeout=120), repair)
+                    result = validated_json_tool_reply(post(
+                        "http://127.0.0.1:11434/v1/chat/completions", repair, timeout=120), guarded, repair)
                     corrected_schema = bool(result["choices"][0]["message"].get("tool_calls"))
                 record(
                     "local",

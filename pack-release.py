@@ -29,6 +29,8 @@ extras = [
     "benchmarks/results/click-diagnostics-20261103.json",
     "benchmarks/results/report-review-20261104.json",
     "benchmarks/results/checker-recovery-20261104.json",
+    "benchmarks/local_tool_repair.py",
+    "benchmarks/results/local-tool-repair-20261104.json",
     # Developer evidence stays in source ZIPs, not the installed runtime's
     # bounded allowlist. Older updaters accept at most 250 manifest entries.
     "benchmarks/results/webapp-auto-20261103.json",

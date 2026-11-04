@@ -106,13 +106,63 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(request, original)
         self.assertEqual(post.call_count, 2)
         repair = post.call_args_list[1].args[1]
-        self.assertIn('steps', repair["messages"][-1]["content"])
-        self.assertIn('array', repair["messages"][-1]["content"])
-        self.assertIn('No tool or source edit ran', repair["messages"][-1]["content"])
+        feedback = "\n".join(message.get("content", "") for message in repair["messages"][-2:])
+        self.assertIn('steps', feedback)
+        self.assertIn('array', feedback)
+        self.assertIn('No tool or source edit ran', feedback)
         self.assertEqual(repair["max_tokens"], 1000)
         self.assertEqual(post.call_args_list[1].kwargs["timeout"], 120)
-        self.assertEqual(repair["tool_choice"], {"type": "function", "function": {"name": "save_plan"}})
+        self.assertNotIn("tool_choice", repair)
+        self.assertEqual(repair["tools"], [])
+        self.assertEqual(repair["response_format"]["type"], "json_schema")
         self.assertEqual(router.last_local_model, cloud.LOCAL_MODEL)
+
+    def test_local_schema_repair_validates_json_arguments_before_wrapping_the_call(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        raw = {**ANSWER, "choices": [{**ANSWER["choices"][0], "message": {
+            "role": "assistant", "content": '{"steps":[1,2]}'}}]}
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536}
+        with patch.object(cloud, "post", side_effect=[argument_reply("[1,2]"), raw]) as post:
+            result = router.complete(ARGUMENT_REQUEST)
+        call = result["choices"][0]["message"]["tool_calls"][0]
+        self.assertEqual(call["function"]["name"], "save_plan")
+        self.assertEqual(json.loads(call["function"]["arguments"]), {"steps": [1, 2]})
+        repair = post.call_args_list[1].args[1]
+        self.assertEqual(repair["response_format"]["json_schema"]["schema"], ARGUMENT_REQUEST["tools"][0]["function"]["parameters"])
+        self.assertEqual(repair["tools"], [])
+
+    def test_local_json_repair_rejects_invalid_arguments_and_wrong_tool_selection(self):
+        with self.assertRaises(cloud.ToolArgumentError) as caught:
+            cloud.valid_completion(argument_reply("[1,2]"), ARGUMENT_REQUEST)
+        guarded = cloud.argument_repair_request(ARGUMENT_REQUEST, caught.exception)
+        repair = cloud.local_json_repair_request(guarded)
+        for content in ('not json', '[]', '{"steps":"[1,2]"}', '{"steps":[1],"extra":true}', '{"steps":[NaN]}'):
+            with self.subTest(content=content):
+                raw = {**ANSWER, "choices": [{**ANSWER["choices"][0], "message": {
+                    "role": "assistant", "content": content}}]}
+                with self.assertRaises(cloud.ToolArgumentError):
+                    cloud.validated_json_tool_reply(raw, guarded, repair)
+        wrong = argument_reply([1])
+        wrong["choices"][0]["message"]["tool_calls"][0]["function"]["name"] = "not_offered"
+        with self.assertRaises(ValueError):
+            cloud.validated_json_tool_reply(wrong, guarded, repair)
+        self.assertGreater(cloud.estimated_input_tokens({**REQUEST, "response_format": {
+            "type": "json_schema", "json_schema": {"schema": {"enum": ["x" * 12000]}}}}),
+            cloud.estimated_input_tokens(REQUEST) + 3000)
+
+    def test_json_repair_keeps_quoted_refusal_text_as_tool_data(self):
+        guarded = {**REQUEST, "tools": [{"type": "function", "function": {"name": "save_quote",
+            "parameters": {"type": "object", "properties": {"text": {"type": "string"}},
+                           "required": ["text"], "additionalProperties": False}}}],
+            "tool_choice": {"type": "function", "function": {"name": "save_quote"}}}
+        repair = cloud.local_json_repair_request(guarded)
+        raw = {**ANSWER, "choices": [{**ANSWER["choices"][0], "message": {
+            "role": "assistant", "content": json.dumps({"text": "I can't help with that."})}}]}
+        result = cloud.validated_json_tool_reply(raw, guarded, repair)
+        call = result["choices"][0]["message"]["tool_calls"][0]
+        self.assertEqual(json.loads(call["function"]["arguments"]), {"text": "I can't help with that."})
+        self.assertIs(cloud.validated_json_tool_reply(REFUSAL, guarded, repair), REFUSAL)
 
     def test_schema_feedback_is_one_extra_call_across_all_local_candidates(self):
         cloud.routing_mode.save_scope(cloud.STATE, "local_only")

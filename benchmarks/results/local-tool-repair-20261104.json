@@ -1,0 +1,35 @@
+{
+  "passed": true,
+  "scenario": "injected malformed arguments; real local correction and SQLite plan",
+  "seconds": 5.74,
+  "model": "cale-main-64k",
+  "initial_bad_response": "injected quoted steps array with trailing invalid data",
+  "correction": "live local inference",
+  "tool_choice_sent": false,
+  "requested_format": "json_schema",
+  "raw_tool_calls": 0,
+  "validated_tool": "task_steps",
+  "sql_units_created": 1,
+  "sql_units_completed": 0,
+  "user_projects_touched": false,
+  "usage": {
+    "prompt_tokens": 243,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens": 66,
+    "total_tokens": 309
+  },
+  "release": "0.5.473",
+  "router_tests": {
+    "passed": 122,
+    "subtests_passed": 18,
+    "seconds": 11.57
+  },
+  "focused_native_tests": {
+    "passed": 7,
+    "seconds": 1.14
+  },
+  "scope": "One injected malformed response followed by actual local correction, strict validation and an isolated SQLite planning effect. Not proof of autonomous app completion.",
+  "source_sha256": "052a7cfbb5f16ee8e46f41c5876c3992070de420117bd5ea2cc74e962ebf3415"
+}
