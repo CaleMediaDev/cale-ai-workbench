@@ -221,6 +221,33 @@ def test_concurrent_job_writes_use_independent_temporary_files(tmp_path):
     assert result["detail"] == "original writer"
 
 
+@pytest.mark.parametrize("terminal_state", ["complete", "failed"])
+def test_status_preserves_terminal_result_published_during_worker_check(tmp_path, terminal_state):
+    job_id = "a" * 32
+
+    def worker_exits_during_check(*args, **kwargs):
+        video_generation._write(
+            job_id, state=terminal_state, detail="Worker finished",
+            error="Render failed" if terminal_state == "failed" else None,
+        )
+        return subprocess.CompletedProcess(args[0], 0, "", "")
+
+    with patch.object(video_generation, "JOBS", tmp_path), patch.object(
+        video_generation, "os", SimpleNamespace(name="nt")
+    ), patch.object(
+        video_generation.subprocess, "run", side_effect=worker_exits_during_check
+    ):
+        video_generation._write(job_id, state="rendering", worker_pid=12345)
+        status = video_generation.video_job_status(job_id)
+        stored = json.loads((tmp_path / f"{job_id}.json").read_text(encoding="utf-8"))
+
+    assert status["state"] == terminal_state
+    assert stored["state"] == terminal_state
+    assert status["detail"] == "Worker finished"
+    assert status["error"] == ("Render failed" if terminal_state == "failed" else None)
+    assert status["progress_percent"] == (100 if terminal_state == "complete" else None)
+
+
 def test_video_status_reports_latest_sampler_progress(tmp_path):
     job_id = "a" * 32
     with patch.object(video_generation, "JOBS", tmp_path):
