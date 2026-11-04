@@ -3,6 +3,7 @@
 import asyncio
 import json
 import subprocess
+import sys
 
 import imageio_ffmpeg
 import pytest
@@ -133,6 +134,33 @@ def test_run_distinguishes_overwrite_refusal_from_output_filename(tmp_path, monk
     else:
         assert not output.exists()
         assert video_edit._destination(str(output), []) == output
+
+
+def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeypatch):
+    output = tmp_path / "edited.mp4"
+    real_run = subprocess.run
+
+    def failed_process(command, **kwargs):
+        assert command[-1] == str(output)
+        # Exercise subprocess's real text decoding, without depending on FFmpeg
+        # or the host locale to produce a particular diagnostic encoding.
+        kwargs["encoding"] = "utf-8"
+        script = (
+            "import pathlib, sys; "
+            "pathlib.Path(sys.argv[1]).write_bytes(b'partial video'); "
+            "sys.stderr.buffer.write(b'Invalid filename: \\xff\\n'); "
+            "sys.exit(1)"
+        )
+        return real_run([sys.executable, "-c", script, str(output)], **kwargs)
+
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", failed_process)
+
+    with pytest.raises(RuntimeError, match="Invalid filename"):
+        video_edit._run([], output, timeout=30)
+
+    assert not output.exists()
+    assert video_edit._destination(str(output), []) == output
 
 
 def test_run_removes_empty_output_after_successful_process(tmp_path, monkeypatch):
