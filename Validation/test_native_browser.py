@@ -176,6 +176,30 @@ def test_snapshot_clears_refs_from_controls_that_become_hidden(tmp_path):
         native_browser.close()
 
 
+def test_closed_project_context_is_replaced_on_next_open(tmp_path):
+    pytest.importorskip("playwright")
+    (tmp_path / "page.html").write_text(
+        '<!doctype html><title>Recovered browser</title><body>Ready</body>',
+        encoding="utf-8")
+    try:
+        opened = native_agent.execute_tool(
+            tmp_path, "browser_open_project", {"path": "page.html"})
+        if opened.startswith("Tool error:") and "Executable doesn't exist" in opened:
+            pytest.skip("Chromium runtime is not installed in this test environment")
+        assert json.loads(opened)["title"] == "Recovered browser"
+        old_context = native_browser._page(tmp_path).context
+        old_context.close()
+
+        reopened = json.loads(native_browser.execute(
+            tmp_path, "open_project", {"path": "page.html"}))
+
+        assert reopened["title"] == "Recovered browser"
+        assert native_browser._page(tmp_path).context is not old_context
+        assert native_browser._ACTIVE_LOCAL[str(tmp_path.resolve())] is True
+    finally:
+        native_browser.close()
+
+
 def test_download_filename_collision_search_continues_past_999(tmp_path):
     destination = tmp_path / "Downloads"
     destination.mkdir()
