@@ -157,7 +157,12 @@ def video_job_status(job_id: str) -> dict:
         check = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
                                capture_output=True, text=True, timeout=10, creationflags=HIDE)
         if check.returncode == 0 and f'"{pid}"' not in check.stdout:
-            data = _write(job_id, state="failed", error="Video worker exited unexpectedly; see log_path.")
+            # The worker may have published its terminal result and exited
+            # while tasklist was running. Do not overwrite that result using
+            # the stale record read before the process check.
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("state") not in FINISHED:
+                data = _write(job_id, state="failed", error="Video worker exited unexpectedly; see log_path.")
     status = {key: data.get(key) for key in (
         "job_id", "state", "detail", "output_path", "error", "log_path", "updated_at"
     )}
