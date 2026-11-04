@@ -56,6 +56,18 @@ def test_installed_version_accepts_whitespace_before_colon(tmp_path, monkeypatch
     assert chrome_connector.installed_version() == "0.2.6"
 
 
+@pytest.mark.parametrize("version_key", ["'version'", '"version"'])
+def test_installed_version_accepts_quoted_yaml_keys(tmp_path, monkeypatch, version_key):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text(
+        f"name: hermes-connector\n{version_key}: 0.2.6\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    assert chrome_connector.installed_version() == "0.2.6"
+
+
 def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
