@@ -334,6 +334,48 @@ def test_invalid_failure_timestamp_does_not_crash_recovery(tmp_path, monkeypatch
     assert not (state / "base-install-repair.json").exists()
 
 
+def test_nonfinite_retry_timestamps_do_not_launch_repair(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    progress_path = state / "install-progress.json"
+    record_path = state / "base-install-repair.json"
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery.time, "time", lambda: 10000)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    valid_progress = {
+        "status": "error", "current": "Setup needs attention: download failed",
+        "updated": 1,
+    }
+    valid_record = {"attempts": 0, "started": 1}
+    locking = MagicMock()
+    locking.LK_NBLCK = 1
+    locking.LK_UNLCK = 2
+    with patch.dict("sys.modules", {"msvcrt": locking}), patch.object(
+        setup_recovery.subprocess, "Popen"
+    ) as launch:
+        for field in ("updated", "started"):
+            for value in ("NaN", "-Infinity", "Infinity"):
+                progress = dict(valid_progress)
+                record = dict(valid_record)
+                (progress if field == "updated" else record)[field] = value
+                progress_path.write_text(json.dumps(progress), encoding="utf-8")
+                record_path.write_text(json.dumps(record), encoding="utf-8")
+                assert setup_recovery.recover() is False
+                # The same invalid state may appear only after taking the lock.
+                with patch.object(setup_recovery, "_read", side_effect=[
+                    valid_progress, valid_record, progress, record,
+                ]):
+                    assert setup_recovery.recover() is False
+                assert json.loads(progress_path.read_text(encoding="utf-8")) == progress
+                assert json.loads(record_path.read_text(encoding="utf-8")) == record
+        launch.assert_not_called()
+    assert locking.locking.call_count == 12
+    assert locking.locking.call_args.args[1:] == (locking.LK_UNLCK, 1)
+
+
 def test_slow_live_installer_is_not_restarted(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
