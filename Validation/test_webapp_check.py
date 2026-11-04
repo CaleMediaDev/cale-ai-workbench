@@ -2044,3 +2044,131 @@ def test_semantic_legacy_browser_sql_gets_grounded_revise_only_focus_without_sou
     assert "cases[0].expect" in briefing and "total-display.text" in briefing
     assert "total-display" in briefing and project["brief"] in briefing
     assert task_context.step_status(tmp_path) == before and source.read_bytes() == original
+
+
+
+ROW_COUNT_PAGE = """<!doctype html><meta charset="utf-8"><input id="label"><button id="add">Add</button>
+<table id="ledger"><thead id="head"><tr><th>Item</th><th>Action</th></tr></thead>
+<tbody id="entries">
+ <!-- Whitespace, comments and text are not rows. --> 
+ </tbody><tfoot id="foot"></tfoot></table>
+<div id="fake"></div><table><tbody id="duplicate"></tbody></table><table><tbody id="duplicate"></tbody></table>
+<script>
+let items=JSON.parse(localStorage.getItem('items')||'[]');
+function render(){const body=document.getElementById('entries');body.replaceChildren();
+ for(const name of items){const row=body.insertRow();row.insertCell().textContent=name;
+ const button=document.createElement('button');button.textContent='Delete';row.insertCell().append(button);
+ button.onclick=()=>{items=items.filter(item=>item!==name);save();render();};}}
+function save(){localStorage.setItem('items',JSON.stringify(items));}
+document.getElementById('add').onclick=()=>{items.push(document.getElementById('label').value);save();render();};
+document.getElementById('fake').rows={length:0};render();
+</script>"""
+
+
+def row_count_workflow():
+    return {"path": "index.html", "cases": [
+        {"row_counts": {"entries": 0, "ledger": 1, "head": 1, "foot": 0}},
+        {"set": {"label": "Alpha"}, "click": ["add"], "row_counts": {"entries": 1, "ledger": 2}},
+        {"set": {"label": "Beta"}, "click": ["add"], "row_counts": {"entries": 2, "ledger": 3}},
+        {"click": [{"button": "Delete", "row_text": "Alpha"}], "row_counts": {"entries": 1, "ledger": 2}},
+        {"reload": True, "row_counts": {"entries": 1, "ledger": 2}},
+        {"click": [{"button": "Delete", "row_text": "Beta"}], "row_counts": {"entries": 0, "ledger": 1}},
+        {"reload": True, "row_counts": {"entries": 0, "ledger": 1}},
+    ]}
+
+
+def test_row_counts_actual_browser_add_delete_reload_and_header_semantics(tmp_path):
+    source = tmp_path / "index.html"
+    source.write_text(ROW_COUNT_PAGE)
+    before = source.read_bytes()
+    spec = row_count_workflow()
+    result = webapp_check.check(tmp_path, spec)
+    assert result["passed"] and result["javascript_errors"] == []
+    assert result["cases"][0]["row_counts"]["entries"] == {"actual": 0, "expected": 0, "tag": "tbody"}
+    assert result["cases"][0]["row_counts"]["ledger"]["actual"] == 1
+    assert result["cases"][0]["row_counts"]["head"]["actual"] == 1
+    assert result["cases"][0]["row_counts"]["foot"]["actual"] == 0
+    assert {entry["case"] for entry in result["interactions"]} == {2, 3, 4, 6}
+    assert all(set(entry["targets"]) == {"rows:entries", "rows:ledger"} for entry in result["interactions"])
+    assert {"rows:entries", "rows:ledger", "rows:head", "rows:foot"} <= webapp_check.assertion_targets(spec)
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("target,expected,actual", [("entries", 1, 0), ("missing", 0, None), ("fake", 0, None), ("duplicate", 0, None)])
+def test_row_counts_wrong_missing_duplicate_or_non_table_fails_even_expected_zero(tmp_path, target, expected, actual):
+    (tmp_path / "index.html").write_text(ROW_COUNT_PAGE)
+    result = webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"row_counts": {target: expected}}]})
+    assert not result["passed"] and not result["interactions"]
+    case = result["cases"][0]
+    assert case["row_counts"][target]["actual"] == actual
+    assert "target_inventory" in case and f"#{target}" in case["failures"][0]
+
+
+@pytest.mark.parametrize("counts", [[], {"entries": True}, {"entries": -1}, {"entries": 10001}, {"entries": 1.0}, {"entries.rows.length": 1}, {"#entries": 1}, {f"table{n}": 0 for n in range(21)}])
+def test_row_counts_preflight_is_exact_bounded_data_without_source_reads(counts):
+    with patch.object(webapp_check, "_project_file", side_effect=AssertionError("data validation must not read files")):
+        with pytest.raises(ValueError):
+            webapp_check.validate_spec_data({"cases": [{"row_counts": counts}]})
+
+
+def test_row_counts_adjacent_normalization_and_valid_bounds_preserve_user_data():
+    spec = {"path": "future.html", "cases": [{"click": ["Add"]}, {"row_counts": {"entries": 10000}}]}
+    normalized = webapp_check.normalize_spec(spec)
+    assert normalized["cases"] == [{"click": ["Add"], "row_counts": {"entries": 10000}}]
+    webapp_check.validate_spec_data(normalized)
+    assert spec["cases"] == [{"click": ["Add"]}, {"row_counts": {"entries": 10000}}]
+
+
+def test_row_counts_unchanged_passing_value_does_not_prove_input_effect(tmp_path):
+    (tmp_path / "index.html").write_text('<button id="noop">Do nothing</button><table><tbody id="rows"></tbody></table>')
+    spec = {"path": "index.html", "cases": [{"click": ["noop"], "row_counts": {"rows": 0}}]}
+    result = webapp_check.check(tmp_path, spec)
+    assert result["passed"] and not result["interactions"]
+
+
+def test_row_counts_saved_verifier_replays_real_workflow_and_rejects_broken_add(tmp_path):
+    source = tmp_path / "index.html"
+    source.write_text(ROW_COUNT_PAGE)
+    spec = row_count_workflow()
+    assert webapp_check.save_verifier(tmp_path, spec, accumulate=True)
+    saved = tmp_path / ".local-ai/webapp-check.json"
+    report = webapp_check.run_saved_checks(tmp_path, saved)
+    assert report["passed"] and report["case_count"] == 7
+    source.write_text(ROW_COUNT_PAGE.replace("items.push(document.getElementById('label').value)", 'void 0'))
+    broken = webapp_check.run_saved_checks(tmp_path, saved)
+    assert not broken["passed"]
+    assert any('Row count #entries' in failure for check in broken["checks"] for case in check["cases"] for failure in case["failures"])
+
+
+def test_row_counts_suite_accumulation_and_assertion_revision_preserve_other_counts_and_inputs(tmp_path):
+    (tmp_path / "index.html").write_text(ROW_COUNT_PAGE)
+    first = {"path": "index.html", "cases": [{"set": {"label": "Alpha"}, "click": ["add"], "row_counts": {"entries": 1}}]}
+    second = {"path": "index.html", "cases": [{"set": {"label": "Alpha"}, "click": ["add"], "row_counts": {"ledger": 2}}]}
+    suite = webapp_check.saved_suite(tmp_path, second, webapp_check.saved_suite(tmp_path, first))
+    assert len(suite["checks"]) == 1 and suite["checks"][0]["cases"][0]["row_counts"] == {"entries": 1, "ledger": 2}
+    assert webapp_check.save_verifier(tmp_path, suite["checks"][0], accumulate=True)
+    saved = tmp_path / ".local-ai/webapp-check.json"
+    import hashlib
+    args = {"path": "index.html", "saved_sequence": 1, "saved_case": 1,
+            "suite_sha256": hashlib.sha256(saved.read_bytes()).hexdigest(), "cases": [{"row_counts": {"ledger": 3}}]}
+    repaired, _metadata = webapp_check.prepare_assertion_revision(tmp_path, args)
+    case = repaired["cases"][0]
+    assert case["row_counts"] == {"entries": 1, "ledger": 3}
+    assert case["set"] == {"label": "Alpha"} and case["click"] == ["add"]
+    assert not webapp_check.check(tmp_path, repaired)["passed"]
+
+
+
+@pytest.mark.parametrize("initial,action", [
+    ('<table><tbody id="rows"></tbody></table>', "document.getElementById('rows').replaceWith(Object.assign(document.createElement('table'),{id:'rows'}))"),
+    ('', "document.body.append(Object.assign(document.createElement('table'),{id:'rows'}))"),
+    ('<div id="rows"></div>', "document.getElementById('rows').replaceWith(Object.assign(document.createElement('table'),{id:'rows'}))"),
+    ('<table id="rows"></table><table id="rows"></table>', "document.querySelector('#rows').remove()"),
+])
+def test_row_counts_unknown_before_or_tag_only_change_cannot_prove_input_delta(tmp_path, initial, action):
+    (tmp_path / "index.html").write_text(initial + '<button id="change">Change</button><script>'
+        + "document.getElementById('change').onclick=()=>{" + action + "};</script>")
+    spec = {"path": "index.html", "cases": [{"click": ["change"], "row_counts": {"rows": 0}}]}
+    result = webapp_check.check(tmp_path, spec)
+    assert result["passed"] and result["cases"][0]["row_counts"]["rows"]["actual"] == 0
+    assert result["interactions"] == []

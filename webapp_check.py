@@ -42,6 +42,37 @@ def _element_id(value: str) -> str:
 
 
 
+def _case_element_id(value, index: int, field: str) -> str:
+    try:
+        return _element_id(value)
+    except ValueError as error:
+        token = json.dumps(value[:80] if isinstance(value, str) else type(value).__name__)
+        raise ValueError(f"cases[{index}].{field} has invalid key {token}. "
+            "Use the exact HTML element ID: a letter followed by up to 63 letters, digits, _ or -. "
+            "No CSS selectors, # prefixes, .text or property suffixes; correct check arguments, not application source. "
+            "For table row counts use row_counts:{tbodyId:2}; expect checks literal text.") from error
+
+
+def observe_rows(page, names: list[str]) -> dict:
+    """Read only native table/section row collections; target IDs are data."""
+    if not names:
+        return {}
+    return page.evaluate("""names => Object.fromEntries(names.map(id => {
+        const matches=document.querySelectorAll('#'+CSS.escape(id));
+        if(matches.length!==1) return [id,{error:matches.length?'duplicate target':'missing target'}];
+        const el=matches[0],tag=el.localName;
+        if(!['table','thead','tbody','tfoot'].includes(tag))
+            return [id,{error:'target is not table, thead, tbody or tfoot',tag}];
+        try {
+            const type=tag==='table'?HTMLTableElement:HTMLTableSectionElement;
+            const rows=Object.getOwnPropertyDescriptor(type.prototype,'rows').get.call(el);
+            const count=Object.getOwnPropertyDescriptor(HTMLCollection.prototype,'length').get.call(rows);
+            return Number.isSafeInteger(count)&&count>=0
+                ? [id,{value:count,tag}] : [id,{error:'invalid native row count',tag}];
+        } catch (_) { return [id,{error:'native row collection is unavailable',tag}]; }
+    }))""", names)
+
+
 def _click_token(value):
     if isinstance(value, dict):
         if (set(value) != {"button", "row_text"} or any(
@@ -131,7 +162,7 @@ def normalize_spec(spec: dict) -> dict:
         merged = []
         index = 0
         actions = {"reload", "set", "click", "keys", "wait_ms"}
-        assertions = {"expect", "visible", "hidden", "mobile_fit", "state"}
+        assertions = {"expect", "visible", "hidden", "mobile_fit", "state", "row_counts"}
         while index < len(cases):
             current = cases[index]
             following = cases[index + 1] if index + 1 < len(cases) else None
@@ -233,7 +264,7 @@ def missing_numeric_boundaries(folder: Path, request: str) -> list[dict]:
             controls[path] = {name: words(" ".join(aliases + parser.labels.get(name, [])))
                               for name, aliases in parser.fields.items()}
         for case in normalized["cases"]:
-            if not (case.get("expect") or case.get("visible") or case.get("hidden")):
+            if not (case.get("expect") or case.get("visible") or case.get("hidden") or case.get("row_counts")):
                 continue
             for name, value in case.get("set", {}).items():
                 numeric = number(value)
@@ -297,11 +328,18 @@ def validate_spec_data(spec: dict) -> None:
         raise ValueError("mobile_fit must be true or false")
     total_wait = 0
     for case_index, case in enumerate(cases):
-        if not isinstance(case, dict) or not set(case).issubset({"reload", "set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit", "state"}):
-            raise ValueError("Use reload, set, click, keys, wait_ms, expect, visible, hidden, mobile_fit and state in each case")
+        if not isinstance(case, dict) or not set(case).issubset({"reload", "set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit", "state", "row_counts"}):
+            raise ValueError("Use reload, set, click, keys, wait_ms, expect, visible, hidden, mobile_fit, state and row_counts in each case")
         if "reload" in case and type(case["reload"]) is not bool:
             raise ValueError("reload must be a boolean; it only reloads the current local page")
         validate_state_assertions(case.get("state", {}))
+        row_counts = case.get("row_counts", {})
+        if not isinstance(row_counts, dict) or len(row_counts) > 20:
+            raise ValueError("row_counts must map at most 20 exact HTML IDs to row counts")
+        for name, count in row_counts.items():
+            _case_element_id(name, case_index, "row_counts")
+            if type(count) is not int or not 0 <= count <= 10000:
+                raise ValueError(f"cases[{case_index}].row_counts needs integer counts from 0 to 10000, not booleans")
         keys = case.get("keys", [])
         if not isinstance(keys, list) or len(keys) > 20:
             raise ValueError("keys must be a list of at most 20 key actions")
@@ -336,14 +374,7 @@ def validate_spec_data(spec: dict) -> None:
             raise ValueError("Too many elements in one browser case")
         for field, mapping in (("set", updates), ("expect", expected)):
             for name, value in mapping.items():
-                try:
-                    _element_id(name)
-                except ValueError as error:
-                    token = json.dumps(name[:80] if isinstance(name, str) else type(name).__name__)
-                    raise ValueError(f"cases[{case_index}].{field} has invalid key {token}. "
-                        "Use the exact HTML element ID: a letter followed by up to 63 letters, digits, _ or -. "
-                        "Do not use CSS selectors, # prefixes, .text or property suffixes; "
-                        "correct check arguments, not application source.") from error
+                _case_element_id(name, case_index, field)
                 if not isinstance(value, str) or len(value) > 200:
                     raise ValueError("Browser values and expected text must be short strings. "
                                      "visible/hidden are sibling lists beside expect, not entries inside expect. "
@@ -360,9 +391,9 @@ def validate_spec_data(spec: dict) -> None:
                              "Correct the test specification before changing the app.")
         if "mobile_fit" in case and not isinstance(case["mobile_fit"], bool):
             raise ValueError("mobile_fit must be true or false")
-        if not expected and not case.get("visible") and not case.get("hidden") and not case.get("mobile_fit") and not case.get("state"):
+        if not expected and not case.get("visible") and not case.get("hidden") and not case.get("mobile_fit") and not case.get("state") and not row_counts:
             raise ValueError("Each browser case needs an observable assertion. Put set/click/keys and "
-                             "expect/visible/hidden in the same case; correct these test arguments, not the app.")
+                             "expect/visible/hidden/state/row_counts in the same case; correct these test arguments, not the app.")
 
 
 def validate_spec(folder: Path, spec: dict) -> Path:
@@ -614,6 +645,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                         observed["visibility:" + token] = target.count() > 0 and target.is_visible()
                 observed.update({"state:" + key: value for key, value in
                                  observe_state(page, list(case.get("state", {}))).items()})
+                observed.update({"rows:" + key: value for key, value in
+                                 observe_rows(page, list(case.get("row_counts", {}))).items()})
                 return observed
 
             for number, case in enumerate(spec["cases"], 1):
@@ -714,6 +747,19 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                         failures.append(f"State {path}: {observed['error']}")
                     elif not state_matches(observed["value"], expected):
                         failures.append(f"State {path} was {observed['value']!r}; expected {expected!r}")
+                row_observations = {}
+                for element_id, expected in case.get("row_counts", {}).items():
+                    observed = after["rows:" + element_id]
+                    row_observations[element_id] = {"actual": observed.get("value"), "expected": expected,
+                                                    "tag": observed.get("tag")}
+                    if "error" in observed:
+                        row_observations[element_id]["error"] = observed["error"]
+                        failures.append(f"Row count #{element_id}: {observed['error']}")
+                        target_failed = True
+                    elif observed["value"] != expected:
+                        failures.append(f"Row count #{element_id} was {observed['value']}; expected {expected} "
+                                        "(table counts include header rows)")
+                        target_failed = True
                 for element_id, text in case.get("expect", {}).items():
                     previous_failures = len(failures)
                     target = page.locator("#" + element_id)
@@ -770,6 +816,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                         failures.insert(1, "Native invalid controls: " + json.dumps(invalid, separators=(",", ":"))[:700]
                                         + ". Constraints may block submit before its handler; inspect form/invalid handling.")
                 outcome = {"case": number, "passed": not failures, "failures": failures}
+                if row_observations:
+                    outcome["row_counts"] = row_observations
                 if failures:
                     if target_failed:
                         outcome["target_inventory"] = target_inventory(page)
@@ -781,7 +829,10 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                         outcome["click_diagnostics"] = {"observations": click_observations}
                 results.append(outcome)
                 actions = [kind for kind in ("reload", "set", "click", "keys") if case.get(kind)]
-                changed = [name for name, value in after.items() if before.get(name) != value]
+                changed = [name for name, value in after.items() if before.get(name) != value
+                           and (not name.startswith("rows:") or type(value.get("value")) is int
+                                and type(before.get(name, {}).get("value")) is int
+                                and value["value"] != before[name]["value"])]
                 if actions and changed and not failures:
                     interactions.append({"case": number, "actions": actions, "targets": changed})
             if screenshot:
@@ -873,6 +924,9 @@ def saved_suite(folder: Path, spec: dict, previous: dict | None = None, *,
             case = {**copy.deepcopy(previous_case), **copy.deepcopy(new_case)}
             expected = {**previous_case.get("expect", {}), **new_case.get("expect", {})}
             states = {**previous_case.get("state", {}), **new_case.get("state", {})}
+            counts = {**previous_case.get("row_counts", {}), **new_case.get("row_counts", {})}
+            if counts:
+                case["row_counts"] = counts
             if states:
                 case["state"] = states
             hidden_now = set(new_case.get("hidden", []))
@@ -920,7 +974,8 @@ def assertion_targets(spec: dict) -> set[str]:
     return {target for case in normalize_spec(spec)["cases"] for target in (
         ["text:" + name for name in case.get("expect", {})]
         + ["visibility:" + name for field in ("visible", "hidden") for name in case.get(field, [])]
-        + ["state:" + name for name in case.get("state", {})])}
+        + ["state:" + name for name in case.get("state", {})]
+        + ["rows:" + name for name in case.get("row_counts", {})])}
 
 
 def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = None) -> dict:
@@ -1033,7 +1088,7 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
         raise ValueError("Use the saved case index from the failed checker result")
     supplied = normalize_spec(arguments).get("cases")
     if (not isinstance(supplied, list) or len(supplied) != 1 or not isinstance(supplied[0], dict)
-            or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "state", "reload", "set", "click", "keys", "wait_ms"}):
+            or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "state", "reload", "set", "click", "keys", "wait_ms", "row_counts"}):
         raise ValueError("A saved-case repair needs exactly one corrected case, not the full case list. "
                          "Input actions stay fixed unless you explicitly use revise_inputs:true.")
     old = batch["cases"][number - 1]
@@ -1044,7 +1099,7 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
                          "preserving the original requirements and unrelated cases.")
     correction = copy.deepcopy(supplied[0])
     repaired = {**copy.deepcopy(old), **correction}
-    for field in ("expect", "state"):
+    for field in ("expect", "state", "row_counts"):
         if field in old or field in correction:
             repaired[field] = {**old.get(field, {}), **correction.get(field, {})}
     # Explicit visibility lists can correct mistaken IDs. Other assertion
