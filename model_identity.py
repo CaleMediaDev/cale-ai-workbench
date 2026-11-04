@@ -42,10 +42,12 @@ def configured_main_alias(root: Path) -> str:
             if indent != model_indent:
                 continue
             match = re.fullmatch(
-                r"\s+(?:default|'default'|\"default\") *:\s*(['\"]?)([a-zA-Z0-9._-]+)\1(?:\s+#.*)?\s*", line
+                r"\s+(?:default|'default'|\"default\") *:\s*(['\"]?)([a-zA-Z0-9._-]+(?::latest)?)\1(?:\s+#.*)?\s*", line
             )
             if match:
-                candidate = match.group(2).lower()
+                # Ollama's explicit :latest names the same alias as an
+                # omitted tag. Keep catalog/companion lookups canonical.
+                candidate = match.group(2).lower().removesuffix(":latest")
                 return candidate if SAFE_ALIAS.fullmatch(candidate) else DEFAULT_MAIN
     return DEFAULT_MAIN
 

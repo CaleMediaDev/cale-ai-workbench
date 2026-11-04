@@ -8,6 +8,20 @@ from model_identity import configured_main_alias, configured_permissive_alias
 
 
 class ModelIdentityTests(unittest.TestCase):
+    def test_latest_tag_keeps_configured_main_and_legacy_companion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            for alias, companion in (("qwen3-coder-local", "qwen3-coder-permissive"),
+                                     ("custom-local", "cale-permissive")):
+                for quote in ("", "'", '"'):
+                    with self.subTest(alias=alias, quote=quote):
+                        (root / "data/config.yaml").write_text(
+                            f"model:\n  default: {quote}{alias}:latest{quote} # installed model\n",
+                            encoding="utf-8")
+                        self.assertEqual(configured_main_alias(root), alias)
+                        self.assertEqual(configured_permissive_alias(root), companion)
+
     def test_existing_legacy_installation_keeps_its_model_names(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
