@@ -11,6 +11,26 @@ import public_api_catalog
 import toolbox_mcp
 
 
+@pytest.mark.parametrize("offline", [False, True])
+def test_future_cache_timestamp_is_not_treated_as_fresh(tmp_path, offline):
+    cache = tmp_path / "apis.json"
+    old = [{"name": "Cached snapshot"}]
+    new = [{"name": "Current snapshot"}]
+    cache.write_text(json.dumps(old), encoding="utf-8")
+    corrected_time = cache.stat().st_mtime - 3600
+    with patch.object(public_api_catalog, "CACHE", cache), \
+         patch.object(public_api_catalog.time, "time", return_value=corrected_time), \
+         patch.object(public_api_catalog, "urlopen") as fetch:
+        if offline:
+            fetch.side_effect = OSError("Offline")
+        else:
+            fetch.return_value.__enter__.return_value.read.return_value = json.dumps(new).encode("utf-8")
+        data, fresh = public_api_catalog._catalog()
+    fetch.assert_called_once()
+    assert data == (old if offline else new)
+    assert fresh is (not offline)
+
+
 def test_search_public_apis_sorts_non_string_names(tmp_path):
     cache = tmp_path / "apis.json"
     cache.write_text(json.dumps([

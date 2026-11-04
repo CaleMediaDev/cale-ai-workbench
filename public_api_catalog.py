@@ -33,7 +33,8 @@ def _catalog() -> tuple[list[dict], bool]:
         if not isinstance(cached, list) or not all(isinstance(entry, dict) for entry in cached):
             raise ValueError("Unexpected public API catalog format.")
         data = cached
-        fresh = time.time() - CACHE.stat().st_mtime < MAX_AGE
+        age = time.time() - CACHE.stat().st_mtime
+        fresh = 0 <= age < MAX_AGE
     except (OSError, ValueError, RecursionError):
         pass
     if not fresh:
