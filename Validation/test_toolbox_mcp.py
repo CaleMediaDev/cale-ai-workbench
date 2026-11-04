@@ -1098,3 +1098,96 @@ def test_classify_tool_uses_cpu_thread_not_media_worker(tmp_path,monkeypatch):
     monkeypatch.setattr(toolbox_mcp,"media_run",no_media)
     result=asyncio.run(toolbox_mcp.classify_text(str(tmp_path),"invoice payment"))
     assert result["label"]=="billing"
+
+
+def split_classifier_csv(path):
+    import csv
+    with path.open('w',newline='',encoding='utf-8') as stream:
+        writer=csv.DictWriter(stream,fieldnames=['text','label','split']);writer.writeheader()
+        for split,count,token in [('train',8,'trainingonly'),('validation',2,'validationonly'),('test',3,'heldoutonly')]:
+            for label,theme in [('billing','invoice payment'),('music','song melody'),('travel','flight airport')]:
+                for index in range(count):writer.writerow({'text':theme+' '+token+' '+str(index),'label':label,'split':split})
+
+
+def test_classifier_training_uses_only_train_and_keeps_candidate_with_baseline_and_latency(tmp_path):
+    import hashlib
+    import small_training as training
+    dataset=tmp_path/'examples.csv';split_classifier_csv(dataset)
+    report=training.train_classifier(dataset,tmp_path/'model')
+    artifact=json.loads((tmp_path/'model/model.json').read_text())
+    assert 'trainingonly' in artifact['vocabulary']
+    assert 'heldoutonly' not in artifact['vocabulary'] and 'validationonly' not in artifact['vocabulary']
+    assert report['training_examples']==24 and report['held_out_examples']==9 and report['validation_examples']==6
+    assert report['evaluation_split']=='provided_test'
+    assert report['accuracy']>=report['majority_baseline_accuracy']
+    assert report['portable_latency']['device']=='cpu' and report['portable_latency']['samples']==9
+    registry=json.loads((tmp_path/'model/candidate.json').read_text())
+    assert registry['status']=='candidate' and not registry['activated']
+    assert registry['evaluation_sha256']==hashlib.sha256((tmp_path/'model/evaluation.json').read_bytes()).hexdigest()
+    assert registry['model_sha256']==hashlib.sha256((tmp_path/'model/model.json').read_bytes()).hexdigest()
+    assert training.predict_classifier(tmp_path/'model','invoice payment')['label']=='billing'
+
+
+def test_classifier_rejects_heldout_text_overlap_before_fitting(tmp_path,monkeypatch):
+    import csv
+    import small_training as training
+    from sklearn.linear_model import LogisticRegression
+    dataset=tmp_path/'examples.csv';split_classifier_csv(dataset)
+    with dataset.open('a',newline='') as stream:
+        csv.writer(stream).writerow([' INVOICE   payment trainingonly 0 ','billing','test'])
+    monkeypatch.setattr(LogisticRegression,'fit',lambda *args,**kwargs:pytest.fail('Leaked data was fitted'))
+    with pytest.raises(ValueError,match='overlaps held-out'):
+        training.train_classifier(dataset,tmp_path/'model')
+    assert not (tmp_path/'model').exists()
+
+
+def test_classifier_plain_csv_legacy_holdout_still_roundtrips_without_activation(tmp_path):
+    import csv
+    import small_training as training
+    dataset=tmp_path/'plain.csv'
+    with dataset.open('w',newline='') as stream:
+        writer=csv.writer(stream);writer.writerow(['text','label'])
+        for label,word in [('a','apples'),('b','buses')]:
+            for index in range(10):writer.writerow([word+' example '+str(index),label])
+    result=training.train_classifier(dataset,tmp_path/'model')
+    assert result['evaluation_split']=='random_stratified_holdout'
+    assert result['training_examples']==16 and result['held_out_examples']==4 and result['status']=='candidate'
+    assert training.predict_classifier(tmp_path/'model','apples')['label']=='a'
+
+
+def test_classifier_input_and_artifact_budgets_reject_before_loading(tmp_path,monkeypatch):
+    import small_training as training
+    with pytest.raises(ValueError,match="16384"):
+        training.predict_classifier(tmp_path,"x"*16385)
+    (tmp_path/"model.json").write_bytes(b'x'*65)
+    monkeypatch.setattr(training,"CLASSIFIER_MAX_BYTES",64)
+    monkeypatch.setattr(training.json,"loads",lambda *args,**kwargs:pytest.fail("Oversized artifact was decoded"))
+    with pytest.raises(ValueError,match="read budget"):
+        training.predict_classifier(tmp_path,"small")
+
+
+@pytest.mark.parametrize('bad_split',[None,[["text",False]],[["",'intent']]])
+def test_clinc_malformed_reviewed_bytes_do_not_publish_normalized_output(tmp_path,monkeypatch,bad_split):
+    import hashlib
+    training,source,official,payloads=clinc_normalization_fixture(tmp_path,monkeypatch)
+    official['train']=bad_split
+    raw=json.dumps(official).encode();(source/'files/data/data_full.json').write_bytes(raw)
+    entry=training.GITHUB_DATASETS['clinc150'];entry['files']['data/data_full.json']=hashlib.sha256(raw).hexdigest()
+    (source/'source.json').write_text(json.dumps(training._dataset_manifest('clinc150',entry,sum(map(len,payloads.values())))))
+    with pytest.raises(ValueError):training.normalize_training_dataset('clinc150',source,tmp_path/'prepared')
+    assert not (tmp_path/'prepared').exists()
+
+
+def test_classifier_subset_filters_each_official_split_before_fitting_and_hashes_policy(tmp_path):
+    import hashlib
+    import small_training as training
+    dataset=tmp_path/'split.csv';split_classifier_csv(dataset)
+    result=training.train_classifier(dataset,tmp_path/'subset',labels=['music','billing'])
+    artifact=json.loads((tmp_path/'subset/model.json').read_text())
+    assert artifact['classes']==['billing','music'] and 'flight' not in artifact['vocabulary']
+    assert result['training_examples']==16 and result['held_out_examples']==6 and result['validation_examples']==4
+    policy=result['subset_policy']
+    assert policy['selected_labels']==['billing','music'] and policy['applied_before_fit']
+    assert policy['retained_split_counts']=={'train':16,'validation':4,'test':6}
+    assert result['subset_policy_sha256']==hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest()
+    assert not result['activated']

@@ -1129,6 +1129,7 @@ async def train_text_classifier(
     output_folder: str,
     text_column: str = "text",
     label_column: str = "label",
+    labels: list[str] | None = None,
 ) -> dict:
     """Train a small local CSV text classifier; save an inspectable JSON model and held-out evaluation."""
     return await media_run(
@@ -1138,6 +1139,7 @@ async def train_text_classifier(
         output_folder=output_folder,
         text_column=text_column,
         label_column=label_column,
+        labels=labels,
     )
 
 

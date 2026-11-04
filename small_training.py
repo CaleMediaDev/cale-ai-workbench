@@ -283,76 +283,162 @@ def fresh_folder(path):
     return folder
 
 
-def train_classifier(
-    dataset_path, output_folder, text_column="text", label_column="label"
-):
-    """Train a TF-IDF classifier and save held-out evaluation beside it."""
-    from collections import Counter
 
+def _classifier_rows(dataset_path,text_column,label_column):
+    raw = _bounded_bytes(dataset_path,MAX_DATASET_BYTES)
+    reader = csv.DictReader(io.StringIO(raw.decode("utf-8-sig"),newline=""))
+    if not reader.fieldnames or not {text_column,label_column}.issubset(reader.fieldnames):
+        raise ValueError("Dataset needs the chosen text and label columns")
+    explicit = "split" in reader.fieldnames
+    partitions = {"train":[],"validation":[],"test":[]}
+    all_rows = []
+    for number,row in enumerate(reader,1):
+        if number>50000:
+            raise ValueError("Classifier dataset exceeds 50000 rows")
+        text,label = row.get(text_column),row.get(label_column)
+        if not isinstance(text,str) or not isinstance(label,str):
+            raise ValueError("Malformed classifier CSV row")
+        text,label=text.strip(),label.strip()
+        if not text or not label or len(text)>16384 or len(label)>128:
+            raise ValueError("Classifier rows need bounded nonempty text and labels")
+        split=row.get("split") if explicit else "train"
+        if split not in partitions:
+            raise ValueError("Use train, validation or test split labels")
+        partitions[split].append((text,label));all_rows.append((text,label))
+    if explicit:
+        keys={name:{_text_key(text) for text,_ in values} for name,values in partitions.items()}
+        if (keys["train"] & (keys["validation"]|keys["test"]) or keys["validation"] & keys["test"]):
+            raise ValueError("Exact text overlaps held-out splits; normalize before training")
+        if not partitions["test"]:
+            raise ValueError("Explicit split data needs an untouched test partition")
+    unique = {}
+    for text,label in partitions["train"]:
+        key=_text_key(text)
+        if key in unique and unique[key][1]!=label:
+            raise ValueError("Identical training input has conflicting labels")
+        unique.setdefault(key,(text,label))
+    partitions["train"]=list(unique.values())
+    return raw,partitions,explicit
+
+
+def _classifier_provenance(path,raw):
+    """Hash-bound normalization metadata is provenance, not task suitability."""
+    result={"kind":"local_csv","dataset_sha256":hashlib.sha256(raw).hexdigest()}
+    manifest=Path(path).parent/"normalization.json"
+    if not manifest.exists():return result
+    data=_bounded_bytes(manifest,64000);value=json.loads(data)
+    if (not isinstance(value,dict) or value.get("format_version")!=1
+            or value.get("dataset_id") not in GITHUB_DATASETS
+            or not isinstance(value.get("files"),dict)
+            or value["files"].get(Path(path).name)!=result["dataset_sha256"]):
+        raise ValueError("Normalization metadata does not match the training CSV")
+    entry=GITHUB_DATASETS[value["dataset_id"]]
+    source=value.get("source",{})
+    if (not isinstance(source,dict)
+            or value.get("raw_sha256")!=entry["files"].get("data/data_full.json")
+            or any(source.get(key)!=entry[key] for key in ("repository","commit","files","license"))):
+        raise ValueError("Normalization source differs from the reviewed dataset")
+    return {**result,"kind":"normalized_public_benchmark","dataset_id":value["dataset_id"],
+            "repository":entry["repository"],"commit":entry["commit"],"license":entry["license"],
+            "attribution":entry["attribution"],"source_files":dict(entry["files"]),
+            "raw_sha256":value["raw_sha256"],"normalization_sha256":hashlib.sha256(data).hexdigest()}
+
+
+def train_classifier(dataset_path,output_folder,text_column="text",label_column="label",labels=None):
+    """Fit only training rows; report held-out/baseline/latency, never activate.
+
+    Split-tagged normalized benchmarks preserve their official test partition.
+    Legacy plain CSVs keep the existing stratified random holdout behavior.
+    Public intent accuracy does not qualify a model to route actual Cale tasks.
+    """
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
-    from sklearn.metrics import accuracy_score, classification_report
+    from sklearn.metrics import accuracy_score,balanced_accuracy_score,classification_report,f1_score
     from sklearn.model_selection import train_test_split
 
-    rows = {}
-    with Path(dataset_path).open(encoding="utf-8-sig", newline="") as stream:
-        for row in csv.DictReader(stream):
-            text, label = row[text_column].strip(), row[label_column].strip()
-            key = " ".join(text.lower().split())
-            if not text or not label:
-                continue
-            if key in rows and rows[key][1] != label:
-                raise ValueError("Identical input has conflicting labels.")
-            rows[key] = (text, label)
-    if len(rows) < 12:
-        raise ValueError(
-            "Provide at least 12 distinct labeled examples, with at least 3 per class."
-        )
-    texts, labels = zip(*rows.values())
-    counts = Counter(labels)
-    if len(counts) < 2 or min(counts.values()) < 3:
-        raise ValueError(
-            "Need at least two classes and three distinct examples per class."
-        )
-    train_x, test_x, train_y, test_y = train_test_split(
-        texts,
-        labels,
-        test_size=max(len(counts), round(len(rows) * 0.2)),
-        random_state=42,
-        stratify=labels,
-    )
-    vectorizer = TfidfVectorizer(
-        ngram_range=(1, 2), max_features=20000, sublinear_tf=True
-    )
-    model = LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
-    model.fit(vectorizer.fit_transform(train_x), train_y)
-    predicted = model.predict(vectorizer.transform(test_x))
-    report = {
-        "kind": "text_classifier",
-        "training_examples": len(train_x),
-        "held_out_examples": len(test_x),
-        "accuracy": accuracy_score(test_y, predicted),
-        "classes": dict(counts),
-        "classification_report": classification_report(
-            test_y, predicted, zero_division=0, output_dict=True
-        ),
-        "limitation": "A small held-out set estimates performance only on similar examples; it does not prove general reliability.",
-    }
-    folder = fresh_folder(output_folder)
-    artifact = {
-        "kind": "text_classifier",
-        "vocabulary": {k: int(v) for k, v in vectorizer.vocabulary_.items()},
-        "idf": vectorizer.idf_.tolist(),
-        "coef": model.coef_.tolist(),
-        "intercept": model.intercept_.tolist(),
-        "classes": model.classes_.tolist(),
-    }
-    (folder / "model.json").write_text(json.dumps(artifact), encoding="utf-8")
-    (folder / "evaluation.json").write_text(
-        json.dumps(report, indent=2), encoding="utf-8"
-    )
-    return dict(report, model_folder=str(folder))
-
+    raw,partitions,explicit=_classifier_rows(dataset_path,text_column,label_column)
+    provenance=_classifier_provenance(dataset_path,raw)
+    before_counts={name:len(values) for name,values in partitions.items()}
+    if labels is not None:
+        if (not isinstance(labels,list) or not 2<=len(labels)<=256
+                or any(not isinstance(label,str) or not 0<len(label)<=128 for label in labels)
+                or len(set(labels))!=len(labels)
+                or not set(labels).issubset({label for _,label in partitions["train"]})):
+            raise ValueError("Choose two to 256 distinct labels present in the training split")
+        selected=set(labels)
+        partitions={name:[row for row in values if row[1] in selected] for name,values in partitions.items()}
+        if not partitions["test"] and explicit:
+            raise ValueError("Selected labels have no untouched test rows")
+    policy={"kind":"exact_label_subset" if labels is not None else "all_labels",
+            "selected_labels":sorted(labels) if labels is not None else None,"applied_before_fit":True,
+            "source_split_counts":before_counts,"retained_split_counts":{name:len(values) for name,values in partitions.items()},
+            "limitation":"Official OOS examples do not establish coverage of omitted intents or general out-of-distribution inputs."}
+    policy_hash=hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest()
+    counts=Counter(label for _,label in partitions["train"])
+    if len(partitions["train"])<12 or not 2<=len(counts)<=256 or min(counts.values())<3:
+        raise ValueError("Need at least 12 distinct training examples, two classes, and three per class")
+    if not explicit:
+        texts,labels=zip(*partitions["train"])
+        train_x,test_x,train_y,test_y=train_test_split(texts,labels,
+            test_size=max(len(counts),round(len(texts)*.2)),random_state=42,stratify=labels)
+        partitions["train"]=list(zip(train_x,train_y));partitions["test"]=list(zip(test_x,test_y))
+    train_x,train_y=zip(*partitions["train"])
+    test_x,test_y=zip(*partitions["test"])
+    counts=Counter(train_y)
+    destination=Path(output_folder).resolve()
+    if destination.exists() and any(destination.iterdir()):
+        raise ValueError("Choose a new, empty output folder")
+    started=time.perf_counter()
+    vectorizer=TfidfVectorizer(ngram_range=(1,2),max_features=20000,sublinear_tf=True)
+    model=LogisticRegression(max_iter=1000,class_weight="balanced",random_state=42)
+    model.fit(vectorizer.fit_transform(train_x),train_y)
+    fitted=time.perf_counter()-started
+    predicted=model.predict(vectorizer.transform(test_x))
+    majority=max(sorted(counts),key=counts.__getitem__)
+    report={"kind":"text_classifier","training_examples":len(train_x),"held_out_examples":len(test_x),
+        "validation_examples":len(partitions["validation"]),"accuracy":accuracy_score(test_y,predicted),
+        "macro_f1":f1_score(test_y,predicted,average="macro",zero_division=0),
+        "balanced_accuracy":balanced_accuracy_score(test_y,predicted),
+        "majority_baseline_accuracy":accuracy_score(test_y,[majority]*len(test_y)),
+        "classification_report":classification_report(test_y,predicted,zero_division=0,output_dict=True),
+        "classes":dict(counts),"fit_seconds":fitted,"data":provenance,
+        "subset_policy":policy,"subset_policy_sha256":policy_hash,
+        "evaluation_split":"provided_test" if explicit else "random_stratified_holdout",
+        "activated":False,"limitation":"Intent benchmark performance only; not proof of Cale routing/tool-use or user task success."}
+    if "oos" in counts:
+        report["always_oos_baseline_accuracy"]=accuracy_score(test_y,["oos"]*len(test_y))
+    if partitions["validation"]:
+        val_x,val_y=zip(*partitions["validation"])
+        report["validation_accuracy"]=accuracy_score(val_y,model.predict(vectorizer.transform(val_x)))
+    artifact={"kind":"text_classifier","format_version":1,
+        "feature_config":{"ngram_range":[1,2],"sublinear_tf":True,"lowercase":True,"norm":"l2"},
+        "vocabulary":{k:int(v) for k,v in vectorizer.vocabulary_.items()},"idf":vectorizer.idf_.tolist(),
+        "coef":model.coef_.tolist(),"intercept":model.intercept_.tolist(),"classes":model.classes_.tolist()}
+    model_bytes=json.dumps(artifact,allow_nan=False).encode("utf-8")
+    if len(model_bytes)>CLASSIFIER_MAX_BYTES:
+        raise ValueError("Trained classifier exceeds the portable artifact budget")
+    folder=fresh_folder(output_folder)
+    with (folder/"model.json").open("xb") as stream:stream.write(model_bytes)
+    # Benchmark the actual portable path, not sklearn reconstruction. Test text
+    # is read only for evaluation; it never fits vocabulary/IDF/coefficients.
+    probe=list(test_x[:min(20,len(test_x))])
+    started=time.perf_counter();predict_classifier(folder,probe[0]);cold=time.perf_counter()-started
+    timings=[]
+    for text in probe:
+        started=time.perf_counter();predict_classifier(folder,text);timings.append(time.perf_counter()-started)
+    report["portable_latency"]={"cold_seconds":cold,"warm_median_seconds":sorted(timings)[len(timings)//2],
+                                "samples":len(timings),"device":"cpu"}
+    report["model_sha256"]=hashlib.sha256(model_bytes).hexdigest()
+    evaluation=json.dumps(report,indent=2,allow_nan=False).encode("utf-8")
+    with (folder/"evaluation.json").open("xb") as stream:stream.write(evaluation)
+    registry={"format_version":1,"kind":"intent_classifier_candidate","status":"candidate","activated":False,
+        "model_sha256":report["model_sha256"],"evaluation_sha256":hashlib.sha256(evaluation).hexdigest(),
+        "dataset_sha256":provenance["dataset_sha256"],"data":provenance,
+        "subset_policy":policy,"subset_policy_sha256":policy_hash,
+        "purpose":"public_intent_benchmark" if provenance["kind"]=="normalized_public_benchmark" else "local_text_classification",
+        "reason":"Evaluation is recorded; independent Cale suitability and held-out task tests are still required."}
+    with (folder/"candidate.json").open("x",encoding="utf-8") as stream:json.dump(registry,stream,indent=2,allow_nan=False)
+    return dict(report,model_folder=str(folder),candidate_registry=str(folder/"candidate.json"),status="candidate")
 
 
 CLASSIFIER_MAX_BYTES = 96 * 1024 * 1024
@@ -409,7 +495,7 @@ def _load_classifier(model_folder):
                     or len(set(classes)) != len(classes)):
                 raise ValueError("Classifier needs distinct bounded class labels")
             config = {"ngram_range":[1,2],"sublinear_tf":True,"lowercase":True,"norm":"l2"}
-            if (artifact.get("format_version",1) != 1
+            if (type(artifact.get("format_version",1)) is not int or artifact.get("format_version",1) != 1
                     or json.dumps(artifact.get("feature_config",config),sort_keys=True) != json.dumps(config,sort_keys=True)):
                 raise ValueError("Unsupported classifier feature configuration")
             idf,coef,intercept = artifact["idf"],artifact["coef"],artifact["intercept"]
