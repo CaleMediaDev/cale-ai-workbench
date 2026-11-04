@@ -94,6 +94,10 @@ def _installer_running(pid=None) -> bool:
                         continue
                     candidates = [Path(argument)]
                     break
+                # Interpreter option values do not enable installation; only
+                # arguments following the script are parsed by its CLI.
+                if "--install" not in arguments:
+                    continue
                 if any(part.is_absolute() and part.resolve() == script for part in candidates):
                     return True
                 relative = [part for part in candidates if not part.is_absolute()

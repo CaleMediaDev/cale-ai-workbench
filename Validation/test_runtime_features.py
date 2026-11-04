@@ -271,6 +271,25 @@ def test_installer_path_in_another_programs_arguments_does_not_block_repair(
     assert json.loads(progress.read_text(encoding="utf-8"))["attempts"] == 2
 
 
+@pytest.mark.parametrize("script_arguments", [[], ["--install"]])
+def test_installer_flag_must_follow_script(monkeypatch, script_arguments):
+    import psutil
+
+    script = str(runtime_features.Path(runtime_features.__file__).resolve())
+
+    class Process:
+        def cmdline(self):
+            # Python consumes the first --install as the value of -W.
+            return ["python", "-W", "--install", script, *script_arguments]
+
+        def cwd(self):
+            pytest.fail("An absolute script path must not require cwd lookup")
+
+    monkeypatch.setattr(psutil, "Process", lambda pid: Process())
+
+    assert runtime_features._installer_running(12345) is bool(script_arguments)
+
+
 def test_missing_pip_is_bootstrapped(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_features, "PROGRESS", tmp_path / "install-progress.json")
     calls = []
