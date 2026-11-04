@@ -437,7 +437,10 @@ def _render_job(job_id: str, data: dict) -> None:
                     if destination.exists():
                         raise RuntimeError("Output path already exists; preserving the existing file.")
                     if rendered.suffix.lower() == ".mp4":
-                        shutil.copy2(rendered, destination)
+                        # Exclusively create the destination: another process may
+                        # have created it since the existence check above.
+                        with rendered.open("rb") as source, destination.open("xb") as target:
+                            shutil.copyfileobj(source, target)
                     else:
                         subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-i", str(rendered),
                                         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", str(destination)],
