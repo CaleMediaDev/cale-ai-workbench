@@ -36,6 +36,27 @@ class SkillHubTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[0].args[0:2], ("search", "accessibility"))
         self.assertEqual(run.call_args_list[2].args, ("install", identifier, "--yes"))
 
+    def test_install_rejects_expired_search_with_fresh_inspection(self):
+        identifier = "skills-sh/example/workflows/accessibility"
+        payload = json.dumps([{
+            "identifier": identifier,
+            "name": "accessibility",
+            "description": "Check interface accessibility.",
+        }])
+        started = 10000.0
+        with patch.object(skill_hub.time, "monotonic", return_value=started) as clock:
+            with patch.object(
+                skill_hub, "_run", side_effect=[payload, "Skill preview"]
+            ) as run:
+                skill_hub.search("accessibility")
+                clock.return_value = started + skill_hub.MAX_AGE - 1
+                skill_hub.inspect(identifier)
+                clock.return_value = started + skill_hub.MAX_AGE + 1
+                with self.assertRaisesRegex(ValueError, "Search and inspect"):
+                    skill_hub.install(identifier)
+                self.assertEqual(run.call_count, 2)
+                self.assertEqual(run.call_args.args, ("inspect", identifier))
+
     def test_search_skips_non_object_entries(self):
         identifier = "skills-sh/example/workflows/accessibility"
         payload = json.dumps([None, "invalid entry", [], {
