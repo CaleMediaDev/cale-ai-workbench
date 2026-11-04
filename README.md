@@ -232,6 +232,12 @@ retained verifier to pass. Input-effect, JavaScript, source-change and request
 guards remain part of step acceptance. Focused repair turns show bounded
 current source snippets around IDs and handlers, and use small edits for an
 existing HTML page. New-file writes and periodic unrestricted turns stay available.
+Repeated selector/checker failures can receive two short decision turns with
+the complete original brief, current follow-ups and project rules. These turns
+advertise only checker/step operations; their returned calls are validated again
+before execution. Changed requirements invalidate in-flight decisions, and the
+attempt reservation survives worker restarts. Ordinary task tools return after
+the bounded decision or when its complete requirements do not fit.
 
 The browser helper retains up to 32 independent sequences and 128 cases, within
 its existing 64 KB specification and 10-second explicit-wait budgets. Replay

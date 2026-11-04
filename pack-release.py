@@ -43,6 +43,8 @@ extras = [
     "benchmarks/results/offline-expense-resume-481-20261104.json",
     "benchmarks/results/offline-expense-resume-482a-20261104.json",
     "benchmarks/results/offline-expense-resume-482b-20261104.json",
+    "benchmarks/results/offline-expense-resume-483a-20261104.json",
+    "benchmarks/results/offline-expense-resume-483b-20261104.json",
     "benchmarks/results/donation-review-20261104b.json",
     "benchmarks/results/offline-expense-resume-478-20261104.json",
     "benchmarks/results/offline-expense-resume-480a-20261104.json",

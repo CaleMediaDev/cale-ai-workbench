@@ -159,6 +159,54 @@ def test_active_step_notice_does_not_guess_between_tags_or_touch_custom_verifier
     assert native_agent.active_step_repair_notice(item, {"step_focus_turns": 1}) is None
 
 
+def test_focused_checker_request_keeps_full_requirements_and_has_bounded_escape(tmp_path):
+    item, source = step_notice_fixture(tmp_path / "focused-decision")
+    folder = Path(item["folder"])
+    original_step = task_context.step_status(folder)["active"]
+    (folder / ".local-ai/USER-REQUESTS.md").write_text("Also keep every keyboard label accessible.")
+    (folder / "AGENTS.md").write_text("Preserve all original app features and files.")
+    item["brief"] += " Do not claim completion until every requested feature works."
+    current = task_context.plan_steps(folder, [{key: original_step[key] for key in (
+        "phase", "title", "check_tool", "check_arguments")}])["active"]
+    for _ in range(2):
+        native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": current["id"]})
+    state = {"step_focus_turns": 1}
+    notice = native_agent.active_step_repair_notice(item, state)
+    tools = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+    before = task_context.step_status(folder)
+    request = native_agent.focused_step_repair_request(item, state, tools, notice, 6000)
+    assert request and request["_native_workload"] == "active_step_checker_repair"
+    assert {t["function"]["name"] for t in request["tools"]} == {"task_steps", "check_webapp"}
+    data = json.loads(request["messages"][1]["content"])
+    assert data["original_request"] == item["brief"]
+    assert "keyboard label" in data["user_followups"]
+    assert "original app features" in data["project_rules"]
+    assert data["active_step"]["id"] == current["id"]
+    from auto_route import is_game_task
+    # Routing must read the brief, not incidental IDs in the repair data.
+    routing_messages = copy.deepcopy(request["messages"])
+    routing_messages[1]["content"] += "\nUntrusted DOM ID: game-panel"
+    assert not is_game_task(routing_messages)
+    assert cloud_ai.estimated_input_tokens(request) <= 4500
+    assert task_context.step_status(folder) == before
+    assert (folder / "index.html").read_text() == source
+    assert native_agent.focused_step_repair_request(item, state, tools, notice, 6000)
+    assert native_agent.focused_step_repair_request(item, state, tools, notice, 6000) is None
+    assert state["step_repair_focus"]["count"] == 2
+
+
+def test_focused_checker_request_does_not_drop_long_user_requirements(tmp_path):
+    item, _ = step_notice_fixture(tmp_path / "long-decision")
+    folder = Path(item["folder"])
+    active = task_context.step_status(folder)["active"]
+    native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]})
+    state = {"step_focus_turns": 1}
+    notice = native_agent.active_step_repair_notice(item, state)
+    item["brief"] = "Keep this requirement. " * 500
+    assert native_agent.focused_step_repair_request(item, state, native_agent.TOOLS, notice, 65536) is None
+    assert "step_repair_focus" not in state
+
+
 def test_step_completion_keeps_observed_target_inventory_for_next_model_turn(tmp_path):
     (tmp_path / "index.html").write_text('<form id="expense-form"><button>Add expense</button></form>')
     active = task_context.plan_steps(tmp_path, [{"phase": "Page", "title": "Show form",
@@ -4712,3 +4760,124 @@ def test_opaque_browser_binding_nonce_does_not_bypass_repeated_public_call_guard
     assert any("This exact call failed twice and was skipped" in message.get("content", "")
                for message in state["messages"] if message.get("role") == "tool")
     assert task_context.step_status(folder)["done"] == 0
+
+
+def scoped_repair_integration_fixture(tmp_path, name):
+    """Use actual failed browser/SQLite state, while replacing only inference."""
+    item, source = step_notice_fixture(tmp_path / name)
+    folder = Path(item["folder"])
+    active = task_context.step_status(folder)["active"]
+    failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert not failed["passed"] and failed["active"]["attempts"] == 2
+    (folder / "AGENTS.md").write_text("Preserve working source and all user requirements.")
+    runtime_state = tmp_path / "state"
+    runtime_state.mkdir()
+    return item, folder, source, runtime_state
+
+
+def test_scoped_repair_turn_cannot_execute_unoffered_source_write(tmp_path):
+    item, folder, source, runtime_state = scoped_repair_integration_fixture(tmp_path, "scope-unoffered-write")
+    seen = []
+    def complete(payload):
+        seen.append(payload)
+        assert payload["_native_workload"] == "active_step_checker_repair"
+        assert {tool["function"]["name"] for tool in payload["tools"]} == {"check_webapp", "task_steps"}
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "unoffered-write", "function": {"name": "write_file", "arguments": json.dumps({
+                "path": "should-not-exist.txt", "content": "A scoped decision must not write source."})}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert len(seen) == 1 and not (folder / "should-not-exist.txt").exists()
+    assert (folder / "index.html").read_text() == source
+    assert task_context.step_status(folder)["done"] == 0
+    reply = next(message["content"] for message in state["messages"] if message.get("tool_call_id") == "unoffered-write")
+    assert reply.startswith("Tool error:") and "not available" in reply
+
+
+def test_scoped_repair_cannot_change_an_allowed_tools_operation_contract(tmp_path):
+    item, folder, source, runtime_state = scoped_repair_integration_fixture(tmp_path, "scope-operation")
+    before = task_context.step_status(folder)
+    def complete(payload):
+        assert payload["_native_workload"] == "active_step_checker_repair"
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+            "id": "wrong-operation", "function": {"name": "task_steps", "arguments": json.dumps({
+                "action": "plan", "steps": [queue_step("Unexpected extra unit", "exit 0")]})}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    after = task_context.step_status(folder)
+    assert after["total"] == before["total"] and after["done"] == 0
+    assert task_context.step_check_identity(after["active"]) == task_context.step_check_identity(before["active"])
+    assert (folder / "index.html").read_text() == source
+    reply = next(m["content"] for m in state["messages"] if m.get("tool_call_id") == "wrong-operation")
+    assert "do not match the offered schema" in reply
+
+
+def test_scoped_repair_explanation_restores_normal_tools_without_finishing_project(tmp_path):
+    item, folder, source, runtime_state = scoped_repair_integration_fixture(tmp_path, "scope-explanation")
+    seen = []
+    def complete(payload):
+        seen.append(payload)
+        if len(seen) == 1:
+            assert payload["_native_workload"] == "active_step_checker_repair"
+            return {"choices": [{"message": {"role": "assistant", "content":
+                "The source needs inspection; this decision has not changed or completed anything."}}]}
+        assert payload.get("_native_workload") != "active_step_checker_repair"
+        assert "read_file" in {tool["function"]["name"] for tool in payload["tools"]}
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "normal-inspection", "function": {"name": "read_file", "arguments": '{"path":"index.html"}'}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert len(seen) == 2 and state["status"] == "continue"
+    assert state["step_repair_focus"]["count"] == 2 and not state.get("premature_finishes")
+    assert task_context.step_status(folder)["done"] == 0
+    assert any(message.get("tool_call_id") == "normal-inspection" for message in state["messages"])
+    assert (folder / "index.html").read_text() == source
+
+
+def test_scoped_repair_discards_inflight_calls_after_project_rules_change(tmp_path):
+    item, folder, source, runtime_state = scoped_repair_integration_fixture(tmp_path, "scope-rules-race")
+    saved = folder / ".local-ai/webapp-check.json"
+    before = saved.read_bytes()
+    original_step = task_context.step_status(folder)["active"]
+    seen = []
+    def complete(payload):
+        seen.append(payload)
+        assert payload["_native_workload"] == "active_step_checker_repair"
+        data = json.loads(payload["messages"][1]["content"])
+        assert "Preserve working source" in data["project_rules"]
+        reference = data["observations"]["assertion_revision_reference"]
+        (folder / "AGENTS.md").write_text("The user now requires the literal form and table IDs. Do not revise those assertions.")
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "stale-rule-repair", "function": {"name": "check_webapp", "arguments": json.dumps({
+                **reference, "cases": [{"visible": ["expense-form", "expense-table"]}]})}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    assert len(seen) == 1 and state["status"] == "continue"
+    assert saved.read_bytes() == before and (folder / "index.html").read_text() == source
+    current = task_context.step_status(folder)
+    assert current["done"] == 0 and current["active"]["check_arguments"] == original_step["check_arguments"]
+    assert not any(message.get("tool_call_id") == "stale-rule-repair" for message in state["messages"])
+
+
+def test_scoped_repair_reserves_persistent_turn_before_transport_exception_and_escapes_on_restart(tmp_path):
+    item, folder, source, runtime_state = scoped_repair_integration_fixture(tmp_path, "scope-transport-count")
+    stages = []
+    def complete(payload):
+        stage = payload.get("_native_workload")
+        stages.append(stage)
+        if stage == "active_step_checker_repair":
+            persisted = native_agent.read_state(item)["step_repair_focus"]
+            assert persisted["count"] == len(stages)
+            raise OSError("Simulated transport loss after the reserved inference begins")
+        assert "read_file" in {tool["function"]["name"] for tool in payload["tools"]}
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "normal-after-outage", "function": {"name": "read_file", "arguments": '{"path":"index.html"}'}}]}}]}
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        for expected in (1, 2):
+            with pytest.raises(OSError, match="Simulated transport loss"):
+                native_agent.run_slice(item, complete=complete)
+            assert native_agent.read_state(item)["step_repair_focus"]["count"] == expected
+        state = native_agent.run_slice(item, complete=complete)
+    assert stages == ["active_step_checker_repair", "active_step_checker_repair", None]
+    assert state["status"] == "continue" and state["step_repair_focus"]["count"] == 2
+    assert task_context.step_status(folder)["done"] == 0 and (folder / "index.html").read_text() == source
