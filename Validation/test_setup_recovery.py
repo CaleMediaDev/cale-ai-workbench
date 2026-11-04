@@ -314,6 +314,27 @@ def test_invalid_progress_timestamp_does_not_crash_or_restart_setup(tmp_path, mo
     assert not (state / "base-install-repair.json").exists()
 
 
+def test_overflowing_working_timestamp_does_not_trigger_recovery(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    progress_path = state / "install-progress.json"
+    progress = {
+        "status": "working", "current": "Downloading the AI model",
+        "updated": 10 ** 400,
+    }
+    progress_text = json.dumps(progress)
+    progress_path.write_text(progress_text, encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    with patch.object(setup_recovery.subprocess, "Popen") as launch:
+        assert setup_recovery._stalled(progress) is False
+        assert setup_recovery.recover() is False
+        launch.assert_not_called()
+    assert progress_path.read_text(encoding="utf-8") == progress_text
+    assert not (state / "base-install-repair.json").exists()
+
+
 def test_nonfinite_working_timestamp_does_not_trigger_recovery(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
