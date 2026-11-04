@@ -9,6 +9,43 @@ import pytest
 import cale_voice
 
 
+def test_gpu_release_still_stops_parent_when_children_are_inaccessible(tmp_path):
+    import psutil
+    own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
+    own.children.side_effect = psutil.AccessDenied(pid=100)
+    with patch.object(cale_voice, "ROOT", tmp_path), patch("psutil.process_iter", return_value=[own]), \
+         patch("os.getpid", return_value=500), patch("psutil.wait_procs", return_value=([], [])):
+        cale_voice.release_for_gpu_task()
+    own.terminate.assert_called_once_with()
+    own.wait.assert_called_once_with(timeout=5)
+
+
+def test_gpu_release_waits_for_killed_descendants_before_returning(tmp_path):
+    own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
+    child = Mock()
+    own.children.return_value = [child]
+    with patch.object(cale_voice, "ROOT", tmp_path), patch("psutil.process_iter", return_value=[own]), \
+         patch("os.getpid", return_value=500), \
+         patch("psutil.wait_procs", side_effect=[([], [child]), ([child], [])]) as wait:
+        cale_voice.release_for_gpu_task()
+    child.kill.assert_called_once_with()
+    assert len(wait.call_args_list) == 2
+    assert all(call.args == ([child],) and call.kwargs == {"timeout": 3} for call in wait.call_args_list)
+
+
+def test_gpu_release_waits_for_parent_after_forced_kill(tmp_path):
+    import psutil
+    own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
+    own.children.return_value = []
+    own.wait.side_effect = [psutil.TimeoutExpired(5, pid=100), 0]
+    with patch.object(cale_voice, "ROOT", tmp_path), patch("psutil.process_iter", return_value=[own]), \
+         patch("os.getpid", return_value=500), patch("psutil.wait_procs", return_value=([], [])):
+        cale_voice.release_for_gpu_task()
+    own.kill.assert_called_once_with()
+    assert own.wait.call_count == 2
+    own.wait.assert_called_with(timeout=5)
+
+
 def test_voice_ready_rejects_a_stale_marker_with_wrong_dependencies():
     with TemporaryDirectory() as folder:
         root = Path(folder)
@@ -104,7 +141,8 @@ def test_music_releases_only_this_installations_voice_worker(tmp_path, child_sur
     own.wait.assert_called_once_with(timeout=5)
     own.children.assert_called_once_with(recursive=True)
     child.terminate.assert_called_once_with()
-    wait_procs.assert_called_once_with([child], timeout=3)
+    assert wait_procs.call_count == (2 if child_survives else 1)
+    wait_procs.assert_called_with([child], timeout=3)
     if child_survives:
         child.kill.assert_called_once_with()
     else:
