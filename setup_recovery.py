@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import time
@@ -128,7 +129,8 @@ def _stalled(progress: dict) -> bool:
         # A readable JSON record can still contain an invalid timestamp.
         # Without a usable timestamp, do not infer that setup is stale.
         return False
-    return (time.time() - updated >= STALE_SECONDS
+    return (math.isfinite(updated)
+            and time.time() - updated >= STALE_SECONDS
             and not _installer_running(progress)
             and not _retry_runner_running())
 
