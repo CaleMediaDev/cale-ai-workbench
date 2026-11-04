@@ -11,6 +11,45 @@ import project_memory
 import site_crawler
 
 
+@pytest.mark.parametrize("bad_href", [123, b"/broken"])
+def test_malformed_link_target_does_not_abort_crawl(tmp_path, monkeypatch, bad_href):
+    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+    indexed = []
+    monkeypatch.setattr(project_memory, "index_file", lambda project, path: indexed.append(path))
+    start = "https://example.com"
+    child = start + "/child"
+    seen = []
+
+    class FakeCrawler:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def arun(self, url, config):
+            seen.append(url)
+            return types.SimpleNamespace(
+                success=True, markdown="Readable content", error_message="",
+                links={"internal": [{"href": bad_href}, {"href": "/child"}]} if url == start else {},
+            )
+
+    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
+        AsyncWebCrawler=FakeCrawler,
+        BrowserConfig=lambda **kwargs: kwargs,
+        CrawlerRunConfig=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    ))
+    result = asyncio.run(site_crawler.crawl_site(tmp_path, start, max_pages=2))
+    assert seen == [start, child]
+    assert result["errors"] == []
+    assert [page["url"] for page in result["pages"]] == seen
+    assert indexed == [site_crawler.page_path(tmp_path, url) for url in seen]
+    assert all(path.exists() for path in indexed)
+
+
 def test_url_scope_and_stable_path(tmp_path, monkeypatch):
     monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
     url = site_crawler.normalized_url("https://example.com/a#part", "example.com")
