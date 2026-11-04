@@ -1,0 +1,33 @@
+{
+  "release": "0.5.502",
+  "base": "1005969dd07b58d414fd369983135a8e4e6e3cbc",
+  "changes": [
+    "Require at least three qualified sustained samples before model exclusion or automatic retirement.",
+    "Keep all throughput samples available for ranking and display.",
+    "Take the usage-database writer lock only for actual schema or index migration."
+  ],
+  "independent_proofs": {
+    "three_one_token_half_second_responses": {
+      "display_tps_before_and_after": 2.0,
+      "hardware_fit_model_suitable_before": false,
+      "hardware_fit_model_suitable_after": true
+    },
+    "initialized_wal_reader_with_writer_held": {
+      "original_retirement_candidate": "SQLITE_BUSY",
+      "corrected_reader_rows": 3,
+      "corrected_reader_in_transaction": false
+    }
+  },
+  "validation": {
+    "modules": ["test_usage_history", "test_model_fitness", "test_model_library", "test_cloud_ai", "test_auto_route"],
+    "parent_check": "294 passed, 111 subtests passed in 27.88 seconds",
+    "independent_review_check": "294 passed, 111 subtests passed in 23.96 seconds"
+  },
+  "preserved": ["Hardware suitability gates", "App-owned-model and idle guards before deletion", "Explicit model selection", "Local/cloud/account modes"],
+  "limitations": [
+    "Compatible endpoints report end-to-end throughput including prompt/load time, not isolated decode speed.",
+    "Model timing histories remain alias-keyed, not keyed by physical weight digest.",
+    "No actual inference or model deletion was used to validate these focused changes.",
+    "Private JavaScript-context and app-continuation experiments are not included."
+  ]
+}
