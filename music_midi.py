@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import music_backend
@@ -58,11 +59,13 @@ def install() -> Path:
 
 def normalize_note_events(path: Path) -> None:
     """Make Basic Pitch's unquoted pitch-bend arrays valid five-column CSV."""
-    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary_file = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline="", dir=path.parent,
+        prefix=path.name + ".", suffix=".tmp", delete=False,
+    )
+    temporary = Path(temporary_file.name)
     try:
-        with path.open("r", encoding="utf-8", newline="") as source, temporary.open(
-            "w", encoding="utf-8", newline=""
-        ) as target:
+        with temporary_file as target, path.open("r", encoding="utf-8", newline="") as source:
             reader = csv.reader(source)
             writer = csv.writer(target)
             if next(reader, None) != NOTE_COLUMNS:
