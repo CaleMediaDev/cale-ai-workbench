@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import sys
 from unittest.mock import patch
 
@@ -100,6 +101,9 @@ def test_catalog_recovers_from_fresh_oversized_cache(tmp_path):
         def __exit__(self, *args):
             return self.handle.__exit__(*args)
 
+        def fileno(self):
+            return self.handle.fileno()
+
         def read(self, size=-1):
             read_sizes.append(size)
             assert size == limit + 1
@@ -166,6 +170,37 @@ def test_catalog_recovers_from_excessively_nested_cache(tmp_path):
 
     open_url.assert_called_once()
     response.read.assert_called_once_with(public_api_catalog.MAX_BYTES + 1)
+    assert data == snapshot
+    assert fresh is True
+    assert cache.read_bytes() == downloaded
+
+
+def test_catalog_freshness_belongs_to_snapshot_read(tmp_path):
+    cache = tmp_path / "apis.json"
+    original = json.dumps([{"name": "Expired snapshot"}]).encode("utf-8")
+    cache.write_bytes(original)
+    now = 200000
+    os.utime(cache, (1, 1))
+    replacement = tmp_path / "replacement.json"
+    replacement.write_text(json.dumps([{"name": "Concurrent snapshot"}]), encoding="utf-8")
+    os.utime(replacement, (now, now))
+    snapshot = [{"name": "Downloaded snapshot"}]
+    downloaded = json.dumps(snapshot).encode("utf-8")
+    original_loads = json.loads
+
+    def decode(value, *args, **kwargs):
+        if value == original.decode("utf-8"):
+            replacement.replace(cache)
+        return original_loads(value, *args, **kwargs)
+
+    with patch.object(public_api_catalog, "CACHE", cache), \
+         patch.object(public_api_catalog.time, "time", return_value=now), \
+         patch.object(public_api_catalog.json, "loads", side_effect=decode), \
+         patch.object(public_api_catalog, "urlopen") as open_url:
+        open_url.return_value.__enter__.return_value.read.return_value = downloaded
+        data, fresh = public_api_catalog._catalog()
+
+    open_url.assert_called_once()
     assert data == snapshot
     assert fresh is True
     assert cache.read_bytes() == downloaded
