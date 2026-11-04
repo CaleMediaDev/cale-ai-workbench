@@ -58,9 +58,22 @@ def record(source: str, size: str, outcome: str) -> None:
 
 def record_budget_limit(source: str) -> None:
     """Count a client-side daily cap once, even if later tasks keep trying."""
+    if not source or len(source) > 40:
+        return
     now = time.time()
-    if now - pressure(source, now)["last_limit"] >= 86400:
-        record(source, "balanced", "limit")
+    if now - pressure(source, now)["last_limit"] < 86400:
+        return
+    try:
+        with closing(_connection()) as conn, conn:
+            # Recheck within the insert: other callers may share our snapshot.
+            inserted = conn.execute("""INSERT INTO attempts(timestamp,source,size,outcome)
+                SELECT ?,?,'balanced','limit' WHERE NOT EXISTS (
+                    SELECT 1 FROM attempts WHERE source=? AND outcome='limit' AND timestamp>?
+                )""", (now, source, source, now - 86400))
+            if inserted.rowcount:
+                conn.execute("DELETE FROM attempts WHERE timestamp < ?", (now - 30 * 86400,))
+    except (OSError, sqlite3.Error):
+        pass
 
 
 def pressure(source: str, now: float | None = None) -> dict:
