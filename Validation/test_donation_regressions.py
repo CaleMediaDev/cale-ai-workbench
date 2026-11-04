@@ -45,6 +45,25 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class TaskElapsedTimeRegressionTests(unittest.TestCase):
+    def test_nonfinite_elapsed_timestamps_are_unavailable(self):
+        for timestamp in (float("nan"), float("inf"), float("-inf")):
+            for status in ("working", "paused", "ready_for_review", "accepted", "stopped"):
+                with self.subTest(created=timestamp, status=status):
+                    self.assertEqual(
+                        total_time(timestamp, 160, status, now=1000), "—"
+                    )
+            for status in ("ready_for_review", "accepted", "stopped"):
+                for finished in (None, "invalid", float("nan")):
+                    with self.subTest(updated=timestamp, status=status, finished=finished):
+                        self.assertEqual(
+                            total_time(100, timestamp, status, now=1000, finished=finished),
+                            "—",
+                        )
+                with self.subTest(updated=timestamp, status=status, finished=130):
+                    self.assertEqual(
+                        total_time(100, timestamp, status, now=1000, finished=130), "30s"
+                    )
+
     def test_terminal_time_falls_back_for_invalid_finished_timestamp(self):
         for status in ("ready_for_review", "accepted", "stopped"):
             for finished in (None, 0, "invalid", {"bad": "timestamp"},

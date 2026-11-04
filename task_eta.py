@@ -40,7 +40,7 @@ def total_time(created: float, updated: float, status: str,
         last_change = float(updated)
     except (TypeError, ValueError):
         return "—"
-    if start <= 0:
+    if not math.isfinite(start) or start <= 0:
         return "—"
     if status in ("ready_for_review", "accepted", "stopped"):
         try:
@@ -51,6 +51,8 @@ def total_time(created: float, updated: float, status: str,
             end = last_change
     else:
         end = now
+    if not math.isfinite(end):
+        return "—"
     return _duration(max(0, end - start))
 
 
