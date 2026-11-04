@@ -83,7 +83,7 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
             files = [target / path.name for path in staged_files]
             published = []
             try:
-                for path in staging.iterdir():
+                for path in staged_files:
                     destination = target / path.name
                     path.rename(destination)
                     published.append(destination)
