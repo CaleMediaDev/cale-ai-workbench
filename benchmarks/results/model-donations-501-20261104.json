@@ -2,13 +2,13 @@
   "release": "0.5.501",
   "feature": "Explicit opt-in CPU donations for evaluated small specialist models",
   "validation": {
-    "modules": 7,
-    "result": "269 passed, 4 skipped, 118 subtests passed in 19.62 seconds",
-    "earlier_catalog_failure": "Existing public500 project-memory assignment exceeded40000 characters:52291. Seven unchanged existing tests moved to a focused packaged module; assignment now28812 characters."
+    "modules": 6,
+    "result": "273 passed, 4 skipped, 118 subtests passed in 23.01 seconds",
+    "earlier_catalog_failure": "Existing public500 assignment was52291 characters. Seven unchanged existing memory tests moved into existing test_routing_memory.py; final assignment31839 characters."
   },
   "actual_worker": {
-    "source": "cbaf4dc04e2be8f116664367028ca388b3fb97ea",
-    "experiment_sha256": "7c865cffa92939cca43439ef05093a0a0cdc8794d82347eddbe88127795ee32e",
+    "source": "ed0758e499a10b8b1c264ae267b9528d8ca681bc",
+    "experiment_sha256": "2a77a5cd0dd47d4b38870926707bef6292073fe8b0a44aa2298b07ce6186b905",
     "policy": {
       "job": "model-clinc-utility-v1",
       "dataset_id": "clinc150",
@@ -41,8 +41,8 @@
       "timeout": 300,
       "threads": 2,
       "gate": "accuracy>both-baselines+.05;macro_f1>=.70;not-routing-qualified",
-      "trainer_sha256": "f3171c5e5e890411457e80303661856b645477e776d3db5877fb68dde4336279",
-      "worker_sha256": "86b2b0bd57230c52d7827e2f9538c7c97aafd347aa9d0fe3f919d4020813a72f",
+      "trainer_sha256": "55e0cea16b25c834ae1629d194a3d2c0637eabba168f01427417de4be275f67f",
+      "worker_sha256": "55e0cea16b25c834ae1629d194a3d2c0637eabba168f01427417de4be275f67f",
       "python": "3.13.6",
       "dependencies": {
         "scikit-learn": "1.9.1",
@@ -50,21 +50,21 @@
         "scipy": "1.18.1"
       }
     },
-    "worker_seconds": 7.35740400000941,
-    "elapsed_seconds": 7.513309800007846,
+    "worker_seconds": 2.9277743000129703,
+    "elapsed_seconds": 3.1652765999897383,
     "model_bytes": 1254794,
     "artifact_hashes": {
       "model.json": "df2707eeb95caae16877078104ea681428c77fae71d2b271bd7fdb5ba17865f7",
-      "evaluation.json": "ae5d09099796ce6e1f9560a598420a2b254608e1118c0ca4626df99d810dd63c",
-      "candidate.json": "4ee12813683b003cc04551d8d65194305eba78cb5894a158ae2224fd8432ca13",
-      "contribution.json": "20540a0c0e1811bfc4a8728319e3cc1a6e289724c51789e70320b2f201f0c63e"
+      "evaluation.json": "ca382344966847c67692093ff30e5ff088dc554c59b32e898d903af8c8b1e558",
+      "candidate.json": "2e7820993a62d1913a2be264425a0c2ccdb248c5ec515f5a48d14626c60f5e10",
+      "contribution.json": "5d139693a5e92d55496acfc4fd983a8318a61929b10d89c9a0c212886a2ee649"
     },
     "accuracy": 0.6135338345864662,
     "macro_f1": 0.5718705186459785,
     "always_oos_baseline_accuracy": 0.7518796992481203,
     "portable_latency": {
-      "cold_seconds": 0.04349000001093373,
-      "warm_median_seconds": 0.00029070000164210796,
+      "cold_seconds": 0.043278600001940504,
+      "warm_median_seconds": 0.0002861000248230994,
       "samples": 20,
       "device": "cpu"
     },
@@ -80,5 +80,12 @@
     "Experiment novelty is tracked per PC, not coordinated across contributors.",
     "Publication, crash recovery, cancellation and account boundaries use focused mocked tests; actual smoke trained and validated locally without uploads.",
     "No claim that the installed full self-check has passed."
-  ]
+  ],
+  "compatibility": {
+    "manifest_entries": 250,
+    "original_manifest_set_preserved": true,
+    "updater_cap_unchanged": true,
+    "new_worker_location": "small_training.py",
+    "intermediate_253_file_build_rejected_before_publication": true
+  }
 }
