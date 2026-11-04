@@ -229,6 +229,30 @@ def test_restarts_reattach_existing_render_and_station_edits_do_not_play_old_pro
         assert not player.played
 
 
+def test_missing_buffered_audio_is_retired_from_published_ready_count(tmp_path):
+    _, service, player, jobs, calls, generate = fixture(tmp_path)
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        finish(jobs, calls, 1)
+        service.tick()
+        assert service.snapshot()["ready"] == 1
+        buffered = next(row for row in service._rows() if row["status"] == "ready")
+        Path(buffered["path"]).unlink()
+
+        service.tick()
+
+        retired = next(row for row in service._rows() if row["id"] == buffered["id"])
+        assert retired["status"] == "error"
+        assert service.snapshot()["ready"] == 0
+        assert player.active and player.played == [calls[0][1]]
+        # The in-flight replacement can still become usable buffered audio.
+        finish(jobs, calls, 2)
+        service.tick()
+        assert service.snapshot()["ready"] == 1
+
+
 def test_completed_render_without_output_retries_and_recovers(tmp_path):
     _, service, player, jobs, calls, generate = fixture(tmp_path)
     with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]), patch.object(radio.time, "monotonic", return_value=100) as clock:

@@ -534,6 +534,9 @@ class Service:
             rows = self._rows()
             # Reattach durable jobs after a restart without starting duplicates.
             for row in rows:
+                if row["status"] == "ready" and not Path(row["path"]).is_file():
+                    self._update(row["id"], "error")
+                    continue
                 if row["status"] != "queued":
                     continue
                 job = music_backend.music_job_status(row["job"])
