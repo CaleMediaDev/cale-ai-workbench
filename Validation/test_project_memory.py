@@ -297,6 +297,29 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertFalse(memory.index_document_text(
             self.folder, source, corrected, digest)["updated"])
 
+    def test_document_chunk_boundary_preserves_searchable_word(self):
+        source = self.folder / "boundary.pdf"
+        source.write_bytes(b"document bytes")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        prefix = " " * (memory.DOCUMENT_CHUNK_CHARS - 5)
+        text = prefix + "boundaryzebra passage"
+
+        result = memory.index_document_text(self.folder, source, text, digest)
+
+        self.assertEqual(result["parts"], 2)
+        found = memory.search(self.folder, "boundaryzebra", kind="document")
+        self.assertEqual([row["id"] for row in found],
+                         ["document:boundary.pdf:2"])
+        with memory.connection(self.folder) as conn:
+            bodies = [row[0] for row in conn.execute(
+                "SELECT body FROM memories WHERE kind='document' ORDER BY id"
+            )]
+        self.assertEqual("".join(bodies), text)
+        self.assertTrue(all(len(body) <= memory.DOCUMENT_CHUNK_CHARS
+                            for body in bodies))
+        self.assertFalse(memory.index_document_text(
+            self.folder, source, text, digest)["updated"])
+
     def test_document_chunks_are_searchable_and_source_checked(self):
         source = self.folder / "manual.pdf"
         source.write_bytes(b"first document bytes")
