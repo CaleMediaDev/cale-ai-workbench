@@ -207,6 +207,39 @@ def test_game_ranking_nested_cache_falls_back_and_allows_retry():
         ) == ["cale-fast"]
 
 
+def test_game_probe_current_rejects_nested_cache_and_recovers():
+    depth = max(5000, sys.getrecursionlimit() + 100)
+    source = "candidate:7b"
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        path = root / "LongTasks/game-model-probes.json"
+        path.parent.mkdir()
+        path.write_text("[" * depth + "0" + "]" * depth, encoding="utf-8")
+        with (
+            patch.object(model_library, "post") as post,
+            patch.object(model_library, "weight_blob", return_value="a" * 64),
+            patch.object(model_fitness, "gpu_vram_gb", return_value=12),
+            patch.object(model_library, "total_ram_gb", return_value=32),
+        ):
+            assert model_fitness.game_probe_current(source, root) is False
+            post.assert_not_called()
+            path.write_text(
+                json.dumps({source: {
+                    "version": model_fitness.GAME_PROBE_VERSION,
+                    "weights": "a" * 64,
+                    "vram_gb": 12,
+                    "ram_gb": 32,
+                    "updated": time.time(),
+                    "build": {"passed": True},
+                }}),
+                encoding="utf-8",
+            )
+            assert model_fitness.game_probe_current(
+                source, root, info={"model": source}
+            ) is True
+            post.assert_not_called()
+
+
 def test_game_probe_requires_two_complete_independent_passes():
     with tempfile.TemporaryDirectory() as folder:
         checks = {str(i): True for i in range(13)}
