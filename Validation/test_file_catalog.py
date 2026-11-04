@@ -236,6 +236,36 @@ class FileCatalogTests(unittest.TestCase):
             self.assertEqual(file_catalog.search(state, "my budget")[0]["path"], str(target))
             self.assertEqual(file_catalog.search(state, "my budget spreadsheet from 2025"), [])
 
+    def test_stale_search_candidates_do_not_hide_live_match(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            target = root / "needle extra words.txt"
+            target.write_text("", encoding="utf-8")
+            with file_catalog.database(state) as conn:
+                # Shorter filenames rank ahead of the live match, but none
+                # of these previously cataloged files still exist.
+                for number in range(100):
+                    parent = root / f"deleted-{number}"
+                    conn.execute(
+                        "INSERT INTO entries(path,name,parent,kind,scan_id) VALUES(?,?,?,?,?)",
+                        (str(parent / "needle.txt"), "needle.txt", str(parent),
+                         "file", "previous"),
+                    )
+                conn.execute(
+                    "INSERT INTO entries(path,name,parent,kind,scan_id) VALUES(?,?,?,?,?)",
+                    (str(target), target.name, str(root), "file", "previous"),
+                )
+
+            results = file_catalog.search(state, "needle", limit=1)
+
+            self.assertEqual([row["path"] for row in results], [str(target)])
+            with file_catalog.database(state) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0], 1
+                )
+
     def test_filler_word_does_not_hide_compound_filename(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"
