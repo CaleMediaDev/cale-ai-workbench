@@ -8,6 +8,7 @@ while as the runtime and model download. No account or cloud inference is used.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -982,8 +983,12 @@ def recover_music_jobs() -> None:
             _job_path(job_id)
             if info.get("job_id") != job_id or info.get("status") not in ("queued", "working"):
                 continue
-            if info["status"] == "queued" and time.time() - float(info.get("created", 0)) < 30:
-                continue
+            if info["status"] == "queued":
+                created = float(info.get("created", 0))
+                if not math.isfinite(created):
+                    continue  # A damaged timestamp must not enter the startup grace period.
+                if time.time() - created < 30:
+                    continue
             if _worker_running(job_id, info):
                 continue
             output = Path(info["output_path"])
