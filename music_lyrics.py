@@ -48,7 +48,10 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
     """Write plain text, SRT captions and raw timings without changing audio."""
     rows = []
     for segment in transcription.get("segments", []):
-        words = " ".join(str(segment.get("text", "")).split())
+        text_value = segment.get("text", "")
+        if not isinstance(text_value, str):
+            continue
+        words = " ".join(text_value.split())
         try:
             start = float(segment["start"])
             end = float(segment["end"])
