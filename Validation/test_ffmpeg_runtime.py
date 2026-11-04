@@ -135,6 +135,18 @@ def test_version_health_check_uses_bytes(tmp_path, stdout, returncode, expected)
     )
 
 
+@pytest.mark.parametrize("error", [
+    PermissionError("installation directory is inaccessible"),
+    OSError("installation filesystem is unavailable"),
+])
+def test_version_health_check_handles_executable_stat_errors(tmp_path, error):
+    with patch.object(Path, "is_file", side_effect=error), \
+            patch.object(ffmpeg_runtime.subprocess, "run") as run:
+        assert ffmpeg_runtime.working(tmp_path) is False
+
+    run.assert_not_called()
+
+
 @pytest.mark.parametrize("repair_fails", [False, True])
 def test_background_repair_only_throttles_failures(tmp_path, repair_fails):
     with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
