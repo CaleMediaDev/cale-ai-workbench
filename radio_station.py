@@ -40,9 +40,26 @@ def database(root=ROOT):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("CREATE TABLE IF NOT EXISTS stations(id TEXT PRIMARY KEY,name TEXT,prompt TEXT,instrumental INTEGER)")
     conn.execute("""CREATE TABLE IF NOT EXISTS tracks(id TEXT PRIMARY KEY,station TEXT,job TEXT,
-        path TEXT,status TEXT,created REAL,finished REAL DEFAULT 0,render_seconds REAL DEFAULT 0,config TEXT DEFAULT '')""")
-    if "config" not in {row[1] for row in conn.execute("PRAGMA table_info(tracks)")}:
+        path TEXT,status TEXT,created REAL,finished REAL DEFAULT 0,render_seconds REAL DEFAULT 0,config TEXT DEFAULT '',completed INTEGER NOT NULL DEFAULT 0)""")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(tracks)")}
+    if "config" not in columns:
         conn.execute("ALTER TABLE tracks ADD COLUMN config TEXT DEFAULT ''")
+        conn.commit()
+    if "completed" not in columns:
+        conn.execute("ALTER TABLE tracks ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
+        conn.execute("UPDATE tracks SET completed=1 WHERE status IN ('ready','playing','played') OR finished>0")
+        # Older players erased finish timestamps on playback/pruning. Recover
+        # only successes proved by their exact durable music-job receipt.
+        for row in conn.execute("SELECT id,job FROM tracks WHERE completed=0 AND status='pruned'").fetchall():
+            job = row["job"]
+            if not isinstance(job, str) or len(job) != 32 or any(c not in "0123456789abcdef" for c in job):
+                continue
+            try:
+                receipt = json.loads((Path(root)/"LongTasks/music-jobs"/(job+".json")).read_text(encoding="utf-8"))
+                if isinstance(receipt, dict) and receipt.get("status") == "complete":
+                    conn.execute("UPDATE tracks SET completed=1 WHERE id=?", (row["id"],))
+            except (OSError, ValueError):
+                pass
         conn.commit()
     conn.execute("CREATE INDEX IF NOT EXISTS radio_live_tracks ON tracks(created) WHERE status!='pruned'")
     conn.execute("CREATE INDEX IF NOT EXISTS radio_queue ON tracks(station,config,status)")
@@ -259,8 +276,7 @@ class Service:
             self.stats_at = time.monotonic()+10
             self.local_tokens, self.radio_tokens = local_token_totals(self.root)
             with closing(database(self.root)) as conn:
-                self.tracks_made = conn.execute("""SELECT COUNT(*) FROM tracks
-                    WHERE status IN ('ready','playing','played') OR (status='pruned' AND finished>0)""").fetchone()[0]
+                self.tracks_made = conn.execute("SELECT COUNT(*) FROM tracks WHERE completed=1").fetchone()[0]
         with closing(database(self.root)) as conn:
             rendering = bool(conn.execute("SELECT 1 FROM tracks WHERE status='queued' LIMIT 1").fetchone())
             if self.station:
@@ -299,8 +315,8 @@ class Service:
 
     def _update(self, identity, status, **values):
         with closing(database(self.root)) as conn, conn:
-            conn.execute("UPDATE tracks SET status=?,finished=COALESCE(?,finished),render_seconds=COALESCE(?,render_seconds) WHERE id=?",
-                         (status, values.get("finished"), values.get("render_seconds"), identity))
+            conn.execute("UPDATE tracks SET status=?,finished=COALESCE(?,finished),render_seconds=COALESCE(?,render_seconds),completed=MAX(completed,?) WHERE id=?",
+                         (status, values.get("finished"), values.get("render_seconds"), int(status in ("ready", "playing", "played")), identity))
 
     def tick(self):
         try:
@@ -470,7 +486,7 @@ class Controls:
         self.volume = tk.DoubleVar(value=65)
         ttk.Scale(transport, from_=0, to=100, length=80, variable=self.volume, style="Radio.Horizontal.TScale",
                   command=self.set_volume).pack(side="right", padx=(6, 0))
-        self.mute = ttk.Button(transport, text="Mute", width=5, command=self.toggle_mute, style="Radio.TButton")
+        self.mute = ttk.Button(transport, text="Mute", width=7, command=self.toggle_mute, style="Radio.TButton")
         self.mute.pack(side="right", padx=(8, 0))
         progress = tk.Frame(transport, background=deck)
         progress.pack(side="left", fill="x", expand=True, padx=(16, 8))

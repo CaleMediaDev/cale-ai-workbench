@@ -6,6 +6,13 @@
   ],
   "windows_play_pause_resume_skip_stop_passed": true,
   "cloud_inference_used": false,
+  "vocal_country_trial": {
+    "job_status": "complete", "elapsed_seconds": 95.98,
+    "requested_audio_seconds": 180, "vocal_check_passed": true,
+    "recognized_words": 381, "last_vocal_second": 178.0,
+    "new_radio_lyric_usage_attributed": true,
+    "playback_clock_and_transport_controls_passed": true
+  },
   "vocal_club_trial": {
     "description": "Live default Cale Club edited to request Cale Media lyrics and lead vocals, using the existing local music worker.",
     "job_status": "complete",

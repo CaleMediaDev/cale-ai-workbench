@@ -120,6 +120,28 @@ def test_playback_status_does_not_erase_completed_render_evidence(tmp_path):
         service.tick()
         row = next(row for row in service._rows() if row["id"] == current["id"])
         assert row["status"] == "played" and row["finished"] > 0
+        service._update(current["id"], "pruned")
+        service.stats_at = 0
+        service._publish()
+        assert service.snapshot()["tracks_made"] == 1  # Cache cleanup never subtracts a made track.
+
+
+def test_legacy_pruned_track_count_requires_a_success_receipt(tmp_path):
+    import json
+    import sqlite3
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    with sqlite3.connect(state / "radio.sqlite3") as conn:
+        conn.execute("CREATE TABLE tracks(id TEXT,station TEXT,job TEXT,path TEXT,status TEXT,created REAL,finished REAL,render_seconds REAL,config TEXT)")
+        conn.executemany("INSERT INTO tracks VALUES(?,?,?,?,?,?,?,?,?)", [
+            ("first", "station", "a"*32, "audio.wav", "pruned", 1, 0, 0, ""),
+            ("failed", "station", "b"*32, "audio.wav", "pruned", 2, 0, 0, "")])
+    jobs = state / "music-jobs"
+    jobs.mkdir()
+    (jobs/("a"*32+".json")).write_text(json.dumps({"status": "complete"}))
+    (jobs/("b"*32+".json")).write_text(json.dumps({"status": "error"}))
+    with radio.database(tmp_path) as conn:
+        assert dict(conn.execute("SELECT id,completed FROM tracks")) == {"first": 1, "failed": 0}
 
 
 def test_continuous_queue_prefetches_and_repeats_instead_of_silence(tmp_path):
