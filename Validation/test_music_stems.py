@@ -62,9 +62,10 @@ def test_separation_returns_only_real_nonempty_stems(tmp_path):
     output = tmp_path / "stems"
 
     def render(*_args, **_kwargs):
-        (output / "song_(Vocals).wav").write_bytes(b"vocals")
-        (output / "song_(Instrumental).wav").write_bytes(b"instrumental")
-        (output / "empty.wav").write_bytes(b"")
+        staging = Path(_args[0][-1])
+        (staging / "song_(Vocals).wav").write_bytes(b"vocals")
+        (staging / "song_(Instrumental).wav").write_bytes(b"instrumental")
+        (staging / "empty.wav").write_bytes(b"")
         return type("Result", (), {"returncode": 0})()
 
     from contextlib import nullcontext
@@ -111,6 +112,43 @@ def test_output_rechecked_after_waiting_for_setup_lock(tmp_path):
     assert source.read_bytes() == b"music"
 
 
+def test_failed_worker_leaves_output_empty_for_retry(tmp_path):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+    attempts = 0
+
+    def render(args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        staging = Path(args[-1])
+        (staging / "song_(Vocals).wav").write_bytes(b"vocals")
+        if attempts == 1:
+            return SimpleNamespace(returncode=1, stderr="inference failed", stdout="")
+        (staging / "song_(Instrumental).wav").write_bytes(b"instrumental")
+        return SimpleNamespace(returncode=0)
+
+    with patch.object(
+        music_stems.music_backend, "_setup_lock", side_effect=nullcontext
+    ), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext
+    ), patch.object(
+        music_stems, "install", return_value=Path("python.exe")
+    ), patch.object(music_stems.subprocess, "run", side_effect=render):
+        with pytest.raises(RuntimeError, match="inference failed"):
+            music_stems.separate_stems(str(source), str(output))
+        assert list(output.iterdir()) == []
+        result = music_stems.separate_stems(str(source), str(output))
+
+    assert attempts == 2
+    assert len(result["files"]) == 2
+    assert all(Path(path).parent == output and Path(path).is_file() for path in result["files"])
+    assert source.read_bytes() == b"music"
+
+
 @pytest.mark.parametrize("wav_count", [0, 1])
 def test_auxiliary_files_do_not_count_as_stems(tmp_path, wav_count):
     from contextlib import nullcontext
@@ -120,10 +158,11 @@ def test_auxiliary_files_do_not_count_as_stems(tmp_path, wav_count):
     output = tmp_path / "stems"
 
     def render(*_args, **_kwargs):
-        (output / "separator.log").write_text("completed")
-        (output / "metadata.json").write_text("{}")
+        staging = Path(_args[0][-1])
+        (staging / "separator.log").write_text("completed")
+        (staging / "metadata.json").write_text("{}")
         if wav_count:
-            (output / "song_(Vocals).wav").write_bytes(b"vocals")
+            (staging / "song_(Vocals).wav").write_bytes(b"vocals")
         return type("Result", (), {"returncode": 0})()
 
     with patch.object(music_stems.music_backend, "_setup_lock", return_value=nullcontext()), patch.object(
