@@ -73,7 +73,10 @@ def normalize_note_events(path: Path) -> None:
                     continue
                 if len(row) < 5:
                     raise RuntimeError("Basic Pitch returned an incomplete note event.")
-                row = row[:4] + [json.dumps([float(value) for value in row[4:]])]
+                bends = row[4:]
+                if len(bends) == 1 and bends[0].lstrip().startswith("["):
+                    bends = json.loads(bends[0])
+                row = row[:4] + [json.dumps([float(value) for value in bends])]
                 writer.writerow(row)
         os.replace(temporary, path)
     finally:
