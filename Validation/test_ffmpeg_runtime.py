@@ -193,6 +193,33 @@ def test_failed_background_repair_does_not_throttle_another_root(tmp_path):
         assert thread.return_value.start.call_count == 2
 
 
+def test_background_repair_preserves_relative_root_after_cwd_change(tmp_path, monkeypatch):
+    initial_cwd = tmp_path / "initial"
+    later_cwd = tmp_path / "later"
+    initial_cwd.mkdir()
+    later_cwd.mkdir()
+    monkeypatch.chdir(initial_cwd)
+    relative_root = Path("installation")
+    expected_root = relative_root.resolve()
+
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", return_value=False), \
+            patch.object(ffmpeg_runtime, "ensure") as ensure, \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        ffmpeg_runtime.start_background(relative_root)
+        thread.return_value.start.assert_called_once_with()
+        ensure.assert_not_called()
+        worker = thread.call_args.kwargs["target"]
+
+        # The background worker must not reinterpret the caller's relative path.
+        monkeypatch.chdir(later_cwd)
+        worker()
+
+        ensure.assert_called_once_with(expected_root)
+        assert expected_root not in ffmpeg_runtime._last_attempts
+
+
 def test_first_background_repair_is_not_throttled_at_low_uptime(tmp_path):
     # Preserve the module's initial timestamp while restoring it after this test.
     with patch.object(ffmpeg_runtime, "_last_attempts", dict(ffmpeg_runtime._last_attempts)), \
