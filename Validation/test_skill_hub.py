@@ -52,6 +52,29 @@ class SkillHubTests(unittest.TestCase):
         self.assertEqual(set(skill_hub.SEEN), {identifier})
         self.assertEqual(skill_hub.INSPECTED, {})
 
+    def test_failed_reinspection_invalidates_previous_inspection(self):
+        identifier = "skills-sh/example/workflows/accessibility"
+        for outcome, error in (
+            (RuntimeError("Preview unavailable"), RuntimeError),
+            ("x" * 30001, ValueError),
+        ):
+            with self.subTest(error=error.__name__):
+                skill_hub.SEEN[identifier] = skill_hub.time.monotonic()
+                with patch.object(
+                    skill_hub, "_run", side_effect=["Skill preview", outcome]
+                ) as run:
+                    skill_hub.inspect(identifier)
+                    self.assertIn(identifier, skill_hub.INSPECTED)
+                    with self.assertRaises(error):
+                        skill_hub.inspect(identifier)
+                    self.assertNotIn(identifier, skill_hub.INSPECTED)
+                    with self.assertRaisesRegex(ValueError, "Search and inspect"):
+                        skill_hub.install(identifier)
+                    self.assertEqual(run.call_count, 2)
+                    self.assertTrue(
+                        all(call.args == ("inspect", identifier) for call in run.call_args_list)
+                    )
+
     def test_rejects_unsearched_urls_and_blocked_scans(self):
         with self.assertRaises(ValueError):
             skill_hub.inspect("https://example.com/SKILL.md")
