@@ -86,6 +86,8 @@ def generate(root: Path, prompt: str, output_path: str = "") -> Path:
     if Path(reply.get("path", "")).resolve() != destination or not destination.is_file():
         raise RuntimeError("The image maker did not save the requested file.")
     with Image.open(destination) as picture:
+        if picture.format != "PNG":
+            raise ValueError("The image maker did not save a PNG image.")
         picture.verify()
     with Image.open(destination) as picture:
         picture.load()
@@ -99,6 +101,8 @@ def image_file_ok(path: str | Path) -> bool:
         return False
     try:
         with Image.open(source) as picture:
+            if picture.format != "PNG":
+                return False
             picture.verify()
         with Image.open(source) as picture:
             picture.load()
