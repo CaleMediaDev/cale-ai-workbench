@@ -15,9 +15,17 @@ VOICE = ROOT / "Media/models/natural_voice"
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
+def _nonempty_file(path):
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except FileNotFoundError:
+        # A file removed during the check still needs repair.
+        return False
+
+
 def ready():
     return all(
-        path.is_file() and path.stat().st_size > 0
+        _nonempty_file(path)
         for path in (
             VOICE / "kokoro-v1.0.int8.onnx",
             VOICE / "voices-v1.0.bin",
@@ -29,7 +37,7 @@ def whisper_ready():
     """Both transcription files must exist and contain data."""
     folder = ROOT / "Media/models/whisper"
     return all(
-        path.is_file() and path.stat().st_size > 0
+        _nonempty_file(path)
         for path in (folder / "config.json", folder / "model.bin")
     )
 

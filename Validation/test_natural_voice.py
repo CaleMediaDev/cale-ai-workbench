@@ -13,6 +13,38 @@ import natural_voice
 
 
 class NaturalVoiceTests(unittest.TestCase):
+    def test_file_removed_during_readiness_check_is_not_ready(self):
+        for check_name, names in (
+            ("ready", ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin")),
+            ("whisper_ready", ("config.json", "model.bin")),
+        ):
+            with self.subTest(check=check_name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                voice = root / "voice"
+                whisper = root / "Media/models/whisper"
+                model_folder = voice if check_name == "ready" else whisper
+                model_folder.mkdir(parents=True)
+                for name in names:
+                    (model_folder / name).write_bytes(b"weights")
+                target = model_folder / names[0]
+                original_is_file = Path.is_file
+                removed = []
+
+                def remove_after_is_file(path):
+                    result = original_is_file(path)
+                    if path == target and result:
+                        path.unlink()
+                        removed.append(path)
+                    return result
+
+                with (
+                    patch.object(natural_voice, "ROOT", root),
+                    patch.object(natural_voice, "VOICE", voice),
+                    patch.object(Path, "is_file", remove_after_is_file),
+                ):
+                    self.assertFalse(getattr(natural_voice, check_name)())
+                self.assertEqual(removed, [target])
+
     def test_empty_voice_file_triggers_repair_before_completion(self):
         names = ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin")
         for empty_name in names:
