@@ -400,6 +400,10 @@ def _stop_worker():
             child.kill()
         except psutil.Error:
             pass
+    if alive:
+        # Killing is asynchronous; allow GPU-owning children to exit before
+        # recovery starts a replacement worker.
+        psutil.wait_procs(alive, timeout=3)
 
 
 def _is_voice_worker_process(info: dict, script: str) -> bool:
