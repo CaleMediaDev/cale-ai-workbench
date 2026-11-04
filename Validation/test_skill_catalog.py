@@ -107,6 +107,27 @@ class SkillCatalogTests(unittest.TestCase):
             set(installed.parent.iterdir()), {installed, staging}
         )
 
+    def test_preserves_local_file_at_marker_staging_path(self):
+        skill_catalog.sync(self.root)
+        staging = self.root / "data/.cale-skill-files.json.tmp"
+        staging.write_text("My local notes", encoding="utf-8")
+
+        result = skill_catalog.sync(self.root)
+
+        self.assertEqual(result, {"installed": 0, "updated": 0, "preserved": 0})
+        self.assertEqual(staging.read_text(encoding="utf-8"), "My local notes")
+        source = self.root / "vendor/agent-skills/frontend-ui-engineering/SKILL.md"
+        source.write_text("Updated upstream", encoding="utf-8")
+        result = skill_catalog.sync(self.root)
+        self.assertEqual(result, {"installed": 0, "updated": 1, "preserved": 0})
+        installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
+        self.assertEqual(installed.read_text(encoding="utf-8"), "Updated upstream")
+        self.assertEqual(staging.read_text(encoding="utf-8"), "My local notes")
+        self.assertEqual(
+            set(staging.parent.iterdir()),
+            {self.root / "data/skills", self.root / "data/.cale-skill-files.json", staging},
+        )
+
     def test_preserves_local_skill_edits(self):
         skill_catalog.sync(self.root)
         installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
