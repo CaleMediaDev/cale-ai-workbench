@@ -291,6 +291,61 @@ def test_exceptional_lifespan_exit_clears_closed_backend_registries():
     asyncio.run(check())
 
 
+def test_failed_backend_cleanup_does_not_abort_independent_backend():
+    closed = []
+
+    @asynccontextmanager
+    async def fake_stdio(params):
+        group = "rea" if "rea.mjs" in " ".join(params.args) else "devtools"
+        try:
+            yield (group, object())
+        finally:
+            closed.append(group)
+
+    class FakeSession:
+        def __init__(self, group):
+            self.group = group
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            if self.group == "rea":
+                raise RuntimeError("REA cleanup failed")
+
+        async def initialize(self):
+            if self.group == "rea":
+                raise RuntimeError("REA initialization failed")
+
+        async def list_tools(self):
+            tool = SimpleNamespace(
+                name="inspect_page",
+                model_dump=lambda **_kwargs: {"description": "Inspect a browser page"},
+            )
+            return SimpleNamespace(tools=[tool])
+
+    async def check():
+        with (patch.object(toolbox_mcp, "stdio_client", fake_stdio),
+              patch.object(toolbox_mcp, "ClientSession",
+                           lambda reader, *_args, **_kwargs: FakeSession(reader))):
+            async with toolbox_mcp.lifespan(None):
+                status = toolbox_mcp.toolbox_status()
+                assert status["backends"]["rea"]["available"] is False
+                error = status["backends"]["rea"]["error"]
+                assert "REA initialization failed" in error
+                assert "REA cleanup failed" in error
+                assert status["backends"]["devtools"]["available"] is True
+                assert "devtools.inspect_page" in toolbox_mcp.CATALOG
+                assert "rea" in closed
+                assert toolbox_mcp.toolbox_schema("local.make_music")
+        assert closed == ["rea", "devtools"]
+        assert toolbox_mcp.SESSIONS == {}
+        assert toolbox_mcp.CATALOG == {}
+        assert toolbox_mcp.ERRORS == {}
+
+    asyncio.run(check())
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):
