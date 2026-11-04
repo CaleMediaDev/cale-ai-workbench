@@ -16,6 +16,30 @@ def test_key_estimate_declines_empty_input():
     assert music_analysis._best_key(np.zeros(12)) is None
 
 
+def test_analysis_rejects_nonfinite_samples_before_feature_extraction(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import pytest
+
+    source = tmp_path / "invalid-samples.wav"
+    source.touch()
+
+    def unexpected_harmonic(*args, **kwargs):
+        pytest.fail("Feature extraction must not run on non-finite samples")
+
+    librosa_stub = SimpleNamespace(
+        get_duration=lambda *, path: 1.0,
+        effects=SimpleNamespace(harmonic=unexpected_harmonic),
+    )
+    monkeypatch.setitem(sys.modules, "librosa", librosa_stub)
+    for invalid_sample in (float("nan"), float("inf"), float("-inf")):
+        signal = np.array([0.5, invalid_sample, -0.5])
+        librosa_stub.load = lambda *args, **kwargs: (signal, 22050)
+        with pytest.raises(ValueError, match="non-finite samples"):
+            music_analysis.analyze_music(str(source))
+
+
 def test_analysis_rejects_nonfinite_duration_before_loading(tmp_path, monkeypatch):
     import sys
     from types import SimpleNamespace
