@@ -1,8 +1,10 @@
 """Verify that local music gets a playable video without changing the song."""
 
 import asyncio
+import errno
 import json
 import math
+import os
 import struct
 import subprocess
 import wave
@@ -13,6 +15,26 @@ from PIL import Image, ImageChops
 
 import music_video
 import toolbox_mcp
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows publication without hard links")
+def test_music_video_exports_when_hard_links_are_unavailable(tmp_path, monkeypatch):
+    song, output = tmp_path / "song.wav", tmp_path / "video.mp4"
+    song.write_bytes(b"original audio")
+
+    def render(command, **kwargs):
+        type(output)(command[-1]).write_bytes(b"completed MP4")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    def no_links(*args, **kwargs):
+        raise OSError(errno.EOPNOTSUPP, "Filesystem does not support hard links")
+
+    monkeypatch.setattr(music_video.subprocess, "run", render)
+    monkeypatch.setattr(music_video.os, "link", no_links)
+    result = music_video.make_music_video(str(song), str(output))
+    assert result["path"] == str(output)
+    assert output.read_bytes() == b"completed MP4"
+    assert song.read_bytes() == b"original audio"
 
 
 def test_music_video_rejects_dangling_output_symlink(tmp_path, monkeypatch):

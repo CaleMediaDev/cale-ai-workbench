@@ -1,8 +1,10 @@
 """A music edit must produce playable audio without replacing its inputs."""
 
 import asyncio
+import errno
 import json
 import math
+import os
 import struct
 import wave
 from pathlib import Path
@@ -11,6 +13,21 @@ import pytest
 
 import music_edit
 import toolbox_mcp
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows publication without hard links")
+def test_music_edit_exports_when_hard_links_are_unavailable(tmp_path, monkeypatch):
+    source, output = tmp_path / "song.wav", tmp_path / "clip.wav"
+    tone(source)
+    original = source.read_bytes()
+
+    def no_links(*args, **kwargs):
+        raise OSError(errno.EOPNOTSUPP, "Filesystem does not support hard links")
+
+    monkeypatch.setattr(os, "link", no_links)
+    music_edit.edit_music(str(source), str(output), duration_seconds=.25)
+    assert duration(output) == pytest.approx(.25, abs=.01)
+    assert source.read_bytes() == original
 
 
 def tone(path, seconds=1.0, frequency=440):

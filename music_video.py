@@ -78,9 +78,12 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
                                 errors="replace", timeout=3600, creationflags=HIDE, cwd=temp)
         if result.returncode or not rendered.is_file() or not rendered.stat().st_size:
             raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local music video failed.")
-        # Unlike replace/rename, link refuses a destination created since the
-        # initial validation. TemporaryDirectory cleans up only our own files.
-        os.link(rendered, output)
+        # Windows rename refuses existing destinations without needing hard
+        # links. POSIX rename would overwrite, so retain exclusive linking there.
+        if os.name == "nt":
+            rendered.rename(output)
+        else:
+            os.link(rendered, output)
     return {"source": str(source), "path": str(output), "layout": layout,
             "background_image": str(image) if image else "",
             "captions_path": str(captions) if captions else "", "kind": "music_visualizer"}

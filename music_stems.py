@@ -86,9 +86,12 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
             try:
                 for path in staged_files:
                     destination = target / path.name
-                    # Staging is inside target, so both paths share a filesystem.
-                    # Unlike rename on POSIX, link never replaces an existing file.
-                    os.link(path, destination)
+                    # Windows rename refuses existing files without requiring
+                    # hard links. POSIX rename would replace the destination.
+                    if os.name == "nt":
+                        path.rename(destination)
+                    else:
+                        os.link(path, destination)
                     published.append(destination)
             except OSError:
                 for path in reversed(published):
