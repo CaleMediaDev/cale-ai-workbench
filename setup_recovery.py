@@ -125,7 +125,7 @@ def _stalled(progress: dict) -> bool:
         return False
     try:
         updated = float(progress.get("updated", 0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         # A readable JSON record can still contain an invalid timestamp.
         # Without a usable timestamp, do not infer that setup is stale.
         return False
