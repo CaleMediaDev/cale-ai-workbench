@@ -1,0 +1,889 @@
+{
+  "schema_version": 1,
+  "release": "0.5.495",
+  "review_cut": {
+    "first": 493,
+    "last": 519
+  },
+  "status": "reviewed_merged_and_validated",
+  "counts": {
+    "reviewed": 27,
+    "accepted": 25,
+    "rejected": 2
+  },
+  "rejected_prs": [
+    503,
+    508
+  ],
+  "scope": "Exact proposal heads were reviewed independently in isolated checkouts; no unreviewed newer arrivals are included. PR numbers and software release versions are independent.",
+  "validation_limits": [
+    "Focused and touched-module checks were run on Windows with managed Python 3.13. Skip counts are retained in the reported summaries; skipped platform-dependent checks are not represented as passes.",
+    "Model, media, device and network paths were generally mocked in focused regressions. These receipts do not establish end-to-end microphone, camera, generated-song or model-output quality.",
+    "Passing tests alone did not establish acceptance: PR508 passes its supplied test on both baseline and proposal, but independent bounded-work measurements justify rejection.",
+    "Evidence-source paths name local review artifacts. They are provenance identifiers, not a promise that full local logs are shipped in the release."
+  ],
+  "subbatch_validation": [
+    {
+      "prs": [
+        493,
+        495,
+        496
+      ],
+      "result": "41 passed, 1 skipped, 30 subtests passed in 2.76s"
+    },
+    {
+      "prs": [
+        497,
+        498,
+        499,
+        500
+      ],
+      "result": "163 passed, 2 subtests passed in 2.50s"
+    },
+    {
+      "prs": [
+        510,
+        511,
+        512,
+        513,
+        514
+      ],
+      "result": "189 passed, 34 subtests passed in 16.62s"
+    },
+    {
+      "prs": [
+        515,
+        516,
+        517,
+        518,
+        519
+      ],
+      "result": "76 passed, 1 skipped, 24 subtests passed in 5.40s"
+    }
+  ],
+  "final_integration_validation": {
+    "status": "passed",
+    "source_commit": "159023b127f17dfae82e1089467df5d4a093389a",
+    "result": "621 passed, 9 skipped, 118 subtests passed in 57.28s",
+    "scope": "25 touched test modules; parent-reported combined source validation",
+    "module_list_evidence": "pr-backlog-495-test-files.txt",
+    "runtime_equivalence_to_release": "git diff --exit-code 159023b127f17dfae82e1089467df5d4a093389a 08ac0b78b9a81beac22a547d703134aea888994f passed; only release metadata and this receipt added afterward",
+    "test_files": [
+      "Validation/test_camera_presence.py",
+      "Validation/test_capability_index.py",
+      "Validation/test_chat_assistant.py",
+      "Validation/test_context_window.py",
+      "Validation/test_design_tools.py",
+      "Validation/test_file_chat.py",
+      "Validation/test_model_fitness.py",
+      "Validation/test_model_identity.py",
+      "Validation/test_model_library.py",
+      "Validation/test_music_edit.py",
+      "Validation/test_music_lyrics.py",
+      "Validation/test_music_stems.py",
+      "Validation/test_natural_voice.py",
+      "Validation/test_project_documents.py",
+      "Validation/test_project_memory.py",
+      "Validation/test_quick_image.py",
+      "Validation/test_readiness_checklist.py",
+      "Validation/test_self_diagnostics.py",
+      "Validation/test_setup_recovery.py",
+      "Validation/test_skill_hub.py",
+      "Validation/test_table_ml.py",
+      "Validation/test_task_eta.py",
+      "Validation/test_video_edit.py",
+      "Validation/test_video_generation.py",
+      "Validation/test_web_tools.py"
+    ]
+  },
+  "github_states_verified": true,
+  "entries": [
+    {
+      "pr": 493,
+      "reviewed_head": "cfb91580e0f24294cb9d83e241c47b753b6d3573",
+      "decision": "accept",
+      "reason": "Private same-directory staging prevents interrupted copy from leaving a reusable partial cached FFmpeg executable.",
+      "evidence_source": "review-pr-493-496-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 11 deselected in 0.78s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "11 passed, 1 skipped in 0.60s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "c102885467bf802cbe0ef633d522233ead692995",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "cfb91580e0f24294cb9d83e241c47b753b6d3573",
+        "merge_commit": "c102885467bf802cbe0ef633d522233ead692995",
+        "closed_at": "2026-11-04T15:30:06Z",
+        "merged_at": "2026-11-04T15:30:06Z",
+        "head_matches_accepted_revision": true
+      }
+    },
+    {
+      "pr": 494,
+      "reviewed_head": "d9154cc18b1483368afdc7a0d0e0410b522c8e31",
+      "decision": "accept",
+      "reason": "Original proposal did not retain the first resumed-progress sample and failed its own new regression. Maintainer correction records the reset baseline so ETA resumes after sufficient subsequent samples.",
+      "evidence_source": "review-pr-493-496-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 15 deselected in 1.79s"
+        },
+        "corrected_revision": {
+          "exit": 0,
+          "summary": "16 passed in 0.57s",
+          "evidence": "Maintainer-reported corrected full ETA module; original failure log pr-494-before.txt."
+        },
+        "candidate": {
+          "exit": 1,
+          "summary": "1 failed, 15 passed in 0.68s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "e454c69f6a73a5a9d90afcb8c147ab0e7ca1e748",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "5e56f3cae3e30c56b5c45e1eddee55b8bbea4018",
+        "merge_commit": "e454c69f6a73a5a9d90afcb8c147ab0e7ca1e748",
+        "closed_at": "2026-11-04T15:30:11Z",
+        "merged_at": "2026-11-04T15:30:11Z",
+        "head_matches_accepted_revision": true
+      },
+      "original_review": "needs_work",
+      "accepted_revision": "5e56f3cae3e30c56b5c45e1eddee55b8bbea4018"
+    },
+    {
+      "pr": 495,
+      "reviewed_head": "2f57778681e006d43a8ed0352a7261ac045a72c9",
+      "decision": "accept",
+      "reason": "Malformed optional-installer attempt counts no longer crash task readiness; valid terminal retry limits unchanged.",
+      "evidence_source": "review-pr-493-496-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 19 deselected in 0.32s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "20 passed in 2.31s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "dbe1fa1f36b439f983c7a8142f9bb7f3e48a8805",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "2f57778681e006d43a8ed0352a7261ac045a72c9",
+        "merge_commit": "dbe1fa1f36b439f983c7a8142f9bb7f3e48a8805",
+        "closed_at": "2026-11-04T15:30:16Z",
+        "merged_at": "2026-11-04T15:30:16Z",
+        "head_matches_accepted_revision": true
+      }
+    },
+    {
+      "pr": 496,
+      "reviewed_head": "e6104524741e2216a3c19bd070294fb4b5458a61",
+      "decision": "accept",
+      "reason": "Rejects DEL/C1 controls before stripping; no skill installation/search subprocess runs for invalid query.",
+      "evidence_source": "review-pr-493-496-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "9 failed, 9 deselected, 12 subtests passed in 0.32s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "10 passed, 30 subtests passed in 0.12s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "56d4748d792f2e597a7391cbfb409774277c938d",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "e6104524741e2216a3c19bd070294fb4b5458a61",
+        "merge_commit": "56d4748d792f2e597a7391cbfb409774277c938d",
+        "closed_at": "2026-11-04T15:30:21Z",
+        "merged_at": "2026-11-04T15:30:21Z",
+        "head_matches_accepted_revision": true
+      }
+    },
+    {
+      "pr": 497,
+      "reviewed_head": "32c91ea30cf7f604510df764cad950f0afa05c85",
+      "decision": "accept",
+      "reason": "Narrow production fix; focused regression RED0af05f1, all4combined touchedmodules163pass2subtests.",
+      "evidence_source": "review-pr-497-500/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 1 passed, 20 deselected in 1.14s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "163 passed, 2 subtests passed in 2.50s",
+          "scope": "Complete touched modules in a combined isolated integration of the reviewed batch."
+        }
+      },
+      "integration_commit": "7b9dde8eebe0b398edf0a690d8d8aa8bc957131a",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "32c91ea30cf7f604510df764cad950f0afa05c85",
+        "merge_commit": "7b9dde8eebe0b398edf0a690d8d8aa8bc957131a",
+        "closed_at": "2026-11-04T15:30:25Z",
+        "merged_at": "2026-11-04T15:30:25Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "0af05f1bec4aab435a9438524bca6a12d9a2d431"
+    },
+    {
+      "pr": 498,
+      "reviewed_head": "16e1c969ee95c93a2bda86c0ac914a088562a06a",
+      "decision": "accept",
+      "reason": "Narrow production fix; focused regression RED0af05f1, all4combined touchedmodules163pass2subtests.",
+      "evidence_source": "review-pr-497-500/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 1 passed, 33 deselected in 1.30s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "163 passed, 2 subtests passed in 2.50s",
+          "scope": "Complete touched modules in a combined isolated integration of the reviewed batch."
+        }
+      },
+      "integration_commit": "30845f830a10413e4b19d4b2ae8dc3ff176d8f36",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "16e1c969ee95c93a2bda86c0ac914a088562a06a",
+        "merge_commit": "30845f830a10413e4b19d4b2ae8dc3ff176d8f36",
+        "closed_at": "2026-11-04T15:30:30Z",
+        "merged_at": "2026-11-04T15:30:30Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "0af05f1bec4aab435a9438524bca6a12d9a2d431"
+    },
+    {
+      "pr": 499,
+      "reviewed_head": "c9602e88fd2228774e5ac2bf093e9bdf92dd8e17",
+      "decision": "accept",
+      "reason": "Narrow production fix; focused regression RED0af05f1, all4combined touchedmodules163pass2subtests.",
+      "evidence_source": "review-pr-497-500/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 1 passed, 22 deselected in 1.37s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "163 passed, 2 subtests passed in 2.50s",
+          "scope": "Complete touched modules in a combined isolated integration of the reviewed batch."
+        }
+      },
+      "integration_commit": "51c017dd12fc6c10803c3d2e8ce922fb086dafdd",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "c9602e88fd2228774e5ac2bf093e9bdf92dd8e17",
+        "merge_commit": "51c017dd12fc6c10803c3d2e8ce922fb086dafdd",
+        "closed_at": "2026-11-04T15:30:35Z",
+        "merged_at": "2026-11-04T15:30:35Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "0af05f1bec4aab435a9438524bca6a12d9a2d431"
+    },
+    {
+      "pr": 500,
+      "reviewed_head": "30011708b769df4d79f6da3a6d6d4a46864237a3",
+      "decision": "accept",
+      "reason": "Narrow production fix; focused regression RED0af05f1, all4combined touchedmodules163pass2subtests.",
+      "evidence_source": "review-pr-497-500/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 1 passed, 80 deselected in 1.50s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "163 passed, 2 subtests passed in 2.50s",
+          "scope": "Complete touched modules in a combined isolated integration of the reviewed batch."
+        }
+      },
+      "integration_commit": "03f828b01e31fc71a228f9dde720261d76df2b63",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "30011708b769df4d79f6da3a6d6d4a46864237a3",
+        "merge_commit": "03f828b01e31fc71a228f9dde720261d76df2b63",
+        "closed_at": "2026-11-04T15:30:41Z",
+        "merged_at": "2026-11-04T15:30:41Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "0af05f1bec4aab435a9438524bca6a12d9a2d431"
+    },
+    {
+      "pr": 501,
+      "reviewed_head": "8cd6295e5a01170cdebdea7549e272eb05f28967",
+      "decision": "accept",
+      "reason": "Narrow production fix; regression fails exact parent and full exact-head touched module passes.",
+      "evidence_source": "review-pr-501-504-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 17 deselected, 1 warning in 1.43s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "18 passed in 4.94s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "b9aa54b20056e38dead3e9bcaee9b9efffb425cd",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "8cd6295e5a01170cdebdea7549e272eb05f28967",
+        "merge_commit": "b9aa54b20056e38dead3e9bcaee9b9efffb425cd",
+        "closed_at": "2026-11-04T15:30:45Z",
+        "merged_at": "2026-11-04T15:30:45Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "0af05f1bec4aab435a9438524bca6a12d9a2d431"
+    },
+    {
+      "pr": 502,
+      "reviewed_head": "21cc8de61336e0fdc0f2282e8e1338c952f668e9",
+      "decision": "accept",
+      "reason": "Narrow production fix; regression fails exact parent and full exact-head touched module passes.",
+      "evidence_source": "review-pr-501-504-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 20 deselected in 0.37s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "21 passed in 5.21s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "5019152d85e0c63808df785f401ec5478ff6153a",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "21cc8de61336e0fdc0f2282e8e1338c952f668e9",
+        "merge_commit": "5019152d85e0c63808df785f401ec5478ff6153a",
+        "closed_at": "2026-11-04T15:30:50Z",
+        "merged_at": "2026-11-04T15:30:50Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "0af05f1bec4aab435a9438524bca6a12d9a2d431"
+    },
+    {
+      "pr": 503,
+      "reviewed_head": "4ee3fe3a704093a201b1be11f2a89cea01410bea",
+      "decision": "reject",
+      "reason": "Broad TOOL_WORK exclusion incorrectly promotes ordinary explanatory questions, breaking8 exact-head tests including its own folder-question negative example.",
+      "evidence_source": "review-pr-501-504-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "2 failed, 1 passed, 47 deselected in 0.51s"
+        },
+        "candidate": {
+          "exit": 1,
+          "summary": "8 failed, 40 passed, 41 subtests passed in 0.51s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": null,
+      "github_disposition": {
+        "state": "closed",
+        "merged": false,
+        "current_head": "4ee3fe3a704093a201b1be11f2a89cea01410bea",
+        "merge_commit": "dbb4e76fcd8a7b851449060cbff569d3de66c9b7",
+        "closed_at": "2026-11-04T15:30:53Z",
+        "merged_at": null,
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "0af05f1bec4aab435a9438524bca6a12d9a2d431"
+    },
+    {
+      "pr": 504,
+      "reviewed_head": "223f8bb77e649ce490712be69c3d4249ee336747",
+      "decision": "accept",
+      "reason": "Narrow production fix; regression fails exact parent and full exact-head touched module passes.",
+      "evidence_source": "review-pr-501-504-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "2 failed, 1 passed, 14 deselected in 0.26s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "15 passed, 18 subtests passed in 0.18s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "c70e9ce232fb963578e52421ceae65dc9e8a23fb",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "223f8bb77e649ce490712be69c3d4249ee336747",
+        "merge_commit": "c70e9ce232fb963578e52421ceae65dc9e8a23fb",
+        "closed_at": "2026-11-04T15:30:57Z",
+        "merged_at": "2026-11-04T15:30:57Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "0af05f1bec4aab435a9438524bca6a12d9a2d431"
+    },
+    {
+      "pr": 505,
+      "reviewed_head": "a901872c2f07aca5509eb60443e780edb3c69f20",
+      "decision": "accept",
+      "reason": "Narrow production fix; focused regression fails exact parent, complete exact-head module passes.",
+      "evidence_source": "review-pr-505-509-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "2 failed, 1 passed, 25 deselected in 0.35s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "24 passed, 4 skipped, 10 subtests passed in 3.65s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "a0e6cae66dee8038c36ff61efbf0a47037eaca6d",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "a901872c2f07aca5509eb60443e780edb3c69f20",
+        "merge_commit": "a0e6cae66dee8038c36ff61efbf0a47037eaca6d",
+        "closed_at": "2026-11-04T15:31:02Z",
+        "merged_at": "2026-11-04T15:31:02Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d"
+    },
+    {
+      "pr": 506,
+      "reviewed_head": "8fb0cdbaecc2668547b18fa0a5d96666dc277d92",
+      "decision": "accept",
+      "reason": "Narrow production fix; focused regression fails exact parent, complete exact-head module passes.",
+      "evidence_source": "review-pr-505-509-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "2 failed, 31 deselected in 1.24s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "30 passed, 3 skipped in 19.93s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "3eb1fbaae7c4f37df17d4df55454f7c11cfead74",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "8fb0cdbaecc2668547b18fa0a5d96666dc277d92",
+        "merge_commit": "3eb1fbaae7c4f37df17d4df55454f7c11cfead74",
+        "closed_at": "2026-11-04T15:31:07Z",
+        "merged_at": "2026-11-04T15:31:07Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d"
+    },
+    {
+      "pr": 507,
+      "reviewed_head": "79dc75728c9b09d5f210c2fe3689257207a26cbb",
+      "decision": "accept",
+      "reason": "Narrow production fix; focused regression fails exact parent, complete exact-head module passes.",
+      "evidence_source": "review-pr-505-509-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 17 deselected in 0.60s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "18 passed in 0.34s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "73e4e14b8b84a7add02fabe755b89192c6a3ef61",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "79dc75728c9b09d5f210c2fe3689257207a26cbb",
+        "merge_commit": "73e4e14b8b84a7add02fabe755b89192c6a3ef61",
+        "closed_at": "2026-11-04T15:31:12Z",
+        "merged_at": "2026-11-04T15:31:12Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d"
+    },
+    {
+      "pr": 508,
+      "reviewed_head": "f00728f959496299184c5ca2383931e00a0864ff",
+      "decision": "reject",
+      "reason": "Unbounded refill while-loop repeats ranked FTS queries and deletes every stale match; limit=1 probes5001 paths and takes3.80s with mocked filesystem versus46 probes/0.044s baseline. Supplied happy regression also passes unchanged parent.",
+      "evidence_source": "review-pr-505-509-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 0,
+          "summary": "1 passed, 12 deselected in 1.93s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "13 passed in 0.87s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": null,
+      "github_disposition": {
+        "state": "closed",
+        "merged": false,
+        "current_head": "f00728f959496299184c5ca2383931e00a0864ff",
+        "merge_commit": "4e024ec5d3a52e01d0cc4957b8a0dd07ed32ada6",
+        "closed_at": "2026-11-04T15:31:14Z",
+        "merged_at": null,
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d",
+      "additional_evidence": "review-pr-505-509-evidence/508-unbounded-proof.json"
+    },
+    {
+      "pr": 509,
+      "reviewed_head": "0b598a732a1f0aa83df14e13e554d038134fe801",
+      "decision": "accept",
+      "reason": "Narrow production fix; focused regression fails exact parent, complete exact-head module passes.",
+      "evidence_source": "review-pr-505-509-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 9 deselected in 0.31s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "10 passed in 6.22s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "8ab5638bfbac542b4a421a20211e74aeca5c0a21",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "0b598a732a1f0aa83df14e13e554d038134fe801",
+        "merge_commit": "8ab5638bfbac542b4a421a20211e74aeca5c0a21",
+        "closed_at": "2026-11-04T15:31:19Z",
+        "merged_at": "2026-11-04T15:31:19Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d"
+    },
+    {
+      "pr": 510,
+      "reviewed_head": "923c471a4156c5b0f7081a5634833c259c12fec2",
+      "decision": "accept",
+      "reason": "Focused regression reproduces on fa5d979; complete5touchedmodules189pass34subtests16.62sec. No blocking production defect.",
+      "evidence_source": "review-pr-510-514/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 1 passed, 14 deselected in 3.38s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "189 passed, 34 subtests passed in 16.62s",
+          "scope": "Complete touched modules in a combined isolated integration of the reviewed batch."
+        }
+      },
+      "integration_commit": "2b0a63e3dda9c5fc98d088734593d7f2315f1ba0",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "923c471a4156c5b0f7081a5634833c259c12fec2",
+        "merge_commit": "2b0a63e3dda9c5fc98d088734593d7f2315f1ba0",
+        "closed_at": "2026-11-04T15:31:23Z",
+        "merged_at": "2026-11-04T15:31:23Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d"
+    },
+    {
+      "pr": 511,
+      "reviewed_head": "962b7ccfbb302a1e8b0d00390ccdda1943dabc47",
+      "decision": "accept",
+      "reason": "Focused regression reproduces on fa5d979; complete5touchedmodules189pass34subtests16.62sec. No blocking production defect.",
+      "evidence_source": "review-pr-510-514/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 1 passed, 11 deselected in 0.43s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "189 passed, 34 subtests passed in 16.62s",
+          "scope": "Complete touched modules in a combined isolated integration of the reviewed batch."
+        }
+      },
+      "integration_commit": "93bf210612336d9367d67636fd25ceb55e24a1ef",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "962b7ccfbb302a1e8b0d00390ccdda1943dabc47",
+        "merge_commit": "93bf210612336d9367d67636fd25ceb55e24a1ef",
+        "closed_at": "2026-11-04T15:31:28Z",
+        "merged_at": "2026-11-04T15:31:28Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d"
+    },
+    {
+      "pr": 512,
+      "reviewed_head": "f2c410c60fe0999c8289180513930e86344282d1",
+      "decision": "accept",
+      "reason": "Focused regression reproduces on fa5d979; complete5touchedmodules189pass34subtests16.62sec. No blocking production defect.",
+      "evidence_source": "review-pr-510-514/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "5 failed, 2 passed, 52 deselected in 0.76s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "189 passed, 34 subtests passed in 16.62s",
+          "scope": "Complete touched modules in a combined isolated integration of the reviewed batch."
+        }
+      },
+      "integration_commit": "df9b55ae111dca57eea02537863d90fa9a3a07ef",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "f2c410c60fe0999c8289180513930e86344282d1",
+        "merge_commit": "df9b55ae111dca57eea02537863d90fa9a3a07ef",
+        "closed_at": "2026-11-04T15:31:33Z",
+        "merged_at": "2026-11-04T15:31:33Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d"
+    },
+    {
+      "pr": 513,
+      "reviewed_head": "716eb3cecc70ea151be48c21132b42f22169e1e8",
+      "decision": "accept",
+      "reason": "Focused regression reproduces on fa5d979; complete5touchedmodules189pass34subtests16.62sec. No blocking production defect.",
+      "evidence_source": "review-pr-510-514/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 1 passed, 29 deselected in 0.25s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "189 passed, 34 subtests passed in 16.62s",
+          "scope": "Complete touched modules in a combined isolated integration of the reviewed batch."
+        }
+      },
+      "integration_commit": "a839dc32c11f1e19ea209d79408490435059d1ad",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "716eb3cecc70ea151be48c21132b42f22169e1e8",
+        "merge_commit": "a839dc32c11f1e19ea209d79408490435059d1ad",
+        "closed_at": "2026-11-04T15:31:37Z",
+        "merged_at": "2026-11-04T15:31:37Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d"
+    },
+    {
+      "pr": 514,
+      "reviewed_head": "e67ebd152a7e6f7a0e0f260f58f36a89c217b78f",
+      "decision": "accept",
+      "reason": "Focused regression reproduces on fa5d979; complete5touchedmodules189pass34subtests16.62sec. No blocking production defect.",
+      "evidence_source": "review-pr-510-514/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "2 failed, 1 passed, 72 deselected in 2.74s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "189 passed, 34 subtests passed in 16.62s",
+          "scope": "Complete touched modules in a combined isolated integration of the reviewed batch."
+        }
+      },
+      "integration_commit": "be677860bb46a475ebff4707c1473f872ed51352",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "e67ebd152a7e6f7a0e0f260f58f36a89c217b78f",
+        "merge_commit": "be677860bb46a475ebff4707c1473f872ed51352",
+        "closed_at": "2026-11-04T15:31:42Z",
+        "merged_at": "2026-11-04T15:31:42Z",
+        "head_matches_accepted_revision": true
+      },
+      "review_base": "fa5d979dd5d5d9efe6811ca7abd2b21a4446fe0d"
+    },
+    {
+      "pr": 515,
+      "reviewed_head": "c05bb51c2217ed0f0f51883c6fa9ba508144d0e7",
+      "decision": "accept",
+      "reason": "Describe verified bounded temporary image snapshot rather than mutable source; original digest/source-change checks and no-image-cache behavior preserved. Local media subprocess routes only to loopback Ollama, no cloud image upload.",
+      "evidence_source": "review-pr-515-519-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 13 deselected in 0.54s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "14 passed in 7.76s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "3450935aa5c86b3be2a87de7b7be46220f99cad7",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "c05bb51c2217ed0f0f51883c6fa9ba508144d0e7",
+        "merge_commit": "3450935aa5c86b3be2a87de7b7be46220f99cad7",
+        "closed_at": "2026-11-04T15:31:46Z",
+        "merged_at": "2026-11-04T15:31:46Z",
+        "head_matches_accepted_revision": true
+      }
+    },
+    {
+      "pr": 516,
+      "reviewed_head": "29d73bcbbf230a04f25e5fdabd65f5dddadf292f",
+      "decision": "accept",
+      "reason": "Lock-file open failure reports error instead of preserving stale working status; no installer subprocess starts.",
+      "evidence_source": "review-pr-515-519-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 10 deselected in 0.32s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "11 passed, 6 subtests passed in 0.27s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "793556a2e66b8b4f66770d530b4c4478a3c135fd",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "29d73bcbbf230a04f25e5fdabd65f5dddadf292f",
+        "merge_commit": "793556a2e66b8b4f66770d530b4c4478a3c135fd",
+        "closed_at": "2026-11-04T15:31:51Z",
+        "merged_at": "2026-11-04T15:31:51Z",
+        "head_matches_accepted_revision": true
+      }
+    },
+    {
+      "pr": 517,
+      "reviewed_head": "0149f2e1124d0063b31d35bf156894d33a206ec5",
+      "decision": "accept",
+      "reason": "Excessively nested JSON falls back to known usable ranked aliases instead of crashing; retry after corrected cache works.",
+      "evidence_source": "review-pr-515-519-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 24 deselected in 0.37s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "25 passed in 0.53s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "3d9720e4fec03e0d85853fd9c82f05e252406184",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "0149f2e1124d0063b31d35bf156894d33a206ec5",
+        "merge_commit": "3d9720e4fec03e0d85853fd9c82f05e252406184",
+        "closed_at": "2026-11-04T15:31:56Z",
+        "merged_at": "2026-11-04T15:31:56Z",
+        "head_matches_accepted_revision": true
+      }
+    },
+    {
+      "pr": 518,
+      "reviewed_head": "21e161088ae781568c792dcba8486f7b4f6a4222",
+      "decision": "accept",
+      "reason": "AccessDenied on one child no longer aborts sibling/parent termination or remaining kills; bounded wait behavior retained.",
+      "evidence_source": "review-pr-515-519-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "1 failed, 15 deselected in 0.38s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "15 passed, 1 skipped, 2 subtests passed in 0.47s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "4b6055a6127cb9062218fbba21df8f4bb537c83b",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "21e161088ae781568c792dcba8486f7b4f6a4222",
+        "merge_commit": "4b6055a6127cb9062218fbba21df8f4bb537c83b",
+        "closed_at": "2026-11-04T15:32:00Z",
+        "merged_at": "2026-11-04T15:32:00Z",
+        "head_matches_accepted_revision": true
+      }
+    },
+    {
+      "pr": 519,
+      "reviewed_head": "485f03b9b7acf1db62deb2f6476900525570232e",
+      "decision": "accept",
+      "reason": "Quoted YAML default keys resolve at correct model indentation and preserve legacy alias mapping.",
+      "evidence_source": "review-pr-515-519-evidence/verdicts.json",
+      "tests": {
+        "before": {
+          "exit": 1,
+          "summary": "2 failed, 1 passed, 10 deselected in 0.27s"
+        },
+        "candidate": {
+          "exit": 0,
+          "summary": "11 passed, 16 subtests passed in 0.17s",
+          "scope": "Recorded exact-head touched-module result from the owning independent reviewer."
+        }
+      },
+      "integration_commit": "08ac0b78b9a81beac22a547d703134aea888994f",
+      "github_disposition": {
+        "state": "closed",
+        "merged": true,
+        "current_head": "485f03b9b7acf1db62deb2f6476900525570232e",
+        "merge_commit": "08ac0b78b9a81beac22a547d703134aea888994f",
+        "closed_at": "2026-11-04T15:32:05Z",
+        "merged_at": "2026-11-04T15:32:05Z",
+        "head_matches_accepted_revision": true
+      }
+    }
+  ],
+  "remote_main_at_merge_verification": "08ac0b78b9a81beac22a547d703134aea888994f",
+  "release_reference": {
+    "tag": "v0.5.495",
+    "url": "https://github.com/CaleMediaDev/cale-ai-workbench/releases/tag/v0.5.495"
+  }
+}
