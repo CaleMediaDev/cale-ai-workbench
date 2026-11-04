@@ -136,7 +136,8 @@ def start_background(root: Path = ROOT) -> bool:
         return False
     progress = root / "LongTasks/install-progress.json"
     try:
-        if json.loads(progress.read_text(encoding="utf-8")).get("status") == "working":
+        progress_info = json.loads(progress.read_text(encoding="utf-8"))
+        if isinstance(progress_info, dict) and progress_info.get("status") == "working":
             return False
     except (OSError, ValueError, TypeError):
         pass  # Older installed versions may have no setup progress record.
