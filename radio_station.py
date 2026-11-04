@@ -262,7 +262,7 @@ class Service:
                 job = music_backend.music_job_status(row["job"])
                 if job.get("status") == "complete" and Path(row["path"]).is_file():
                     self._update(row["id"], "ready", finished=time.time(), render_seconds=time.time()-row["created"])
-                elif job.get("status") in ("error", "stopped", "paused"):
+                elif job.get("status") in ("complete", "error", "stopped", "paused"):
                     self._update(row["id"], "error")
                     self.retry_at = time.monotonic() + 30
                     self.message = "Music needs a moment · retrying automatically."

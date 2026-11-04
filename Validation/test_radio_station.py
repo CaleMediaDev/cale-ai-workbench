@@ -130,6 +130,25 @@ def test_restarts_reattach_existing_render_and_station_edits_do_not_play_old_pro
         assert not player.played
 
 
+def test_completed_render_without_output_retries_and_recovers(tmp_path):
+    _, service, player, jobs, calls, generate = fixture(tmp_path)
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]), patch.object(radio.time, "monotonic", return_value=100) as clock:
+        service.tick()
+        jobs["job-0"] = {"status": "complete"}
+        assert not Path(calls[0][1]).exists()
+        service.tick()
+        assert service._rows()[0]["status"] == "error"
+        assert service.retry_at == 130
+        service.tick()
+        assert len(calls) == 1 and not player.played
+        clock.return_value = 131
+        service.tick()
+        assert len(calls) == 2
+        finish(jobs, calls, 1)
+        service.tick()
+        assert player.played == [calls[1][1]]
+
+
 def test_failed_render_backs_off_and_keeps_cached_playback(tmp_path):
     _, service, player, jobs, calls, generate = fixture(tmp_path)
     with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
