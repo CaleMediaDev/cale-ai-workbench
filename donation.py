@@ -883,7 +883,7 @@ class Service:
             # Only the primary lane offers one bounded experiment/hour; all
             # other code lanes continue and this lane resumes code next tick.
             if not self.lane and consent.get("model_training"):
-                import donation_models
+                import small_training as donation_models
                 experiment = donation_models.claim(self.root)
                 if experiment:
                     run_id = experiment["run_id"]

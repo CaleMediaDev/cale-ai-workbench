@@ -74,7 +74,7 @@ class Controls:
         self.free_text.set("Free routes connected" if self.free_fingerprint else "Connect a free route or use an existing provider in Supercharge")
         self.local_text.set("CPU specialist training selected; Ollama is optional" if self.model_training.get() else
                             "Local AI is available" if self.local_ready else "Waiting for Ollama and a local model")
-        import donation_models
+        import small_training as donation_models
         training = donation_models.summary(self.service.root)
         if training is not None:
             self.model_stats.set(f"CPU experiments: {training['experiments']} · worker time: {training['worker_seconds']:.1f}s · "
