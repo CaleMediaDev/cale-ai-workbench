@@ -201,7 +201,12 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
     elif test_local and not _heavy_gpu_active(root):
         try:
             with urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as response:
-                models = json.load(response).get("models", [])
+                payload = json.load(response)
+            if not isinstance(payload, dict):
+                raise ValueError("Invalid Ollama tags response")
+            models = payload.get("models", [])
+            if not isinstance(models, list) or any(not isinstance(model, dict) for model in models):
+                raise ValueError("Invalid Ollama model list")
             candidates = [model for model in models if str(model.get("name", "")).startswith("cale-")]
             candidates.sort(key=lambda model: int(model.get("size") or 0))
             preferred = next((model for model in candidates if model.get("name") == "cale-fast:latest"),
@@ -305,7 +310,12 @@ def snapshot(root: Path = ROOT) -> dict:
     tag_names = []
     try:
         with urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as response:
-            tags = json.load(response).get("models", [])
+            payload = json.load(response)
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid Ollama tags response")
+        tags = payload.get("models", [])
+        if not isinstance(tags, list) or any(not isinstance(model, dict) for model in tags):
+            raise ValueError("Invalid Ollama model list")
         tag_names = [str(model.get("name", "")) for model in tags]
         local_models = [str(model.get("name", "")) for model in tags
                         if str(model.get("name", "")).startswith("cale-")]
