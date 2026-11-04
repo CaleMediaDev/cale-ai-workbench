@@ -867,3 +867,129 @@ def record_action(folder: str | Path, tool: str, result: str, arguments: dict | 
                             WHERE checker='check_webapp' AND path=? AND request_hash=?""", (time.time(), path, identity))
             except (ValueError, TypeError, AttributeError, OSError):
                 pass  # Bad or stale result metadata must not clear unrelated failures.
+
+
+# Recovery bookkeeping never completes a SQL unit. Native host execution alone
+# supplies acceptance proof; model-authored plans/statuses are not evidence.
+RECOVERY_TURNS=6
+RECOVERY_ATTEMPTS=24
+
+
+def _recovery_schema(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS capability_recoveries (
+        id TEXT PRIMARY KEY,goal_hash TEXT NOT NULL,step_id INTEGER NOT NULL,
+        request_hash TEXT NOT NULL,original_check TEXT NOT NULL,current_check TEXT NOT NULL,
+        check_spec TEXT NOT NULL,trigger TEXT NOT NULL,component TEXT NOT NULL,
+        status TEXT NOT NULL,catalog TEXT NOT NULL DEFAULT '',turns INTEGER NOT NULL DEFAULT 0,
+        proof TEXT NOT NULL DEFAULT '',created REAL NOT NULL,updated REAL NOT NULL)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS capability_recovery_attempts (
+        episode TEXT NOT NULL,digest TEXT NOT NULL,method TEXT NOT NULL,tool TEXT NOT NULL,
+        outcome TEXT NOT NULL,args_hash TEXT NOT NULL,result_hash TEXT NOT NULL,created REAL NOT NULL,
+        PRIMARY KEY(episode,digest))""")
+
+
+def _recovery_root(folder):
+    return project_memory._artifact_project_root(folder)
+
+
+def _recovery_hash(value):
+    return hashlib.sha256(json.dumps(value,sort_keys=True,allow_nan=False).encode()).hexdigest()
+
+
+def recovery_episode(folder,goal_hash,active,*,trigger="",component="",blocked_tool="",blocked_arguments=None):
+    """Resume one bounded family per original goal/stable unit, not per revision."""
+    root=_recovery_root(folder)
+    if not isinstance(goal_hash,str) or not re.fullmatch(r'[a-f0-9]{64}',goal_hash):
+        raise ValueError('Recovery needs the full current planning-goal identity')
+    step_id=active['id'] if active else 0
+    current=step_check_identity(active) if active else ''
+    identifier=_recovery_hash(['capability_recovery_v1',goal_hash,step_id])
+    request=request_identity(root)
+    with project_memory.connection(root) as conn:
+        _recovery_schema(conn)
+        conn.execute("UPDATE capability_recoveries SET status='superseded',updated=? WHERE "
+                     "(goal_hash!=? OR step_id!=?) AND status NOT IN ('recovered','superseded')",(time.time(),goal_hash,step_id))
+        row=conn.execute('SELECT id FROM capability_recoveries WHERE id=?',(identifier,)).fetchone()
+        if row is None and trigger:
+            if trigger not in {'missing_capability','repeated_failure','read_stall','capability_claim'}:
+                raise ValueError('Unknown observed recovery trigger')
+            if not isinstance(component,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{0,100}',component):
+                raise ValueError('Use a bounded component name, not a private traceback')
+            if active:
+                spec={key:active.get(key) for key in ('check_tool','check_arguments','check_command','shell')}
+            elif blocked_tool in {'check_python_function','check_javascript_function','check_webapp','check_document_report'}:
+                spec={'check_tool':blocked_tool,'check_arguments':blocked_arguments or {}}
+                current=_recovery_hash(spec)
+            else:
+                spec={}
+            encoded=json.dumps(spec,sort_keys=True,allow_nan=False)
+            if len(encoded.encode())>64000:raise ValueError('Recovery acceptance exceeds its checkpoint budget')
+            now=time.time()
+            conn.execute("INSERT INTO capability_recoveries(id,goal_hash,step_id,request_hash,original_check,current_check,"
+                "check_spec,trigger,component,status,created,updated) VALUES(?,?,?,?,?,?,?,?,?,'searching',?,?)",
+                (identifier,goal_hash,step_id,request,current,current,encoded,trigger,component,now,now))
+            conn.execute('DELETE FROM capability_recoveries WHERE id NOT IN '
+                         '(SELECT id FROM capability_recoveries ORDER BY updated DESC LIMIT 16)')
+            conn.execute('DELETE FROM capability_recovery_attempts WHERE episode NOT IN (SELECT id FROM capability_recoveries)')
+        elif row is not None and active:
+            # A check revision is recorded but cannot renew budgets or prove the
+            # earlier acceptance. Only its original identity earns recovery.
+            conn.execute('UPDATE capability_recoveries SET current_check=? WHERE id=?',(current,identifier))
+        row=conn.execute("SELECT id,goal_hash,step_id,request_hash,original_check,current_check,"
+            "substr(check_spec,1,64001) AS check_spec,trigger,component,status,substr(catalog,1,8001) AS catalog,"
+            "turns,substr(proof,1,2001) AS proof FROM capability_recoveries WHERE id=?",(identifier,)).fetchone()
+        if row is None:return None
+        value=dict(row)
+        value['methods']=[dict(item) for item in conn.execute('SELECT method,tool,outcome FROM capability_recovery_attempts '
+            'WHERE episode=? ORDER BY created LIMIT 24',(identifier,))]
+    return value
+
+
+def recovery_catalog(folder,episode_id,hits):
+    """Persist the first bounded LOCAL discovery; it never installs a backend."""
+    safe=[{'name':str(item.get('name',''))[:100],'kind':str(item.get('kind','tool'))[:12],
+           'description':str(item.get('description',''))[:200]} for item in hits[:6] if isinstance(item,dict)]
+    encoded=json.dumps(safe,ensure_ascii=True)
+    if len(encoded)>8000:raise ValueError('Recovery discovery exceeds its checkpoint budget')
+    with project_memory.connection(_recovery_root(folder)) as conn:
+        _recovery_schema(conn)
+        conn.execute("UPDATE capability_recoveries SET catalog=?,status='working',updated=? WHERE id=? AND catalog='' "
+                     "AND status='searching'",(encoded,time.time(),episode_id))
+
+
+def reserve_recovery_turn(folder,episode_id,goal_hash,check_hash):
+    """Reserve before inference, surviving crashes and mutable in-memory state."""
+    with project_memory.connection(_recovery_root(folder)) as conn:
+        _recovery_schema(conn)
+        conn.execute('BEGIN IMMEDIATE')
+        changed=conn.execute("UPDATE capability_recoveries SET turns=turns+1,updated=? WHERE id=? AND goal_hash=? "
+             "AND current_check=? AND turns<? AND status IN ('working','awaiting_acceptance')",
+             (time.time(),episode_id,goal_hash,check_hash,RECOVERY_TURNS)).rowcount
+    return bool(changed)
+
+
+def recovery_attempt(folder,episode_id,method,tool,arguments,result,outcome,*,proof=None):
+    """Record real calls. Process/HTTP/write successes are never recovery proof."""
+    if method not in {'catalog','existing_tool','build_script','check_script','github_review','training','acceptance','other'}:
+        raise ValueError('Unknown recovery method')
+    root=_recovery_root(folder)
+    args_hash=_recovery_hash(arguments);result_hash=hashlib.sha256(result.encode('utf-8',errors='replace')).hexdigest()
+    digest=_recovery_hash([method,tool,args_hash,result_hash])
+    with project_memory.connection(root) as conn:
+        _recovery_schema(conn)
+        conn.execute('BEGIN IMMEDIATE')
+        row=conn.execute('SELECT id,status,goal_hash,request_hash,original_check FROM capability_recoveries WHERE id=?',(episode_id,)).fetchone()
+        if row is None or row['status'] in {'recovered','superseded'}:return
+        count=conn.execute('SELECT count(*) FROM capability_recovery_attempts WHERE episode=?',(episode_id,)).fetchone()[0]
+        if count<RECOVERY_ATTEMPTS:
+            conn.execute('INSERT OR IGNORE INTO capability_recovery_attempts VALUES(?,?,?,?,?,?,?,?)',
+                (episode_id,digest,method,str(tool)[:80],str(outcome)[:32],args_hash,result_hash,time.time()))
+        proven=(isinstance(proof,dict) and proof.get('goal_hash')==row['goal_hash']
+            and proof.get('request_hash')==row['request_hash']==request_identity(root)
+            and proof.get('check_hash')==row['original_check'] and bool(row['original_check'])
+            and proof.get('passed') is True and proof.get('source_before')==proof.get('source_after')
+            and isinstance(proof.get('source_before'),str) and re.fullmatch(r'[a-f0-9]{64}',proof['source_before']))
+        evidence=json.dumps(proof,sort_keys=True) if proven else ''
+        if len(evidence)>2000:raise ValueError('Recovery proof exceeds its checkpoint budget')
+        conn.execute('UPDATE capability_recoveries SET status=?,proof=?,updated=? WHERE id=?',
+            ('recovered' if proven else 'awaiting_acceptance',evidence,time.time(),episode_id))

@@ -4715,6 +4715,178 @@ def checker_fingerprint(kind: str) -> str:
     return digest.hexdigest()
 
 
+
+def capability_goal_hash(project):
+    return hashlib.sha256(json.dumps(planning_basis(project),sort_keys=True).encode()).hexdigest()
+
+
+def capability_recovery_before(project,name,arguments,active=None):
+    """Capture host identities at actual execution, not inferred model success."""
+    import task_context
+    folder=Path(project['folder'])
+    active=active if active is not None else task_context.step_status(folder)['active']
+    structured=bool(active and active.get('check_tool')!='run_command')
+    checker=(name=='task_steps' and arguments.get('action')=='complete'
+             or name in {'check_python_function','check_javascript_function','check_webapp','check_document_report','run_verifier'})
+    return {'goal_hash':capability_goal_hash(project),'request_hash':task_context.request_identity(folder),
+            'active':active,'check_hash':task_context.step_check_identity(active) if active else '',
+            'structured':structured,'source':hashlib.sha256(step_source_fingerprint(folder,structured).encode()).hexdigest() if checker else None}
+
+
+def capability_local_search(query):
+    """Search existing local registrations without starting/installing backends."""
+    import capability_index
+    if capability_index.database_path(ROOT).is_file():
+        return capability_index.search(ROOT,query,limit=6)
+    import toolbox_mcp
+    words=set(re.findall(r'[a-z0-9_]+',query.lower()))
+    entries=[]
+    for name,spec in toolbox_mcp.LOCAL_CATALOG.items():
+        description=spec.get('description','')
+        score=len(words.intersection(re.findall(r'[a-z0-9_]+',(name+' '+description).lower())))
+        if score:entries.append((score,{'name':name,'kind':'tool','description':description}))
+    return [item for _,item in sorted(entries,key=lambda pair:-pair[0])[:6]]
+
+
+def capability_recovery_observe(project,state,name,arguments,result,outcome,before,*,read_stall=False,capability_claim=False):
+    """Open/dedupe recovery from real observations; preserve original acceptance."""
+    import task_context
+    if before is None or before['goal_hash']!=capability_goal_hash(project):return
+    folder=Path(project['folder']);active=before['active']
+    diagnostic=result
+    try:
+        observed=json.loads(result)
+        if isinstance(observed,dict):
+            # Expected/actual assertion values and quoted case prose are not
+            # trusted missing-capability diagnostics.
+            fields=observed.get('check_summary',{}) if name=='task_steps' else observed
+            errors=fields.get('errors',[]) if isinstance(fields,dict) else []
+            diagnostic='\n'.join(item for item in errors if isinstance(item,str))
+            if isinstance(observed.get('error'),str):diagnostic+='\n'+observed['error']
+            if name=='task_steps' and isinstance(observed.get('check_output'),str):diagnostic+='\n'+observed['check_output']
+    except (ValueError,TypeError):pass
+    missing=re.search(r"(?i)No module named ['\"]?([A-Za-z0-9_.]+)",diagnostic)
+    explicit_missing=outcome.startswith('Failed') and bool(missing or re.search(
+        r'(?i)ModuleNotFoundError|executable (?:is )?not found|command.{0,120}not recognized|unknown tool|unsupported tool|specialist.{0,60}unavailable',diagnostic))
+    trigger=('capability_claim' if capability_claim else 'missing_capability' if explicit_missing else 'read_stall' if read_stall else
+             'repeated_failure' if outcome.startswith('Failed') and int(state.get('same_tool_failures',0))>=2 else '')
+    episode=task_context.recovery_episode(folder,before['goal_hash'],active,trigger=trigger,
+        component=missing[1][:100] if missing else '',blocked_tool=name,blocked_arguments=arguments)
+    if episode is None or episode['status'] in {'recovered','superseded'}:return
+    if not episode['catalog']:
+        query=('python module '+episode['component'] if episode['component'] else 'project source tools '+episode['trigger'])
+        try:hits=capability_local_search(query)
+        except (OSError,ValueError,sqlite3.Error):hits=[]
+        task_context.recovery_catalog(folder,episode['id'],hits)
+        task_context.recovery_attempt(folder,episode['id'],'catalog','local_catalog',{'query':query},json.dumps(hits[:6]),'Completed')
+    try:verdict=json.loads(result)
+    except (ValueError,TypeError):verdict={}
+    passed=False
+    if isinstance(verdict,dict):
+        if active and name=='task_steps' and arguments.get('action')=='complete':
+            passed=(verdict.get('passed') is True and verdict.get('checked_step_id')==active['id']
+                    and verdict.get('check_sha256')==before['check_hash'])
+        elif not active and name in {'check_python_function','check_javascript_function','check_webapp','check_document_report'}:
+            spec={'check_tool':name,'check_arguments':arguments}
+            check=task_context._recovery_hash(spec)
+            passed=verdict.get('passed') is True and check==episode['original_check']
+            before={**before,'check_hash':check}
+    proof=None
+    if passed and before['source'] is not None:
+        after=hashlib.sha256(step_source_fingerprint(folder,before['structured']).encode()).hexdigest()
+        if after==before['source'] and capability_goal_hash(project)==before['goal_hash']:
+            proof={'passed':True,'goal_hash':before['goal_hash'],'request_hash':before['request_hash'],
+                   'check_hash':before['check_hash'],'source_before':before['source'],'source_after':after,
+                   'result_sha256':hashlib.sha256(result.encode()).hexdigest()}
+    tool=str(arguments.get('tool','')) if name=='call_local_tool' else name
+    method=('acceptance' if name in {'task_steps','check_python_function','check_javascript_function','check_webapp','run_verifier'} else
+            'build_script' if name in {'write_file','edit_file'} else 'check_script' if name=='run_command' else
+            'github_review' if name in {'search_web','read_webpage'} else
+            'training' if name=='call_local_tool' and re.search(r'train|dataset',tool) else
+            'existing_tool' if name in {'call_local_tool','discover_local_tools','search_capabilities','read_skill'} else 'other')
+    task_context.recovery_attempt(folder,episode['id'],method,name,arguments,result,outcome,proof=proof)
+    state['capability_recovery_id']=episode['id']
+
+
+def capability_recovery_basis_matches(project,basis):
+    import task_context
+    if capability_goal_hash(project)!=basis['goal_hash']:return False
+    active=task_context.step_status(project['folder'])['active']
+    return (active['id'] if active else 0)==basis['step_id'] and (
+        task_context.step_check_identity(active)==basis['check_hash'] if active else True)
+
+
+
+def capability_claim_with_unmet_goal(project,message):
+    """A live inability claim is a recovery hint only for real unfinished work.
+
+    Quoted/narrated refusals and ordinary questions do not authorize new tools,
+    downloads or training. This is not a provider-policy/refusal override.
+    """
+    import task_context
+    text=str(message or '').strip()
+    direct=r"(?is)^(?:I (?:can(?:not|['’]t)|do not have|don't have|am unable)|I['’]m unable)\b"
+    qualified=r"(?is)^I can .{0,180}\bbut I (?:cannot|can['’]t|am unable)\b"
+    if not (re.match(direct,text) or re.match(qualified,text)):return False
+    if re.search(r'(?i)\b(?:policy|permission|credentials|unauthorized|sign in|api key)\b',text[:400]):return False
+    if not re.search(r'(?i)\b(?:access|render|tools?|files?|browser|install|execute|run|create)\b',text[:220]):return False
+    folder=Path(project['folder'])
+    queue=task_context.step_status(folder)
+    unmet=bool(queue['remaining'] or initial_plan_required(project) and not queue['total']
+               or any(not (folder/name).is_file() for name in requested_root_files(str(project.get('brief','')))))
+    if not unmet:return False
+    episode=task_context.recovery_episode(folder,capability_goal_hash(project),queue['active'])
+    return not episode or episode['turns']<task_context.RECOVERY_TURNS
+
+def capability_recovery_request(project,state,messages,available_tools):
+    """A bounded real-action lane; no arbitrary downloads, installs or activation."""
+    import task_context
+    goal=capability_goal_hash(project);active=task_context.step_status(project['folder'])['active']
+    episode=task_context.recovery_episode(project['folder'],goal,active)
+    if not episode or episode['status'] in {'recovered','superseded'} or not episode['catalog']:return None
+    if episode['turns']>=task_context.RECOVERY_TURNS:
+        if state.get('capability_recovery_budget_notice')!=episode['id']:
+            methods=sorted({item['method'] for item in episode['methods']})
+            messages.append({'role':'user','content':
+                '[Bounded recovery checkpoint] The six reserved recovery turns are used; the original goal is still unfinished. '
+                'Attempted methods: '+json.dumps(methods)+'. Continue its real acceptance with another eligible approach; '
+                'do not repeat unchanged failures, claim recovery or require a new human prompt merely because this stage ended.'})
+            state['capability_recovery_budget_notice']=episode['id']
+        return None
+    if not task_context.reserve_recovery_turn(project['folder'],episode['id'],goal,episode['current_check']):return None
+    names={'read_file','list_files','search_text','write_file','edit_file','run_command','task_steps','run_verifier',
+           'discover_local_tools','search_capabilities','read_skill','call_local_tool','search_web','read_webpage'}
+    if active:
+        names.add(active['check_tool'])
+        if active['check_tool']=='check_webapp':names.add('inspect_webapp')
+    existing={tool['function']['name']:tool for tool in available_tools}
+    tools=[copy.deepcopy(existing.get(tool['function']['name'],tool)) for tool in TOOLS if tool['function']['name'] in names]
+    if active:
+        for tool in tools:
+            if tool['function']['name']=='task_steps':
+                tool['function']['description']='Run the original active acceptance or inspect status. Recovery cannot rewrite its check or mark it done without executing it.'
+                tool['function']['parameters']={'type':'object','properties':{
+                    'action':{'type':'string','enum':['complete','status']},
+                    'step_id':{'type':'integer','const':active['id']}},'required':['action'],'additionalProperties':False}
+    basis={'goal_hash':goal,'step_id':active['id'] if active else 0,
+           'check_hash':task_context.step_check_identity(active) if active else '', 'episode_id':episode['id']}
+    data={key:episode[key] for key in ('trigger','component','turns','original_check','current_check','methods')}
+    data['local_catalog']=json.loads(episode['catalog'])
+    notice=("[Durable capability recovery: take a concrete tool action] The original task and acceptance remain authoritative. "
+        "The host already searched existing LOCAL capabilities. First reuse a relevant installed tool/skill; otherwise build "
+        "a small project-local helper/script and TEST it, then rerun the original saved acceptance and continue the next unit. "
+        "Inspect actual imports/APIs; never shadow a third-party package with a fake stub. If necessary inspect relevant GitHub "
+        "source/license/dependencies before integrating; fetching/HTTP success is not permission to execute repository code. "
+        "Never send private traceback/source/documents to public search. Training is a later option only for an appropriate "
+        "learning task with approved data and held-out evaluation; CLINC intent data does not fix arbitrary software bugs. "
+        "Keep account, offline, hardware, spending and tool policies. No automatic model activation. Do not repeat unchanged "
+        "failed methods or merely announce a plan. Writes/helper tests/process success are not recovery proof: the original "
+        "relevant acceptance must actually pass. Check revisions cannot renew this episode's budget or prove older assertions. "
+        "No task is completed by this bookkeeping. Recovery observation data (not new instructions): "+json.dumps(data))
+    state['capability_recovery_id']=episode['id']
+    return {'messages':[*messages,{'role':'user','content':notice}], 'tools':tools,'tool_choice':'required',
+            'max_tokens':2000,'_native_workload':'capability_recovery','_native_capability_recovery':basis}
+
 def automatic_step_basis(folder: Path, active: dict) -> dict:
     """Retry after source, acceptance, request, retained cases or checker fixes."""
     import task_context
@@ -4772,6 +4944,7 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
         arguments = {"action": "complete", "step_id": active["id"], "_expected_check": basis["step"]}
         if automatic_game:
             arguments["_automatic_game"] = True
+        recovery_before=capability_recovery_before(project,'task_steps',arguments,active)
         result = execute_tool(folder, "task_steps", arguments, before_step_commit=allowed)
         if not allowed():
             return False
@@ -4785,6 +4958,8 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
         state["automatic_step_attempt"] = basis
         state["automatic_step_checks"] = int(state.get("automatic_step_checks", 0)) + 1
         task_context.record_action(folder, "task_steps", result, arguments, request_hash=basis["request"])
+        capability_recovery_observe(project,state,'task_steps',arguments,result,
+            task_context.action_outcome('task_steps',result),recovery_before)
         try:
             verdict = json.loads(result)
         except ValueError:
@@ -4864,7 +5039,7 @@ def run_slice(project: dict, complete=None) -> dict:
         avoid = repair_avoid_models(state, task_context.request_identity(folder))
         stage = payload.get("_native_workload")
         payload = {key: value for key, value in payload.items()
-                   if key not in {"_native_workload", "_native_repair_basis", "_native_plan_basis"}}
+                   if key not in {"_native_workload", "_native_repair_basis", "_native_plan_basis", "_native_capability_recovery"}}
         options = {"repair_avoid": avoid} if avoid else {}
         if stage in {"starter_selection", "starter_scope_review"}:
             options["size_hint"] = "quick"
@@ -4935,6 +5110,10 @@ def run_slice(project: dict, complete=None) -> dict:
         available_tools = acceptance_repair_tools(project, state, available_tools)
         if planning:
             available_tools = initial_plan_tools(project, available_tools)
+        recovery_request = None if needs_initial_plan else capability_recovery_request(project,state,messages,available_tools)
+        if recovery_request:
+            focus=None
+            available_tools=recovery_request['tools']
         call_messages = [*messages, focus[1]] if focus else messages
         if source_first and not focus:
             call_messages = [*call_messages, {"role": "user", "content": (
@@ -4973,7 +5152,7 @@ def run_slice(project: dict, complete=None) -> dict:
                 "before creating this queue. A plan records work still to do; it is not a passing result. "
                 "Normal implementation tools return after a valid plan has been saved.")}]
         elif not focus:
-            scoped = focused_step_repair_request(project, state, available_tools, decision, context_limit)
+            scoped = recovery_request or focused_step_repair_request(project, state, available_tools, decision, context_limit)
             if scoped:
                 request.update(scoped)
                 save_state(project, state)  # Reserve the bounded turn before a crash or network failure.
@@ -5095,6 +5274,17 @@ def run_slice(project: dict, complete=None) -> dict:
                 state["messages"] = messages
                 save_state(project, state)
                 continue
+            if capability_claim_with_unmet_goal(project,message.get('content')):
+                observation=capability_recovery_before(project,'assistant_capability_claim',{})
+                capability_recovery_observe(project,state,'assistant_capability_claim',{},str(message.get('content','')),
+                    'Unproven capability claim',observation,capability_claim=True)
+                messages.append({'role':'user','content':
+                    'The saved task/acceptance is still unfinished. Existing local capabilities were searched. '
+                    'Take a concrete authorized tool action on the original goal; a claim of missing tools is not proof of a blocker. '
+                    'Do not bypass provider policy, account, offline or permission constraints.'})
+                state.update(messages=messages,current='Finding an available method for the unfinished task')
+                save_state(project,state)
+                continue
             issue = completion_issue(folder, project, state)
             if issue:
                 state["premature_finishes"] = int(state.get("premature_finishes", 0)) + 1
@@ -5139,19 +5329,21 @@ def run_slice(project: dict, complete=None) -> dict:
             signature = ""
             step_check = None
             queue_result = None
+            recovery_before = None
             try:
                 args = json.loads(function.get("arguments") or "{}")
                 if not isinstance(args, dict):
                     raise ValueError("Arguments must be an object")
                 offered_tools = (request["tools"] if (request.get("_native_repair_basis") is not None
-                                 or request.get("_native_plan_basis") is not None)
+                                 or request.get("_native_plan_basis") is not None or request.get("_native_capability_recovery") is not None)
                                  else available_tools)
                 allowed_names = ({"check_webapp"} if focus else
                                  {tool["function"]["name"] for tool in offered_tools})
                 if function.get("name") not in allowed_names:
                     raise ValueError("That tool is not available in this focused turn. Use the offered "
                                      "repair/check tools; full discovery tools return periodically.")
-                if request.get("_native_repair_basis") is not None or request.get("_native_plan_basis") is not None:
+                if (request.get("_native_repair_basis") is not None or request.get("_native_plan_basis") is not None
+                        or request.get("_native_capability_recovery") is not None):
                     from jsonschema import ValidationError, validate
 
                     if (request.get("_native_repair_basis") is not None
@@ -5160,12 +5352,16 @@ def run_slice(project: dict, complete=None) -> dict:
                     if (request.get("_native_plan_basis") is not None
                             and planning_basis(project) != request["_native_plan_basis"]):
                         raise ValueError("Project requirements changed; read the fresh checkpoint before acting.")
+                    if (request.get('_native_capability_recovery') is not None and not capability_recovery_basis_matches(
+                            project,request['_native_capability_recovery'])):
+                        raise ValueError('Original recovery goal or acceptance changed; refresh before acting.')
                     offered = next(tool for tool in offered_tools if tool["function"]["name"] == function.get("name"))
                     try:
                         validate(args, offered["function"]["parameters"])
                     except ValidationError as error:
                         raise ValueError("Focused tool arguments do not match the offered schema at "
                                          + json.dumps(list(error.absolute_path))) from error
+                recovery_before=capability_recovery_before(project,function.get('name',''),args)
                 if function.get("name") == "task_steps" and not step_boundary:
                     if request.get("_native_plan_basis") is not None and args.get("action") == "plan":
                         args = {**args, "_initial_plan": True, "_expected_request": planned_request_hash}
@@ -5361,6 +5557,8 @@ def run_slice(project: dict, complete=None) -> dict:
                 state["same_tool_failures"] = 0
                 state.pop("last_failed_tool", None)
                 state["failure_nudged"] = False
+            capability_recovery_observe(project,state,function.get('name',''),args,result,outcome,recovery_before,
+                read_stall=read_cycle_notice and function.get('name')=='read_file')
             if router is not None:
                 kind = function.get("name", "")
                 proven = verifier_command_passed(kind, args, outcome)

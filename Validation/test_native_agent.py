@@ -6727,3 +6727,223 @@ def test_focused_assertion_scope_format_renews_only_two_generic_attempts(tmp_pat
     assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536)
     assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536) is None
     assert task_context.step_status(folder) == before
+
+
+def capability_recovery_invoice_fixture(folder):
+    """Developer-seeded broken local module for deterministic and real-router smoke.
+
+    No helper implementation, model answers, verifier mocks or later expected
+    outputs are injected. Original user tax/format requirements own both units.
+    """
+    item=project(folder)
+    item['brief']='Finish the existing invoice module: apply tax to each subtotal and round half up to cents; preserve invoice_total and format_invoice in billing.py and pass both original saved acceptance phases.'
+    item['ai_route']='local_only'
+    import hashlib
+    item['id']=hashlib.sha256(str(folder.resolve()).encode()).hexdigest()[:12]
+    folder=Path(item['folder'])
+    (folder/'billing.py').write_text('from invoice_math import apply_tax\ndef invoice_total(subtotal,tax_rate):\n    return apply_tax(subtotal,tax_rate)\ndef format_invoice(subtotal,tax_rate):\n    return "Total: %.2f" % invoice_total(subtotal,tax_rate)\n')
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    original=[{'phase':'Calculate','title':'Invoice totals','check_tool':'check_python_function','check_arguments':
+        {'path':'billing.py','function':'invoice_total','cases':[{'args':[100,.06],'expected':106},
+            {'args':[0,.06],'expected':0},{'args':[19.99,.085],'expected':21.69}]}},
+        {'phase':'Format','title':'Invoice text','check_tool':'check_python_function','check_arguments':
+        {'path':'billing.py','function':'format_invoice','cases':[{'args':[100,.06],'expected':'Total: 106.00'}]}}]
+    task_context.plan_steps(folder,original)
+    return item
+
+
+def test_durable_capability_recovery_builds_real_local_module_then_resumes_original_checks(tmp_path):
+    import sys
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice')
+    folder=Path(item['folder'])
+    def response(calls):
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':str(i),
+            'function':{'name':name,'arguments':json.dumps(args)}} for i,(name,args) in enumerate(calls)]}}]}
+    runtime=tmp_path/'runtime'
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',runtime),patch.object(native_agent,'capability_local_search',wraps=getattr(native_agent,'capability_local_search',lambda query:[]),create=True) as search:
+        native_agent.run_slice(item,complete=lambda payload:response([('task_steps',{'action':'complete'})]))
+        assert task_context.step_status(folder)['done']==0
+        assert search.call_count==1  # Baseline truly ran/fails the typed check but never searches.
+        active=task_context.step_status(folder)['active']
+        episode=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),active)
+        assert episode and isinstance(json.loads(episode['catalog']),list) and episode['turns']==0 and episode['status']!='recovered'
+        assert search.call_count==1 and task_context.step_status(folder)['done']==0
+        # New run_slice reloads persisted native state + SQL episode. It does not
+        # ask the user or repeat local discovery; the model supplies a real module.
+        code='from decimal import Decimal, ROUND_HALF_UP\ndef apply_tax(subtotal,tax_rate):\n    return float((Decimal(str(subtotal))*(Decimal("1")+Decimal(str(tax_rate)))).quantize(Decimal(".01"),rounding=ROUND_HALF_UP))\n'
+        command='"'+sys.executable+'" -B -c "from invoice_math import apply_tax; assert apply_tax(100,0.06)==106; assert apply_tax(19.99,0.085)==21.69"'
+        def build(payload):
+            assert payload.get('_native_workload')=='capability_recovery'
+            assert 'discover_local_tools' in {tool['function']['name'] for tool in payload['tools']}
+            return response([('write_file',{'path':'invoice_math.py','content':code}),('run_command',{'command':command})])
+        native_agent.run_slice(item,complete=build)
+        episode=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),active)
+        assert (folder/'invoice_math.py').is_file() and episode['status']!='recovered'
+        assert any(method['method']=='check_script' and method['outcome']=='Completed' for method in episode['methods'])
+        assert task_context.step_status(folder)['done']==0 and search.call_count==1
+        # The host now reruns the ORIGINAL exact unit, then the ORIGINAL next unit.
+        # A final narrative isn't what advances either acceptance check.
+        native_agent.run_slice(item,complete=lambda payload:{'choices':[{'message':{'role':'assistant','content':'The saved checks passed.'}}]})
+        assert task_context.step_status(folder)['done']==2
+        with project_memory.connection(folder) as conn:
+            final=dict(conn.execute('SELECT * FROM capability_recoveries WHERE id=?',(episode['id'],)).fetchone())
+        assert final['status']=='recovered' and json.loads(final['proof'])['check_hash']==episode['original_check']
+        assert search.call_count==1
+
+
+def test_capability_claim_needs_real_unfinished_work_and_is_not_a_quoted_refusal(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice')
+    assert native_agent.capability_claim_with_unmet_goal(item,'I cannot access files or tools in this environment.')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'"I cannot access files," said the character in the story.')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'The narrator says I cannot access files here.')
+    assert native_agent.capability_claim_with_unmet_goal(item,
+        'I can provide a blueprint here, but I cannot render files or create tasks in this chat.')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'I cannot execute this because policy prohibits it.')
+    ordinary=project(tmp_path/'story');ordinary['brief']='Write a short story in your reply.'
+    assert not native_agent.capability_claim_with_unmet_goal(ordinary,'I cannot access files here.')
+
+
+def test_no_tool_inability_claim_enters_durable_action_lane_without_new_user_prompt(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',tmp_path/'runtime'),patch.object(native_agent,'capability_local_search',return_value=[]) as search:
+        native_agent.run_slice(item,complete=lambda payload:{'choices':[{'message':{'role':'assistant','content':'I cannot access files or execute tools in this environment.'}}]})
+        active=task_context.step_status(folder)['active'];episode=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),active)
+        assert episode['trigger']=='capability_claim' and episode['status']!='recovered' and search.call_count==1
+        def use_tool(payload):
+            assert payload['_native_workload']=='capability_recovery' and payload['tool_choice']=='required'
+            return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'read','function':{'name':'read_file','arguments':'{"path":"billing.py"}'}}]}}]}
+        native_agent.run_slice(item,complete=use_tool)
+        assert task_context.step_status(folder)['done']==0 and search.call_count==1
+
+
+def test_recovery_check_revisions_do_not_reset_budget_or_prove_original_acceptance(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='missing_capability',component='invoice_math')
+    task_context.recovery_catalog(folder,episode['id'],[])
+    for _ in range(6):assert task_context.reserve_recovery_turn(folder,episode['id'],goal,episode['current_check'])
+    changed=json.loads(json.dumps(active));changed['check_arguments']['cases']=changed['check_arguments']['cases'][:1]
+    revision=task_context.recovery_episode(folder,goal,changed)
+    assert revision['id']==episode['id'] and revision['turns']==6 and revision['original_check']!=revision['current_check']
+    assert not task_context.reserve_recovery_turn(folder,revision['id'],goal,revision['current_check'])
+    task_context.recovery_attempt(folder,episode['id'],'acceptance','task_steps',{},'{"passed":true}','Completed',proof={
+        'goal_hash':goal,'request_hash':task_context.request_identity(folder),'check_hash':revision['current_check'],
+        'passed':True,'source_before':'a'*64,'source_after':'a'*64})
+    assert task_context.recovery_episode(folder,goal,changed)['status']!='recovered'
+
+
+def test_recovery_uses_full_brief_rules_goal_and_supersedes_old_unit_without_success(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];old_goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,old_goal,active,trigger='read_stall')
+    changed={**item,'brief':item['brief']+' Also add a discount.'}
+    assert native_agent.capability_goal_hash(changed)!=old_goal
+    assert task_context.recovery_episode(folder,native_agent.capability_goal_hash(changed),active) is None
+    with project_memory.connection(folder) as conn:
+        assert conn.execute('SELECT status FROM capability_recoveries WHERE id=?',(episode['id'],)).fetchone()[0]=='superseded'
+    (folder/'AGENTS.md').write_text('Preserve rounding and private data.')
+    assert native_agent.capability_goal_hash(item)!=old_goal
+
+
+def test_recovery_rejects_stale_goal_response_and_never_counts_helper_success_as_recovered(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    task_context.recovery_attempt(folder,episode['id'],'existing_tool','call_local_tool',{},'{"registered":true,"passed":true}','Completed')
+    assert task_context.recovery_episode(folder,goal,active)['status']!='recovered'
+    def stale(payload):
+        assert payload.get('_native_capability_recovery')
+        (folder/'AGENTS.md').write_text('A new authoritative instruction arrived.')
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'bad','function':{'name':'write_file','arguments':'{"path":"stale.txt","content":"must not write"}'}}]}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]):
+        native_agent.run_slice(item,complete=stale)
+    assert not (folder/'stale.txt').exists()
+
+
+def test_recovery_source_changes_and_done_rows_without_observed_proof_are_not_recovery(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    before=native_agent.capability_recovery_before(item,'task_steps',{'action':'complete'},active)
+    (folder/'changed.py').write_text('SOURCE_CHANGED=True')
+    verdict=json.dumps({'passed':True,'checked_step_id':active['id'],'check_sha256':task_context.step_check_identity(active)})
+    native_agent.capability_recovery_observe(item,{},'task_steps',{'action':'complete'},verdict,'Completed',before)
+    assert task_context.recovery_episode(folder,goal,active)['status']!='recovered'
+    with project_memory.connection(folder) as conn:
+        conn.execute("UPDATE task_steps SET status='done' WHERE id=?",(active['id'],))
+    assert task_context.recovery_episode(folder,goal,active)['status']!='recovered'
+
+
+def test_recovery_private_binding_is_not_forwarded_to_router(tmp_path):
+    from types import SimpleNamespace
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    seen=[]
+    def complete(payload,task_id,**options):
+        assert not any(key.startswith('_native') for key in payload)
+        assert task_id==item['id'];seen.append(payload)
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'read','function':{'name':'read_file','arguments':'{"path":"billing.py"}'}}]}}]}
+    router=SimpleNamespace(complete=complete,last_local_model=None,last_local_weights='')
+    with patch('cloud_ai.Router',return_value=router),patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]):
+        native_agent.run_slice(item)
+    assert len(seen)==1
+
+
+def test_recovery_local_catalog_search_never_starts_backend_or_network(tmp_path):
+    with (patch.object(native_agent,'ROOT',tmp_path),patch('subprocess.run',side_effect=AssertionError('No backend process')),
+          patch('urllib.request.urlopen',side_effect=AssertionError('No network'))):
+        rows=native_agent.capability_local_search('expression helper')
+    assert any('expression_helper' in item['name'] for item in rows)
+
+
+def test_recovery_does_not_treat_quoted_case_failure_as_missing_capability(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    before=native_agent.capability_recovery_before(item,'task_steps',{'action':'complete'})
+    result=json.dumps({'passed':False,'check_summary':{'errors':[], 'cases':[
+        {'failures':["Expected story says No module named secret_module, actual story differs"]}]}})
+    with patch.object(native_agent,'capability_local_search',side_effect=AssertionError('No missing-capability search')):
+        native_agent.capability_recovery_observe(item,{},'task_steps',{'action':'complete'},result,'Failed',before)
+    assert task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),before['active']) is None
+
+
+def test_recovery_budget_notice_preserves_unfinished_goal_and_does_not_request_human(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    for _ in range(6):assert task_context.reserve_recovery_turn(folder,episode['id'],goal,episode['current_check'])
+    messages=[];state={}
+    assert native_agent.capability_recovery_request(item,state,messages,native_agent.TOOLS) is None
+    assert 'original goal is still unfinished' in messages[-1]['content'] and 'another eligible approach' in messages[-1]['content']
+    assert task_context.step_status(folder)['done']==0 and 'status' not in state
+
+
+def test_recovery_pause_during_inference_blocks_returned_source_edit(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    def paused(payload):
+        assert payload.get('_native_capability_recovery')
+        state=native_agent.read_state(item);state['status']='paused';native_agent.save_state(item,state)
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'edit','function':{'name':'write_file','arguments':'{"path":"paused.txt","content":"do not write"}'}}]}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]):
+        result=native_agent.run_slice(item,complete=paused)
+    assert result['status']=='paused' and not (folder/'paused.txt').exists()
+
+
+def test_recovery_stage_keeps_original_check_schema_small_and_immutable(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    payload=native_agent.capability_recovery_request(item,{},[],native_agent.TOOLS)
+    tool=next(t for t in payload['tools'] if t['function']['name']=='task_steps')
+    assert tool['function']['parameters']['properties']['action']['enum']==['complete','status']
+    assert tool['function']['parameters']['properties']['step_id']['const']==active['id']
+    assert len(json.dumps(tool))<1000
+    assert 'revise_check' not in json.dumps(tool)
+    assert next(t for t in native_agent.TOOLS if t['function']['name']=='task_steps')['function']['parameters']!=tool['function']['parameters']
