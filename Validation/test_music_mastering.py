@@ -1,7 +1,7 @@
 """Mastering writes a new file and refuses paths that could replace input audio."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -60,6 +60,36 @@ def test_mastering_timeout_removes_partial_output_and_preserves_inputs(tmp_path)
     assert not output.exists()
     assert source.read_bytes() == b"source"
     assert reference.read_bytes() == b"reference"
+
+
+def test_worker_preserves_precision_in_both_intermediate_wavs(tmp_path):
+    ffmpeg = Mock()
+    ffmpeg.get_ffmpeg_exe.return_value = "ffmpeg"
+    matchering = Mock()
+    source = str(tmp_path / "source.flac")
+    reference = str(tmp_path / "reference.wav")
+    output = str(tmp_path / "master.wav")
+
+    with patch.dict("sys.modules", {"imageio_ffmpeg": ffmpeg, "matchering": matchering}), patch.object(
+        music_mastering.subprocess, "run"
+    ) as run:
+        music_mastering._worker(source, reference, output)
+
+    assert run.call_count == 2
+    converted = []
+    for call, original in zip(run.call_args_list, (source, reference)):
+        command = call.args[0]
+        assert command[0] == "ffmpeg"
+        assert command[command.index("-i") + 1] == original
+        assert "-c:a" in command
+        assert command[command.index("-c:a") + 1] == "pcm_f32le"
+        assert call.kwargs["check"] is True
+        converted.append(command[-1])
+    assert converted[0] != converted[1]
+    matchering.pcm24.assert_called_once_with(output)
+    matchering.process.assert_called_once_with(
+        target=converted[0], reference=converted[1], results=[matchering.pcm24.return_value]
+    )
 
 
 def test_mastering_rejects_hard_linked_reference(tmp_path):

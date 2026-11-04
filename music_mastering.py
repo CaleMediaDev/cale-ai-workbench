@@ -95,7 +95,7 @@ def _worker(source: str, reference: str, output: str) -> None:
         for index, path in enumerate((source, reference)):
             wav = str(Path(temporary) / f"input-{index}.wav")
             subprocess.run([ffmpeg, "-nostdin", "-loglevel", "error", "-i", path,
-                            "-ac", "2", "-ar", "44100", wav], check=True,
+                            "-ac", "2", "-ar", "44100", "-c:a", "pcm_f32le", wav], check=True,
                            timeout=900, creationflags=HIDE)
             inputs.append(wav)
         mg.process(target=inputs[0], reference=inputs[1], results=[mg.pcm24(output)])
