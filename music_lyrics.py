@@ -50,9 +50,9 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
     for segment in transcription.get("segments", []):
         words = " ".join(str(segment.get("text", "")).split())
         try:
-            start = float(segment.get("start", 0))
-            end = float(segment.get("end", 0))
-        except (TypeError, ValueError, OverflowError):
+            start = float(segment["start"])
+            end = float(segment["end"])
+        except (KeyError, TypeError, ValueError, OverflowError):
             continue
         if (words and math.isfinite(start) and math.isfinite(end)
                 and math.isfinite(start * 1000) and math.isfinite(end * 1000)
