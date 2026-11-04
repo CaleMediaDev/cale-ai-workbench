@@ -83,6 +83,31 @@ class FileCatalogTests(unittest.TestCase):
             file_catalog.folder_priority(Path("C:/Windows"), home),
         )
 
+    def test_pruning_preserves_unscanned_sibling_with_shared_prefix(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            file_catalog, "enough_space", return_value=True
+        ):
+            root = Path(temp) / "drive"
+            sibling = Path(temp) / "drive-backup"
+            state = Path(temp) / "state"
+            root.mkdir()
+            sibling.mkdir()
+            stale = root / "stale.txt"
+            kept = sibling / "kept.txt"
+            stale.write_text("", encoding="utf-8")
+            kept.write_text("", encoding="utf-8")
+            file_catalog.scan_computer(state, [root, sibling])
+
+            stale.unlink()
+            result = file_catalog.scan_computer(state, [root])
+
+            self.assertEqual(result["status"], "complete")
+            with file_catalog.database(state) as conn:
+                paths = {row["path"] for row in conn.execute("SELECT path FROM entries")}
+            self.assertNotIn(str(stale), paths)
+            self.assertIn(str(kept), paths)
+            self.assertEqual(file_catalog.search(state, "kept")[0]["path"], str(kept))
+
     def test_scan_search_and_prune(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"

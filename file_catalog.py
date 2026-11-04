@@ -227,7 +227,9 @@ def scan_computer(state: str | Path, roots: list[str | Path] | None = None,
             # Prune only after a complete pass. An interrupted process leaves
             # the prior catalog intact for the next launch to recover.
             for root in roots:
-                prefix = str(root)
+                # Include the separator so sibling roots with a shared name
+                # prefix are not mistaken for descendants of this root.
+                prefix = os.path.join(str(root), "")
                 conn.execute(
                     "DELETE FROM entries WHERE substr(path,1,?)=? AND scan_id<>?",
                     (len(prefix), prefix, scan_id),
