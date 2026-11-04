@@ -5270,8 +5270,16 @@ def gui():
     conversation_scroll = ttk.Scrollbar(
         conversation_frame, orient="vertical", command=conversation.yview
     )
-    conversation.configure(yscrollcommand=conversation_scroll.set)
-    conversation_scroll.pack(side="right", fill="y")
+    def update_chat_scroll(first, last):
+        """Keep history accessible without an empty scrollbar on short chats."""
+        conversation_scroll.set(first, last)
+        if float(first) > 0.001 or float(last) < 0.999:
+            if not conversation_scroll.winfo_manager():
+                conversation_scroll.pack(side="right", fill="y", before=conversation)
+        else:
+            conversation_scroll.pack_forget()
+
+    conversation.configure(yscrollcommand=update_chat_scroll)
     conversation.pack(side="left", fill="both", expand=True)
     conversation.tag_configure("user", foreground="#a6c9ff", spacing1=8)
     conversation.tag_configure("assistant", foreground=text, spacing1=8)
@@ -5732,20 +5740,10 @@ def gui():
     usage_window.protocol("WM_DELETE_WINDOW", usage_window.withdraw)
     ttk.Button(task_heading, text="✦  Model activity", command=open_usage).pack(side="right")
     list_wrap = ttk.Frame(main_page)
-    canvas = tk.Canvas(list_wrap, background=bg, borderwidth=0, highlightthickness=0)
-    scrollbar = ttk.Scrollbar(list_wrap, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=scrollbar.set)
-    scrollbar.pack(side="right", fill="y")
-    canvas.pack(side="left", fill="both", expand=True)
-    cards = ttk.Frame(canvas)
-    cards_window = canvas.create_window((0, 0), window=cards, anchor="nw")
-    cards.bind(
-        "<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all"))
-    )
-    canvas.bind(
-        "<Configure>",
-        lambda event: canvas.itemconfigure(cards_window, width=event.width),
-    )
+    # Cards share the home page's scroll region. A second canvas here creates
+    # competing wheel targets and traps the task list inside a small viewport.
+    cards = ttk.Frame(list_wrap)
+    cards.pack(fill="x")
     # A separate, resizable window keeps the full graph one click from tasks.
     # It never gets buried beneath a long list of active or completed cards.
     usage_panel = ttk.Frame(usage_window, style="Card.TFrame", padding=(18, 14))
@@ -5910,11 +5908,6 @@ def gui():
             # Do not move the home page a second time after they consume input.
             if isinstance(widget, tk.Text):
                 return None
-            if widget is canvas:
-                first, last = canvas.yview()
-                if lines > 0 and last < 0.999 or lines < 0 and first > 0.001:
-                    return canvas
-                return main_canvas
             if widget is main_page or widget is main_canvas:
                 return main_canvas
             widget = widget.master

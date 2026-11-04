@@ -4,7 +4,7 @@
 
 Created by [Cale Media](https://calemedia.com/). New general tasks use Cale's native worker with Ollama and the existing model router; older tasks can still finish through Hermes Agent.
 
-Release 0.5.502 prevents short replies from wrongly excluding or retiring a hardware-suitable local model. Sustained timing samples are now required; legacy or unknown measurements remain useful for display without authorizing removal. Usage-history readers also avoid taking a writer lock when their schema is already current. The [validation receipt](benchmarks/results/model-health-502-20261104.json) records both regressions and their fixes.
+Release 0.5.503 simplifies home page scrolling. Task cards flow with the page instead of sitting inside a second scrolling panel. Chat history stays independently scrollable, with its scrollbar hidden when the conversation fits. The model-health fixes from 0.5.502 remain included; their [validation receipt](benchmarks/results/model-health-502-20261104.json) records the sustained-sampling and SQLite reader checks.
 
 Model-building donations from 0.5.501 remain available. Select Local and “Also train small specialist models on CPU” in Donate AI power. Experiments use pinned public data, keep weak results local, and submit screened candidates as inactive draft contributions for review. Training time is shown separately from inference tokens. The [training evidence](benchmarks/results/model-donations-501-20261104.json) records the real worker check and its rejected candidate; no newly qualified routing model is installed.
 
