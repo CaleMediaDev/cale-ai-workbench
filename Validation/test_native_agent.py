@@ -6897,8 +6897,8 @@ def test_recovery_private_binding_is_not_forwarded_to_router(tmp_path):
 def test_recovery_local_catalog_search_never_starts_backend_or_network(tmp_path):
     with (patch.object(native_agent,'ROOT',tmp_path),patch('subprocess.run',side_effect=AssertionError('No backend process')),
           patch('urllib.request.urlopen',side_effect=AssertionError('No network'))):
-        rows=native_agent.capability_local_search('expression helper')
-    assert any('expression_helper' in item['name'] for item in rows)
+        rows=native_agent.capability_local_search('build 3d scene')
+    assert any(item['name']=='local.build_3d_scene' for item in rows)
 
 
 def test_recovery_does_not_treat_quoted_case_failure_as_missing_capability(tmp_path):
@@ -6976,8 +6976,8 @@ def test_recovery_merges_static_tools_when_existing_catalog_is_stale_empty(tmp_p
     import capability_index
     path=capability_index.database_path(tmp_path);path.parent.mkdir();path.touch()
     with patch.object(native_agent,'ROOT',tmp_path),patch.object(capability_index,'search',return_value=[]):
-        rows=native_agent.capability_local_search('expression helper')
-    assert any('expression_helper' in row['name'] for row in rows)
+        rows=native_agent.capability_local_search('build 3d scene')
+    assert any(row['name']=='local.build_3d_scene' for row in rows)
 
 
 def test_no_queue_recovery_replays_real_original_checker_and_reopens_same_budget_after_failure(tmp_path):

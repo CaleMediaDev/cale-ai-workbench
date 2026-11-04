@@ -463,3 +463,49 @@ class ProjectMemoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_recovery_artifact_guard_keeps_new_notes_inside_project(tmp_path):
+    import pytest
+    root=tmp_path/'project';root.mkdir()
+    assert memory._artifact_project_root(root)==root.resolve()
+    with pytest.raises((ValueError,FileNotFoundError)):
+        memory._artifact_project_root(tmp_path/'missing')
+
+
+def test_recovery_artifact_guard_rejects_real_notes_junction(tmp_path):
+    import pytest
+    import subprocess
+    external=tmp_path/'external';external.mkdir()
+    root=tmp_path/'project';root.mkdir()
+    notes=root/'.local-ai'
+    if os.name=='nt':
+        result=subprocess.run(['cmd','/c','mklink','/J',str(notes),str(external)],capture_output=True)
+        assert result.returncode==0
+    else:
+        notes.symlink_to(external,target_is_directory=True)
+    try:
+        with pytest.raises(ValueError,match='own project'):
+            memory._artifact_project_root(root)
+        import task_context
+        with pytest.raises(ValueError,match='own project'):
+            task_context.recovery_episode(root,'a'*64,None,trigger='read_stall')
+        assert not (external/'memory.sqlite3').exists()
+    finally:
+        if os.name=='nt':notes.rmdir()
+        else:notes.unlink()
+
+
+def test_recovery_artifact_guard_rejects_database_link(tmp_path):
+    import pytest
+    root=tmp_path/'project';root.mkdir()
+    external=tmp_path/'external';external.mkdir()
+    notes=root/'.local-ai';notes.mkdir()
+    target=external/'state.sqlite3';target.write_text('unmodified')
+    try:
+        (notes/'memory.sqlite3').symlink_to(target)
+    except OSError:
+        pytest.skip('File symlinks unavailable; real directory junction guard already verified')
+    with pytest.raises(ValueError,match='own project'):
+        memory._artifact_project_root(root)
+    assert target.read_text()=='unmodified'

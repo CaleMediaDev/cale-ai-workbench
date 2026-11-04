@@ -40,6 +40,20 @@ SEARCH_STOPWORDS = frozenset({
 })
 
 
+def _artifact_project_root(folder: str | Path) -> Path:
+    """Keep cached project artifacts contained, including Windows reparse points."""
+    root=Path(folder).resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError('Cached artifacts need their own project directory.')
+    notes=root/'.local-ai';database=notes/'memory.sqlite3'
+    for path in (notes,database):
+        if path.is_symlink() or (path.exists() and getattr(path.lstat(),'st_file_attributes',0)&0x400):
+            raise ValueError('Cached artifact state must stay in its own project; links are not allowed.')
+        if not path.resolve().is_relative_to(root):
+            raise ValueError('Cached artifact state must stay in its own project.')
+    return root
+
+
 def database_path(folder: str | Path) -> Path:
     """Keep the index with its project so it survives app source updates."""
     root = Path(folder).resolve(strict=True)
