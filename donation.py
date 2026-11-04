@@ -57,18 +57,22 @@ def settings(root: Path = ROOT) -> dict:
                 "intensity": value.get("intensity") if isinstance(value.get("intensity"), str) and value.get("intensity") in PROFILES else "slow",
                 "chatgpt_account": str(value.get("chatgpt_account") or ""),
                 "free_account": str(value.get("free_account") or ""),
+                "model_training": value.get("model_training") is True and "local" in sources,
                 "github_account": str(value.get("github_account") or "")}
     except (OSError, ValueError, AttributeError):
         return {"enabled": False, "sources": ["local"], "intensity": "slow",
-                "chatgpt_account": "", "free_account": "", "github_account": ""}
+                "chatgpt_account": "", "free_account": "", "github_account": "", "model_training": False}
 
 
 def set_enabled(enabled: bool, root: Path = ROOT, *, chatgpt_account="", github_account="",
-                sources=None, intensity=None, free_account="") -> None:
+                sources=None, intensity=None, free_account="", model_training=None) -> None:
     """Save explicit donation consent, independently of normal paid routing."""
     previous = settings(root)
     sources = previous["sources"] if sources is None else sources
     intensity = previous["intensity"] if intensity is None else intensity
+    model_training = previous["model_training"] if model_training is None else model_training
+    if type(model_training) is not bool or model_training and "local" not in sources:
+        raise ValueError("Small-model training requires the Local compute source")
     if not isinstance(sources, list) or not all(source in SOURCES for source in sources) or not isinstance(intensity, str) or intensity not in PROFILES:
         raise ValueError("Choose donation sources and Slow, Medium, or Full Blast")
     if enabled and (not sources or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", github_account)
@@ -80,6 +84,7 @@ def set_enabled(enabled: bool, root: Path = ROOT, *, chatgpt_account="", github_
     temporary = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
     temporary.write_text(json.dumps({"enabled": bool(enabled), "chatgpt_account": chatgpt_account if "chatgpt" in sources else "",
                                      "github_account": github_account, "sources": list(dict.fromkeys(sources)),
+                                     "model_training": model_training,
                                      "intensity": intensity, "free_account": free_account if "free_cloud" in sources else ""}), encoding="utf-8")
     os.replace(temporary, path)
 
@@ -550,7 +555,7 @@ def validate_proposal(text: str, sources: dict[str, str]) -> tuple[dict, dict[st
 
 
 def open_proposal(login: str, run_id: str, job: dict, commit: dict,
-                  proposal: dict, edited: dict, check_cancel) -> str:
+                  proposal: dict, edited: dict, check_cancel, *, validation_summary=None) -> str:
     """Write only a new contribution branch, then open a draft for owner review."""
     check_cancel()
     if login.casefold() == UPSTREAM.split("/")[0].casefold():
@@ -590,8 +595,8 @@ def open_proposal(login: str, run_id: str, job: dict, commit: dict,
     body = ("<!-- cale-donation:" + job["id"] + " -->\n"
             "AI-generated contribution using the contributor's opted-in AI resources.\n\n"
             + proposal["summary"] + "\n\nBase commit: `" + commit["sha"] + "`.\n\n"
-            "Validation: exact edits and Python syntax checked. Behavior tests were NOT run "
-            "on the donor's PC. Maintainer review and relevant tests are required before merging.\n\n"
+            + (validation_summary or "Validation: exact edits and Python syntax checked. Behavior tests were NOT run "
+            "on the donor's PC. Maintainer review and relevant tests are required before merging.") + "\n\n"
             "This automation never approves, merges, or publishes a release.")
     result = gh_api(f"repos/{UPSTREAM}/pulls", {
         "title": "[Donation] " + proposal["title"], "body": body,
@@ -874,6 +879,38 @@ class Service:
                     self.message = "Today's contribution attempt is complete · thank you."
                     return
                 previous = conn.execute("SELECT resource FROM runs ORDER BY started DESC LIMIT 1").fetchone()
+            # CPU training has its own explicit opt-in and does not need Ollama.
+            # Only the primary lane offers one bounded experiment/hour; all
+            # other code lanes continue and this lane resumes code next tick.
+            if not self.lane and consent.get("model_training"):
+                import donation_models
+                experiment = donation_models.claim(self.root)
+                if experiment:
+                    run_id = experiment["run_id"]
+                    trained = None
+                    try:
+                        self.message = "Training a small public-data specialist on CPU (up to 5 minutes)…"
+                        trained = experiment.get("resume") or donation_models.run_job(self.root, check_cancel=check_cancel)
+                        state = "ready" if trained["qualified"] else "not_qualified"
+                        donation_models.complete(self.root, experiment, trained, state)
+                        if trained["qualified"]:
+                            check_cancel()
+                            url = donation_models.publish_candidate(self.root, experiment, trained, login, check_cancel)
+                            finish(self.root, run_id, "submitted", url)
+                            with closing(donation_models._connection(self.root)) as conn, conn:
+                                conn.execute("UPDATE model_experiments SET state='submitted' WHERE fingerprint=? AND run_id=?",
+                                             (experiment["fingerprint"], run_id))
+                        self.message = ("Model candidate submitted for owner review." if trained["qualified"] else
+                                        "Experiment recorded: baseline screening failed. Resuming code contributions.")
+                        self.next_attempt = 0
+                        return
+                    except BaseException as error:
+                        # Once training completed, keep its result: upload or
+                        # account failure must not waste CPU retraining it.
+                        donation_models.complete(self.root, experiment, trained or {"seconds": getattr(error, "worker_seconds", 0)},
+                            state=("ready" if trained["qualified"] else "not_qualified") if trained else
+                            "interrupted" if cancel.is_set() else "failed")
+                        raise
             available = permitted_sources(consent, self.root)
             if self.resource:
                 available = [source for source in available if source == self.resource]

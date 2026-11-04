@@ -273,6 +273,7 @@ def test_local_only_setup_button_does_not_require_chatgpt(tmp_path):
     control.fingerprint = control.free_fingerprint = ""
     control.source_vars = {key: SimpleNamespace(get=lambda source=key: source == "local") for key in donation.SOURCES}
     control.intensity = SimpleNamespace(get=lambda: "medium")
+    control.model_training = SimpleNamespace(get=lambda: False)
     control.refresh = lambda: None
     assert control.ready_to_start()
     control.toggle()

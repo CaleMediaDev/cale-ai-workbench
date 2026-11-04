@@ -1,5 +1,5 @@
 [
-  "donation.py", "donation_ui.py", "donation-tasks.json", "Validation/test_donation.py", "Validation/test_donation_regressions.py",
+  "donation.py", "donation_models.py", "donation_ui.py", "donation-tasks.json", "Validation/test_donation.py", "Validation/test_donation_models.py", "Validation/test_donation_regressions.py",
   "capability_index.py", "Validation/test_capability_index.py",
   "native_agent.py", "task_context.py", "Validation/test_native_agent.py", "native_browser.py", "Validation/test_native_browser.py", "webapp_check.py", "Validation/test_webapp_check.py", "document_check.py", "Validation/test_document_check.py", "project_documents.py", "Validation/test_project_documents.py", "native_specialists.py",
   "model_fitness.py", "Validation/test_model_fitness.py", "Install-Retry.ps1", "Validation/test_install_retry.py", "core_tool_health.py", "Repair-CoreTools.ps1", "browser_probe.js", "Validation/test_core_tool_health.py",

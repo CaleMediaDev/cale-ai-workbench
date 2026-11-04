@@ -72,7 +72,13 @@ class Controls:
         self.github_text.set("Connected · " + self.login if self.login else "Not connected yet")
         self.chat_text.set("Connected · plan permission approved" if self.chat_ready else "Connect and approve plan permission")
         self.free_text.set("Free routes connected" if self.free_fingerprint else "Connect a free route or use an existing provider in Supercharge")
-        self.local_text.set("Local AI is available" if self.local_ready else "Waiting for Ollama and a local model")
+        self.local_text.set("CPU specialist training selected; Ollama is optional" if self.model_training.get() else
+                            "Local AI is available" if self.local_ready else "Waiting for Ollama and a local model")
+        import donation_models
+        training = donation_models.summary(self.service.root)
+        if training is not None:
+            self.model_stats.set(f"CPU experiments: {training['experiments']} · worker time: {training['worker_seconds']:.1f}s · "
+                                 f"screened candidates: {training['screened_candidates']} · separate from token totals")
         self.github_button.configure(text="Reconnect GitHub" if self.login else "1. Connect GitHub")
         self.chat_button.configure(text="Reconnect ChatGPT" if self.chat_ready else "2. Connect ChatGPT")
         enabled = donation.settings(self.service.root)["enabled"]
@@ -95,14 +101,16 @@ class Controls:
     def ready_to_start(self):
         """Require only the accounts/runtimes for the resources actually selected."""
         selected = [key for key, value in self.source_vars.items() if value.get()]
-        return bool(self.login and selected and ("local" not in selected or self.local_ready)
+        return bool(self.login and selected and ("local" not in selected or self.local_ready or self.model_training.get())
                     and ("chatgpt" not in selected or self.chat_ready)
                     and ("free_cloud" not in selected or self.free_fingerprint))
 
     def choose_configuration(self):
         """Resource/intensity changes stop the old grant until explicitly restarted."""
+        if not self.source_vars["local"].get():
+            self.model_training.set(False)
         donation.set_enabled(False, self.service.root, sources=[key for key, value in self.source_vars.items() if value.get()],
-                             intensity=self.intensity.get())
+                             intensity=self.intensity.get(), model_training=self.model_training.get())
         self.service.cancel.set()
         self.service.activity()
         self.service.next_attempt = 0
@@ -116,7 +124,8 @@ class Controls:
         donation.set_enabled(not enabled, self.service.root,
                              chatgpt_account=self.fingerprint, github_account=self.login,
                              free_account=self.free_fingerprint,
-                             sources=[key for key, value in self.source_vars.items() if value.get()], intensity=self.intensity.get())
+                             sources=[key for key, value in self.source_vars.items() if value.get()], intensity=self.intensity.get(),
+                             model_training=self.model_training.get())
         if enabled:
             self.service.cancel.set()
         self.service.activity()
@@ -159,7 +168,7 @@ class Controls:
         ttk.Label(outer, text="Help make Cale better", font=("Segoe UI", 23, "bold")).pack(anchor="w")
         ttk.Label(outer, text=(
             "Contribute local AI, free cloud, or your ChatGPT allowance while away—or continuously in Full Blast. "
-            "Only public Cale source code is used. Proposed improvements go to GitHub "
+            "Only public Cale source code is used for code reviews. Optional CPU experiments use reviewed public datasets. Proposed contributions go to GitHub "
             "for the owner's review—nothing merges automatically."),
             wraplength=585, justify="left").pack(anchor="w", pady=(10, 14))
         self.github_text = tk.StringVar(value="Checking your connection…")
@@ -169,9 +178,17 @@ class Controls:
         sources_row = ttk.Frame(outer)
         sources_row.pack(fill="x", pady=(0, 10))
         self.source_vars = {key: tk.BooleanVar(value=key in config["sources"]) for key in donation.SOURCES}
-        for key, label in (("local", "Local models"), ("free_cloud", "Free cloud"), ("chatgpt", "ChatGPT plan / credits")):
+        self.model_training = tk.BooleanVar(value=config["model_training"])
+        for key, label in (("local", "Local compute"), ("free_cloud", "Free cloud"), ("chatgpt", "ChatGPT plan / credits")):
             ttk.Checkbutton(sources_row, text=label, variable=self.source_vars[key],
                             command=self.choose_configuration).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(outer, text="Also train small specialist models on CPU (Local compute required)",
+                        variable=self.model_training, command=self.choose_configuration).pack(anchor="w", pady=(0, 6))
+        ttk.Label(outer, text="Public pinned data only · up to 2 CPU threads / 5 minutes per experiment · no ChatGPT tokens. "
+                  "Weak results stay local; screened candidates need owner review and never activate automatically.",
+                  wraplength=585, style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
+        self.model_stats = tk.StringVar(value="CPU experiments: not started · separate from token totals")
+        ttk.Label(outer, textvariable=self.model_stats, wraplength=585, style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
         self.local_text = tk.StringVar()
         ttk.Label(outer, textvariable=self.local_text, style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
         ttk.Style(popup).configure("Donation.Connect.TButton", padding=(12, 6), font=("Segoe UI", 10, "bold"))
@@ -233,7 +250,7 @@ class Controls:
         outer = ttk.Frame(dialog, padding=20)
         outer.pack(fill="both", expand=True)
         ttk.Label(outer, text="Accepted fixes leaderboard", font=("Segoe UI", 21, "bold")).pack(anchor="w")
-        ttk.Label(outer, text="One merged donation fix = one point. Open, rejected or unmerged PRs do not count.",
+        ttk.Label(outer, text="One accepted contribution (code or model) = one point. Open or rejected proposals do not count.",
                   wraplength=600, style="Muted.TLabel").pack(anchor="w", pady=(6, 14))
         footer = ttk.Frame(outer)
         footer.pack(side="bottom", fill="x")
@@ -250,7 +267,7 @@ class Controls:
         scroll = ttk.Scrollbar(table_shell, orient="vertical", command=table.yview)
         scroll.pack(side="right", fill="y")
         table.configure(yscrollcommand=scroll.set)
-        for column, text, width in (("rank", "Rank", 65), ("login", "Contributor", 350), ("fixes", "Accepted fixes", 140)):
+        for column, text, width in (("rank", "Rank", 65), ("login", "Contributor", 350), ("fixes", "Accepted contributions", 140)):
             table.heading(column, text=text)
             table.column(column, width=width, anchor="w")
         table.pack(fill="both", expand=True)
