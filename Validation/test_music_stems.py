@@ -1,5 +1,6 @@
 """Protect existing audio and report actual separated files."""
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -470,3 +471,88 @@ def test_auxiliary_files_do_not_count_as_stems(tmp_path, wav_count):
         with pytest.raises(RuntimeError, match="did not produce both"):
             music_stems.separate_stems(str(source), str(output))
     assert source.read_bytes() == b"music"
+
+@pytest.mark.parametrize('external_change',['replace','same_inode_edit'])
+def test_fallback_rollback_preserves_real_user_replacement_or_edit(tmp_path,external_change):
+    import errno
+    from contextlib import nullcontext
+    source=tmp_path/'song.mp3';source.write_bytes(b'original audio');target=tmp_path/'stems'
+    original_copy=music_stems.shutil.copyfileobj;copies=[];original_error=OSError('later copy failed')
+    user_bytes=b''
+    def render(args,**kwargs):
+        staging=Path(args[-1]);(staging/'a-Instrumental.wav').write_bytes(b'own instrumental');(staging/'b-Vocals.wav').write_bytes(b'own vocals')
+        return type('Done',(),{'returncode':0})()
+    def copy(input_file,output_file):
+        nonlocal user_bytes
+        copies.append(Path(output_file.name))
+        if len(copies)==2:
+            first=copies[0];prior=first.stat();user_bytes=b'U'*prior.st_size
+            if external_change=='replace':
+                replacement=target/'replacement.tmp';replacement.write_bytes(user_bytes);replacement.replace(first)
+                assert first.stat().st_ino!=prior.st_ino
+            else:
+                first.write_bytes(user_bytes);os.utime(first,ns=(prior.st_atime_ns,prior.st_mtime_ns))
+                assert first.stat().st_ino==prior.st_ino and first.stat().st_size==prior.st_size
+            output_file.write(b'own partial');raise original_error
+        return original_copy(input_file,output_file)
+    with patch.object(music_stems.music_backend,'_setup_lock',side_effect=nullcontext),patch.object(music_stems.music_backend,'_music_gpu_lease',side_effect=nullcontext),patch.object(music_stems,'install',return_value=Path('python.exe')),patch.object(music_stems.subprocess,'run',side_effect=render),patch.object(music_stems.os,'link',side_effect=OSError(errno.ENOTSUP,'unsupported')),patch.object(music_stems.shutil,'copyfileobj',side_effect=copy):
+        with pytest.raises(OSError) as caught:music_stems.separate_stems(str(source),str(target))
+    assert caught.value is original_error
+    assert copies[0].read_bytes()==user_bytes
+    assert not copies[1].exists()
+    assert set(target.iterdir())=={copies[0]}
+    assert source.read_bytes()==b'original audio'
+
+
+@pytest.mark.parametrize('error_type',[OSError,KeyboardInterrupt])
+def test_fallback_owned_partial_rolls_back_without_masking_original_error(tmp_path,error_type):
+    import errno
+    from contextlib import nullcontext
+    source=tmp_path/'song.mp3';source.write_bytes(b'original audio');target=tmp_path/'stems';failure=error_type('copy interrupted')
+    def render(args,**kwargs):
+        staging=Path(args[-1]);(staging/'a.wav').write_bytes(b'first');(staging/'b.wav').write_bytes(b'second');return type('Done',(),{'returncode':0})()
+    def copy(input_file,output_file):output_file.write(b'own partial');raise failure
+    with patch.object(music_stems.music_backend,'_setup_lock',side_effect=nullcontext),patch.object(music_stems.music_backend,'_music_gpu_lease',side_effect=nullcontext),patch.object(music_stems,'install',return_value=Path('python.exe')),patch.object(music_stems.subprocess,'run',side_effect=render),patch.object(music_stems.os,'link',side_effect=OSError(errno.ENOTSUP,'unsupported')),patch.object(music_stems.shutil,'copyfileobj',side_effect=copy):
+        with pytest.raises(error_type) as caught:music_stems.separate_stems(str(source),str(target))
+    assert caught.value is failure and list(target.iterdir())==[]
+    assert source.read_bytes()==b'original audio'
+
+
+def test_fallback_exclusive_creation_never_overwrites_new_user_file(tmp_path):
+    import errno
+    from contextlib import nullcontext
+    source=tmp_path/'song.mp3';source.write_bytes(b'original audio');target=tmp_path/'stems'
+    def render(args,**kwargs):
+        staging=Path(args[-1]);(staging/'a.wav').write_bytes(b'first');(staging/'b.wav').write_bytes(b'second');return type('Done',(),{'returncode':0})()
+    def unsupported(staged,destination):
+        Path(destination).write_bytes(b'user-created audio');raise OSError(errno.ENOTSUP,'unsupported')
+    with patch.object(music_stems.music_backend,'_setup_lock',side_effect=nullcontext),patch.object(music_stems.music_backend,'_music_gpu_lease',side_effect=nullcontext),patch.object(music_stems,'install',return_value=Path('python.exe')),patch.object(music_stems.subprocess,'run',side_effect=render),patch.object(music_stems.os,'link',side_effect=unsupported):
+        with pytest.raises(FileExistsError):music_stems.separate_stems(str(source),str(target))
+    assert (target/'a.wav').read_bytes()==b'user-created audio'
+    assert list(target.iterdir())==[target/'a.wav']
+    assert source.read_bytes()==b'original audio'
+
+
+@pytest.mark.parametrize('change',['replace','same_inode_edit'])
+def test_link_rollback_preserves_real_user_replacement_or_edit(tmp_path,change):
+    from contextlib import nullcontext
+    source=tmp_path/'song.mp3';source.write_bytes(b'original audio');target=tmp_path/'stems'
+    original_link=music_stems.os.link;links=[];failure=OSError('second link failed');user_bytes=b''
+    def render(args,**kwargs):
+        staging=Path(args[-1]);(staging/'a.wav').write_bytes(b'first');(staging/'b.wav').write_bytes(b'second');return type('Done',(),{'returncode':0})()
+    def link(staged,destination):
+        nonlocal user_bytes
+        links.append(Path(destination))
+        if len(links)==2:
+            first=links[0];prior=first.stat();user_bytes=b'U'*prior.st_size
+            if change=='replace':
+                replacement=target/'replacement.tmp';replacement.write_bytes(user_bytes);replacement.replace(first)
+            else:
+                first.write_bytes(user_bytes);os.utime(first,ns=(prior.st_atime_ns,prior.st_mtime_ns));assert first.stat().st_ino==prior.st_ino
+            raise failure
+        return original_link(staged,destination)
+    with patch.object(music_stems.music_backend,'_setup_lock',side_effect=nullcontext),patch.object(music_stems.music_backend,'_music_gpu_lease',side_effect=nullcontext),patch.object(music_stems,'install',return_value=Path('python.exe')),patch.object(music_stems.subprocess,'run',side_effect=render),patch.object(music_stems.os,'link',side_effect=link):
+        with pytest.raises(OSError) as caught:music_stems.separate_stems(str(source),str(target))
+    assert caught.value is failure
+    assert links[0].read_bytes()==user_bytes and set(target.iterdir())=={links[0]}
+    assert source.read_bytes()==b'original audio'
