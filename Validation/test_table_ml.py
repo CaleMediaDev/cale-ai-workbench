@@ -36,6 +36,30 @@ class TableMLTests(unittest.TestCase):
                 self.assertEqual([row["prediction"] for row in csv.DictReader(stream)],
                                  ["cold", "hot"])
 
+    def test_large_finite_feature_median_can_be_trained_and_reused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["signal", "label"])
+                for index in range(40):
+                    writer.writerow(["1e308", "hot" if index % 2 else "cold"])
+            model = root / "model.json"
+            train_table_model(str(training), "label", str(model), "classification")
+            saved = json.loads(model.read_text(encoding="utf-8"))
+            self.assertEqual(saved["schema"]["signal"],
+                             {"kind": "number", "median": 1e308, "scale": 1.0})
+            prediction = root / "new.csv"
+            prediction.write_text("signal\n1e308\n", encoding="utf-8")
+            output = root / "predicted.csv"
+            result = predict_table_model(str(model), str(prediction), str(output))
+            self.assertEqual(result["rows"], 1)
+            with output.open(newline="", encoding="utf-8") as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual(len(rows), 1)
+            self.assertIn(rows[0]["prediction"], ["cold", "hot"])
+
     def test_regression_and_prediction(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

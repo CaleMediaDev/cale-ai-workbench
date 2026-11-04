@@ -60,6 +60,10 @@ def _schema(rows: list[dict], columns: list[str]) -> dict:
                 pass
         if nonempty and len(numeric) / len(nonempty) >= .95:
             median = statistics.median(numeric)
+            if not math.isfinite(median):
+                # Averaging two large finite middle values can overflow even
+                # though their midpoint is finite.
+                median = statistics.median_low(numeric) / 2 + statistics.median_high(numeric) / 2
             scale = max(1.0, statistics.median(abs(value - median) for value in numeric))
             schema[column] = {"kind": "number", "median": median, "scale": scale}
         else:
