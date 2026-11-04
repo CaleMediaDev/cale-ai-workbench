@@ -77,7 +77,7 @@ def _installer_running(pid=None) -> bool:
                     return True
             except (OSError, ValueError, psutil.Error):
                 continue
-    except (OSError, ValueError, TypeError, psutil.Error):
+    except (OSError, ValueError, TypeError, OverflowError, psutil.Error):
         return False
     return False
 
