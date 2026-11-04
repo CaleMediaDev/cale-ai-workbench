@@ -64,7 +64,16 @@ def _schema(rows: list[dict], columns: list[str]) -> dict:
                 # Averaging two large finite middle values can overflow even
                 # though their midpoint is finite.
                 median = statistics.median_low(numeric) / 2 + statistics.median_high(numeric) / 2
-            scale = max(1.0, statistics.median(abs(value - median) for value in numeric))
+            deviations = [abs(value - median) for value in numeric]
+            deviation_median = statistics.median(deviations)
+            if not math.isfinite(deviation_median):
+                # As with the feature median, averaging large finite middle
+                # deviations can overflow despite a representable midpoint.
+                deviation_median = (
+                    statistics.median_low(deviations) / 2
+                    + statistics.median_high(deviations) / 2
+                )
+            scale = max(1.0, deviation_median)
             schema[column] = {"kind": "number", "median": median, "scale": scale}
         else:
             schema[column] = {"kind": "category"}

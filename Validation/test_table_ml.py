@@ -60,6 +60,18 @@ class TableMLTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertIn(rows[0]["prediction"], ["cold", "hot"])
 
+    def test_large_finite_deviations_preserve_numeric_scale(self):
+        from table_ml import _features, _schema
+
+        rows = [{"signal": "-1e308"}, {"signal": "1e308"}]
+        schema = _schema(rows, ["signal"])
+        self.assertEqual(schema["signal"],
+                         {"kind": "number", "median": 0.0, "scale": 1e308})
+        # An infinite scale would silently turn both distinct values into zero
+        # and would fail saved-model validation when reused for prediction.
+        self.assertEqual(_features(rows, schema),
+                         [{"signal": -1.0}, {"signal": 1.0}])
+
     def test_regression_and_prediction(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
