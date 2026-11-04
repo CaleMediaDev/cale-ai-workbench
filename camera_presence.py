@@ -214,7 +214,7 @@ def watch(device=0, parent_pid=None, parent_started=None):
                 ok, frame = camera.read()
             except cv2.error:
                 ok, frame = False, None
-            if not ok:
+            if not ok or frame is None or frame.size == 0:
                 failed_reads += 1
                 if failed_reads >= 5:
                     emit("error", "The webcam stopped sending frames.")
