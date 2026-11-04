@@ -133,7 +133,7 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
         r"(\d+)\s*(?:-\s*)?(?:seconds?|secs?|sec|s)\b", duration_text, re.IGNORECASE,
     )
     single_candidates = re.finditer(
-        r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|minutes?|mins?|min|s)\b",
+        r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|sec|minutes?|mins?|min|s)\b",
         duration_text, re.IGNORECASE,
     )
     # In a style brief, "1990s" and "2000s" are decades, not seconds.
