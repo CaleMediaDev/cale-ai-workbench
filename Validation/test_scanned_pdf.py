@@ -383,6 +383,56 @@ def test_zero_sized_scan_preserves_other_pages_and_reports_omission(tmp_path):
     document.close.assert_called_once_with()
 
 
+def test_nan_scan_dimensions_preserve_native_text_and_report_omission(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    class PdfiumError(Exception):
+        pass
+
+    pdf = tmp_path / "nan-sized-scan.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    native_textpage = Mock()
+    native_textpage.get_text_bounded.return_value = "Native order"
+    scan_textpage = Mock()
+    scan_textpage.get_text_bounded.return_value = ""
+    native_page = Mock()
+    native_page.get_textpage.return_value = native_textpage
+    scan_page = Mock()
+    scan_page.get_textpage.return_value = scan_textpage
+    scan_page.get_size.return_value = (float("nan"), 800)
+    # Rendering non-finite dimensions can fail during numeric conversion.
+    scan_page.render.side_effect = ValueError("cannot convert float NaN to integer")
+    document = Mock()
+    document.__len__ = Mock(return_value=2)
+    document.__getitem__ = Mock(side_effect=lambda index: [native_page, scan_page][index])
+    recognize = Mock()
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(
+            PdfDocument=Mock(return_value=document), PdfiumError=PdfiumError
+        ),
+        "media_worker": SimpleNamespace(recognize_image=recognize),
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert "[Page 1; selectable text]\nNative order" in result["text"]
+    assert "[1 scanned pages were not read: 2.]" in result["text"]
+    assert "[Page 2; vision transcription]" not in result["text"]
+    assert result["pages_read"] == [1]
+    assert result["scanned_pages"] == [2]
+    assert result["has_scans"] is True
+    assert result["partial"] is True
+    native_page.render.assert_not_called()
+    scan_page.render.assert_not_called()
+    recognize.assert_not_called()
+    native_textpage.close.assert_called_once_with()
+    scan_textpage.close.assert_called_once_with()
+    native_page.close.assert_called_once_with()
+    assert scan_page.close.call_count == 2
+    document.close.assert_called_once_with()
+
+
 def test_page_selection_spans_long_document():
     assert scanned_pdf.sampled_pages(1, 6) == [0]
     assert scanned_pdf.sampled_pages(10, 4) == [0, 3, 6, 9]
