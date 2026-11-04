@@ -1,0 +1,29 @@
+{
+  "passed": true,
+  "scenario": "injected HTTP 500 followed by actual local model response through production Router",
+  "seconds": 0.48,
+  "http_calls": 2,
+  "timeouts": [
+    90,
+    60
+  ],
+  "answer": "READY",
+  "model": "cale-main-64k",
+  "tools_executed": 0,
+  "cloud_used": false,
+  "user_projects_touched": false,
+  "usage": {
+    "prompt_tokens": 16,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens": 2,
+    "total_tokens": 18
+  },
+  "tests": {
+    "router_passed": 126,
+    "subtests_passed": 22,
+    "seconds": 9.29
+  },
+  "source_sha256": "6484cd2b5ae3781a81f699a70b8ea9c93a341f1d9a76f1e39d49918ba51f4e0c"
+}

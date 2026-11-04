@@ -34,6 +34,8 @@ extras = [
     "benchmarks/results/nested-plan-repair-20261104.json",
     "benchmarks/results/offline-expense-app-473-20261104.json",
     "benchmarks/test_inference_budget.py",
+    "benchmarks/results/local-server-retry-20261104.json",
+    "benchmarks/results/offline-expense-app-474-20261104.json",
     # Developer evidence stays in source ZIPs, not the installed runtime's
     # bounded allowlist. Older updaters accept at most 250 manifest entries.
     "benchmarks/results/webapp-auto-20261103.json",

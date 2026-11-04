@@ -1255,6 +1255,24 @@ class Router:
         last_error = None
         schema_repair_attempted = False
         empty_weights = set()
+        transient_retry_used = False
+
+        def local_post(body, timeout):
+            nonlocal transient_retry_used
+            check_cancel()
+            try:
+                return post("http://127.0.0.1:11434/v1/chat/completions", body, timeout=timeout)
+            except HTTPError as error:
+                if error.code not in (500, 502, 503, 504) or transient_retry_used:
+                    raise
+                # The failed response delivered no tool result. Retry this
+                # same request once, without model swaps or duplicate effects.
+                transient_retry_used = True
+                if error.fp is not None:
+                    error.close()
+                check_cancel()
+                return post("http://127.0.0.1:11434/v1/chat/completions", body, timeout=min(timeout, 60))
+
         for selected_model in selected:
             identity = getattr(self, "model_weights", {}).get(selected_model)
             if identity and identity in empty_weights:
@@ -1288,9 +1306,7 @@ class Router:
                 corrected_schema = False
                 recovered_empty = False
                 try:
-                    result = valid_completion(post(
-                        "http://127.0.0.1:11434/v1/chat/completions", local,
-                        timeout=90 if size_hint == "quick" else 1800), payload)
+                    result = valid_completion(local_post(local, 90 if size_hint == "quick" else 1800), payload)
                 except EmptyInferenceResponse:
                     # A thinking-only/truncated local answer cannot advance the
                     # worker. Retry once without thinking on advertised thinking
@@ -1303,8 +1319,7 @@ class Router:
                         empty_weights.add(identity)
                     retry = {**local, "reasoning_effort": "none"}
                     check_cancel()
-                    result = valid_completion(post(
-                        "http://127.0.0.1:11434/v1/chat/completions", retry, timeout=120), payload)
+                    result = valid_completion(local_post(retry, 120), payload)
                     recovered_empty = True
                 except ToolArgumentError as error:
                     guarded = argument_repair_request(local, error)
@@ -1314,14 +1329,14 @@ class Router:
                         raise
                     schema_repair_attempted = True
                     check_cancel()
-                    result = validated_json_tool_reply(post(
-                        "http://127.0.0.1:11434/v1/chat/completions", repair, timeout=120), guarded, repair)
+                    result = validated_json_tool_reply(local_post(repair, 120), guarded, repair)
                     corrected_schema = bool(result["choices"][0]["message"].get("tool_calls"))
                 record(
                     "local",
                     ("Repair retry after tool failures; " if repair_avoid and profile == "main" else "")
                     + ("Corrected local tool arguments; " if corrected_schema else "")
                     + ("Recovered empty local response; " if recovered_empty else "")
+                    + ("Retried local server error; " if transient_retry_used else "")
                     + f"Auto scale: {size}; local model responded.",
                     selected_model,
                 )

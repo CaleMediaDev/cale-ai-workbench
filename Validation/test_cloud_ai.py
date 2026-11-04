@@ -247,6 +247,37 @@ class CloudTests(unittest.TestCase):
                 router.complete(ARGUMENT_REQUEST, cancel=lambda: cancelled)
         self.assertEqual(post.call_count, 1)
 
+    def test_local_server_error_retries_same_payload_once_with_bounded_timeout(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        error = HTTPError("http://127.0.0.1:11434/v1/chat/completions", 500, "temporary", {}, None)
+        with patch.object(cloud, "post", side_effect=[error, ANSWER]) as upstream:
+            result = cloud.Router().complete(REQUEST, size_hint="quick")
+        self.assertEqual(result, ANSWER)
+        self.assertEqual(upstream.call_count, 2)
+        self.assertEqual(upstream.call_args_list[0].args, upstream.call_args_list[1].args)
+        self.assertEqual(upstream.call_args_list[1].kwargs["timeout"], 60)
+
+    def test_local_server_retry_is_bounded_and_does_not_retry_client_errors(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        for code, count in ((500, 2), (401, 1), (422, 1), (429, 1)):
+            with self.subTest(code=code), patch.object(cloud, "post", side_effect=HTTPError(
+                    "http://127.0.0.1:11434/v1/chat/completions", code, "failure", {}, None)) as upstream:
+                with self.assertRaises(HTTPError):
+                    cloud.Router().complete(REQUEST)
+                self.assertEqual(upstream.call_count, count)
+
+    def test_cancel_after_local_server_error_prevents_retry(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        cancelled = False
+        def fail(*args, **kwargs):
+            nonlocal cancelled
+            cancelled = True
+            raise HTTPError("http://127.0.0.1:11434/v1/chat/completions", 500, "temporary", {}, None)
+        with patch.object(cloud, "post", side_effect=fail) as upstream:
+            with self.assertRaises(InterruptedError):
+                cloud.Router().complete(REQUEST, cancel=lambda: cancelled)
+        self.assertEqual(upstream.call_count, 1)
+
     def test_schema_feedback_never_adds_local_calls_to_free_cloud_only(self):
         cloud.routing_mode.save_scope(cloud.STATE, "free_cloud_only")
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)

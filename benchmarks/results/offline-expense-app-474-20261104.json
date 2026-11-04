@@ -1,0 +1,55 @@
+{
+  "scenario": "offline_expense_app",
+  "brief": "Create index.html, a complete single-file offline expense log for a small business.\nUse no accounts, external libraries, fonts, or network requests. Make it readable on a phone.\nThe form has accessible labels Description, Amount, and Category. Category choices are\nSupplies, Travel, Meals, and Other. Its button says Add expense. Show an expense table\nwith Description, Amount, Category, and a Delete button on each expense row.\nShow Total: $0.00 initially; display dollars with two decimal places and keep the total\ncorrect after adding and deleting entries. Reject a blank description, zero or negative\namount, and nonnumeric amounts, showing an accessible inline error with role=alert.\nDescriptions are plain text even when they contain HTML characters. Save entries on\nthis computer with localStorage. Reloading must preserve added entries and deletions.\nBuild actual working files using small SQLite steps for form validation, the expense\ntable/totals, and persistence. Save and run a repeatable verifier that exercises real\nform input and checks persistence across page reload. Keep PLAN.md and PROGRESS.md accurate.\n",
+  "seconds": 55.93,
+  "model_calls": 1,
+  "tool_calls": 1,
+  "prompt_tokens": 10150,
+  "completion_tokens": 519,
+  "tools_used": [
+    "task_steps"
+  ],
+  "routes": [
+    {
+      "model": "cale-main-64k",
+      "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+      "repair_avoid": [],
+      "size_hint": null,
+      "seconds": 22.57
+    }
+  ],
+  "router_call_attempts": 2,
+  "upstream_local_calls": 3,
+  "step_transport_shapes": [
+    [
+      {
+        "type": "str",
+        "length": 800,
+        "first": "[",
+        "decode_error": "Expecting property name enclosed in double quotes",
+        "decode_position": 328
+      }
+    ]
+  ],
+  "inference_budget_seconds": 300.0,
+  "grade_seconds": 0.0,
+  "total_seconds": 55.93,
+  "resumed": false,
+  "initial_turns": 0,
+  "initial_source_sha256": null,
+  "checkpoint_status": "running",
+  "inference_error": "HTTPError: HTTP Error 500: Internal Server Error",
+  "grade": {
+    "passed": false,
+    "error": "index.html was not created"
+  },
+  "run_outcome": "failed",
+  "independent_check_diagnostics": [],
+  "tested_source_commit": "3b9cdf0d499b533593a12de228c4f657fec98aeb",
+  "scope_note": "Fresh unassisted build failed after its first accepted plan and an HTTP 500. No implementation file was created. The accepted plan incorrectly named tools as shell checker commands; this remains unresolved.",
+  "followup_probe": {
+    "same_request_replay": "HTTP 200 with write_file call after 23.70 seconds",
+    "tool_executed": false,
+    "interpretation": "Observed recovery supports treating the server error as transient; its original response body was not captured."
+  }
+}
