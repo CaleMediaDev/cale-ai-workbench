@@ -438,6 +438,10 @@ def _render_job(job_id: str, data: dict) -> None:
                     if destination.exists():
                         raise RuntimeError("Output path already exists; preserving the existing file.")
                     if rendered.suffix.lower() == ".mp4":
+                        # Reject invalid renders before creating an export that
+                        # would block retrying with the same destination.
+                        if rendered.stat().st_size < 1000:
+                            raise RuntimeError("The generated video file is empty.")
                         # Exclusively create the destination: another process may
                         # have created it since the existence check above.
                         with rendered.open("rb") as source:

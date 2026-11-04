@@ -234,6 +234,47 @@ def test_mp4_export_preserves_destination_created_after_exists_check(tmp_path):
     assert rendered.read_bytes() == b"rendered video" * 200
 
 
+@pytest.mark.parametrize("size", [0, 999])
+def test_undersized_mp4_leaves_destination_available_for_retry(tmp_path, size):
+    job_id = "f" * 32
+    runtime = tmp_path / "runtime"
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    rendered = runtime / "ComfyUI" / "output" / "render.mp4"
+    rendered.parent.mkdir(parents=True)
+    content = b"x" * size
+    rendered.write_bytes(content)
+    destination = tmp_path / "clip.mp4"
+    history = {
+        "prompt-1": {
+            "status": {"completed": True},
+            "outputs": {"58": {"videos": [{"filename": "render.mp4"}]}},
+        }
+    }
+    data = {
+        "prompt": "A calm forest", "seconds": 2, "layout": "wide",
+        "image_path": "", "output_path": str(destination),
+    }
+
+    with patch.object(video_generation, "RUNTIME", runtime), patch.object(
+        video_generation, "JOBS", jobs
+    ), patch.object(video_generation, "_write") as write, patch.object(
+        video_generation, "_free_port", return_value=8188
+    ), patch.object(video_generation, "_workflow", return_value={}), patch.object(
+        video_generation, "_request",
+        side_effect=[{}, {"prompt_id": "prompt-1"}, history],
+    ), patch.object(video_generation.subprocess, "Popen") as launch:
+        launch.return_value.poll.return_value = None
+        with pytest.raises(RuntimeError, match="generated video file is empty"):
+            video_generation._render_job(job_id, data)
+        assert not any(call.kwargs.get("state") == "complete" for call in write.call_args_list)
+        launch.return_value.terminate.assert_called_once()
+        launch.return_value.wait.assert_called_once_with(timeout=20)
+
+    assert not destination.exists()
+    assert rendered.read_bytes() == content
+
+
 def test_failed_mp4_copy_removes_partial_destination(tmp_path):
     job_id = "d" * 32
     runtime = tmp_path / "runtime"
