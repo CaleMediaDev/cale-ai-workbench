@@ -255,6 +255,32 @@ def test_small_functions_alone_do_not_promote_new_game_builder():
             ) == ["cale-fast"]
 
 
+def test_game_grader_process_failure_is_a_failed_grade_and_allows_retry():
+    result = type("Result", (), {"stdout": '{"movement":true}'})()
+    with (
+        patch("shutil.which", return_value="node"),
+        patch.object(
+            model_fitness.subprocess,
+            "run",
+            side_effect=[
+                model_fitness.subprocess.CalledProcessError(
+                    1, "node", output='{"movement":true}\n',
+                    stderr="Error: unhandled rejection",
+                ),
+                result,
+            ],
+        ) as run,
+    ):
+        assert model_fitness.grade_game_code(
+            "Promise.reject(new Error('generated failure'));", Path("missing")
+        ) == {"valid_code": False}
+        assert model_fitness.grade_game_code("", Path("missing")) == {
+            "movement": True
+        }
+    assert run.call_count == 2
+    assert run.call_args.kwargs["check"] is True
+
+
 def test_game_grader_process_timeout_is_a_failed_grade_and_allows_retry():
     result = type("Result", (), {"stdout": '{"movement":true}'})()
     with (
