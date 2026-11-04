@@ -1,0 +1,27 @@
+{
+  "release": "0.5.506",
+  "reviewed_source": "16d7f952c10a9de4bfeda40540589a65493419a7",
+  "changes": [
+    "Factual donation stages in main chat while donation popup closed; existing private history, voice settings, canonical clickable PR links, and older viewport retained.",
+    "Shared bounded typed worker queue; progress grouped and rate-limited, confirmed submissions immediate. No generated status inference.",
+    "Source-specific inference cooldown; enabled alternate sources continue without silently enabling local. GitHub outages remain shared waits.",
+    "Local hardware/tool/context-approved quick candidates, at most 3072 output tokens, honest input/output context reservation; complete 40KB source/test eligibility retained.",
+    "Invalid proposals remain failed and keep actual usage; per-resource/job/full-source cooldown allows another eligible area.",
+    "Reviewed PRs 675, 676, 678 and 685 merged: robust music diagnostic decoding, per-root FFmpeg repair, readable PDF pages retained on export failure, malformed catalog queries rejected."
+  ],
+  "validation": {
+    "combined_donation_ui": "379 passed, 108 subtests passed in 73.10s",
+    "four_merged_fix_modules": "71 passed, 1 symlink skipped in 4.71s; all nine new cases first reproduced baseline failures",
+    "independent_review": "No release blockers; exact producer/UI source identity and publication-before-notification inspected",
+    "actual_Tk": "Real callback, private SQLite chat history, voice sink, clickable link, closed donation dialog and older viewport exercised.",
+    "updater_and_merged_fixes": "101 passed, 1 symlink skipped in 5.79s"
+  },
+  "runtime_manifest_files": 250,
+  "limits": [
+    "No real model throughput or PR-frequency improvement measured.",
+    "Checking proposed edits means exact-edit/JSON/Python syntax validation; arbitrary donated runtime tests are not run.",
+    "Bounded notifications may coalesce/drop under extreme backlog; submitted URLs remain in durable ledger. No restart delivery guarantee.",
+    "No full installed self-check or fresh-machine end-to-end verification claimed.",
+    "No account keys, consent changes, experimental browser coverage or continuation changes included."
+  ]
+}
