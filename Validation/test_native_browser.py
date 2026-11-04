@@ -188,6 +188,33 @@ def test_local_dom_contract_describes_targets_without_values_and_tracks_loaded_b
     assert not native_browser._PAGE_DOCUMENTS
 
 
+def test_local_dom_contract_handles_svg_non_string_type_property(tmp_path):
+    pytest.importorskip("playwright")
+    (tmp_path / "index.html").write_text(
+        '<!doctype html><title>SVG contract</title><body>'
+        '<svg><filter id="filter"><feColorMatrix id="matrix" type="matrix" '
+        'values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0"/></filter></svg>'
+        '<input id="amount" type="number"></body>', encoding="utf-8")
+    try:
+        opened = native_agent.execute_tool(
+            tmp_path, "browser_open_project", {"path": "index.html"})
+        if opened.startswith("Tool error:") and "Executable doesn't exist" in opened:
+            pytest.skip("Chromium runtime is not installed in this test environment")
+        assert json.loads(opened)["title"] == "SVG contract"
+        page = native_browser._page(tmp_path)
+        assert page.evaluate("typeof document.getElementById('matrix').type") == "object"
+
+        snapshot = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        targets = {row["id"]: row for row in snapshot["dom_contract"]["targets"]}
+        assert targets["matrix"]["tag"] == "feColorMatrix"
+        assert targets["matrix"]["type"] == "matrix"
+        assert targets["amount"]["type"] == "number"
+        assert targets["amount"]["editable"]
+        assert not snapshot["dom_contract"]["stale"]
+    finally:
+        native_browser.close()
+
+
 def test_local_dom_contract_bounds_targets_and_unicode_output(tmp_path):
     pytest.importorskip("playwright")
     (tmp_path / "index.html").write_text("".join(
