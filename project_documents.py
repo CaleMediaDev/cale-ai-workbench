@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
+import tempfile
 from pathlib import Path
 
 import file_chat
@@ -72,9 +73,21 @@ def inspect(folder: str | Path, path: str, question: str = "",
         if len(text) > MAX_EXTRACTED_CHARS:
             raise ValueError("The extracted text is too large for this task reader")
         cache.parent.mkdir(parents=True, exist_ok=True)
-        temporary = cache.with_suffix(".tmp")
-        temporary.write_text(text, encoding="utf-8")
-        os.replace(temporary, cache)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=cache.parent,
+            prefix=cache.name + ".", suffix=".tmp", delete=False,
+        ) as output:
+            temporary = Path(output.name)
+            try:
+                output.write(text)
+            except BaseException:
+                output.close()
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            os.replace(temporary, cache)
+        finally:
+            temporary.unlink(missing_ok=True)
     if len(text) > MAX_EXTRACTED_CHARS:
         raise ValueError("The extracted text is too large for this task reader")
     indexed = False
