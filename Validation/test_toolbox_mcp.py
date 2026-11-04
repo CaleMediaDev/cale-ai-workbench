@@ -479,6 +479,65 @@ def test_failed_backend_cleanup_does_not_abort_independent_backend():
     asyncio.run(check())
 
 
+def test_backend_discovery_includes_tools_from_later_pages():
+    discovery_calls = []
+    tool_calls = []
+
+    @asynccontextmanager
+    async def fake_stdio(params):
+        if "rea.mjs" not in " ".join(params.args):
+            raise OSError("DevTools unavailable")
+        yield (object(), object())
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def initialize(self):
+            pass
+
+        async def list_tools(self, cursor=None):
+            discovery_calls.append(cursor)
+            assert cursor in (None, "page-2")
+            name = "first_tool" if cursor is None else "later_tool"
+            tool = SimpleNamespace(
+                name=name,
+                model_dump=lambda **_kwargs: {
+                    "name": name, "description": "Paginated specialist tool"
+                },
+            )
+            return SimpleNamespace(
+                tools=[tool], next_cursor="page-2" if cursor is None else None
+            )
+
+        async def call_tool(self, name, arguments):
+            tool_calls.append((name, arguments))
+            return SimpleNamespace(model_dump=lambda **_kwargs: {"content": []})
+
+    async def check():
+        with (patch.object(toolbox_mcp, "stdio_client", fake_stdio),
+              patch.object(toolbox_mcp, "ClientSession",
+                           lambda *_args, **_kwargs: FakeSession()),
+              patch.dict(toolbox_mcp.SESSIONS, {}, clear=True),
+              patch.dict(toolbox_mcp.CATALOG, {}, clear=True),
+              patch.dict(toolbox_mcp.ERRORS, {}, clear=True)):
+            async with toolbox_mcp.lifespan(None):
+                assert discovery_calls == [None, "page-2"]
+                assert toolbox_mcp.toolbox_status()["backends"]["rea"]["tools"] == 2
+                names = {item["name"] for item in
+                         toolbox_mcp.toolbox_search("later_tool")["tools"]}
+                assert "rea.later_tool" in names
+                assert toolbox_mcp.toolbox_schema("rea.later_tool")["name"] == "later_tool"
+                result = await toolbox_mcp.toolbox_call("rea.later_tool", '{"value": 7}')
+                assert result == {"content": []}
+                assert tool_calls == [("later_tool", {"value": 7})]
+
+    asyncio.run(check())
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):
