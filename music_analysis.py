@@ -85,7 +85,12 @@ def analyze_music(source_path: str) -> dict:
     frames_per_segment = segment_seconds * sample_rate / 512
     changes = []
     previous_chord = None
-    for segment_index in range(int(np.ceil(chroma.shape[1] / frames_per_segment))):
+    # Centered STFT frames at the audio endpoint do not start a new segment.
+    segment_count = min(
+        int(np.ceil(chroma.shape[1] / frames_per_segment)),
+        int(np.ceil(len(signal) / (segment_seconds * sample_rate))),
+    )
+    for segment_index in range(segment_count):
         # Round absolute boundaries rather than accumulating a rounded interval.
         start = round(segment_index * frames_per_segment)
         end = round((segment_index + 1) * frames_per_segment)
