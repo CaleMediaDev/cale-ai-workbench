@@ -30,6 +30,20 @@ def test_space_shooter_is_new_offline_file_with_safe_title_and_no_overwrite(tmp_
         design_tools.create_space_shooter(str(tmp_path / "game.exe"))
 
 
+@pytest.mark.parametrize("title", ["Flight \ud800", "Flight \udfff"])
+def test_space_shooter_rejects_surrogate_title_before_creating_output(tmp_path, title):
+    import design_tools
+
+    page = tmp_path / "new-project" / "game.html"
+    with pytest.raises(ValueError, match="printable game title"):
+        design_tools.create_space_shooter(str(page), title=title)
+
+    assert not page.exists()
+    assert not page.parent.exists()
+    design_tools.create_space_shooter(str(page), title="Valid flight")
+    assert "Valid flight" in page.read_text(encoding="utf-8")
+
+
 def test_space_shooter_actual_engine_passes_logic_and_extra_collision_boundaries(tmp_path):
     import re
 

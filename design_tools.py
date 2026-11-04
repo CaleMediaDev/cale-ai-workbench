@@ -260,7 +260,9 @@ def create_space_shooter(path: str, title: str = "Nebula Guard", accent: str = "
     This is reusable project code, not model-generated physics or proof that a
     customized game satisfies its entire brief. Render and test the actual file.
     """
-    if not isinstance(title, str) or not 1 <= len(title.strip()) <= 80 or any(ord(c) < 32 for c in title):
+    if not isinstance(title, str) or not 1 <= len(title.strip()) <= 80 or any(
+        ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in title
+    ):
         raise ValueError("Use a short, printable game title of 1 to 80 characters.")
     luminance(accent)  # Reuse the strict six-digit color validator.
     chosen = Path(path).absolute()
