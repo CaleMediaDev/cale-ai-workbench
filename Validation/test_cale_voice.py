@@ -310,6 +310,15 @@ def test_clone_probe_requires_actual_complete_non_silent_render_before_cache_pas
     assert not Path(command[-2]).exists()  # Evidence metadata survives, temporary audio does not.
 
 
+def test_finished_invalid_clone_probe_does_not_inspect_or_stop_a_reusable_pid(clone_probe_runtime, monkeypatch):
+    root, snapshot, wav, process = clone_probe_runtime
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", process("empty"))
+    stop = Mock(side_effect=AssertionError("The owned process has already exited"))
+    monkeypatch.setattr("self_diagnostics._stop_check", stop)
+    assert cale_voice.run_probe()["status"] == "failed"
+    stop.assert_not_called()
+
+
 @pytest.mark.parametrize("mode", ["empty", "truncated", "silent", "corrupt", "dc", "quiet"])
 def test_clone_probe_rejects_invalid_render_without_false_ready(clone_probe_runtime, monkeypatch, mode):
     root, snapshot, wav, process = clone_probe_runtime

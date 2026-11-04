@@ -261,7 +261,7 @@ def run_probe() -> dict:
                 report.update(status="passed", engine=answer["engine"], model_path=answer["model_path"],
                               fingerprint=fingerprint, audio=_checked_probe_wav(output))
         except (OSError, ValueError, RuntimeError, TimeoutError, subprocess.SubprocessError, wave.Error, EOFError, KeyError, TypeError) as error:
-            if process is not None:
+            if process is not None and process.poll() is None:
                 self_diagnostics._stop_check(process)
             report.update(status="failed", detail=str(error)[:200])
         report["checked_at"] = time.time()
