@@ -338,7 +338,8 @@ def test_inspector_rejects_image_changes_during_description(tmp_path):
     source.write_bytes(b"original image source")
 
     def describe_then_change(path, question):
-        assert path == source
+        assert path != source and path.name == source.name
+        assert path.read_bytes() == b"original image source"
         assert question == "What is shown?"
         source.write_bytes(b"updated image source")
         return "original image description"
@@ -353,11 +354,42 @@ def test_inspector_rejects_image_changes_during_description(tmp_path):
 
     with patch.object(file_chat, "image_description", return_value="updated image description") as describe:
         fresh = project_documents.inspect(tmp_path, "diagram.png", question="What is shown?")
-        describe.assert_called_once_with(source, "What is shown?")
+        describe.assert_called_once()
+        snapshot, question = describe.call_args.args
+        assert snapshot != source and snapshot.name == source.name
+        assert not snapshot.exists()
+        assert question == "What is shown?"
 
     assert fresh["text"] == "updated image description"
     assert fresh["kind"] == "image" and not fresh["cached"]
     assert source.read_bytes() == b"updated image source"
+    assert not (tmp_path / ".local-ai/document-cache").exists()
+
+
+def test_inspector_describes_snapshot_during_transient_image_edit(tmp_path):
+    source = tmp_path / "diagram.png"
+    original = b"original image source"
+    source.write_bytes(original)
+    snapshots = []
+
+    def describe_while_source_changes(path, question):
+        snapshots.append(path)
+        assert question == "What is shown?"
+        source.write_bytes(b"transient image source")
+        try:
+            return path.read_bytes().decode("utf-8")
+        finally:
+            source.write_bytes(original)
+
+    with patch.object(file_chat, "image_description", side_effect=describe_while_source_changes) as describe:
+        result = project_documents.inspect(tmp_path, "diagram.png", question="What is shown?")
+
+    assert result["text"] == original.decode("utf-8")
+    assert result["kind"] == "image" and not result["cached"]
+    describe.assert_called_once()
+    assert snapshots[0] != source and snapshots[0].name == source.name
+    assert not snapshots[0].exists()
+    assert source.read_bytes() == original
     assert not (tmp_path / ".local-ai/document-cache").exists()
 
 

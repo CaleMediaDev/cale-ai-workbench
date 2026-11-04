@@ -31,7 +31,7 @@ def _digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _extract_snapshot(source: Path, expected_digest: str) -> str:
+def _extract_snapshot(source: Path, expected_digest: str, question: str = "") -> str:
     """Extract only bytes verified to belong to the requested cache key."""
     with tempfile.TemporaryDirectory(prefix="document-extract-") as directory:
         snapshot = Path(directory) / source.name
@@ -46,6 +46,8 @@ def _extract_snapshot(source: Path, expected_digest: str) -> str:
                 output.write(chunk)
         if digest.hexdigest() != expected_digest:
             raise RuntimeError("The document changed while it was being read; try again")
+        if source.suffix.casefold() in file_chat.IMAGES:
+            return file_chat.image_description(snapshot, question)
         if source.suffix.casefold() in file_chat.PLAIN_TEXT:
             return snapshot.read_text(encoding="utf-8-sig", errors="replace")
         return file_chat.document_text(snapshot, max_scanned_pages=20)
@@ -68,7 +70,7 @@ def inspect(folder: str | Path, path: str, question: str = "",
     relative = source.relative_to(root).as_posix()
     if source.suffix.casefold() in file_chat.IMAGES:
         digest = _digest(source)
-        description = file_chat.image_description(source, question)[:limit]
+        description = _extract_snapshot(source, digest, question)[:limit]
         if _digest(source) != digest:
             raise RuntimeError("The document changed while it was being read; try again")
         return {"source": relative, "text": description, "kind": "image",
