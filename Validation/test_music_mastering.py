@@ -38,6 +38,30 @@ def test_mastering_preserves_inputs_and_writes_new_result(tmp_path):
     assert reference.read_bytes() == b"reference"
 
 
+def test_mastering_timeout_removes_partial_output_and_preserves_inputs(tmp_path):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    source.write_bytes(b"source")
+    reference.write_bytes(b"reference")
+    timeout = music_mastering.subprocess.TimeoutExpired("mastering worker", 3600)
+
+    def time_out(*args, **kwargs):
+        Path(args[0][-1]).write_bytes(b"partial WAV")
+        raise timeout
+
+    with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
+        music_mastering, "install", return_value=Path("python.exe")
+    ), patch.object(music_mastering.subprocess, "run", side_effect=time_out):
+        with pytest.raises(music_mastering.subprocess.TimeoutExpired) as caught:
+            music_mastering.master_music(str(source), str(reference), str(output))
+
+    assert caught.value is timeout
+    assert not output.exists()
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"reference"
+
+
 def test_mastering_rejects_overwrite_and_same_reference(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"

@@ -66,11 +66,15 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
     output.parent.mkdir(parents=True, exist_ok=True)
     with music_backend._setup_lock():
         python = install()
-    result = subprocess.run(
-        [str(python), str(Path(__file__).resolve()), "--worker", str(source),
-         str(reference), str(output)], capture_output=True, text=True,
-        timeout=3600, creationflags=HIDE,
-    )
+    try:
+        result = subprocess.run(
+            [str(python), str(Path(__file__).resolve()), "--worker", str(source),
+             str(reference), str(output)], capture_output=True, text=True,
+            timeout=3600, creationflags=HIDE,
+        )
+    except subprocess.TimeoutExpired:
+        output.unlink(missing_ok=True)
+        raise
     if result.returncode or not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Music mastering failed.")
