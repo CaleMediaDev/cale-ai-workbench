@@ -6519,3 +6519,130 @@ def test_invalid_acceptance_context_does_not_change_valid_input_repair_payload_o
         assert state["step_repair_focus"]["key"] == key and state["step_repair_focus"]["count"] == 2
         assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536) is None
     assert task_context.step_status(folder) == before and (folder / "index.html").read_text() == source
+
+
+def test_retarget_host_schema_is_one_time_and_never_repeatable_acceptance(tmp_path):
+    from jsonschema import ValidationError, validate
+    mapping = {"from": "text:bad-count", "to": "rows:items"}
+    args = {"path": "index.html", "saved_sequence": 1, "saved_case": 1, "suite_sha256": "a" * 64,
+            "retarget_assertion": mapping, "cases": [{"row_counts": {"items": 1}}]}
+    schema = next(tool["function"]["parameters"] for tool in native_agent.TOOLS if tool["function"]["name"] == "check_webapp")
+    validate(args, schema)
+    plain = {"path": "index.html", "cases": [{"expect": {"status": "Ready"}}]}
+    for one_time in ({"retarget_assertion": mapping}, {**args, "path": "index.html"}):
+        with pytest.raises(ValueError, match="one-time checker action"):
+            task_context.plan_steps(tmp_path, [{"phase": "Check", "title": "Retarget", "check_tool": "check_webapp",
+                "check_arguments": {**plain, **one_time}}])
+    assert task_context.step_status(tmp_path)["total"] == 0
+    steps_schema = next(tool["function"]["parameters"] for tool in native_agent.TOOLS if tool["function"]["name"] == "task_steps")
+    with pytest.raises(ValidationError):
+        validate({"action": "plan", "steps": [{"phase": "Check", "title": "Retarget", "check_tool": "check_webapp", "check_arguments": args}]}, steps_schema)
+    for bad in ({"path": "index.html", "retarget_assertion": mapping, "cases": args["cases"]}, {**args, "revise_inputs": False}):
+        assert "complete saved-case reference" in native_agent.execute_tool(tmp_path, "check_webapp", bad)
+
+
+def test_retarget_host_only_changes_owned_assertion_and_preserves_all_other_case_data(tmp_path):
+    old = {"path": "index.html", "viewport_width": 375, "cases": [
+        {"set": {"amount": "2"}, "click": ["add"], "expect": {"wrong": "1", "status": "Ready"}, "hidden": ["error"]},
+        {"reload": True, "row_counts": {"items": 1}}]}
+    active = {"check_arguments": copy.deepcopy(old)}
+    corrected = copy.deepcopy(old)
+    del corrected["cases"][0]["expect"]["wrong"]
+    corrected["cases"][0]["row_counts"] = {"items": 1}
+    revision = {"saved_case": 1, "retarget_assertion": {"from": "text:wrong", "to": "rows:items"}}
+    assert native_agent.browser_retarget_preserves_step(active, old, corrected, revision)
+    altered = []
+    for key, value in (("set", {"amount": "9"}), ("click", []), ("hidden", []), ("expect", {}), ("reload", True)):
+        candidate = copy.deepcopy(corrected); candidate["cases"][0][key] = value; altered.append(candidate)
+    candidate = copy.deepcopy(corrected); candidate["cases"][1]["row_counts"]["items"] = 0; altered.append(candidate)
+    candidate = copy.deepcopy(corrected); candidate["viewport_width"] = 800; altered.append(candidate)
+    assert all(not native_agent.browser_retarget_preserves_step(active, old, case, revision) for case in altered)
+    subset = copy.deepcopy(active); del subset["check_arguments"]["cases"][0]["expect"]["wrong"]
+    assert native_agent.browser_revision_matches_step(tmp_path, subset, old)
+    assert not native_agent.browser_retarget_preserves_step(subset, old, corrected, revision)
+
+
+def retarget_host_fixture(tmp_path, name, *, extra_only=False):
+    import webapp_check
+    item = project(tmp_path / name); folder = Path(item["folder"])
+    source = ("<input id='amount'><button id='add' onclick=\"document.querySelector('tbody').insertRow().insertCell().textContent=document.querySelector('input').value\">Add</button>"
+              "<table><tbody id='items'></tbody></table><p id='status'>Ready</p><p id='error' hidden></p>")
+    (folder / "index.html").write_text(source, encoding="utf-8")
+    retained = {"path": "index.html", "cases": [{"set": {"amount": "2"}, "click": ["add"],
+        "expect": {"wrong-count-id": "1", "status": "Ready"}, "hidden": ["error"]}]}
+    planned = copy.deepcopy(retained)
+    if extra_only: del planned["cases"][0]["expect"]["wrong-count-id"]
+    active = task_context.plan_steps(folder, [{"phase": "Add", "title": "Add an item", "check_tool": "check_webapp", "check_arguments": planned}])["active"]
+    future = {"path": "index.html", "cases": [{"expect": {"status": "Future failure remains"}}]}
+    webapp_check.save_verifier(folder, future, accumulate=True)
+    webapp_check.save_verifier(folder, retained, accumulate=True)
+    failed = json.loads(native_agent.execute_tool(folder, "task_steps", {"action": "complete", "step_id": active["id"]}))
+    assert failed["passed"] is False
+    if extra_only:
+        # The active subset has no measured outcome change and may fail its
+        # unit-strength gate before reporting the unrelated retained failure.
+        # Explicitly address that actual retained assertion, not its SQL unit.
+        saved = (folder / ".local-ai/webapp-check.json").read_bytes()
+        checks = json.loads(saved)["checks"]
+        selected = next(index for index, check in enumerate(checks, 1)
+                        if "wrong-count-id" in check["cases"][0].get("expect", {}))
+        ref = {"path": "index.html", "saved_sequence": selected, "saved_case": 1, "suite_sha256": hashlib.sha256(saved).hexdigest()}
+    else:
+        ref = failed["assertion_revision_reference"]
+    arguments = {**ref, "retarget_assertion": {"from": "text:wrong-count-id", "to": "rows:items"}, "cases": [{"row_counts": {"items": 1}}]}
+    state = tmp_path / (name + "-state"); state.mkdir()
+    return item, folder, source, planned, task_context.step_status(folder)["active"], arguments, state
+
+
+@pytest.mark.parametrize("bound", [False, True])
+def test_retarget_host_actual_count_repair_preserves_inputs_and_future_failure_without_completing(tmp_path, bound):
+    item, folder, source, planned, active, args, state = retarget_host_fixture(tmp_path, "count-retarget-" + str(bound))
+    before = json.loads((folder / ".local-ai/webapp-check.json").read_text())
+    actual = native_agent.bind_browser_assertion_revision(folder, args, active, task_context.request_identity(folder)) if bound else args
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state):
+        result = json.loads(native_agent.execute_tool(folder, "check_webapp", actual))
+    assert result["repaired_case_passed"] and result["verifier_saved"]
+    assert result["passed"] is False and result["verifier_check_passed"] is False
+    after = json.loads((folder / ".local-ai/webapp-check.json").read_text())
+    selected = args["saved_sequence"] - 1
+    old_case = before["checks"][selected]["cases"][0]; new_case = after["checks"][selected]["cases"][0]
+    assert new_case["set"] == old_case["set"] and new_case["click"] == old_case["click"]
+    assert new_case["expect"] == {"status": "Ready"} and new_case["row_counts"] == {"items": 1}
+    assert new_case["hidden"] == old_case["hidden"]
+    assert [case for n,case in enumerate(before["checks"]) if n != selected] == [case for n,case in enumerate(after["checks"]) if n != selected]
+    current = task_context.step_status(folder)
+    assert current["done"] == 0 and current["active"]["id"] == active["id"]
+    assert (folder / "index.html").read_text() == source
+    if bound:
+        assert result["active_step_check_aligned"] and current["active"]["check_arguments"]["cases"][0] == new_case
+        assert "already used" in native_agent.execute_tool(folder, "check_webapp", actual)
+    else:
+        assert "active_step_check_aligned" not in result and current["active"]["check_arguments"] == planned
+
+
+def test_retarget_host_extra_retained_assertion_does_not_authorize_sql_rewrite(tmp_path):
+    item, folder, source, planned, active, args, state = retarget_host_fixture(tmp_path, "extra-retained-target", extra_only=True)
+    actual = native_agent.bind_browser_assertion_revision(folder, args, active, task_context.request_identity(folder))
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", state):
+        result = json.loads(native_agent.execute_tool(folder, "check_webapp", actual))
+    assert result["repaired_case_passed"] and result["verifier_saved"]
+    assert result["active_step_check_aligned"] is False
+    assert task_context.step_status(folder)["active"]["check_arguments"] == planned
+    assert task_context.step_status(folder)["done"] == 0 and (folder / "index.html").read_text() == source
+
+
+def test_retarget_host_state_assertions_keep_boolean_and_numeric_types_distinct(tmp_path):
+    old = {"path": "index.html", "cases": [{"click": ["add"], "expect": {"wrong": "1"}, "state": {"app.ready": True}}]}
+    active = {"check_arguments": copy.deepcopy(old)}
+    corrected = copy.deepcopy(old); del corrected["cases"][0]["expect"]["wrong"]
+    corrected["cases"][0]["row_counts"] = {"items": 1}
+    revision = {"saved_case": 1, "retarget_assertion": {"from": "text:wrong", "to": "rows:items"}}
+    assert native_agent.browser_retarget_preserves_step(active, old, corrected, revision)
+    changed = copy.deepcopy(corrected); changed["cases"][0]["state"]["app.ready"] = 1
+    assert not native_agent.browser_retarget_preserves_step(active, old, changed, revision)
+    retained = copy.deepcopy(old); retained["cases"][0]["state"]["app.ready"] = 1
+    assert not native_agent.browser_revision_matches_step(tmp_path, active, retained)
+    from_state = {"saved_case": 1, "retarget_assertion": {"from": "state:app.ready", "to": "rows:items"}}
+    new = copy.deepcopy(old); del new["cases"][0]["state"]["app.ready"]; new["cases"][0]["row_counts"] = {"items": 1}
+    numeric_owner = copy.deepcopy(active); numeric_owner["check_arguments"]["cases"][0]["state"]["app.ready"] = 1
+    assert not native_agent.browser_retarget_preserves_step(numeric_owner, old, new, from_state)
