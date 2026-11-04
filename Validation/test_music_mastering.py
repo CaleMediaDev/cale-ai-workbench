@@ -92,6 +92,47 @@ def test_worker_preserves_precision_in_both_intermediate_wavs(tmp_path):
     )
 
 
+@pytest.mark.parametrize("worker_result", ["success", "failure", "timeout"])
+def test_mastering_preserves_destination_created_during_render(tmp_path, worker_result):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    source.write_bytes(b"source")
+    reference.write_bytes(b"reference")
+    staged_paths = []
+
+    def render(*args, **kwargs):
+        staged = Path(args[0][-1])
+        staged_paths.append(staged)
+        staged.write_bytes(b"rendered audio")
+        output.write_bytes(b"another operation's audio")
+        if worker_result == "timeout":
+            raise music_mastering.subprocess.TimeoutExpired("mastering worker", 3600)
+        return type("Result", (), {
+            "returncode": int(worker_result == "failure"),
+            "stderr": "worker failed",
+            "stdout": "",
+        })()
+
+    expected = {
+        "success": ValueError,
+        "failure": RuntimeError,
+        "timeout": music_mastering.subprocess.TimeoutExpired,
+    }[worker_result]
+    with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
+        music_mastering, "install", return_value=Path("python.exe")
+    ), patch.object(music_mastering.subprocess, "run", side_effect=render):
+        with pytest.raises(expected):
+            music_mastering.master_music(str(source), str(reference), str(output))
+
+    assert output.read_bytes() == b"another operation's audio"
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"reference"
+    assert len(staged_paths) == 1
+    assert staged_paths[0] != output
+    assert not staged_paths[0].parent.exists()
+
+
 def test_mastering_rejects_hard_linked_reference(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"
