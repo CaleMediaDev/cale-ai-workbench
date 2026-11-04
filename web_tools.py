@@ -430,7 +430,9 @@ def find_business_email(name: str, locality: str = "") -> dict:
             "name_matching_domain": name_matching_domain(name, page["source_url"]),
         }
         checked.append(record)
-        addresses = public_emails(page)
+        final_host = (urlsplit(page["source_url"]).hostname or "").lower()
+        matches_business = final_host == host or business_name_matches(name, page["title"], page["source_url"])
+        addresses = public_emails(page) if matches_business else []
         if addresses:
             sources.append({**record, "email_addresses": addresses[:8]})
         if len(sources) >= 3 or len(checked) >= 8:
@@ -485,6 +487,9 @@ def find_business_contact(name: str, locality: str = "") -> dict:
             page = read_webpage(url)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             unreadable_pages += 1
+            continue
+        final_host = (urlsplit(page["source_url"]).hostname or "").lower()
+        if final_host != host and not business_name_matches(name, page["title"], page["source_url"]):
             continue
         phones = list(
             dict.fromkeys(

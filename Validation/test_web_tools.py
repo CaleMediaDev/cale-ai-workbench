@@ -8,6 +8,19 @@ import web_tools
 
 
 class BusinessContactTests(unittest.TestCase):
+    def test_contact_lookup_rejects_redirect_to_unrelated_company(self):
+        results = {"results": [{"url": "https://aceplumbing.com/contact", "title": "Ace Plumbing"}]}
+        page = {"source_url": "https://otherbusiness.com/contact", "title": "Other Business",
+                "retrieved_at": "2026-11-04T00:00:00Z", "text": "Phone: 517-258-1313",
+                "contact_links": ["mailto:office@otherbusiness.com", "tel:+15172581313"]}
+        with patch.object(web_tools, "search_web", return_value=results), \
+             patch.object(web_tools, "read_webpage", return_value=page):
+            self.assertEqual(web_tools.find_business_email("Ace Plumbing")["sources"], [])
+            self.assertEqual(web_tools.find_business_contact("Ace Plumbing")["sources"], [])
+            page["title"] = "Ace Plumbing - Contact"
+            self.assertEqual(len(web_tools.find_business_email("Ace Plumbing")["sources"]), 1)
+            self.assertEqual(len(web_tools.find_business_contact("Ace Plumbing")["sources"]), 1)
+
     def test_short_business_name_does_not_match_inside_another_name(self):
         self.assertFalse(web_tools.name_matching_domain("Ace Plumbing", "https://palaceplumbing.com"))
         self.assertFalse(web_tools.business_name_matches(
