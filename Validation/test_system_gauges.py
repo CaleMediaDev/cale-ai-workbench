@@ -21,6 +21,14 @@ def test_gpu_parser_handles_multiple_cards_and_missing_values():
     assert system_gauges.parse_gpu_utilization("N/A\n") is None
 
 
+def test_gpu_parser_rejects_out_of_range_readings():
+    assert system_gauges.parse_gpu_utilization("-1\n") is None
+    assert system_gauges.parse_gpu_utilization("101\n") is None
+    assert system_gauges.parse_gpu_utilization("-1\n41\n101\nN/A\n") == 41
+    assert system_gauges.parse_gpu_utilization("0\n") == 0
+    assert system_gauges.parse_gpu_utilization("100\n") == 100
+
+
 def test_rpm_scale_lights_green_to_red_and_handles_missing_sensor():
     assert system_gauges.rpm_color(0) == "#32d390"
     assert system_gauges.rpm_color(0.5) == "#ffc64b"

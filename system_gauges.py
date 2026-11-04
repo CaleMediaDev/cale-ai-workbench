@@ -104,9 +104,11 @@ def parse_gpu_utilization(output):
     values = []
     for line in output.splitlines():
         try:
-            values.append(int(line.strip().split(",", 1)[0]))
+            value = int(line.strip().split(",", 1)[0])
         except ValueError:
             continue
+        if 0 <= value <= 100:
+            values.append(value)
     return max(values) if values else None
 
 
