@@ -48,6 +48,34 @@ def test_extracted_installer_pid_is_recognized_without_duplicate_repair(tmp_path
         assert not setup_recovery._installer_running(progress)
 
 
+def test_replacement_installer_is_detected_before_it_updates_progress(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    script = tmp_path / "Install-Backend.ps1"
+    script.write_text("# fixture", encoding="utf-8")
+    progress = {
+        "status": "error", "current": "Setup needs attention: download failed",
+        "updated": time.time() - 1000, "pid": 4321,
+    }
+    (state / "install-progress.json").write_text(json.dumps(progress), encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    replacement = MagicMock()
+    replacement.cmdline.return_value = [
+        "powershell.exe", "-File", str(script), "-Destination", str(tmp_path),
+    ]
+    with patch("psutil.Process", side_effect=psutil.NoSuchProcess(4321)), patch(
+        "psutil.process_iter", return_value=[replacement]
+    ), patch.object(
+        setup_recovery.subprocess, "Popen", side_effect=AssertionError("duplicate repair")
+    ):
+        assert setup_recovery._installer_running(progress)
+        assert not setup_recovery.recover()
+        replacement.cmdline.return_value[-1] = str(tmp_path / "other-install")
+        assert not setup_recovery._installer_running(progress)
+
+
 def test_legacy_installer_detection_respects_destination(tmp_path, monkeypatch):
     monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
     worker = MagicMock()
