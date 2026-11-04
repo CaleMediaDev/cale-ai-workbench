@@ -351,6 +351,60 @@ class CameraPresenceTests(unittest.TestCase):
         camera.release.assert_called_once_with()
         self.assertFalse(any(call.args[0] == "error" for call in events.call_args_list))
 
+    def test_watcher_resizes_very_wide_frames_to_positive_height(self):
+        import camera_presence
+
+        frame = np.zeros((1, 1281, 3), dtype=np.uint8)
+        gray = np.zeros((1, 1281), dtype=np.uint8)
+        resized = np.zeros((1, 640), dtype=np.uint8)
+        camera = Mock()
+        camera.isOpened.return_value = True
+        camera.read.return_value = (True, frame)
+        cascade = Mock()
+        cascade.empty.return_value = False
+        cascade.detectMultiScale.return_value = []
+
+        def resize(image, size):
+            self.assertIs(image, gray)
+            self.assertEqual(size, (640, 1))
+            return resized
+
+        resize_mock = Mock(side_effect=resize)
+        cv2 = SimpleNamespace(
+            data=SimpleNamespace(haarcascades="."),
+            CascadeClassifier=Mock(return_value=cascade),
+            VideoCapture=Mock(return_value=camera),
+            CAP_DSHOW=0,
+            COLOR_BGR2GRAY=1,
+            cvtColor=Mock(return_value=gray),
+            resize=resize_mock,
+        )
+        modules = {
+            "cv2": cv2,
+            "camera_network": SimpleNamespace(
+                camera_source=lambda source: source,
+                greeting_camera=lambda: 0,
+            ),
+            "face_identity": SimpleNamespace(
+                ENROLL_REQUEST=Mock(),
+                FaceModel=Mock(side_effect=RuntimeError("model unavailable")),
+                enroll=Mock(),
+            ),
+        }
+        with patch.dict("sys.modules", modules), patch.multiple(
+            camera_presence,
+            allowed=Mock(side_effect=[True, True, False]),
+            emit=Mock(),
+            preview_frame=Mock(return_value=""),
+        ), patch.object(camera_presence.time, "sleep"):
+            self.assertEqual(camera_presence.watch(), 0)
+
+        resize_mock.assert_called_once()
+        cascade.detectMultiScale.assert_called_once_with(
+            resized, scaleFactor=1.1, minNeighbors=5, minSize=(45, 45)
+        )
+        camera.release.assert_called_once_with()
+
     def test_enrollment_rejects_multiple_visible_faces(self):
         model = FaceModel.__new__(FaceModel)
         model.features = lambda _frame: [[1.0, 0.0], [0.0, 1.0]]
