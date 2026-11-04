@@ -196,6 +196,47 @@ def test_recovery_retries_png_with_valid_checksums_but_invalid_pixels(tmp_path):
     assert not output.exists()
 
 
+def test_recovery_retries_png_with_invalid_chunk_checksum(tmp_path):
+    import struct
+
+    import pytest
+
+    output = tmp_path / "bad-checksum.png"
+    Image.new("RGB", (64, 64), "orange").save(output)
+    data = bytearray(output.read_bytes())
+    offset = 8
+    while offset < len(data):
+        length = struct.unpack_from(">I", data, offset)[0]
+        if data[offset + 4:offset + 8] == b"IDAT":
+            # Keep the compressed pixels intact but invalidate the chunk CRC.
+            data[offset + 8 + length] ^= 1
+            break
+        offset += length + 12
+    else:
+        raise AssertionError("Expected an IDAT chunk")
+    output.write_bytes(data)
+
+    with Image.open(output) as picture:
+        with pytest.raises(SyntaxError):
+            picture.verify()
+    assert not quick_image.image_file_ok(output)
+
+    job_id = "1" * 32
+    quick_image._write_job(tmp_path, job_id, {
+        "job_id": job_id, "status": "working", "prompt": "a dog",
+        "output_path": str(output),
+    })
+    with (patch.object(quick_image, "_worker_running", return_value=False),
+          patch.object(quick_image, "_launch_job") as launch):
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_called_once_with(tmp_path, job_id)
+
+    info = quick_image.image_job_status(tmp_path, job_id)
+    assert info["status"] == "queued"
+    assert info["recoveries"] == 1
+    assert not output.exists()
+
+
 def test_recovery_preserves_valid_png_smaller_than_100_bytes(tmp_path):
     output = tmp_path / "small.png"
     Image.new("RGB", (1, 1), "orange").save(output)
