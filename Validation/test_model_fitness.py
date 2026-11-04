@@ -220,8 +220,8 @@ def test_game_probe_requires_two_complete_independent_passes():
 
 
 def test_game_probe_nested_completion_json_is_saved_as_failed_samples():
-    nested = "[" * (sys.getrecursionlimit() + 100) + "0"
-    nested += "]" * (sys.getrecursionlimit() + 100)
+    nested = "[" * (max(5000, sys.getrecursionlimit() + 100)) + "0"
+    nested += "]" * (max(5000, sys.getrecursionlimit() + 100))
     replies = [
         {"modelfile": "FROM sha256-" + "a" * 64},
         *[{"message": {"content": nested}} for _ in range(3)],
