@@ -64,6 +64,14 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
         raise RuntimeError("No clear lyrics were detected in the isolated vocal track.")
     timings_content = json.dumps({"language": transcription.get("language"),
                                   "segments": rows}, ensure_ascii=False, indent=2) + "\n"
+    text_content = "\n".join(row["text"] for row in rows) + "\n"
+    captions_content = "\n\n".join(
+        f"{index}\n{_srt_time(row['start'])} --> {_srt_time(row['end'])}\n{row['text']}"
+        for index, row in enumerate(rows, 1)
+    ) + "\n"
+    # Validate every output's encoding before creating any files.
+    contents = [content.encode("utf-8") for content in
+                (text_content, captions_content, timings_content)]
     target.mkdir(parents=True, exist_ok=True)
     text = target / "lyrics.txt"
     captions = target / "lyrics.srt"
@@ -71,12 +79,8 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
     for path in (text, captions, timings):
         if path.exists():
             raise ValueError(f"Output already exists: {path}")
-    text.write_text("\n".join(row["text"] for row in rows) + "\n", encoding="utf-8")
-    captions.write_text("\n\n".join(
-        f"{index}\n{_srt_time(row['start'])} --> {_srt_time(row['end'])}\n{row['text']}"
-        for index, row in enumerate(rows, 1)
-    ) + "\n", encoding="utf-8")
-    timings.write_text(timings_content, encoding="utf-8")
+    for path, content in zip((text, captions, timings), contents):
+        path.write_bytes(content)
     return {"source": str(source), "vocal_path": str(vocal),
             "lyrics_path": str(text), "captions_path": str(captions),
             "timings_path": str(timings), "language": transcription.get("language"),

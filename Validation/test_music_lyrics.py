@@ -110,6 +110,38 @@ def test_save_serialization_failure_leaves_no_partial_output(tmp_path, existing_
     assert vocal.read_bytes() == b"isolated"
 
 
+@pytest.mark.parametrize("existing_target", [False, True])
+@pytest.mark.parametrize("field", ["text", "language"])
+def test_save_encoding_failure_leaves_no_partial_output(tmp_path, existing_target, field):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    vocal = tmp_path / "vocals.wav"
+    vocal.write_bytes(b"isolated")
+    target = tmp_path / "lyrics"
+    if existing_target:
+        target.mkdir()
+        (target / "keep.txt").write_text("keep", encoding="utf-8")
+    transcription = {
+        "language": "en",
+        "segments": [{"start": 1.0, "end": 2.0, "text": "Hello world"}],
+    }
+    if field == "text":
+        transcription["segments"][0]["text"] = "Hello \ud800"
+    else:
+        transcription["language"] = "en\ud800"
+
+    with pytest.raises(UnicodeEncodeError):
+        music_lyrics.save(source, vocal, target, transcription)
+
+    if existing_target:
+        assert sorted(path.name for path in target.iterdir()) == ["keep.txt"]
+        assert (target / "keep.txt").read_text(encoding="utf-8") == "keep"
+    else:
+        assert not target.exists()
+    assert source.read_bytes() == b"original"
+    assert vocal.read_bytes() == b"isolated"
+
+
 def test_save_rejects_infinite_end_without_leaving_partial_output(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
