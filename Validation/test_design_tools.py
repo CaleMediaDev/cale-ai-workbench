@@ -226,6 +226,33 @@ def test_rejects_invalid_manifest_structure_before_copy(tmp_path, package):
     assert not (tmp_path / "src").exists()
 
 
+def test_installs_kit_with_bom_prefixed_package_manifest(tmp_path, monkeypatch):
+    import design_tools
+
+    kit = tmp_path / "kit"
+    (kit / "src").mkdir(parents=True)
+    (kit / "src/Message.astro").write_text("<p>Message</p>", encoding="utf-8")
+    (kit / "LICENSE").write_text("fixture license", encoding="utf-8")
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", kit)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    manifest = project / "package.json"
+    manifest.write_bytes(
+        b'\xef\xbb\xbf' + json.dumps({"dependencies": {"astro": "^5"}}).encode("utf-8")
+    )
+    original_manifest = manifest.read_bytes()
+
+    result = add_astro_ai_ui(str(project))
+
+    destination = project / "src/vendor/ai-ui"
+    assert result["files_added"] == 2
+    assert (destination / "Message.astro").read_text(encoding="utf-8") == "<p>Message</p>"
+    assert (destination / "LICENSE").read_text(encoding="utf-8") == "fixture license"
+    assert add_astro_ai_ui(str(project))["files_added"] == 0
+    assert manifest.read_bytes() == original_manifest
+
+
 def test_rejects_non_astro_project(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"react": "*"}}), encoding="utf-8")
     with pytest.raises(ValueError, match="Astro"):
