@@ -460,6 +460,48 @@ def gh_api(endpoint: str, data: dict | None = None):
     return json.loads(result.stdout)
 
 
+def open_donation_reviews(login: str, continuous: bool, check_cancel=lambda: None) -> dict:
+    """List pending proposals even when GitHub cannot search an account.
+
+    Direct repository listing preserves duplicate checks for accounts absent
+    from GitHub's search index. Failed or bounded-out listings stop work.
+    """
+    try:
+        query = urlencode({"q": f'repo:{UPSTREAM} is:pr is:open author:{login} "[Donation]" in:title'})
+        opened = gh_api("search/issues?" + query + "&per_page=100")
+        if continuous:
+            total = int(opened.get("total_count", 0))
+            if total > 1000 or opened.get("incomplete_results"):
+                raise RuntimeError("Draft listing is incomplete; retry before proposing duplicates.")
+            items = list(opened.get("items", []))
+            for page in range(2, (total + 99) // 100 + 1):
+                check_cancel()
+                part = gh_api("search/issues?" + query + f"&per_page=100&page={page}")
+                if part.get("incomplete_results"):
+                    raise RuntimeError("Draft listing is incomplete.")
+                items.extend(part.get("items", []))
+            if len(items) < total:
+                raise RuntimeError("Draft listing changed; retry before proposing duplicates.")
+            opened["items"] = items
+        return opened
+    except RuntimeError:
+        # GitHub Search can reject a valid, authenticated author with HTTP 422.
+        # Repository access does not depend on that account being searchable.
+        pass
+    items = []
+    for page in range(1, 101):
+        check_cancel()
+        batch = gh_api(f"repos/{UPSTREAM}/pulls?state=open&sort=created&direction=asc&per_page=100&page={page}")
+        if not isinstance(batch, list):
+            raise RuntimeError("Repository draft listing is invalid; retry before proposing duplicates.")
+        items.extend(pr for pr in batch
+                     if str(pr.get("user", {}).get("login", "")).casefold() == login.casefold()
+                     and "[donation]" in str(pr.get("title", "")).casefold())
+        if len(batch) < 100:
+            return {"total_count": len(items), "items": items}
+    raise RuntimeError("Repository draft listing is incomplete; retry before proposing duplicates.")
+
+
 def public_file(path: str, revision: str) -> str:
     """Read a source blob from the canonical public repository at an exact SHA."""
     value = gh_api(f"repos/{UPSTREAM}/contents/{quote(path, safe='/')}?ref={revision}")
@@ -745,22 +787,7 @@ class Service:
             resource = available[(available.index(previous[0]) + 1) % len(available)] if previous and previous[0] in available else available[0]
             check_cancel()
             refresh_pending_reviews(self.root, check_cancel=check_cancel)
-            query = urlencode({"q": f'repo:{UPSTREAM} is:pr is:open author:{login} "[Donation]" in:title'})
-            opened = gh_api("search/issues?" + query + "&per_page=100")
-            if consent["intensity"] in {"medium", "full_blast"}:
-                total = int(opened.get("total_count", 0))
-                if total > 1000 or opened.get("incomplete_results"):
-                    raise RuntimeError("Draft listing is incomplete; retry before proposing duplicates.")
-                items = list(opened.get("items", []))
-                for page in range(2, (total + 99) // 100 + 1):
-                    check_cancel()
-                    part = gh_api("search/issues?" + query + f"&per_page=100&page={page}")
-                    if part.get("incomplete_results"):
-                        raise RuntimeError("Draft listing is incomplete.")
-                    items.extend(part.get("items", []))
-                if len(items) < total:
-                    raise RuntimeError("Draft listing changed; retry before proposing duplicates.")
-                opened["items"] = items
+            opened = open_donation_reviews(login, consent["intensity"] in {"medium", "full_blast"}, check_cancel)
             if profile["open"] is not None and opened.get("total_count", 0) >= profile["open"]:
                 self.message = "Your proposal is waiting for maintainer review."
                 return

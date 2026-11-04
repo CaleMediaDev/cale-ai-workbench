@@ -38,6 +38,45 @@ def enable(root):
     donation.set_enabled(True, root, chatgpt_account=FINGERPRINT, github_account="donor", sources=["chatgpt"])
 
 
+def test_unsearchable_account_lists_all_repository_pages():
+    own = {"user": {"login": "DONOR"}, "title": "[Donation] Fix", "body": "<!-- cale-donation:example-fix -->"}
+    other = {"user": {"login": "other"}, "title": "[Donation] Fix"}
+    unrelated = {"user": {"login": "donor"}, "title": "Ordinary fix"}
+    def api(endpoint):
+        if endpoint.startswith("search/"):
+            raise RuntimeError("GitHub request did not finish")
+        return [other] * 99 + [unrelated] if endpoint.endswith("&page=1") else [own]
+    with patch.object(donation, "gh_api", side_effect=api) as fetch:
+        result = donation.open_donation_reviews("donor", True)
+    assert result == {"total_count": 1, "items": [own]}
+    assert fetch.call_count == 3
+
+
+def test_repository_fallback_failure_does_not_look_like_empty_queue():
+    with patch.object(donation, "gh_api", side_effect=RuntimeError("Unavailable")):
+        with pytest.raises(RuntimeError, match="Unavailable"):
+            donation.open_donation_reviews("donor", False)
+
+
+def test_repository_fallback_honors_cancellation():
+    def cancel():
+        raise InterruptedError("Stopped")
+    with patch.object(donation, "gh_api", side_effect=RuntimeError("Search unavailable")) as fetch:
+        with pytest.raises(InterruptedError):
+            donation.open_donation_reviews("donor", True, cancel)
+    assert fetch.call_count == 1
+
+
+def test_repository_fallback_stops_at_page_bound():
+    def api(endpoint):
+        if endpoint.startswith("search/"):
+            raise RuntimeError("Search unavailable")
+        return [{"user": {"login": "other"}, "title": "Fix"}] * 100
+    with patch.object(donation, "gh_api", side_effect=api):
+        with pytest.raises(RuntimeError, match="incomplete"):
+            donation.open_donation_reviews("donor", True)
+
+
 def test_opt_in_is_off_until_saved_and_damage_fails_closed(tmp_path):
     assert not donation.settings(tmp_path)["enabled"]
     with pytest.raises(ValueError):
