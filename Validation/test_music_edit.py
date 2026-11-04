@@ -82,6 +82,34 @@ def test_mix_music_renders_both_tracks_and_is_discoverable(tmp_path):
     assert duration(foreground) == pytest.approx(0.3)
 
 
+def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeypatch):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio left untouched by the mocked subprocess"
+    source.write_bytes(original)
+    calls = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def empty_success(command, **kwargs):
+        calls.append(command)
+        assert "-n" in command
+        assert kwargs["timeout"] == 3600
+        assert source.read_bytes() == original
+        output.write_bytes(b"")
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", empty_success)
+
+    # A failed validation must not leave an empty file blocking a retry.
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="Local audio edit failed"):
+            music_edit.edit_music(str(source), str(output))
+        assert not output.exists()
+        assert source.read_bytes() == original
+
+    assert len(calls) == 2
+
+
 def test_mix_music_refuses_to_replace_source(tmp_path):
     first = tmp_path / "first.wav"
     second = tmp_path / "second.wav"
