@@ -144,6 +144,33 @@ class AutoModelTests(unittest.TestCase):
                     self.assertEqual(json.loads(pending.read_text()), expected_pending)
                 delete.assert_called_once_with("old:large")
 
+    def test_retirement_retries_failed_owned_source_deletion(self):
+        from urllib.error import HTTPError
+
+        item = {"alias": "cale-slow", "source": "slow:latest"}
+        for error in (
+            HTTPError("http://localhost/api/delete", 500, "failed", {}, None),
+            OSError("connection lost"),
+        ):
+            with self.subTest(error=error):
+                absent = HTTPError("http://localhost/api/delete", 404,
+                                   "not found", {}, None)
+                with (patch.object(library, "alias_update_waits_for_tasks", return_value=False),
+                      patch.object(library, "owned_sources", return_value={item["source"]}),
+                      patch.object(library, "delete_model",
+                                   side_effect=[None, error, absent, None]) as delete):
+                    self.assertFalse(library.retire_slow_model(item))
+                    self.assertTrue(library.retire_slow_model(item))
+                self.assertEqual([call.args[0] for call in delete.call_args_list],
+                                 [item["alias"], item["source"],
+                                  item["alias"], item["source"]])
+
+        absent = HTTPError("http://localhost/api/delete", 404, "not found", {}, None)
+        with (patch.object(library, "alias_update_waits_for_tasks", return_value=False),
+              patch.object(library, "owned_sources", return_value={item["source"]}),
+              patch.object(library, "delete_model", side_effect=[None, absent])):
+            self.assertTrue(library.retire_slow_model(item))
+
     def test_owned_sources_recovers_from_non_string_list_entries(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
