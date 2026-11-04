@@ -80,9 +80,9 @@ def _installer_running(pid=None) -> bool:
                 candidates = []
                 arguments = iter(command[1:])
                 for argument in arguments:
-                    if argument in ("-c", "-m", "-"):
+                    if argument == "-" or argument.startswith(("-c", "-m")):
                         break
-                    if argument in ("-W", "-X"):
+                    if argument in ("-W", "-X", "--check-hash-based-pycs"):
                         next(arguments, None)
                         continue
                     if argument == "--":

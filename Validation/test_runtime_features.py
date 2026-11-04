@@ -374,3 +374,34 @@ def test_installer_absolute_path_does_not_require_access_to_process_cwd(monkeypa
         process.cwd.assert_not_called()
     else:
         process.cwd.assert_called_once_with()
+
+
+@pytest.mark.parametrize("prefix", [
+    ["--check-hash-based-pycs", "always"],
+    ["--check-hash-based-pycs=never"],
+    ["-W", "ignore", "-X", "utf8", "-u"],
+    ["--"],
+])
+def test_review_installer_valid_python_flags_preserve_absolute_script_without_cwd(tmp_path, monkeypatch, prefix):
+    import psutil
+    script = str(runtime_features.Path(runtime_features.__file__).resolve())
+    class Installer:
+        def cmdline(self):
+            return ["python", *prefix, script, "--install"]
+        def cwd(self):
+            raise psutil.AccessDenied(12345)
+    monkeypatch.setattr(psutil, "Process", lambda pid: Installer())
+    assert runtime_features._installer_running(12345)
+
+
+@pytest.mark.parametrize("prefix", [["-cpass"], ["-mother_module"], ["-"]])
+def test_review_installer_inline_or_module_attached_options_are_not_script(tmp_path, monkeypatch, prefix):
+    import psutil
+    script = str(runtime_features.Path(runtime_features.__file__).resolve())
+    class OtherProgram:
+        def cmdline(self):
+            return ["python", *prefix, script, "--install"]
+        def cwd(self):
+            return str(tmp_path)
+    monkeypatch.setattr(psutil, "Process", lambda pid: OtherProgram())
+    assert not runtime_features._installer_running(12345)
