@@ -174,6 +174,28 @@ def test_image_job_pause_and_resume_reuse_same_id(tmp_path):
         launch.assert_called_once_with(tmp_path, job_id)
 
 
+def test_missing_toolbox_runtime_marks_started_job_as_error(tmp_path):
+    import pytest
+
+    with pytest.raises(RuntimeError, match="Toolbox runtime is missing"):
+        quick_image.start_image_job(tmp_path, "a dog", str(tmp_path / "dog.png"))
+
+    jobs = list((tmp_path / "LongTasks/image-jobs").glob("*.json"))
+    assert len(jobs) == 1
+    job_id = jobs[0].stem
+    info = quick_image.image_job_status(tmp_path, job_id)
+    assert info["status"] == "error"
+    assert "Toolbox runtime is missing" in info["current"]
+
+    # Age the record so the queued-job grace period cannot hide a retry.
+    info["created"] = 1
+    quick_image._write_job(tmp_path, job_id, info)
+    with patch.object(quick_image, "_launch_job") as launch:
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_not_called()
+    assert quick_image.image_job_status(tmp_path, job_id)["status"] == "error"
+
+
 def test_hold_image_job_handles_access_denied(tmp_path):
     import psutil
 
