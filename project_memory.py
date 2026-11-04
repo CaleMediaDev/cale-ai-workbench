@@ -337,8 +337,12 @@ def _refresh_file_record(root: Path, row, checked_documents: dict | None = None)
             conn.execute("DELETE FROM memory_fts WHERE id=?", (row["id"],))
         return True
     try:
+        # Stored file identities are canonical. A replacement symlink must not
+        # refresh a different record while leaving this old record readable.
+        if path.resolve(strict=True).relative_to(root).as_posix() != row["source_path"]:
+            raise ValueError("Indexed source identity changed.")
         data = path.read_bytes()
-    except OSError:
+    except (OSError, ValueError):
         with connection(root) as conn:
             conn.execute("DELETE FROM memories WHERE id=?", (row["id"],))
             conn.execute("DELETE FROM memory_fts WHERE id=?", (row["id"],))
