@@ -64,7 +64,11 @@ def safe_loopback_url(value):
 
 def source(folder):
     """Prefer a declared local server; otherwise preview a project HTML file."""
-    folder = Path(folder).resolve()
+    try:
+        folder = Path(folder).resolve()
+    except (OSError, RuntimeError):
+        # An inaccessible root or symlink loop leaves no usable preview.
+        return ""
     declaration = folder / ".local-ai/preview.json"
     try:
         declaration = declaration.resolve()

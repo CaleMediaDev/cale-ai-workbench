@@ -99,6 +99,15 @@ class ProjectPreviewTests(unittest.TestCase):
                 self.skipTest(f"Symlinks unavailable: {error}")
             self.assertEqual(preview.source(folder), fallback.as_uri())
 
+    def test_unresolvable_project_root_returns_no_preview(self):
+        for error in (
+            PermissionError("Cannot search project directory"),
+            RuntimeError("Symlink loop at project root"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(Path, "resolve", side_effect=error):
+                    self.assertEqual(preview.source("project"), "")
+
     def test_unreadable_declaration_check_falls_back_to_static_html(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary).resolve()
