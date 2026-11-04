@@ -248,7 +248,7 @@ class VoiceTests(unittest.TestCase):
         fake.post = Mock(side_effect=AssertionError("Malformed status must not start the model"))
         for response in (b'null', b'[]', b'{"models":[null]}',
                          b'{"models":[42]}'):
-            with self.subTest(response=response), (
+            with (self.subTest(response=response),
                 patch.dict(sys.modules, {"cloud_ai": fake}),
                 patch.object(voice_assistant, "_heavy_gpu_active", return_value=False),
                 patch.object(voice_assistant, "urlopen",
