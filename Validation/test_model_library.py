@@ -781,6 +781,17 @@ class AutoModelTests(unittest.TestCase):
         self.assertIs(request["think"], False)
         self.assertEqual(request["options"]["num_predict"], 512)
 
+    def test_null_tool_calls_fail_the_candidate_probe(self):
+        response = {
+            "message": {"content": "91", "tool_calls": None},
+            "eval_count": 64,
+            "eval_duration": 2_000_000_000,
+        }
+        with patch.object(library, "post", return_value=response) as post:
+            with self.assertRaisesRegex(library.CandidateModelError, "tool-use check"):
+                library.probe_tool_use("candidate-source")
+        post.assert_called_once()
+
     def test_non_object_tool_arguments_fail_the_candidate_probe(self):
         for arguments in (None, 'invalid', [], 42, True):
             with self.subTest(arguments=arguments):
