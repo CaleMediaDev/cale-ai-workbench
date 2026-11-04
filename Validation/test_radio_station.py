@@ -187,6 +187,29 @@ def test_continuous_queue_prefetches_and_repeats_instead_of_silence(tmp_path):
         assert all(call[2]["task_id"] == "radio-"+identity for call in calls)
 
 
+def test_missing_buffered_audio_is_retired_and_replaced(tmp_path):
+    _, service, player, jobs, calls, generate = fixture(tmp_path)
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        finish(jobs, calls, 1)
+        service.tick()
+        finish(jobs, calls, 2)
+        service.tick()
+        assert service.snapshot()["ready"] == 2 and len(calls) == 3
+
+        missing = Path(calls[1][1])
+        missing.unlink()
+        service.tick()
+
+        row = next(row for row in service._rows() if row["path"] == str(missing))
+        assert row["status"] == "error"
+        assert service.snapshot()["ready"] == 1
+        assert len(calls) == 4  # Replace the unavailable buffered recording.
+        assert player.active and player.played == [calls[0][1]]
+
+
 def test_pause_stop_and_setup_holds_do_not_launch_music(tmp_path):
     _, service, player, jobs, calls, generate = fixture(tmp_path)
     with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]), patch("music_backend.pause_music_job") as stop:
