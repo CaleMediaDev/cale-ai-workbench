@@ -56,10 +56,15 @@ def _sources(root: Path):
 def sync(root: str | Path) -> dict:
     """Copy new/unchanged managed files, preserving local skill modifications."""
     root = Path(root).resolve(strict=True)
-    destination = root / "data/skills"
+    state = root / "data"
+    if state.is_symlink() or state.is_junction():
+        # The ownership marker shares this folder; leave redirected state alone.
+        return {"installed": 0, "updated": 0,
+                "preserved": sum(1 for _ in _sources(root))}
+    destination = state / "skills"
     if not destination.exists() and not destination.is_symlink() and not destination.is_junction():
         destination.mkdir(parents=True, exist_ok=True)
-    marker = root / "data/.cale-skill-files.json"
+    marker = state / ".cale-skill-files.json"
     try:
         previous = json.loads(marker.read_text(encoding="utf-8"))
         if not isinstance(previous, dict):

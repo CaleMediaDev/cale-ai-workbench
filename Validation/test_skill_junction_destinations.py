@@ -63,3 +63,29 @@ def test_skill_sync_preserves_dangling_root_junction(tmp_path, monkeypatch):
     assert skill_catalog.sync(root) == {"installed": 0, "updated": 0, "preserved": 1}
     assert link.is_junction()
     assert not outside.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory junction")
+def test_skill_sync_preserves_redirected_data_folder_and_ownership_record(tmp_path, monkeypatch):
+    root = tmp_path / "app"
+    source = root / "vendor/agent-skills/context-engineering/SKILL.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"new bundled content")
+    monkeypatch.setattr(skill_catalog, "SKILLS", {"context-engineering": "software-development"})
+    monkeypatch.setattr(skill_catalog, "SHARED_REFERENCES", ())
+    outside = tmp_path / "outside"
+    key = "software-development/context-engineering/SKILL.md"
+    external = outside / "skills" / key
+    external.parent.mkdir(parents=True)
+    external.write_bytes(b"previous content")
+    marker = outside / ".cale-skill-files.json"
+    original_marker = json.dumps({key: hashlib.sha256(b"previous content").hexdigest()}).encode("utf-8")
+    marker.write_bytes(original_marker)
+    link = root / "data"
+    subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(link), str(outside)],
+                   check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    result = skill_catalog.sync(root)
+    assert external.read_bytes() == b"previous content"
+    assert marker.read_bytes() == original_marker
+    assert link.is_junction()
+    assert result == {"installed": 0, "updated": 0, "preserved": 1}
