@@ -5,6 +5,7 @@ import io
 import os
 import unittest
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import numpy as np
 import psutil
@@ -127,6 +128,51 @@ class CameraPresenceTests(unittest.TestCase):
         self.assertIn("Alex", line)
         self.assertIn("one at a time", line)
         self.assertIn("Who are you?", line)
+
+    def test_malformed_enrollment_request_does_not_stop_watching(self):
+        from camera_presence import watch
+
+        camera = Mock()
+        camera.isOpened.return_value = True
+        camera.read.return_value = (True, np.zeros((8, 8, 3), dtype=np.uint8))
+        cascade = Mock()
+        cascade.empty.return_value = False
+        model = Mock()
+        model.features.return_value = []
+        request = Mock()
+        request.is_file.return_value = True
+        request.read_text.return_value = "null"
+        fake_cv2 = SimpleNamespace(
+            data=SimpleNamespace(haarcascades="."),
+            CascadeClassifier=Mock(return_value=cascade),
+            VideoCapture=Mock(return_value=camera),
+            CAP_DSHOW=0,
+            COLOR_BGR2GRAY=0,
+            cvtColor=lambda frame, _code: frame[:, :, 0],
+        )
+        modules = {
+            "cv2": fake_cv2,
+            "camera_network": SimpleNamespace(
+                camera_source=lambda device: device,
+                greeting_camera=lambda: 0,
+            ),
+            "face_identity": SimpleNamespace(
+                ENROLL_REQUEST=request,
+                FaceModel=Mock(return_value=model),
+                enroll=Mock(),
+            ),
+        }
+        with patch.dict("sys.modules", modules), \
+                patch("camera_presence.allowed", side_effect=[True, True, False]), \
+                patch("camera_presence.owner_alive", return_value=True), \
+                patch("camera_presence.preview_frame", return_value=""), \
+                patch("camera_presence.time.sleep"), \
+                patch("camera_presence.emit") as emit:
+            self.assertEqual(watch(), 0)
+
+        request.unlink.assert_called_once_with(missing_ok=True)
+        camera.release.assert_called_once_with()
+        emit.assert_any_call("stopped", "Camera greeting is off.")
 
     def test_enrollment_rejects_multiple_visible_faces(self):
         model = FaceModel.__new__(FaceModel)
