@@ -16,6 +16,11 @@ def test_key_estimate_declines_empty_input():
     assert music_analysis._best_key(np.zeros(12)) is None
 
 
+def test_key_estimate_declines_flat_input_without_invalid_arithmetic():
+    with np.errstate(divide="raise", invalid="raise"):
+        assert music_analysis._best_key(np.ones(12)) is None
+
+
 def test_analysis_rejects_nonfinite_duration_before_loading(tmp_path, monkeypatch):
     import sys
     from types import SimpleNamespace
