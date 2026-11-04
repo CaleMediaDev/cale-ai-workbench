@@ -83,11 +83,15 @@ def _dom_contract(folder: Path, page) -> dict:
         contract["stale"] = contract["current_page_sha256"] != contract["page_sha256"]
     inventory = page.evaluate("""() => {
       const counts = new Map();
-      document.querySelectorAll('[id]').forEach(el => counts.set(el.id, (counts.get(el.id)||0)+1));
+      document.querySelectorAll('[id]').forEach(el => {
+        const id = el.getAttribute('id');
+        counts.set(id, (counts.get(id)||0)+1);
+      });
       const nodes = document.querySelectorAll('[id],input,select,textarea,button,output,form,[role="status"],[role="alert"],[aria-live],[contenteditable="true"]');
       const targets = [];
       for (const el of nodes) {
         if(targets.length === 64) break;
+        const id = el.getAttribute('id') || '';
         const tag = el.localName, type = (typeof el.type === 'string' && el.type) || el.getAttribute('type') || '';
         const disabled = el.matches(':disabled'), readOnly = !!el.readOnly;
         const visible = !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden],[aria-hidden="true"]');
@@ -104,11 +108,11 @@ def _dom_contract(folder: Path, page) -> dict:
         };
         const labels = [...(el.labels || [])].slice(0,3).map(labelText);
         const form = el.form || el.closest('form');
-        targets.push({id:el.id.slice(0,120),id_count:el.id ? counts.get(el.id) : 0,
-          id_truncated:el.id.length>120,
-          checker_id_supported:!!el.id && counts.get(el.id)===1 && el.id.length<=64 && /^[A-Za-z]/.test(el.id) && !/[^A-Za-z0-9_-]/.test(el.id),
+        targets.push({id:id.slice(0,120),id_count:id ? counts.get(id) : 0,
+          id_truncated:id.length>120,
+          checker_id_supported:!!id && counts.get(id)===1 && id.length<=64 && /^[A-Za-z]/.test(id) && !/[^A-Za-z0-9_-]/.test(id),
           tag,type:type.slice(0,32),labels,aria_label:(el.getAttribute('aria-label')||'').slice(0,120),
-          form:form ? {id:form.id.slice(0,120),name:(form.getAttribute('name')||'').slice(0,120)} : null,
+          form:form ? {id:(form.getAttribute('id')||'').slice(0,120),name:(form.getAttribute('name')||'').slice(0,120)} : null,
           visible,editable:visible && !disabled && !readOnly && ((tag==='input' && !['hidden','button','submit','reset','checkbox','radio','file','image'].includes(type.toLowerCase())) || tag==='textarea' || tag==='select' || el.isContentEditable),
           readOnly,disabled,constraints});
       }
