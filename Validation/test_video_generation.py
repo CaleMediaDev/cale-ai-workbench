@@ -175,7 +175,8 @@ def test_video_status_reports_latest_sampler_progress(tmp_path):
             encoding="utf-8",
         )
         log = tmp_path / f"{job_id}-comfy.log"
-        log.write_bytes(b"earlier 40%|####\rnow 65%|######")
+        # Ensure the log is large enough to trigger the tail read logic
+        log.write_bytes(b"earlier 40%|####\rnow 65%|######" + b"x" * 70000)
         result = video_generation.video_job_status(job_id)
         assert result["progress_percent"] == 65
         assert result["detail"] == "Generating frames"

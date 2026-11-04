@@ -169,8 +169,8 @@ def _render_percent(job_id: str) -> int:
         return 0
     try:
         with path.open("rb") as stream:
-            stream.seek(0, os.SEEK_END)
-            stream.seek(max(0, stream.tell() - 65536))
+            size = stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, size - 65536))
             tail = stream.read()
     except OSError:
         return 0
