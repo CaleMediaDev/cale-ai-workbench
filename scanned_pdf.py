@@ -38,7 +38,8 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                 try:
                     textpage = page.get_textpage()
                     try:
-                        text = textpage.get_text_range().strip()
+                        # Bounded extraction supports full Unicode; range extraction is UCS-2.
+                        text = textpage.get_text_bounded().strip()
                     finally:
                         textpage.close()
                 except pdfium.PdfiumError:
