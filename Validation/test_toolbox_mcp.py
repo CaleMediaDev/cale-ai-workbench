@@ -127,6 +127,43 @@ def test_analyze_music_tool_is_discoverable_and_callable():
     assert result["tempo_bpm"] == 120
 
 
+def test_preview_backend_errors_preserve_successful_browser_result(tmp_path):
+    class PreviewBackendError(Exception):
+        pass
+
+    async def check(failing_stage):
+        calls = []
+        original = {"isError": False, "content": [{"type": "text", "text": "done"}]}
+
+        class FakeSession:
+            async def call_tool(self, name, arguments):
+                calls.append(name)
+                if name == "navigate_page":
+                    return SimpleNamespace(
+                        is_error=False, model_dump=lambda **_kwargs: original
+                    )
+                if name == failing_stage:
+                    raise PreviewBackendError("preview backend failed")
+                assert name == "list_pages"
+                return SimpleNamespace(
+                    is_error=False,
+                    content=[SimpleNamespace(text="1: https://example.com [selected]")],
+                )
+
+        with (patch.dict(toolbox_mcp.CATALOG, {"devtools.navigate_page": {}}, clear=True),
+              patch.dict(toolbox_mcp.SESSIONS, {"devtools": FakeSession()}, clear=True),
+              patch.object(toolbox_mcp, "registered_project", return_value=tmp_path)):
+            result = await toolbox_mcp.toolbox_call(
+                "devtools.navigate_page", "{}", project_folder=str(tmp_path)
+            )
+        assert result == original
+        assert calls == (["navigate_page", "list_pages"] if failing_stage == "list_pages"
+                         else ["navigate_page", "list_pages", "take_screenshot"])
+
+    for failing_stage in ("list_pages", "take_screenshot"):
+        asyncio.run(check(failing_stage))
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):
