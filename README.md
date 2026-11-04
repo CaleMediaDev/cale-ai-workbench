@@ -238,20 +238,27 @@ the same active SQLite definition without completing it. Neither the revision
 flag nor its one-time reference can be stored as repeatable step acceptance.
 Generated browser suites stay behind this checker API rather than raw file edits.
 
-Clear interactive-app builds and explicit SQLite-step requests now enter a
-planning stage before model-driven implementation. Only read-only discovery
-and a typed `task_steps plan` mutation are offered until a real queue exists.
-HTML plans use browser acceptance; planning records unfinished work and never
-claims a passing test. Established starter/function planners and existing queues
-are retained. After a completed prior workflow, a small follow-up uses its own
-intent rather than being forced into another whole-app plan.
+Clear interactive-app builds and explicit SQLite-step requests require a real
+step queue before handoff. Default workers can create a small source skeleton,
+inspect its actual controls, then plan acceptance using that interface. Existing
+pages are preserved. SQL steps, browser interaction, and final verification are
+still required; writing a page alone never completes the task. Established
+starter/function planners and existing queues are retained. After a completed
+workflow, a small follow-up uses its own intent.
+
+The pre-implementation executable planner is a developer experiment, enabled
+only by `experimental_initial_plan=True` in project metadata. It restricts tools
+to discovery and typed planning, requires ID-based visibility targets and at
+least one action/outcome sequence. Live local trials still produced invented
+tests, so this experiment is off by default. The receipts are retained in the
+developer benchmarks; they are not evidence of reliable autonomous app building.
 
 Planning binds the original brief, full project rules and follow-ups to the
 prompt that actually read them. Changes rebuild the briefing rather than pairing
 new hashes with old instructions. SQLite checks initial-queue emptiness under
 its write lock and rechecks live control/requirements before and after insertion;
 stale, stopped or concurrently superseded planning rolls back. An accepted plan
-ends its response batch before implementation tools return on a fresh turn.
+ends its response batch so later calls cannot act against the previous queue.
 
 An invalid legacy acceptance command can also trigger a bounded focused repair.
 For a small, single HTML page, Cale supplies observed control IDs and the full
@@ -528,4 +535,4 @@ Branded videos on song task cards now include source-audio and video checksums. 
 
 The leaderboard counts each verified donation PR once, using its GitHub numeric author ID. A normal merge counts automatically. When a maintainer integrates reviewed code directly on `main` and closes the original PR, the maintainer applies the upstream `cale-accepted-fix` label after verifying its integration receipt. Closing a PR, editing its body, or claiming token totals does not grant credit. Donors do not label their own submissions on the upstream repository.
 
-Removing that acceptance label withdraws manually integrated credit on the next complete refresh. Partial or failed scans preserve the last verified leaderboard, and renamed accounts retain credit through their stable GitHub identity. Release maintainers must backfill this label for the 24 recorded manual integrations in v0.5.486 and apply it to future accepted integrations.
+Removing that acceptance label withdraws manually integrated credit on the next complete refresh. Partial or failed scans preserve the last verified leaderboard, and renamed accounts retain credit through their stable GitHub identity. The 24 recorded manual integrations in v0.5.486 have been backfilled and verified against live GitHub data. Maintainers apply the same label to future accepted integrations, including closed drafts.

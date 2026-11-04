@@ -1,5 +1,44 @@
 # Native worker reality check
 
+## Grounding and planning experiments, v0.5.487
+
+All six retained local runs failed overall. The brief and independent grader
+were unchanged; no developer edited their app source or supplied a plan.
+These are individual observations, not a controlled model/speed comparison.
+
+| Receipt suffix | Worker seconds | Checked SQL units | Browser checks passed/attempted | Result |
+| --- | ---: | ---: | ---: | --- |
+| 487a | 300.02 | 1/8 | 10/15 | Guidance alone left invented HTML-text checks |
+| 487b | 228.38 | 1/6 | 10/12 | Validation improved; deletion broke; empty inference response |
+| 487c | 134.34 | 0/0 | 0/0 | Interaction constraint rejected; no page created |
+| 487d | 300.02 | 0/4 | 8/15 | Semantic feedback recovered a plan, but its checks were invented |
+| 487e | 300.02 | 0/0 | 6/9 | Default source-first; missing escapeHtml broke valid additions |
+| 487f (resume) | 150.01 | 0/2 | 6/9 | Same source-first task; missing helper remained |
+
+The first five files are `offline-expense-app-487[a-e]-20261104.json`;
+the continuation is `offline-expense-resume-487f-20261104.json`. Unattempted
+browser requirements are not passes. Each baseline verifier failed, so skipped
+mutation tests receive no correctness credit. The source-first trial overlapped
+the full CPU/browser regression run; its timing is not a controlled benchmark.
+Later receipts include host-code hashes and an explicit experimental flag.
+
+The speculative pre-implementation executable planner is now opt-in through
+`--experimental-initial-plan`. Its ID/interaction schemas and guards remain
+available for experiments, but better syntax did not produce a reliable app.
+Default source-first work retains the SQL and browser completion requirements,
+full instruction-basis checks, Stop/done controls and guarded plan insertion.
+Deferred, requirement-bound phases with DOM-grounded acceptance are a proposed
+next design, not an implemented or verified capability.
+
+The browser now reports bounded unhandled JavaScript errors. Actual Chromium
+tests prove missing-helper and startup errors are surfaced, and repaired/reloaded
+pages clear old errors. The resumed worker above made no browser calls, so that
+run does not prove model use of the new observations or successful self-repair.
+
+The donation-credit correction was separately checked against public GitHub in
+an isolated database: all 24 historical integrations were credited, within a
+complete 158-fix snapshot. It does not change donated-token accounting.
+
 ## Initial planning and incremental recovery, v0.5.486
 
 The fresh offline expense-app trial used the actual local router, without
