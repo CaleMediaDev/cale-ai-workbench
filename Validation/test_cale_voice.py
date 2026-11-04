@@ -92,8 +92,13 @@ def test_music_releases_only_this_installations_voice_worker(tmp_path):
     ["[]"],
     ['{"ready": true}', "null"],
     ['{"ready": true}', "[]"],
+    ['{"ready": true}', '{}'],
+    ['{"ready": true}', '{"path": null}'],
+    ['{"ready": true}', '{"path": ""}'],
+    ['{"ready": true}', '{"path": []}'],
+    ['{"ready": true}', '{"path": 123}'],
 ])
-def test_non_object_worker_messages_trigger_cleanup(tmp_path, lines):
+def test_invalid_worker_messages_trigger_cleanup(tmp_path, lines):
     with (patch.object(cale_voice, "ROOT", tmp_path),
           patch.object(cale_voice, "ready", return_value=True),
           patch.object(cale_voice, "_worker", None),
