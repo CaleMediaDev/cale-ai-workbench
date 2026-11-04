@@ -77,7 +77,8 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 for link in (result.links or {}).get("internal", []):
                     candidate = link.get("href", "")
                     try:
-                        candidate = normalized_url(urljoin(url, candidate), host)
+                        base_url = getattr(result, "redirected_url", None) or url
+                        candidate = normalized_url(urljoin(base_url, candidate), host)
                     except (OSError, ValueError):
                         continue
                     if candidate not in queued and len(queued) < 100:
