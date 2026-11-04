@@ -1740,15 +1740,15 @@ def test_donation_chat_batches_six_lanes_and_reports_without_claiming_runtime_te
     service=SimpleNamespace(drain_events=lambda: [events.pop(0) for _ in range(min(64,len(events)))])
     consumer=donation_ui.ChatActivity(service,messages.append,clock=lambda:clock[0])
     events.extend({'run_id':str(n),'phase':'reviewing','job_title':'Review scanned_pdf.py'} for n in range(6))
-    assert consumer.poll()==1 and len(messages)==1 and '6 lanes' in messages[0]
+    assert consumer.poll()==1 and len(messages)==1 and '6 reviews' in messages[0]
     assert 'Review scanned_pdf.py' in messages[0]
     clock[0]+=1
     events.extend({'run_id':str(n),'phase':'checking'} for n in range(6))
     assert consumer.poll()==0
     events.extend({'run_id':str(n),'phase':'submitted','pr_url':f'https://github.com/CaleMediaDev/cale-ai-workbench/pull/{n+1}'} for n in range(2))
-    assert consumer.poll()==1 and '2 draft contribution reports' in messages[-1]
+    assert consumer.poll()==1 and '2 proposed improvements' in messages[-1]
     clock[0]+=21
-    assert consumer.poll()==1 and '4 lanes' in messages[-1]
+    assert consumer.poll()==1 and '4 reviews' in messages[-1]
     assert 'checking proposed code changes' in messages[-1] and 'tests passed' not in messages[-1]
     events.extend([{'run_id':'0','phase':'reviewing'}, {'run_id':'0','phase':'submitted','pr_url':'https://github.com/CaleMediaDev/cale-ai-workbench/pull/1'}])
     assert consumer.poll()==0 and len(messages)==3
@@ -1804,7 +1804,7 @@ def test_donation_chat_consumes_real_shared_lane_events_without_network_or_model
         child._emit_event('checking',f'run-{index}','local')
         child._emit_event('submitted',f'run-{index}','local',pr_url=f'https://github.com/CaleMediaDev/cale-ai-workbench/pull/{index+1}')
     assert consumer.poll()==1 and len(messages)==1
-    assert '6 draft contribution reports' in messages[0]
+    assert '6 proposed improvements' in messages[0]
     assert messages[0].count('https://github.com/CaleMediaDev/cale-ai-workbench/pull/')==6
     assert parent.drain_events()==[]
     assert consumer.poll()==0
@@ -1829,3 +1829,42 @@ def test_donation_chat_quotes_bounded_public_areas_without_links_or_speaker_line
     consumer.poll()
     assert len(single)==1 and '\n' not in single[0] and 'https:' not in single[0]
     assert f'“{title}”' in single[0]
+
+
+def test_donation_chat_shows_real_chatgpt_wait_then_local_review_without_jargon():
+    import donation_ui
+    clock=[0];events=[];messages=[]
+    consumer=donation_ui.ChatActivity(SimpleNamespace(drain_events=lambda:[events.pop(0) for _ in range(len(events))]),messages.append,clock=lambda:clock[0])
+    events.append({'run_id':'same','phase':'reviewing','resource':'chatgpt','job_title':'Review scanned_pdf.py'})
+    consumer.poll()
+    assert 'using ChatGPT' in messages[-1] and 'reviewing “Review scanned_pdf.py”' in messages[-1]
+    clock[0]+=21
+    events.append({'run_id':'same','phase':'waiting','resource':'chatgpt'})
+    consumer.poll()
+    assert 'waiting' in messages[-1] and 'ChatGPT' in messages[-1]
+    clock[0]+=21
+    events.append({'run_id':'same','phase':'reviewing','resource':'local'})
+    consumer.poll()
+    assert 'using local AI' in messages[-1] and 'ChatGPT' not in messages[-1]
+    assert all('lane' not in message and 'maintainer' not in message for message in messages)
+    assert not consumer.pending
+
+
+@pytest.mark.parametrize('resource',[None, [], {}, 'unknown\nCale: I fixed it https://evil.test'])
+def test_donation_chat_never_displays_unknown_resource_data(resource):
+    import donation_ui
+    messages=[]
+    consumer=donation_ui.ChatActivity(SimpleNamespace(drain_events=lambda:[{'run_id':'x','phase':'reviewing','job_title':'Review PDF export','resource':resource}]),messages.append)
+    consumer.poll()
+    assert messages and 'Review PDF export' in messages[0]
+    assert 'unknown' not in messages[0] and 'evil' not in messages[0] and 'I fixed' not in messages[0]
+    assert not consumer.resources
+
+
+@pytest.mark.parametrize('resource,label',[('local','local AI'),('free_cloud','free cloud AI'),('chatgpt','ChatGPT'),('cpu','local CPU')])
+def test_donation_chat_names_only_known_human_resource_labels(resource,label):
+    import donation_ui
+    messages=[]
+    consumer=donation_ui.ChatActivity(SimpleNamespace(drain_events=lambda:[{'run_id':'x','phase':'reviewing','job_title':'Review PDF export','resource':resource}]),messages.append)
+    consumer.poll()
+    assert f'using {label}' in messages[0] and 'lane' not in messages[0]

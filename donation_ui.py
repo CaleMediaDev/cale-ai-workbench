@@ -26,6 +26,7 @@ class ChatActivity:
         self.urls = {}
         self.pending_reports = {}
         self.titles = {}
+        self.resources = {}
         self.pending = {}
         self.last_progress = float("-inf")
 
@@ -75,6 +76,13 @@ class ChatActivity:
                 self.titles[run] = title
                 while len(self.titles) > 512:
                     self.titles.pop(next(iter(self.titles)))
+            resource = event.get("resource")
+            if isinstance(resource, str) and resource in {"local", "free_cloud", "chatgpt", "cpu"}:
+                self.resources[run] = resource
+                while len(self.resources) > 512:
+                    self.resources.pop(next(iter(self.resources)))
+            elif "resource" in event:
+                self.resources.pop(run, None)
             if phase == "submitted":
                 url = self.report_url(event.get("pr_url"))
                 if url and url not in self.urls:
@@ -83,7 +91,7 @@ class ChatActivity:
                         self.pending_reports.pop(next(iter(self.pending_reports)))
                     self.pending.pop(run, None)
                 continue
-            key = (run, phase)
+            key = (run, phase, self.resources.get(run))
             if key in self.seen:
                 continue
             self.remember(self.seen, key)
@@ -95,9 +103,9 @@ class ChatActivity:
         if reports:
             # Up to 64 validated results remain one compact chat message. The
             # producer drains at most six concurrent lanes in normal operation.
-            noun = "a draft contribution report" if len(reports) == 1 else f"{len(reports)} draft contribution reports"
+            noun = "a proposed improvement" if len(reports) == 1 else f"{len(reports)} proposed improvements"
             try:
-                self.reply(f"I sent {noun} to GitHub for maintainer review:\n" + "\n".join(
+                self.reply(f"I just sent {noun} to GitHub for review:\n" + "\n".join(
                     (f'“{self.pending_reports[url]}” — ' if self.pending_reports[url] else "") + url for url in reports))
             except Exception:
                 return 0  # Retain this bounded batch for the next Tk tick.
@@ -109,28 +117,40 @@ class ChatActivity:
         if self.pending and self.clock() - self.last_progress >= 20:
             current = list(self.pending.values())
             descriptions = {
-                "reviewing": "reviewing public Cale code",
-                "checking": "checking proposed code changes before sending them for review",
-                "submitting": "sending a draft for maintainer review",
-                "training": "training a small specialist on reviewed public data",
-                "trained": "recorded a local specialist experiment; it is not activated",
-                "no_change": "finished a review without a reliable code change; nothing was sent",
-                "waiting": "waiting for an enabled AI source or GitHub to become available",
-                "error": "paused after a contribution error; no successful report is confirmed",
+                "reviewing": "I'm reviewing public Cale code",
+                "checking": "I'm checking proposed code changes before sending them for review",
+                "submitting": "I'm sending a proposed improvement to GitHub for review",
+                "training": "I'm training a small specialist on reviewed public data",
+                "trained": "I recorded a local specialist experiment; it is not activated",
+                "no_change": "I finished a review without a reliable code change; nothing was sent",
+                "waiting": "I'm waiting for an enabled AI source or GitHub to become available",
+                "error": "I paused after a contribution error; no successful report is confirmed",
             }
             lines = []
             for phase in descriptions:
                 if phase not in current:
                     continue
-                labels = list(dict.fromkeys(self.titles[run] for run, value in self.pending.items()
-                                            if value == phase and self.titles.get(run)))
+                runs = [run for run, value in self.pending.items() if value == phase]
+                labels = list(dict.fromkeys(self.titles[run] for run in runs if self.titles.get(run)))
                 areas = ", ".join(f'“{label}”' for label in labels[:2])
                 if len(labels) > 2:
                     areas += f" and {len(labels) - 2} other areas"
-                line = f"{current.count(phase)} {'lane' if current.count(phase) == 1 else 'lanes'}: {descriptions[phase]}"
-                lines.append(line + (" · " + areas if areas else ""))
+                if phase == "reviewing":
+                    line = ("I'm reviewing " + (areas or "public Cale code") if len(runs) == 1 else
+                            f"I'm working on {len(runs)} reviews" + (" for " + areas if areas else ""))
+                elif phase == "checking" and len(runs) > 1:
+                    line = f"I'm checking proposed code changes from {len(runs)} reviews before sending them for review"
+                    line += " · " + areas if areas else ""
+                else:
+                    line = descriptions[phase] + (" · " + areas if areas else "")
+                names = {"local": "local AI", "free_cloud": "free cloud AI", "chatgpt": "ChatGPT", "cpu": "local CPU"}
+                sources = list(dict.fromkeys(self.resources[run] for run in runs if self.resources.get(run) in names))
+                if sources:
+                    source_text = ", ".join(names[source] for source in sources)
+                    line += (" (" + source_text + ")" if phase in {"waiting", "error"} else " using " + source_text)
+                lines.append(line)
             try:
-                self.reply("Donation activity · " + "; ".join(lines) + ".")
+                self.reply(". ".join(lines) + ".")
             except Exception:
                 return count
             self.pending.clear()

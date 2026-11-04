@@ -3190,7 +3190,7 @@ def test_donation_activity_reaches_real_tk_chat_history_voice_and_link(tmp_path)
             window.update()
             history=task_module.chat_history()
         assert len(history)==1 and history[0]['role']=='assistant' and history[0]['private']
-        assert 'I sent a draft contribution report' in conversation.get('1.0','end')
+        assert 'I just sent a proposed improvement' in conversation.get('1.0','end')
         assert spoken==[history[0]['content']]
         assert conversation.index('@0,0')==first_visible  # Background updates never steal older history.
         links=[tag for tag in conversation.tag_names() if tag.startswith('link-')]
