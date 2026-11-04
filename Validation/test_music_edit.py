@@ -110,6 +110,65 @@ def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeyp
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize("concurrent_output", [False, True])
+def test_edit_music_timeout_cleans_staging_and_preserves_originals(tmp_path, monkeypatch, concurrent_output):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original recording"
+    other_audio = b"audio created by another caller"
+    source.write_bytes(original)
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    staged_paths = []
+
+    def timeout(command, **kwargs):
+        staged = music_edit.Path(command[-1])
+        staged_paths.append(staged)
+        assert staged != output
+        assert staged.suffix == output.suffix
+        assert "-n" in command
+        assert kwargs["timeout"] == 3600
+        staged.write_bytes(b"partial audio")
+        if concurrent_output:
+            output.write_bytes(other_audio)
+        raise music_edit.subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(music_edit.subprocess, "run", timeout)
+
+    for _ in range(2 if not concurrent_output else 1):
+        with pytest.raises(music_edit.subprocess.TimeoutExpired):
+            music_edit.edit_music(str(source), str(output))
+        assert source.read_bytes() == original
+        assert all(not path.parent.exists() for path in staged_paths)
+        if concurrent_output:
+            assert output.read_bytes() == other_audio
+        else:
+            assert not output.exists()
+
+
+def test_edit_music_publication_preserves_concurrent_output(tmp_path, monkeypatch):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    source.write_bytes(b"original recording")
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    staged_paths = []
+
+    def success(command, **kwargs):
+        staged = music_edit.Path(command[-1])
+        staged_paths.append(staged)
+        staged.write_bytes(b"finished edit")
+        output.write_bytes(b"concurrent recording")
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", success)
+
+    with pytest.raises(FileExistsError):
+        music_edit.edit_music(str(source), str(output))
+
+    assert output.read_bytes() == b"concurrent recording"
+    assert source.read_bytes() == b"original recording"
+    assert all(not path.parent.exists() for path in staged_paths)
+
+
 def test_mix_music_refuses_to_replace_source(tmp_path):
     first = tmp_path / "first.wav"
     second = tmp_path / "second.wav"
