@@ -305,6 +305,13 @@ class BusinessContactTests(unittest.TestCase):
         self.assertEqual(result["sources"][0]["phone_links"], [])
         self.assertEqual(result["sources"][0]["visible_numbers"], ["(517) 258-1313"])
 
+    def test_visible_phone_limit_counts_distinct_numbers(self):
+        numbers = [f"(517) 555-010{i}" for i in range(10)]
+        text = (f"Phone: {numbers[0]}\n" * 8) + "\n".join(
+            f"Phone: {number}" for number in numbers[1:]
+        )
+        self.assertEqual(web_tools.visible_phone_numbers(text), numbers[:8])
+
     def test_unlabeled_number_is_not_treated_as_contact(self):
         self.assertEqual(web_tools.visible_phone_numbers("Reference: 5172581313"), [])
         self.assertEqual(web_tools.visible_phone_numbers("Fax: (517) 258-1313"), [])
