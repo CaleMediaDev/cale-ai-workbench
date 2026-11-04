@@ -1,12 +1,153 @@
 """Bounded local training with held-out evaluation and separate model artifacts."""
 
 import csv
+import hashlib
+import io
 import json
 import random
+import re
 import time
 from pathlib import Path
+from urllib.parse import quote, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parent
+
+# Reviewed public sources are pinned to immutable bytes. A catalogue entry is
+# evidence about a particular dataset, not permission to train on any repo file.
+GITHUB_DATASETS = {
+    "clinc150": {
+        "repository": "clinc/oos-eval",
+        "commit": "828f8093932c8fe6ca7936c3d2e52903b1c523de",
+        "purpose": "intent classification and out-of-scope evaluation",
+        "license": "CC-BY-3.0", "license_path": "LICENSE",
+        "attribution": "Larson et al. (2019), An Evaluation Dataset for Intent Classification and Out-of-Scope Prediction",
+        "files": {
+            "LICENSE": "e6bc9e9c474700b708f568bac9e5a8a9bcb2b1dad53442f5ba449fcb848b8e76",
+            "data/data_full.json": "36923c3705a59e08fe9c3883d8bc2dd966ef93e22cb78ac41171782a698d56e0"},
+    },
+}
+MAX_DATASET_FILE_BYTES = 8 * 1024 * 1024
+MAX_DATASET_BYTES = 32 * 1024 * 1024
+
+
+class _GitHubDataRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        parsed = urlsplit(new_url)
+        if (parsed.scheme != "https" or parsed.hostname != "raw.githubusercontent.com"
+                or parsed.username is not None or parsed.port not in (None, 443)):
+            raise ValueError("Dataset redirect left the public GitHub data host")
+        return super().redirect_request(request, response, code, message, headers, new_url)
+
+
+def _github_dataset_bytes(url, limit):
+    """Read actual bytes with a cap; no account, archive extraction or script execution."""
+    parsed = urlsplit(url)
+    if (parsed.scheme != "https" or parsed.hostname != "raw.githubusercontent.com"
+            or parsed.username is not None or parsed.port not in (None, 443)):
+        raise ValueError("Use an immutable public GitHub raw-file URL")
+    request = Request(url, headers={"User-Agent": "Cale-AI-Workbench-datasets"})
+    with build_opener(_GitHubDataRedirect()).open(request, timeout=30) as response:
+        data = response.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("Training dataset file exceeds its download budget")
+    return data
+
+
+def training_dataset_catalog(purpose=""):
+    """Return source metadata; catalogue lookup never downloads or trains."""
+    words = set(re.findall(r"\w+", str(purpose).lower()))
+    return [{"id": name, **json.loads(json.dumps(item))} for name, item in GITHUB_DATASETS.items()
+            if not words or words.intersection(re.findall(r"\w+", name + " " + item["purpose"]))]
+
+
+def _dataset_manifest(dataset_id, entry, size):
+    return {"dataset_id": dataset_id, "repository": entry["repository"], "commit": entry["commit"],
+            "source_url": "https://github.com/" + entry["repository"] + "/tree/" + entry["commit"],
+            "license": entry["license"], "license_path": "files/" + entry["license_path"],
+            "attribution": entry["attribution"], "files": dict(entry["files"]), "downloaded_bytes": size,
+            "source_kind": "public_github", "code_executed": False, "trained": False}
+
+
+def _cached_dataset(folder, dataset_id, entry):
+    """Only exact catalogue bytes count as cache; never overwrite modified data."""
+    def read(path, limit):
+        if path.is_symlink() or not path.resolve().is_relative_to(folder):
+            raise ValueError("Dataset cache points outside its folder")
+        with path.open("rb") as stream:
+            data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("Dataset cache exceeds its read budget")
+        return data
+    try:
+        stored = json.loads(read(folder / "source.json", 64000))
+        if any(stored.get(key) != value for key, value in (
+                ("dataset_id", dataset_id), ("repository", entry["repository"]),
+                ("commit", entry["commit"]), ("files", entry["files"]))):
+            raise ValueError("Dataset cache does not match the reviewed source")
+        size = 0
+        for path, digest in entry["files"].items():
+            data = read(folder / "files" / path, min(MAX_DATASET_FILE_BYTES, MAX_DATASET_BYTES - size))
+            if hashlib.sha256(data).hexdigest() != digest:
+                raise ValueError("Dataset cache changed after download")
+            size += len(data)
+        return dict(_dataset_manifest(dataset_id, entry, size), dataset_folder=str(folder), cached=True)
+    except (OSError, ValueError, TypeError, AttributeError, RecursionError) as error:
+        raise ValueError("Existing dataset folder is modified or incomplete; preserve it and use a new empty folder") from error
+
+
+def download_training_dataset(dataset_id, output_folder):
+    """Automatically acquire a reviewed, pinned public dataset when a job needs it.
+
+    Raw files and attribution remain beside the derived training files. This
+    operation supplies data only: it does not train, activate, execute fetched
+    code, or infer that a public benchmark matches the user's actual task.
+    """
+    import pc_offline
+
+    if dataset_id not in GITHUB_DATASETS:
+        raise ValueError("Choose a reviewed source from training_dataset_catalog")
+    entry = GITHUB_DATASETS[dataset_id]
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", entry["repository"]) or not re.fullmatch(
+            r"[a-f0-9]{40}", entry["commit"]):
+        raise ValueError("Dataset catalogue needs a repository and full commit hash")
+    files = entry["files"]
+    if not 1 <= len(files) <= 12 or entry["license_path"] not in files:
+        raise ValueError("Dataset catalogue must retain its pinned license file")
+    for path, digest in files.items():
+        parts = path.split("/")
+        if (not path or len(path) > 240 or any(part in {"", ".", ".."} or ":" in part or "\\" in part
+                or part.endswith((" ", ".")) or re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?", part)
+                for part in parts) or not re.fullmatch(r"[a-f0-9]{64}", digest)):
+            raise ValueError("Dataset catalogue contains an unsafe path or checksum")
+    folder = Path(output_folder).resolve()
+    if folder.exists() and any(folder.iterdir()):
+        return _cached_dataset(folder, dataset_id, entry)
+    if pc_offline.offline():
+        raise RuntimeError("Dataset downloads wait until internet access is enabled")
+    downloaded, size = {}, 0
+    for path, digest in files.items():
+        url = ("https://raw.githubusercontent.com/" + entry["repository"] + "/" + entry["commit"]
+               + "/" + quote(path, safe="/"))
+        data = _github_dataset_bytes(url, min(MAX_DATASET_FILE_BYTES, MAX_DATASET_BYTES - size))
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError("Dataset checksum differs from the reviewed source")
+        downloaded[path] = data
+        size += len(data)
+    # Publish only after every download and checksum succeeds. An I/O failure
+    # leaves inspectable partial data rather than deleting possibly edited files.
+    folder.mkdir(parents=True, exist_ok=True)
+    for path, data in downloaded.items():
+        target = folder / "files" / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.resolve().is_relative_to(folder):
+            raise ValueError("Dataset destination left its output folder")
+        with target.open("xb") as stream:
+            stream.write(data)
+    manifest = _dataset_manifest(dataset_id, entry, size)
+    with (folder / "source.json").open("x", encoding="utf-8") as stream:
+        json.dump(manifest, stream, indent=2)
+    return dict(manifest, dataset_folder=str(folder), cached=False)
 
 
 def fresh_folder(path):

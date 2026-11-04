@@ -1096,6 +1096,27 @@ async def voice_file(text: str, output_path: str) -> dict:
 
 
 @server.tool()
+def find_training_datasets(purpose: str = "") -> dict:
+    """Find reviewed public GitHub datasets for a specialist; lookup downloads nothing."""
+    import small_training
+    return {"datasets": small_training.training_dataset_catalog(purpose)}
+
+
+@server.tool()
+async def acquire_training_dataset(project_folder: str, dataset_id: str) -> dict:
+    """Download a pinned public training dataset into this task, retaining source/license hashes; cached data works offline. Does not train or activate a model."""
+    import small_training
+    root = registered_project(project_folder)
+    entry = small_training.GITHUB_DATASETS.get(dataset_id)
+    if entry is None:
+        raise ValueError("Choose a dataset from find_training_datasets")
+    destination = (root / ".local-ai/training-datasets" / (dataset_id + "-" + entry["commit"][:12])).resolve()
+    if not destination.is_relative_to(root):
+        raise ValueError("Training data must stay inside the task folder")
+    return await asyncio.to_thread(small_training.download_training_dataset, dataset_id, destination)
+
+
+@server.tool()
 async def train_text_classifier(
     dataset_path: str,
     output_folder: str,

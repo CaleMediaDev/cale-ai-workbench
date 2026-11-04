@@ -12,6 +12,94 @@ import pytest
 import toolbox_mcp
 
 
+def github_dataset_fixture(monkeypatch):
+    import hashlib
+    import pc_offline
+    import small_training
+    payloads = {"LICENSE": b"Fixture license attribution", "data/train.json": b'[["example", "label"]]'}
+    entry = {"repository": "example/dataset", "commit": "a" * 40,
+             "purpose": "intent classification", "license": "fixture", "license_path": "LICENSE",
+             "attribution": "Synthetic fixture, not an approved public training source",
+             "files": {path: hashlib.sha256(data).hexdigest() for path, data in payloads.items()}}
+    monkeypatch.setattr(small_training, "GITHUB_DATASETS", {"fixture": entry})
+    monkeypatch.setattr(pc_offline, "offline", lambda: False)
+    return small_training, entry, payloads
+
+
+def test_github_training_data_is_pinned_attributed_and_reusable_offline(tmp_path, monkeypatch):
+    training, entry, payloads = github_dataset_fixture(monkeypatch)
+    calls = []
+    def fetch(url, limit):
+        assert url.startswith("https://raw.githubusercontent.com/example/dataset/" + "a" * 40 + "/")
+        calls.append(url)
+        return payloads[url.split("a" * 40 + "/", 1)[1]]
+    monkeypatch.setattr(training, "_github_dataset_bytes", fetch)
+    folder = tmp_path / "dataset"
+    result = training.download_training_dataset("fixture", folder)
+    assert len(calls) == 2 and not result["cached"]
+    assert result["commit"] == "a" * 40 and result["license"] == "fixture"
+    assert not result["trained"] and not result["code_executed"]
+    assert (folder / "files/LICENSE").read_bytes() == payloads["LICENSE"]
+    assert json.loads((folder / "source.json").read_text())["files"] == entry["files"]
+    import pc_offline
+    monkeypatch.setattr(pc_offline, "offline", lambda: True)
+    monkeypatch.setattr(training, "_github_dataset_bytes", lambda *args: pytest.fail("Cache used the internet"))
+    assert training.download_training_dataset("fixture", folder)["cached"]
+
+
+def test_github_training_data_corruption_never_publishes_or_overwrites(tmp_path, monkeypatch):
+    training, entry, payloads = github_dataset_fixture(monkeypatch)
+    monkeypatch.setattr(training, "_github_dataset_bytes", lambda url, limit: b"changed")
+    output = tmp_path / "bad"
+    with pytest.raises(ValueError, match="checksum"):
+        training.download_training_dataset("fixture", output)
+    assert not output.exists()
+    output.mkdir()
+    (output / "mine.txt").write_text("Keep my data")
+    monkeypatch.setattr(training, "_github_dataset_bytes", lambda *args: pytest.fail("Overwrite attempted"))
+    with pytest.raises(ValueError, match="preserve"):
+        training.download_training_dataset("fixture", output)
+    assert (output / "mine.txt").read_text() == "Keep my data"
+
+
+@pytest.mark.parametrize("path", ["../escape.json", "/absolute.json", "C:/bad.json", "data\\escape.json", "CON.json"])
+def test_github_training_data_rejects_unsafe_catalog_paths_before_download(tmp_path, monkeypatch, path):
+    training, entry, payloads = github_dataset_fixture(monkeypatch)
+    entry["files"][path] = "a" * 64
+    monkeypatch.setattr(training, "_github_dataset_bytes", lambda *args: pytest.fail("Unsafe path downloaded"))
+    with pytest.raises(ValueError, match="unsafe"):
+        training.download_training_dataset("fixture", tmp_path / "out")
+
+
+def test_github_training_http_reads_are_bounded_and_redirects_stay_on_github(monkeypatch):
+    import small_training
+    reads = []
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, size):
+            reads.append(size)
+            return b"x" * size
+    class Opener:
+        def open(self, request, timeout): return Response()
+    monkeypatch.setattr(small_training, "build_opener", lambda *args: Opener())
+    with pytest.raises(ValueError, match="budget"):
+        small_training._github_dataset_bytes("https://raw.githubusercontent.com/a/b/commit/data.json", 16)
+    assert reads == [17]
+    with pytest.raises(ValueError, match="redirect"):
+        small_training._GitHubDataRedirect().redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/private")
+
+
+def test_github_training_tool_uses_registered_project_and_deterministic_cache(tmp_path, monkeypatch):
+    training, entry, payloads = github_dataset_fixture(monkeypatch)
+    monkeypatch.setattr(toolbox_mcp, "registered_project", lambda path: tmp_path)
+    monkeypatch.setattr(training, "_github_dataset_bytes", lambda url, limit: payloads[url.split("a" * 40 + "/", 1)[1]])
+    result = asyncio.run(toolbox_mcp.acquire_training_dataset("registered", "fixture"))
+    assert result["dataset_folder"] == str(tmp_path / ".local-ai/training-datasets/fixture-aaaaaaaaaaaa")
+    assert asyncio.run(toolbox_mcp.acquire_training_dataset("registered", "fixture"))["cached"]
+    assert toolbox_mcp.find_training_datasets("intent")["datasets"][0]["id"] == "fixture"
+
+
 @pytest.mark.parametrize("already_exited", [False, True])
 def test_media_communication_error_stops_and_reaps_worker(tmp_path, already_exited):
     python = tmp_path / "Media/python/Scripts/python.exe"
