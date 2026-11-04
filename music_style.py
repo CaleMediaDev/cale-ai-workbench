@@ -95,7 +95,7 @@ def requires_sustained_vocals(prompt: str, lyrics: str = "",
         return False
     if lyrics.strip():
         return True
-    request = prompt.split("Past user feedback", 1)[0]
+    request, _, _ = _clean_negations(prompt.split("Past user feedback", 1)[0])
     return not (VOCAL_TEXTURE.search(request) and not LEAD_VOCALS.search(request))
 
 
