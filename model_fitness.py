@@ -172,7 +172,7 @@ catch (_) { console.log(JSON.stringify({valid_code:false})); }
         return {"valid_code": False}
     try:
         checks = json.loads(result.stdout)
-    except (json.JSONDecodeError, RecursionError):
+    except (ValueError, RecursionError):
         return {"valid_code": False}
     return (
         checks
