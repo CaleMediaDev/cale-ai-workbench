@@ -272,6 +272,10 @@ async def lifespan(_server):
         ],
     }
     async with AsyncExitStack() as stack:
+        # Startup can exit before reaching the finally block around yield.
+        stack.callback(SESSIONS.clear)
+        stack.callback(CATALOG.clear)
+        stack.callback(ERRORS.clear)
         for group, args in specs.items():
             # Keep the other backend and our own local tools alive if one fails.
             params = StdioServerParameters(

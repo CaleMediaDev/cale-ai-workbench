@@ -295,6 +295,66 @@ def test_cancelled_backend_initialization_closes_partial_backend():
     asyncio.run(check())
 
 
+def test_cancelled_second_backend_startup_clears_first_backend_registries():
+    async def check():
+        initializing = asyncio.Event()
+        closed = []
+
+        @asynccontextmanager
+        async def fake_stdio(params):
+            group = "rea" if "rea.mjs" in " ".join(params.args) else "devtools"
+            try:
+                yield (group, object())
+            finally:
+                closed.append(group)
+
+        class FakeSession:
+            def __init__(self, group):
+                self.group = group
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                pass
+
+            async def initialize(self):
+                if self.group == "devtools":
+                    initializing.set()
+                    await asyncio.Future()
+
+            async def list_tools(self):
+                return SimpleNamespace(tools=[SimpleNamespace(
+                    name="inspect",
+                    model_dump=lambda **_kwargs: {"description": "Inspect an artifact"},
+                )])
+
+        async def consume():
+            async with toolbox_mcp.lifespan(None):
+                raise AssertionError("Cancelled startup must not yield")
+
+        with (patch.object(toolbox_mcp, "stdio_client", fake_stdio),
+              patch.object(toolbox_mcp, "ClientSession",
+                           lambda reader, *_args, **_kwargs: FakeSession(reader)),
+              patch.dict(toolbox_mcp.SESSIONS, {}, clear=True),
+              patch.dict(toolbox_mcp.CATALOG, {}, clear=True),
+              patch.dict(toolbox_mcp.ERRORS, {}, clear=True)):
+            task = asyncio.create_task(consume())
+            await initializing.wait()
+            assert "rea" in toolbox_mcp.SESSIONS
+            assert "rea.inspect" in toolbox_mcp.CATALOG
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert closed == ["devtools", "rea"]
+            assert toolbox_mcp.SESSIONS == {}
+            assert toolbox_mcp.CATALOG == {}
+            assert toolbox_mcp.ERRORS == {}
+            assert toolbox_mcp.toolbox_status()["backends"]["rea"]["available"] is False
+
+    asyncio.run(check())
+
+
 def test_exceptional_lifespan_exit_clears_closed_backend_registries():
     closed = []
 
