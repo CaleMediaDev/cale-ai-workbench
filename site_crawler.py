@@ -76,6 +76,8 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 project_memory.index_file(project, path)
                 pages.append({"url": url, "file": str(path), "characters": len(markdown)})
                 for link in (result.links or {}).get("internal", []):
+                    if not isinstance(link, dict):
+                        continue
                     candidate = link.get("href", "")
                     if not isinstance(candidate, str):
                         continue
