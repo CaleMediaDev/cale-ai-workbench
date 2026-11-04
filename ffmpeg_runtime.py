@@ -17,8 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _thread: threading.Thread | None = None
-_last_attempt: float | None = None
-_last_attempt_root: Path | None = None
+_last_attempts: dict[Path, float] = {}
+_attempt_lock = threading.Lock()
+MAX_REPAIR_ROOTS = 64
 
 
 def executable(root: Path = ROOT) -> Path:
@@ -106,24 +107,30 @@ def ensure(root: Path = ROOT) -> Path:
 
 def start_background(root: Path = ROOT) -> None:
     """Quietly repair a missing executable after an update or accidental deletion."""
-    global _thread, _last_attempt, _last_attempt_root
+    global _thread
     if working(root) or (_thread is not None and _thread.is_alive()):
         return
     resolved_root = Path(root).resolve()
-    if (_last_attempt is not None and _last_attempt_root == resolved_root
-            and time.monotonic() - _last_attempt < 300):
-        return
-    _last_attempt = time.monotonic()
-    _last_attempt_root = resolved_root
+    with _attempt_lock:
+        now = time.monotonic()
+        previous = _last_attempts.get(resolved_root)
+        if previous is not None and now - previous < 300:
+            return
+        # Keep each installation's failure independently without growing a
+        # permanent registry of every root ever inspected by this process.
+        _last_attempts.pop(resolved_root, None)
+        _last_attempts[resolved_root] = now
+        while len(_last_attempts) > MAX_REPAIR_ROOTS:
+            _last_attempts.pop(next(iter(_last_attempts)))
 
     def repair() -> None:
-        global _last_attempt
         try:
             ensure(root)
         except (OSError, RuntimeError, subprocess.TimeoutExpired):
             pass  # The checklist remains in attention; retry after five minutes.
         else:
-            _last_attempt = None
+            with _attempt_lock:
+                _last_attempts.pop(resolved_root, None)
 
     _thread = threading.Thread(target=repair, name="ffmpeg-repair", daemon=True)
     _thread.start()
