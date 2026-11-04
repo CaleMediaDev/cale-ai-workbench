@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import json
+import math
 import os
 import queue
 import sqlite3
@@ -20,6 +21,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 SECONDS = 180
+FADE_SECONDS = 8
+PRELOAD_SECONDS = 15
 LEGACY_CLUB = "Instrumental melodic techno, electronic drums and rich synthesizers, no guitars, energetic night-drive atmosphere"
 BRAND_LYRICS = "Original lyrics about Cale Media, local SEO and marketing, helping local businesses get found. Sing the name Cale Media in a memorable chorus. Clear lead vocals through verses and choruses."
 DEFAULT_STATIONS = (
@@ -130,11 +133,12 @@ def foreground_music_busy():
     return False
 
 
-class Player:
-    """A single Windows audio channel; no external player windows or packages."""
+class AudioDeck:
+    """One pre-loadable Windows audio channel, owned by the radio worker."""
     def __init__(self):
         self.alias = "cale_radio_" + uuid.uuid4().hex
         self.opened = False
+        self.path = None
         self.volume = 65
 
     def command(self, text):
@@ -146,17 +150,24 @@ class Player:
             raise RuntimeError("Windows could not play this radio track.")
         return buffer.value
 
-    def play(self, path):
+    def open(self, path):
         self.stop()
         self.command(f'open "{Path(path).resolve()}" type mpegvideo alias {self.alias}')
         self.opened = True
+        self.path = str(Path(path).resolve())
         try:
             self.set_volume(self.volume)
             self.command(f"set {self.alias} time format milliseconds")
-            self.command(f"play {self.alias}")
         except Exception:
             self.stop()
             raise
+
+    def start(self):
+        self.command(f"play {self.alias}")
+
+    def play(self, path):
+        self.open(path)
+        self.start()
 
     def busy(self):
         return self.opened and self.command(f"status {self.alias} mode") in ("playing", "paused")
@@ -168,17 +179,17 @@ class Player:
                 int(self.command(f"status {self.alias} length"))/1000)
 
     def pause(self):
-        if self.opened:
+        if self.opened and self.command(f"status {self.alias} mode") == "playing":
             self.command(f"pause {self.alias}")
 
     def resume(self):
-        if self.opened:
+        if self.opened and self.command(f"status {self.alias} mode") == "paused":
             self.command(f"resume {self.alias}")
 
     def set_volume(self, value):
-        self.volume = max(0, min(100, int(value)))
+        self.volume = max(0, min(100, float(value)))
         if self.opened:
-            self.command(f"setaudio {self.alias} volume to {self.volume * 10}")
+            self.command(f"setaudio {self.alias} volume to {round(self.volume * 10)}")
 
     def stop(self):
         if self.opened:
@@ -186,6 +197,124 @@ class Player:
                 self.command(f"close {self.alias}")
             finally:
                 self.opened = False
+                self.path = None
+
+
+class Player:
+    """Two preloaded decks with an equal-power crossfade; no UI-thread audio work."""
+    def __init__(self, deck_factory=AudioDeck, clock=time.monotonic):
+        self.factory, self.now = deck_factory, clock
+        self.active = deck_factory()
+        self.outgoing = self.prepared = None
+        self.volume = 65
+        self.paused_at = None
+        self.fade_start = self.fade_seconds = 0
+
+    @property
+    def mixing(self):
+        return self.outgoing is not None
+
+    @property
+    def alias(self):
+        return self.active.alias
+
+    def command(self, text):
+        return self.active.command(text)
+
+    def play(self, path):
+        self.stop()
+        self.active.set_volume(self.volume)
+        self.active.play(path)
+
+    def prepare(self, path):
+        path = str(Path(path).resolve())
+        if self.prepared is not None and self.prepared.path == path:
+            return
+        if self.prepared is not None:
+            self.prepared.stop()
+        self.prepared = self.factory()
+        try:
+            self.prepared.set_volume(0)
+            self.prepared.open(path)
+        except Exception:
+            self.prepared.stop()
+            self.prepared = None
+            raise
+
+    def blend(self, path, seconds=FADE_SECONDS):
+        if self.mixing:
+            return False
+        self.prepare(path)
+        # Keep the outgoing channel intact if the new channel cannot start.
+        self.prepared.start()
+        self.outgoing, self.active = self.active, self.prepared
+        self.prepared = None
+        self.fade_start = self.now()
+        self.fade_seconds = max(0.1, float(seconds))
+        self.advance_mix()
+        return True
+
+    def advance_mix(self):
+        if not self.mixing or self.paused_at is not None:
+            return
+        fraction = max(0, min(1, (self.now()-self.fade_start)/self.fade_seconds))
+        self.active.set_volume(self.volume*math.sin(fraction*math.pi/2))
+        self.outgoing.set_volume(self.volume*math.cos(fraction*math.pi/2))
+        if fraction >= 1:
+            self.outgoing.stop()
+            self.outgoing = None
+
+    def protected_paths(self):
+        return {deck.path for deck in (self.active, self.outgoing, self.prepared) if deck is not None and deck.path}
+
+    def busy(self):
+        return self.active.busy()
+
+    def clock(self):
+        return self.active.clock()
+
+    def pause(self):
+        if self.paused_at is None:
+            self.paused_at = self.now()
+            for deck in (self.active, self.outgoing):
+                if deck is not None:
+                    deck.pause()
+
+    def resume(self):
+        if self.paused_at is not None:
+            if self.mixing:
+                self.fade_start += self.now()-self.paused_at
+            self.paused_at = None
+            for deck in (self.active, self.outgoing):
+                if deck is not None:
+                    deck.resume()
+
+    def set_volume(self, value):
+        self.volume = max(0, min(100, int(value)))
+        if self.mixing:
+            # A paused fade still applies the saved point on its gain curve.
+            paused = self.paused_at
+            if paused is not None:
+                self.fade_start += self.now()-paused
+                self.paused_at = None
+            self.advance_mix()
+            if paused is not None:
+                self.paused_at = self.now()
+        else:
+            self.active.set_volume(self.volume)
+
+    def stop(self):
+        error = None
+        for deck in (self.active, self.outgoing, self.prepared):
+            if deck is not None:
+                try:
+                    deck.stop()
+                except Exception as failure:
+                    error = error or failure
+        self.outgoing = self.prepared = None
+        self.paused_at = None
+        if error is not None:
+            raise error
 
 
 class Service:
@@ -200,6 +329,8 @@ class Service:
         self.suspended = True
         self.closed = threading.Event()
         self.current = None
+        self.repeating = False
+        self.skip_requested = False
         self.message = "Pick a station. Fresh three-minute tracks, made on this PC."
         self.ready = 0
         self.progress = 0
@@ -232,6 +363,8 @@ class Service:
             self.player.stop()
             self.station = station
             self.current = None
+            self.repeating = False
+            self.skip_requested = False
             self.ready = self.progress = 0
             self.enabled, self.paused = True, False
             self.retry_at = 0
@@ -254,6 +387,7 @@ class Service:
 
     def _stop(self):
         with self.lock:
+            self.skip_requested = False
             self.enabled = False
             self.paused = False
             self.player.stop()
@@ -292,6 +426,8 @@ class Service:
         self.view = {"message": "Paused" if self.paused else self.message, "ready": self.ready,
                      "progress": self.progress, "playing": self.enabled, "paused": self.paused,
                      "on_air": on_air, "elapsed": elapsed, "duration": duration,
+                     "blending": bool(getattr(self.player, "mixing", False)),
+                     "next_loaded": getattr(self.player, "prepared", None) is not None,
                      "local_tokens": self.local_tokens, "radio_tokens": self.radio_tokens,
                      "tracks_made": self.tracks_made, "rendering": rendering}
 
@@ -305,7 +441,10 @@ class Service:
             elif action == "stop":
                 self._stop()
             elif action == "skip":
-                self.player.stop()
+                if hasattr(self.player, "prepare"):
+                    self.skip_requested = not getattr(self.player, "mixing", False)
+                else:
+                    self.player.stop()
             elif action == "volume":
                 self.player.set_volume(value)
 
@@ -332,6 +471,43 @@ class Service:
             self._update(self.current["id"], "error")
             self.current = None
             raise
+
+    def _prepare_transition(self, ready):
+        """Stage the next recording before EOF, then overlap both live decks."""
+        if not self.current or not hasattr(self.player, "prepare") or getattr(self.player, "mixing", False):
+            return
+        elapsed, duration = self.player.clock()
+        if duration <= 0:
+            return
+        remaining = max(0, duration-elapsed)
+        if not ready:
+            self.skip_requested = False
+        use_fresh = (self.repeating or self.skip_requested) and bool(ready)
+        if remaining > PRELOAD_SECONDS and not ready:
+            return
+        target = ready[0] if ready else self.current
+        try:
+            self.player.prepare(target["path"])
+            if remaining > FADE_SECONDS and not use_fresh:
+                return
+            if not self.player.blend(target["path"], max(0.1, min(FADE_SECONDS, remaining))):
+                return
+        except Exception:
+            if target["id"] != self.current["id"]:
+                self._update(target["id"], "error")
+                ready.remove(target)
+            self.message = "On air · skipping an unplayable buffered track"
+            return  # The current deck keeps playing after a preload/start error.
+        if target["id"] != self.current["id"]:
+            self._update(self.current["id"], "played")
+            self.current = ready.pop(0)
+            self._update(self.current["id"], "playing")
+            self.repeating = False
+        else:
+            self.repeating = True
+        self.skip_requested = False
+        self.message = ("On air · DJ blend into the next track" if not self.repeating else
+                        "On air · blending a cached repeat while the next song finishes")
 
     def _tick(self):
         import music_backend
@@ -361,11 +537,18 @@ class Service:
             signature = hashlib.sha256((self.station["prompt"]+str(self.station["instrumental"])).encode()).hexdigest()
             ready = [r for r in rows if r["station"] == self.station["id"] and r["config"] == signature and r["status"] == "ready" and Path(r["path"]).is_file()]
             self.ready = len(ready)
+            if self.player.busy():
+                self._prepare_transition(ready)
+                self.ready = len(ready)
+                if not getattr(self.player, "mixing", False) and self.message.startswith("On air · DJ blend"):
+                    self.message = "On air · next tracks are made in the background"
             if not self.player.busy():
                 if ready:
                     if self.current:
                         self._update(self.current["id"], "played")
                     self.current = ready.pop(0)
+                    self.repeating = False
+                    self.skip_requested = False
                     self._play_current()
                     self._update(self.current["id"], "playing")
                     self.ready = len(ready)
@@ -398,8 +581,11 @@ class Service:
             # Bound disk use; never delete an upload, song task, or active track.
             played = [r for r in rows if r["status"] in ("played", "error", "cancelled") or
                       r["status"] == "ready" and (r["station"] != self.station["id"] or r["config"] != signature)]
+            protected = getattr(self.player, "protected_paths", lambda: set())()
             for row in played[:-5]:
                 path = Path(row["path"])
+                if str(path.resolve()) in protected:
+                    continue  # An outgoing fade and preloaded deck still own these files.
                 expected = self.root / "Radio/audio" / row["station"] / (row["id"] + ".wav")
                 if path.resolve() == expected.resolve() and path.resolve().is_relative_to((self.root / "Radio/audio").resolve()):
                     path.unlink(missing_ok=True)
@@ -407,15 +593,20 @@ class Service:
                     self._update(row["id"], "pruned")
 
     def _loop(self):
+        next_tick = 0
         while not self.closed.is_set():
             try:
-                self.tick()
+                getattr(self.player, "advance_mix", lambda: None)()
+                if time.monotonic() >= next_tick:
+                    self.tick()
+                    next_tick = time.monotonic()+0.5
             except Exception as error:
                 with self.lock:
                     self.message = "Radio will retry: " + str(error)[:100]
                     self.retry_at = time.monotonic() + 30
-            self._publish()
-            self.closed.wait(1)
+                    next_tick = time.monotonic()+1
+                self._publish()
+            self.closed.wait(0.05 if getattr(self.player, "mixing", False) else 0.15)
         self.player.stop()
 
     def close(self):
@@ -479,7 +670,7 @@ class Controls:
         transport.pack(fill="x", pady=(8, 0))
         self.play = ttk.Button(transport, text="Play", width=7, command=self.toggle, style="Radio.Play.TButton")
         self.play.pack(side="left")
-        self.next = ttk.Button(transport, text="Next", width=5, command=service.skip, style="Radio.TButton")
+        self.next = ttk.Button(transport, text="Mix next", width=8, command=service.skip, style="Radio.TButton")
         self.next.pack(side="left", padx=(7, 4))
         ttk.Button(transport, text="Stop", width=5, command=service.stop, style="Radio.TButton").pack(side="left")
         self.previous_volume = 65
@@ -538,7 +729,7 @@ class Controls:
             self.details.pack(fill="x")
         elif not state["playing"]:
             self.details.pack_forget()
-        self.text.set(state["message"] + f"  ·  {state['ready']} tracks ready")
+        self.text.set(state["message"] + f"  ·  {state['ready']} tracks ready" + (" · next deck loaded" if state.get("next_loaded") else ""))
         if state.get("rendering"):
             self.bar.pack(fill="x")
         else:
@@ -549,7 +740,7 @@ class Controls:
             return f"{int(value)//60}:{int(value)%60:02d}"
         self.clock.set(clock(elapsed)+" / "+clock(duration))
         self.timeline.configure(maximum=duration, value=min(elapsed, duration))
-        self.badge.configure(text="PAUSED" if state["paused"] else "ON AIR" if state.get("on_air") else "BUFFERING" if state["playing"] else "READY",
+        self.badge.configure(text="PAUSED" if state["paused"] else "DJ BLEND" if state.get("blending") else "ON AIR" if state.get("on_air") else "BUFFERING" if state["playing"] else "READY",
                              background="#153a36" if state.get("on_air") else "#252642", foreground="#70edce" if state.get("on_air") else "#bdb3ff")
         for value, key in zip(self.metrics, ("tracks_made", "radio_tokens", "local_tokens"), strict=True):
             number = state.get(key)
@@ -558,7 +749,7 @@ class Controls:
         if 0 <= index < len(self.items):
             self.kind.set(("INSTRUMENTAL" if self.items[index]["instrumental"] else "VOCALS")+" · 3 MIN · LOCAL")
         self.play.configure(text="Resume" if state["paused"] else "Pause" if state["playing"] else "Play")
-        self.next.configure(state="normal" if state["playing"] and state["ready"] else "disabled")
+        self.next.configure(state="normal" if state["playing"] and state["ready"] and not state["paused"] and not state.get("blending") else "disabled")
         self.window.after(500, self.poll)
 
     def station_dialog(self, editing=False):

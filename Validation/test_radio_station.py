@@ -245,6 +245,224 @@ def test_unplayable_cache_is_retired_so_the_station_can_recover(tmp_path):
         assert player.played == [calls[1][1]]
 
 
+class Deck:
+    """Audio boundary with a clock, so overlap and paused timing are testable."""
+    def __init__(self, now):
+        self.now = now
+        self.path = None
+        self.opened = self.running = self.paused = False
+        self.volume = self.offset = self.started = 0
+        self.length = 180
+    def open(self, path):
+        self.path = str(Path(path).resolve())
+        self.opened, self.running, self.paused = True, False, False
+        self.offset = 0
+    def start(self):
+        self.running = True
+        self.started = self.now()
+    def play(self, path):
+        self.open(path)
+        self.start()
+    def clock(self):
+        return self.offset+(self.now()-self.started if self.running and not self.paused else 0), self.length
+    def busy(self):
+        return self.opened and self.running and self.clock()[0] < self.length
+    def set_volume(self, value):
+        self.volume = value
+    def pause(self):
+        self.offset = self.clock()[0]
+        self.paused = True
+    def resume(self):
+        self.started = self.now()
+        self.paused = False
+    def stop(self):
+        self.path = None
+        self.opened = self.running = False
+
+
+def test_preload_and_equal_power_overlap_start_before_the_first_track_ends(tmp_path):
+    import math
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    first, second = tmp_path/"first.wav", tmp_path/"second.wav"
+    player.play(first)
+    old = player.active
+    player.prepare(second)
+    staged = player.prepared
+    assert old.busy() and staged.opened and not staged.busy() and staged.volume == 0
+    assert player.blend(second, 8)
+    assert player.active is staged and player.outgoing is old
+    assert old.busy() and staged.busy() and old.volume == 65 and staged.volume == 0
+    moment[0] = 4
+    player.advance_mix()
+    assert old.busy() and staged.busy()
+    assert old.volume == pytest.approx(65/math.sqrt(2))
+    assert staged.volume**2+old.volume**2 == pytest.approx(65**2)
+    moment[0] = 8
+    player.advance_mix()
+    assert not old.opened and player.outgoing is None and staged.busy() and staged.volume == pytest.approx(65)
+
+
+def test_pausing_and_muting_keep_both_decks_and_fade_position_consistent(tmp_path):
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    player.play(tmp_path/"first.wav")
+    player.blend(tmp_path/"second.wav", 8)
+    moment[0] = 2
+    player.advance_mix()
+    player.pause()
+    old, new = player.outgoing, player.active
+    assert old.paused and new.paused
+    moment[0] = 52
+    player.set_volume(0)
+    assert old.volume == new.volume == 0
+    player.set_volume(40)
+    assert new.volume**2+old.volume**2 == pytest.approx(40**2)
+    assert new.volume < old.volume  # Still one-quarter through, not 52 seconds later.
+    player.resume()
+    moment[0] = 54
+    player.advance_mix()
+    assert new.volume == pytest.approx(old.volume)
+    player.stop()
+    assert not old.opened and not new.opened and not player.mixing
+
+
+def test_service_stages_ready_audio_immediately_and_blends_eight_seconds_before_eof(tmp_path):
+    _, service, _, jobs, calls, generate = fixture(tmp_path)
+    moment = [0]
+    service.player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        finish(jobs, calls, 1)
+        service.tick()
+        assert service.player.prepared.path == str(Path(calls[1][1]).resolve())
+        assert service.snapshot()["next_loaded"]
+        finish(jobs, calls, 2)
+        service.tick()
+        old = service.player.active
+        moment[0] = 164
+        service.tick()
+        assert service.player.prepared is not None and not service.player.mixing
+        moment[0] = 165
+        service.tick()
+        assert service.player.prepared.path == str(Path(calls[1][1]).resolve())
+        assert not service.player.prepared.busy() and old.busy()
+        moment[0] = 172
+        service.tick()
+        assert service.player.mixing and service.snapshot()["blending"]
+        assert service.current["path"] == calls[1][1] and len(calls) == 4
+        moment[0] = 176
+        service.player.advance_mix()
+        assert old.busy() and service.player.active.busy()
+        moment[0] = 180
+        service.player.advance_mix()
+        assert not old.opened and service.player.active.busy()
+
+
+def test_generation_underrun_blends_into_a_cached_repeat_then_the_next_ready_track(tmp_path):
+    _, service, _, jobs, calls, generate = fixture(tmp_path)
+    moment = [0]
+    service.player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        identity = service.current["id"]
+        moment[0] = 172
+        service.tick()
+        assert service.player.mixing and service.repeating and service.current["id"] == identity
+        finish(jobs, calls, 1)
+        moment[0] = 180
+        service.player.advance_mix()
+        service.tick()
+        assert service.player.mixing and not service.repeating
+        assert service.current["path"] == calls[1][1]
+
+
+def test_mix_next_button_crossfades_early_instead_of_stopping_playback(tmp_path):
+    _, service, _, jobs, calls, generate = fixture(tmp_path)
+    moment = [0]
+    service.player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        finish(jobs, calls, 1)
+        service.tick()
+        old = service.player.active
+        moment[0] = 20
+        service.skip()
+        service.tick()
+        assert service.player.mixing and old.busy() and service.player.active.busy()
+        assert service.current["path"] == calls[1][1] and not service.skip_requested
+        service.skip()  # Presses during a transition cannot queue another unwanted skip.
+        service.tick()
+        assert not service.skip_requested
+
+
+def test_failed_preload_keeps_the_current_deck_audible(tmp_path):
+    _, service, _, jobs, calls, generate = fixture(tmp_path)
+    moment = [0]
+    service.player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        finish(jobs, calls, 1)
+        old = service.player.active
+        moment[0] = 165
+        with patch.object(Deck, "open", side_effect=RuntimeError("Cannot decode next file")):
+            service.tick()
+        assert old.busy() and old.volume == 65 and service.player.active is old
+        assert any(row["status"] == "error" for row in service._rows())
+
+
+def test_cache_cleanup_preserves_the_outgoing_deck_until_fade_finishes(tmp_path):
+    import time
+    import uuid
+    from contextlib import closing
+    _, service, _, jobs, calls, generate = fixture(tmp_path)
+    moment = [0]
+    service.player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        finish(jobs, calls, 1)
+        service.tick()
+        moment[0] = 172
+        service.tick()
+        outgoing = Path(calls[0][1])
+        # More disposable cache rows make the old track eligible for pruning.
+        with closing(radio.database(tmp_path)) as conn, conn:
+            for _ in range(6):
+                identity = uuid.uuid4().hex
+                path = outgoing.parent/(identity+".wav")
+                path.write_bytes(b"failed cache")
+                conn.execute("INSERT INTO tracks(id,station,job,path,status,created) VALUES(?,?,?,?,?,?)",
+                    (identity, service.station["id"], "unused", str(path), "error", time.time()))
+        moment[0] = 173
+        service.player.advance_mix()
+        service.tick()
+        assert outgoing.is_file() and service.player.outgoing.busy()
+        moment[0] = 180
+        service.player.advance_mix()
+        service.tick()
+        assert not outgoing.exists() and service.player.active.busy()
+
+
+def test_stop_attempts_both_channels_even_if_one_close_reports_an_error(tmp_path):
+    player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
+    player.play(tmp_path/"one.wav")
+    player.blend(tmp_path/"two.wav")
+    old = player.outgoing
+    with patch.object(player.active, "stop", side_effect=RuntimeError("Close failed")), pytest.raises(RuntimeError):
+        player.stop()
+    assert not old.opened and player.outgoing is None
+
+
 def test_radio_admission_is_atomic_across_services(tmp_path):
     import threading
     from concurrent.futures import ThreadPoolExecutor

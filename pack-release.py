@@ -24,6 +24,8 @@ if missing_tests:
 extras = [
     "README.md", "ARCHITECTURE.md",
     "benchmarks/results/local-radio-20261103.json",
+    "benchmarks/radio_crossfade.py",
+    "benchmarks/results/radio-crossfade-20261103.json",
     # Developer evidence stays in source ZIPs, not the installed runtime's
     # bounded allowlist. Older updaters accept at most 250 manifest entries.
     "benchmarks/results/webapp-auto-20261103.json",

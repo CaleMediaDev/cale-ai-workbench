@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "samples": 76,
+  "overlap_samples": 75,
+  "no_both_inactive_sample": true,
+  "no_both_zero_gain_sample": true,
+  "device_reported_per_deck_volumes_verified": true,
+  "preload_without_start_passed": true,
+  "pause_resume_mute_passed": true,
+  "outgoing_closed_after_fade": true,
+  "all_decks_closed_after_stop": true,
+  "seconds": 6.85,
+  "interpretation": "Real Windows MCI overlap and gain commands on quiet six-second tones. Not a loopback-audio, beat-matching, or subjective listening test.",
+  "service_tests": [
+    "preload immediately when ready",
+    "automatic eight-second blend before EOF",
+    "manual Mix next uses crossfade",
+    "cached-repeat underrun and fresh-track arrival",
+    "pause/mute preserve fade position",
+    "preload failure preserves active playback",
+    "outgoing cache file retained until fade ends"
+  ]
+}
