@@ -68,6 +68,19 @@ def test_installed_version_accepts_quoted_yaml_keys(tmp_path, monkeypatch, versi
     assert chrome_connector.installed_version() == "0.2.6"
 
 
+@pytest.mark.parametrize("indent", ["  ", "    "])
+def test_installed_version_accepts_indented_root_mapping(tmp_path, monkeypatch, indent):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text(
+        f"{indent}name: hermes-connector\n{indent}version: 0.2.6\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    assert chrome_connector.installed_version() == "0.2.6"
+
+
 def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()

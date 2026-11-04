@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from textwrap import dedent
 
 ROOT = Path(__file__).resolve().parent
 PLUGIN = ROOT / "data/plugins/hermes-connector"
@@ -20,7 +21,7 @@ def installed_version() -> str:
         contents = manifest.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError):
         return ""
-    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]*(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", contents, re.M)
+    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]*(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", dedent(contents), re.M)
     return match.group(2) if match else ""
 
 
