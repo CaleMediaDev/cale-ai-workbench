@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sqlite3
+import tempfile
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -196,7 +197,10 @@ def sync(root: str | Path) -> dict:
         path = database_path(root)
         if not path.is_file():
             raise
-        backup = path.with_name(path.name + f".corrupt-{int(time.time())}")
+        descriptor, backup_name = tempfile.mkstemp(
+            prefix=path.name + f".corrupt-{int(time.time())}-", dir=path.parent)
+        os.close(descriptor)
+        backup = Path(backup_name)
         os.replace(path, backup)
         for suffix in ("-wal", "-shm"):
             companion = Path(str(path) + suffix)

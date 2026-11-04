@@ -91,6 +91,28 @@ def test_damaged_index_is_preserved_and_rebuilt():
         assert list(path.parent.glob("capabilities.sqlite3.corrupt-*"))
 
 
+def test_repeated_recovery_in_one_second_preserves_both_damaged_indexes():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        skill, tools = fixture(root)
+        original_skill = skill.read_bytes()
+        path = capability_index.database_path(root)
+        path.parent.mkdir(parents=True)
+        damaged_copies = (b"first damaged database", b"second damaged database")
+        with patch.object(capability_index, "_registered_tools", return_value=tools), \
+                patch.object(capability_index.time, "time", return_value=1700000000):
+            for damaged in damaged_copies:
+                path.write_bytes(damaged)
+                result = capability_index.sync(root)
+                assert result["skills"] == 1 and result["tools"] == 1
+                assert capability_index.health(root)["ok"]
+                assert capability_index.search(root, "image", kind="tool")[0]["name"] == "make_image"
+        backups = list(path.parent.glob("capabilities.sqlite3.corrupt-*"))
+        assert len(backups) == 2
+        assert {backup.read_bytes() for backup in backups} == set(damaged_copies)
+        assert skill.read_bytes() == original_skill
+
+
 def test_busy_index_is_not_moved_or_rebuilt():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
