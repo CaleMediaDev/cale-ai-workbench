@@ -6651,3 +6651,79 @@ def test_retarget_host_state_assertions_keep_boolean_and_numeric_types_distinct(
     new = copy.deepcopy(old); del new["cases"][0]["state"]["app.ready"]; new["cases"][0]["row_counts"] = {"items": 1}
     numeric_owner = copy.deepcopy(active); numeric_owner["check_arguments"]["cases"][0]["state"]["app.ready"] = 1
     assert not native_agent.browser_retarget_preserves_step(numeric_owner, old, new, from_state)
+
+
+def focused_assertion_scope_fixture(tmp_path, selected):
+    import webapp_check
+    item = project(tmp_path / ("assertion-scope-" + str(selected)))
+    item["brief"] = "Build an interactive form and table; preserve all original requirements."
+    folder = Path(item["folder"])
+    source = '<form id="actual-form"><input id="amount"><button id="add">Add</button></form><table><tbody id="items"></tbody></table>'
+    (folder / "index.html").write_text(source)
+    arguments = {"path": "index.html", "cases": [{"visible": ["form"]},
+        {"expect": {"missing-text": "Old assertion"}, "row_counts": {"items": 0}, "state": {"app.ready": True}},
+        {"expect": {"other-case-only": "Other assertion"}}]}
+    active = task_context.plan_steps(folder, [{"phase": "UI", "title": "Verify requested form behavior", "check_tool": "check_webapp", "check_arguments": arguments}])["active"]
+    webapp_check.save_verifier(folder, arguments, accumulate=True)
+    for _ in range(2):
+        task_context.record_step_check(folder, active["id"], task_context.request_identity(folder), "Exit code: 1\nMissing required target", unchanged=True)
+    raw = (folder / ".local-ai/webapp-check.json").read_bytes()
+    reference = {"path": "index.html", "saved_sequence": 1, "saved_case": selected, "suite_sha256": hashlib.sha256(raw).hexdigest()}
+    notice = {"role": "user", "content": "Untrusted observations\n" + json.dumps({"assertion_revision_reference": reference,
+        "candidate_static_tag_ids": {"form": "actual-form"}})}
+    return item, folder, notice, reference
+
+
+def test_focused_assertion_scope_visibility_only_hides_retarget_and_pins_reference(tmp_path):
+    from jsonschema import ValidationError, validate
+    item, folder, notice, reference = focused_assertion_scope_fixture(tmp_path, 1)
+    before = task_context.step_status(folder)
+    state = {"step_focus_turns": 1}
+    tools = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+    request = native_agent.focused_step_repair_request(item, state, tools, notice, 65536)
+    tool = next(tool for tool in request["tools"] if tool["function"]["name"] == "check_webapp")
+    schema = tool["function"]["parameters"]
+    assert "retarget_assertion" not in schema["properties"] and "retarget_assertion" not in json.dumps(request)
+    assert "visible/hidden lists" in request["messages"][0]["content"] and item["brief"] in request["messages"][0]["content"]
+    valid = {**reference, "cases": [{"visible": ["actual-form"]}]}
+    validate(valid, schema)
+    for field in reference:
+        assert schema["properties"][field]["const"] == reference[field]
+    for altered in ({**valid, "saved_case": 2}, {**valid, "saved_sequence": 2}, {**valid, "path": "other.html"},
+                    {**valid, "suite_sha256": "a" * 64}, {**valid, "revise_inputs": True},
+                    {**valid, "cases": [{"set": {"amount": "2"}, "visible": ["actual-form"]}]},
+                    {**valid, "retarget_assertion": {"from": "text:form", "to": "rows:items"}}):
+        with pytest.raises(ValidationError): validate(altered, schema)
+    assert task_context.step_status(folder) == before
+
+
+def test_focused_assertion_scope_typed_from_enum_is_only_selected_case(tmp_path):
+    from jsonschema import ValidationError, validate
+    item, folder, notice, reference = focused_assertion_scope_fixture(tmp_path, 2)
+    before = task_context.step_status(folder)
+    state = {"step_focus_turns": 1}; offered = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+    request = native_agent.focused_step_repair_request(item, state, offered, notice, 65536)
+    schema = next(tool["function"]["parameters"] for tool in request["tools"] if tool["function"]["name"] == "check_webapp")
+    assert schema["properties"]["retarget_assertion"]["properties"]["from"]["enum"] == ["rows:items", "state:app.ready", "text:missing-text"]
+    valid = {**reference, "retarget_assertion": {"from": "text:missing-text", "to": "rows:new-items"}, "cases": [{"row_counts": {"new-items": 1}}]}
+    validate(valid, schema)
+    for value in ("text:form", "text:other-case-only", "text:invented"):
+        with pytest.raises(ValidationError): validate({**valid, "retarget_assertion": {**valid["retarget_assertion"], "from": value}}, schema)
+    with pytest.raises(ValidationError): validate({**valid, "saved_case": 3}, schema)
+    with pytest.raises(ValidationError): validate({**valid, "cases": [{"click": ["add"], "row_counts": {"new-items": 1}}]}, schema)
+    assert task_context.step_status(folder) == before
+
+
+def test_focused_assertion_scope_format_renews_only_two_generic_attempts(tmp_path):
+    item, folder, notice, reference = focused_assertion_scope_fixture(tmp_path, 1)
+    before = task_context.step_status(folder); state = {"step_focus_turns": 1}
+    offered = native_agent.acceptance_repair_tools(item, state, native_agent.TOOLS)
+    with patch.object(native_agent, "_GENERIC_ASSERTION_SCOPE_FORMAT", ""):
+        for _ in range(2): assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536)
+        old = state["step_repair_focus"]["key"]
+        assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536) is None
+    assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536)
+    assert state["step_repair_focus"]["key"] != old and state["step_repair_focus"]["count"] == 1
+    assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536)
+    assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536) is None
+    assert task_context.step_status(folder) == before
