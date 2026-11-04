@@ -91,6 +91,8 @@ def inspect(folder: str | Path, path: str, question: str = "",
             os.replace(temporary, cache)
         finally:
             temporary.unlink(missing_ok=True)
+        if _digest(source) != digest:
+            raise RuntimeError("The document changed while it was being read; try again")
     if len(text) > MAX_EXTRACTED_CHARS:
         raise ValueError("The extracted text is too large for this task reader")
     indexed = False
