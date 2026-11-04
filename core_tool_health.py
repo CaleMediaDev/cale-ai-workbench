@@ -107,7 +107,7 @@ def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     if not (box / "ghidra_12.1.4_PUBLIC/ghidraRun.bat").is_file():
         unavailable.append("Ghidra")
     agent_python = _agent_python(root)
-    if agent_python is not None and not _runnable(agent_python, "-c", AGENT_SDK_PROBE):
+    if agent_python is None or not _runnable(agent_python, "-c", AGENT_SDK_PROBE):
         unavailable.append("Agent model SDK")
     if not _agent_launcher_works(root):
         unavailable.append("Agent launcher")

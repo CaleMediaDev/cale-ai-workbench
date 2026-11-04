@@ -6,6 +6,38 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import core_tool_health
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def healthy_agent_facts(tmp_path):
+    facts = tmp_path / "data/installs/current/facts.json"
+    facts.parent.mkdir(parents=True)
+    facts.write_text(json.dumps({"packages": {"venv": {
+        "environment": str(tmp_path / "data/agent-venv")
+    }}}), encoding="utf-8")
+    return facts
+
+
+@pytest.mark.parametrize("record", [None, "{invalid json"])
+def test_missing_agent_facts_cannot_cache_ready_health(
+        tmp_path, monkeypatch, healthy_agent_facts, record):
+    if record is None:
+        healthy_agent_facts.unlink()
+    else:
+        healthy_agent_facts.write_text(record, encoding="utf-8")
+    ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+    ghidra.parent.mkdir(parents=True)
+    ghidra.touch()
+    monkeypatch.setattr(core_tool_health, "_health_cache", (None, (), 0.0))
+    monkeypatch.setattr(core_tool_health, "_runnable", lambda path, *args: True)
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
+
+    assert core_tool_health.missing(tmp_path, fresh=True) == ["Agent model SDK"]
+    with patch.object(core_tool_health, "_runnable",
+                      side_effect=AssertionError("expected cached health")):
+        assert core_tool_health.missing(tmp_path) == ["Agent model SDK"]
 
 
 def test_missing_checks_executables_and_ghidra(tmp_path, monkeypatch):
@@ -31,7 +63,8 @@ def test_health_cache_distinguishes_relative_roots_after_chdir(tmp_path, monkeyp
 
     monkeypatch.setattr(core_tool_health, "_health_cache", (None, (), 0.0))
     monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: 1000.0)
-    monkeypatch.setattr(core_tool_health, "_agent_python", lambda root: None)
+    monkeypatch.setattr(core_tool_health, "_agent_python",
+                        lambda root: root / "data/agent-venv/Scripts/python.exe")
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
     monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
     broken_gh = broken / "Toolbox/gh_2.103.3_windows_amd64/bin/gh.exe"
@@ -54,7 +87,8 @@ def test_cache_lookup_keeps_results_from_its_own_installation(tmp_path, monkeypa
 
     monkeypatch.setattr(core_tool_health, "_health_cache", (None, (), 0.0))
     monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: 1000.0)
-    monkeypatch.setattr(core_tool_health, "_agent_python", lambda root: None)
+    monkeypatch.setattr(core_tool_health, "_agent_python",
+                        lambda root: root / "data/agent-venv/Scripts/python.exe")
     monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
     broken_gh = broken / "Toolbox/gh_2.103.3_windows_amd64/bin/gh.exe"
@@ -84,7 +118,8 @@ def test_older_probe_cannot_overwrite_newer_healthy_cache(tmp_path, monkeypatch)
     monkeypatch.setattr(core_tool_health, "_health_cache", (None, (), 0.0))
     monkeypatch.setattr(core_tool_health, "_health_generation", 0)
     monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: 1000.0)
-    monkeypatch.setattr(core_tool_health, "_agent_python", lambda root: None)
+    monkeypatch.setattr(core_tool_health, "_agent_python",
+                        lambda root: root / "data/agent-venv/Scripts/python.exe")
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
     monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
     interleaved = []
@@ -118,7 +153,7 @@ def test_browser_runtime_failure_is_visible_even_when_node_runs(tmp_path, monkey
 
 def test_agent_sdk_probe_uses_managed_install_facts(tmp_path, monkeypatch):
     facts = tmp_path / "data/installs/current/facts.json"
-    facts.parent.mkdir(parents=True)
+    facts.parent.mkdir(parents=True, exist_ok=True)
     agent_env = tmp_path / "data/agent-venv"
     facts.write_text(json.dumps({"packages": {"venv": {"environment": str(agent_env)}}}))
     assert core_tool_health._agent_python(tmp_path) == agent_env / "Scripts/python.exe"
