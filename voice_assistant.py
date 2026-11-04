@@ -613,8 +613,12 @@ def say(message, rate=0, cancel=None, require_clone=False):
         bundled = ROOT / "assets" / bundled_name
         if (reference.is_file() and bundled.is_file() and bundled.stat().st_size > 1000
                 and hashlib.sha256(reference.read_bytes()).hexdigest() == WAKE_REFERENCE_SHA256):
-            _play_file(bundled, cancel)
-            return {"path": str(bundled), "engine": "Cale's local voice (bundled)"}
+            try:
+                _play_file(bundled, cancel)
+            except (OSError, wave.Error):
+                pass  # An unusable bundled WAV must not prevent synthesized speech.
+            else:
+                return {"path": str(bundled), "engine": "Cale's local voice (bundled)"}
     temp = ROOT / "Temp"
     temp.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=temp) as folder:
