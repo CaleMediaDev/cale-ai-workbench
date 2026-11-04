@@ -125,6 +125,8 @@ def _text(path: Path) -> str:
         )
         try:
             audio = _media_call("transcribe_audio", path).get("text", "")
+            if not isinstance(audio, str):
+                raise RuntimeError("The local media reader returned an invalid transcript.")
         except (OSError, ValueError, RuntimeError, KeyError, subprocess.TimeoutExpired):
             # Silent videos and unsupported audio tracks still retain visual memory.
             audio = ""

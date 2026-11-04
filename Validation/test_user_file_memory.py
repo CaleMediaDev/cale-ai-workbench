@@ -444,6 +444,25 @@ class UserFileMemoryTests(unittest.TestCase):
             )
         self.assertEqual(worker.call_count, 2)
 
+    def test_null_video_audio_retains_visual_memory_and_remaining_batch(self):
+        video = self.root / "a-walkthrough.mp4"
+        note = self.root / "b-note.txt"
+        video.write_bytes(b"video fixture")
+        note.write_text("retained notebook", encoding="utf-8")
+        with patch.object(user_file_memory, "_media_call", side_effect=[
+            {"sampled_frames": [
+                {"timestamp_seconds": 0.0, "description": "A blue dashboard."}
+            ]},
+            {"text": None},
+        ]) as media:
+            result = user_file_memory.ingest(self.state, [str(video), str(note)])
+        self.assertEqual(result, {"indexed": 2, "unchanged": 0, "skipped": 0})
+        self.assertEqual(media.call_count, 2)
+        self.assertIn("blue dashboard", user_file_memory.get(self.state, str(video))["content"])
+        self.assertEqual(
+            user_file_memory.search(self.state, "notebook")[0]["path"], str(note)
+        )
+
     def test_video_memory_labels_sampled_frames(self):
         video = self.root / "walkthrough.mp4"
         video.write_bytes(b"video fixture")
