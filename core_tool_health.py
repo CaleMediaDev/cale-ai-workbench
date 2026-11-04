@@ -19,6 +19,7 @@ _cached_root: Path | None = None
 _cached_missing: list[str] = []
 _repair_thread: threading.Thread | None = None
 _last_repair: float | None = None
+_repair_lock = threading.Lock()
 
 
 def _runnable(path: Path, *args: str) -> bool:
@@ -122,6 +123,16 @@ def _status(root: Path, state: str, detail: str) -> None:
 
 def start_background(root: Path = ROOT) -> bool:
     """Repair missing app-owned tools once per cooldown, without blocking tasks."""
+    if not _repair_lock.acquire(blocking=False):
+        return False
+    try:
+        return _start_background(root)
+    finally:
+        _repair_lock.release()
+
+
+def _start_background(root: Path) -> bool:
+    """Check eligibility and launch while holding the repair admission lock."""
     global _repair_thread, _last_repair
     root = Path(root).resolve()
     if _repair_thread is not None and _repair_thread.is_alive():
