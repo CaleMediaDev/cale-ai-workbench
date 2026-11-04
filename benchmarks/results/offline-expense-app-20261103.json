@@ -841,5 +841,990 @@
       "routing_subtests_passed": 13,
       "ruff": "passed"
     }
+  },
+  "developments_v463": {
+    "trial": {
+      "scenario": "offline_expense_app",
+      "brief": "Create index.html, a complete single-file offline expense log for a small business.\nUse no accounts, external libraries, fonts, or network requests. Make it readable on a phone.\nThe form has accessible labels Description, Amount, and Category. Category choices are\nSupplies, Travel, Meals, and Other. Its button says Add expense. Show an expense table\nwith Description, Amount, Category, and a Delete button on each expense row.\nShow Total: $0.00 initially; display dollars with two decimal places and keep the total\ncorrect after adding and deleting entries. Reject a blank description, zero or negative\namount, and nonnumeric amounts, showing an accessible inline error with role=alert.\nDescriptions are plain text even when they contain HTML characters. Save entries on\nthis computer with localStorage. Reloading must preserve added entries and deletions.\nBuild actual working files using small SQLite steps for form validation, the expense\ntable/totals, and persistence. Save and run a repeatable verifier that exercises real\nform input and checks persistence across page reload. Keep PLAN.md and PROGRESS.md accurate.\n",
+      "seconds": 112.17,
+      "model_calls": 2,
+      "tool_calls": 2,
+      "prompt_tokens": 20599,
+      "completion_tokens": 903,
+      "tools_used": [
+        "task_steps",
+        "task_steps"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "size_hint": null,
+          "seconds": 16.9
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "size_hint": null,
+          "seconds": 71.28
+        }
+      ],
+      "router_call_attempts": 2,
+      "upstream_local_calls": 2,
+      "grade_seconds": 12.88,
+      "total_seconds": 125.04,
+      "resumed": true,
+      "initial_turns": 69,
+      "initial_source_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+      "checkpoint_status": "running",
+      "inference_error": "RuntimeError: Benchmark deferred: active music worker 45032 needs the GPU",
+      "grade": {
+        "browser": {
+          "checks": {
+            "requested_category_choices": true,
+            "initial_empty": true,
+            "reject_blank": true,
+            "reject_negative": true,
+            "reject_zero": true,
+            "reject_nonnumeric": true,
+            "adds_two_and_totals": true,
+            "category_visible": true,
+            "reload_keeps_entries": true,
+            "delete_updates_total": false,
+            "reload_keeps_deletion": false,
+            "description_plain_text": true,
+            "decimal_totals": false,
+            "mobile_fit": true,
+            "no_remote_requests": true
+          },
+          "errors": [],
+          "remote_requests": [],
+          "passed": false
+        },
+        "verifier_passes_correct": false,
+        "verifier_rejects_missing_javascript": false,
+        "mutation_status": "not_run_baseline_verifier_failed",
+        "steps": {
+          "total": 5,
+          "done": 3,
+          "remaining": 2
+        },
+        "passed": false
+      },
+      "run_outcome": "failed",
+      "diagnostic_assistance": {
+        "source_sha256": "d87dbdf5dc06f0f4d78dfe963ecb6faa6cdc9e16dd74bb4fdc8483d09713b25d",
+        "observation": {
+          "invalid": [
+            {
+              "id": "amount",
+              "message": "Value must be greater than or equal to 0.01."
+            }
+          ],
+          "submits": 0
+        },
+        "origin": "Independent developer browser inspection; diagnostic feedback, not an unassisted trial.",
+        "feedback_recorded": true
+      },
+      "independent_check_diagnostics": [
+        {
+          "origin": "Independent developer browser check, supplied as diagnostic feedback; not an unassisted trial.",
+          "source_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+          "source_unchanged": true,
+          "spec": {
+            "path": "index.html",
+            "cases": [
+              {
+                "set": {
+                  "description": "Wash supplies",
+                  "amount": "12.50",
+                  "category": "Supplies"
+                },
+                "click": [
+                  "Add expense"
+                ],
+                "expect": {
+                  "tot": "12.50"
+                }
+              },
+              {
+                "set": {
+                  "description": "Fuel",
+                  "amount": "7.25",
+                  "category": "Travel"
+                },
+                "click": [
+                  "Add expense"
+                ],
+                "expect": {
+                  "tot": "19.75"
+                }
+              },
+              {
+                "click": [
+                  {
+                    "button": "Delete",
+                    "row_text": "Wash supplies"
+                  }
+                ],
+                "expect": {
+                  "tot": "7.25"
+                },
+                "hidden": [
+                  "Wash supplies"
+                ],
+                "visible": [
+                  "Fuel"
+                ]
+              },
+              {
+                "reload": true,
+                "expect": {
+                  "tot": "7.25"
+                },
+                "hidden": [
+                  "Wash supplies"
+                ],
+                "visible": [
+                  "Fuel"
+                ]
+              }
+            ]
+          },
+          "result": {
+            "passed": false,
+            "case_count": 4,
+            "failed_case_count": 2,
+            "cases": [
+              {
+                "case": 1,
+                "passed": true,
+                "failures": []
+              },
+              {
+                "case": 2,
+                "passed": true,
+                "failures": []
+              },
+              {
+                "case": 3,
+                "passed": false,
+                "failures": [
+                  "#tot displayed '19.75'; expected visible text containing '7.25'",
+                  "'Wash supplies' visibility was wrong: expected hidden, observed visible"
+                ],
+                "inputs": {
+                  "click": [
+                    {
+                      "button": "Delete",
+                      "row_text": "Wash supplies"
+                    }
+                  ]
+                }
+              },
+              {
+                "case": 4,
+                "passed": false,
+                "failures": [
+                  "#tot displayed '19.75'; expected visible text containing '7.25'",
+                  "'Wash supplies' visibility was wrong: expected hidden, observed visible"
+                ],
+                "inputs": {
+                  "reload": true
+                }
+              }
+            ],
+            "javascript_errors": [],
+            "page_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+            "interactions": [
+              {
+                "case": 1,
+                "actions": [
+                  "set",
+                  "click"
+                ],
+                "targets": [
+                  "text:tot"
+                ]
+              },
+              {
+                "case": 2,
+                "actions": [
+                  "set",
+                  "click"
+                ],
+                "targets": [
+                  "text:tot"
+                ]
+              }
+            ],
+            "normalized_inputs": [],
+            "path": "index.html",
+            "interaction_proven": true,
+            "suite_sha256": "21595959155c18d0f0881c32ca63bc83b483e3aa47db96bd319b91c2a39ceccc",
+            "ok": false
+          }
+        },
+        {
+          "origin": "Independent developer browser check with failed-case retention, supplied as diagnostic feedback; not an unassisted trial.",
+          "source_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+          "source_unchanged": true,
+          "spec": {
+            "path": "index.html",
+            "cases": [
+              {
+                "set": {
+                  "description": "Wash supplies",
+                  "amount": "12.50",
+                  "category": "Supplies"
+                },
+                "click": [
+                  "Add expense"
+                ],
+                "expect": {
+                  "tot": "12.50"
+                }
+              },
+              {
+                "set": {
+                  "description": "Fuel",
+                  "amount": "7.25",
+                  "category": "Travel"
+                },
+                "click": [
+                  "Add expense"
+                ],
+                "expect": {
+                  "tot": "19.75"
+                }
+              },
+              {
+                "click": [
+                  {
+                    "button": "Delete",
+                    "row_text": "Wash supplies"
+                  }
+                ],
+                "expect": {
+                  "tot": "7.25"
+                },
+                "hidden": [
+                  "Wash supplies"
+                ],
+                "visible": [
+                  "Fuel"
+                ]
+              },
+              {
+                "reload": true,
+                "expect": {
+                  "tot": "7.25"
+                },
+                "hidden": [
+                  "Wash supplies"
+                ],
+                "visible": [
+                  "Fuel"
+                ]
+              }
+            ]
+          },
+          "result": {
+            "passed": false,
+            "case_count": 4,
+            "failed_case_count": 2,
+            "cases": [
+              {
+                "case": 1,
+                "passed": true,
+                "failures": []
+              },
+              {
+                "case": 2,
+                "passed": true,
+                "failures": []
+              },
+              {
+                "case": 3,
+                "passed": false,
+                "failures": [
+                  "#tot displayed '19.75'; expected visible text containing '7.25'",
+                  "'Wash supplies' visibility was wrong: expected hidden, observed visible"
+                ],
+                "inputs": {
+                  "click": [
+                    {
+                      "button": "Delete",
+                      "row_text": "Wash supplies"
+                    }
+                  ]
+                }
+              },
+              {
+                "case": 4,
+                "passed": false,
+                "failures": [
+                  "#tot displayed '19.75'; expected visible text containing '7.25'",
+                  "'Wash supplies' visibility was wrong: expected hidden, observed visible"
+                ],
+                "inputs": {
+                  "reload": true
+                }
+              }
+            ],
+            "javascript_errors": [],
+            "page_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+            "interactions": [
+              {
+                "case": 1,
+                "actions": [
+                  "set",
+                  "click"
+                ],
+                "targets": [
+                  "text:tot"
+                ]
+              },
+              {
+                "case": 2,
+                "actions": [
+                  "set",
+                  "click"
+                ],
+                "targets": [
+                  "text:tot"
+                ]
+              }
+            ],
+            "normalized_inputs": [],
+            "path": "index.html",
+            "interaction_proven": true,
+            "failed_cases_retained": true,
+            "verifier_check_passed": false,
+            "suite_sha256": "05c457f117c5bda938eeb01af751c81ec8044f6c3593f5c8fc6a981feda5972c",
+            "ok": false
+          }
+        }
+      ]
+    },
+    "source_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+    "source": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Expense Log</title>\n  <style>\n    * { box-sizing: border-box; }\n    body { font-family: system-ui, sans-serif; margin: 20px; line-height: 1.5; }\n    h1 { color: #333; }\n    .form-group { margin-bottom: 15px; }\n    label { display: block; margin-bottom: 5px; font-weight: bold; }\n    input, select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }\n    button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; }\n    button:hover { background: #0056b3; }\n    table { width: 100%; border-collapse: collapse; margin-top: 20px; }\n    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }\n    th { background: #f5f5f5; }\n    .delete-btn { background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }\n    .error { color: #dc3545; font-size: 14px; margin-top: 5px; display: none; }\n    .error.visible { display: block; }\n    .total { margin-top: 20px; font-size: 18px; font-weight: bold; }\n    @media (max-width: 600px) { table, th, td { display: block; width: 100%; } th { display: none; } tr { margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; padding: 10px; } }\n  </style>\n</head>\n<body>\n  <h1>Expense Log</h1>\n  <form id=\"f\">\n    <div class=\"form-group\"><label for=\"description\">Description:</label><input type=\"text\" id=\"description\" name=\"description\"></div>\n    <span class=\"error\" id=\"error\" role=\"alert\" aria-live=\"polite\"></span>\n    <div class=\"form-group\"><label for=\"amount\">Amount:</label><input type=\"number\" id=\"amount\" name=\"amount\" step=\"0.01\" placeholder=\"e.g., 25.50\"></div>\n    <div class=\"form-group\"><label for=\"category\">Category:</label><select id=\"category\" name=\"category\"><option value=\"\">Select</option><option value=\"Supplies\">Supplies</option><option value=\"Travel\">Travel</option><option value=\"Meals\">Meals</option><option value=\"Other\">Other</option></select></div>\n    <button type=\"submit\">Add expense</button>\n  </form>\n  <table id=\"tbl\"><thead><tr><th>Description</th><th>Amount</th><th>Category</th><th>Action</th></tr></thead><tbody id=\"tbody\"></tbody></table>\n  <div class=\"total\">Total: $<span id=\"tot\">0.00</span></div>\n  <script>\n    (function() {\n      const S = 'expenses';\n      let data = JSON.parse(localStorage.getItem(S) || '[]');\n      function render() {\n        const t = document.getElementById('tbody');\n        t.innerHTML = '';\n        data.forEach((e, i) => {\n          const r = document.createElement('tr');\n          r.innerHTML = '<td>' + escape(e.description) + '</td><td>$' + e.amount.toFixed(2) + '</td><td>' + e.category + '</td><td><button class=\"del\" data-i=\"' + i + '\">Delete</button></td>';\n          t.appendChild(r);\n        });\n        const sum = data.reduce((s, x) => s + x.amount, 0);\n        document.getElementById('tot').textContent = sum.toFixed(2);\n      }\n      function escape(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }\n      document.getElementById('f').onsubmit = function(ev) {\n        ev.preventDefault();\n        const errorEl = document.getElementById('error');\n        const desc = document.getElementById('description').value.trim();\n        const amt = parseFloat(document.getElementById('amount').value);\n        const cat = document.getElementById('category').value;\n        \n        // Clear any previous error first\n        errorEl.className = 'error';\n        errorEl.textContent = '';\n        \n        if (!desc) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Description cannot be blank'; \n          return; \n        }\n        if (isNaN(amt)) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Amount must be numeric'; \n          return; \n        }\n        if (amt <= 0) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Amount must be positive'; \n          return; \n        }\n        if (!cat) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Please select a category'; \n          return; \n        }\n        \n        // All validation passed - add the expense\n        data.push({ description: desc, amount: amt, category: cat });\n        localStorage.setItem(S, JSON.stringify(data));\n        render();\n      };\n      document.querySelectorAll('.del').forEach(b => b.onclick = function() {\n        const i = parseInt(this.getAttribute('data-i'));\n        data.splice(i, 1);\n        localStorage.setItem(S, JSON.stringify(data));\n        render();\n      });\n      render();\n    })();\n  </script>\n</body>\n</html>\n",
+    "interpretation": [
+      "Assisted evolving-code resume, not an unassisted fresh build or controlled speed comparison.",
+      "Developer supplied an actual row-delete browser test and retained its failing cases without editing app source. Both diagnostic receipts are included in the raw report.",
+      "After two local calls the benchmark deferred for a real music worker. Raw run_outcome failed is historical runner labeling; inference_error establishes the defer, not a completed app attempt.",
+      "All 15 independent browser checks ran; 12 passed. Deletion, saved deletion, and later decimal totals still failed. Three SQL units remain complete and two unfinished.",
+      "The baseline verifier failed. Mutation tests were deliberately not run because rejection by an already failing verifier cannot prove correctness.",
+      "Subsequent benchmark code labels media deferrals explicitly and checks live media before internal inference retries. An already in-flight request is not cancelled.",
+      "No full-app completion claim or model ranking change.",
+      "The later resume made six recorded local calls in 369.48 worker seconds before another live music worker triggered an explicit deferred outcome. Three SQL units remain complete; 14 of 15 browser checks passed but the baseline verifier still failed.",
+      "Deletion works immediately after reload, then fails after render replaces the buttons. An additional unchanged-source lifecycle check proves the first deletion succeeds and the second fails. The decimal-total check includes such a later deletion; do not infer an arithmetic-only defect.",
+      "The retained suite is at its bounded sequence capacity. Scalable test retention/consolidation needs investigation; do not silently drop earlier failing cases or assertions to declare success."
+    ],
+    "validation": {
+      "browser_tests_passed": 109,
+      "native_tests_passed": 180,
+      "native_seconds": 166.8,
+      "history": "The combined run passed all 109 browser tests but exposed one native compaction regression. It was fixed without changing that test; the full 180 native tests then passed.",
+      "ruff": "passed",
+      "diff_whitespace": "passed"
+    },
+    "second_resume": {
+      "scenario": "offline_expense_app",
+      "brief": "Create index.html, a complete single-file offline expense log for a small business.\nUse no accounts, external libraries, fonts, or network requests. Make it readable on a phone.\nThe form has accessible labels Description, Amount, and Category. Category choices are\nSupplies, Travel, Meals, and Other. Its button says Add expense. Show an expense table\nwith Description, Amount, Category, and a Delete button on each expense row.\nShow Total: $0.00 initially; display dollars with two decimal places and keep the total\ncorrect after adding and deleting entries. Reject a blank description, zero or negative\namount, and nonnumeric amounts, showing an accessible inline error with role=alert.\nDescriptions are plain text even when they contain HTML characters. Save entries on\nthis computer with localStorage. Reloading must preserve added entries and deletions.\nBuild actual working files using small SQLite steps for form validation, the expense\ntable/totals, and persistence. Save and run a repeatable verifier that exercises real\nform input and checks persistence across page reload. Keep PLAN.md and PROGRESS.md accurate.\n",
+      "seconds": 369.48,
+      "model_calls": 6,
+      "tool_calls": 5,
+      "prompt_tokens": 78887,
+      "completion_tokens": 14076,
+      "tools_used": [
+        "edit_file",
+        "read_file",
+        "edit_file",
+        "edit_file",
+        "read_file"
+      ],
+      "routes": [
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "size_hint": null,
+          "seconds": 22.53
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "size_hint": null,
+          "seconds": 8.02
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "size_hint": null,
+          "seconds": 64.83
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "size_hint": null,
+          "seconds": 89.03
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "size_hint": null,
+          "seconds": 9.64
+        },
+        {
+          "model": "cale-main-64k",
+          "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+          "repair_avoid": [
+            {
+              "model": "cale-main-64k",
+              "weights": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d"
+            }
+          ],
+          "size_hint": null,
+          "seconds": 115.88
+        }
+      ],
+      "router_call_attempts": 7,
+      "upstream_local_calls": 9,
+      "grade_seconds": 10.58,
+      "total_seconds": 380.06,
+      "resumed": true,
+      "initial_turns": 71,
+      "initial_source_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+      "checkpoint_status": "running",
+      "inference_error": "RuntimeError: Benchmark deferred: active music worker 27556 needs the GPU",
+      "grade": {
+        "browser": {
+          "checks": {
+            "requested_category_choices": true,
+            "initial_empty": true,
+            "reject_blank": true,
+            "reject_negative": true,
+            "reject_zero": true,
+            "reject_nonnumeric": true,
+            "adds_two_and_totals": true,
+            "category_visible": true,
+            "reload_keeps_entries": true,
+            "delete_updates_total": true,
+            "reload_keeps_deletion": true,
+            "description_plain_text": true,
+            "decimal_totals": false,
+            "mobile_fit": true,
+            "no_remote_requests": true
+          },
+          "errors": [],
+          "remote_requests": [],
+          "passed": false
+        },
+        "verifier_passes_correct": false,
+        "verifier_rejects_missing_javascript": false,
+        "mutation_status": "not_run_baseline_verifier_failed",
+        "steps": {
+          "total": 5,
+          "done": 3,
+          "remaining": 2
+        },
+        "passed": false
+      },
+      "run_outcome": "deferred",
+      "diagnostic_assistance": {
+        "source_sha256": "d87dbdf5dc06f0f4d78dfe963ecb6faa6cdc9e16dd74bb4fdc8483d09713b25d",
+        "observation": {
+          "invalid": [
+            {
+              "id": "amount",
+              "message": "Value must be greater than or equal to 0.01."
+            }
+          ],
+          "submits": 0
+        },
+        "origin": "Independent developer browser inspection; diagnostic feedback, not an unassisted trial.",
+        "feedback_recorded": true
+      },
+      "independent_check_diagnostics": [
+        {
+          "origin": "Independent developer browser check, supplied as diagnostic feedback; not an unassisted trial.",
+          "source_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+          "source_unchanged": true,
+          "spec": {
+            "path": "index.html",
+            "cases": [
+              {
+                "set": {
+                  "description": "Wash supplies",
+                  "amount": "12.50",
+                  "category": "Supplies"
+                },
+                "click": [
+                  "Add expense"
+                ],
+                "expect": {
+                  "tot": "12.50"
+                }
+              },
+              {
+                "set": {
+                  "description": "Fuel",
+                  "amount": "7.25",
+                  "category": "Travel"
+                },
+                "click": [
+                  "Add expense"
+                ],
+                "expect": {
+                  "tot": "19.75"
+                }
+              },
+              {
+                "click": [
+                  {
+                    "button": "Delete",
+                    "row_text": "Wash supplies"
+                  }
+                ],
+                "expect": {
+                  "tot": "7.25"
+                },
+                "hidden": [
+                  "Wash supplies"
+                ],
+                "visible": [
+                  "Fuel"
+                ]
+              },
+              {
+                "reload": true,
+                "expect": {
+                  "tot": "7.25"
+                },
+                "hidden": [
+                  "Wash supplies"
+                ],
+                "visible": [
+                  "Fuel"
+                ]
+              }
+            ]
+          },
+          "result": {
+            "passed": false,
+            "case_count": 4,
+            "failed_case_count": 2,
+            "cases": [
+              {
+                "case": 1,
+                "passed": true,
+                "failures": []
+              },
+              {
+                "case": 2,
+                "passed": true,
+                "failures": []
+              },
+              {
+                "case": 3,
+                "passed": false,
+                "failures": [
+                  "#tot displayed '19.75'; expected visible text containing '7.25'",
+                  "'Wash supplies' visibility was wrong: expected hidden, observed visible"
+                ],
+                "inputs": {
+                  "click": [
+                    {
+                      "button": "Delete",
+                      "row_text": "Wash supplies"
+                    }
+                  ]
+                }
+              },
+              {
+                "case": 4,
+                "passed": false,
+                "failures": [
+                  "#tot displayed '19.75'; expected visible text containing '7.25'",
+                  "'Wash supplies' visibility was wrong: expected hidden, observed visible"
+                ],
+                "inputs": {
+                  "reload": true
+                }
+              }
+            ],
+            "javascript_errors": [],
+            "page_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+            "interactions": [
+              {
+                "case": 1,
+                "actions": [
+                  "set",
+                  "click"
+                ],
+                "targets": [
+                  "text:tot"
+                ]
+              },
+              {
+                "case": 2,
+                "actions": [
+                  "set",
+                  "click"
+                ],
+                "targets": [
+                  "text:tot"
+                ]
+              }
+            ],
+            "normalized_inputs": [],
+            "path": "index.html",
+            "interaction_proven": true,
+            "suite_sha256": "21595959155c18d0f0881c32ca63bc83b483e3aa47db96bd319b91c2a39ceccc",
+            "ok": false
+          }
+        },
+        {
+          "origin": "Independent developer browser check with failed-case retention, supplied as diagnostic feedback; not an unassisted trial.",
+          "source_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+          "source_unchanged": true,
+          "spec": {
+            "path": "index.html",
+            "cases": [
+              {
+                "set": {
+                  "description": "Wash supplies",
+                  "amount": "12.50",
+                  "category": "Supplies"
+                },
+                "click": [
+                  "Add expense"
+                ],
+                "expect": {
+                  "tot": "12.50"
+                }
+              },
+              {
+                "set": {
+                  "description": "Fuel",
+                  "amount": "7.25",
+                  "category": "Travel"
+                },
+                "click": [
+                  "Add expense"
+                ],
+                "expect": {
+                  "tot": "19.75"
+                }
+              },
+              {
+                "click": [
+                  {
+                    "button": "Delete",
+                    "row_text": "Wash supplies"
+                  }
+                ],
+                "expect": {
+                  "tot": "7.25"
+                },
+                "hidden": [
+                  "Wash supplies"
+                ],
+                "visible": [
+                  "Fuel"
+                ]
+              },
+              {
+                "reload": true,
+                "expect": {
+                  "tot": "7.25"
+                },
+                "hidden": [
+                  "Wash supplies"
+                ],
+                "visible": [
+                  "Fuel"
+                ]
+              }
+            ]
+          },
+          "result": {
+            "passed": false,
+            "case_count": 4,
+            "failed_case_count": 2,
+            "cases": [
+              {
+                "case": 1,
+                "passed": true,
+                "failures": []
+              },
+              {
+                "case": 2,
+                "passed": true,
+                "failures": []
+              },
+              {
+                "case": 3,
+                "passed": false,
+                "failures": [
+                  "#tot displayed '19.75'; expected visible text containing '7.25'",
+                  "'Wash supplies' visibility was wrong: expected hidden, observed visible"
+                ],
+                "inputs": {
+                  "click": [
+                    {
+                      "button": "Delete",
+                      "row_text": "Wash supplies"
+                    }
+                  ]
+                }
+              },
+              {
+                "case": 4,
+                "passed": false,
+                "failures": [
+                  "#tot displayed '19.75'; expected visible text containing '7.25'",
+                  "'Wash supplies' visibility was wrong: expected hidden, observed visible"
+                ],
+                "inputs": {
+                  "reload": true
+                }
+              }
+            ],
+            "javascript_errors": [],
+            "page_sha256": "c8c1a950fbcf43cc922ec276fcf3b1296d6473b720ef87cbc2786efc0debb631",
+            "interactions": [
+              {
+                "case": 1,
+                "actions": [
+                  "set",
+                  "click"
+                ],
+                "targets": [
+                  "text:tot"
+                ]
+              },
+              {
+                "case": 2,
+                "actions": [
+                  "set",
+                  "click"
+                ],
+                "targets": [
+                  "text:tot"
+                ]
+              }
+            ],
+            "normalized_inputs": [],
+            "path": "index.html",
+            "interaction_proven": true,
+            "failed_cases_retained": true,
+            "verifier_check_passed": false,
+            "suite_sha256": "05c457f117c5bda938eeb01af751c81ec8044f6c3593f5c8fc6a981feda5972c",
+            "ok": false
+          }
+        }
+      ]
+    },
+    "latest_source": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Expense Log</title>\n  <style>\n    * { box-sizing: border-box; }\n    body { font-family: system-ui, sans-serif; margin: 20px; line-height: 1.5; }\n    h1 { color: #333; }\n    .form-group { margin-bottom: 15px; }\n    label { display: block; margin-bottom: 5px; font-weight: bold; }\n    input, select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }\n    button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; }\n    button:hover { background: #0056b3; }\n    table { width: 100%; border-collapse: collapse; margin-top: 20px; }\n    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }\n    th { background: #f5f5f5; }\n    .delete-btn { background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }\n    .error { color: #dc3545; font-size: 14px; margin-top: 5px; display: none; }\n    .error.visible { display: block; }\n    .total { margin-top: 20px; font-size: 18px; font-weight: bold; }\n    @media (max-width: 600px) { table, th, td { display: block; width: 100%; } th { display: none; } tr { margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; padding: 10px; } }\n  </style>\n</head>\n<body>\n  <h1>Expense Log</h1>\n  <form id=\"f\">\n    <div class=\"form-group\"><label for=\"description\">Description:</label><input type=\"text\" id=\"description\" name=\"description\"></div>\n    <span class=\"error\" id=\"error\" role=\"alert\" aria-live=\"polite\"></span>\n    <div class=\"form-group\"><label for=\"amount\">Amount:</label><input type=\"number\" id=\"amount\" name=\"amount\" step=\"0.01\" placeholder=\"e.g., 25.50\"></div>\n    <div class=\"form-group\"><label for=\"category\">Category:</label><select id=\"category\" name=\"category\"><option value=\"\">Select</option><option value=\"Supplies\">Supplies</option><option value=\"Travel\">Travel</option><option value=\"Meals\">Meals</option><option value=\"Other\">Other</option></select></div>\n    <button type=\"submit\">Add expense</button>\n  </form>\n  <table id=\"tbl\"><thead><tr><th>Description</th><th>Amount</th><th>Category</th><th>Action</th></tr></thead><tbody id=\"tbody\"></tbody></table>\n  <div class=\"total\">Total: $<span id=\"tot\">0.00</span></div>\n  <script>\n    (function() {\n      const S = 'expenses';\n      let data = JSON.parse(localStorage.getItem(S) || '[]');\n      function render() {\n        const t = document.getElementById('tbody');\n        t.innerHTML = '';\n        data.forEach((e, i) => {\n          const r = document.createElement('tr');\n          r.innerHTML = '<td>' + escape(e.description) + '</td><td>$' + e.amount.toFixed(2) + '</td><td>' + e.category + '</td><td><button class=\"del\" data-i=\"' + i + '\">Delete</button></td>';\n          t.appendChild(r);\n        });\n        const sum = data.reduce((s, x) => s + x.amount, 0);\n        document.getElementById('tot').textContent = sum.toFixed(2);\n      }\n      function escape(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }\n      document.getElementById('f').onsubmit = function(ev) {\n        ev.preventDefault();\n        const errorEl = document.getElementById('error');\n        const desc = document.getElementById('description').value.trim();\n        const amt = parseFloat(document.getElementById('amount').value);\n        const cat = document.getElementById('category').value;\n        \n        // Clear any previous error first\n        errorEl.className = 'error';\n        errorEl.textContent = '';\n        \n        if (!desc) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Description cannot be blank'; \n          return; \n        }\n        if (isNaN(amt)) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Amount must be numeric'; \n          return; \n        }\n        if (amt <= 0) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Amount must be positive'; \n          return; \n        }\n        if (!cat) { \n          errorEl.className = 'error visible';\n          errorEl.textContent = 'Please select a category'; \n          return; \n        }\n        \n        // All validation passed - add the expense\n        data.push({ description: desc, amount: amt, category: cat });\n        localStorage.setItem(S, JSON.stringify(data));\n        render();\n      };\n      render();\n\n      // Attach delete listeners after render so they work on reloaded page\n      document.querySelectorAll('.del').forEach(b => {\n        b.addEventListener('click', function() {\n          const i = parseInt(this.getAttribute('data-i'));\n          data.splice(i, 1);\n          localStorage.setItem(S, JSON.stringify(data));\n          render();\n        });\n      });\n    })();\n  </script>\n</body>\n</html>\n",
+    "latest_source_sha256": "ca1dfdba74e49160f44266d527ea09e0e6ba0f2b74f58b5ec0e5b6d5015b7672",
+    "lifecycle_diagnostic": {
+      "origin": "Independent developer browser diagnostic; not an unassisted trial. Source unchanged; this diagnostic is not added to the already full retained suite.",
+      "source_sha256": "ca1dfdba74e49160f44266d527ea09e0e6ba0f2b74f58b5ec0e5b6d5015b7672",
+      "spec": {
+        "path": "index.html",
+        "cases": [
+          {
+            "set": {
+              "description": "Wash supplies",
+              "amount": "12.50",
+              "category": "Supplies"
+            },
+            "click": [
+              "Add expense"
+            ],
+            "expect": {
+              "tot": "12.50"
+            }
+          },
+          {
+            "set": {
+              "description": "Fuel",
+              "amount": "7.25",
+              "category": "Travel"
+            },
+            "click": [
+              "Add expense"
+            ],
+            "expect": {
+              "tot": "19.75"
+            }
+          },
+          {
+            "reload": true,
+            "expect": {
+              "tot": "19.75"
+            }
+          },
+          {
+            "click": [
+              {
+                "button": "Delete",
+                "row_text": "Wash supplies"
+              }
+            ],
+            "expect": {
+              "tot": "7.25"
+            },
+            "hidden": [
+              "Wash supplies"
+            ],
+            "visible": [
+              "Fuel"
+            ]
+          },
+          {
+            "click": [
+              {
+                "button": "Delete",
+                "row_text": "Fuel"
+              }
+            ],
+            "expect": {
+              "tot": "0.00"
+            },
+            "hidden": [
+              "Fuel"
+            ]
+          }
+        ]
+      },
+      "result": {
+        "passed": false,
+        "case_count": 5,
+        "failed_case_count": 1,
+        "cases": [
+          {
+            "case": 1,
+            "passed": true,
+            "failures": []
+          },
+          {
+            "case": 2,
+            "passed": true,
+            "failures": []
+          },
+          {
+            "case": 3,
+            "passed": true,
+            "failures": []
+          },
+          {
+            "case": 4,
+            "passed": true,
+            "failures": []
+          },
+          {
+            "case": 5,
+            "passed": false,
+            "failures": [
+              "#tot displayed '7.25'; expected visible text containing '0.00'",
+              "'Fuel' visibility was wrong: expected hidden, observed visible"
+            ],
+            "inputs": {
+              "click": [
+                {
+                  "button": "Delete",
+                  "row_text": "Fuel"
+                }
+              ]
+            }
+          }
+        ],
+        "javascript_errors": [],
+        "page_sha256": "ca1dfdba74e49160f44266d527ea09e0e6ba0f2b74f58b5ec0e5b6d5015b7672",
+        "interactions": [
+          {
+            "case": 1,
+            "actions": [
+              "set",
+              "click"
+            ],
+            "targets": [
+              "text:tot"
+            ]
+          },
+          {
+            "case": 2,
+            "actions": [
+              "set",
+              "click"
+            ],
+            "targets": [
+              "text:tot"
+            ]
+          },
+          {
+            "case": 4,
+            "actions": [
+              "click"
+            ],
+            "targets": [
+              "text:tot",
+              "visibility:Wash supplies"
+            ]
+          }
+        ],
+        "normalized_inputs": []
+      }
+    },
+    "retained_suite_size": {
+      "sequences": 8,
+      "cases": 23,
+      "sequence_limit": 8,
+      "case_limit": 24
+    }
   }
 }

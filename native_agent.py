@@ -141,7 +141,8 @@ TOOLS = [
                                  'keys, waits, then visible assertions. reload:true reloads the current local page first '
                                  'in the same isolated browser profile, to test persistence. cases is an array or JSON string. set '
                                  'and expect map element IDs to text; set also selects dropdown option values or visible labels. '
-                                 'click lists element IDs or exact accessible button names (IDs take priority; ambiguous names need a unique ID); visible/hidden list IDs '
+                                 'click lists element IDs or exact accessible button names (IDs take priority). '
+                                 'Use click:[{button:"Delete",row_text:"Paper"}] for a unique table row containing that exact cell text. visible/hidden list IDs '
                                  "or text. For a canvas or image use visible:['id'] for presence, never expect:{id:'exists'}. "
                                  "keys lists objects such as {key:'ArrowRight',hold_ms:200} or "
                                  "{key:'Space'} for keyboard apps and games. hold_ms is 0..1000, wait_ms is "
@@ -166,7 +167,11 @@ TOOLS = [
                                                                                               'set': {'type': 'object',
                                                                                                       'additionalProperties': {'type': 'string'}},
                                                                                               'click': {'type': 'array',
-                                                                                                        'items': {'type': 'string'}},
+                                                                                                        'items': {'anyOf': [{'type': 'string'},
+                                                                                                                            {'type': 'object', 'properties': {
+                                                                                                                                'button': {'type': 'string', 'minLength': 1, 'maxLength': 200},
+                                                                                                                                'row_text': {'type': 'string', 'minLength': 1, 'maxLength': 200}},
+                                                                                                                             'required': ['button', 'row_text'], 'additionalProperties': False}]}},
                                                                                               'keys': {'type': 'array',
                                                                                                        'items': {'type': 'object',
                                                                                                                  'properties': {'key': {'type': 'string'},
@@ -751,14 +756,20 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             # The task browser keeps a Playwright sync event loop alive. The
             # independent offline checker needs its own fresh event loop.
             import native_browser
+            import task_context
             import webapp_check
 
             native_browser.close()
             revision = None
             if any(name in arguments for name in ("saved_sequence", "saved_case", "suite_sha256")):
                 arguments, revision = webapp_check.prepare_assertion_revision(folder, arguments)
+            check_request = task_context.request_identity(folder)
             result = webapp_check.check(folder, arguments, screenshot=True)
             result["path"] = arguments["path"]
+            request_unchanged = check_request == task_context.request_identity(folder)
+            if not request_unchanged:
+                result["passed"] = False
+                result.setdefault("errors", []).append("User instructions changed during the browser check; rerun it against the fresh request.")
             result["interaction_proven"] = bool(result.get("interactions"))
             if result["passed"] and not result["interaction_proven"]:
                 result["note"] = (
@@ -818,6 +829,14 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                             result["errors"] += report.get("errors", [])[:4]
                         else:
                             result["errors"].append(report_error or verification[-1200:])
+            elif (request_unchanged and not revision and result.get("page_sha256") ==
+                  hashlib.sha256(project_path(folder, arguments["path"]).read_bytes()).hexdigest()):
+                # A later unrelated success must not erase this failing case.
+                # Save an executable failing suite, never a passing attestation.
+                # Assertion revisions still require a pass before replacing
+                # their selected old assertions; custom verifiers stay owned.
+                result["failed_cases_retained"] = webapp_check.save_verifier(folder, arguments, accumulate=True)
+                result["verifier_check_passed"] = False
             saved = folder / ".local-ai/webapp-check.json"
             if saved.is_file() and saved.stat().st_size <= 64000:
                 raw = saved.read_bytes()
@@ -1783,11 +1802,13 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
                             path = None
                         function["arguments"] = json.dumps({
                             "path": path if isinstance(path, str) else "",
-                            "note": "Earlier arguments omitted from context; inspect project files.",
+                            "note": "omitted; reread file",
                         })
-            if any(item.get("role") == "tool" for item in candidate):
+            if not chosen or any(item.get("role") == "tool" for item in candidate):
                 # A larger tool catalog must not squeeze the latest result down
                 # to a few characters while retaining repetitive checkpoint prose.
+                # Reserve the newest steering message too: dropping it before
+                # reaching the tool batch would lose the entire recent exchange.
                 minimum_group = copy.deepcopy(candidate)
                 for item in minimum_group:
                     if isinstance(item.get("content"), str):
@@ -1811,7 +1832,11 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
                 for item, value in contents:
                     item["content"] = clip(value, low)
             if estimate(candidate, []) <= available:
+                newest_steering = not chosen and candidate[0].get("role") == "user"
                 chosen[:0] = candidate
+                total += estimate(candidate, [])
+                if newest_steering:
+                    continue  # Still reserve its preceding complete tool exchange.
             break
         chosen[:0] = group
         total += cost
@@ -2340,7 +2365,7 @@ def browser_verifier_write_issue(folder: Path, project: dict, name: str,
     verifier = folder / ".local-ai" / "verify.ps1"
     existing = verifier.read_text(encoding="utf-8-sig") if verifier.is_file() else ""
     if existing.startswith("# Generated by Cale check_webapp"):
-        return "Preserve the passing browser verifier and run it after the last page edit."
+        return "Preserve the generated browser verifier and run it after the last page edit."
     if not existing:
         return ("Run check_webapp with real input, visible-result, invalid-state, "
                 "and mobile cases until it passes. It creates the repeatable "

@@ -129,6 +129,18 @@ def grade(folder: Path) -> dict:
         command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(verifier)]
         try:
             result["verifier_passes_correct"] = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL, capture_output=True, timeout=60).returncode == 0
+        except subprocess.TimeoutExpired:
+            result["baseline_verifier_timeout"] = True
+        if not result["verifier_passes_correct"]:
+            # An already failing verifier rejecting a mutation proves nothing.
+            # Keep the original source and browser evidence; skip expensive
+            # mutation runs without relaxing the all-required pass criterion.
+            result["mutation_status"] = "not_run_baseline_verifier_failed"
+            queue = task_context.step_status(folder)
+            result["steps"] = {key: queue[key] for key in ("total", "done", "remaining")}
+            result["passed"] = False
+            return result
+        try:
             page.write_text(re.sub(r"<script\b[^>]*>.*?</script>", "", source.decode("utf-8-sig"), flags=re.I | re.S), encoding="utf-8")
             result["verifier_rejects_missing_javascript"] = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL, capture_output=True, timeout=60).returncode != 0
             mutations = {
@@ -144,7 +156,8 @@ def grade(folder: Path) -> dict:
                 mutated = re.sub(r"<script\b", lambda match: "<script>" + hook + "</script>" + match[0], original, count=1, flags=re.I)
                 page.write_text(mutated, encoding="utf-8")
                 observed = grade_browser(folder, capture=False)
-                meaningful = observed.get("checks", {}).get(target) is False
+                meaningful = (result["browser"].get("checks", {}).get(target) is True
+                              and observed.get("checks", {}).get(target) is False)
                 rejected = subprocess.run(command, cwd=folder, stdin=subprocess.DEVNULL, capture_output=True, timeout=60).returncode != 0
                 result["persistence_mutations"][name] = {"valid_behavior_mutation": meaningful, "verifier_rejected": rejected}
         finally:
@@ -200,26 +213,32 @@ def main() -> int:
         finally:
             native_browser.close()
         elapsed = time.monotonic() - started
+        grading_started = time.monotonic()
         try:
             graded = grade(folder)
         except Exception as error:
             graded = {"passed": False, "error": f"{type(error).__name__}: {str(error)[:500]}"}
     passed = state.get("status") == "done" and graded["passed"] and not failure
+    deferred = bool(failure and failure.startswith("RuntimeError: Benchmark deferred:"))
     report = {"scenario": "offline_expense_app", "brief": BRIEF, "seconds": round(elapsed, 2), **stats,
+              "grade_seconds": round(time.monotonic() - grading_started, 2),
+              "total_seconds": round(time.monotonic() - started, 2),
               "resumed": args.resume, "initial_turns": initial_turns, "initial_source_sha256": initial_source,
               "checkpoint_status": state.get("status"), "inference_error": failure, "grade": graded,
-              "run_outcome": "passed" if passed else "failed"}
+              "run_outcome": "passed" if passed else "deferred" if deferred else "failed"}
     # A resumed developer-assisted repair is not an unassisted fresh build.
     # Carry the intervention receipt into the report, even on a later success.
     assistance = notes / "benchmark-validation-observation.json"
     if assistance.is_file():
         report["diagnostic_assistance"] = json.loads(assistance.read_text(encoding="utf-8"))
+    report["independent_check_diagnostics"] = [json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(notes.glob("benchmark-row*-observation.json"))]
     report_path = folder / ("benchmark-resume-report.json" if args.resume else "benchmark-report.json")
     if report_path.exists():
         report_path = report_path.with_name(report_path.stem + "-" + str(time.time_ns()) + ".json")
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
-    return 0 if passed else 1
+    return 0 if passed else 2 if deferred else 1
 
 
 if __name__ == "__main__":

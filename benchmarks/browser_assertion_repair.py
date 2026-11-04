@@ -48,6 +48,7 @@ def observed_router(stats: dict):
             def observed_post(url, body, *args, **options):
                 inference = url.endswith("/v1/chat/completions")
                 if inference:
+                    require_idle_media(model_library.ROOT)  # Include internal schema/empty-output retries.
                     stats["upstream_local_calls"] = stats.get("upstream_local_calls", 0) + 1
                 response = post(url, body, *args, **options)
                 if inference:

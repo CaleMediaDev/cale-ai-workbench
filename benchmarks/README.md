@@ -484,3 +484,22 @@ local routing probe selected the eligible 64K alias and returned `READY` in
 was 16.80 GB total and 9.47 GB on GPU. This confirms route/memory behavior only,
 not a controlled speed or app-quality comparison. Larger eligible windows and
 manual choices remain available.
+
+The `developments_v463` section retains a later two-call resume that yielded
+to a live user music worker. Its old raw `failed` outcome is qualified by the
+explicit media-defer error; it is not a completed build trial. A developer
+supplied a real row-delete/reload check, without editing app source, and the
+owned verifier now retains those failed cases. Three SQL units and 12 of 15
+browser checks remain passing; deletion is still broken. General completion
+remains unproven. The runner now distinguishes `deferred` (exit 2), reports
+grading separately from worker time, and skips mutations when the baseline
+verifier already fails. Such a skip always leaves the overall grade failed.
+
+A second six-call resume yielded to another live music worker after 369.48
+worker seconds. Fourteen of 15 browser checks passed, but the verifier failed
+and two SQL units remain unfinished. A separate unchanged-source lifecycle
+probe confirms that the first deletion after reload works while the next
+deletion fails after render replaces the buttons. The decimal-total check
+contains that later deletion; it is not evidence of an arithmetic-only bug.
+The retained suite has reached its eight-sequence bound; scalable retention
+needs work without discarding earlier failures. No complete-app pass is claimed.

@@ -190,6 +190,15 @@ diagnostics, never grounds to pass an assertion or remove a requested constraint
 Browser checks can reload the same isolated page to test persistence, select a
 dropdown by value or label, and click a unique exact button name when no ID is
 available. Ambiguous buttons still fail instead of selecting one arbitrarily.
+For repeated table actions, `click:[{"button":"Delete","row_text":"Paper"}]`
+selects the uniquely matching row and button by exact accessible text, without
+requiring generated IDs. Duplicate rows or buttons fail without clicking.
+
+New failing cases are retained in Cale-owned browser suites. A later unrelated
+passing case must rerun them and cannot clear their failure. Saving that failing
+suite creates a repeatable check, not a success claim. Failed assertion revisions
+do not replace earlier assertions, custom verifiers remain untouched, and checks
+superseded by changed user instructions are not saved under the new request.
 
 The native worker can omit `step_id` when completing, splitting, or revising
 the active unit shown in its checkpoint. The inferred ID is bound to the exact

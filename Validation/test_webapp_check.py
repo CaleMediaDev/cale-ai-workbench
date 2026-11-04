@@ -1185,3 +1185,125 @@ def test_click_does_not_choose_arbitrarily_between_duplicate_button_names(tmp_pa
 def test_click_prefers_an_existing_id_over_a_different_button_name(tmp_path):
     (tmp_path / "index.html").write_text("""<button id="Save" onclick="document.getElementById('result').textContent='id'">Other</button><button onclick="document.getElementById('result').textContent='label'">Save</button><p id="result">untouched</p>""")
     assert webapp_check.check(tmp_path, {"path": "index.html", "cases": [{"click": ["Save"], "expect": {"result": "id"}}]})["passed"]
+
+
+def test_row_button_checks_deletion_and_saved_deletion_without_ids(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text('''<table><tbody></tbody></table><p id="count"></p><script>
+        let rows=JSON.parse(localStorage.getItem('rows')||'["Paper","Fuel"]');
+        function render(){document.querySelector('tbody').innerHTML=rows.map(name=>
+            '<tr><td>'+name+'</td><td><button>Delete</button></td></tr>').join('');
+            document.getElementById('count').textContent=String(rows.length)}
+        document.addEventListener('click',e=>{if(e.target.tagName==='BUTTON'){
+            rows=rows.filter(name=>name!==e.target.closest('tr').cells[0].textContent);
+            localStorage.setItem('rows',JSON.stringify(rows));render()}});render();</script>''')
+    spec = {"path": "index.html", "cases": [
+        {"expect": {"count": "2"}, "visible": ["Paper", "Fuel"]},
+        {"click": [{"button": "Delete", "row_text": "Paper"}], "expect": {"count": "1"}, "hidden": ["Paper"], "visible": ["Fuel"]},
+        {"reload": True, "expect": {"count": "1"}, "hidden": ["Paper"], "visible": ["Fuel"]}]}
+    checked = webapp_check.check(tmp_path, spec)
+    assert checked["passed"] and checked["interactions"]
+    assert webapp_check.save_verifier(tmp_path, spec, accumulate=True)
+    path = tmp_path / ".local-ai/webapp-check.json"
+    assert webapp_check.run_saved_checks(tmp_path, path)["passed"]
+    source = page.read_text()
+    page.write_text(source.replace("rows=rows.filter(name=>name!==e.target.closest('tr').cells[0].textContent);", ""))
+    assert not webapp_check.run_saved_checks(tmp_path, path)["passed"]
+    page.write_text(source.replace("localStorage.setItem('rows',JSON.stringify(rows));", ""))
+    assert not webapp_check.run_saved_checks(tmp_path, path)["passed"]
+
+
+def test_row_click_is_exact_and_rejects_duplicate_rows_and_duplicate_buttons(tmp_path):
+    page = tmp_path / "index.html"
+    for body in (
+        '<tr><td>Paper extra</td><td><button>Delete</button></td></tr>',
+        '<tr><td>Paper</td><td><button>Delete</button></td></tr>' * 2,
+        '<tr><td>Paper</td><td><button>Delete</button><button>Delete</button></td></tr>',
+    ):
+        page.write_text('<table>' + body + '</table><p id="clicked">no</p><script>'
+                        "document.addEventListener('click',()=>document.getElementById('clicked').textContent='yes')</script>")
+        checked = webapp_check.check(tmp_path, {"path": "index.html", "cases": [
+            {"click": [{"button": "Delete", "row_text": "Paper"}], "expect": {"clicked": "no"}}, {"expect": {"clicked": "no"}}]})
+        assert not checked["passed"] and checked["cases"][1]["passed"]
+        assert "ambiguous" in str(checked["cases"][0]["failures"])
+
+
+@pytest.mark.parametrize("target", [{}, {"button": "Delete"}, {"button": "Delete", "row_text": " "},
+    {"button": "Delete", "row_text": "Paper", "selector": "td"}, {"button": 3, "row_text": "Paper"}])
+def test_row_click_descriptor_has_a_bounded_data_only_shape(tmp_path, target):
+    (tmp_path / "index.html").write_text('<table></table>')
+    with pytest.raises(ValueError, match="row click"):
+        webapp_check.validate_spec(tmp_path, {"path": "index.html", "cases": [{"click": [target]}]})
+
+
+def test_row_click_schema_and_revision_preserve_which_row_was_clicked(tmp_path):
+    import hashlib
+
+    import cloud_ai
+
+    (tmp_path / "index.html").write_text('<table><tr><td>Paper</td><td><button>Delete</button></td></tr></table><p id="result">ready</p>')
+    spec = {"path": "index.html", "cases": [{"click": [{"button": "Delete", "row_text": "Paper"}], "expect": {"result": "ready"}}]}
+    tool = next(tool for tool in native_agent.TOOLS if tool["function"]["name"] == "check_webapp")
+    response = {"choices": [{"message": {"tool_calls": [{"id": "row", "function": {"name": "check_webapp", "arguments": json.dumps(spec)}}]}}]}
+    assert cloud_ai.valid_completion(response, {"tools": [tool]})
+    assert webapp_check.save_verifier(tmp_path, spec, accumulate=True)
+    path = tmp_path / ".local-ai/webapp-check.json"
+    raw = path.read_bytes()
+    revision = {"path": "index.html", "saved_sequence": 1, "saved_case": 1, "suite_sha256": hashlib.sha256(raw).hexdigest(),
+                "cases": [{"click": [{"button": "Delete", "row_text": "Fuel"}], "expect": {"result": "ready"}}]}
+    with pytest.raises(ValueError, match="input actions"):
+        webapp_check.prepare_assertion_revision(tmp_path, revision)
+    assert path.read_bytes() == raw
+
+
+def test_failed_new_case_survives_an_unrelated_passing_check_until_source_is_fixed(tmp_path):
+    page = tmp_path / "index.html"
+    broken = PAGE.replace("error.hidden=n>0", "error.hidden=true")
+    page.write_text(broken)
+    good = {"path": "index.html", "cases": [{"set": {"bill": "80"}, "expect": {"answer": "96.00"}}]}
+    invalid = {"path": "index.html", "cases": [{"set": {"bill": "0"}, "visible": ["error"]}]}
+    unrelated = {"path": "index.html", "cases": [{"set": {"bill": "90"}, "expect": {"answer": "108.00"}}]}
+    def run(spec):
+        with patch.object(long_tasks, "projects", return_value=[{"id": "retention", "folder": str(tmp_path)}]):
+            return json.loads(native_agent.execute_tool(tmp_path, "check_webapp", spec))
+    initial = run(good)
+    assert initial["passed"], initial
+    failed = run(invalid)
+    assert not failed["passed"] and failed["failed_cases_retained"]
+    assert failed["verifier_check_passed"] is False
+    assert page.read_text() == broken
+    repeated = run(unrelated)
+    assert not repeated["passed"] and not repeated["verifier_check_passed"]
+    assert any("visibility was wrong" in str(case["failures"]) for case in repeated["cases"])
+    saved = json.loads((tmp_path / ".local-ai/webapp-check.json").read_text())
+    assert len(saved["checks"]) == 3
+    page.write_text(PAGE)
+    fixed = run(unrelated)
+    assert fixed["passed"] and fixed["verifier_check_passed"]
+
+
+def test_failed_case_retention_preserves_custom_verifier(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    notes = tmp_path / ".local-ai"
+    notes.mkdir()
+    verifier = notes / "verify.ps1"
+    verifier.write_text("# User suite\nexit 0")
+    result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", {"path": "index.html", "cases": [{"expect": {"answer": "wrong"}}]}))
+    assert not result["passed"] and result["failed_cases_retained"] is False
+    assert verifier.read_text() == "# User suite\nexit 0"
+    assert not (notes / "webapp-check.json").exists()
+
+
+def test_superseded_browser_check_does_not_save_cases_under_new_user_request(tmp_path):
+    (tmp_path / "index.html").write_text(PAGE)
+    task_context.step_status(tmp_path)
+    original = webapp_check.check
+    def changed_request(*args, **kwargs):
+        result = original(*args, **kwargs)
+        (tmp_path / ".local-ai/USER-REQUESTS.md").write_text("Use different requirements")
+        return result
+    with patch.object(webapp_check, "check", side_effect=changed_request):
+        result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", SPEC))
+    assert not result["passed"] and "instructions changed" in str(result["errors"])
+    assert not (tmp_path / ".local-ai/verify.ps1").exists()
+    assert not (tmp_path / ".local-ai/webapp-check.json").exists()

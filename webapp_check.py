@@ -35,7 +35,13 @@ def _element_id(value: str) -> str:
 
 
 
-def _click_token(value: str) -> str:
+def _click_token(value):
+    if isinstance(value, dict):
+        if (set(value) != {"button", "row_text"} or any(
+                not isinstance(label, str) or not label.strip() or len(label) > 200
+                or any(ord(character) < 32 for character in label) for label in value.values())):
+            raise ValueError("A row click needs short button and row_text labels only")
+        return value
     if (not isinstance(value, str) or not value.strip() or len(value) > 200
             or value.startswith(("#", ".", "//")) or any(ord(character) < 32 for character in value)):
         raise ValueError("Use a short element ID or exact button name, not a CSS selector")
@@ -314,7 +320,7 @@ def validate_spec(folder: Path, spec: dict) -> Path:
             raise ValueError("Browser cases may wait at most 10000 milliseconds in total")
         clicks = case.get("click", [])
         if not isinstance(clicks, list) or len(clicks) > 20:
-            raise ValueError("click must be a list of at most 20 element IDs or exact button names")
+            raise ValueError("click must list at most 20 IDs, exact button names, or {button,row_text} targets")
         for element_id in clicks:
             _click_token(element_id)
         updates, expected = case.get("set", {}), case.get("expect", {})
@@ -454,10 +460,21 @@ def check(folder: Path, spec: dict, screenshot: bool = False) -> dict:
                                 raise
                 # Replay actual user input: reload, fill, click, keys, wait, assertions.
                 for element_id in case.get("click", []):
-                    control = (page.locator("#" + element_id)
-                               if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", element_id) else None)
-                    if control is None or control.count() == 0:
-                        control = page.get_by_role("button", name=element_id, exact=True)
+                    if isinstance(element_id, dict):
+                        # Both labels are data, not selectors or regular
+                        # expressions. Repeated row names/buttons remain an
+                        # ambiguity error rather than clicking the first one.
+                        row = page.get_by_role("row").filter(
+                            has=page.get_by_text(element_id["row_text"], exact=True))
+                        control = row.get_by_role("button", name=element_id["button"], exact=True)
+                        if row.count() != 1:
+                            failures.append(f"Missing or ambiguous row text {element_id['row_text']!r}; use a unique row label or element ID")
+                            continue
+                    else:
+                        control = (page.locator("#" + element_id)
+                                   if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", element_id) else None)
+                        if control is None or control.count() == 0:
+                            control = page.get_by_role("button", name=element_id, exact=True)
                     if control.count() != 1:
                         failures.append(f"Missing or ambiguous click target {element_id!r}; use a unique ID or exact button name")
                         continue
