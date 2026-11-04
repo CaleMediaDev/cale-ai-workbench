@@ -23,6 +23,8 @@ if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
     "README.md", "ARCHITECTURE.md",
+    "benchmarks/results/pr-backlog-488-20261104.json",
+    "benchmarks/results/voice-clone-probe-488-final-20261104.json",
     "benchmarks/results/pr-backlog-487-20261104.json",
     "benchmarks/results/accepted-credit-487-before-20261104.json",
     "benchmarks/results/accepted-credit-487-after-20261104.json",

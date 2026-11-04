@@ -1,7 +1,7 @@
 {
   "version": "0.5.488",
-  "scope": "Pull requests 369-410",
-  "accepted": 41,
+  "scope": "Pull requests 369-423",
+  "accepted": 54,
   "rejected": [
     393
   ],
@@ -1241,6 +1241,334 @@
           "summary": "..................                                                       [100%]\r\n18 passed in 3.90s\r\n"
         }
       }
+    },
+    {
+      "number": 411,
+      "head": "d16edc880c94bc1696359615bcb0244d9e8fd776",
+      "new_tests": [
+        "test_search_rejects_boundary_control_characters_before_trimming",
+        "test_search_matches_non_ascii_topic"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": ".........                                            [100%]\n9 passed, 20 subtests passed in 0.12s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "idation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nSUBFAILED(query=\"'accessibility\\\\r'\") Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nSUBFAILED(query=\"'\\\\taccessibility'\") Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nSUBFAILED(query=\"'accessibility\\\\t'\") Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nSUBFAILED(query=\"'\\\\x0baccessibility'\") Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nSUBFAILED(query=\"'accessibility\\\\x0b'\") Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nSUBFAILED(query=\"'\\\\x0caccessibility'\") Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nSUBFAILED(query=\"'accessibility\\\\x0c'\") Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nSUBFAILED(query=\"'\\\\x1faccessibility'\") Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nSUBFAILED(query=\"'accessibility\\\\x1f'\") Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\nFAILED Validation/test_skill_hub.py::SkillHubTests::test_search_rejects_boundary_control_characters_before_trimming\n13 failed, 1 passed, 7 deselected in 0.33s\n"
+      },
+      "integration": {
+        "base": "f7e2c74434495993cede5477b2a87cc9bc1edc2e",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": ".........                                            [100%]\n9 passed, 20 subtests passed in 0.11s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Rejects raw boundary C0 controls before whitespace trimming; ordinary surrounding spaces remain valid.",
+      "reviewed_head": "d16edc880c94bc1696359615bcb0244d9e8fd776"
+    },
+    {
+      "number": 412,
+      "head": "70e9cf39c066f7e18e49a7ece800c6f0c3812bf4",
+      "new_tests": [
+        "test_save_serialization_failure_leaves_no_partial_output",
+        "test_save_rejects_infinite_end_without_leaving_partial_output"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "..............................                                           [100%]\n30 passed in 1.24s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "owsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1768/test_save_serialization_failur1')\nexisting_target = True\n\n    @pytest.mark.parametrize(\"existing_target\", [False, True])\n    def test_save_serialization_failure_leaves_no_partial_output(tmp_path, existing_target):\n        source = tmp_path / \"song.wav\"\n        source.write_bytes(b\"original\")\n        vocal = tmp_path / \"vocals.wav\"\n        vocal.write_bytes(b\"isolated\")\n        target = tmp_path / \"lyrics\"\n        if existing_target:\n            target.mkdir()\n            (target / \"keep.txt\").write_text(\"keep\", encoding=\"utf-8\")\n        transcription = {\n            \"language\": {\"en\"},\n            \"segments\": [{\"start\": 1.0, \"end\": 2.0, \"text\": \"Hello world\"}],\n        }\n    \n        with pytest.raises(TypeError, match=\"not JSON serializable\"):\n            music_lyrics.save(source, vocal, target, transcription)\n    \n        if existing_target:\n>           assert sorted(path.name for path in target.iterdir()) == [\"keep.txt\"]\nE           AssertionError: assert ['keep.txt', ... 'lyrics.txt'] == ['keep.txt']\nE             \nE             Left contains 2 more items, first extra item: 'lyrics.srt'\nE             Use -v to get more diff\n\nValidation\\test_music_lyrics.py:105: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_lyrics.py::test_save_serialization_failure_leaves_no_partial_output[False]\nFAILED Validation/test_music_lyrics.py::test_save_serialization_failure_leaves_no_partial_output[True]\n2 failed, 1 passed, 27 deselected in 1.23s\n"
+      },
+      "integration": {
+        "base": "f7e2c74434495993cede5477b2a87cc9bc1edc2e",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "..............................                                           [100%]\n30 passed in 1.78s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Completes potentially failing lyric JSON serialization before creating a destination or writing text/captions.",
+      "reviewed_head": "70e9cf39c066f7e18e49a7ece800c6f0c3812bf4"
+    },
+    {
+      "number": 413,
+      "head": "64260c21bf0cc48fa9c9346d6802c7d58fbbf7e8",
+      "new_tests": [
+        "test_replace_soundtrack_accepts_vp8_webm",
+        "test_edit_video_original_layout_pads_odd_dimensions"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": ".............                                                            [100%]\n13 passed in 4.52s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "utput)]\n        output_existed = output.exists()\n        try:\n            result = subprocess.run(command, capture_output=True, text=True,\n                                    timeout=timeout, creationflags=HIDE)\n        except subprocess.TimeoutExpired:\n            if not output_existed:\n                output.unlink(missing_ok=True)\n            raise\n        if result.returncode or not output.is_file() or not output.stat().st_size:\n            if not output_existed and output.is_file() and \"already exists\" not in result.stderr.lower():\n                output.unlink(missing_ok=True)\n>           raise RuntimeError((result.stderr or result.stdout)[-1200:] or \"Video edit failed.\")\nE           RuntimeError: [mp4 @ 000002adefc4f9c0] Could not find tag for codec vp8 in stream #0, codec not currently supported in container\nE           [out#0/mp4 @ 000002adefc58ac0] Could not write header (incorrect codec parameters ?): Invalid argument\nE           [af#0:1 @ 000002adefc3d980] Error sending frames to consumers: Invalid argument\nE           [af#0:1 @ 000002adefc3d980] Task finished with error code: -22 (Invalid argument)\nE           [af#0:1 @ 000002adefc3d980] Terminating thread with return code -22 (Invalid argument)\nE           [out#0/mp4 @ 000002adefc58ac0] Nothing was written into output file, because at least one of its streams received no packets.\n\nvideo_edit.py:58: RuntimeError\n=========================== short test summary info ===========================\nFAILED Validation/test_video_edit.py::test_replace_soundtrack_accepts_vp8_webm\n1 failed, 1 passed, 11 deselected in 2.10s\n"
+      },
+      "integration": {
+        "base": "f7e2c74434495993cede5477b2a87cc9bc1edc2e",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": ".............                                                            [100%]\n13 passed in 4.17s\n"
+        }
+      },
+      "verdict": "accept_adapted",
+      "adaptation": {
+        "repo": "C:\\Users\\tahoe\\AppData\\Local\\Temp\\cale-pr-review-411-415-4r2b4zaw\\adjustments",
+        "branch": "corrected-413",
+        "commit": "9abdd903376f0ffc9d1d012ba00964d0fa4d9535",
+        "patch": "C:\\Users\\tahoe\\AppData\\Local\\Temp\\cale-pr-review-411-415-4r2b4zaw\\413-fast-copy-adaptation.patch",
+        "apply_after_original_head": "64260c21bf0cc48fa9c9346d6802c7d58fbbf7e8",
+        "before": "Original PR413 changed compatible H264 packet hashes by re-encoding; added real FFmpeg preservation regression failed. Root base fails original real VP8 WebM mux regression with codec-not-supported-in-container.",
+        "after": "15 tests passed in6.48sec: compatible video packets copied bit-for-bit; VP8 converts and preserves video/audio; unrelated I/O errors never retried. Conversion retries only observed unsupported-container codec error, one attempt maximum."
+      },
+      "disposition": "accept_adapted",
+      "reason": "Adds necessary MP4 codec conversion while preserving the fast lossless compatible-video copy path; conversion retries only the observed unsupported-container error.",
+      "reviewed_head": "64260c21bf0cc48fa9c9346d6802c7d58fbbf7e8"
+    },
+    {
+      "number": 414,
+      "head": "4e6fc42f552002ae6339e0a01d0bdf011df845d1",
+      "new_tests": [
+        "test_failed_conversion_leaves_no_partial_export",
+        "test_render_cleanup_waits_for_killed_server"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "..................                                                       [100%]\n18 passed in 5.66s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": " as write, patch.object(\n            video_generation, \"_free_port\", return_value=8188\n        ), patch.object(video_generation, \"_workflow\", return_value={}), patch.object(\n            video_generation, \"_request\",\n            side_effect=[{}, {\"prompt_id\": \"prompt-1\"}, history],\n        ), patch.object(video_generation.subprocess, \"Popen\") as launch, patch.object(\n            video_generation.imageio_ffmpeg, \"get_ffmpeg_exe\", return_value=\"ffmpeg\"\n        ), patch.object(video_generation.subprocess, \"run\", side_effect=fail_conversion):\n            launch.return_value.poll.return_value = None\n            with pytest.raises(type(failure)):\n                video_generation._render_job(job_id, data)\n            assert not any(call.kwargs.get(\"state\") == \"complete\" for call in write.call_args_list)\n            launch.return_value.terminate.assert_called_once()\n            launch.return_value.wait.assert_called_once_with(timeout=20)\n    \n>       assert not destination.exists()\nE       AssertionError: assert not True\nE        +  where True = exists()\nE        +    where exists = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1776/test_failed_conversion_leaves_1/clip.mp4').exists\n\nValidation\\test_video_generation.py:331: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_video_generation.py::test_failed_conversion_leaves_no_partial_export[failure0]\nFAILED Validation/test_video_generation.py::test_failed_conversion_leaves_no_partial_export[failure1]\n2 failed, 1 passed, 15 deselected in 0.39s\n"
+      },
+      "integration": {
+        "base": "f7e2c74434495993cede5477b2a87cc9bc1edc2e",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "..................                                                       [100%]\n18 passed in 8.37s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Converts non-MP4 output privately before exclusive publication, so encoder failures/timeouts leave no partial destination.",
+      "reviewed_head": "4e6fc42f552002ae6339e0a01d0bdf011df845d1"
+    },
+    {
+      "number": 415,
+      "head": "95a34fd72dccf4536d660d98c9f48c22850e488c",
+      "new_tests": [
+        "test_overflowing_feed_sizes_fall_back_to_cached_profile",
+        "test_bad_feed_update_keeps_last_cached_working_profile"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "...................................................   [100%]\n51 passed, 19 subtests passed in 9.50s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "50}\", source\n                )\n                and origin == \"https://ollama.com/library/\" + source.split(\":\", 1)[0]\n                and item.get(\"license\")\n                and item.get(\"auto\") is True\n                and known_aliases.get(alias, profile) == profile\n                # Replacing weights under a live profile would revoke its old\n                # approval before the replacement passes. Publish a new profile\n                # and alias for a new model instead.\n                and (previous is None or previous.get(\"source\") == source)\n            ):\n                if previous is not None and profile not in BUILTIN_PROFILES:\n                    raise ValueError(\"An existing model recommendation changed incompatibly.\")\n                continue\n            try:\n                size = int(item[\"download_gb\"])\n                ram = int(item[\"ram_gb\"])\n>               context = int(item[\"context\"])\n                          ^^^^^^^^^^^^^^^^^^^^\nE               OverflowError: cannot convert float infinity to integer\n\nmodel_library.py:208: OverflowError\n=========================== short test summary info ===========================\nSUBFAILED(field='download_gb') Validation/test_model_library.py::AutoModelTests::test_overflowing_feed_sizes_fall_back_to_cached_profile\nSUBFAILED(field='ram_gb') Validation/test_model_library.py::AutoModelTests::test_overflowing_feed_sizes_fall_back_to_cached_profile\nSUBFAILED(field='context') Validation/test_model_library.py::AutoModelTests::test_overflowing_feed_sizes_fall_back_to_cached_profile\n3 failed, 2 passed, 49 deselected in 0.61s\n"
+      },
+      "integration": {
+        "base": "f7e2c74434495993cede5477b2a87cc9bc1edc2e",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "...................................................   [100%]\n51 passed, 19 subtests passed in 6.63s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Handles overflowing numeric recommendation values through existing cached-catalog recovery.",
+      "reviewed_head": "95a34fd72dccf4536d660d98c9f48c22850e488c"
+    },
+    {
+      "headRefName": "cale-donation-c46d844b2fb04a2b",
+      "headRefOid": "058ac4ea0b342ed149794c63c50ffe6ae4b2693f",
+      "number": 416,
+      "state": "OPEN",
+      "title": "[Donation] Preserve earlier direct follow-ups when routing saved projects",
+      "files": [
+        "Validation/test_auto_route.py",
+        "auto_route.py"
+      ],
+      "status": "accept",
+      "reason": "Production diff reviewed; regression red before and complete touched module green at exact head and current root f7e2c74.",
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 2.53,
+          "summary": "...F..........................................                                                            [100%]\r\n================================== FAILURES ===================================\r\n___ AutoRouteTests.test_continuation_preserves_earlier_direct_project_scope ___\r\nValidation\\test_auto_route.py:436: in test_continuation_preserves_earlier_direct_project_scope\r\n    self.assertEqual(task_size(messages), \"deep\")\r\nE   AssertionError: 'quick' != 'deep'\r\nE   - quick\r\nE   + deep\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_auto_route.py::AutoRouteTests::test_continuation_preserves_earlier_direct_project_scope\r\n1 failed, 45 passed, 39 subtests passed in 1.74s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 1.03,
+          "summary": "..............................................                                                            [100%]\r\n46 passed, 39 subtests passed in 0.26s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 1.82,
+          "summary": "..............................................                                                            [100%]\r\n46 passed, 39 subtests passed in 1.15s\r\n"
+        }
+      }
+    },
+    {
+      "headRefName": "cale-donation-e3392e2805e043d2",
+      "headRefOid": "c3b02ec8953ace702f8be03e0ccdf68df09b2a77",
+      "number": 417,
+      "state": "OPEN",
+      "title": "[Donation] Normalize whitespace before finding finished-task follow-ups",
+      "files": [
+        "Validation/test_chat_assistant.py",
+        "chat_assistant.py"
+      ],
+      "status": "accept",
+      "reason": "Production diff reviewed; regression red before and complete touched module green at exact head and current root f7e2c74.",
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 2.81,
+          "summary": "   \r\nE     Right contains one more item: {'id': 'song', 'title': 'Finished song', 'status': 'accepted', 'updated': 10}\r\nE     Use -v to get more diff\r\n_ test_whitespace_padded_revision_still_offers_finished_task[\\nMake it louder\\n] _\r\nValidation\\test_chat_assistant.py:531: in test_whitespace_padded_revision_still_offers_finished_task\r\n    assert candidates == tasks\r\nE   AssertionError: assert [] == [{'id': 'song...updated': 10}]\r\nE     \r\nE     Right contains one more item: {'id': 'song', 'title': 'Finished song', 'status': 'accepted', 'updated': 10}\r\nE     Use -v to get more diff\r\n_ test_whitespace_padded_revision_still_offers_finished_task[\\tMake it louder  ] _\r\nValidation\\test_chat_assistant.py:531: in test_whitespace_padded_revision_still_offers_finished_task\r\n    assert candidates == tasks\r\nE   AssertionError: assert [] == [{'id': 'song...updated': 10}]\r\nE     \r\nE     Right contains one more item: {'id': 'song', 'title': 'Finished song', 'status': 'accepted', 'updated': 10}\r\nE     Use -v to get more diff\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_chat_assistant.py::test_whitespace_padded_revision_still_offers_finished_task[  Make it louder]\r\nFAILED Validation/test_chat_assistant.py::test_whitespace_padded_revision_still_offers_finished_task[\\nMake it louder\\n]\r\nFAILED Validation/test_chat_assistant.py::test_whitespace_padded_revision_still_offers_finished_task[\\tMake it louder  ]\r\n3 failed, 74 passed in 2.03s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 2.43,
+          "summary": "........................................................................ [ 93%]\r\n.....                                                                    [100%]\r\n77 passed in 1.54s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 2.1,
+          "summary": "........................................................................ [ 93%]\r\n.....                                                                    [100%]\r\n77 passed in 1.25s\r\n"
+        }
+      }
+    },
+    {
+      "headRefName": "cale-donation-ff75f933dfcc4a01",
+      "headRefOid": "6cad7f4dacd80588a5500bb769d95352af3475c4",
+      "number": 418,
+      "state": "OPEN",
+      "title": "[Donation] Keep touch controls active until all pressing pointers are released",
+      "files": [
+        "Validation/test_design_tools.py",
+        "design_tools.py"
+      ],
+      "status": "accept",
+      "reason": "Production diff reviewed; regression red before and complete touched module green at exact head and current root f7e2c74.",
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 15.89,
+          "summary": "...F........sss..........                                                [100%]\r\n================================== FAILURES ===================================\r\n_________ test_touch_control_remains_held_until_last_pointer_releases _________\r\nValidation\\test_design_tools.py:151: in test_touch_control_remains_held_until_last_pointer_releases\r\n    assert result[\"afterFirstRelease\"] > result[\"start\"]\r\nE   assert 300 > 300\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_design_tools.py::test_touch_control_remains_held_until_last_pointer_releases\r\n1 failed, 21 passed, 3 skipped in 15.09s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 16.36,
+          "summary": "............sss..........                                                [100%]\r\n22 passed, 3 skipped in 15.45s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 22.03,
+          "summary": "............sss..........                                                [100%]\r\n22 passed, 3 skipped in 21.14s\r\n"
+        }
+      }
+    },
+    {
+      "headRefName": "cale-donation-491d326214a34fc8",
+      "headRefOid": "a41d7f0152426ab295587fc26d178d7b8d8384c0",
+      "number": 419,
+      "state": "OPEN",
+      "title": "[Donation] Treat excessively nested grader output as a failed grade",
+      "files": [
+        "Validation/test_model_fitness.py",
+        "model_fitness.py"
+      ],
+      "status": "accept",
+      "reason": "Production diff reviewed; regression red before and complete touched module green at exact head and current root f7e2c74.",
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 1.3,
+          "summary": "...........F..........                                                   [100%]\r\n================================== FAILURES ===================================\r\n_______ test_game_grader_nested_json_is_a_failed_grade_and_allows_retry _______\r\nValidation\\test_model_fitness.py:287: in test_game_grader_nested_json_is_a_failed_grade_and_allows_retry\r\n    assert model_fitness.grade_game_code(\r\nmodel_fitness.py:174: in grade_game_code\r\n    checks = json.loads(result.stdout)\r\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\r\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\json\\__init__.py:346: in loads\r\n    return _default_decoder.decode(s)\r\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\json\\decoder.py:345: in decode\r\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\r\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\json\\decoder.py:361: in raw_decode\r\n    obj, end = self.scan_once(s, idx)\r\n               ^^^^^^^^^^^^^^^^^^^^^^\r\nE   RecursionError: maximum recursion depth exceeded while decoding a JSON array from a unicode string\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_model_fitness.py::test_game_grader_nested_json_is_a_failed_grade_and_allows_retry\r\n1 failed, 21 passed in 0.66s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 1.21,
+          "summary": "......................                                                   [100%]\r\n22 passed in 0.52s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 1.14,
+          "summary": "......................                                                   [100%]\r\n22 passed in 0.48s\r\n"
+        }
+      }
+    },
+    {
+      "number": 420,
+      "head": "1501536bf7ef3407eba588492e54a4de253a7b09",
+      "parent": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+      "status": "accept",
+      "test_file": "Validation/test_model_identity.py",
+      "regression": "test_nested_model_defaults_do_not_select_aliases",
+      "red": ".                                                                      [100%]\n================================== FAILURES ===================================\n_ ModelIdentityTests.test_nested_model_defaults_do_not_select_aliases (config='model:\\n  options:\\n    default: cale-local\\n  default: qwen3-coder-local\\n') _\nValidation\\test_model_identity.py:57: in test_nested_model_defaults_do_not_select_aliases\n    self.assertEqual(configured_main_alias(root), main)\nE   AssertionError: 'cale-local' != 'qwen3-coder-local'\nE   - cale-local\nE   + qwen3-coder-local\n_ ModelIdentityTests.test_nested_model_defaults_do_not_select_aliases (config='model:\\n  options:\\n    default: qwen3-coder-local\\n') _\nValidation\\test_model_identity.py:57: in test_nested_model_defaults_do_not_select_aliases\n    self.assertEqual(configured_main_alias(root), main)\nE   AssertionError: 'qwen3-coder-local' != 'cale-local'\nE   - qwen3-coder-local\nE   + cale-local\n=========================== short test summary info ===========================\nSUBFAILED(config='model:\\n  options:\\n    default: cale-local\\n  default: qwen3-coder-local\\n') Validation/test_model_identity.py::ModelIdentityTests::test_nested_model_defaults_do_not_select_aliases\nSUBFAILED(config='model:\\n  options:\\n    default: qwen3-coder-local\\n') Validation/test_model_identity.py::ModelIdentityTests::test_nested_model_defaults_do_not_select_aliases\n2 failed, 1 passed, 7 deselected in 0.22s",
+      "green": "........                                                        [100%]\n8 passed, 9 subtests passed in 0.17s",
+      "seconds": 1.88,
+      "integration_commit": "edd4f8cd3e19b25d0381e2055bb06f5363031d1e",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/420",
+      "reason": "Direct-child indentation prevents nested YAML defaults from selecting wrong local aliases; both misleading nested cases fail on parent."
+    },
+    {
+      "number": 421,
+      "head": "a79ae6e054c599fb770934cdae687afde307a709",
+      "parent": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+      "status": "accept",
+      "test_file": "Validation/test_radio_station.py",
+      "regression": "test_completed_fade_releases_outgoing_state_when_close_reports_an_error",
+      "red": "F                                                                        [100%]\n================================== FAILURES ===================================\n___ test_completed_fade_releases_outgoing_state_when_close_reports_an_error ___\nValidation\\test_radio_station.py:581: in test_completed_fade_releases_outgoing_state_when_close_reports_an_error\n    assert player.outgoing is None and not player.mixing\nE   assert (<test_radio_station.Deck object at 0x0000012416A46F90> is None)\nE    +  where <test_radio_station.Deck object at 0x0000012416A46F90> = <radio_station.Player object at 0x0000012416A46E40>.outgoing\n=========================== short test summary info ===========================\nFAILED Validation/test_radio_station.py::test_completed_fade_releases_outgoing_state_when_close_reports_an_error\n1 failed, 33 deselected in 0.41s",
+      "green": "..................................                                       [100%]\n34 passed in 16.46s",
+      "seconds": 18.48,
+      "integration_commit": "7a8ca47a4353103ab7903ed5f6615ffc1f906493",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/421",
+      "reason": "Outgoing deck reference must clear even when already-closed audio cleanup reports an exception; subsequent transition remains possible."
+    },
+    {
+      "number": 422,
+      "head": "bec8cee14aa646f53064df95a66de0baffbd15ce",
+      "parent": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+      "status": "accept_with_compatibility_test",
+      "test_file": "Validation/test_project_preview.py",
+      "regression": "test_malformed_authority_rejected_when_legacy_parser_returns_it",
+      "red": "F                                                                        [100%]\n================================== FAILURES ===================================\n_______ test_malformed_authority_rejected_when_legacy_parser_returns_it _______\nValidation\\test_project_preview.py:163: in test_malformed_authority_rejected_when_legacy_parser_returns_it\n    assert preview.safe_loopback_url(malformed) == \"\"\nE   AssertionError: assert 'http://[::1]invalid:3000/' == ''\nE     \nE     + http://[::1]invalid:3000/\n=========================== short test summary info ===========================\nFAILED Validation/test_project_preview.py::test_malformed_authority_rejected_when_legacy_parser_returns_it\n1 failed, 9 deselected in 0.26s",
+      "green": ".....s....                                                           [100%]\n9 passed, 1 skipped, 4 subtests passed in 0.15s",
+      "reason": "Defense in depth for older urllib parsers. Submitted test already passes this patched Python baseline; added controlled SplitResult compatibility case proves app rejects full malformed authority independent of parser rejection.",
+      "integration_commit": "74b0fdaf65444e6d4e4b41b6d033bc5682072534",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/422"
+    },
+    {
+      "number": 423,
+      "head": "0046edd47a846906f8cd8fd1588440efd5bd653d",
+      "parent": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+      "status": "accept",
+      "test_file": "Validation/test_tone_adaptation.py",
+      "regression": "test_token_truncated_reply_uses_fallback",
+      "red": ".                                                                      [100%]\n================================== FAILURES ===================================\n_ ToneAdaptationTests.test_token_truncated_reply_uses_fallback (finish_reason='length') _\nValidation\\test_tone_adaptation.py:48: in test_token_truncated_reply_uses_fallback\n    self.assertEqual(tone_adaptation.social_reply(\"Hello\"), expected)\nE   AssertionError: 'I was going to say that' != 'I heard you. What do you need?'\nE   - I was going to say that\nE   + I heard you. What do you need?\n=========================== short test summary info ===========================\nSUBFAILED(finish_reason='length') Validation/test_tone_adaptation.py::ToneAdaptationTests::test_token_truncated_reply_uses_fallback\n1 failed, 1 passed, 11 deselected, 1 subtests passed in 0.56s",
+      "green": "............                                        [100%]\n12 passed, 21 subtests passed in 0.24s",
+      "integration_commit": "a3dfa547c6e5728d46dbe9115500ccb813c0947d",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/423",
+      "reason": "Explicit token-limit truncation must use existing short fallback rather than speak incomplete model text."
     }
   ],
   "integration_corrections": [
@@ -1248,6 +1576,14 @@
     "387: bounded descendant cleanup and Python entrypoint ownership",
     "388: synchronized bounded per-runtime cooldown cache",
     "400: parse Python interpreter options before matching installer entrypoint",
-    "404: bound tool pagination and reject cursor cycles"
-  ]
+    "404: bound tool pagination and reject cursor cycles",
+    "413: preserve compatible MP4 stream-copy and transcode only after observed codec/container rejection"
+  ],
+  "validation": {
+    "combined_root": "1008 passed, 12 skipped, 163 subtests passed in 265.84s",
+    "native_and_browser": "381 passed, 2 skipped before final metadata-only adjustments; final browser 30 passed, 2 skipped",
+    "new_416_419_root": "167 passed, 3 skipped, 39 subtests passed",
+    "new_420_423_root": "63 passed, 1 skipped, 34 subtests passed",
+    "new_411_415_private": "123 passed, 39 subtests passed in 16.51s"
+  }
 }
