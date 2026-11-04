@@ -92,6 +92,30 @@ def test_media_timeout_reaps_worker_and_preserves_timeout(tmp_path, exit_state):
     assert cleanup == (["wait"] if exit_state == "already_exited" else ["kill", "wait"])
 
 
+@pytest.mark.parametrize("response", [[], None, 42, "done", True, {"path": "image.png"}])
+def test_media_worker_response_must_be_a_json_object(tmp_path, response):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self, data):
+            return json.dumps(response).encode("utf-8"), b""
+
+    async def fake_spawn(*args, **kwargs):
+        return FakeProcess()
+
+    with (patch.object(toolbox_mcp, "ROOT", tmp_path),
+          patch.object(toolbox_mcp.asyncio, "create_subprocess_exec", fake_spawn)):
+        if isinstance(response, dict):
+            assert asyncio.run(toolbox_mcp.media_run("generate_image")) == response
+        else:
+            with pytest.raises(RuntimeError, match="Local generate_image failed: worker response must be a JSON object"):
+                asyncio.run(toolbox_mcp.media_run("generate_image"))
+
+
 def test_3d_generation_and_cpu_geometry_are_discoverable_and_callable():
     found = toolbox_mcp.toolbox_search("3d model mesh")
     names = {item["name"] for item in found["tools"]}

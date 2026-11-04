@@ -668,6 +668,8 @@ async def media_run(action: str, timeout: int = 900, **arguments) -> dict:
         raise RuntimeError(
             f"Local {action} failed: {stderr.decode('utf-8', errors='replace')[-1500:]}"
         )
+    if not isinstance(result, dict):
+        raise RuntimeError(f"Local {action} failed: worker response must be a JSON object")
     if process.returncode or "error" in result:
         raise RuntimeError(
             f"Local {action} failed: {result.get('error', stderr.decode('utf-8', errors='replace')[-1500:])}"
