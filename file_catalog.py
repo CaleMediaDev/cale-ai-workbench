@@ -271,19 +271,24 @@ def search(state: str | Path, query: str, limit: int = 10) -> list[dict]:
     count = max(1, min(limit, 30))
     with database(state) as conn:
         def matches(expression: str, candidate_limit: int) -> list[dict]:
-            rows = conn.execute(
-                """SELECT entries.path,entries.name,entries.kind
-                FROM entry_fts JOIN entries ON entries.id=entry_fts.rowid
-                WHERE entry_fts MATCH ? ORDER BY bm25(entry_fts,8.0,1.0)
-                LIMIT ?""",
-                (expression, candidate_limit),
-            ).fetchall()
             found = []
-            for row in rows:
-                if Path(row["path"]).exists():
-                    found.append(dict(row))
-                else:
-                    conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
+            while len(found) < candidate_limit:
+                rows = conn.execute(
+                    """SELECT entries.path,entries.name,entries.kind
+                    FROM entry_fts JOIN entries ON entries.id=entry_fts.rowid
+                    WHERE entry_fts MATCH ? ORDER BY bm25(entry_fts,8.0,1.0)
+                    LIMIT ? OFFSET ?""",
+                    (expression, candidate_limit - len(found), len(found)),
+                ).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    if Path(row["path"]).exists():
+                        found.append(dict(row))
+                    else:
+                        conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
+                # Deleted rows no longer occupy the ranked candidate window;
+                # skip only the live matches already collected.
             return found
 
         def score(row: dict) -> tuple[int, int]:

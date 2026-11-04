@@ -202,6 +202,36 @@ class FileCatalogTests(unittest.TestCase):
             self.assertFalse(file_catalog.first_scan_pending(state))
             self.assertTrue((state / file_catalog.FIRST_SCAN_NAME).is_file())
 
+    def test_search_refills_candidates_after_removing_stale_matches(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            file_catalog, "enough_space", return_value=True
+        ):
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            stale = []
+            for number in range(4):
+                folder = root / f"folder{number}"
+                folder.mkdir()
+                path = folder / "needle.txt"
+                path.write_text("", encoding="utf-8")
+                stale.append(path)
+            target = root / "needle-extra-notes.txt"
+            target.write_text("", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            for path in stale:
+                path.unlink()
+
+            # The shorter, now-deleted filenames rank ahead of the live file
+            # and exceed the initial three-candidate window for limit=1.
+            results = file_catalog.search(state, "needle", limit=1)
+
+            self.assertEqual([row["path"] for row in results], [str(target)])
+            with file_catalog.database(state) as conn:
+                paths = {row["path"] for row in conn.execute("SELECT path FROM entries")}
+            self.assertTrue(all(str(path) not in paths for path in stale))
+            self.assertIn(str(target), paths)
+
     def test_first_scan_only_holds_first_run(self):
         with tempfile.TemporaryDirectory() as temp:
             state = Path(temp)
