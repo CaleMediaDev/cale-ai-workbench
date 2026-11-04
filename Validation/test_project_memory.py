@@ -39,6 +39,24 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertEqual(memory.search(self.folder, "useful_component")[0]["source_path"],
                          "b.py")
 
+    def test_directory_scan_error_preserves_unseen_file_records(self):
+        nested = self.folder / "src"
+        nested.mkdir()
+        source = nested / "app.py"
+        source.write_text("retainedcomponent", encoding="utf-8")
+        memory.index(self.folder, include_code=True)
+
+        def incomplete_walk(root, followlinks=False, onerror=None):
+            yield str(root), ["src"], []
+            onerror(PermissionError("directory temporarily unreadable"))
+
+        with patch.object(memory.os, "walk", side_effect=incomplete_walk):
+            result = memory.index(self.folder, include_code=True)
+
+        self.assertEqual(result["removed"], 0)
+        found = memory.search(self.folder, "retainedcomponent", kind="file")
+        self.assertEqual([row["source_path"] for row in found], ["src/app.py"])
+
     def test_second_edit_during_search_hides_old_project_memory(self):
         source = self.folder / "app.py"
         source.write_text("old_widget", encoding="utf-8")

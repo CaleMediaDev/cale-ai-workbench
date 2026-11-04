@@ -199,9 +199,15 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
     max_files = max(1, min(int(max_files), 2000))
     paths = [root / relative for relative in DEFAULT_FILES]
     truncated = False
+    scan_failed = False
+
+    def scan_error(error):
+        nonlocal scan_failed
+        scan_failed = True
+
     if include_code:
         count = 0
-        for base, dirs, names in os.walk(root, followlinks=False):
+        for base, dirs, names in os.walk(root, followlinks=False, onerror=scan_error):
             dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS
                              and not SECRET_NAME.search(d) and not (Path(base) / d).is_symlink())
             for name in sorted(names):
@@ -244,7 +250,7 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
             changed += 1
         # Remove vanished index entries only when the whole source walk was seen.
         existing_files = {row[0] for row in conn.execute("SELECT id FROM memories WHERE kind='file'")}
-        if include_code and not truncated:
+        if include_code and not truncated and not scan_failed:
             stale = list(existing_files - seen)
         else:
             missing_defaults = {"file:" + relative for relative in DEFAULT_FILES if not (root / relative).is_file()}
