@@ -37,13 +37,19 @@ def _sources(root: Path):
     bundled = root / "vendor/agent-skills"
     for name, category in SKILLS.items():
         folder = bundled / name
+        if folder.is_symlink():
+            continue
         for source in sorted(folder.rglob("*")):
             if source.is_file() and not source.is_symlink():
                 relative = Path(category) / name / source.relative_to(folder)
                 yield source, relative
     for name in SHARED_REFERENCES:
         source = bundled / "references" / name
-        if source.is_file() and not source.is_symlink():
+        if (
+            not source.parent.is_symlink()
+            and source.is_file()
+            and not source.is_symlink()
+        ):
             yield source, Path("references") / name
 
 

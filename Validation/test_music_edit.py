@@ -94,6 +94,38 @@ def test_edit_music_preserves_fade_timing_precision(tmp_path, monkeypatch):
     assert source.read_bytes() == original
 
 
+@pytest.mark.parametrize("gain", [-59.99999, 12.3456789])
+def test_music_filters_preserve_gain_precision(tmp_path, monkeypatch, gain):
+    source = tmp_path / "song.wav"
+    foreground = tmp_path / "voice.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio"
+    source.write_bytes(original)
+    foreground.write_bytes(original)
+    calls = []
+    monkeypatch.setattr(music_edit, "_run", lambda *args: calls.append(args))
+
+    music_edit.edit_music(str(source), str(output), gain_db=gain)
+    music_edit.mix_music(
+        str(source), str(foreground), str(output),
+        background_gain_db=gain, foreground_gain_db=gain,
+    )
+
+    assert len(calls) == 2
+    edit_args, edit_output = calls[0]
+    edit_filter = edit_args[edit_args.index("-af") + 1]
+    assert float(edit_filter.split("=", 1)[1].removesuffix("dB")) == gain
+    mix_args, mix_output = calls[1]
+    graph = mix_args[mix_args.index("-filter_complex") + 1]
+    gain_fields = graph.split("volume=")[1:]
+    assert len(gain_fields) == 2
+    assert all(float(field.split("dB", 1)[0]) == gain for field in gain_fields)
+    assert edit_output == mix_output == output
+    assert not output.exists()
+    assert source.read_bytes() == original
+    assert foreground.read_bytes() == original
+
+
 def test_mix_music_renders_both_tracks_and_is_discoverable(tmp_path):
     background = tmp_path / "music.wav"
     foreground = tmp_path / "voice.wav"

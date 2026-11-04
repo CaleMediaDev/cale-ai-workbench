@@ -71,6 +71,55 @@ def test_catalog_preserves_stale_snapshot_on_incompatible_encoding(tmp_path):
     assert cache.read_bytes() == original
 
 
+def test_catalog_recovers_from_fresh_oversized_cache(tmp_path):
+    cache = tmp_path / "apis.json"
+    limit = 128
+    cache.write_bytes(json.dumps([{"name": "x" * limit}]).encode("utf-8"))
+    current_time = cache.stat().st_mtime + 1
+    snapshot = [{"name": "Recovered snapshot"}]
+    downloaded = json.dumps(snapshot).encode("utf-8")
+    original_open = type(cache).open
+    read_sizes = []
+
+    class BoundedReader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def read(self, size=-1):
+            read_sizes.append(size)
+            assert size == limit + 1
+            return self.handle.read(size)
+
+    def tracked_open(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        if path == cache:
+            return BoundedReader(handle)
+        return handle
+
+    with patch.object(public_api_catalog, "CACHE", cache), \
+         patch.object(public_api_catalog, "MAX_BYTES", limit), \
+         patch.object(public_api_catalog.time, "time", return_value=current_time), \
+         patch.object(type(cache), "open", new=tracked_open), \
+         patch.object(public_api_catalog, "urlopen") as open_url:
+        response = open_url.return_value.__enter__.return_value
+        response.read.return_value = downloaded
+        data, fresh = public_api_catalog._catalog()
+
+    assert read_sizes == [limit + 1]
+    open_url.assert_called_once()
+    response.read.assert_called_once_with(limit + 1)
+    assert data == snapshot
+    assert fresh is True
+    assert cache.read_bytes() == downloaded
+
+
 def test_catalog_recovers_from_fresh_malformed_cache(tmp_path):
     cache = tmp_path / "apis.json"
     cache.write_bytes(b'{"incomplete":')

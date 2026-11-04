@@ -334,6 +334,16 @@ def test_clone_probe_requires_actual_complete_non_silent_render_before_cache_pas
     assert not Path(command[-2]).exists()  # Evidence metadata survives, temporary audio does not.
 
 
+def test_clone_capability_rejects_overflowing_probe_timestamp(clone_probe_runtime, monkeypatch):
+    root, snapshot, wav, process = clone_probe_runtime
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", process())
+    report = cale_voice.run_probe()
+    assert report["status"] == "passed" and cale_voice.capability_ready()
+    report["checked_at"] = 10 ** 400
+    cale_voice._save_probe(report)
+    assert not cale_voice.capability_ready()
+
+
 def test_finished_invalid_clone_probe_does_not_inspect_or_stop_a_reusable_pid(clone_probe_runtime, monkeypatch):
     root, snapshot, wav, process = clone_probe_runtime
     monkeypatch.setattr(cale_voice.subprocess, "Popen", process("empty"))

@@ -2004,9 +2004,21 @@ def test_semantic_browser_preflight_preserves_future_page_and_normalized_adjacen
         {"reload": True, "expect": {"total-display": "$7.25"}},
     ]}
     before = copy.deepcopy(spec)
-    with patch.object(webapp_check, "_project_file", side_effect=AssertionError("pure preflight must not inspect source")):
+    source_reads = []
+    def protect_pages(method):
+        def guarded(path, *args, **kwargs):
+            if path.suffix.lower() in {".html", ".htm"}:
+                source_reads.append(path)
+                raise AssertionError("Planning must not read page content")
+            return method(path, *args, **kwargs)
+        return guarded
+    # Containment resolution is allowed; source inspection and execution are not.
+    with (patch.object(webapp_check, "check", side_effect=AssertionError("Planning must not run a browser")),
+          patch.object(Path, "read_text", protect_pages(Path.read_text)),
+          patch.object(Path, "read_bytes", protect_pages(Path.read_bytes))):
         webapp_check.validate_spec_data(webapp_check.normalize_spec(spec))
         queue = task_context.plan_steps(tmp_path, [{"phase": "Totals", "title": "Calculate requested dollars", "check_tool": "check_webapp", "check_arguments": spec}])
+    assert source_reads == []
     assert queue["total"] == 1 and queue["done"] == 0
     assert queue["active"]["check_arguments"] == spec == before
     assert not (tmp_path / "future.html").exists()
@@ -2451,3 +2463,109 @@ def test_ordinary_partial_actual_candidate_respects_newer_request_source_suite_a
         assert not parsed["passed"] and not parsed.get("verifier_saved")
     assert saved.read_bytes() == expected["suite"] and verifier.read_bytes() == expected["verifier"]
     assert task_context.step_status(tmp_path)["done"] == 0
+
+
+@pytest.mark.parametrize("operation", ["plan", "revise", "split"])
+@pytest.mark.parametrize("bad_path", ["/index.html", r"\index.html", "C:index.html",
+    r"C:\outside.html", r"\\server\share\outside.html", "../outside.html", "page.txt"])
+def test_browser_plan_path_rejects_before_sql_mutation(tmp_path, operation, bad_path):
+    page = tmp_path / "index.html"
+    page.write_text('<p id="status">Ready</p>')
+    step = {"phase": "prepare", "title": "Check the page", "check_tool": "check_webapp",
+            "check_arguments": {"path": "index.html", "cases": [{"visible": ["status"]}]}}
+    queue = task_context.plan_steps(tmp_path, [step])
+    with project_memory.connection(tmp_path) as conn:
+        conn.execute("UPDATE task_steps SET attempts=2,evidence='Existing failure evidence',status=? WHERE id=?",
+                     ("done" if operation == "plan" else "active", queue["active"]["id"]))
+    def rows():
+        with project_memory.connection(tmp_path) as conn:
+            return [tuple(row) for row in conn.execute("SELECT * FROM task_steps ORDER BY id")]
+    before = rows()
+    bad = {**step, "check_arguments": {**step["check_arguments"], "path": bad_path}}
+    with pytest.raises(ValueError, match="relative HTML|HTML file in this project"):
+        if operation == "revise":
+            task_context.revise_step(tmp_path, queue["active"]["id"], [bad])
+        elif operation == "split":
+            task_context.plan_steps(tmp_path, [bad, step], split_id=queue["active"]["id"])
+        else:
+            task_context.plan_steps(tmp_path, [bad])
+    assert rows() == before
+    assert page.read_text() == '<p id="status">Ready</p>'
+    assert not (tmp_path / ".local-ai/webapp-check.json").exists()
+
+
+def test_browser_plan_path_permits_future_contained_html_and_execution_requires_file(tmp_path):
+    future = "not-created/pages/future.html"
+    arguments = {"path": future, "cases": [{"visible": ["future-control"]}]}
+    queue = task_context.plan_steps(tmp_path, [{"phase": "future", "title": "Check future page",
+        "check_tool": "check_webapp", "check_arguments": arguments}])
+    assert queue["active"]["check_arguments"] == arguments
+    assert not (tmp_path / future).exists()
+    assert webapp_check._project_file(tmp_path, future, must_exist=False) == (tmp_path / future).resolve()
+    with pytest.raises(ValueError, match="must exist"):
+        webapp_check.validate_spec(tmp_path, arguments)
+    (tmp_path / "index.html").write_text('<p id="status">Ready</p>')
+    assert webapp_check.validate_spec(tmp_path, {**arguments, "path": "index.html"}) == (tmp_path / "index.html").resolve()
+    with pytest.raises(ValueError, match="relative HTML"):
+        webapp_check.validate_spec(tmp_path, {**arguments, "path": str(tmp_path / "index.html")})
+
+
+def test_browser_plan_path_rejects_resolved_symlink_escape_without_reading_source(tmp_path, monkeypatch):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    alias = folder / "alias.html"
+    outside = tmp_path / "private.html"
+    outside.write_text("private source must not be read")
+    resolve = Path.resolve
+    def redirected(path, *args, **kwargs):
+        return outside if path == alias else resolve(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "resolve", redirected)
+    step = {"phase": "future", "title": "Check page", "check_tool": "check_webapp",
+            "check_arguments": {"path": "alias.html", "cases": [{"visible": ["status"]}]}}
+    with patch.object(Path, "read_bytes", side_effect=AssertionError("No source bytes during planning")):
+        with pytest.raises(ValueError, match="HTML file in this project"):
+            task_context.plan_steps(folder, [step])
+    assert not (folder / ".local-ai/memory.sqlite3").exists()
+
+
+def test_browser_plan_path_rejects_actual_outside_symlink(tmp_path):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    outside = tmp_path / "outside.html"
+    outside.write_text("outside")
+    try:
+        (folder / "alias.html").symlink_to(outside)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"Symlinks unavailable: {error}")
+    with pytest.raises(ValueError, match="HTML file in this project"):
+        task_context.plan_steps(folder, [{"phase": "check", "title": "Check page", "check_tool": "check_webapp",
+            "check_arguments": {"path": "alias.html", "cases": [{"visible": ["status"]}]}}])
+
+
+@pytest.mark.parametrize("bad_path", ["/index.html", r"\index.html", "C:index.html", "", "bad\x00.html"])
+def test_browser_plan_path_legacy_definition_validation_is_pure_and_precise(tmp_path, bad_path):
+    with patch.object(Path, "read_bytes", side_effect=AssertionError("No source reads")):
+        with pytest.raises(ValueError, match="relative HTML path.*check_arguments.path"):
+            task_context.validate_repeatable_check("check_webapp", {
+                "path": bad_path, "cases": [{"visible": ["status"]}]})
+    assert not (tmp_path / ".local-ai/memory.sqlite3").exists()
+
+
+def test_browser_plan_path_absolute_inside_project_keeps_relative_only_contract(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text('<p id="status">Ready</p>')
+    with pytest.raises(ValueError, match="relative HTML path"):
+        task_context.plan_steps(tmp_path, [{"phase": "page", "title": "Check page",
+            "check_tool": "check_webapp", "check_arguments": {
+                "path": str(page), "cases": [{"visible": ["status"]}]}}])
+    assert not (tmp_path / ".local-ai/memory.sqlite3").exists()
+
+
+def test_browser_plan_path_format_only_developer_probe_keeps_pure_compatibility():
+    step = {"phase": "future", "title": "Check future page", "check_tool": "check_webapp",
+            "check_arguments": {"path": "future.html", "cases": [{"visible": ["future-control"]}]}}
+    # The developer format probe has no project folder and never publishes SQL.
+    assert len(task_context._validate_steps([step])) == 1
+    with pytest.raises(ValueError, match="relative HTML path"):
+        task_context._validate_steps([{**step, "check_arguments": {
+            **step["check_arguments"], "path": "/index.html"}}])

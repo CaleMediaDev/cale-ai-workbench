@@ -173,8 +173,21 @@ def index_document_text(folder: str | Path, path: str | Path, text: str,
         raise ValueError("Document text is too large to index")
     if not re.fullmatch(r"[a-f0-9]{64}", source_hash):
         raise ValueError("A verified source hash is required")
-    chunks = [text[start:start + DOCUMENT_CHUNK_CHARS]
-              for start in range(0, len(text), DOCUMENT_CHUNK_CHARS)]
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + DOCUMENT_CHUNK_CHARS, len(text))
+        boundary = end
+        # FTS indexes each chunk independently. Avoid turning an ordinary
+        # word into two unsearchable fragments at a fixed character boundary.
+        while (boundary > start and boundary < len(text)
+               and text[boundary - 1].isalnum() and text[boundary].isalnum()):
+            boundary -= 1
+        # A token longer than the chunk budget still requires a hard split.
+        if boundary > start:
+            end = boundary
+        chunks.append(text[start:end])
+        start = end
     with connection(root) as conn:
         existing = conn.execute(
             "SELECT COUNT(*),MIN(source_hash),MAX(source_hash),MIN(tags),MAX(tags) FROM memories "

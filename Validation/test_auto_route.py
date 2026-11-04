@@ -88,6 +88,31 @@ class AutoRouteTests(unittest.TestCase):
                 else:
                     self.assertIs(repair_messages(messages), messages)
 
+    def test_excessively_nested_json_does_not_crash_recovery_routing(self):
+        # Python 3.13's C JSON decoder can exceed the Python recursion limit.
+        # A bounded 16 KB payload reaches its actual decoder nesting guard.
+        depth = 8000
+        nested = '[' * depth + '0' + ']' * depth
+        messages = [{"role": "user", "content": "Calculate a tip."}]
+        messages.append({"role": "system", "content":
+            'Current task checkpoint:\nNative routing evidence: ' + nested})
+        self.assertFalse(repeated_tool_failures(messages))
+        self.assertEqual(task_size(messages), "quick")
+        self.assertIs(repair_messages(messages), messages)
+
+        # Unusable checkpoint evidence must still allow ordinary tool recovery.
+        messages.extend({"role": "tool", "content": '{"success":false}'}
+                        for _ in range(3))
+        self.assertTrue(repeated_tool_failures(messages))
+        self.assertEqual(task_size(messages), "deep")
+        self.assertIn("Do not repeat", repair_messages(messages)[0]["content"])
+
+        # An undecodable latest result is not evidence of another failure.
+        messages.append({"role": "tool", "content": nested})
+        self.assertFalse(repeated_tool_failures(messages))
+        self.assertEqual(task_size(messages), "quick")
+        self.assertIs(repair_messages(messages), messages)
+
     def test_database_routing_evidence_survives_short_history(self):
         for attempts, repeats, expected in ((1, 0, False), (2, 0, True), (0, 3, True), (0, 0, False)):
             content = 'Current task checkpoint (data):\nNative routing evidence: ' + json.dumps(

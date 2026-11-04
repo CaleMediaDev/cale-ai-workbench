@@ -135,7 +135,7 @@ def start_video_job(prompt: str, output_path: str, image_path: str = "",
     job_id = uuid.uuid4().hex
     payload = {"prompt": prompt.strip(), "output_path": str(output), "image_path": str(image or ""),
                "seconds": float(seconds), "layout": layout}
-    _write(job_id, state="queued", **payload)
+    _write(job_id, state="starting", **payload)
     log = JOBS / f"{job_id}.log"
     try:
         with log.open("wb") as stream:
@@ -145,7 +145,7 @@ def start_video_job(prompt: str, output_path: str, image_path: str = "",
     except OSError as exc:
         _write(job_id, state="failed", error=f"{type(exc).__name__}: {exc}", log_path=str(log))
         raise
-    return _write(job_id, state="starting", worker_pid=proc.pid, log_path=str(log))
+    return _write(job_id, worker_pid=proc.pid, log_path=str(log))
 
 
 def video_job_status(job_id: str) -> dict:

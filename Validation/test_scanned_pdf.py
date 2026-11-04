@@ -82,6 +82,46 @@ def test_native_pdf_does_not_require_vision_worker(tmp_path):
     document.close.assert_called_once_with()
 
 
+def test_unavailable_vision_worker_preserves_native_text_and_reports_omission(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    pdf = tmp_path / "mixed-without-worker.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    native_textpage = Mock()
+    native_textpage.get_text_bounded.return_value = "Native order"
+    scan_textpage = Mock()
+    scan_textpage.get_text_bounded.return_value = ""
+    native_page = Mock()
+    native_page.get_textpage.return_value = native_textpage
+    scan_page = Mock()
+    scan_page.get_textpage.return_value = scan_textpage
+    document = Mock()
+    document.__len__ = Mock(return_value=2)
+    document.__getitem__ = Mock(side_effect=lambda index: [native_page, scan_page][index])
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(PdfDocument=Mock(return_value=document)),
+        "media_worker": None,
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert "[Page 1; selectable text]\nNative order" in result["text"]
+    assert "[1 scanned pages were not read: 2.]" in result["text"]
+    assert "[Page 2; vision transcription]" not in result["text"]
+    assert result["pages_read"] == [1]
+    assert result["scanned_pages"] == [2]
+    assert result["has_scans"] is True
+    assert result["partial"] is True
+    native_page.render.assert_not_called()
+    scan_page.render.assert_not_called()
+    native_textpage.close.assert_called_once_with()
+    scan_textpage.close.assert_called_once_with()
+    native_page.close.assert_called_once_with()
+    scan_page.close.assert_called_once_with()
+    document.close.assert_called_once_with()
+
+
 def test_text_layer_error_falls_back_to_vision_and_preserves_native_text(tmp_path):
     import sys
     from unittest.mock import Mock
@@ -430,6 +470,63 @@ def test_nan_scan_dimensions_preserve_native_text_and_report_omission(tmp_path):
     scan_textpage.close.assert_called_once_with()
     native_page.close.assert_called_once_with()
     assert scan_page.close.call_count == 2
+    document.close.assert_called_once_with()
+
+
+def test_failed_transcription_preserves_other_pages_and_reports_omission(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    class PdfiumError(Exception):
+        pass
+
+    pdf = tmp_path / "failed-transcription.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    pages = [Mock(), Mock(), Mock()]
+    textpages = [Mock(), Mock(), Mock()]
+    for page, textpage, text in zip(pages, textpages, ["Native order", "", ""]):
+        page.get_textpage.return_value = textpage
+        textpage.get_text_bounded.return_value = text
+        page.get_size.return_value = (600, 800)
+    images = [Mock(), Mock()]
+    bitmaps = [Mock(), Mock()]
+    for page, bitmap, image in zip(pages[1:], bitmaps, images):
+        page.render.return_value = bitmap
+        bitmap.to_pil.return_value = image
+    document = Mock()
+    document.__len__ = Mock(return_value=3)
+    document.__getitem__ = Mock(side_effect=lambda index: pages[index])
+    recognize = Mock(side_effect=[
+        RuntimeError("vision inference failed"),
+        {"description": "Readable scan"},
+    ])
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(
+            PdfDocument=Mock(return_value=document), PdfiumError=PdfiumError
+        ),
+        "media_worker": SimpleNamespace(recognize_image=recognize),
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert "[Page 1; selectable text]\nNative order" in result["text"]
+    assert "[Page 3; vision transcription]\nReadable scan" in result["text"]
+    assert "[1 scanned pages were not read: 2.]" in result["text"]
+    assert "[Page 2; vision transcription]" not in result["text"]
+    assert result["pages_read"] == [1, 3]
+    assert result["scanned_pages"] == [2, 3]
+    assert result["has_scans"] is True
+    assert result["partial"] is True
+    assert recognize.call_count == 2
+    pages[0].render.assert_not_called()
+    for textpage in textpages:
+        textpage.close.assert_called_once_with()
+    for image, bitmap in zip(images, bitmaps):
+        image.close.assert_called_once_with()
+        bitmap.close.assert_called_once_with()
+    for call in recognize.call_args_list:
+        assert not Path(call.args[0]).parent.exists()
+    assert [page.close.call_count for page in pages] == [1, 2, 2]
     document.close.assert_called_once_with()
 
 

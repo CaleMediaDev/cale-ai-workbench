@@ -159,7 +159,7 @@ def capability_ready() -> bool:
         return bool(ready() and report.get("format") == PROBE_FORMAT
                     and report.get("status") == "passed" and report.get("engine") == "Cale's local voice"
                     and report.get("fingerprint") == _voice_fingerprint(report["model_path"]))
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, OverflowError):
         return False
 
 

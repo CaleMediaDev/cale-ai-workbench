@@ -161,6 +161,29 @@ def test_run_distinguishes_overwrite_refusal_from_output_filename(tmp_path, monk
         assert video_edit._destination(str(output), []) == output
 
 
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_run_preserves_original_exception_when_destination_becomes_directory(tmp_path, monkeypatch, interrupted):
+    output = tmp_path / "edited.mp4"
+    error = KeyboardInterrupt() if interrupted else subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1)
+
+    def failed_process(command, **kwargs):
+        assert command[-1] == str(output)
+        # Another process creates a directory after the initial existence check.
+        output.mkdir()
+        (output / "keep.txt").write_text("preserve me")
+        raise error
+
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", failed_process)
+
+    with pytest.raises(type(error)) as caught:
+        video_edit._run([], output, timeout=1)
+
+    assert caught.value is error
+    assert output.is_dir()
+    assert (output / "keep.txt").read_text() == "preserve me"
+
+
 def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeypatch):
     output = tmp_path / "edited.mp4"
     real_run = subprocess.run

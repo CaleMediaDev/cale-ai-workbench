@@ -56,11 +56,15 @@ def install():
         save_download_status(STATUS, "error", str(exc)[:400], 0)
         return
     with lock_file as lock:
-        lock.seek(0, 2)
-        if lock.tell() == 0:
-            lock.write(b"1")
-            lock.flush()
-        lock.seek(0)
+        try:
+            lock.seek(0, 2)
+            if lock.tell() == 0:
+                lock.write(b"1")
+                lock.flush()
+            lock.seek(0)
+        except OSError as exc:
+            save_download_status(STATUS, "error", str(exc)[:400], 0)
+            return
         try:
             msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError as exc:

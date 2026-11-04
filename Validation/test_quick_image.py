@@ -248,6 +248,30 @@ def test_recovery_retries_png_with_invalid_chunk_checksum(tmp_path):
     assert not output.exists()
 
 
+def test_recovery_skips_non_object_job_records(tmp_path):
+    for index, malformed in enumerate((None, [], "invalid", 42)):
+        root = tmp_path / str(index)
+        bad_id = "0" * 32
+        good_id = "1" * 32
+        bad_path = quick_image._job_path(root, bad_id)
+        bad_path.parent.mkdir(parents=True)
+        bad_path.write_text(json.dumps(malformed), encoding="utf-8")
+        quick_image._write_job(root, good_id, {
+            "job_id": good_id, "status": "working", "prompt": "a dog",
+            "output_path": str(root / "dog.png"),
+        })
+
+        with (patch.object(quick_image, "_worker_running", return_value=False),
+              patch.object(quick_image, "_launch_job") as launch):
+            quick_image.recover_image_jobs(root)
+            launch.assert_called_once_with(root, good_id)
+
+        info = quick_image.image_job_status(root, good_id)
+        assert info["status"] == "queued"
+        assert info["recoveries"] == 1
+        assert json.loads(bad_path.read_text(encoding="utf-8")) == malformed
+
+
 def test_recovery_preserves_valid_png_smaller_than_100_bytes(tmp_path):
     output = tmp_path / "small.png"
     Image.new("RGB", (1, 1), "orange").save(output)

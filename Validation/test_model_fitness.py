@@ -207,6 +207,39 @@ def test_game_ranking_nested_cache_falls_back_and_allows_retry():
         ) == ["cale-fast"]
 
 
+def test_game_probe_current_rejects_nested_cache_and_recovers():
+    depth = max(5000, sys.getrecursionlimit() + 100)
+    source = "candidate:7b"
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        path = root / "LongTasks/game-model-probes.json"
+        path.parent.mkdir()
+        path.write_text("[" * depth + "0" + "]" * depth, encoding="utf-8")
+        with (
+            patch.object(model_library, "post") as post,
+            patch.object(model_library, "weight_blob", return_value="a" * 64),
+            patch.object(model_fitness, "gpu_vram_gb", return_value=12),
+            patch.object(model_library, "total_ram_gb", return_value=32),
+        ):
+            assert model_fitness.game_probe_current(source, root) is False
+            post.assert_not_called()
+            path.write_text(
+                json.dumps({source: {
+                    "version": model_fitness.GAME_PROBE_VERSION,
+                    "weights": "a" * 64,
+                    "vram_gb": 12,
+                    "ram_gb": 32,
+                    "updated": time.time(),
+                    "build": {"passed": True},
+                }}),
+                encoding="utf-8",
+            )
+            assert model_fitness.game_probe_current(
+                source, root, info={"model": source}
+            ) is True
+            post.assert_not_called()
+
+
 def test_game_probe_requires_two_complete_independent_passes():
     with tempfile.TemporaryDirectory() as folder:
         checks = {str(i): True for i in range(13)}
@@ -269,6 +302,41 @@ def test_game_probe_nested_completion_json_is_saved_as_failed_samples():
             (Path(folder) / "LongTasks/game-model-probes.json").read_text()
         )
         assert saved["candidate:7b"] == result
+
+
+def test_game_probe_replaces_nested_cache_with_completed_report():
+    depth = max(5000, sys.getrecursionlimit() + 100)
+    replies = [
+        {"modelfile": "FROM sha256-" + "a" * 64},
+        {"message": {"content": '{"code":"first"}'}},
+        {"message": {"content": '{"code":"second"}'}},
+        {"message": {"content": '{"html":"<html>game</html>"}'}},
+    ]
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        path = root / "LongTasks/game-model-probes.json"
+        path.parent.mkdir()
+        path.write_text("[" * depth + "0" + "]" * depth, encoding="utf-8")
+        with (
+            patch.object(model_library, "post", side_effect=replies) as post,
+            patch.object(
+                model_fitness, "grade_game_code", return_value={"valid_code": False}
+            ) as grade_code,
+            patch.object(
+                model_fitness, "grade_game_html", return_value={"valid_html": False}
+            ) as grade_html,
+            patch.object(model_fitness, "gpu_vram_gb", return_value=12),
+            patch.object(model_library, "total_ram_gb", return_value=32),
+        ):
+            result = model_fitness.probe_game_coding("candidate:7b", root)
+        assert post.call_count == 4
+        assert grade_code.call_count == 2
+        grade_html.assert_called_once()
+        assert result["passed"] is False
+        assert len(result["samples"]) == 2
+        assert json.loads(path.read_text(encoding="utf-8")) == {
+            "candidate:7b": result
+        }
 
 
 def test_small_functions_alone_do_not_promote_new_game_builder():

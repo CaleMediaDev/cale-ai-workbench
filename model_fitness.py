@@ -297,7 +297,7 @@ def probe_game_coding(source, root):
         records = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(records, dict):
             records = {}
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         records = {}
     records[source] = report
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -400,7 +400,7 @@ def game_probe_current(source, root, info=None):
             and 0 <= time.time() - report["updated"] < 30 * 86400
             and isinstance(report.get("build", {}).get("passed"), bool)
         )
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError):
         return False
 
 

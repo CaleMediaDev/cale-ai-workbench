@@ -238,7 +238,7 @@ def read_webpage(url: str, find: str = "", start_char: int = 0, question: str = 
         dict.fromkeys(
             link["url"]
             for link in page.links
-            if link["url"].startswith(("tel:", "mailto:"))
+            if link["url"].lower().startswith(("tel:", "mailto:"))
         )
     )
     links = list(

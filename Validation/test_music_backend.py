@@ -772,6 +772,29 @@ def test_cover_upload_is_multipart_and_loopback_only(tmp_path):
     assert post.call_args.kwargs["files"]["src_audio"][0] == "original.mp3"
 
 
+def test_setup_status_interleaved_writes_use_distinct_temporary_files(tmp_path):
+    original_replace = music_backend.os.replace
+    sources = []
+
+    def interleave_write(source, destination):
+        sources.append(Path(source))
+        if len(sources) == 1:
+            music_backend._write_setup_status("working", "Second writer", 35)
+        return original_replace(source, destination)
+
+    with (patch.object(music_backend, "ROOT", tmp_path),
+          patch.object(music_backend.os, "replace", side_effect=interleave_write)):
+        music_backend._write_setup_status("working", "First writer", 5)
+
+    directory = tmp_path / "LongTasks"
+    assert len(sources) == 2
+    assert sources[0] != sources[1]
+    assert json.loads((directory / "music-install-progress.json").read_text(
+        encoding="utf-8"
+    )) == {"status": "working", "current": "First writer", "progress": 5}
+    assert not list(directory.glob("*.tmp"))
+
+
 def test_prefetch_downloads_in_background_on_capable_pc(tmp_path):
     engine = tmp_path / "Media" / "music" / "ACE-Step-1.5"
     downloader = engine / ".venv" / "Scripts" / "acestep-download.exe"
@@ -1387,6 +1410,28 @@ def test_project_jobs_skips_invalid_timestamp_and_sorts_valid_jobs(tmp_path, bad
           patch.object(Path, "glob", return_value=paths)):
         assert music_backend.project_jobs(task_id, project) == [records[2], records[1]]
     assert json.loads(paths[0].read_text(encoding="utf-8")) == records[0]
+
+
+@pytest.mark.parametrize("created", [float("nan"), float("inf"), float("-inf")])
+def test_project_jobs_skips_nonfinite_timestamps_and_preserves_valid_order(tmp_path, created):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    task_id = "a" * 12
+    records = [
+        {"job_id": "1" * 32, "task_id": task_id, "created": 20},
+        {"job_id": "2" * 32, "task_id": task_id, "created": created},
+        {"job_id": "3" * 32, "task_id": task_id, "created": 10},
+    ]
+    paths = []
+    for record in records:
+        path = jobs / (record["job_id"] + ".json")
+        path.write_text(json.dumps(record), encoding="utf-8")
+        paths.append(path)
+    original = paths[1].read_bytes()
+    with (patch.object(music_backend, "JOBS", jobs),
+          patch.object(Path, "glob", return_value=paths)):
+        assert music_backend.project_jobs(task_id, tmp_path) == [records[2], records[0]]
+    assert paths[1].read_bytes() == original
 
 
 def test_agent_music_job_is_attributed_and_task_controls_only_its_renders(tmp_path):

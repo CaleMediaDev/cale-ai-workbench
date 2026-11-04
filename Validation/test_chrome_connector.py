@@ -81,6 +81,40 @@ def test_installed_version_accepts_indented_root_mapping(tmp_path, monkeypatch, 
     assert chrome_connector.installed_version() == "0.2.6"
 
 
+@pytest.mark.parametrize("comment_first", [True, False])
+def test_installed_version_accepts_indented_mapping_with_unindented_comment(
+    tmp_path, monkeypatch, comment_first
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    mapping = "  name: hermes-connector\n  version: 0.2.6\n"
+    comment = "# Local companion manifest\n"
+    contents = comment + mapping if comment_first else mapping + comment
+    (plugin / "plugin.yaml").write_text(contents, encoding="utf-8")
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    assert chrome_connector.installed_version() == "0.2.6"
+
+
+@pytest.mark.parametrize("start,end", [
+    ("---\n", ""),
+    ("---\n", "...\n"),
+    ("--- # document start\n", "... # document end\n"),
+])
+def test_installed_version_accepts_indented_mapping_with_document_markers(
+    tmp_path, monkeypatch, start, end
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text(
+        start + "  name: hermes-connector\n  version: 0.2.6\n" + end,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    assert chrome_connector.installed_version() == "0.2.6"
+
+
 def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()

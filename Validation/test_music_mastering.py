@@ -134,7 +134,8 @@ def test_mastering_preserves_destination_created_during_render(tmp_path, worker_
 
 
 @pytest.mark.parametrize("destination_created", [False, True])
-def test_mastering_without_filesystem_hard_link_support(tmp_path, destination_created):
+@pytest.mark.parametrize("winerror", [None, 1, 50])
+def test_mastering_without_filesystem_hard_link_support(tmp_path, destination_created, winerror):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"
     output = tmp_path / "master.wav"
@@ -150,7 +151,12 @@ def test_mastering_without_filesystem_hard_link_support(tmp_path, destination_cr
             output.write_bytes(b"another operation's audio")
         return type("Result", (), {"returncode": 0})()
 
-    unsupported = OSError(music_mastering.errno.EOPNOTSUPP, "Hard links unsupported")
+    unsupported = OSError(
+        music_mastering.errno.EOPNOTSUPP if winerror is None else music_mastering.errno.EINVAL,
+        "Hard links unsupported",
+    )
+    if winerror is not None:
+        unsupported.winerror = winerror
     with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
         music_mastering, "install", return_value=Path("python.exe")
     ), patch.object(music_mastering.subprocess, "run", side_effect=render), patch.object(
@@ -166,6 +172,47 @@ def test_mastering_without_filesystem_hard_link_support(tmp_path, destination_cr
     assert output.read_bytes() == (
         b"another operation's audio" if destination_created else b"mastered"
     )
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"reference"
+    assert len(staged_paths) == 1
+    assert not staged_paths[0].parent.exists()
+
+
+def test_mastering_preserves_copy_error_when_partial_output_cleanup_fails(tmp_path):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    source.write_bytes(b"source")
+    reference.write_bytes(b"reference")
+    staged_paths = []
+    copy_error = OSError(music_mastering.errno.ENOSPC, "No space left on device")
+    cleanup_error = PermissionError("Cannot remove partial output")
+
+    def render(*args, **kwargs):
+        staged = Path(args[0][-1])
+        staged_paths.append(staged)
+        staged.write_bytes(b"mastered")
+        return type("Result", (), {"returncode": 0})()
+
+    def fail_copy(rendered, destination):
+        destination.write(b"partial")
+        raise copy_error
+
+    with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
+        music_mastering, "install", return_value=Path("python.exe")
+    ), patch.object(music_mastering.subprocess, "run", side_effect=render), patch.object(
+        music_mastering.os, "link",
+        side_effect=OSError(music_mastering.errno.EOPNOTSUPP, "Hard links unsupported"),
+    ), patch.object(
+        music_mastering.shutil, "copyfileobj", side_effect=fail_copy
+    ), patch.object(Path, "unlink", side_effect=cleanup_error) as unlink:
+        with pytest.raises(OSError) as caught:
+            music_mastering.master_music(str(source), str(reference), str(output))
+        unlink.assert_called_once_with()
+
+    assert caught.value is copy_error
+    assert caught.value.__cause__ is cleanup_error
+    assert output.read_bytes() == b"partial"
     assert source.read_bytes() == b"source"
     assert reference.read_bytes() == b"reference"
     assert len(staged_paths) == 1

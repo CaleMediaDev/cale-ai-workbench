@@ -64,6 +64,47 @@ def test_failed_staged_publication_rolls_back_only_owned_midi(tmp_path):
     assert len(list(target.iterdir())) == 1
 
 
+@pytest.mark.parametrize("copy_fails", [False, True])
+def test_publication_without_hard_links_supports_copy_and_rollback(tmp_path, copy_fails):
+    import errno
+
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"original audio")
+    target = tmp_path / "notes"
+    payload = b"MThd generated"
+    original_copy = music_midi.shutil.copyfileobj
+
+    def render(args, **kwargs):
+        staging = Path(args[-1])
+        (staging / "guitar.mid").write_bytes(payload)
+        return type("Done", (), {"returncode": 0})()
+
+    def copy(source_file, output):
+        if copy_fails:
+            output.write(b"partial")
+            raise OSError("copy failed")
+        return original_copy(source_file, output)
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path("python.exe")), \
+         patch.object(music_midi.subprocess, "run", side_effect=render), \
+         patch.object(music_midi.os, "link", side_effect=OSError(errno.EOPNOTSUPP, "no hard links")), \
+         patch.object(music_midi.shutil, "copyfileobj", side_effect=copy):
+        if copy_fails:
+            with pytest.raises(OSError, match="copy failed"):
+                music_midi.transcribe_to_midi(str(source), str(target))
+            assert list(target.iterdir()) == []
+        else:
+            result = music_midi.transcribe_to_midi(str(source), str(target))
+            destination = target / "guitar.mid"
+            assert destination.read_bytes() == payload
+            assert result["midi_path"] == str(destination)
+            assert result["files"] == [str(destination)]
+            assert list(target.iterdir()) == [destination]
+
+    assert source.read_bytes() == b"original audio"
+
+
 def test_transcription_rejects_missing_or_wrong_audio(tmp_path):
     with pytest.raises(FileNotFoundError):
         music_midi.transcribe_to_midi(str(tmp_path / "missing.wav"), str(tmp_path / "notes"))

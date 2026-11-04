@@ -85,7 +85,8 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
         except FileExistsError:
             raise ValueError("Choose a new output filename so existing audio is preserved.") from None
         except OSError as exc:
-            if exc.errno not in {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS}:
+            if (exc.errno not in {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS}
+                    and getattr(exc, "winerror", None) not in {1, 50}):
                 raise
             # Some destination filesystems cannot create hard links. Exclusive
             # creation still protects files created during rendering.
@@ -97,8 +98,11 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
                 with destination:
                     with staged.open("rb") as rendered:
                         shutil.copyfileobj(rendered, destination)
-            except BaseException:
-                output.unlink()
+            except BaseException as exc:
+                try:
+                    output.unlink()
+                except OSError as cleanup_error:
+                    raise exc from cleanup_error
                 raise
     return {"source": str(source), "reference": str(reference), "path": str(output),
             "engine": "Matchering 2.0.6"}

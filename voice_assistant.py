@@ -512,7 +512,7 @@ def media_call(action, cancel=None, **arguments):
                 except subprocess.TimeoutExpired:
                     sent = True
             returncode = process.returncode
-        except (cale_voice.SpeechInterrupted, subprocess.TimeoutExpired):
+        except (cale_voice.SpeechInterrupted, subprocess.TimeoutExpired, OSError):
             _stop_media_process(process)
             raise
     try:
@@ -611,14 +611,13 @@ def say(message, rate=0, cancel=None, require_clone=False):
         # can finish its first, comparatively slow synthesis call.
         reference = ROOT / "assets" / "cale-voice-reference.wav"
         bundled = ROOT / "assets" / bundled_name
-        if (reference.is_file() and bundled.is_file() and bundled.stat().st_size > 1000
-                and hashlib.sha256(reference.read_bytes()).hexdigest() == WAKE_REFERENCE_SHA256):
-            try:
+        try:
+            if (reference.is_file() and bundled.is_file() and bundled.stat().st_size > 1000
+                    and hashlib.sha256(reference.read_bytes()).hexdigest() == WAKE_REFERENCE_SHA256):
                 _play_file(bundled, cancel)
-            except (OSError, EOFError, wave.Error):
-                pass  # An unusable bundled WAV must not prevent synthesized speech.
-            else:
                 return {"path": str(bundled), "engine": "Cale's local voice (bundled)"}
+        except (OSError, EOFError, wave.Error):
+            pass  # Unreadable or unusable bundled assets must not prevent synthesis.
     temp = ROOT / "Temp"
     temp.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=temp) as folder:

@@ -49,7 +49,7 @@ def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
         result = subprocess.run(command, capture_output=True, text=True,
                                 errors="replace", timeout=timeout, creationflags=HIDE)
     except (subprocess.TimeoutExpired, KeyboardInterrupt):
-        if not output_existed:
+        if not output_existed and output.is_file():
             output.unlink(missing_ok=True)
         raise
     if result.returncode or not output.is_file() or not output.stat().st_size:

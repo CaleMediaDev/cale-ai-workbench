@@ -264,7 +264,19 @@ class Player:
         self.prepared = None
         self.fade_start = self.now()
         self.fade_seconds = max(0.1, float(seconds))
-        self.advance_mix()
+        try:
+            self.advance_mix()
+        except Exception:
+            # Starting playback is not enough: initial gain setup can fail too.
+            # Restore the original channel before reporting a failed transition.
+            failed = self.active
+            self.active = self.outgoing
+            self.outgoing = None
+            try:
+                failed.stop()
+            finally:
+                self.active.set_volume(self.volume)
+            raise
         return True
 
     def advance_mix(self):
@@ -312,9 +324,11 @@ class Player:
             if paused is not None:
                 self.fade_start += self.now()-paused
                 self.paused_at = None
-            self.advance_mix()
-            if paused is not None:
-                self.paused_at = self.now()
+            try:
+                self.advance_mix()
+            finally:
+                if paused is not None:
+                    self.paused_at = self.now()
         else:
             self.active.set_volume(self.volume)
 

@@ -38,6 +38,8 @@ class ToneAdaptationTests(unittest.TestCase):
         for finish_reason, content, expected in (
             ("length", "I was going to say that", "I heard you. What do you need?"),
             ("content_filter", "I was going to say that", "I heard you. What do you need?"),
+            ("tool_calls", "Let me check that for you.", "I heard you. What do you need?"),
+            ("function_call", "Let me check that for you.", "I heard you. What do you need?"),
             ("stop", "Glad I could help!", "Glad I could help!"),
         ):
             with self.subTest(finish_reason=finish_reason):

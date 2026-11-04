@@ -1,0 +1,136 @@
+{
+  "release": "0.5.499",
+  "source_before_metadata": "14f3bb371879e1f8085eda2d0eb782a585729b41",
+  "source_tree": "07450068d1a88c3f99c37778b35153b699f52f32",
+  "exact_tested_tree_match": true,
+  "supersedes_unpublished_preparation": {
+    "commit": "d194fbd8518d5a8d1037134a2d5702826cc588ae",
+    "reviewed_fixes": 6,
+    "published": false
+  },
+  "accepted_prs": [
+    {
+      "number": 588,
+      "head": "1074ae65968033e4b0904dd74cacbf691371132d",
+      "merge": "49e232396f3543b174f5edc85c5835a7f27bfb32",
+      "baseline": "1 failed, 16 deselected in 0.28s",
+      "candidate": "17 passed in 0.13s"
+    },
+    {
+      "number": 591,
+      "head": "43a18b4850105b1c249f2dc5a5bc7f1f4ee00205",
+      "merge": "73bc5c1ca6cb6e93e557276f98e57ebf7d8ecbe7",
+      "baseline": "2 failed, 17 deselected in 0.69s",
+      "candidate": "19 passed in 2.64s"
+    },
+    {
+      "number": 592,
+      "head": "194bd11c12646f799acde83a69e716ec28841a41",
+      "merge": "bd9db24e01b9961b73414468b9ffe9003b1bbe12",
+      "baseline": "10 failed, 39 deselected in 1.61s",
+      "candidate": "49 passed in 1.47s"
+    },
+    {
+      "number": 595,
+      "head": "c3e50ab89545b20636d8d64cdc3779a8f31cc9bb",
+      "merge": "7baf92b6c2c5f6ee364cebf23b045569c36139d7",
+      "baseline": "2 failed, 20 deselected in 2.17s",
+      "candidate": "22 passed in 5.67s"
+    },
+    {
+      "number": 596,
+      "head": "80449142cb7f5fe1a05ebfa3552eecddb0d0287a",
+      "merge": "ca0e673b71cd6faee112689a474a40fec9490d1b",
+      "baseline": "2 failed, 25 deselected in 1.25s",
+      "candidate": "27 passed in 5.57s"
+    },
+    {
+      "number": 597,
+      "head": "ba5e2b0032c2bb1f74108bde9c2818a6142de6ae",
+      "merge": "184ecca705a4b67d89685556b9f269b9cb1f175a",
+      "baseline": "1 failed, 8 passed in 0.47s",
+      "candidate": "9 passed in 0.23s"
+    },
+    {
+      "number": 614,
+      "head": "673fb302879884f8099c45d37cdff0201a4ce3a9",
+      "merge": "3c06bba0f18075573403055fe69d47c3ee66b6c5",
+      "baseline": "2 failed, 12 passed, 22 subtests passed in 0.73s",
+      "candidate": "12 passed, 24 subtests passed in 0.27s"
+    },
+    {
+      "number": 615,
+      "head": "61d65e288c1b83badc8d6f7e17eebacd2af4f4ab",
+      "merge": "a9080236029205f911d025b589a15680757463d8",
+      "baseline": "1 failed, 14 deselected in 1.46s",
+      "candidate": "15 passed in 2.25s"
+    },
+    {
+      "number": 619,
+      "head": "a6a3d8303e2a5c1d63f6ed3bca27df6ec5661c24",
+      "merge": "50a131674cfeb7dc21d9be1c93ef3ab4715c8289",
+      "baseline": "1 failed, 26 deselected in 0.39s",
+      "candidate": "27 passed in 0.58s"
+    },
+    {
+      "number": 620,
+      "head": "d04d11b11fd67444abd360400e5973418ebfa269",
+      "merge": "ba7ed740f957a2423bf0ffe1e41125bcfeaeb409",
+      "baseline": "1 failed, 17 deselected in 0.32s",
+      "candidate": "17 passed, 1 skipped, 2 subtests passed in 1.14s"
+    },
+    {
+      "number": 621,
+      "head": "fc40c95a8f1888cea2a7737bfca503e75830179e",
+      "merge": "a95e692002db2835a51c23938fa6290e2fe74c44",
+      "baseline": "1 failed, 38 deselected in 2.40s",
+      "candidate": "39 passed in 13.05s"
+    },
+    {
+      "number": 622,
+      "head": "a5c27b24e3d86e713a47a4cd0d5e91bf4769c3b6",
+      "merge": "0233a50980d2eddef1564cfa33a9895b23e45843",
+      "baseline": "1 failed, 16 deselected in 1.37s",
+      "candidate": "16 passed, 1 skipped in 1.23s"
+    },
+    {
+      "number": 623,
+      "head": "e96ce207f7f466b3eff13aaffac5dd7ead2de834",
+      "merge": "744befb0dba1242eb50578537c47fc94ea76d2a9",
+      "baseline": "1 failed, 11 deselected in 0.38s",
+      "candidate": "12 passed in 1.82s"
+    },
+    {
+      "number": 625,
+      "head": "916f7feafdf2010618902c78c4a8b6b19b1751a9",
+      "merge": "14f3bb371879e1f8085eda2d0eb782a585729b41",
+      "baseline": "1 failed, 15 deselected in 1.43s",
+      "candidate": "16 passed in 2.56s"
+    }
+  ],
+  "combined_validation": {
+    "command": "python -m pytest -q Validation/test_cale_voice_worker.py Validation/test_capability_index.py Validation/test_install_environment.py Validation/test_install_retry.py Validation/test_model_fitness.py Validation/test_music_edit.py Validation/test_music_lyrics.py Validation/test_music_mastering.py Validation/test_music_midi.py Validation/test_public_api_catalog.py Validation/test_radio_station.py Validation/test_scanned_pdf.py Validation/test_self_diagnostics.py Validation/test_self_update.py Validation/test_system_gauges.py Validation/test_tone_adaptation.py Validation/test_video_edit.py",
+    "exit_code": 0,
+    "unique_test_modules": 17,
+    "passed": 338,
+    "skipped": 2,
+    "subtests_passed": 26,
+    "seconds": 46.18,
+    "includes_updater_installer_modules": 3,
+    "counts_overlap_prior_focused_runs": true
+  },
+  "packaging_validation": {
+    "powershell_installer_scripts_parsed": 6,
+    "archive_contract": "pack-release.py validates the produced source ZIP with self_update.validated_manifest before compiling the installer; final asset hashes recorded separately."
+  },
+  "limitations": [
+    "591 fallback exclusive-copy path tested with mocked unsupported hardlink on NTFS; no actual FAT/network share exercised.",
+    "595 preserves directory replacement and original interruption errors; it does not introduce a full concurrent file-ownership transaction.",
+    "597 model/probe generation is mocked; this review validates JSON/stdout protocol, not audible real-model output.",
+    "621 tests deterministic fake playback decks; no real sound device failure injected.",
+    "622 filesystem copy/cleanup failures are mocked; existing ownership policy is unchanged.",
+    "625 PDF/vision workers are mocked; actual native-only and mixed-page behavior covered by full suite, no new vision model inference."
+  ],
+  "excluded": "Private assertion-repair facade, ownership-priority, typed-target and authored-note completion/grading experiments; no new end-to-end local-app completion claim.",
+  "runtime_manifest_entries": 250
+}

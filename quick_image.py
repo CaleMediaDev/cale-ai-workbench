@@ -254,6 +254,8 @@ def recover_image_jobs(root: Path) -> None:
         try:
             job_id = path.stem
             info = image_job_status(root, job_id)
+            if not isinstance(info, dict):
+                continue
             if info.get("job_id") != job_id or info.get("status") not in ("queued", "working"):
                 continue
             if info["status"] == "queued" and time.time() - float(info.get("created", 0)) < 30:

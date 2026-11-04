@@ -282,6 +282,32 @@ def test_music_video_uses_supplied_cover_art_without_changing_it(tmp_path):
                                      background_image=str(song))
 
 
+def test_music_video_cover_pixel_aspect_does_not_distort_output(tmp_path):
+    song = tmp_path / "song.wav"
+    cover = tmp_path / "non-square-pixels.png"
+    video = tmp_path / "square.mp4"
+    with wave.open(str(song), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b"\x00\x00" * 16000)
+    # PNG physical pixel dimensions become FFmpeg's sample aspect ratio.
+    Image.new("RGB", (320, 320), (220, 20, 20)).save(cover, dpi=(144, 72))
+    original_cover = cover.read_bytes()
+
+    music_video.make_music_video(
+        str(song), str(video), layout="square", background_image=str(cover)
+    )
+    probe = subprocess.run(
+        [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(video)],
+        capture_output=True, text=True, creationflags=music_video.HIDE,
+    )
+    video_stream = next(line for line in probe.stderr.splitlines() if "Video: h264" in line)
+    assert "720x720" in video_stream
+    assert "SAR 1:1 DAR 1:1" in video_stream
+    assert cover.read_bytes() == original_cover
+
+
 def test_music_video_burns_timed_srt_captions_without_changing_inputs(tmp_path):
     song = tmp_path / "song.wav"
     captions = tmp_path / "lyrics.srt"

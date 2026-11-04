@@ -25,7 +25,11 @@ def _catalog() -> tuple[list[dict], bool]:
     data = None
     fresh = False
     try:
-        cached = json.loads(CACHE.read_text(encoding="utf-8"))
+        with CACHE.open("rb") as handle:
+            raw = handle.read(MAX_BYTES + 1)
+        if len(raw) > MAX_BYTES:
+            raise ValueError("Public API catalog exceeded its cache limit.")
+        cached = json.loads(raw.decode("utf-8"))
         if not isinstance(cached, list) or not all(isinstance(entry, dict) for entry in cached):
             raise ValueError("Unexpected public API catalog format.")
         data = cached

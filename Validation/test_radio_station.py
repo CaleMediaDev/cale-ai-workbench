@@ -442,6 +442,28 @@ def test_failed_blend_start_releases_prepared_deck_and_allows_retry(tmp_path):
     assert player.outgoing is current and current.busy()
 
 
+def test_failed_initial_blend_volume_restores_current_deck_and_allows_retry(tmp_path):
+    player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
+    first, second = tmp_path/"first.wav", tmp_path/"second.wav"
+    player.play(first)
+    current = player.active
+    player.prepare(second)
+    failed = player.prepared
+
+    with patch.object(failed, "set_volume", side_effect=RuntimeError("Cannot set volume")):
+        with pytest.raises(RuntimeError, match="Cannot set volume"):
+            player.blend(second)
+
+    assert player.active is current and current.busy()
+    assert current.volume == player.volume
+    assert not player.mixing and player.prepared is None
+    assert not failed.opened and not failed.running
+    assert str(second.resolve()) not in player.protected_paths()
+    assert player.blend(second)
+    assert player.active is not failed and player.active.busy()
+    assert player.outgoing is current and current.busy()
+
+
 def test_blend_while_paused_preserves_staged_audio_until_resume(tmp_path):
     moment = [0]
     player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
@@ -492,6 +514,34 @@ def test_pausing_and_muting_keep_both_decks_and_fade_position_consistent(tmp_pat
     assert new.volume == pytest.approx(old.volume)
     player.stop()
     assert not old.opened and not new.opened and not player.mixing
+
+
+def test_failed_volume_change_during_paused_fade_still_allows_resume(tmp_path):
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    player.play(tmp_path/"first.wav")
+    player.blend(tmp_path/"second.wav", 8)
+    moment[0] = 2
+    player.advance_mix()
+    player.pause()
+    old, new = player.outgoing, player.active
+    moment[0] = 52
+
+    with patch.object(new, "set_volume", side_effect=RuntimeError("Cannot set volume")):
+        with pytest.raises(RuntimeError, match="Cannot set volume"):
+            player.set_volume(40)
+
+    assert player.paused_at == 52
+    assert old.paused and new.paused
+    moment[0] = 62
+    player.resume()
+    assert player.paused_at is None
+    assert not old.paused and not new.paused
+    moment[0] = 64
+    player.advance_mix()
+    assert old.busy() and new.busy()
+    assert new.volume == pytest.approx(old.volume)
+    assert new.volume**2 + old.volume**2 == pytest.approx(40**2)
 
 
 def test_service_stages_ready_audio_immediately_and_blends_eight_seconds_before_eof(tmp_path):

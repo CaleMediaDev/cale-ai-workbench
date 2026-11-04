@@ -624,23 +624,28 @@ async def mirror_chrome_page(project_folder: str = ""):
             folder = Path(row[0]).resolve()
         image = folder / ".local-ai/browser.png"
         image.parent.mkdir(parents=True, exist_ok=True)
-        temporary = image.with_name("browser-capture.tmp.png")
+        temporary = image.with_name(f"browser-capture-{uuid.uuid4().hex}.tmp.png")
         pages = await SESSIONS["devtools"].call_tool("list_pages", arguments={})
         listing = "\n".join(getattr(part, "text", "") for part in pages.content)
         selected = re.search(r"(?m)^\s*(\d+):[^\n]*\[selected\]", listing)
         if pages.is_error or selected is None:
             return
-        shot = await SESSIONS["devtools"].call_tool(
-            "take_screenshot",
-            arguments={
-                "pageId": int(selected.group(1)),
-                "format": "png",
-                "filePath": str(temporary),
-            },
-        )
-        if not shot.is_error and temporary.is_file():
-            os.replace(temporary, image)
-        temporary.unlink(missing_ok=True)
+        try:
+            shot = await SESSIONS["devtools"].call_tool(
+                "take_screenshot",
+                arguments={
+                    "pageId": int(selected.group(1)),
+                    "format": "png",
+                    "filePath": str(temporary),
+                },
+            )
+            if not shot.is_error and temporary.is_file():
+                os.replace(temporary, image)
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass  # Best-effort cleanup must not replace cancellation.
     except Exception:
         # Preview is best-effort, including backend protocol/transport failures.
         # Cancellation derives from BaseException and must still propagate.

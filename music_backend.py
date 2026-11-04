@@ -70,12 +70,16 @@ def _setup_lock():
 def _write_setup_status(status: str, current: str, percent: int) -> None:
     path = ROOT / "LongTasks" / "music-install-progress.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps({"status": status, "current": current, "progress": percent}),
-        encoding="utf-8",
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix="music-install-progress-", suffix=".tmp", dir=path.parent,
     )
-    os.replace(temporary, path)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump({"status": status, "current": current, "progress": percent}, stream)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _capable_for_background() -> bool:
@@ -540,6 +544,8 @@ def project_jobs(task_id: str, folder: str | Path) -> list[dict]:
             owned_path = bool(output_path) and Path(str(output_path)).resolve().is_relative_to(project)
             if info.get("task_id") == task_id or owned_path:
                 created = float(info.get("created") or 0)
+                if not math.isfinite(created):
+                    continue  # Nonfinite timestamps cannot be ordered chronologically.
                 found.append((created, info))
         except (OSError, ValueError, TypeError, OverflowError):
             continue
