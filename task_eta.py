@@ -82,7 +82,10 @@ def music_estimate_seconds(jobs_dir: Path, duration_seconds: int,
         try:
             job = json.loads(path.read_text(encoding="utf-8"))
             length = float(job.get("duration_seconds") or 0)
-            elapsed = float(job.get("finished") or 0) - float(job.get("requested_at") or job.get("created") or 0)
+            started = float(job.get("requested_at") or job.get("created") or 0)
+            if not math.isfinite(started) or started <= 0:
+                continue
+            elapsed = float(job.get("finished") or 0) - started
             result = job.get("result") if isinstance(job.get("result"), dict) else {}
             job_made_video = bool(job.get("make_video") or result.get("video"))
             if (job.get("status") != "complete" or not length or
