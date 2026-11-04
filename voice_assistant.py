@@ -512,7 +512,7 @@ def media_call(action, cancel=None, **arguments):
                 except subprocess.TimeoutExpired:
                     sent = True
             returncode = process.returncode
-        except (cale_voice.SpeechInterrupted, subprocess.TimeoutExpired):
+        except (cale_voice.SpeechInterrupted, subprocess.TimeoutExpired, OSError):
             _stop_media_process(process)
             raise
     try:
