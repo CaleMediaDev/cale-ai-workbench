@@ -132,6 +132,27 @@ def test_explicit_vocal_free_request_does_not_gain_singer_or_texture_cues():
     assert music_style.requires_sustained_vocals(current)
 
 
+def test_explicit_instrumental_request_does_not_gain_vocal_cues():
+    for description in ("instrumental track", "fully instrumental"):
+        request = "Katy Perry-style techno, " + description
+        assert music_style.vocal_intent(request) == "none"
+        assert not music_style.requires_sustained_vocals(request)
+        caption = music_style.enhance(request)
+        assert "female lead vocals" not in caption
+        assert "Sparse chopped vocal syllables" not in caption
+        assert "drum machine" in caption
+        assert music_style.enhance(caption) == caption
+
+    request = "Female lead vocals with an instrumental break"
+    assert music_style.vocal_intent(request) == "female"
+    assert music_style.requires_sustained_vocals(request)
+    assert "female lead vocals throughout" in music_style.enhance(request)
+
+    request += "\nPast user feedback: Make an instrumental track"
+    assert music_style.vocal_intent(request) == "female"
+    assert music_style.requires_sustained_vocals(request)
+
+
 def test_explicit_bpm_is_parsed_for_music_engine():
     assert music_style.requested_bpm("Heavy dubstep at 150 BPM") == 150
     assert music_style.requested_bpm("80-bpm synth groove") == 80
