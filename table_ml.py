@@ -93,7 +93,13 @@ def _features(rows: list[dict], schema: dict) -> list[dict]:
                         raise ValueError
                 except ValueError:
                     number = spec["median"]
-                normalized = (number - spec["median"]) / spec["scale"]
+                difference = number - spec["median"]
+                if math.isfinite(difference):
+                    normalized = difference / spec["scale"]
+                else:
+                    # Opposite-sign finite values can overflow on subtraction
+                    # even when scaling makes their difference representable.
+                    normalized = number / spec["scale"] - spec["median"] / spec["scale"]
                 if not math.isfinite(normalized):
                     raise ValueError(f"Numeric feature {column!r} overflowed during normalization.")
                 features[column] = normalized
