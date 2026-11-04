@@ -119,6 +119,23 @@ class AutoModelTests(unittest.TestCase):
             standard.assert_called_once()
             delete.assert_called_once_with("old:large")
 
+    def test_owned_sources_recovers_from_non_string_list_entries(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root / "LongTasks/auto-owned-models.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps([
+                "existing:latest", {}, [], None, 42, True,
+            ]), encoding="utf-8")
+            with patch.object(library, "ROOT", root):
+                self.assertEqual(library.owned_sources(), {"existing:latest"})
+                library.record_owned_source("new:latest")
+                self.assertEqual(library.owned_sources(), {
+                    "existing:latest", "new:latest",
+                })
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                             ["existing:latest", "new:latest"])
+
     def test_retired_main_source_waits_for_active_tasks(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
