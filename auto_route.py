@@ -210,6 +210,11 @@ def _task_intent(messages):
     project = PROJECT_REQUEST.search(beginning) or PROJECT_REQUEST.search(request)
     if native_brief:
         intent = native_brief
+        real_followups = [
+            item.strip() for item in users if not synthetic_worker_note(item)
+        ]
+        if real_followups:
+            intent += "\n" + "\n".join(real_followups)
     elif project:
         original = project.group(1).strip()
         # The latest saved user follow-ups can turn a small original task into
