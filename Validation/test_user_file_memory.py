@@ -51,6 +51,24 @@ class UserFileMemoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             user_file_memory.get(self.state, str(path))
 
+    def test_search_refills_past_many_deleted_matches(self):
+        deleted = []
+        for number in range(15):
+            path = self.root / f"deleted-{number:02}.txt"
+            path.write_text("orchid", encoding="utf-8")
+            deleted.append(path)
+        live = self.root / "live.txt"
+        live.write_text("orchid " + "filler " * 1000, encoding="utf-8")
+        user_file_memory.ingest(self.state, [str(path) for path in deleted] + [str(live)])
+        # The longer live document ranks behind the short, identical matches.
+        initial = user_file_memory.search(self.state, "orchid", limit=20)
+        self.assertEqual(len(initial), 16)
+        self.assertEqual(initial[-1]["path"], str(live))
+        for path in deleted:
+            path.unlink()
+        hits = user_file_memory.search(self.state, "orchid", limit=1)
+        self.assertEqual([row["path"] for row in hits], [str(live)])
+
     def test_precise_search_requires_all_query_terms(self):
         acme = self.root / "acme-invoice.txt"
         other = self.root / "other-invoice.txt"

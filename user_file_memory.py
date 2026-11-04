@@ -354,10 +354,16 @@ def search(state: str | Path, query: str, limit: int = 8,
         return False
 
     scanned = False
-    for _ in range(4):
+    refreshed = set()
+    while True:
         rows = candidates()
-        changed = any([refresh(row["path"]) for row in rows])
+        changed = {row["path"] for row in rows if refresh(row["path"])}
         if changed:
+            # Deleted matches may occupy many batches. Keep refilling, but
+            # do not repeatedly retry a source that changes during validation.
+            if changed & refreshed:
+                break
+            refreshed.update(changed)
             continue
         if (rows and words) or scanned:
             return rows[:count]
