@@ -50,9 +50,10 @@ def main():
     model = load_model()
     # Extract the owner's voice once per worker. Re-encoding the same reference
     # for every short chat line adds avoidable seconds to spoken replies.
-    voice_prompt = model.create_voice_clone_prompt(
-        ref_audio=str(REFERENCE), ref_text=REFERENCE_TEXT,
-    )
+    with contextlib.redirect_stdout(sys.stderr):
+        voice_prompt = model.create_voice_clone_prompt(
+            ref_audio=str(REFERENCE), ref_text=REFERENCE_TEXT,
+        )
     if "--warm-model" in sys.argv:
         print(json.dumps({"ready": True}), flush=True)
         return

@@ -201,11 +201,13 @@ def speak(text: str, output_path: str | Path, play: bool = True,
                         bufsize=1, cwd=ROOT, env=env, creationflags=HIDE,
                     )
                 ready_line = json.loads(_line_with_timeout(_worker.stdout, 45, cancel))
-                if not ready_line.get("ready"):
+                if not isinstance(ready_line, dict) or not ready_line.get("ready"):
                     raise RuntimeError("The voice worker did not start.")
             _worker.stdin.write(json.dumps({"text": str(text)[:280], "output_path": str(output_path)}) + "\n")
             _worker.stdin.flush()
             answer = json.loads(_line_with_timeout(_worker.stdout, 120, cancel))
+            if not isinstance(answer, dict):
+                raise RuntimeError("The voice worker returned an invalid response.")
             if "error" in answer:
                 raise RuntimeError(answer["error"])
         except SpeechInterrupted:

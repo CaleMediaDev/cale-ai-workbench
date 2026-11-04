@@ -60,9 +60,10 @@ def explicit_lead_vocals(prompt: str, lyrics: str = "") -> bool:
 
 def unambiguous_vocal_song(prompt: str, lyrics: str = "") -> bool:
     """Use only clear vocal intent for automatic correction of a music job."""
-    return (explicit_lead_vocals(prompt, lyrics)
-            and not NO_VOCALS.search(prompt)
-            and not WHOLE_INSTRUMENTAL.search(prompt))
+    request = prompt.split("Past user feedback", 1)[0]
+    return (explicit_lead_vocals(request, lyrics)
+            and not NO_VOCALS.search(request)
+            and not WHOLE_INSTRUMENTAL.search(request))
 
 
 def requested_bpm(prompt: str) -> int | None:

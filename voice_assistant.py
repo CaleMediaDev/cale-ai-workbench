@@ -451,6 +451,8 @@ def _persistent_mic_call(action, arguments):
 
             line = cale_voice._line_with_timeout(_mic_worker.stdout, 90)
             answer = json.loads(line)
+            if not isinstance(answer, dict):
+                raise ValueError("The microphone worker response must be an object.")
         except (OSError, ValueError, queue.Empty, AttributeError, TypeError):
             _stop_mic_worker()
             return None
