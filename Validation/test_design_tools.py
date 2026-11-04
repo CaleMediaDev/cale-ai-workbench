@@ -202,6 +202,40 @@ def test_blocked_kit_parent_does_not_copy_earlier_files(tmp_path, monkeypatch):
     assert list(destination.iterdir()) == [blocker]
 
 
+@pytest.mark.parametrize("blocked_parent", [False, True])
+def test_dangling_kit_symlink_does_not_copy_earlier_files(tmp_path, monkeypatch, blocked_parent):
+    import design_tools
+
+    kit = tmp_path / "kit"
+    (kit / "src/z").mkdir(parents=True)
+    (kit / "src/a.astro").write_text("early component", encoding="utf-8")
+    (kit / "src/z/component.astro").write_text("nested component", encoding="utf-8")
+    (kit / "LICENSE").write_text("fixture license", encoding="utf-8")
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", kit)
+
+    project = tmp_path / "project"
+    destination = project / "src/vendor/ai-ui"
+    destination.mkdir(parents=True)
+    (project / "package.json").write_text(
+        json.dumps({"dependencies": {"astro": "^5"}}), encoding="utf-8"
+    )
+    blocker = destination / "z" if blocked_parent else destination / "z/component.astro"
+    blocker.parent.mkdir(parents=True, exist_ok=True)
+    missing = tmp_path / "missing" / "target"
+    try:
+        blocker.symlink_to(missing, target_is_directory=blocked_parent)
+    except (OSError, NotImplementedError):
+        pytest.skip("Creating symlinks is not available")
+
+    with pytest.raises(FileExistsError, match="no files were changed"):
+        add_astro_ai_ui(str(project))
+
+    assert blocker.is_symlink() and blocker.readlink() == missing
+    assert not missing.exists()
+    assert not (destination / "a.astro").exists()
+    assert not (destination / "LICENSE").exists()
+
+
 def test_3d_scene_rejects_unbounded_or_invalid_geometry():
     import media_worker
 
