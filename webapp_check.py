@@ -14,7 +14,7 @@ import tempfile
 from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -24,13 +24,33 @@ MAX_REPORT_BYTES = 1_000_000
 REPORT_NAME = "browser-check-report.json"
 
 
-def _project_file(folder: Path, name: str) -> Path:
-    if not isinstance(name, str) or not name or Path(name).is_absolute():
-        raise ValueError("Use a relative HTML path")
-    path = (folder / name).resolve()
-    if not path.is_relative_to(folder.resolve()) or path.suffix.lower() not in {".html", ".htm"}:
+def _relative_html_path(name: str) -> Path:
+    """Reject rooted Windows paths too: /page.html is not is_absolute on Windows."""
+    if (not isinstance(name, str) or not name or "\x00" in name
+            or Path(name).anchor or PureWindowsPath(name).anchor):
+        raise ValueError("Use a relative HTML path such as 'index.html', without a leading slash or drive. "
+                         "Correct check_arguments.path, not application source.")
+    relative = Path(name)
+    if relative.suffix.lower() not in {".html", ".htm"}:
         raise ValueError("Choose an HTML file in this project")
-    if not path.is_file() or path.stat().st_size > 5_000_000:
+    return relative
+
+
+def _project_file(folder: Path, name: str, *, must_exist: bool = True) -> Path:
+    """Resolve the same contained HTML target for planning and execution.
+
+    Planning can name a future file, but cannot escape via rooted paths or an
+    existing symlink. Only execution requires the file and checks its size.
+    """
+    relative = _relative_html_path(name)
+    try:
+        root = Path(folder).resolve()
+        path = (root / relative).resolve()
+    except (OSError, RuntimeError) as error:
+        raise ValueError("Choose an HTML file in this project; its path could not be resolved") from error
+    if not path.is_relative_to(root) or path.suffix.lower() not in {".html", ".htm"}:
+        raise ValueError("Choose an HTML file in this project")
+    if must_exist and (not path.is_file() or path.stat().st_size > 5_000_000):
         raise ValueError("HTML file must exist and be no larger than 5 MB")
     return path
 

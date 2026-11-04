@@ -297,7 +297,7 @@ def historical_step_status(folder: str | Path) -> dict:
         return {"total": row["total"], "remaining": row["remaining"]}
 
 
-def validate_repeatable_check(tool: str, arguments: dict) -> None:
+def validate_repeatable_check(tool: str, arguments: dict, *, folder: str | Path | None = None) -> None:
     """A durable acceptance check cannot replay a one-time suite mutation."""
     if tool == "run_command":
         from native_agent import TOOLS
@@ -318,9 +318,13 @@ def validate_repeatable_check(tool: str, arguments: dict) -> None:
         # Planning may name a future page. Validate the executable case data
         # without requiring that page or running a browser before its build.
         webapp_check.validate_spec_data(webapp_check.normalize_spec(arguments))
+        if folder is None:
+            webapp_check._relative_html_path(arguments.get("path"))
+        else:
+            webapp_check._project_file(Path(folder), arguments.get("path"), must_exist=False)
 
 
-def _validate_steps(steps: list) -> list[tuple]:
+def _validate_steps(steps: list, folder: str | Path | None = None) -> list[tuple]:
     if isinstance(steps, str):
         if len(steps) > 64000:
             raise ValueError("The steps JSON string must be under 64 KB")
@@ -365,7 +369,7 @@ def _validate_steps(steps: list) -> list[tuple]:
             arguments = step.get("check_arguments", {})
             if not isinstance(arguments, dict):
                 raise ValueError("check_arguments must be a JSON object.")
-            validate_repeatable_check(tool, arguments)
+            validate_repeatable_check(tool, arguments, folder=folder)
             # Use the worker's published schema, without running the check or
             # requiring a source file which an earlier step has yet to build.
             from jsonschema import ValidationError, validate
@@ -399,7 +403,7 @@ def plan_steps(folder: str | Path, steps: list, *, split_id: int | None = None,
     Completed rows remain intact. BEGIN IMMEDIATE prevents two workers from
     appending competing batches or advancing the same active unit concurrently.
     """
-    values = _validate_steps(steps)
+    values = _validate_steps(steps, folder)
     request_hash = request_identity(folder)
     if expected_request is not None and expected_request != request_hash:
         raise ValueError("User instructions changed before planning this phase.")
@@ -490,7 +494,7 @@ def record_step_check(folder: str | Path, step_id: int, request_hash: str,
 def revise_step(folder: str | Path, step_id: int, steps: list, *,
                 expected_request: str | None = None, expected_check: str | None = None) -> dict:
     """Repair one mistaken acceptance command without discarding progress."""
-    values = _validate_steps(steps)
+    values = _validate_steps(steps, folder)
     if len(values) != 1:
         raise ValueError("Revise exactly one active step; use split for several smaller steps.")
     with project_memory.connection(folder) as conn:
