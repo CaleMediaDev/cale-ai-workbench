@@ -253,6 +253,50 @@ def test_mastering_preserves_copy_error_when_partial_output_cleanup_fails(tmp_pa
     assert not staged_paths[0].parent.exists()
 
 
+def test_mastering_copy_failure_preserves_replacement_destination(tmp_path):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    moved_partial = tmp_path / "moved-partial.wav"
+    source.write_bytes(b"source")
+    reference.write_bytes(b"reference")
+    copy_error = OSError(music_mastering.errno.ENOSPC, "No space left on device")
+    staged_paths = []
+
+    def render(*args, **kwargs):
+        staged = Path(args[0][-1])
+        staged_paths.append(staged)
+        staged.write_bytes(b"mastered")
+        return type("Result", (), {"returncode": 0})()
+
+    def replace_then_fail(rendered, destination):
+        destination.write(b"partial")
+        # Close first so the replacement can also be simulated on Windows.
+        destination.close()
+        output.rename(moved_partial)
+        output.write_bytes(b"another operation's audio")
+        raise copy_error
+
+    with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
+        music_mastering, "install", return_value=Path("python.exe")
+    ), patch.object(music_mastering.subprocess, "run", side_effect=render), patch.object(
+        music_mastering.os, "link",
+        side_effect=OSError(music_mastering.errno.EOPNOTSUPP, "Hard links unsupported"),
+    ), patch.object(
+        music_mastering.shutil, "copyfileobj", side_effect=replace_then_fail
+    ):
+        with pytest.raises(OSError) as caught:
+            music_mastering.master_music(str(source), str(reference), str(output))
+
+    assert caught.value is copy_error
+    assert output.read_bytes() == b"another operation's audio"
+    assert moved_partial.read_bytes() == b"partial"
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"reference"
+    assert len(staged_paths) == 1
+    assert not staged_paths[0].parent.exists()
+
+
 def test_mastering_rejects_hard_linked_reference(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"
