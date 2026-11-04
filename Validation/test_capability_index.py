@@ -58,6 +58,25 @@ def test_identical_installed_skill_replaces_bundled_path():
             assert capability_index.sync(root)["updated"] == 0
 
 
+def test_missing_fts_table_is_repopulated_for_unchanged_capabilities():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        skill, tools = fixture(root)
+        original = skill.read_bytes()
+        with patch.object(capability_index, "_registered_tools", return_value=tools):
+            capability_index.sync(root)
+            with capability_index._database(root) as conn:
+                conn.execute("DROP TABLE capabilities_fts")
+            result = capability_index.sync(root)
+            assert result["skills"] == 1 and result["tools"] == 1
+            assert result["updated"] == 2
+            assert capability_index.search(root, "accessible", kind="skill")[0]["id"] == "skill:frontend-ui-engineering"
+            assert capability_index.search(root, "image", kind="tool")[0]["name"] == "make_image"
+            assert capability_index.health(root)["ok"]
+            assert skill.read_bytes() == original
+            assert capability_index.sync(root)["updated"] == 0
+
+
 def test_damaged_index_is_preserved_and_rebuilt():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
