@@ -41,6 +41,28 @@ def test_background_setup_recovers_from_non_object_json(tmp_path, monkeypatch, p
     assert current["owner"] == "runtime_features"
 
 
+@pytest.mark.parametrize("attempts", [None, "invalid", [], {}])
+def test_background_setup_recovers_from_invalid_attempt_count(tmp_path, monkeypatch, attempts):
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({
+        "status": "failed", "updated": 0,
+        "attempts": attempts, "owner": "runtime_features",
+    }), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ROOT", tmp_path)
+    monkeypatch.setattr(runtime_features, "ready", lambda: False)
+    launches = []
+    monkeypatch.setattr(runtime_features.subprocess, "Popen", lambda *args, **kwargs: launches.append(args))
+
+    assert runtime_features.start_background()
+
+    assert len(launches) == 1
+    current = json.loads(progress.read_text(encoding="utf-8"))
+    assert current["status"] == "working"
+    assert current["attempts"] == 1
+    assert current["owner"] == "runtime_features"
+
+
 def test_ready_requires_marker_package_and_matching_companion(tmp_path, monkeypatch):
     marker = tmp_path / "features.done"
     monkeypatch.setattr(runtime_features, "MARKER", marker)

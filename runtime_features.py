@@ -154,7 +154,10 @@ def start_background() -> bool:
     if current and not owned and current.get("status") != "complete":
         return False
     age = time.time() - current.get("updated", 0)
-    attempts = max(0, int(current.get("attempts", 0)))
+    try:
+        attempts = max(0, int(current.get("attempts", 0)))
+    except (TypeError, ValueError, OverflowError):
+        attempts = 0
     if current.get("status") == "working":
         # Installation commands can be quiet for a long time. A live process
         # is progress; a dead one should be repaired promptly.
