@@ -65,6 +65,12 @@ def _page(folder: Path, local: bool | None = None):
 
             context.route("**/*", project_only_route(folder))
         _CONTEXTS[key] = context
+
+        def discard_closed_context(_closed_context):
+            if _CONTEXTS.get(key) is context:
+                _CONTEXTS.pop(key, None)
+
+        context.on("close", discard_closed_context)
     _ACTIVE_LOCAL[root] = local
     context = _CONTEXTS[key]
     return context.pages[-1] if context.pages else context.new_page()
