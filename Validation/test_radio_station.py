@@ -570,6 +570,39 @@ def test_service_finalizes_stop_when_audio_cleanup_reports_an_error(tmp_path):
         assert len(player.played) == 1 and len(calls) == 2
 
 
+def test_station_change_recovers_when_audio_cleanup_reports_an_error(tmp_path):
+    _, service, player, jobs, calls, generate = fixture(tmp_path)
+    target = radio.save_station("Piano", "Solo piano", root=tmp_path)
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        old_id = service.current["id"]
+        old_path = player.played[-1]
+
+        def stop_with_error():
+            player.active = False
+            raise RuntimeError("Close failed")
+
+        service.choose(target)
+        with patch.object(player, "stop", side_effect=stop_with_error), pytest.raises(RuntimeError, match="Close failed"):
+            service.tick()
+
+        assert service.station["id"] == target
+        assert service.current is None
+        assert service.enabled and not service.paused
+        assert next(row for row in service._rows() if row["id"] == old_id)["status"] == "played"
+        # The previous station's in-flight render can finish, but must not play.
+        finish(jobs, calls, 1)
+        service.tick()
+        assert player.played == [old_path]
+        assert "Solo piano" in calls[2][0]
+        finish(jobs, calls, 2)
+        service.tick()
+        assert player.played == [old_path, calls[2][1]]
+        assert service.current["station"] == target
+
+
 def test_worker_survives_failure_to_publish_its_retry_status(tmp_path):
     import sqlite3
 
