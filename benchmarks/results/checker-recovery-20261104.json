@@ -1,0 +1,32 @@
+{
+  "version": "0.5.472",
+  "base_release": "0.5.471",
+  "changes": [
+    "Preserve saved-case references through rejected assertion repairs and checker request errors.",
+    "Allow the whole home page to scroll when chat/radio push tasks below the viewport; retain independent chat/task scrolling."
+  ],
+  "regression": {
+    "old_release": "New real-browser regression fails on v0.5.471 with missing assertion_revision_reference.",
+    "fixed_regressions_passed": 3,
+    "affected_suite_passed": 165,
+    "affected_suite_skipped": 1,
+    "affected_suite_seconds": 167.9,
+    "command": "python -m pytest -q Validation/test_webapp_check.py Validation/test_native_agent.py Validation/test_project_memory.py -k \"test_webapp_check or checker or checkpoint or project_memory\""
+  },
+  "desktop_validation": {
+    "installed_version": "0.5.472",
+    "restored_window": "1280x900 nominal",
+    "home_wheel": "Scrolled over avatar from top section until My tasks and a complete card were visible.",
+    "task_wheel": "Scrolled within cards to later tasks while home viewport remained in place.",
+    "radio_playback": "Idle during update.",
+    "privacy": "No screenshots or user task content included in this public evidence."
+  },
+  "limitations": [
+    "This targeted release does not establish reliable autonomous completion of arbitrary apps."
+  ],
+  "runtime_source_sha256": {
+    "long_tasks.py": "d652bf23db593d3776963b032f4484ecba5ebe37c28a77ff9f562796a91504c5",
+    "native_agent.py": "a019c80bb25995bee3b244c5e48a0ab82d8242c92dbc5ebabc9a15c94d5078e1",
+    "task_context.py": "b1ba0a4ea7a090c8efcf2244b69f79e3607cb794cd37410ebe63bd2ee58ad248"
+  }
+}

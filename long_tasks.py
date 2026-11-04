@@ -3927,7 +3927,19 @@ def gui():
     threading.Thread(target=sample_gauges, daemon=True).start()
     window.after(1000, paint_gauges)
 
-    main_page = ttk.Frame(outer)
+    # The whole home page must remain reachable on a short display. Scrolling
+    # only the cards cannot help when chat/radio push the card viewport below
+    # the bottom of the window.
+    main_shell = ttk.Frame(outer)
+    main_canvas = tk.Canvas(main_shell, background=bg, borderwidth=0, highlightthickness=0)
+    main_scroll = ttk.Scrollbar(main_shell, orient="vertical", command=main_canvas.yview)
+    main_canvas.configure(yscrollcommand=main_scroll.set)
+    main_scroll.pack(side="right", fill="y")
+    main_canvas.pack(side="left", fill="both", expand=True)
+    main_page = ttk.Frame(main_canvas)
+    main_window = main_canvas.create_window((0, 0), window=main_page, anchor="nw")
+    main_page.bind("<Configure>", lambda _: main_canvas.configure(scrollregion=main_canvas.bbox("all")))
+    main_canvas.bind("<Configure>", lambda event: main_canvas.itemconfigure(main_window, width=event.width))
     super_shell = ttk.Frame(outer)
     super_canvas = tk.Canvas(
         super_shell, background=bg, borderwidth=0, highlightthickness=0,
@@ -3952,14 +3964,14 @@ def gui():
     )
 
     def show_super():
-        main_page.pack_forget()
+        main_shell.pack_forget()
         rocket.pack_forget()
         super_shell.pack(fill="both", expand=True)
 
     def show_main():
         super_shell.pack_forget()
         rocket.pack(side="right")
-        main_page.pack(fill="both", expand=True)
+        main_shell.pack(fill="both", expand=True)
 
     rocket = ttk.Button(
         header, text="🚀  Supercharge my AI", command=show_super, style="Accent.TButton"
@@ -4000,7 +4012,7 @@ def gui():
                             style="SelectedMode.TButton" if provider_scope.get() == scope else "Mode.TButton")
         button.pack(side="left", padx=(4, 0))
         scope_buttons[scope] = button
-    main_page.pack(fill="both", expand=True)
+    main_shell.pack(fill="both", expand=True)
 
     ttk.Button(super_page, text="←  Back to my tasks", command=show_main).pack(
         anchor="w", pady=(0, 12)
@@ -5876,33 +5888,45 @@ def gui():
     window.after(500, refresh_usage)
     wheel_remainder = 0.0
 
-    def over_task_list():
-        if not main_page.winfo_ismapped():
-            return False
+    def home_scroll_target(lines):
+        if not main_shell.winfo_ismapped():
+            return None
         widget = window.winfo_containing(
             window.winfo_pointerx(), window.winfo_pointery()
         )
         while widget is not None:
+            # Text widgets have their own class binding for chat/history.
+            # Do not move the home page a second time after they consume input.
+            if isinstance(widget, tk.Text):
+                return None
             if widget is canvas:
-                return True
+                first, last = canvas.yview()
+                if lines > 0 and last < 0.999 or lines < 0 and first > 0.001:
+                    return canvas
+                return main_canvas
+            if widget is main_page or widget is main_canvas:
+                return main_canvas
             widget = widget.master
-        return False
+        return None
 
     def on_mousewheel(event):
         nonlocal wheel_remainder
-        if not over_task_list():
+        target = home_scroll_target(-1 if event.delta > 0 else 1)
+        if target is None:
             return None
         wheel_remainder -= event.delta / 120 * 3
         lines = int(wheel_remainder)
         wheel_remainder -= lines
         if lines:
-            canvas.yview_scroll(lines, "units")
+            target.yview_scroll(lines, "units")
         return "break"
 
     def on_wheel_button(event):
-        if not over_task_list():
+        lines = -3 if event.num == 4 else 3
+        target = home_scroll_target(lines)
+        if target is None:
             return None
-        canvas.yview_scroll(-3 if event.num == 4 else 3, "units")
+        target.yview_scroll(lines, "units")
         return "break"
 
     window.bind_all("<MouseWheel>", on_mousewheel, add="+")
