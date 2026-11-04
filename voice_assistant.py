@@ -516,6 +516,8 @@ def media_call(action, cancel=None, **arguments):
             raise
     try:
         answer = json.loads(stdout.splitlines()[-1])
+        if not isinstance(answer, dict):
+            raise ValueError("The local voice service response must be an object.")
     except (IndexError, ValueError) as exc:
         raise RuntimeError("The local voice service did not respond.") from exc
     if returncode or "error" in answer:
