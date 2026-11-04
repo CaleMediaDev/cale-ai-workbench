@@ -331,7 +331,7 @@ def rank_game_models(ordered, catalog, root, weights=None):
         records = json.loads(
             (Path(root) / "LongTasks/game-model-probes.json").read_text()
         )
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return fallback_order
     if not isinstance(records, dict):
         return fallback_order
