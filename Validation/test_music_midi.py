@@ -82,6 +82,31 @@ def test_note_csv_normalization_can_be_repeated(tmp_path, bends):
     assert not path.with_suffix(".csv.tmp").exists()
 
 
+@pytest.mark.parametrize("valid", [True, False])
+def test_note_csv_normalization_preserves_existing_temporary_file(tmp_path, valid):
+    path = tmp_path / "notes.csv"
+    original = (
+        ",".join(music_midi.NOTE_COLUMNS) + "\n0.0,1.0,69,85,1,2\n"
+        if valid else "unknown,format\n1,2\n"
+    )
+    path.write_text(original)
+    existing = path.with_suffix(".csv.tmp")
+    existing.write_bytes(b"unrelated recovery data")
+
+    if valid:
+        music_midi.normalize_note_events(path)
+        with path.open(newline="") as stream:
+            row = next(csv.DictReader(stream))
+        assert json.loads(row["pitch_bend"]) == [1.0, 2.0]
+    else:
+        with pytest.raises(RuntimeError, match="unexpected note-event CSV"):
+            music_midi.normalize_note_events(path)
+        assert path.read_text() == original
+
+    assert existing.read_bytes() == b"unrelated recovery data"
+    assert set(tmp_path.iterdir()) == {path, existing}
+
+
 def test_unexpected_note_csv_is_preserved_for_diagnosis(tmp_path):
     path = tmp_path / "notes.csv"
     path.write_text("unknown,format\n1,2\n")
