@@ -57,10 +57,10 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
     target = Path(output_dir).expanduser().resolve()
     if source.parent == target:
         raise ValueError("Choose a separate output folder for the vocal tracks.")
-    if target.exists() and any(target.iterdir()):
-        raise ValueError("Choose an empty output folder to protect existing audio files.")
-    target.mkdir(parents=True, exist_ok=True)
     with music_backend._setup_lock(), music_backend._music_gpu_lease():
+        if target.exists() and any(target.iterdir()):
+            raise ValueError("Choose an empty output folder to protect existing audio files.")
+        target.mkdir(parents=True, exist_ok=True)
         python = install()
         result = subprocess.run(
             [str(python), str(Path(__file__).resolve()), "--worker", str(source), str(target)],
