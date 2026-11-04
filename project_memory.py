@@ -247,8 +247,10 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
         if include_code and not truncated:
             stale = list(existing_files - seen)
         else:
-            missing_defaults = {"file:" + relative for relative in DEFAULT_FILES if not (root / relative).is_file()}
-            stale = list(existing_files & missing_defaults)
+            # Inspected paths that failed eligibility or text validation must
+            # lose their old records too. Preserve files outside this scan.
+            inspected = {"file:" + path.relative_to(root).as_posix() for path in paths}
+            stale = list(existing_files & (inspected - seen))
         for identifier in stale:
             conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
             conn.execute("DELETE FROM memory_fts WHERE id=?", (identifier,))
