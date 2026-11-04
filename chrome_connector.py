@@ -20,7 +20,7 @@ def installed_version() -> str:
         contents = manifest.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError):
         return ""
-    match = re.search(r"^version[ \t]*:[ \t]*(['\"]?)([\w.\-]+)\1[ \t]*(?:#[^\r\n]*)?\r?$", contents, re.M)
+    match = re.search(r"^version[ \t]*:[ \t]*(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", contents, re.M)
     return match.group(2) if match else ""
 
 

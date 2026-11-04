@@ -103,6 +103,16 @@ def test_manifest_probe_error_reports_repair_without_launching_broker(tmp_path, 
         chrome_connector.pairing_code()
 
 
+def test_installed_version_does_not_strip_attached_hash(tmp_path, monkeypatch):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text("version: 0.2.6#custom\n", encoding="utf-8")
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    # Without separating whitespace, the hash belongs to the YAML scalar.
+    assert chrome_connector.installed_version() == ""
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
