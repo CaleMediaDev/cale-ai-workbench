@@ -65,6 +65,22 @@ def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
     assert chrome_connector.installed_version() == "0.2.6"
 
 
+def test_corrupt_manifest_reports_repair_without_launching_broker(tmp_path, monkeypatch):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_bytes(b"version: 0.2.6\n\xff")
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    def unexpected_run(*args, **kwargs):
+        pytest.fail("The broker must not run with an unreadable manifest")
+
+    monkeypatch.setattr(chrome_connector.subprocess, "run", unexpected_run)
+
+    assert chrome_connector.installed_version() == ""
+    with pytest.raises(RuntimeError, match="Run the installer again to repair it"):
+        chrome_connector.pairing_code()
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
