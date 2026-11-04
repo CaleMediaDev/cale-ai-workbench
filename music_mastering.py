@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 if __name__ != "__main__":
@@ -66,18 +67,18 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
     output.parent.mkdir(parents=True, exist_ok=True)
     with music_backend._setup_lock():
         python = install()
-    try:
+    with tempfile.TemporaryDirectory(prefix="cale-master-output-", dir=output.parent) as temporary:
+        rendered = Path(temporary) / "master.wav"
         result = subprocess.run(
             [str(python), str(Path(__file__).resolve()), "--worker", str(source),
-             str(reference), str(output)], capture_output=True, text=True,
+             str(reference), str(rendered)], capture_output=True, text=True,
             timeout=3600, creationflags=HIDE,
         )
-    except subprocess.TimeoutExpired:
-        output.unlink(missing_ok=True)
-        raise
-    if result.returncode or not output.is_file() or output.stat().st_size == 0:
-        output.unlink(missing_ok=True)
-        raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Music mastering failed.")
+        if result.returncode or not rendered.is_file() or rendered.stat().st_size == 0:
+            raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Music mastering failed.")
+        # Publish without replacing a destination created since validation.
+        # Keeping the temporary file beside the output ensures the same filesystem.
+        os.link(rendered, output)
     return {"source": str(source), "reference": str(reference), "path": str(output),
             "engine": "Matchering 2.0.6"}
 
