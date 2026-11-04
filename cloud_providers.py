@@ -102,7 +102,8 @@ def _subscription_environment(provider=None):
               "CLAUDE_CODE_API_KEY_HELPER_TTL_MS"}
     env = {key: value for key, value in os.environ.items()
             if key.upper() not in denied and not key.upper().startswith("ANTHROPIC_")
-            and not key.upper().startswith("CLAUDE_CODE_USE_")}
+            and not key.upper().startswith("CLAUDE_CODE_USE_")
+            and not key.upper().startswith("GROK_")}
     if provider is not None:
         _subscription_spec(provider)
         # Vendor CLI owns its credentials in its own isolated profile. We never
@@ -113,13 +114,16 @@ def _subscription_environment(provider=None):
     return env
 
 
-def _agent_process(command, *, cwd, timeout, max_output=1024 * 1024, cancel=None, provider=None):
+def _agent_process(command, *, cwd, timeout, max_output=1024 * 1024, cancel=None, provider=None, subscription_task=False):
     """Bound time/output; terminate only this owned process tree on interruption."""
     import subprocess
     import tempfile
     import psutil
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen(command, cwd=str(cwd), env=_subscription_environment(provider),
+        environment = _subscription_environment(provider)
+        if subscription_task and provider == "grok":
+            environment["GROK_DISABLE_API_KEY_AUTH"] = "1"
+        process = subprocess.Popen(command, cwd=str(cwd), env=environment,
             stdin=subprocess.DEVNULL, stdout=output, stderr=errors,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         deadline = time.monotonic() + timeout
@@ -218,11 +222,11 @@ def connect_subscription_agent(provider, on_progress=None):
             _install_subscription_agent(provider, on_progress)
         if on_progress: on_progress("Complete sign-in in the official browser window.")
         (AGENT_ROOT / "profiles" / provider).mkdir(parents=True, exist_ok=True)
-        command = [str(_subscription_binary(provider))] + (["auth", "login"] if provider == "claude" else ["--no-auto-update", "login"])
+        command = [str(_subscription_binary(provider))] + (["--setting-sources", "user", "auth", "login"] if provider == "claude" else ["--no-auto-update", "login"])
         code, _, _ = _agent_process(command, cwd=AGENT_ROOT, timeout=600, provider=provider)
         if code != 0: raise RuntimeError("Official sign-in did not finish. Please try connecting again.")
         if provider == "claude":
-            code, output, _ = _agent_process([str(_subscription_binary(provider)), "auth", "status"], cwd=AGENT_ROOT, timeout=15, provider=provider)
+            code, output, _ = _agent_process([str(_subscription_binary(provider)), "--setting-sources", "user", "auth", "status"], cwd=AGENT_ROOT, timeout=15, provider=provider)
             try: status = json.loads(output)
             except ValueError: status = {}
             if code != 0 or status.get("authMethod") != "claude.ai":
@@ -244,17 +248,54 @@ def build_subscription_task_command(provider, folder, prompt):
     if not executable.is_file(): raise ValueError("Connect the official agent first.")
     common = ["-p", prompt, "--output-format", "json", "--max-turns", "8"]
     if provider == "claude":
-        # Manual permissions remain active; never bypass permissions or approve
-        # shell/filesystem tools merely because a subscription was connected.
-        command = [str(executable), *common, "--permission-mode", "default"]
+        # This explicit coding handoff authorizes project edits. acceptEdits
+        # permits those while retaining ordinary shell/network approval gates.
+        command = [str(executable), "--setting-sources", "user", "--settings", '{"forceLoginMethod":"claudeai"}',
+                   *common, "--permission-mode", "acceptEdits"]
     else:
-        command = [str(executable), "--no-auto-update", *common, "--model", "grok-4.7", "--no-subagents"]
+        _check_grok_subscription_config(folder)
+        import glob
+        edit_rule = "Edit(" + glob.escape(folder.as_posix()) + "/**)"
+        command = [str(executable), "--no-auto-update", *common, "--model", "grok-4.7", "--no-subagents",
+                   "--permission-mode", "default", "--allow", edit_rule]
     import subprocess
     # Windows CreateProcess uses UTF-16 units, including quoting and the full
     # executable path. Reserve headroom below its32767-unit command-line cap.
     if len(subprocess.list2cmdline(command).encode("utf-16-le")) // 2 > 24000:
         raise ValueError("The task is too long for the official Windows CLI. Use a shorter task with project file references (24,000 UTF-16 command-line units maximum).")
     return command
+
+
+def _check_grok_subscription_config(folder):
+    """Refuse provider overrides, rather than rewriting user/project settings.
+
+    Pinned Grok accepts model/auth/endpoints only from its user profile, while
+    project TOML normally contributes permissions/MCP/plugins. Check both so a
+    future loader expansion cannot silently turn plan consent into API spend.
+    Configuration is bounded; auth.json and other credential files are never
+    opened. Valid tool permission rules remain untouched.
+    """
+    import tomllib
+    dangerous = {"model", "models", "auth", "grok_com_config", "endpoints", "env",
+                 "api_key", "apiKeyHelper", "provider", "providers", "base_url"}
+    roots = [AGENT_ROOT / "profiles" / "grok"]
+    parents = [Path(folder), *Path(folder).parents]
+    if len(parents) > 32: raise ValueError("Project configuration nesting is too deep.")
+    roots.extend(parent / ".grok" for parent in parents)
+    for root in roots:
+        for name in ("config.toml", "settings.json", "settings.local.json"):
+            path = root / name
+            if not path.exists(): continue
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("Subscription task cannot verify this Grok configuration.")
+            with path.open("rb") as stream: raw = stream.read(65537)
+            if len(raw) > 65536: raise ValueError("Grok configuration is too large for subscription validation.")
+            try:
+                value = tomllib.loads(raw.decode("utf-8")) if name.endswith("toml") else json.loads(raw)
+            except (ValueError, UnicodeError):
+                raise ValueError("Subscription task cannot verify this Grok configuration.") from None
+            if not isinstance(value, dict) or dangerous.intersection(value):
+                raise ValueError("A Grok provider or authentication override is configured. Use the official agent directly or remove that override before using this subscription connection.")
 
 
 def run_subscription_task(provider, folder, prompt, timeout=300):
@@ -274,7 +315,7 @@ def run_subscription_task(provider, folder, prompt, timeout=300):
         raise ValueError("Enable use of your subscription before handing off a task.")
     command = build_subscription_task_command(provider, folder, prompt)
     if provider == "claude":
-        code, output, _ = _agent_process([str(_subscription_binary(provider)), "auth", "status"],
+        code, output, _ = _agent_process([str(_subscription_binary(provider)), "--setting-sources", "user", "auth", "status"],
             cwd=folder, timeout=15, provider=provider)
         try: auth = json.loads(output)
         except ValueError: auth = {}
@@ -282,7 +323,7 @@ def run_subscription_task(provider, folder, prompt, timeout=300):
             raise ValueError("The official agent is not currently signed into your Claude subscription.")
     started = time.monotonic()
     code, output, _ = _agent_process(command, cwd=folder, timeout=timeout,
-        cancel=lambda: blocked() or not subscription_agent_status(provider)["enabled"], provider=provider)
+        cancel=lambda: blocked() or not subscription_agent_status(provider)["enabled"], provider=provider, subscription_task=True)
     if code != 0: raise RuntimeError("Official agent could not finish this task; sign-in, plan limits, or permissions may need attention.")
     try: result = json.loads(output)
     except ValueError: raise ValueError("Official agent did not return its documented JSON result.") from None

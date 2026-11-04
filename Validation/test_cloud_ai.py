@@ -2395,3 +2395,61 @@ class SubscriptionAgentTests(unittest.TestCase):
                 self.assertIn(short,cloud_providers.build_subscription_task_command(provider,folder,short))
                 for too_long in ('a'*24000,chr(0x1f680)*12000):
                     with self.assertRaisesRegex(ValueError,'UTF-16'):cloud_providers.build_subscription_task_command(provider,folder,too_long)
+
+
+    def test_subscription_claude_never_loads_project_billing_or_hook_settings(self):
+        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'):
+            folder=Path(d)/'project';folder.mkdir();(folder/'.claude').mkdir()
+            settings={'env':{'ANTHROPIC_API_KEY':'NOT_A_REAL_KEY'},'apiKeyHelper':'must-not-execute','hooks':{'SessionStart':[{'command':'must-not-execute'}]}}
+            for name in ('settings.json','settings.local.json'):(folder/'.claude'/name).write_text(json.dumps(settings))
+            original={name:(folder/'.claude'/name).read_bytes() for name in ('settings.json','settings.local.json')}
+            exe=cloud_providers._subscription_binary('claude');exe.parent.mkdir(parents=True);exe.write_bytes(b'MZfake')
+            command=cloud_providers.build_subscription_task_command('claude',folder,'task')
+            self.assertEqual(command[command.index('--setting-sources')+1],'user')
+            self.assertEqual(json.loads(command[command.index('--settings')+1]),{'forceLoginMethod':'claudeai'})
+            with patch.object(cloud_providers,'_agent_process',side_effect=[(0,'',''),(0,json.dumps({'authMethod':'claude.ai'}),'')]) as execute:
+                cloud_providers.connect_subscription_agent('claude')
+            for call in execute.call_args_list:
+                args=call.args[0];self.assertEqual(args[args.index('--setting-sources')+1],'user')
+            for name,data in original.items():self.assertEqual((folder/'.claude'/name).read_bytes(),data)
+
+    def test_subscription_grok_refuses_provider_config_but_preserves_tool_permissions(self):
+        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'):
+            folder=Path(d)/'project';folder.mkdir();(folder/'.grok').mkdir()
+            exe=cloud_providers._subscription_binary('grok');exe.parent.mkdir(parents=True);exe.write_bytes(b'MZfake')
+            path=folder/'.grok/config.toml'
+            for content in ('[model."grok-4.7"]\nbase_url="https://api.invalid"\n', '[auth]\nauth_provider_command="must-not-execute"\n', '[endpoints]\nmodels_base_url="https://api.invalid"\n'):
+                path.write_text(content)
+                with self.assertRaisesRegex(ValueError,'override'):cloud_providers.build_subscription_task_command('grok',folder,'task')
+                self.assertEqual(path.read_text(),content)
+            path.write_text('[permission]\nallow=["Read"]\n')
+            self.assertIn('grok-4.7',cloud_providers.build_subscription_task_command('grok',folder,'task'))
+            profile=cloud_providers.AGENT_ROOT/'profiles/grok';profile.mkdir(parents=True)
+            (profile/'config.toml').write_text('[models]\ndefault="paid-custom"\n')
+            with self.assertRaisesRegex(ValueError,'override'):cloud_providers.build_subscription_task_command('grok',folder,'task')
+
+    def test_subscription_grok_strips_external_auth_and_model_environment(self):
+        overrides={'GROK_AUTH_PROVIDER_COMMAND':'must-not-execute','GROK_MODELS_BASE_URL':'https://bad.invalid','GROK_MODELS_LIST_URL':'https://bad.invalid','GROK_CODE_XAI_API_KEY':'NOT_REAL','GROK_AUTH':'NOT_REAL','GROK_HOME':'externalprofile'}
+        with patch.dict('os.environ',overrides):
+            env=cloud_providers._subscription_environment('grok')
+        for name in overrides:
+            if name!='GROK_HOME':self.assertNotIn(name,env)
+        with tempfile.TemporaryDirectory() as d,patch('subprocess.Popen') as launch:
+            launch.return_value.poll.return_value=0;launch.return_value.returncode=0
+            cloud_providers._agent_process(['official-grok'],cwd=d,timeout=1,provider='grok',subscription_task=True)
+        self.assertEqual(launch.call_args.kwargs['env']['GROK_DISABLE_API_KEY_AUTH'],'1')
+
+
+    def test_subscription_coding_handoff_can_edit_without_broad_shell_approval(self):
+        import glob
+        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'):
+            folder=Path(d)/'project';folder.mkdir()
+            for provider in ('claude','grok'):
+                exe=cloud_providers._subscription_binary(provider);exe.parent.mkdir(parents=True,exist_ok=True);exe.write_bytes(b'MZfake')
+                command=cloud_providers.build_subscription_task_command(provider,folder,'Implement the requested project change')
+                mode=command[command.index('--permission-mode')+1]
+                self.assertEqual(mode,'acceptEdits' if provider=='claude' else 'default')
+                if provider=='grok':self.assertEqual(command[command.index('--allow')+1],'Edit('+glob.escape(folder.resolve().as_posix())+'/**)')
+                self.assertNotIn('--always-approve',command);self.assertNotIn('--yolo',command)
+                self.assertNotIn('bypassPermissions',command)
+                self.assertFalse(any(arg.startswith(('Bash(','MCPTool(','WebFetch(')) for arg in command))
