@@ -104,6 +104,58 @@ class ProjectMemoryTests(unittest.TestCase):
                             ("file:app.py",),
                         ).fetchone()[0], 1)
 
+    def test_incremental_alias_invalidation_uses_canonical_id_for_both_memory_tables(self):
+        source = self.folder / "notes.md"
+        alias = self.folder / "README.md"
+        alias.write_text("alias placeholder", encoding="utf-8")
+        other = self.folder / "app.py"
+        other.write_text("preserved source record", encoding="utf-8")
+        memory.index_file(self.folder, other)
+        resolve, read_bytes = Path.resolve, Path.read_bytes
+        def canonical(path, *args, **kwargs):
+            return resolve(source, *args, **kwargs) if path == alias else resolve(path, *args, **kwargs)
+        def read(path):
+            return read_bytes(source) if path == alias else read_bytes(path)
+        with patch.object(Path, "resolve", canonical), patch.object(Path, "read_bytes", read):
+            for invalid_data in (b"binary\x00content", b"x" * 256_001):
+                with self.subTest(size=len(invalid_data)):
+                    source.write_text("obsolete canonical alias passage", encoding="utf-8")
+                    memory.index(self.folder)
+                    with memory.connection(self.folder) as conn:
+                        self.assertEqual(conn.execute("SELECT source_path FROM memories WHERE id='file:notes.md'").fetchone()[0], "notes.md")
+                    source.write_bytes(invalid_data)
+                    result = memory.index(self.folder)
+                    self.assertEqual(result["removed"], 1)
+                    # Inspect raw storage before recall can lazily remove stale content.
+                    with memory.connection(self.folder) as conn:
+                        for table in ("memories", "memory_fts"):
+                            self.assertEqual(conn.execute(f"SELECT COUNT(*) FROM {table} WHERE id='file:notes.md'").fetchone()[0], 0)
+                            self.assertEqual(conn.execute(f"SELECT COUNT(*) FROM {table} WHERE id='file:app.py'").fetchone()[0], 1)
+
+    def test_incremental_inspected_alias_skips_external_and_unresolvable_targets(self):
+        other = self.folder / "app.py"
+        other.write_text("preserve uninspected source", encoding="utf-8")
+        memory.index_file(self.folder, other)
+        alias = self.folder / "README.md"
+        alias.write_text("alias placeholder", encoding="utf-8")
+        outside = Path(self.temp.name) / "outside.md"
+        outside.write_text("outside private text", encoding="utf-8")
+        resolve = Path.resolve
+        for unavailable in (False, True):
+            with self.subTest(unavailable=unavailable):
+                def canonical(path, *args, **kwargs):
+                    if path == alias:
+                        if unavailable:
+                            raise OSError("Alias target cannot be resolved")
+                        return resolve(outside, *args, **kwargs)
+                    return resolve(path, *args, **kwargs)
+                with patch.object(Path, "resolve", canonical):
+                    result = memory.index(self.folder)
+                self.assertEqual(result["removed"], 0)
+                with memory.connection(self.folder) as conn:
+                    self.assertEqual([row[0] for row in conn.execute("SELECT id FROM memories WHERE kind='file'")], ["file:app.py"])
+                    self.assertEqual([row[0] for row in conn.execute("SELECT id FROM memory_fts")], ["file:app.py"])
+
     def test_save_cannot_overwrite_an_indexed_document_chunk(self):
         source = self.folder / "manual.pdf"
         source.write_bytes(b"document bytes")

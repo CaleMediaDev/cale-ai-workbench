@@ -249,7 +249,16 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
         else:
             # Inspected paths that failed eligibility or text validation must
             # lose their old records too. Preserve files outside this scan.
-            inspected = {"file:" + path.relative_to(root).as_posix() for path in paths}
+            inspected = set()
+            for path in paths:
+                try:
+                    # Indexing stores resolved source identities, so invalid
+                    # aliases must evict that same canonical record too.
+                    resolved = path.resolve()
+                    if resolved.is_relative_to(root):
+                        inspected.add("file:" + resolved.relative_to(root).as_posix())
+                except (OSError, RuntimeError, ValueError):
+                    continue  # Unresolvable or escaped aliases provide no safe identity.
             stale = list(existing_files & (inspected - seen))
         for identifier in stale:
             conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
