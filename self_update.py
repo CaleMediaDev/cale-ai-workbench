@@ -549,6 +549,18 @@ def write_version_marker(root, version):
         temporary.unlink(missing_ok=True)
 
 
+def _validate_update_destinations(files):
+    """Reject release destinations redirected by existing filesystem links."""
+    root = ROOT.resolve()
+    for name in files:
+        target = root / name
+        for path in (target, *target.parents):
+            if path == root:
+                break
+            if path.is_symlink() or path.is_junction():
+                raise ValueError("Update destination is redirected by a filesystem link: " + name)
+
+
 def apply(archive_path, version):
     """Keep the old source recoverable and swap only files in the manifest."""
     if active_tasks():
@@ -556,7 +568,7 @@ def apply(archive_path, version):
     # Install new app-owned Python dependencies before swapping source. A
     # source update must not expose tools that the installed runtimes lack.
     with ZipFile(archive_path) as archive:
-        validated_manifest(archive)
+        _validate_update_destinations(validated_manifest(archive))
         sync_new_media_requirements(archive)
         sync_new_toolbox_requirements(archive)
     backup = (
@@ -570,6 +582,7 @@ def apply(archive_path, version):
         files = validated_manifest(archive)
         try:
             for name in files:
+                _validate_update_destinations([name])
                 target = ROOT / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 previous = backup / name
