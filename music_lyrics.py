@@ -7,6 +7,7 @@ module validates paths and turns their result into files useful for editing.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
@@ -50,7 +51,7 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
         words = " ".join(str(segment.get("text", "")).split())
         start = float(segment.get("start", 0))
         end = float(segment.get("end", 0))
-        if words and end > start >= 0:
+        if words and math.isfinite(start) and math.isfinite(end) and end > start >= 0:
             rows.append({"start": start, "end": end, "text": words})
     if not rows:
         raise RuntimeError("No clear lyrics were detected in the isolated vocal track.")
