@@ -29,7 +29,7 @@ def configured_main_alias(root: Path) -> str:
     for line in lines:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if line == "model:":
+        if re.fullmatch(r"model:(?:[ \t]+#.*|[ \t]*)", line):
             in_model = True
             continue
         if in_model and not line[0].isspace():
