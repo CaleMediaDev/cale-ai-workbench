@@ -142,6 +142,58 @@ def test_save_encoding_failure_leaves_no_partial_output(tmp_path, existing_targe
     assert vocal.read_bytes() == b"isolated"
 
 
+def test_save_write_failure_rolls_back_partial_files_and_allows_retry(tmp_path):
+    from contextlib import contextmanager
+    from unittest.mock import Mock
+
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    vocal = tmp_path / "vocals.wav"
+    vocal.write_bytes(b"isolated")
+    target = tmp_path / "lyrics"
+    target.mkdir()
+    keep = target / "keep.txt"
+    keep.write_bytes(b"keep")
+    transcription = {"segments": [
+        {"start": 1.0, "end": 2.0, "text": "Hello world"},
+    ]}
+    real_open = Path.open
+
+    @contextmanager
+    def failing_open(path, *args, **kwargs):
+        with real_open(path, *args, **kwargs) as output:
+            if path == target / "lyrics.srt" and args == ("xb",):
+                proxy = Mock(wraps=output)
+
+                def partial_write(content):
+                    output.write(content[:5])
+                    raise OSError("simulated disk failure")
+
+                proxy.write.side_effect = partial_write
+                yield proxy
+            else:
+                yield output
+
+    with patch.object(Path, "open", failing_open):
+        with pytest.raises(OSError, match="simulated disk failure"):
+            music_lyrics.save(source, vocal, target, transcription)
+
+    assert sorted(path.name for path in target.iterdir()) == ["keep.txt"]
+    assert keep.read_bytes() == b"keep"
+    assert source.read_bytes() == b"original"
+    assert vocal.read_bytes() == b"isolated"
+
+    result = music_lyrics.save(source, vocal, target, transcription)
+    assert result["segments"] == 1
+    assert (target / "lyrics.txt").read_text(encoding="utf-8") == "Hello world\n"
+    assert (target / "lyrics.srt").read_text(encoding="utf-8") == (
+        "1\n00:00:01,000 --> 00:00:02,000\nHello world\n"
+    )
+    assert json.loads((target / "lyrics.json").read_text(encoding="utf-8"))[
+        "segments"
+    ] == transcription["segments"]
+
+
 def test_save_rejects_infinite_end_without_leaving_partial_output(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
