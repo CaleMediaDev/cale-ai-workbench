@@ -210,7 +210,10 @@ def watch(device=0, parent_pid=None, parent_started=None):
         failed_reads = 0
         last_preview = 0.0
         while allowed() and owner_alive(parent_pid, parent_started):
-            ok, frame = camera.read()
+            try:
+                ok, frame = camera.read()
+            except cv2.error:
+                ok, frame = False, None
             if not ok:
                 failed_reads += 1
                 if failed_reads >= 5:
