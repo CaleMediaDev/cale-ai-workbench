@@ -138,7 +138,11 @@ def _stop_check(process: subprocess.Popen) -> None:
         parent = psutil.Process(process.pid)
         children = parent.children(recursive=True)
         for child in children:
-            child.terminate()
+            try:
+                child.terminate()
+            except psutil.NoSuchProcess:
+                # A child may exit after enumeration; still stop its siblings.
+                pass
         process.terminate()
         _, alive = psutil.wait_procs(children, timeout=5)
         for child in alive:
