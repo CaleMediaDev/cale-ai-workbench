@@ -10,6 +10,50 @@ from table_ml import predict_table_model, train_table_model
 
 
 class TableMLTests(unittest.TestCase):
+    def test_model_publication_preserves_concurrent_destination(self):
+        from unittest.mock import patch
+
+        import table_ml
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            training.write_text("size,price\n" + "".join(f"{i},{i * 12 + 50}\n" for i in range(40)), encoding="utf-8")
+            output = root / "model.json"
+            dump = json.dump
+
+            def concurrent_dump(payload, stream, **kwargs):
+                output.write_bytes(b"another operation's model")
+                return dump(payload, stream, **kwargs)
+
+            with patch.object(table_ml.json, "dump", side_effect=concurrent_dump):
+                with self.assertRaises(FileExistsError):
+                    train_table_model(str(training), "price", str(output), "regression")
+            self.assertEqual(output.read_bytes(), b"another operation's model")
+            self.assertEqual(set(root.iterdir()), {training, output})
+
+    def test_failed_model_write_leaves_no_partial_file_and_allows_retry(self):
+        from unittest.mock import patch
+
+        import table_ml
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            training.write_text("size,price\n" + "".join(f"{i},{i * 12 + 50}\n" for i in range(40)), encoding="utf-8")
+            output = root / "model.json"
+
+            def failed_dump(payload, stream, **kwargs):
+                stream.write('{"format":')
+                raise OSError("Disk write failed")
+
+            with patch.object(table_ml.json, "dump", side_effect=failed_dump):
+                with self.assertRaisesRegex(OSError, "Disk write failed"):
+                    train_table_model(str(training), "price", str(output), "regression")
+            self.assertEqual(list(root.iterdir()), [training])
+            train_table_model(str(training), "price", str(output), "regression")
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["format"], "cale-table-model-v1")
+
     def test_classification_and_prediction(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -333,6 +377,7 @@ if __name__ == "__main__":
 def test_prediction_error_and_publication_preserve_concurrent_destination(tmp_path):
     from contextlib import contextmanager
     from unittest.mock import patch
+
     import pytest
     from sklearn.feature_extraction import DictVectorizer
     for outcome in ("failure", "success"):
