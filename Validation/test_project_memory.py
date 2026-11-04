@@ -352,6 +352,8 @@ class ProjectMemoryTests(unittest.TestCase):
 
 
 def test_common_pair_survives_high_ranked_rare_single_term_hits(tmp_path):
+    import project_memory
+
     # Rare single-term notes can outrank a longer, eligible two-term match.
     for number in range(20):
         project_memory.save(tmp_path, "note", f"Alpha {number}", "Short entry.")
