@@ -659,6 +659,17 @@ def setup_blocks_tasks(setup):
                 and setup.get("owner") != "runtime_features")
 
 
+def background_work_suspended(setup, *, updating=False, pending_update=None):
+    """Pause contributions/playback for core setup or a staged app update.
+
+    Optional tool installers share install-progress.json with core setup.
+    Their downloads, failed retries, and missing legacy progress records must
+    not strand otherwise usable background services behind a permanent hold.
+    A task waiting for a model is likewise not evidence of a core install.
+    """
+    return bool(updating or pending_update or setup_blocks_tasks(setup))
+
+
 def first_launch_readiness(state=None):
     """Describe the two required first-run stages shown above the composer.
 
@@ -7060,11 +7071,11 @@ def gui():
             item["status"] in ("queued", "working", "checking") for item in all_projects
         )
         donation_service.tick(busy=(running or foreground_chat.is_set() or not answer_requests.empty()),
-                              suspended=(updating or bool(pending_update) or not setup
-                                         or setup.get("status") != "complete"
-                                         or any(item["status"] == "waiting_for_setup" for item in all_projects)))
+                              suspended=background_work_suspended(
+                                  setup, updating=updating, pending_update=pending_update))
         donation_controls.refresh()
-        radio_service.suspended = bool(updating or pending_update or not setup or setup.get("status") != "complete")
+        radio_service.suspended = background_work_suspended(
+            setup, updating=updating, pending_update=pending_update)
         upgrading = ollama_runtime.model_download_running() or any(
             state.get("status") in ("working", "waiting")
             for state in (voice_setup, ollama_setup)
@@ -7189,7 +7200,7 @@ def gui():
             )
         ):
             setup_state = read_task_status(STATE / "install-progress.json")
-            if not setup_state or setup_state.get("status") == "complete":
+            if not setup_blocks_tasks(setup_state):
                 archive, version = pending_update
                 try:
                     subprocess.Popen(

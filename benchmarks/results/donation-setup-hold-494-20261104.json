@@ -1,0 +1,17 @@
+{
+  "release": "0.5.494",
+  "base_commit": "3745c0c61ba6162f5b98bd69008b1ebec66e2c3c",
+  "source_ref": "refs/tags/v0.5.494",
+  "reported_symptom": "Donation remains paused while Cale installs or updates.",
+  "reproduced_cause": "The desktop required every shared install-progress record to be complete, including optional runtime_features downloads that exhaust retries. It also treated missing progress and any waiting_for_setup task as permanent background-work holds. An optional failed record separately prevented the pending update from applying.",
+  "change": "Donation and radio share the existing core-setup blocking policy. Optional installer status and stale waiting task rows do not suspend them. Update launch uses that same core-setup policy; existing live-worker checks still gate source updates.",
+  "preserved_guards": ["Real base installation holds", "Pending/applying app-update holds", "Donation opt-in, account binding, privacy modes and resource limits", "Live-worker update checks"],
+  "validation": {
+    "regression_before": "3 failed, 173 deselected on unchanged stable source",
+    "regression_after": "3 passed, 173 deselected",
+    "combined_command": "python -m pytest -q Validation/test_long_tasks.py Validation/test_donation.py Validation/test_donation_regressions.py Validation/test_runtime_features.py Validation/test_setup_recovery.py Validation/test_self_update.py Validation/test_radio_station.py --tb=short",
+    "combined_result": "397 passed, 105 subtests passed in 59.89 seconds",
+    "coverage": ["Actual desktop donation/radio/update guard expressions", "Failed optional setup after three retries", "Missing legacy progress record", "Stale waiting task", "Real DonationService pause-to-resume with unchanged consent", "Base setup and pending/applying update holds"]
+  },
+  "limitations": ["Client machine not directly inspected; this reproduces a confirmed cause matching the reported symptom.", "Tests use fake contribution work and do not spend account allowances.", "Old clients blocked by the old update guard may need to close Cale and run the new installer once."]
+}

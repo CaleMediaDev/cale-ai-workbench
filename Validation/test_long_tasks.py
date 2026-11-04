@@ -3071,3 +3071,75 @@ class LongTaskTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# Exercise the desktop's real hold expressions without opening a Tk window.
+def _background_hold_ui_expressions():
+    import ast
+    tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+    donation_call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute) and node.func.attr == "tick"
+        and isinstance(node.func.value, ast.Name) and node.func.value.id == "donation_service")
+    donation_hold = next(arg.value for arg in donation_call.keywords if arg.arg == "suspended")
+    radio_hold = next(node.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Attribute) and target.attr == "suspended"
+                and isinstance(target.value, ast.Name) and target.value.id == "radio_service"
+                for target in node.targets))
+    update_ready = next(node.test for node in ast.walk(tree) if isinstance(node, ast.If)
+        and any(isinstance(child, ast.Assign)
+                and any(isinstance(target, ast.Tuple)
+                    and [getattr(item, "id", "") for item in target.elts] == ["archive", "version"]
+                    for target in child.targets) for child in node.body))
+    return [compile(ast.Expression(expr), "long_tasks.py", "eval")
+            for expr in (donation_hold, radio_hold, update_ready)]
+
+
+def test_paused_install_hold_matches_optional_and_base_setup_policy():
+    cases = [({}, False), ({"status": "complete"}, False),
+             ({"status": "working", "owner": "runtime_features"}, False),
+             ({"status": "failed", "owner": "runtime_features", "attempts": 3}, False),
+             ({"status": "working"}, True), ({"status": "error"}, True)]
+    for setup, expected in cases:
+        assert task_module.background_work_suspended(setup) is expected
+        assert task_module.background_work_suspended(setup, updating=True)
+        assert task_module.background_work_suspended(setup, pending_update=("update.zip", (0, 5, 494)))
+
+
+def test_paused_install_hold_real_ui_wiring_ignores_stale_waiting_task():
+    donation_expr, radio_expr, update_expr = _background_hold_ui_expressions()
+    for setup, expected in [({}, False), ({"status": "complete"}, False),
+            ({"status": "failed", "owner": "runtime_features", "attempts": 3}, False),
+            ({"status": "working"}, True), ({"status": "error"}, True)]:
+        context = dict(vars(task_module), setup=setup, setup_state=setup,
+                       updating=False, pending_update=None,
+                       all_projects=[{"status": "waiting_for_setup"}])
+        assert bool(eval(donation_expr, context)) is expected
+        assert bool(eval(radio_expr, context)) is expected
+        assert bool(eval(update_expr, context)) is (not expected)
+        for changed in ({"updating": True}, {"pending_update": ("update.zip", (0, 5, 494))}):
+            assert eval(donation_expr, {**context, **changed})
+            assert eval(radio_expr, {**context, **changed})
+
+
+def test_paused_install_hold_donation_resumes_without_changing_consent(tmp_path):
+    import donation
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"],
+                         intensity="full_blast")
+    consent = donation.settings(tmp_path)
+    service = donation.Service(tmp_path)
+    donation_expr, _, _ = _background_hold_ui_expressions()
+    def tick(setup):
+        context = dict(vars(task_module), setup=setup, updating=False, pending_update=None,
+                       all_projects=[{"status": "waiting_for_setup"}])
+        service.tick(suspended=bool(eval(donation_expr, context)))
+    with patch("pc_offline.offline", return_value=False), patch.object(service, "_run") as run:
+        tick({"status": "working"})
+        assert service.suspended and service.cancel.is_set()
+        assert "Paused while Cale installs" in service.message
+        run.assert_not_called()
+        tick({"status": "failed", "owner": "runtime_features", "attempts": 3})
+        assert not service.suspended
+        assert service.thread is not None
+        service.thread.join(2)
+        run.assert_called_once()
+        assert donation.settings(tmp_path) == consent
