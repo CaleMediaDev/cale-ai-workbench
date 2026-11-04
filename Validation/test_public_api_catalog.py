@@ -4,6 +4,8 @@ import asyncio
 import json
 from unittest.mock import patch
 
+import pytest
+
 import public_api_catalog
 import toolbox_mcp
 
@@ -36,6 +38,14 @@ def test_search_public_apis_filters_auth_and_keeps_caveat(tmp_path):
                            json.dumps({"query": "weather"})))
     assert [item["name"] for item in result["results"]] == ["Open Weather"]
     assert "research leads" in result["note"]
+
+
+@pytest.mark.parametrize("max_results", [1.5, "2", None])
+def test_search_public_apis_rejects_non_integer_limits_before_catalog_access(max_results):
+    with patch.object(public_api_catalog, "_catalog") as catalog:
+        with pytest.raises(ValueError, match="Result count must be between 1 and 20"):
+            public_api_catalog.search_public_apis("weather", max_results=max_results)
+    catalog.assert_not_called()
 
 
 def test_catalog_preserves_stale_snapshot_on_incompatible_encoding(tmp_path):
