@@ -109,6 +109,36 @@ def test_inspector_rejects_source_changes_during_cache_hits(tmp_path):
     assert source.read_text(encoding="utf-8") == "updated document"
 
 
+def test_inspector_rejects_source_changes_during_indexing(tmp_path):
+    source = tmp_path / "notes.pdf"
+    source.write_bytes(b"original PDF source")
+
+    def change_during_indexing(*args, **kwargs):
+        source.write_bytes(b"updated PDF source")
+
+    with patch.object(file_chat, "ROOT", tmp_path), patch.object(
+        file_chat, "document_text", side_effect=["original text", "updated text"],
+    ) as extract, patch.object(project_memory, "index_document_text") as index:
+        first = project_documents.inspect(tmp_path, "notes.pdf")
+        assert first["text"] == "original text" and not first["cached"]
+        index.side_effect = change_during_indexing
+        try:
+            project_documents.inspect(tmp_path, "notes.pdf")
+        except RuntimeError as exc:
+            assert "document changed" in str(exc)
+        else:
+            raise AssertionError("Source edited during indexing returned stale text")
+        assert extract.call_count == 1
+        index.side_effect = None
+        fresh = project_documents.inspect(tmp_path, "notes.pdf")
+        cached = project_documents.inspect(tmp_path, "notes.pdf")
+
+    assert fresh["text"] == cached["text"] == "updated text"
+    assert not fresh["cached"] and cached["cached"]
+    assert extract.call_count == 2
+    assert source.read_bytes() == b"updated PDF source"
+
+
 def test_inspector_rejects_source_changes_during_cache_publication(tmp_path):
     source = tmp_path / "notes.pdf"
     source.write_bytes(b"original PDF source")

@@ -109,6 +109,10 @@ def inspect(folder: str | Path, path: str, question: str = "",
         # A locked index or sensitive filename must not prevent an explicitly
         # requested document read. A later inspect can rebuild the FTS entry.
         pass
+    # Indexing may take long enough for the source to change after the earlier
+    # validation, including when extraction was served from the cache.
+    if _digest(source) != digest:
+        raise RuntimeError("The document changed while it was being read; try again")
     if question.strip():
         excerpt = file_chat.select_excerpt(text, question, limit=limit,
                                             subject="document")
