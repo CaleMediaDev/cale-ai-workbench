@@ -325,8 +325,9 @@ def _refresh_file_record(root: Path, row, checked_documents: dict | None = None)
                 if checked_documents is not None:
                     checked_documents[key] = True
             return True
-        if checked_documents is not None and relative in checked_documents:
-            return checked_documents[relative]
+        key = (relative, row["source_hash"], row["tags"])
+        if checked_documents is not None and key in checked_documents:
+            return checked_documents[key]
         try:
             source = _document_source(root, root / relative)
             digest = hashlib.sha256()
@@ -337,18 +338,21 @@ def _refresh_file_record(root: Path, row, checked_documents: dict | None = None)
         except (OSError, RuntimeError, ValueError):
             changed = True
         if changed:
-            # Extracted text belongs to exact source bytes. Never serve it
-            # after an edit; the next inspect_project_file call re-extracts.
+            # Delete only this stale source version. Another inspection may
+            # have published verified replacement chunks while we hashed it.
             with connection(root) as conn:
+                predicate = "kind='document' AND source_path=? AND source_hash=?"
+                values = (relative, row["source_hash"])
                 ids = [item[0] for item in conn.execute(
-                    "SELECT id FROM memories WHERE kind='document' AND source_path=?",
-                    (relative,),
+                    "SELECT id FROM memories WHERE " + predicate, values,
                 )]
                 for identifier in ids:
-                    conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
-                    conn.execute("DELETE FROM memory_fts WHERE id=?", (identifier,))
+                    deleted = conn.execute("DELETE FROM memories WHERE id=? AND " + predicate,
+                                           (identifier, *values))
+                    if deleted.rowcount:
+                        conn.execute("DELETE FROM memory_fts WHERE id=?", (identifier,))
         if checked_documents is not None:
-            checked_documents[relative] = changed
+            checked_documents[key] = changed
         return changed
     if row["kind"] != "file":
         return False
