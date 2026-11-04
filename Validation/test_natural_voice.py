@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import natural_voice
@@ -125,6 +125,36 @@ class NaturalVoiceTests(unittest.TestCase):
                 natural_voice.install()
             self.assertEqual(json.loads(status.read_text())["status"], "error")
             self.assertIn("Lock file is not writable", status.read_text())
+            run.assert_not_called()
+
+    def test_lock_flush_failure_replaces_stale_working_status_with_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            status = Path(folder) / "voice-status.json"
+            status.write_text(json.dumps({"status": "working"}))
+            lock_path = status.parent / "natural-voice.lock"
+            original_open = Path.open
+            lock = MagicMock()
+            lock.__enter__.return_value = lock
+            lock.tell.return_value = 0
+            lock.flush.side_effect = OSError(errno.ENOSPC, "No space for lock byte")
+            fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=MagicMock())
+
+            def open_lock(path, *args, **kwargs):
+                if path == lock_path:
+                    return lock
+                return original_open(path, *args, **kwargs)
+
+            with (
+                patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+                patch.object(natural_voice, "STATUS", status),
+                patch.object(Path, "open", open_lock),
+                patch.object(natural_voice.subprocess, "run") as run,
+            ):
+                natural_voice.install()
+            self.assertEqual(json.loads(status.read_text())["status"], "error")
+            self.assertIn("No space for lock byte", status.read_text())
+            lock.write.assert_called_once_with(b"1")
+            fake_msvcrt.locking.assert_not_called()
             run.assert_not_called()
 
     def test_unexpected_lock_failure_replaces_stale_working_status_with_error(self):
