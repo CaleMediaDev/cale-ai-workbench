@@ -29,9 +29,9 @@ def executable(root: Path = ROOT) -> Path:
 def working(root: Path = ROOT) -> bool:
     """Execute the installed binary; a file existing is not enough."""
     target = executable(root)
-    if not target.is_file():
-        return False
     try:
+        if not target.is_file():
+            return False
         result = subprocess.run([str(target), "-version"], capture_output=True,
                                 text=False, timeout=10, creationflags=HIDE)
         return result.returncode == 0 and result.stdout.startswith(b"ffmpeg version")
