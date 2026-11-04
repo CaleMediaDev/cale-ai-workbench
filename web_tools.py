@@ -349,10 +349,12 @@ def visible_phone_numbers(text: str) -> list[str]:
             continue
         digits = re.sub(r"\D", "", match.group())
         if len(digits) == 10 or (len(digits) == 11 and digits.startswith("1")):
-            found.append(match.group().strip())
+            number = match.group().strip()
+            if number not in found:
+                found.append(number)
         if len(found) >= 8:
             break
-    return list(dict.fromkeys(found))
+    return found
 
 
 def business_name_matches(name: str, title: str, url: str) -> bool:
