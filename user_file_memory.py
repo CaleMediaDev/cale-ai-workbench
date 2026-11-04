@@ -93,6 +93,8 @@ def _media_call(action: str, path: Path, **options) -> dict:
         payload = json.loads(result.stdout.splitlines()[-1])
     except (IndexError, ValueError) as exc:
         raise RuntimeError("The local media reader did not respond.") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("The local media reader returned an invalid response.")
     if result.returncode or "error" in payload:
         raise RuntimeError(str(payload.get("error", "Could not read the media.")))
     return payload

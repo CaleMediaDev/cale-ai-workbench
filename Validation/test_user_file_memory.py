@@ -381,6 +381,39 @@ class UserFileMemoryTests(unittest.TestCase):
         self.assertEqual(user_file_memory.search(self.state, "receipt")[0]["path"], str(image))
         self.assertEqual(user_file_memory.search(self.state, "proposal")[0]["path"], str(recording))
 
+    def test_non_object_media_response_keeps_batch_and_retry_working(self):
+        from types import SimpleNamespace
+
+        python = self.root / "Media/python/Scripts/python.exe"
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b"")
+        recording = self.root / "a-recording.wav"
+        note = self.root / "b-note.txt"
+        recording.write_bytes(b"audio fixture")
+        note.write_text("retained notebook", encoding="utf-8")
+        responses = [
+            SimpleNamespace(returncode=0, stdout="null\n"),
+            SimpleNamespace(returncode=0, stdout='{"text": "recovered transcript"}\n'),
+        ]
+        with (
+            patch.object(user_file_memory.file_chat, "ROOT", self.root),
+            patch.object(user_file_memory.subprocess, "run", side_effect=responses) as worker,
+        ):
+            result = user_file_memory.ingest(self.state, [str(recording), str(note)])
+            self.assertEqual(result, {"indexed": 1, "unchanged": 0, "skipped": 1})
+            with user_file_memory._connection(self.state) as conn:
+                failed = conn.execute(
+                    "SELECT version,content FROM files WHERE path=?", (str(recording),)
+                ).fetchone()
+                self.assertEqual(tuple(failed), ("", ""))
+            self.assertEqual(
+                user_file_memory.search(self.state, "notebook")[0]["path"], str(note)
+            )
+            self.assertEqual(
+                user_file_memory.search(self.state, "recovered")[0]["path"], str(recording)
+            )
+        self.assertEqual(worker.call_count, 2)
+
     def test_video_memory_labels_sampled_frames(self):
         video = self.root / "walkthrough.mp4"
         video.write_bytes(b"video fixture")
