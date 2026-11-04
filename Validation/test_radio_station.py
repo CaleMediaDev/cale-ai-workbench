@@ -6,6 +6,24 @@ import pytest
 
 import radio_station as radio
 
+REAL_FOREGROUND_CHECK = radio.foreground_music_busy
+
+
+@pytest.mark.parametrize("receipt", ["null", "[]", '"working"', "42", "true"])
+def test_foreground_check_skips_bad_receipt_and_still_detects_live_user_song(tmp_path, receipt):
+    import json
+
+    import music_backend
+
+    (tmp_path / "bad.json").write_text(receipt, encoding="utf-8")
+    with patch.object(music_backend, "JOBS", tmp_path), patch.object(music_backend, "_worker_running", return_value=True) as running:
+        assert not REAL_FOREGROUND_CHECK()
+        running.assert_not_called()
+        live = {"task_id": "user-song", "status": "working"}
+        (tmp_path / "live.json").write_text(json.dumps(live), encoding="utf-8")
+        assert REAL_FOREGROUND_CHECK()
+        running.assert_called_once_with("live", live)
+
 
 @pytest.fixture(autouse=True)
 def no_live_user_render():

@@ -17,7 +17,7 @@ STALE_SECONDS = 90
 
 def _read(path: Path) -> dict:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
         return value if isinstance(value, dict) else {}
     except (OSError, ValueError):
         return {}

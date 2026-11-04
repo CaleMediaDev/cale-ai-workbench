@@ -31,7 +31,7 @@ def progress(percent: int, current: str, status: str = "working", attempts: int 
         try:
             previous = json.loads(PROGRESS.read_text(encoding="utf-8"))
             attempts = int(previous.get("attempts", 0)) if isinstance(previous, dict) else 0
-        except (OSError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError, OverflowError):
             attempts = 0
     value = {"percent": percent, "current": current, "status": status,
              "updated": time.time(), "attempts": attempts, "owner": "runtime_features",

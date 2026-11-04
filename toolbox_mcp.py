@@ -642,7 +642,11 @@ async def media_run(action: str, timeout: int = 900, **arguments) -> dict:
         await process.wait()
         raise
     except asyncio.TimeoutError:
-        process.kill()
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass  # It may exit between the return-code check and kill.
         await process.wait()
         raise TimeoutError(f"Local {action} exceeded {timeout} seconds.")
     lines = stdout.decode("utf-8", errors="replace").splitlines()

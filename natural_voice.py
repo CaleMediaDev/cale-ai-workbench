@@ -70,6 +70,13 @@ def install():
                     timeout=600,
                     creationflags=HIDE,
                 )
+                subprocess.run(
+                    [str(MEDIA_PYTHON), "-c", "import kokoro_onnx"],
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                    creationflags=HIDE,
+                )
             if not ready():
                 save_download_status(
                     STATUS, "working", "Downloading the natural voice", 50

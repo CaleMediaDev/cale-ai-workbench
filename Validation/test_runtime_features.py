@@ -22,6 +22,21 @@ def test_progress_recovers_from_non_object_json(tmp_path, monkeypatch, previous)
     assert current["owner"] == "runtime_features"
 
 
+@pytest.mark.parametrize("attempts", [float("inf"), float("-inf")])
+def test_progress_recovers_from_infinite_attempt_count(tmp_path, monkeypatch, attempts):
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({"attempts": attempts}), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+
+    runtime_features.progress(0, "Tool update needs attention: installation failed", "failed")
+
+    current = json.loads(progress.read_text(encoding="utf-8"))
+    assert current["attempts"] == 0
+    assert current["status"] == "failed"
+    assert current["current"] == "Tool update needs attention: installation failed"
+    assert current["owner"] == "runtime_features"
+
+
 @pytest.mark.parametrize("previous", [None, [], "invalid metadata", 42])
 def test_background_setup_recovers_from_non_object_json(tmp_path, monkeypatch, previous):
     progress = tmp_path / "install-progress.json"

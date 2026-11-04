@@ -124,6 +124,8 @@ def foreground_music_busy():
     for path in music_backend.JOBS.glob("*.json"):
         try:
             job = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(job, dict):
+                continue
             if (not str(job.get("task_id", "")).startswith("radio-")
                     and job.get("status") in ("queued", "working")
                     and music_backend._worker_running(path.stem, job)):
