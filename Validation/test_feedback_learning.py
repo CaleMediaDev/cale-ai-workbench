@@ -61,6 +61,31 @@ def test_repeated_review_refreshes_task_snapshot_for_matching(tmp_path):
     assert "Use electronic drums" not in learned
 
 
+def test_updated_review_refreshes_recency_for_guidance(tmp_path, monkeypatch):
+    timestamps = iter([10.0, 20.0, 30.0])
+    monkeypatch.setattr(feedback_learning.time, "time", lambda: next(timestamps))
+    original = task("refreshed-song", "Techno synth bass", title="Techno synth bass")
+    competing = task("other-song", "Techno synth bass", title="Techno synth bass")
+
+    first = feedback_learning.record(tmp_path, original, -1, "Use electronic drums")
+    feedback_learning.record(tmp_path, competing, -1, "Use a slower tempo")
+    assert "Use a slower tempo" in feedback_learning.guidance(
+        tmp_path, "music", "Techno synth bass", limit=1
+    )
+
+    assert feedback_learning.record(
+        tmp_path, original, -1, "Use softer electronic drums"
+    ) == first
+    reviews = feedback_learning.for_task(tmp_path, "refreshed-song")
+    assert len(reviews) == 1
+    assert reviews[0]["created"] == 30.0
+    learned = feedback_learning.guidance(
+        tmp_path, "music", "Techno synth bass", limit=1
+    )
+    assert "Use softer electronic drums" in learned
+    assert "Use a slower tempo" not in learned
+
+
 def test_schema_initialization_failure_closes_connection(tmp_path, monkeypatch):
     import sqlite3
     from unittest.mock import Mock
