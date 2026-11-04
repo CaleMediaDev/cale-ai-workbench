@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import music_backend
 
@@ -62,18 +63,23 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
             raise ValueError("Choose an empty output folder to protect existing audio files.")
         target.mkdir(parents=True, exist_ok=True)
         python = install()
-        result = subprocess.run(
-            [str(python), str(Path(__file__).resolve()), "--worker", str(source), str(target)],
-            capture_output=True, text=True, timeout=7200, creationflags=HIDE,
-        )
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Audio separation failed.")
-    files = sorted(
-        path for path in target.iterdir()
-        if path.suffix.lower() == ".wav" and path.is_file() and path.stat().st_size > 0
-    )
-    if len(files) < 2:
-        raise RuntimeError("Audio separator did not produce both vocal and instrumental tracks.")
+        with TemporaryDirectory(prefix=".stems-", dir=target) as staging_dir:
+            staging = Path(staging_dir)
+            result = subprocess.run(
+                [str(python), str(Path(__file__).resolve()), "--worker", str(source), str(staging)],
+                capture_output=True, text=True, timeout=7200, creationflags=HIDE,
+            )
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Audio separation failed.")
+            staged_files = sorted(
+                path for path in staging.iterdir()
+                if path.suffix.lower() == ".wav" and path.is_file() and path.stat().st_size > 0
+            )
+            if len(staged_files) < 2:
+                raise RuntimeError("Audio separator did not produce both vocal and instrumental tracks.")
+            files = [target / path.name for path in staged_files]
+            for path in staging.iterdir():
+                path.rename(target / path.name)
     return {"source": str(source), "output_dir": str(target),
             "files": [str(path) for path in files], "model": "Audio Separator"}
 
