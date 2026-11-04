@@ -12,6 +12,7 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -181,7 +182,10 @@ def index_document_text(folder: str | Path, path: str | Path, text: str,
         # FTS indexes each chunk independently. Avoid turning an ordinary
         # word into two unsearchable fragments at a fixed character boundary.
         while (boundary > start and boundary < len(text)
-               and text[boundary - 1].isalnum() and text[boundary].isalnum()):
+               and (text[boundary - 1].isalnum()
+                    or unicodedata.category(text[boundary - 1]).startswith("M"))
+               and (text[boundary].isalnum()
+                    or unicodedata.category(text[boundary]).startswith("M"))):
             boundary -= 1
         # A token longer than the chunk budget still requires a hard split.
         if boundary > start:
