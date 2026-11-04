@@ -308,6 +308,7 @@ def task_size(messages):
         and QUESTION_START.match(latest)
         and not live_lookup
         and not has_media_input(messages)
+        and not TOOL_WORK.search(intent)
         and not EXPLICIT_TOOL.search(intent)
     ):
         return "quick"

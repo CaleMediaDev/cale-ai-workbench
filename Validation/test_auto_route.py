@@ -148,6 +148,22 @@ class AutoRouteTests(unittest.TestCase):
                 self.assertEqual(task_size([{"role": "user", "content": request}]),
                                  "balanced")
 
+    def test_question_shaped_file_work_uses_middle_tier(self):
+        for request in (
+            "How would you summarize this PDF?",
+            "What can you extract from my file?",
+            "Which details can you read in the attached document?",
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(
+                    task_size([{"role": "user", "content": request}]),
+                    "balanced",
+                )
+        self.assertEqual(
+            task_size([{"role": "user", "content": "How do I create a folder?"}]),
+            "quick",
+        )
+
     def test_media_part_and_short_project_request_escalate(self):
         self.assertEqual(task_size([{"role": "user", "content": [
             {"type": "text", "text": "What is in this?"},
