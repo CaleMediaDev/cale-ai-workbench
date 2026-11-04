@@ -68,13 +68,17 @@ def kind_for(task: dict) -> str:
 
 
 def record(root: str | Path, task: dict, rating: int, note: str = "") -> int:
-    """Save one explicit review per task generation and rating, idempotently."""
+    """Save the current explicit review per task generation, idempotently."""
     if rating not in (-1, 1):
         raise ValueError("A review must be thumbs up or thumbs down.")
     note = " ".join(str(note).split())[:2000]
     if rating < 0 and not note:
         raise ValueError("Tell Cale what to improve before giving thumbs down.")
     with _connect(root) as conn:
+        conn.execute(
+            "DELETE FROM feedback WHERE task_id=? AND generation=? AND rating!=?",
+            (str(task["id"]), int(task.get("generation", 0)), rating),
+        )
         conn.execute("""INSERT INTO feedback
             (task_id,generation,kind,rating,title,brief,note,created)
             VALUES (?,?,?,?,?,?,?,?)
