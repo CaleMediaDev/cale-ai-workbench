@@ -49,6 +49,16 @@ class ModelIdentityTests(unittest.TestCase):
                         configured_permissive_alias(root), "qwen3-coder-permissive"
                     )
 
+    def test_invalid_utf8_config_falls_back(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "data/config.yaml").write_bytes(
+                b"model:\n  default: qwen3-coder-local\n# corrupt: \xff\n"
+            )
+            self.assertEqual(configured_main_alias(root), "cale-local")
+            self.assertEqual(configured_permissive_alias(root), "cale-permissive")
+
     def test_invalid_alias_falls_back(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
