@@ -671,6 +671,39 @@ class VoiceTests(unittest.TestCase):
             ready.assert_not_called()
             playback.assert_called_once()
 
+    def test_corrupt_bundled_acknowledgement_falls_back_to_synthesis(self):
+        import hashlib
+
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            assets = root / "assets"
+            assets.mkdir()
+            reference = b"original voice"
+            (assets / "cale-voice-reference.wav").write_bytes(reference)
+            bundled = assets / "cale-wake-ack.wav"
+            bundled.write_bytes(b"not a WAV" * 200)
+            cancel = threading.Event()
+            fallback_result = {"path": "fallback.wav", "engine": "offline"}
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant, "WAKE_REFERENCE_SHA256",
+                             hashlib.sha256(reference).hexdigest()),
+                patch.object(cale_voice, "ready", return_value=False),
+                patch.object(voice_assistant, "media_call",
+                             return_value=fallback_result) as synthesize,
+                patch.object(voice_assistant, "_play_file",
+                             side_effect=[wave.Error("invalid WAV header"), None]) as play,
+            ):
+                result = voice_assistant.say(voice_assistant.WAKE_ACK, cancel=cancel)
+            self.assertEqual(result, fallback_result)
+            synthesize.assert_called_once()
+            self.assertEqual(synthesize.call_args.args, ("speak",))
+            self.assertEqual(synthesize.call_args.kwargs["text"], voice_assistant.WAKE_ACK)
+            self.assertIs(synthesize.call_args.kwargs["cancel"], cancel)
+            self.assertEqual(play.call_count, 2)
+            self.assertEqual(play.call_args_list[0].args, (bundled, cancel))
+            self.assertEqual(play.call_args_list[1].args, ("fallback.wav", cancel))
+
     def test_bundled_read_aloud_reply_starts_before_voice_model(self):
         import hashlib
 
