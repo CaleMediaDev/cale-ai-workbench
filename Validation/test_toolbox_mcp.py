@@ -10,6 +10,49 @@ from unittest.mock import patch
 import toolbox_mcp
 
 
+def test_cancelled_media_call_stops_and_reaps_worker(tmp_path):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+
+    async def check():
+        started = asyncio.Event()
+        cleanup = []
+
+        class FakeProcess:
+            returncode = None
+
+            async def communicate(self, data):
+                started.set()
+                await asyncio.Future()
+
+            def kill(self):
+                cleanup.append("kill")
+
+            async def wait(self):
+                cleanup.append("wait")
+                self.returncode = -1
+                return self.returncode
+
+        async def fake_spawn(*args, **kwargs):
+            return FakeProcess()
+
+        with (patch.object(toolbox_mcp, "ROOT", tmp_path),
+              patch.object(toolbox_mcp.asyncio, "create_subprocess_exec", fake_spawn)):
+            task = asyncio.create_task(toolbox_mcp.media_run("generate_image"))
+            await started.wait()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            else:
+                raise AssertionError("Media call swallowed cancellation")
+        assert cleanup == ["kill", "wait"]
+
+    asyncio.run(check())
+
+
 def test_3d_generation_and_cpu_geometry_are_discoverable_and_callable():
     found = toolbox_mcp.toolbox_search("3d model mesh")
     names = {item["name"] for item in found["tools"]}
