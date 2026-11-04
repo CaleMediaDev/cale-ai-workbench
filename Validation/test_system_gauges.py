@@ -61,6 +61,41 @@ def test_network_bandwidth_rejects_counter_rollback_and_recovers():
         ) == (8, 4, 12)
 
 
+def test_network_throughput_survives_unavailable_interface_stats(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    counters = iter([
+        SimpleNamespace(bytes_recv=1_000_000, bytes_sent=2_000_000),
+        SimpleNamespace(bytes_recv=3_000_000, bytes_sent=3_000_000),
+    ])
+    times = iter([10.0, 12.0])
+
+    def unavailable_stats():
+        raise OSError("Interface statistics unavailable")
+
+    monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(
+        disk_io_counters=lambda: None,
+        net_io_counters=lambda: next(counters),
+        net_if_stats=unavailable_stats,
+    ))
+    monkeypatch.setattr(system_gauges, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(system_gauges, "_cpu_times", lambda: None)
+    monkeypatch.setattr(system_gauges, "_ram_percent", lambda: None)
+    monkeypatch.setattr(system_gauges, "_gpu_percent", lambda: None)
+    monkeypatch.setattr(system_gauges, "_drive_space", lambda: (None, None))
+    monkeypatch.setattr(system_gauges.time, "monotonic", lambda: next(times))
+
+    sampler = system_gauges.HardwareSampler()
+    first = sampler.sample()
+    assert first["net_down_mbps"] is None
+    assert first["net_up_mbps"] is None
+    second = sampler.sample()
+    assert second["net_down_mbps"] == 8
+    assert second["net_up_mbps"] == 4
+    assert second["net"] is None
+
+
 def test_non_windows_sample_returns_all_sensor_fields_as_unavailable(monkeypatch):
     from types import SimpleNamespace
 
