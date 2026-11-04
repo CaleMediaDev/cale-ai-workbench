@@ -107,7 +107,11 @@ def _worker(source: str, target: str) -> None:
     ffmpeg_dir.mkdir(exist_ok=True)
     ffmpeg = ffmpeg_dir / "ffmpeg.exe"
     if not ffmpeg.exists():
-        shutil.copy2(binary, ffmpeg)
+        # A failed copy must not leave an executable that retries will reuse.
+        with TemporaryDirectory(prefix=".ffmpeg-", dir=ffmpeg_dir) as staging_dir:
+            staged_ffmpeg = Path(staging_dir) / ffmpeg.name
+            shutil.copy2(binary, staged_ffmpeg)
+            os.replace(staged_ffmpeg, ffmpeg)
     os.environ["PATH"] = str(ffmpeg_dir) + os.pathsep + os.environ.get("PATH", "")
     separator = Separator(output_dir=target, model_file_dir=str(ENGINE / "models"), output_format="WAV")
     separator.load_model()

@@ -306,6 +306,52 @@ def test_relative_symlinks_do_not_count_as_stems(tmp_path):
     assert source.read_bytes() == b"music"
 
 
+def test_worker_retries_after_partial_ffmpeg_copy(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    engine = tmp_path / "audio-separator"
+    engine.mkdir()
+    binary = tmp_path / "bundled-ffmpeg.exe"
+    binary.write_bytes(b"complete executable")
+    ffmpeg = engine / "bin" / "ffmpeg.exe"
+    original_copy = music_stems.shutil.copy2
+    attempts = 0
+    separator_class = Mock()
+
+    def interrupted_copy(source, destination):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            Path(destination).write_bytes(b"partial")
+            raise OSError("interrupted copy")
+        return original_copy(source, destination)
+
+    modules = {
+        "imageio_ffmpeg": SimpleNamespace(get_ffmpeg_exe=lambda: str(binary)),
+        "audio_separator": SimpleNamespace(),
+        "audio_separator.separator": SimpleNamespace(Separator=separator_class),
+    }
+    with patch.dict(music_stems.sys.modules, modules), patch.dict(
+        music_stems.os.environ
+    ), patch.object(music_stems, "ENGINE", engine), patch.object(
+        music_stems.shutil, "copy2", side_effect=interrupted_copy
+    ):
+        with pytest.raises(OSError, match="interrupted copy"):
+            music_stems._worker("song.mp3", "stems")
+        assert not ffmpeg.exists()
+        assert list(ffmpeg.parent.iterdir()) == []
+        separator_class.assert_not_called()
+
+        music_stems._worker("song.mp3", "stems")
+
+    assert attempts == 2
+    assert ffmpeg.read_bytes() == binary.read_bytes()
+    assert set(ffmpeg.parent.iterdir()) == {ffmpeg}
+    separator_class.return_value.load_model.assert_called_once_with()
+    separator_class.return_value.separate.assert_called_once_with("song.mp3")
+
+
 @pytest.mark.parametrize("wav_count", [0, 1])
 def test_auxiliary_files_do_not_count_as_stems(tmp_path, wav_count):
     from contextlib import nullcontext
