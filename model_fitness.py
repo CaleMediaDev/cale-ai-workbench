@@ -155,15 +155,19 @@ const context=vm.createContext(Object.create(null),{codeGeneration:{strings:fals
 try { console.log(vm.runInContext(input.code+'\n;(()=>{\n'+input.checks+'\n})()',context,{timeout:1000})); }
 catch (_) { console.log(JSON.stringify({valid_code:false})); }
 """
-    result = subprocess.run(
-        [executable, "--permission", "-e", driver],
-        input=json.dumps({"code": code, "checks": checks}),
-        capture_output=True,
-        text=True,
-        timeout=8,
-        check=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    try:
+        result = subprocess.run(
+            [executable, "--permission", "-e", driver],
+            input=json.dumps({"code": code, "checks": checks}),
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except subprocess.TimeoutExpired:
+        # Scheduled JavaScript can keep Node alive beyond the VM timeout.
+        return {"valid_code": False}
     checks = json.loads(result.stdout)
     return (
         checks

@@ -255,6 +255,28 @@ def test_small_functions_alone_do_not_promote_new_game_builder():
             ) == ["cale-fast"]
 
 
+def test_game_grader_process_timeout_is_a_failed_grade_and_allows_retry():
+    result = type("Result", (), {"stdout": '{"movement":true}'})()
+    with (
+        patch("shutil.which", return_value="node"),
+        patch.object(
+            model_fitness.subprocess,
+            "run",
+            side_effect=[
+                model_fitness.subprocess.TimeoutExpired("node", 8),
+                result,
+            ],
+        ) as run,
+    ):
+        assert model_fitness.grade_game_code(
+            "Promise.resolve().then(() => { while (true) {} });", Path("missing")
+        ) == {"valid_code": False}
+        assert model_fitness.grade_game_code("", Path("missing")) == {
+            "movement": True
+        }
+    assert run.call_count == 2
+
+
 def test_game_grader_has_time_and_node_permission_limits():
     result = type("Result", (), {"stdout": '{"valid_code":false}'})()
     with (
