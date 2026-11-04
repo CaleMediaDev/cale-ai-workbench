@@ -41,6 +41,27 @@ def test_up_rating_is_idempotent_and_becomes_similar_success_example(tmp_path):
     assert len(feedback_learning.for_task(tmp_path, "song-2")) == 1
 
 
+def test_schema_initialization_failure_closes_connection(tmp_path, monkeypatch):
+    import sqlite3
+    from unittest.mock import Mock
+
+    import pytest
+
+    connection = Mock()
+    connection.execute.side_effect = [
+        None,
+        sqlite3.OperationalError("index initialization failed"),
+    ]
+    monkeypatch.setattr(feedback_learning.sqlite3, "connect", Mock(return_value=connection))
+
+    with pytest.raises(sqlite3.OperationalError, match="index initialization failed"):
+        feedback_learning.for_task(tmp_path, "song-1")
+
+    assert connection.execute.call_count == 2
+    connection.close.assert_called_once_with()
+    connection.commit.assert_not_called()
+
+
 def test_review_requires_comment_for_thumbs_down(tmp_path):
     import pytest
 
