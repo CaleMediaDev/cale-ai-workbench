@@ -123,7 +123,7 @@ def _status(root: Path, state: str, detail: str) -> None:
 def start_background(root: Path = ROOT) -> bool:
     """Repair missing app-owned tools once per cooldown, without blocking tasks."""
     global _repair_thread, _last_repair
-    root = Path(root)
+    root = Path(root).resolve()
     if _repair_thread is not None and _repair_thread.is_alive():
         return False
     if _last_repair is not None and time.monotonic() - _last_repair < CHECK_INTERVAL:

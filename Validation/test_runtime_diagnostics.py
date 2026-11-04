@@ -57,6 +57,41 @@ def test_backward_clock_starts_a_new_reportable_episode(tmp_path):
     assert not diagnostics.record(tmp_path, "camera", "disconnected", now=30)
 
 
+def test_delayed_recorder_does_not_reset_concurrent_episode(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from threading import Event
+
+    entered = Event()
+    release = Event()
+    original_open = diagnostics._open
+    timestamps = iter((100, 101))
+    monkeypatch.setattr(diagnostics.time, "time", lambda: next(timestamps))
+
+    @contextmanager
+    def delayed_open(state):
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(timeout=10)
+        with original_open(state) as db:
+            yield db
+
+    monkeypatch.setattr(diagnostics, "_open", delayed_open)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        delayed = pool.submit(diagnostics.record, tmp_path, "camera", "unavailable")
+        try:
+            assert entered.wait(timeout=10)
+            assert not diagnostics.record(tmp_path, "camera", "unavailable")
+        finally:
+            release.set()
+        assert delayed.result(timeout=10)
+
+    issue = diagnostics.issues(tmp_path)[0]
+    assert issue["first_seen"] == 100
+    assert issue["last_seen"] == 101
+    assert issue["count"] == 2
+    assert issue["reported"] == 1
+
+
 def test_concurrent_failures_are_counted_and_reported_once(tmp_path):
     # Initialize the database before exercising concurrent episode updates.
     assert not diagnostics.record(tmp_path, "camera", "unavailable", now=100)

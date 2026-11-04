@@ -269,6 +269,8 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             browser = json.loads(check.stdout) if check.returncode == 0 else {}
+            if not isinstance(browser, dict):
+                browser = {}
             result["browser"] = {"ok": bool(browser.get("paired")),
                                  "detail": "Chrome extension is connected" if browser.get("paired")
                                  else "Chrome extension is not connected yet"}
