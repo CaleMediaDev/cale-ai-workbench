@@ -300,7 +300,7 @@ def test_music_video_cover_pixel_aspect_does_not_distort_output(tmp_path):
     )
     probe = subprocess.run(
         [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(video)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, creationflags=music_video.HIDE,
     )
     video_stream = next(line for line in probe.stderr.splitlines() if "Video: h264" in line)
     assert "720x720" in video_stream
