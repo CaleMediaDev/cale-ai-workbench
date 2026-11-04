@@ -2,6 +2,7 @@
 
 import csv
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,7 +10,72 @@ from pathlib import Path
 from table_ml import predict_table_model, train_table_model
 
 
+@unittest.skipUnless(os.name == "nt", "Windows publication without hard links")
+def test_prediction_exports_without_hard_link_support(tmp_path, monkeypatch):
+    model, source, output = tmp_path / "model.json", tmp_path / "input.csv", tmp_path / "predicted.csv"
+    model.write_text(json.dumps({
+        "format": "cale-table-model-v1", "problem_type": "regression",
+        "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
+        "feature_names": ["size"], "coefficients": [[1]], "intercepts": [0], "classes": [],
+        "target_column": "value", "metric": "holdout_mean_absolute_error", "holdout_score": 1, "baseline_score": 2,
+    }), encoding="utf-8")
+    source.write_text("size\n2\n", encoding="utf-8")
+
+    def no_links(*args, **kwargs):
+        raise OSError("Filesystem does not support hard links")
+
+    monkeypatch.setattr(os, "link", no_links)
+    result = predict_table_model(str(model), str(source), str(output))
+    assert result["rows"] == 1
+    with output.open(newline="", encoding="utf-8") as stream:
+        assert list(csv.DictReader(stream)) == [{"size": "2", "prediction": "2"}]
+
+
 class TableMLTests(unittest.TestCase):
+    def test_model_publication_preserves_concurrent_destination(self):
+        from unittest.mock import patch
+
+        import table_ml
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            training.write_text("size,price\n" + "".join(f"{i},{i * 12 + 50}\n" for i in range(40)), encoding="utf-8")
+            output = root / "model.json"
+            dump = json.dump
+
+            def concurrent_dump(payload, stream, **kwargs):
+                output.write_bytes(b"another operation's model")
+                return dump(payload, stream, **kwargs)
+
+            with patch.object(table_ml.json, "dump", side_effect=concurrent_dump):
+                with self.assertRaises(FileExistsError):
+                    train_table_model(str(training), "price", str(output), "regression")
+            self.assertEqual(output.read_bytes(), b"another operation's model")
+            self.assertEqual(set(root.iterdir()), {training, output})
+
+    def test_failed_model_write_leaves_no_partial_file_and_allows_retry(self):
+        from unittest.mock import patch
+
+        import table_ml
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            training.write_text("size,price\n" + "".join(f"{i},{i * 12 + 50}\n" for i in range(40)), encoding="utf-8")
+            output = root / "model.json"
+
+            def failed_dump(payload, stream, **kwargs):
+                stream.write('{"format":')
+                raise OSError("Disk write failed")
+
+            with patch.object(table_ml.json, "dump", side_effect=failed_dump):
+                with self.assertRaisesRegex(OSError, "Disk write failed"):
+                    train_table_model(str(training), "price", str(output), "regression")
+            self.assertEqual(list(root.iterdir()), [training])
+            train_table_model(str(training), "price", str(output), "regression")
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["format"], "cale-table-model-v1")
+
     def test_classification_and_prediction(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -356,6 +422,7 @@ if __name__ == "__main__":
 def test_prediction_error_and_publication_preserve_concurrent_destination(tmp_path):
     from contextlib import contextmanager
     from unittest.mock import patch
+
     import pytest
     from sklearn.feature_extraction import DictVectorizer
     for outcome in ("failure", "success"):

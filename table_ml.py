@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import os
 import statistics
 import tempfile
 from collections import Counter
@@ -204,8 +205,16 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
                "intercepts": model.intercept_.tolist() if classes else [float(model.intercept_)],
                "metric": metric, "holdout_score": score, "baseline_score": baseline,
                "trained_rows": len(rows), "holdout_rows": len(y_test)}
-    with output.open("x", encoding="utf-8") as stream:
-        json.dump(payload, stream, ensure_ascii=False, indent=2)
+    with tempfile.TemporaryDirectory(prefix=".table-model-", dir=output.parent) as directory:
+        staged = Path(directory) / output.name
+        with staged.open("x", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+        # Publish a complete model exclusively, without requiring hard links
+        # on removable Windows filesystems. POSIX rename would overwrite.
+        if os.name == "nt":
+            staged.rename(output)
+        else:
+            output.hardlink_to(staged)
     better = score > baseline if classes else score < baseline
     return {"model_path": str(output), "problem_type": problem_type,
             metric: round(score, 4), "baseline": round(baseline, 4),
@@ -264,7 +273,10 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
                     predictions = [classes[index] for index in np.argmax(scores, axis=1)]
                 for row, prediction in zip(batch, predictions):
                     writer.writerow({**row, output_column: prediction})
-        output.hardlink_to(staged)
+        if os.name == "nt":
+            staged.rename(output)
+        else:
+            output.hardlink_to(staged)
     better = (
         model["holdout_score"] > model["baseline_score"]
         if model["problem_type"] == "classification"
