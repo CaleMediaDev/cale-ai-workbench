@@ -451,6 +451,19 @@ def test_slow_optional_tool_install_is_not_mistaken_for_dead_base_installer(tmp_
     assert not (state / "base-install-repair.json").exists()
 
 
+def test_feature_repair_exhaustion_handles_invalid_attempt_counts():
+    failed = {"owner": "runtime_features", "status": "failed"}
+    for attempts in (None, "invalid", {}, [], float("inf"), float("nan")):
+        assert setup_recovery.repair_exhausted({**failed, "attempts": attempts}) is False
+    assert setup_recovery.repair_exhausted(failed) is False
+    assert setup_recovery.repair_exhausted({**failed, "attempts": 2}) is False
+    assert setup_recovery.repair_exhausted({**failed, "attempts": 3}) is True
+    assert setup_recovery.repair_exhausted({**failed, "attempts": "3"}) is True
+    assert setup_recovery.repair_exhausted({
+        **failed, "status": "working", "attempts": 3,
+    }) is False
+
+
 def test_repair_exhaustion_requires_final_failure_and_dead_process(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
