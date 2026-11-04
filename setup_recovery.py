@@ -204,13 +204,17 @@ def recover() -> bool:
             _write(record_path, {"attempts": attempts + 1, "started": now})
             log = STATE / "base-install-repair.log"
             with log.open("ab") as output:
-                subprocess.Popen(
-                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                     "-File", str(script), "-Destination", str(ROOT),
-                     "-Profile", "auto", "-NoLaunch"],
-                    cwd=ROOT, stdin=subprocess.DEVNULL, stdout=output,
-                    stderr=subprocess.STDOUT, creationflags=HIDE,
-                )
+                try:
+                    subprocess.Popen(
+                        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                         "-File", str(script), "-Destination", str(ROOT),
+                         "-Profile", "auto", "-NoLaunch"],
+                        cwd=ROOT, stdin=subprocess.DEVNULL, stdout=output,
+                        stderr=subprocess.STDOUT, creationflags=HIDE,
+                    )
+                except OSError as error:
+                    output.write(f"Unable to start setup repair: {error}\n".encode("utf-8"))
+                    return False
             return True
         finally:
             lock.seek(0)
