@@ -184,7 +184,10 @@ def sync(root: str | Path) -> dict:
     """Refresh the index, preserving a damaged copy before rebuilding it."""
     try:
         return _sync_once(root)
-    except sqlite3.DatabaseError:
+    except sqlite3.DatabaseError as exc:
+        if (getattr(exc, "sqlite_errorcode", 0) & 0xff) not in (
+                sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB):
+            raise
         path = database_path(root)
         if not path.is_file():
             raise
