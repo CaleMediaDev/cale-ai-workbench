@@ -90,7 +90,7 @@ def active_projects(state: Path) -> bool:
     if not database.is_file():
         return False
     try:
-        with closing(sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True,
+        with closing(sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True,
                                      timeout=1)) as connection:
             return connection.execute(
                 "SELECT 1 FROM projects WHERE status IN ('queued','working','checking') LIMIT 1"
