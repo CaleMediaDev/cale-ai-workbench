@@ -274,6 +274,42 @@ def test_invalid_progress_timestamp_does_not_crash_or_restart_setup(tmp_path, mo
     assert not (state / "base-install-repair.json").exists()
 
 
+def test_invalid_failure_timestamp_does_not_crash_recovery(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    progress_path = state / "install-progress.json"
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery.time, "time", lambda: 10000)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    locking = MagicMock()
+    locking.LK_NBLCK = 1
+    locking.LK_UNLCK = 2
+    valid = {
+        "status": "error", "current": "Setup needs attention: download failed",
+        "updated": 1,
+    }
+    read = setup_recovery._read
+    with patch.dict("sys.modules", {"msvcrt": locking}), patch.object(
+        setup_recovery.subprocess, "Popen"
+    ) as launch:
+        for updated in (None, "not-a-timestamp", {}, []):
+            invalid = {**valid, "updated": updated}
+            progress_path.write_text(json.dumps(invalid), encoding="utf-8")
+            # Invalid on the initial read.
+            assert setup_recovery.recover() is False
+            # Valid initially, but invalid when reread under the repair lock.
+            with patch.object(setup_recovery, "_read", side_effect=[valid, {}, invalid, {}]):
+                assert setup_recovery.recover() is False
+            assert read(progress_path) == invalid
+        launch.assert_not_called()
+    assert locking.locking.call_count == 8
+    assert locking.locking.call_args.args[1:] == (locking.LK_UNLCK, 1)
+    assert not (state / "base-install-repair.json").exists()
+
+
 def test_slow_live_installer_is_not_restarted(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()

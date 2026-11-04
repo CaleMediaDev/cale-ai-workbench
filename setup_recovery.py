@@ -168,10 +168,14 @@ def recover() -> bool:
         return False
     record = _read(record_path)
     attempts = max(0, int(record.get("attempts", 0)))
-    if (attempts < len(RETRY_DELAYS) and
-            time.time() - max(float(progress.get("updated", 0)),
-                              float(record.get("started", 0))) < RETRY_DELAYS[attempts]):
-        return False
+    if attempts < len(RETRY_DELAYS):
+        try:
+            last_update = max(float(progress.get("updated", 0)),
+                              float(record.get("started", 0)))
+        except (TypeError, ValueError):
+            return False
+        if time.time() - last_update < RETRY_DELAYS[attempts]:
+            return False
     import msvcrt
 
     lock_path = STATE / "base-install-repair.lock"
@@ -209,8 +213,12 @@ def recover() -> bool:
                 _write(STATE / "install-progress.json", progress)
             if attempts >= len(RETRY_DELAYS):
                 return False
-            if time.time() - max(float(progress.get("updated", 0)),
-                                 float(record.get("started", 0))) < RETRY_DELAYS[attempts]:
+            try:
+                last_update = max(float(progress.get("updated", 0)),
+                                  float(record.get("started", 0)))
+            except (TypeError, ValueError):
+                return False
+            if time.time() - last_update < RETRY_DELAYS[attempts]:
                 return False
             now = time.time()
             _write(record_path, {"attempts": attempts + 1, "started": now})
