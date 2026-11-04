@@ -340,6 +340,32 @@ def test_preload_and_equal_power_overlap_start_before_the_first_track_ends(tmp_p
     assert not old.opened and player.outgoing is None and staged.busy() and staged.volume == pytest.approx(65)
 
 
+def test_failed_preload_releases_deck_even_when_cleanup_fails(tmp_path):
+    active = Deck(lambda: 0)
+    failed = Deck(lambda: 0)
+    replacement = Deck(lambda: 0)
+    decks = iter((active, failed, replacement))
+    player = radio.Player(lambda: next(decks), lambda: 0)
+    player.play(tmp_path/"first.wav")
+    target = tmp_path/"second.wav"
+
+    with patch.object(failed, "open", side_effect=RuntimeError("Open failed")), \
+            patch.object(failed, "stop", side_effect=RuntimeError("Close failed")):
+        with pytest.raises(RuntimeError):
+            player.prepare(target)
+        assert player.prepared is None
+        assert player.active is active and active.busy() and active.volume == 65
+        # Retry while the failed deck still cannot be closed: it must not be reused.
+        player.prepare(target)
+
+    assert player.prepared is replacement
+    assert replacement.opened and not replacement.busy()
+    assert replacement.path == str(target.resolve())
+    assert player.blend(target)
+    assert player.active is replacement and replacement.busy()
+    assert player.outgoing is active and active.busy()
+
+
 def test_failed_blend_start_releases_prepared_deck_and_allows_retry(tmp_path):
     player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
     first, second = tmp_path/"first.wav", tmp_path/"second.wav"
