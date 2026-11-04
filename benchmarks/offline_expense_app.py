@@ -177,6 +177,8 @@ def main() -> int:
     parser.add_argument("--max-seconds", type=float, default=300,
                         help="Inference budget; grading runs separately and acceptance stays unchanged")
     parser.add_argument("--resume", action="store_true", help="Continue only this synthetic fixture; retain prior evidence")
+    parser.add_argument("--experimental-initial-plan", action="store_true",
+                        help="Opt into speculative executable planning before the page exists")
     args = parser.parse_args()
     if not 0 < args.max_seconds <= 1800:
         parser.error("Use an inference budget above zero and at most 1800 seconds")
@@ -198,8 +200,13 @@ def main() -> int:
         (notes / "PROGRESS.md").write_text(long_tasks.INITIAL_PROGRESS, encoding="utf-8")
         long_tasks.save_original_request(folder, "benchmark", BRIEF)
     project = {"id": "benchmark", "folder": str(folder), "brief": BRIEF}
+    if args.experimental_initial_plan:
+        project["experimental_initial_plan"] = True
     initial_turns = native_agent.read_state(project).get("turns", 0)
     initial_source = hashlib.sha256((folder / "index.html").read_bytes()).hexdigest() if (folder / "index.html").is_file() else None
+    host_root = Path(native_agent.__file__).resolve().parent
+    host_hashes = {name: hashlib.sha256((host_root / name).read_bytes()).hexdigest()
+                   for name in ("native_agent.py", "native_browser.py", "cloud_ai.py", "auto_route.py", "task_context.py", "webapp_check.py")}
     stats = {"model_calls": 0, "tool_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "tools_used": [], "routes": []}
     state, failure = {}, None
     started = time.monotonic()
@@ -226,6 +233,8 @@ def main() -> int:
     deferred = bool(failure and failure.startswith("RuntimeError: Benchmark deferred:"))
     report = {"scenario": "offline_expense_app", "brief": BRIEF, "seconds": round(elapsed, 2), **stats,
               "inference_budget_seconds": args.max_seconds,
+              "experimental_initial_plan": args.experimental_initial_plan,
+              "host_code_sha256": host_hashes,
               "grade_seconds": round(time.monotonic() - grading_started, 2),
               "total_seconds": round(time.monotonic() - started, 2),
               "resumed": args.resume, "initial_turns": initial_turns, "initial_source_sha256": initial_source,

@@ -3958,7 +3958,7 @@ def completion_issue(folder: Path, project: dict | None = None,
 
     queue = task_context.step_status(folder)
     if initial_plan_required(project) and not queue["total"]:
-        return "Create the initial SQLite steps with task_steps action=plan before implementation or handoff."
+        return "Create the initial SQLite steps with task_steps action=plan and pass their actual checks before handoff."
     plan_issue = uncreated_plan_issue(folder, state, queue)
     if plan_issue:
         return plan_issue
@@ -4763,13 +4763,19 @@ def run_slice(project: dict, complete=None) -> dict:
         planned_request_hash = task_context.request_identity(folder)
         planned_queue = task_context.step_status(folder)
         planned_step = planned_queue["active"]
-        planning = initial_plan_required(project) and not planned_queue["total"]
-        plan_basis = planning_basis(project) if planning else None
-        if planning and messages and messages[0].get("role") == "system":
+        needs_initial_plan = initial_plan_required(project) and not planned_queue["total"]
+        # Pre-implementation executable acceptance remains an opt-in experiment.
+        # Default workers may ground selectors in real source first; the final
+        # SQLite completion prerequisite above remains mandatory.
+        planning = needs_initial_plan and project.get("experimental_initial_plan") is True
+        source_first = (needs_initial_plan and not planning
+                        and browser_check_required({**project, "brief": planning_intent(project)}))
+        plan_basis = planning_basis(project) if needs_initial_plan else None
+        if needs_initial_plan and messages and messages[0].get("role") == "system":
             messages[0] = {"role": "system", "content": prompt(project)}
         messages = fresh_messages(messages, folder, state, project)
         messages = compact_messages(messages, folder, context_limit)
-        if planning and planning_basis(project) != plan_basis:
+        if needs_initial_plan and planning_basis(project) != plan_basis:
             continue  # Rebuild the prompt and its identity together, without inference or mutation.
         focus = None if planning else focused_browser_check(project, state, planned_request_hash)
         available_tools = step_tools(project, state, repair_tools(project, state))
@@ -4777,8 +4783,15 @@ def run_slice(project: dict, complete=None) -> dict:
         if planning:
             available_tools = initial_plan_tools(project, available_tools)
         call_messages = [*messages, focus[1]] if focus else messages
+        if source_first and not focus:
+            call_messages = [*call_messages, {"role": "user", "content": (
+                "If the page already exists, inspect and preserve it. Otherwise build a small source skeleton first. "
+                "Use its actual controls and output IDs when planning browser checks. "
+                "Derive expected behavior from the original requirements. "
+                "Create and pass the SQLite units after grounding their checks; source edits alone are not completion."
+            )}]
         if not focus and len(available_tools) < len(TOOLS):
-            call_messages = [*messages, {"role": "user", "content": (
+            call_messages = [*call_messages, {"role": "user", "content": (
                 "Use the current checkpoint's active step and any checker diagnostics. "
                 "Make the small source/test correction and run its acceptance check. "
                 "Avoid searching for another copy of the same error or saving unverified lessons. "
@@ -4790,8 +4803,9 @@ def run_slice(project: dict, complete=None) -> dict:
         request = {"model": LOCAL_MODEL, "messages": call_messages,
                    "tools": [] if focus else available_tools, "tool_choice": "none" if focus else "auto",
                    "stream": False, "temperature": 0.2, "max_tokens": 4096}
-        if planning:
+        if needs_initial_plan:
             request["_native_plan_basis"] = plan_basis
+        if planning:
             request["_native_workload"] = "initial_step_planning"
             request["messages"] = [*messages, {"role": "user", "content": (
                 "[Required initial planning stage] No SQLite units exist for this request. Read any necessary "
@@ -4965,7 +4979,7 @@ def run_slice(project: dict, complete=None) -> dict:
         for item in calls:
             state["premature_finishes"] = 0
             latest = read_state(project)
-            if latest.get("status") in ("paused", "stopped"):
+            if latest.get("status") in ("paused", "stopped", "done"):
                 return latest
             function = item.get("function") or {}
             args = {}
@@ -4992,7 +5006,7 @@ def run_slice(project: dict, complete=None) -> dict:
                         raise ValueError("Project requirements changed; read the fresh checkpoint before repair.")
                     if (request.get("_native_plan_basis") is not None
                             and planning_basis(project) != request["_native_plan_basis"]):
-                        raise ValueError("Planning requirements changed; read the fresh checkpoint before creating a plan.")
+                        raise ValueError("Project requirements changed; read the fresh checkpoint before acting.")
                     offered = next(tool for tool in offered_tools if tool["function"]["name"] == function.get("name"))
                     try:
                         validate(args, offered["function"]["parameters"])
@@ -5000,7 +5014,7 @@ def run_slice(project: dict, complete=None) -> dict:
                         raise ValueError("Focused tool arguments do not match the offered schema at "
                                          + json.dumps(list(error.absolute_path))) from error
                 if function.get("name") == "task_steps" and not step_boundary:
-                    if request.get("_native_plan_basis") is not None:
+                    if request.get("_native_plan_basis") is not None and args.get("action") == "plan":
                         args = {**args, "_initial_plan": True, "_expected_request": planned_request_hash}
                     if request.get("_native_repair_basis") is not None and args.get("action") == "revise":
                         # The scoped schema already pinned an explicit ID, but
@@ -5087,7 +5101,8 @@ def run_slice(project: dict, complete=None) -> dict:
 
             task_context.record_action(folder, function.get("name", ""), result, args,
                                        request_hash=planned_request_hash)
-            if function.get("name") == "check_webapp" and "_active_browser_revision" in args:
+            if (request.get("_native_plan_basis") is not None
+                    or function.get("name") == "check_webapp" and "_active_browser_revision" in args):
                 latest = read_state(project)
                 if latest.get("status") in {"paused", "stopped", "done"}:
                     return latest  # Do not overwrite a control change observed by the commit guard.
