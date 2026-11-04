@@ -787,6 +787,27 @@ def test_station_change_recovers_when_audio_cleanup_reports_an_error(tmp_path):
         assert service.current["station"] == target
 
 
+def test_worker_processes_stop_before_a_failing_crossfade(tmp_path):
+    player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
+    service = radio.Service(tmp_path, player)
+    player.play(tmp_path/"first.wav")
+    player.blend(tmp_path/"second.wav")
+    service.enabled = True
+    service.stop()
+
+    # End after one worker iteration; final shutdown alone must not count as
+    # handling the queued Stop command and updating the service state.
+    with patch.object(player.active, "set_volume", side_effect=RuntimeError("Cannot set volume")), \
+            patch.object(service.closed, "wait", side_effect=lambda timeout: service.closed.set()), \
+            patch.object(radio.time, "monotonic", return_value=100):
+        service._loop()
+
+    assert not service.enabled
+    assert service.commands.empty()
+    assert service.snapshot()["message"].startswith("Radio stopped.")
+    assert not player.mixing and not player.busy()
+
+
 def test_worker_survives_failure_to_publish_its_retry_status(tmp_path):
     import sqlite3
 

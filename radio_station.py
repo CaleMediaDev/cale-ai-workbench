@@ -633,10 +633,11 @@ class Service:
         next_tick = 0
         while not self.closed.is_set():
             try:
-                getattr(self.player, "advance_mix", lambda: None)()
                 if time.monotonic() >= next_tick:
                     self.tick()
                     next_tick = time.monotonic()+0.5
+                # Let queued recovery commands stop failing decks before mixing.
+                getattr(self.player, "advance_mix", lambda: None)()
             except Exception as error:
                 with self.lock:
                     self.message = "Radio will retry: " + str(error)[:100]
