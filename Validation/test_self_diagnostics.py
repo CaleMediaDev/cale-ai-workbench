@@ -15,6 +15,131 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import self_diagnostics as diagnostics
 
 
+def diagnostic_install(tmp_path):
+    root = tmp_path / "install"
+    state = root / "LongTasks"
+    state.mkdir(parents=True)
+    (root / ".cale-ai-install").write_text("Cale AI Workbench 0.5.498")
+    python = root / "Toolbox/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    validation = root / "Validation/test_long_tasks.py"
+    validation.parent.mkdir()
+    validation.touch()
+    return root, state
+
+
+def test_deferred_diagnostics_distinguish_database_error_without_raw_details(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    (state / "projects.db").touch()
+    with patch.object(diagnostics.sqlite3, "connect", side_effect=sqlite3.OperationalError(
+            "PRIVATE-TASK-CONTENT AND PRIVATE-PATH")), patch.object(diagnostics.subprocess, "Popen") as launch:
+        report = diagnostics.run(root, state)
+    launch.assert_not_called()
+    assert report["status"] == "deferred"
+    assert report.get("deferred_reason") == "project_db_unavailable"
+    assert report.get("activity_error_type") == "OperationalError"
+    assert "PRIVATE" not in json.dumps(report)
+
+
+def test_deferred_diagnostics_identify_actual_project_activity(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    with closing(sqlite3.connect(state / "projects.db")) as conn, conn:
+        conn.execute("CREATE TABLE projects(status TEXT)")
+        conn.execute("INSERT INTO projects VALUES('working')")
+    with patch.object(diagnostics.subprocess, "Popen") as launch:
+        report = diagnostics.run(root, state)
+    launch.assert_not_called()
+    assert report["status"] == "deferred" and report.get("deferred_reason") == "active_projects"
+    assert "activity_error_type" not in report
+
+
+def test_scheduler_preserves_bounded_sanitized_previous_attempt_evidence(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    private = "PRIVATE-PATH PRIVATE-TASK-CONTENT"
+    progress = "." * 30 + " [ 30%]"
+    footer = "2 passed, 1 skipped in 0.10s"
+    with patch.object(diagnostics, "active_projects", return_value=False), patch.object(
+            diagnostics.subprocess, "Popen", return_value=SimpleNamespace(pid=123)), patch("psutil.Process") as proc:
+        proc.return_value.create_time.return_value = 100
+        for checked in range(1, 6):
+            (state / "self-check.json").write_text(json.dumps({
+                "version": diagnostics.version(root), "status": "deferred", "checked_at": checked,
+                "summary": private, "deferred_reason": "project_db_unavailable",
+                "activity_error_type": "OperationalError", "duration_seconds": 12.5}))
+            (state / "self-check.log").write_text(private * 1000 + "\n" + progress + "\n" + footer + "\n")
+            assert diagnostics.schedule(root, state, now=100 + checked)
+    history = state / "self-check-history.json"
+    assert history.is_file()
+    raw = history.read_text()
+    attempts = json.loads(raw)["attempts"]
+    assert len(attempts) == 3 and [r["checked_at"] for r in attempts] == [3, 4, 5]
+    assert all(r["log_tail"] == [progress, footer] for r in attempts)
+    assert private not in raw and len(raw) < 8192
+
+
+def test_optional_history_write_failure_does_not_prevent_launch(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    (state / "self-check.json").write_text(json.dumps({
+        "version": diagnostics.version(root), "status": "deferred", "checked_at": 1}))
+    actual_write = diagnostics._write
+    def write(path, data):
+        if path.name == "self-check-history.json":
+            raise PermissionError("History unavailable")
+        actual_write(path, data)
+    with patch.object(diagnostics, "active_projects", return_value=False), patch.object(
+            diagnostics, "_write", side_effect=write), patch.object(diagnostics.subprocess, "Popen",
+            return_value=SimpleNamespace(pid=123)) as launch, patch("psutil.Process") as proc:
+        proc.return_value.create_time.return_value = 100
+        assert diagnostics.schedule(root, state, now=100)
+    launch.assert_called_once()
+    assert json.loads((state / "self-check.json").read_text())["status"] == "running"
+
+
+def test_running_check_records_database_deferral_and_preserves_cancellation(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    with closing(sqlite3.connect(state / "projects.db")) as conn, conn:
+        conn.execute("CREATE TABLE projects(status TEXT)")
+    actual_connect = sqlite3.connect
+    calls = []
+    def connect(*args, **kwargs):
+        calls.append(True)
+        if len(calls) > 1:
+            raise sqlite3.OperationalError("PRIVATE DATABASE DETAILS")
+        return actual_connect(*args, **kwargs)
+    process = SimpleNamespace(pid=123, poll=lambda: None)
+    with patch.object(diagnostics.sqlite3, "connect", side_effect=connect), patch.object(
+            diagnostics.subprocess, "Popen", return_value=process), patch.object(
+            diagnostics, "_stop_check") as stop, patch.object(diagnostics.time, "sleep") as sleep:
+        report = diagnostics.run(root, state)
+    stop.assert_called_once_with(process)
+    sleep.assert_not_called()
+    assert report["status"] == "deferred" and report["failures"] == 0
+    assert report["deferred_reason"] == "project_db_unavailable"
+    assert report["activity_error_type"] == "OperationalError" and "PRIVATE" not in json.dumps(report)
+
+
+def test_malformed_optional_history_never_prevents_validation_launch(tmp_path):
+    for index, content in enumerate((
+            "[" * 5000 + "0" + "]" * 5000,
+            json.dumps({"attempts": [{"status": {}, "version": "PRIVATE"}, {
+                "status": "deferred", "version": "PRIVATE", "checked_at": 10 ** 1000,
+                "deferred_reason": {}, "activity_error_type": {}, "log_tail": ["PRIVATE"]}]}))):
+        root, state = diagnostic_install(tmp_path / str(index))
+        (state / "self-check.json").write_text(json.dumps({
+            "version": diagnostics.version(root), "status": "deferred", "checked_at": 1}))
+        (state / "self-check-history.json").write_text(content)
+        with patch.object(diagnostics, "active_projects", return_value=False), patch.object(
+                diagnostics.subprocess, "Popen", return_value=SimpleNamespace(pid=123)) as launch, patch("psutil.Process") as proc:
+            proc.return_value.create_time.return_value = 100
+            assert diagnostics.schedule(root, state, now=100)
+        launch.assert_called_once()
+        assert json.loads((state / "self-check.json").read_text())["status"] == "running"
+        retained = (state / "self-check-history.json").read_text()
+        assert "PRIVATE" not in retained
+        assert json.loads(retained)["attempts"][-1]["checked_at"] == 1
+
+
 class SelfDiagnosticsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
