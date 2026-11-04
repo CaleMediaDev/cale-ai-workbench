@@ -36,6 +36,22 @@ class SkillHubTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[0].args[0:2], ("search", "accessibility"))
         self.assertEqual(run.call_args_list[2].args, ("install", identifier, "--yes"))
 
+    def test_search_skips_non_object_entries(self):
+        identifier = "skills-sh/example/workflows/accessibility"
+        payload = json.dumps([None, "invalid entry", [], {
+            "identifier": identifier,
+            "name": "accessibility",
+            "description": "Check interface accessibility.",
+        }])
+        with patch.object(skill_hub, "_run", return_value=payload):
+            result = skill_hub.search("accessibility", limit=5)
+        self.assertEqual(
+            [match["identifier"] for match in result["matches"]],
+            [identifier],
+        )
+        self.assertEqual(set(skill_hub.SEEN), {identifier})
+        self.assertEqual(skill_hub.INSPECTED, {})
+
     def test_rejects_unsearched_urls_and_blocked_scans(self):
         with self.assertRaises(ValueError):
             skill_hub.inspect("https://example.com/SKILL.md")
