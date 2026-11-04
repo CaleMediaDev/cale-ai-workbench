@@ -65,12 +65,12 @@ def sync(root: str | Path) -> dict:
         data = source.read_bytes()
         target = destination / relative
         if (
-            target.is_symlink()
-            or (target.exists() and not target.is_file())
-            or any(
+            any(
                 parent.is_symlink() or (parent.exists() and not parent.is_dir())
-                for parent in (destination / part for part in relative.parents)
+                for parent in (destination / part for part in reversed(relative.parents))
             )
+            or target.is_symlink()
+            or (target.exists() and not target.is_file())
         ):
             preserved += 1
             continue
