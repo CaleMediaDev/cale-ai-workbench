@@ -103,6 +103,30 @@ class NaturalVoiceTests(unittest.TestCase):
                 self.assertIn("--download-voice", run.call_args_list[1].args[0])
                 self.assertEqual(json.loads(status.read_text())["status"], "complete")
 
+    def test_lock_open_failure_replaces_stale_working_status_with_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            status = Path(folder) / "voice-status.json"
+            status.write_text(json.dumps({"status": "working"}))
+            lock_path = status.parent / "natural-voice.lock"
+            original_open = Path.open
+            fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=lambda *args: None)
+
+            def fail_lock_open(path, *args, **kwargs):
+                if path == lock_path:
+                    raise PermissionError(errno.EACCES, "Lock file is not writable")
+                return original_open(path, *args, **kwargs)
+
+            with (
+                patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+                patch.object(natural_voice, "STATUS", status),
+                patch.object(Path, "open", fail_lock_open),
+                patch.object(natural_voice.subprocess, "run") as run,
+            ):
+                natural_voice.install()
+            self.assertEqual(json.loads(status.read_text())["status"], "error")
+            self.assertIn("Lock file is not writable", status.read_text())
+            run.assert_not_called()
+
     def test_unexpected_lock_failure_replaces_stale_working_status_with_error(self):
         with tempfile.TemporaryDirectory() as folder:
             status = Path(folder) / "voice-status.json"

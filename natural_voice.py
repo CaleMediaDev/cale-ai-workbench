@@ -50,7 +50,12 @@ def install():
     import msvcrt
 
     STATUS.parent.mkdir(exist_ok=True)
-    with (STATUS.parent / "natural-voice.lock").open("a+b") as lock:
+    try:
+        lock_file = (STATUS.parent / "natural-voice.lock").open("a+b")
+    except OSError as exc:
+        save_download_status(STATUS, "error", str(exc)[:400], 0)
+        return
+    with lock_file as lock:
         lock.seek(0, 2)
         if lock.tell() == 0:
             lock.write(b"1")
