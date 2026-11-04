@@ -11,6 +11,19 @@ import context_window
 
 
 class ContextWindowTests(unittest.TestCase):
+    def test_missing_model_weights_are_not_budgeted_as_zero(self):
+        listings = (
+            b'{"models": []}',
+            b'{"models": [{"name": "other:latest", "size": 9663676416}]}',
+        )
+        for listing in listings:
+            with self.subTest(listing=listing):
+                with patch.object(context_window, "urlopen") as mocked_urlopen:
+                    response = mocked_urlopen.return_value.__enter__.return_value
+                    response.read.return_value = listing
+                    with self.assertRaisesRegex(ValueError, "model weight size"):
+                        context_window.model_bytes("main")
+
     def test_large_machine_uses_full_native_window(self):
         info = {"model_info": {"qwen.context_length": 262144}}
         self.assertEqual(

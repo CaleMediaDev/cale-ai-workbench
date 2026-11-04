@@ -60,7 +60,10 @@ def model_bytes(model):
     with urlopen(OLLAMA + "/api/tags", timeout=10) as response:
         models = json.load(response).get("models", [])
     names = {model, model + ":latest"}
-    return next((item["size"] for item in models if item.get("name") in names), 0)
+    size = next((item["size"] for item in models if item.get("name") in names), None)
+    if size is None:
+        raise ValueError("Cannot determine model weight size for memory budget")
+    return size
 
 
 def desired_context(info, ram_bytes, weight_bytes):
