@@ -34,6 +34,19 @@ class ToneAdaptationTests(unittest.TestCase):
             self.assertEqual(tone_adaptation.social_reply("Hello"),
                              "I heard you. What do you need?")
 
+    def test_token_truncated_reply_uses_fallback(self):
+        for finish_reason, content, expected in (
+            ("length", "I was going to say that", "I heard you. What do you need?"),
+            ("stop", "Glad I could help!", "Glad I could help!"),
+        ):
+            with self.subTest(finish_reason=finish_reason):
+                result = {"choices": [{
+                    "finish_reason": finish_reason,
+                    "message": {"content": content},
+                }]}
+                with patch("cloud_ai.post", return_value=result):
+                    self.assertEqual(tone_adaptation.social_reply("Hello"), expected)
+
     def test_malformed_model_response_leaves_a_short_reply(self):
         for result in ({"choices": None}, {"choices": [{"message": None}]}):
             with self.subTest(result=result):
