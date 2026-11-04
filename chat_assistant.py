@@ -49,7 +49,7 @@ def followup_tasks(tasks: list[dict], text: str = "") -> list[dict]:
     active = [task for task in tasks if task["status"] in FOLLOWUP_STATUSES]
     if not text:
         return active
-    value = text.casefold()
+    value = text.strip().casefold()
     named = [task for task in tasks if task["status"] == "accepted"
              and task["title"].strip() and task["title"].casefold() in value]
     if named:

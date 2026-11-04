@@ -522,6 +522,17 @@ def test_vague_revision_offers_recent_finished_tasks_without_guessing():
     assert chat_assistant.followup_tasks(tasks, "Make a new app") == []
 
 
+@pytest.mark.parametrize("text", ["  Make it louder", "\nMake it louder\n", "\tMake it louder  "])
+def test_whitespace_padded_revision_still_offers_finished_task(text):
+    tasks = [
+        {"id": "song", "title": "Finished song", "status": "accepted", "updated": 10},
+    ]
+    candidates = chat_assistant.followup_tasks(tasks, text)
+    assert candidates == tasks
+    assert chat_assistant.route(text, candidates) == "note"
+    assert chat_assistant.choose_task(text, candidates) == tasks[0]
+
+
 def test_multiple_tasks_require_a_clear_followup_target():
     tasks = [{"id": "a", "title": "Build bakery site"}, {"id": "b", "title": "Research suppliers"}]
     assert chat_assistant.choose_task("also add a contact page", tasks) is None
