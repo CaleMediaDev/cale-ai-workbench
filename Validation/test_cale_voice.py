@@ -386,6 +386,30 @@ def test_clone_fingerprint_requires_valid_bounded_configuration(clone_probe_runt
         cale_voice._voice_fingerprint(str(snapshot))
 
 
+def test_probe_pcm_does_not_alias_audible_audio_to_silence(tmp_path):
+    import math
+    import struct
+    import wave
+
+    path = tmp_path / "tone.wav"
+    rate = 48000
+    frames = rate * 2
+    # The former stride of three sampled only this tone's zero crossings.
+    samples = b"".join(
+        struct.pack("<h", int(8000 * math.sin(2 * math.pi * 8000 * n / rate)))
+        for n in range(frames)
+    )
+    with wave.open(str(path), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(rate)
+        output.writeframes(samples)
+
+    report = cale_voice._checked_probe_wav(path)
+    assert report["frames"] == frames
+    assert report["sample_rate"] == rate
+
+
 @pytest.mark.parametrize("width", [1, 2, 3, 4])
 def test_probe_pcm_requires_audible_variation_in_a_channel(tmp_path, width):
     import math
