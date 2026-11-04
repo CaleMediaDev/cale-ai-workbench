@@ -229,6 +229,7 @@ def run(root: Path = ROOT, state: Path = STATE) -> dict:
     deferred = active_projects(state)
     timed_out = False
     returncode = None
+    process = None
     try:
         with log.open("wb") as stream:
             if not deferred:
@@ -254,6 +255,12 @@ def run(root: Path = ROOT, state: Path = STATE) -> dict:
             output += "\nSelf-check exceeded its time limit.\n"
         passed = returncode == 0 and not deferred and not timed_out
     except (OSError, subprocess.TimeoutExpired) as exc:
+        if process is not None:
+            try:
+                _stop_check(process)
+            except (OSError, subprocess.TimeoutExpired):
+                # Cleanup failure must not discard the original error or output.
+                pass
         try:
             output = log.read_text(encoding="utf-8", errors="replace")
         except OSError:
