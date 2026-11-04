@@ -150,7 +150,18 @@ def add_video_audio(source_path: str, audio_path: str, output_path: str,
     audio = _existing(audio_path, AUDIO)
     output = _destination(output_path, [source, audio])
     gain = _number(audio_gain_db, -60, 24, "Audio gain")
-    args = ["-i", str(source), "-i", str(audio), "-map", "0:v:0", "-map", "1:a:0",
-            "-c:v", "copy", "-c:a", "aac", "-af", f"volume={gain:g}dB",
-            "-shortest", "-movflags", "+faststart"]
-    return {**_run(args, output), "edit": "replace soundtrack", "source": str(source)}
+    inputs = ["-i", str(source), "-i", str(audio), "-map", "0:v:0", "-map", "1:a:0"]
+    soundtrack = ["-c:a", "aac", "-af", f"volume={gain:g}dB",
+                  "-shortest", "-movflags", "+faststart"]
+    try:
+        # Keep compatible video packets unchanged and avoid a costly re-encode.
+        result = _run([*inputs, "-c:v", "copy", *soundtrack], output)
+    except RuntimeError as error:
+        if "codec not currently supported in container" not in str(error).casefold():
+            raise
+        # FFmpeg rejected this bitstream for MP4 (for example VP8 WebM).
+        # Only that muxer error warrants one bounded conversion retry.
+        result = _run([*inputs, "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+                       "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
+                       "-pix_fmt", "yuv420p", *soundtrack], output)
+    return {**result, "edit": "replace soundtrack", "source": str(source)}
