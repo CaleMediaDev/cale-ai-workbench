@@ -2172,3 +2172,193 @@ def test_row_counts_unknown_before_or_tag_only_change_cannot_prove_input_delta(t
     result = webapp_check.check(tmp_path, spec)
     assert result["passed"] and result["cases"][0]["row_counts"]["rows"]["actual"] == 0
     assert result["interactions"] == []
+
+
+
+def seed_retarget_case(folder, *, retained_failures=False):
+    import hashlib
+    source = folder / "index.html"
+    source.write_text(ROW_COUNT_PAGE + '<p id="status">Ready</p><script>window.game={ready:true};</script>')
+    first = {"reload": False, "set": {"label": "Alpha"}, "click": ["add"], "wait_ms": 0,
+        "expect": {"wrongTarget": "1 row", "status": "Ready"}, "row_counts": {"ledger": 2},
+        "state": {"game.ready": True}, "visible": ["status"], "hidden": ["notCreated"], "mobile_fit": True}
+    spec = {"path": "index.html", "viewport_width": 400, "cases": [first,
+        {"reload": True, "row_counts": {"entries": 99 if retained_failures else 1}, "expect": {"status": "Ready"}}]}
+    assert webapp_check.save_verifier(folder, spec, accumulate=True)
+    if retained_failures:
+        assert webapp_check.save_verifier(folder, {"path": "index.html", "cases": [{"row_counts": {"entries": 7}}]}, accumulate=True)
+    saved = folder / ".local-ai/webapp-check.json"
+    raw = saved.read_bytes()
+    args = {"path": "index.html", "saved_sequence": 1, "saved_case": 1,
+        "suite_sha256": hashlib.sha256(raw).hexdigest(),
+        "retarget_assertion": {"from": "text:wrongTarget", "to": "rows:entries"},
+        "cases": [{"row_counts": {"entries": 1}}]}
+    return source, saved, raw, spec, args
+
+
+def test_retarget_repairs_real_wrong_text_target_to_native_rows_without_source_changes(tmp_path):
+    import copy
+    source, saved, raw, original, args = seed_retarget_case(tmp_path)
+    before_source = source.read_bytes()
+    initial = webapp_check.check(tmp_path, original)
+    assert not initial["passed"] and "Missing expected element #wrongTarget" in initial["cases"][0]["failures"]
+    candidate, revision = webapp_check.prepare_assertion_revision(tmp_path, args)
+    expected = copy.deepcopy(original)
+    del expected["cases"][0]["expect"]["wrongTarget"]
+    expected["cases"][0]["row_counts"]["entries"] = 1
+    assert candidate == expected
+    assert revision["retarget_assertion"] == args["retarget_assertion"] and revision["replace_sequence"] == 1
+    actual = webapp_check.check(tmp_path, candidate)
+    assert actual["passed"] and actual["cases"][0]["row_counts"]["entries"]["actual"] == 1
+    assert webapp_check.save_verifier(tmp_path, candidate, accumulate=True,
+        expected_sha=revision["previous_sha256"], replace_sequence=revision["replace_sequence"], expected_page_sha=actual["page_sha256"])
+    suite = json.loads(saved.read_text())
+    assert suite["checks"] == [expected]
+    assert webapp_check.run_saved_checks(tmp_path, saved)["passed"]
+    assert source.read_bytes() == before_source
+
+
+def test_retarget_selected_case_can_pass_while_other_cases_and_sequences_remain_failed(tmp_path):
+    source, saved, raw, original, args = seed_retarget_case(tmp_path, retained_failures=True)
+    source_before = source.read_bytes()
+    old = json.loads(raw)
+    candidate, revision = webapp_check.prepare_assertion_revision(tmp_path, args)
+    actual = webapp_check.check(tmp_path, candidate)
+    assert actual["cases"][0]["passed"] and not actual["cases"][1]["passed"] and not actual["passed"]
+    assert webapp_check.save_verifier(tmp_path, candidate, accumulate=True,
+        expected_sha=revision["previous_sha256"], replace_sequence=revision["replace_sequence"], expected_page_sha=actual["page_sha256"])
+    stored = json.loads(saved.read_text())
+    assert len(stored["checks"]) == 2 and len(stored["checks"][0]["cases"]) == 2
+    assert stored["checks"][0]["cases"][1] == old["checks"][0]["cases"][1]
+    assert stored["checks"][1] == old["checks"][1]
+    checked = webapp_check.run_saved_checks(tmp_path, saved)
+    assert not checked["passed"] and checked["case_count"] == 3 and checked["failed_case_count"] == 2
+    assert source.read_bytes() == source_before
+
+
+def test_retarget_failed_actual_candidate_does_not_save_suite_or_verifier(tmp_path):
+    source, saved, raw, _original, args = seed_retarget_case(tmp_path)
+    source_before = source.read_bytes()
+    verifier = tmp_path / ".local-ai/verify.ps1"
+    verifier_before = verifier.read_bytes()
+    args["cases"] = [{"row_counts": {"entries": 2}}]
+    with patch.object(long_tasks, "projects", return_value=[{"id": "retarget", "folder": str(tmp_path)}]):
+        result = json.loads(native_agent.execute_tool(tmp_path, "check_webapp", args))
+    assert result["repaired_case_passed"] is False and not result["passed"] and not result.get("verifier_saved")
+    assert saved.read_bytes() == raw and verifier.read_bytes() == verifier_before
+    assert source.read_bytes() == source_before and task_context.step_status(tmp_path)["done"] == 0
+
+
+@pytest.mark.parametrize("invalid", ["missing_from", "same", "collision", "namespace", "css", "extra_mapping", "no_replacement", "wrong_destination", "extra_assertion", "input_action", "revise_true", "revise_false", "boolean_count", "partial_reference", "hidden_contradiction"])
+def test_retarget_rejects_ambiguous_waiving_or_action_changing_definitions(tmp_path, invalid):
+    source, saved, raw, _original, args = seed_retarget_case(tmp_path)
+    before_source = source.read_bytes()
+    before_verifier = (tmp_path / ".local-ai/verify.ps1").read_bytes()
+    if invalid == "missing_from": args["retarget_assertion"]["from"] = "text:missing"
+    elif invalid == "same": args["retarget_assertion"]["to"] = "text:wrongTarget"
+    elif invalid == "collision": args["retarget_assertion"]["to"] = "rows:ledger"; args["cases"] = [{"row_counts": {"ledger": 2}}]
+    elif invalid == "namespace": args["retarget_assertion"]["from"] = "visibility:wrongTarget"
+    elif invalid == "css": args["retarget_assertion"]["to"] = "rows:#entries"
+    elif invalid == "extra_mapping": args["retarget_assertion"]["extra"] = True
+    elif invalid == "no_replacement": args["cases"] = [{}]
+    elif invalid == "wrong_destination": args["cases"] = [{"row_counts": {"head": 1}}]
+    elif invalid == "extra_assertion": args["cases"][0]["expect"] = {"status": "Ready"}
+    elif invalid == "input_action": args["cases"][0]["click"] = ["add"]
+    elif invalid == "revise_true": args["revise_inputs"] = True
+    elif invalid == "revise_false": args["revise_inputs"] = False
+    elif invalid == "boolean_count": args["cases"][0]["row_counts"]["entries"] = True
+    elif invalid == "partial_reference": del args["saved_case"]
+    else:
+        args["retarget_assertion"]["to"] = "text:notCreated"
+        args["cases"] = [{"expect": {"notCreated": "Created"}}]
+    with pytest.raises(ValueError):
+        webapp_check.prepare_assertion_revision(tmp_path, args)
+    assert saved.read_bytes() == raw and source.read_bytes() == before_source
+    assert (tmp_path / ".local-ai/verify.ps1").read_bytes() == before_verifier
+
+
+@pytest.mark.parametrize("source_field,source_target,destination_field,destination_target,replacement", [
+    ("expect", "old", "state", "game.total", {"gte": 1}),
+    ("state", "game.old", "row_counts", "items", 0),
+    ("row_counts", "old", "expect", "items", ""),
+])
+def test_retarget_supported_namespaces_preserve_every_unrelated_field(source_field, source_target, destination_field, destination_target, replacement):
+    import copy
+    namespaces = {"expect": "text", "state": "state", "row_counts": "rows"}
+    old = {"set": {"amount": "2"}, "click": ["Submit"], "reload": True, "wait_ms": 1,
+           "keys": [{"key": "Enter"}], "expect": {"keep": "yes"}, "state": {"game.keep": True},
+           "row_counts": {"keep": 3}, "visible": ["keep"], "hidden": ["absent"], "mobile_fit": True}
+    old.setdefault(source_field, {})[source_target] = 1 if source_field == "row_counts" else "bad"
+    expected = copy.deepcopy(old)
+    del expected[source_field][source_target]
+    expected.setdefault(destination_field, {})[destination_target] = replacement
+    candidate = webapp_check._retarget_assertion_case(old, {destination_field: {destination_target: replacement}},
+        {"from": namespaces[source_field] + ":" + source_target, "to": namespaces[destination_field] + ":" + destination_target})
+    assert candidate == expected and old[source_field][source_target] == (1 if source_field == "row_counts" else "bad")
+
+
+@pytest.mark.parametrize("invalid", ["stale", "request", "custom", "viewport"])
+def test_retarget_preserves_existing_reference_and_ownership_guards(tmp_path, invalid):
+    _source, saved, raw, _original, args = seed_retarget_case(tmp_path)
+    if invalid == "stale": args["suite_sha256"] = "0" * 64
+    elif invalid == "request": (tmp_path / ".local-ai/USER-REQUESTS.md").write_text("New user requirements")
+    elif invalid == "custom": (tmp_path / ".local-ai/verify.ps1").write_text("exit 0")
+    else: args["viewport_width"] = 800
+    with pytest.raises(ValueError):
+        webapp_check.prepare_assertion_revision(tmp_path, args)
+    assert saved.read_bytes() == raw
+
+
+@pytest.mark.parametrize("race", ["source", "source_while_staging", "request", "suite"])
+def test_retarget_actual_checked_candidate_cannot_overwrite_newer_source_request_or_suite(tmp_path, monkeypatch, race):
+    source, saved, raw, _original, args = seed_retarget_case(tmp_path)
+    candidate, revision = webapp_check.prepare_assertion_revision(tmp_path, args)
+    actual = webapp_check.check(tmp_path, candidate)
+    assert actual["passed"]
+    verifier = tmp_path / ".local-ai/verify.ps1"
+    before_verifier = verifier.read_bytes()
+    if race == "source": source.write_text(source.read_text() + "<!-- newer source -->")
+    elif race == "request": (tmp_path / ".local-ai/USER-REQUESTS.md").write_text("New user request")
+    elif race == "suite": saved.write_bytes(raw + b"\n")
+    else:
+        original_write = Path.write_bytes
+        def mutate_after_staging(path, data):
+            result = original_write(path, data)
+            if path == saved.with_suffix(".tmp"):
+                source.write_text(source.read_text() + "<!-- changed during staging -->")
+            return result
+        monkeypatch.setattr(Path, "write_bytes", mutate_after_staging)
+    expected_saved = saved.read_bytes()
+    with pytest.raises(ValueError):
+        webapp_check.save_verifier(tmp_path, candidate, accumulate=True,
+            expected_sha=revision["previous_sha256"], replace_sequence=revision["replace_sequence"], expected_page_sha=actual["page_sha256"])
+    assert saved.read_bytes() == expected_saved and verifier.read_bytes() == before_verifier
+
+
+
+@pytest.mark.parametrize("mapping,replacement", [
+    (None, {"row_counts": {"items": 1}}),
+    ({}, {"row_counts": {"items": 1}}),
+    ({"from": "text:wrongTarget"}, {"row_counts": {"items": 1}}),
+    ({"from": [], "to": "rows:items"}, {"row_counts": {"items": 1}}),
+    ({"from": "text:wrongTarget", "to": "state:game.constructor.x"}, {"state": {"game.constructor.x": 1}}),
+    ({"from": "text:wrongTarget", "to": "rows:items"}, {"row_counts": {"items": 1, "other": 0}}),
+    ({"from": "text:wrongTarget", "to": "state:game.total"}, {"state": {"game.total": {}}}),
+])
+def test_retarget_requires_a_single_valid_typed_mapping_and_concrete_replacement(tmp_path, mapping, replacement):
+    _source, saved, raw, _original, args = seed_retarget_case(tmp_path)
+    args["retarget_assertion"] = mapping
+    args["cases"] = [replacement]
+    with pytest.raises(ValueError):
+        webapp_check.prepare_assertion_revision(tmp_path, args)
+    assert saved.read_bytes() == raw
+
+
+def test_retarget_namespace_identity_does_not_remove_same_named_other_observables():
+    old = {"expect": {"items": "wrong", "status": "Ready"}, "row_counts": {"items": 3},
+           "state": {"game.items": 3}, "visible": ["items"], "hidden": ["absent"]}
+    candidate = webapp_check._retarget_assertion_case(old, {"row_counts": {"entries": 3}},
+        {"from": "text:items", "to": "rows:entries"})
+    assert candidate == {"expect": {"status": "Ready"}, "row_counts": {"items": 3, "entries": 3},
+                         "state": {"game.items": 3}, "visible": ["items"], "hidden": ["absent"]}
+    assert old["expect"]["items"] == "wrong"

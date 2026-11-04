@@ -1051,10 +1051,52 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
                 + ([] if sources_unchanged else ["HTML source changed between saved sequences; rerun the verifier"])}
 
 
+def _retarget_assertion_case(old: dict, correction: dict, retarget: dict) -> dict:
+    """Replace one explicit typed target; preserve every unrelated case field."""
+    if not isinstance(retarget, dict) or set(retarget) != {"from", "to"}:
+        raise ValueError("retarget_assertion needs exactly from and to typed targets")
+    fields = {"text": "expect", "rows": "row_counts", "state": "state"}
+    resolved = []
+    for direction in ("from", "to"):
+        token = retarget[direction]
+        if not isinstance(token, str) or len(token) > 166:
+            raise ValueError("Retarget targets must be short text:ID, rows:ID or state:exported.path strings")
+        namespace, separator, name = token.partition(":")
+        if not separator or namespace not in fields:
+            raise ValueError("Retarget targets support text:ID, rows:ID or state:exported.path only")
+        if namespace == "state":
+            validate_state_assertions({name: None})
+        else:
+            _element_id(name)
+        resolved.append((fields[namespace], name))
+    source, destination = resolved
+    if source == destination:
+        raise ValueError("Retarget needs a different destination; revise a value through the ordinary assertion repair")
+    old_field, old_name = source
+    field, name = destination
+    if old_name not in old.get(old_field, {}):
+        raise ValueError("The retarget source assertion does not exist in this saved case")
+    if name in old.get(field, {}):
+        raise ValueError("The retarget destination already has an assertion; preserve it instead of collapsing targets")
+    if (set(correction) != {field} or not isinstance(correction[field], dict)
+            or set(correction[field]) != {name}):
+        raise ValueError("Retarget needs exactly one concrete replacement assertion matching its destination, without input actions or other fields")
+    repaired = copy.deepcopy(old)
+    del repaired[old_field][old_name]
+    if not repaired[old_field]:
+        del repaired[old_field]
+    repaired.setdefault(field, {})[name] = copy.deepcopy(correction[field][name])
+    return repaired
+
+
 def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dict]:
     """Revise one checksum-bound case; action changes require explicit opt-in."""
     import task_context
 
+    retargeting = "retarget_assertion" in arguments
+    if retargeting and ("revise_inputs" in arguments or not all(
+            name in arguments for name in ("path", "saved_sequence", "saved_case", "suite_sha256"))):
+        raise ValueError("Retarget requires its complete checksum-bound saved-case reference and cannot combine with revise_inputs")
     revise_inputs = arguments.get("revise_inputs", False)
     if type(revise_inputs) is not bool:
         raise ValueError("revise_inputs must be an explicit boolean")
@@ -1081,7 +1123,7 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
     validate_spec(folder, batch)
     if _project_file(folder, arguments.get("path")) != _project_file(folder, batch["path"]):
         raise ValueError("The revision path must match the selected saved sequence")
-    if (revise_inputs and "viewport_width" in arguments
+    if ((revise_inputs or retargeting) and "viewport_width" in arguments
             and arguments["viewport_width"] != batch.get("viewport_width", 375)):
         raise ValueError("The revision viewport must match the selected saved sequence")
     if type(number) is not int or not 1 <= number <= len(batch["cases"]):
@@ -1092,6 +1134,13 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
         raise ValueError("A saved-case repair needs exactly one corrected case, not the full case list. "
                          "Input actions stay fixed unless you explicitly use revise_inputs:true.")
     old = batch["cases"][number - 1]
+    if retargeting:
+        batch["cases"][number - 1] = _retarget_assertion_case(
+            old, supplied[0], arguments["retarget_assertion"])
+        validate_spec(folder, batch)
+        return batch, {"saved_sequence": sequence, "saved_case": number,
+            "previous_sha256": digest, "request_hash": saved["request_hash"],
+            "replace_sequence": sequence, "retarget_assertion": copy.deepcopy(arguments["retarget_assertion"])}
     if not revise_inputs and any(name in supplied[0] and (name not in old or supplied[0][name] != old[name])
            for name in ("reload", "set", "click", "keys", "wait_ms")):
         raise ValueError("Assertion revisions cannot change input actions; repeated actions must exactly match the saved case. "
