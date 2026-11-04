@@ -390,6 +390,37 @@ def test_failed_preload_releases_deck_even_when_cleanup_fails(tmp_path):
     assert player.outgoing is active and active.busy()
 
 
+def test_replacing_prepared_deck_recovers_after_close_reports_an_error(tmp_path):
+    active = Deck(lambda: 0)
+    stale = Deck(lambda: 0)
+    replacement = Deck(lambda: 0)
+    decks = iter((active, stale, replacement))
+    player = radio.Player(lambda: next(decks), lambda: 0)
+    player.play(tmp_path/"first.wav")
+    player.prepare(tmp_path/"second.wav")
+    target = tmp_path/"third.wav"
+    original_stop = stale.stop
+
+    def stop_with_error():
+        original_stop()
+        raise RuntimeError("Close failed")
+
+    with patch.object(stale, "stop", side_effect=stop_with_error) as close:
+        with pytest.raises(RuntimeError, match="Close failed"):
+            player.prepare(target)
+        assert player.prepared is None
+        assert player.active is active and active.busy() and active.volume == 65
+        player.prepare(target)
+        close.assert_called_once_with()
+
+    assert player.prepared is replacement
+    assert replacement.path == str(target.resolve())
+    assert replacement.opened and not replacement.busy()
+    assert player.blend(target)
+    assert player.active is replacement and replacement.busy()
+    assert player.outgoing is active and active.busy()
+
+
 def test_failed_blend_start_releases_prepared_deck_and_allows_retry(tmp_path):
     player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
     first, second = tmp_path/"first.wav", tmp_path/"second.wav"

@@ -233,7 +233,9 @@ class Player:
         if self.prepared is not None and self.prepared.path == path:
             return
         if self.prepared is not None:
-            self.prepared.stop()
+            previous = self.prepared
+            self.prepared = None
+            previous.stop()
         self.prepared = self.factory()
         try:
             self.prepared.set_volume(0)
