@@ -3599,6 +3599,31 @@ def repair_avoid_models(state: dict, request_hash: str) -> list[dict]:
             and type(row.get("failures")) is int and row["failures"] >= 2]
 
 
+def expected_missing_worker_note_read(folder: Path, tool: str, arguments: dict, result: str) -> bool:
+    """Separate absent internal note discovery from model-quality failures.
+
+    The tool still failed and the notes still need authoring. This exemption
+    changes only weight-blame bookkeeping; invalid arguments/paths, permission
+    errors and missing requested output files keep their ordinary feedback.
+    """
+    if (tool != "read_file" or not isinstance(result, str)
+            or not result.startswith("Tool error: FileNotFoundError:")
+            or not isinstance(arguments, dict) or not isinstance(arguments.get("path"), str)
+            or len(arguments["path"]) > 500):
+        return False
+    from jsonschema import ValidationError, validate
+    try:
+        schema = next(tool["function"]["parameters"] for tool in TOOLS
+                      if tool["function"]["name"] == "read_file")
+        validate(arguments, schema)
+        root = folder.resolve()
+        target = project_path(root, arguments["path"])
+        return (target.parent == root / ".local-ai" and target.name in {"PLAN.md", "PROGRESS.md"}
+                and not target.exists() and not target.is_symlink())
+    except (OSError, ValueError, TypeError, RuntimeError, ValidationError):
+        return False
+
+
 def remember_local_tool_feedback(state: dict, model: str | None, weights: str,
                                  request_hash: str, *, failed: bool, recovered: bool) -> None:
     """Reads do not erase failures; verified progress or new instructions do."""
@@ -5617,9 +5642,11 @@ def run_slice(project: dict, complete=None) -> dict:
                 recovered = (proven and not state.get("failed_checks") and not state.get("uncreated_step_plan")
                              and not task_context.checker_failures(folder, "", limit=1))
                 barrier = result.startswith("Tool error: The step queue advanced earlier in this response.")
+                expected_note_absence = expected_missing_worker_note_read(folder, kind, args, result)
                 remember_local_tool_feedback(state, getattr(router, "last_local_model", None),
                     getattr(router, "last_local_weights", ""), planned_request_hash,
-                    failed=outcome.startswith("Failed") and not barrier, recovered=recovered)
+                    failed=outcome.startswith("Failed") and not barrier and not expected_note_absence,
+                    recovered=recovered)
             state["messages"] = messages
             state["current"] = f"{function.get('name', 'tool')}: {result[:150]}"
             if queue_result or function.get("name") == "task_steps" and outcome == "Completed":

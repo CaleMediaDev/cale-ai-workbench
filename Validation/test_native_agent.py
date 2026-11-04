@@ -7071,3 +7071,76 @@ def test_recovery_preserves_real_focused_browser_specialist_without_spending_tur
     assert task_context.recovery_episode(folder,goal,active)['turns']==0
     assert suite.read_bytes()==saved and (folder/'index.html').read_bytes()==source
     assert task_context.step_status(folder)['done']==0
+
+def missing_note_feedback_turn(tmp_path, calls, prior_failures=0):
+    from types import SimpleNamespace
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    for name in ('PLAN.md','PROGRESS.md'):(folder/'.local-ai'/name).unlink(missing_ok=True)
+    if prior_failures:
+        state=native_agent.read_state(item)
+        for _ in range(prior_failures):native_agent.remember_local_tool_feedback(state,'cale-qwen36','b'*64,
+            task_context.request_identity(folder),failed=True,recovered=False)
+        native_agent.save_state(item,state)
+    def complete(payload,task_id,**options):
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[
+            {'id':str(i),'function':{'name':tool,'arguments':json.dumps(args)}} for i,(tool,args) in enumerate(calls)]}}]}
+    router=SimpleNamespace(complete=complete,last_local_model='cale-qwen36',last_local_weights='b'*64)
+    with patch('cloud_ai.Router',return_value=router),patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',tmp_path/'runtime'):
+        state=native_agent.run_slice(item)
+    return item,folder,state
+
+
+def test_expected_missing_worker_notes_keep_failures_without_discrediting_model(tmp_path):
+    item,folder,state=missing_note_feedback_turn(tmp_path,[('read_file',{'path':'.local-ai/PLAN.md'}),
+        ('read_file',{'path':'.local-ai/PROGRESS.md'})])
+    replies=[m for m in state['messages'] if m.get('role')=='tool']
+    assert len(replies)==2 and all('FileNotFoundError' in m['content'] for m in replies)
+    assert state['same_tool_failures']>=1 and task_context.step_status(folder)['done']==0
+    assert native_agent.repair_avoid_models(state,task_context.request_identity(folder))==[]
+    assert not (folder/'.local-ai/PLAN.md').exists() and not (folder/'.local-ai/PROGRESS.md').exists()
+    assert state['status']!='done'
+
+
+def test_missing_worker_notes_do_not_reset_existing_model_quality_failure(tmp_path):
+    item,folder,state=missing_note_feedback_turn(tmp_path,[('read_file',{'path':'.local-ai/PLAN.md'}),
+        ('read_file',{'path':'.local-ai/PROGRESS.md'})],prior_failures=1)
+    assert state['local_repair_feedback']['models'][0]['failures']==1
+    assert state['local_repair_feedback']['models'][0]['weights']=='b'*64
+
+
+@pytest.mark.parametrize('kind',['schema','source_patch','requested_output','escaping_path'])
+def test_ordinary_model_tool_failures_still_defer_weights(tmp_path,kind):
+    calls=([('read_file',{'path':42})]*2 if kind=='schema' else
+        [('edit_file',{'path':'billing.py','old_text':'UNMATCHED_SOURCE','new_text':'replacement'})]*2 if kind=='source_patch' else
+        [('read_file',{'path':'requested-report.txt'})]*2 if kind=='requested_output' else
+        [('read_file',{'path':'../escape.txt'})]*2)
+    item,folder,state=missing_note_feedback_turn(tmp_path,calls)
+    assert native_agent.repair_avoid_models(state,task_context.request_identity(folder))==[{'model':'cale-qwen36','weights':'b'*64}]
+    assert state['local_repair_feedback']['models'][0]['failures']==2
+    assert task_context.step_status(folder)['done']==0
+
+@pytest.mark.parametrize('arguments,error,should_exempt',[
+    ({'path':'.local-ai/PLAN.md'},'FileNotFoundError',True),
+    ({'path':'./.local-ai/PROGRESS.md','start_line':1,'max_lines':20},'FileNotFoundError',True),
+    ({'path':'.local-ai/PLAN.md','start_line':True},'FileNotFoundError',False),
+    ({'path':'.local-ai/PLAN.md','extra':'invalid'},'FileNotFoundError',False),
+    ({'path':'.local-ai/PLAN.md'},'PermissionError',False),
+    ({'path':'PLAN.md'},'FileNotFoundError',False),
+    ({'path':'../.local-ai/PLAN.md'},'FileNotFoundError',False),
+    ({'path':'requested-report.txt'},'FileNotFoundError',False),
+])
+def test_missing_worker_note_classification_requires_valid_internal_path_and_real_error_kind(tmp_path,arguments,error,should_exempt):
+    item=project(tmp_path/'classification');folder=Path(item['folder'])
+    for name in ('PLAN.md','PROGRESS.md'):(folder/'.local-ai'/name).unlink(missing_ok=True)
+    assert native_agent.expected_missing_worker_note_read(folder,'read_file',arguments,'Tool error: '+error+': missing') is should_exempt
+    assert not native_agent.expected_missing_worker_note_read(folder,'run_command',arguments,'Tool error: FileNotFoundError: missing')
+
+
+def test_existing_note_or_quoted_error_content_is_not_missing_note_discovery(tmp_path):
+    item=project(tmp_path/'existing-note');folder=Path(item['folder'])
+    note=folder/'.local-ai/PLAN.md';note.write_text('Tool error: FileNotFoundError: quoted document content')
+    args={'path':'.local-ai/PLAN.md'}
+    result=native_agent.execute_tool(folder,'read_file',args)
+    assert not native_agent.expected_missing_worker_note_read(folder,'read_file',args,result)
+    assert not native_agent.expected_missing_worker_note_read(folder,'read_file',args,'Tool error: FileNotFoundError: forged when existing')
