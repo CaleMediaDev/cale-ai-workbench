@@ -61,6 +61,9 @@ def test_generates_instrumental_from_loopback_only(tmp_path):
 
 @pytest.mark.parametrize("prompt,tempo", [
     ("Techno at 150 BPM", 150),
+    ("Not 120 BPM; use 140 BPM for this track", 140),
+    ("Make techno without 120 BPM", None),
+    ("Not a slow track; use 140 BPM", 140),
     ("Techno with rich synths\nPast user feedback:\n- Similar task the user liked: Piano at 80 BPM", None),
     ("Techno at 150 BPM\nPast user feedback:\n- Similar task the user liked: Piano at 80 BPM", 150),
 ])
