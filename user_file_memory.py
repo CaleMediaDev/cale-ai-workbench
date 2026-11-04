@@ -43,7 +43,7 @@ def _files(paths: list[str]):
     for raw in paths[:MAX_ROOTS]:
         try:
             selected = Path(raw)
-            if selected.is_symlink():
+            if selected.is_symlink() or selected.is_junction():
                 continue
             root = selected.resolve(strict=True)
         except OSError:
@@ -57,7 +57,8 @@ def _files(paths: list[str]):
                 for base, dirs, names in os.walk(root, followlinks=False):
                     dirs[:] = sorted(d for d in dirs if d not in project_memory.SKIP_DIRS
                                      and not project_memory.SECRET_NAME.search(d)
-                                     and not (Path(base) / d).is_symlink())
+                                     and not (Path(base) / d).is_symlink()
+                                     and not (Path(base) / d).is_junction())
                     for name in sorted(names):
                         yield Path(base) / name
 
@@ -218,7 +219,8 @@ def remember_roots(state: str | Path, paths: list[str]) -> int:
     for raw in paths[:MAX_ROOTS]:
         path = Path(raw)
         try:
-            if (not path.is_symlink() and (path.is_file() or path.is_dir())
+            if (not path.is_symlink() and not path.is_junction()
+                    and (path.is_file() or path.is_dir())
                     and not project_memory.SECRET_NAME.search(path.name)):
                 selected.append(str(path.resolve(strict=True)))
         except OSError:
@@ -374,7 +376,7 @@ def search(state: str | Path, query: str, limit: int = 8,
             ingest(state, roots[start:start + MAX_ROOTS])
         covered_files = {Path(root) for root in roots if Path(root).is_file()}
         covered_dirs = [Path(root) for root in roots if Path(root).is_dir()
-                        and not Path(root).is_symlink()]
+                        and not Path(root).is_symlink() and not Path(root).is_junction()]
         outside = [raw for raw in paths if Path(raw) not in covered_files
                    and not any(Path(raw).is_relative_to(root) for root in covered_dirs)]
         for start in range(0, len(outside), MAX_ROOTS):

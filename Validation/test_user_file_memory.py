@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from contextlib import closing
@@ -17,6 +18,27 @@ class UserFileMemoryTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.state = self.root / "state"
+
+    @unittest.skipUnless(os.name == "nt", "Windows directory junction")
+    def test_folder_scan_does_not_follow_or_remember_junctions(self):
+        selected = self.root / "selected"
+        outside = self.root / "outside"
+        selected.mkdir()
+        outside.mkdir()
+        kept = selected / "kept.txt"
+        kept.write_text("selected content", encoding="utf-8")
+        (outside / "other.txt").write_text("unselected content", encoding="utf-8")
+        junction = selected / "linked"
+        subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(junction), str(outside)],
+                       check=True, capture_output=True,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+        self.assertTrue(junction.is_junction())
+        self.assertEqual(list(user_file_memory._files([str(selected)])), [kept])
+        self.assertEqual(list(user_file_memory._files([str(junction)])), [])
+        self.assertEqual(user_file_memory.remember_roots(self.state, [str(junction)]), 0)
+        self.assertEqual(user_file_memory.remembered_roots(self.state), [])
+        self.assertEqual(user_file_memory.ingest(self.state, [str(selected)])["indexed"], 1)
+        self.assertEqual(user_file_memory.search(self.state, "unselected"), [])
 
     def test_unreadable_file_does_not_abort_remaining_folder_index(self):
         folder = self.root / "selected"
