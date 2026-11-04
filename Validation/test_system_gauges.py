@@ -24,6 +24,39 @@ def test_cpu_percent_rejects_idle_delta_exceeding_total_and_recovers():
     assert system_gauges.cpu_percent(current, (350, 400)) == 0
 
 
+def test_cpu_sampler_clears_failed_snapshot_and_reprimes(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(system_gauges, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(system_gauges, "_ram_percent", lambda: None)
+    monkeypatch.setattr(system_gauges, "_gpu_percent", lambda: None)
+    monkeypatch.setattr(system_gauges, "_drive_space", lambda: (None, None))
+    monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(
+        disk_io_counters=lambda: None,
+        net_io_counters=lambda: None,
+        net_if_stats=lambda: {},
+    ))
+
+    for error_type in (OSError, AttributeError):
+        snapshots = iter([(100, 200), error_type("Sensor unavailable"),
+                          (150, 400), (175, 500)])
+
+        def cpu_times():
+            snapshot = next(snapshots)
+            if isinstance(snapshot, Exception):
+                raise snapshot
+            return snapshot
+
+        monkeypatch.setattr(system_gauges, "_cpu_times", cpu_times)
+        sampler = system_gauges.HardwareSampler()
+        assert sampler.sample()["cpu"] is None
+        assert sampler.sample()["cpu"] is None
+        assert sampler.previous_cpu is None
+        assert sampler.sample()["cpu"] is None
+        assert sampler.sample()["cpu"] == 75
+
+
 def test_gpu_parser_handles_multiple_cards_and_missing_values():
     assert system_gauges.parse_gpu_utilization("9\n41\n") == 41
     assert system_gauges.parse_gpu_utilization("N/A\n") is None
