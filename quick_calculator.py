@@ -35,7 +35,9 @@ def _evaluate(node: ast.AST, expression: str, depth: int = 0) -> Fraction:
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
         value = _evaluate(node.operand, expression, depth + 1)
         return -value if isinstance(node.op, ast.USub) else value
-    if isinstance(node, ast.BinOp):
+    if isinstance(node, ast.BinOp) and isinstance(
+        node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)
+    ):
         left = _evaluate(node.left, expression, depth + 1)
         right = _evaluate(node.right, expression, depth + 1)
         if isinstance(node.op, ast.Add):

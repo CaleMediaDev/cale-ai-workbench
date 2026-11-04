@@ -60,6 +60,12 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class CalculatorPrecisionTests(unittest.TestCase):
+    def test_unsupported_operator_is_rejected_before_evaluating_operands(self):
+        for expression in ("1 // (1 / 0)", "(1 / 0) // 2", "1 // 0"):
+            with self.subTest(expression=expression):
+                self.assertIsNone(calculate(expression))
+        self.assertEqual(calculate("1 / 0"), "Cannot divide by zero.")
+
     def test_leading_zero_integers_are_decimal(self):
         for expression, answer in (
             ("0012 + 3", "15"),
