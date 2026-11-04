@@ -76,9 +76,9 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
             try:
                 with tempfile.TemporaryDirectory(prefix="cale-pdf-") as folder:
                     image_path = Path(folder) / "page.png"
-                    width, height = page.get_size()
-                    scale = min(2, 1800 / max(width, height))
                     try:
+                        width, height = page.get_size()
+                        scale = min(2, 1800 / max(width, height))
                         bitmap = page.render(scale=scale)
                     except pdfium.PdfiumError:
                         # Preserve other pages and report this scan as omitted.
