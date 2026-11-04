@@ -75,7 +75,11 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 path.write_text(body, encoding="utf-8")
                 project_memory.index_file(project, path)
                 pages.append({"url": url, "file": str(path), "characters": len(markdown)})
-                for link in (result.links or {}).get("internal", []):
+                links = result.links if isinstance(result.links, dict) else {}
+                internal_links = links.get("internal", [])
+                if not isinstance(internal_links, (list, tuple)):
+                    internal_links = []
+                for link in internal_links:
                     if not isinstance(link, dict):
                         continue
                     candidate = link.get("href", "")
