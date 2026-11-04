@@ -21,6 +21,31 @@ def test_missing_checks_executables_and_ghidra(tmp_path, monkeypatch):
     assert core_tool_health.missing(tmp_path, fresh=True) == ["GitHub CLI", "Ghidra"]
 
 
+def test_health_cache_distinguishes_relative_roots_after_chdir(tmp_path, monkeypatch):
+    healthy = tmp_path / "healthy/installation"
+    broken = tmp_path / "broken/installation"
+    for root in (healthy, broken):
+        ghidra = root / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+        ghidra.parent.mkdir(parents=True)
+        ghidra.touch()
+
+    monkeypatch.setattr(core_tool_health, "_cached_root", None)
+    monkeypatch.setattr(core_tool_health, "_cached_missing", [])
+    monkeypatch.setattr(core_tool_health, "_last_check", 0.0)
+    monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: 1000.0)
+    monkeypatch.setattr(core_tool_health, "_agent_python", lambda root: None)
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
+    broken_gh = broken / "Toolbox/gh_2.103.3_windows_amd64/bin/gh.exe"
+    monkeypatch.setattr(core_tool_health, "_runnable",
+                        lambda path, *args: path != broken_gh)
+
+    monkeypatch.chdir(healthy.parent)
+    assert core_tool_health.missing(Path("installation")) == []
+    monkeypatch.chdir(broken.parent)
+    assert core_tool_health.missing(Path("installation")) == ["GitHub CLI"]
+
+
 def test_browser_runtime_failure_is_visible_even_when_node_runs(tmp_path, monkeypatch):
     monkeypatch.setattr(core_tool_health, "_runnable", lambda path, *args: True)
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: False)
