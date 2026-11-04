@@ -81,6 +81,27 @@ class TableMLTests(unittest.TestCase):
             self.assertEqual([row["prediction_2"] for row in rows],
                              ["low", "middle", "high"])
 
+    def test_binary_prediction_at_zero_matches_logistic_regression(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            model.write_text(json.dumps({
+                "format": "cale-table-model-v1", "problem_type": "classification",
+                "schema": {"signal": {"kind": "number", "median": 0, "scale": 1}},
+                "feature_names": ["signal"], "coefficients": [[1]],
+                "intercepts": [0], "classes": ["cold", "hot"],
+                "target_column": "label", "metric": "holdout_accuracy",
+                "holdout_score": 1, "baseline_score": .5,
+            }), encoding="utf-8")
+            prediction = root / "new.csv"
+            prediction.write_text("signal\n-1\n0\n1\n", encoding="utf-8")
+            output = root / "predicted.csv"
+            predict_table_model(str(model), str(prediction), str(output))
+            with output.open(newline="", encoding="utf-8") as stream:
+                labels = [row["prediction"] for row in csv.DictReader(stream)]
+            # LogisticRegression chooses its first class for a zero score.
+            self.assertEqual(labels, ["cold", "cold", "hot"])
+
     def test_malformed_model_is_rejected_before_writing(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

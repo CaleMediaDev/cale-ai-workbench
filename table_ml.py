@@ -213,7 +213,7 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
             if model["problem_type"] == "regression":
                 predictions = [f"{number:.6g}" for number in scores[:, 0]]
             elif len(classes) == 2:
-                predictions = [classes[int(number >= 0)] for number in scores[:, 0]]
+                predictions = [classes[int(number > 0)] for number in scores[:, 0]]
             else:
                 predictions = [classes[index] for index in np.argmax(scores, axis=1)]
             for row, prediction in zip(batch, predictions):
