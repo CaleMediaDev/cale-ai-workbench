@@ -121,6 +121,7 @@ def _registered_tools(root: Path) -> list[dict]:
         for spec in snapshot.get("tools", []):
             if (isinstance(spec, dict) and isinstance(spec.get("name"), str)
                     and spec["name"].startswith(("rea.", "devtools."))
+                    and isinstance(spec.get("description"), str)
                     and isinstance(spec.get("schema"), dict)):
                 rows.append(spec)
     except (OSError, ValueError, TypeError):

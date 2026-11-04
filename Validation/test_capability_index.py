@@ -125,6 +125,44 @@ def test_non_object_specialist_snapshot_does_not_block_local_index():
                 assert capability_index.search(root, "image", kind="tool")[0]["name"] == "make_image"
 
 
+def test_malformed_specialist_descriptions_do_not_block_index():
+    from types import SimpleNamespace
+
+    async def list_tools():
+        return []
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        _, tools = fixture(root)
+        tool = tools[0]
+        modules = {
+            "native_agent": SimpleNamespace(TOOLS=[]),
+            "toolbox_mcp": SimpleNamespace(
+                server=SimpleNamespace(list_tools=list_tools),
+                LOCAL_CATALOG={tool["name"]: {
+                    "description": tool["description"],
+                    "inputSchema": tool["schema"],
+                }}),
+        }
+        snapshot = capability_index.specialist_snapshot_path(root)
+        snapshot.parent.mkdir(parents=True)
+        valid = {"name": "devtools.list_pages", "description": "List browser pages",
+                 "schema": {"type": "object"}}
+        with patch.dict("sys.modules", modules):
+            for fields in ({}, {"description": None}, {"description": 42}):
+                malformed = {"name": "rea.invalid", "schema": {"type": "object"},
+                             **fields}
+                snapshot.write_text(json.dumps({"tools": [malformed, valid]}),
+                                    encoding="utf-8")
+                result = capability_index.sync(root)
+                assert result["skills"] == 1 and result["tools"] == 2
+                assert capability_index.health(root)["ok"]
+                assert capability_index.search(root, "accessible", kind="skill")[0]["id"] == "skill:frontend-ui-engineering"
+                assert capability_index.search(root, "image", kind="tool")[0]["name"] == "make_image"
+                assert capability_index.search(root, "browser pages", kind="tool")[0]["name"] == "devtools.list_pages"
+                assert {row["name"] for row in capability_index.search(root, "", kind="tool")} == {"make_image", "devtools.list_pages"}
+
+
 def test_specialist_snapshot_joins_fast_tool_index():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
