@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "scenario": "injected malformed arguments; real local correction and SQLite plan",
+  "seconds": 6.11,
+  "model": "cale-main-64k",
+  "initial_bad_response": "injected API tool name as shell checker",
+  "correction": "live local inference",
+  "tool_choice_sent": false,
+  "requested_format": "json_schema",
+  "raw_tool_calls": 0,
+  "validated_tool": "task_steps",
+  "sql_units_created": 1,
+  "sql_units_completed": 0,
+  "user_projects_touched": false,
+  "usage": {
+    "prompt_tokens": 427,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens": 80,
+    "total_tokens": 507
+  },
+  "validation": {
+    "focused_native_tests_passed": 17,
+    "router_tests_passed": 126,
+    "router_subtests_passed": 22,
+    "legacy_row": "Rejected before shell launch, revised to a real Python checker, and completed by actual execution without changing source."
+  },
+  "scope": "Bare Cale tool names are invalid shell acceptance commands. This does not prove arbitrary shell commands test meaningful behavior or that whole app building is reliable.",
+  "source_sha256": {
+    "native_agent.py": "d6a0d8c2030e332dd07ee7d8468cf83147cb652b14ef907febf4061801677a7d",
+    "task_context.py": "39cbda679ce06e061998fb185a814d45ec9dc2c032680dfd3760595665724c85"
+  }
+}

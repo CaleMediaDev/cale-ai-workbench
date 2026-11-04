@@ -58,6 +58,35 @@ def test_typed_plan_contract_accepts_supported_repeatable_checks(tmp_path, check
             validate(once, schema)
 
 
+@pytest.mark.parametrize("command", ["write_file", "browser_open_project", "run_verifier", " WRITE_FILE ", "'write_file'", "write_file()"])
+def test_shell_tool_labels_cannot_be_saved_as_acceptance_commands(tmp_path, command):
+    with pytest.raises(ValueError, match="not a shell acceptance check"):
+        task_context.plan_steps(tmp_path, [queue_step("Build page", command)])
+    assert task_context.step_status(tmp_path)["total"] == 0
+
+
+def test_legacy_shell_tool_label_is_blocked_before_process_and_can_be_repaired(tmp_path):
+    (tmp_path / "logic.py").write_text("def identity(value): return value\n")
+    queued = task_context.plan_steps(tmp_path, [queue_step("Check identity", "Write-Output checked")])
+    active = queued["active"]["id"]
+    with project_memory.connection(tmp_path) as conn:
+        conn.execute("UPDATE task_steps SET check_command='write_file' WHERE id=?", (active,))
+    original = native_agent.execute_tool
+    def guarded(folder, name, arguments, **kwargs):
+        assert name != "run_command", "The invalid legacy checker must not launch a shell"
+        return original(folder, name, arguments, **kwargs)
+    with patch.object(native_agent, "execute_tool", side_effect=guarded):
+        error = native_agent.execute_tool(tmp_path, "task_steps", {"action": "complete", "step_id": active})
+    assert "not a shell acceptance check" in error
+    unchanged = task_context.step_status(tmp_path)
+    assert unchanged["done"] == 0 and unchanged["active"]["attempts"] == 0
+    corrected = {"phase": "Check", "title": "Check identity", "check_tool": "check_python_function",
+        "check_arguments": {"path": "logic.py", "function": "identity", "cases": [{"args": [2], "expected": 2}]}}
+    assert json.loads(original(tmp_path, "task_steps", {"action": "revise", "step_id": active, "steps": [corrected]}))["remaining"] == 1
+    assert json.loads(original(tmp_path, "task_steps", {"action": "complete", "step_id": active}))["done"] == 1
+    assert (tmp_path / "logic.py").read_text() == "def identity(value): return value\n"
+
+
 def test_step_queue_checks_real_work_and_resumes_in_another_process():
     with tempfile.TemporaryDirectory() as temporary:
         folder = Path(project(Path(temporary) / "game")["folder"])

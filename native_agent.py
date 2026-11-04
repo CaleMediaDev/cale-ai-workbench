@@ -79,16 +79,9 @@ TOOLS = [
             "required": ["path", "function", "cases"], "additionalProperties": False}}},
     {'type': 'function',
      'function': {'name': 'task_steps',
-                  'description': 'Durable SQLite phases. Plan 1-6 tiny steps; preserve a requested count during repair. '
-                                 'Use typed check_tool/check_arguments or a read-only check_command. complete runs '
-                                 'saved acceptance and advances only on success with unchanged source. split divides '
-                                 'the active step; revise supplies exactly one replacement. Native calls may omit '
-                                 'step_id for the shown active unit; stale checks are rejected. status resumes. '
-                                 'Keep repeatable cases here; one-time saved-case revisions belong to the checker. '
-                                 'Browser input steps need observed effects or fresh same-page, matching-target '
-                                 'positive controls. Static checks need no input. scope requires an explicit latest '
-                                 'USER-REQUESTS.md quote plus scope_operation and function_names; never waive work '
-                                 'from model progress. A completed batch is not whole-project verification.',
+                  'description': 'SQLite phases: plan 1-6 tiny steps; keep a requested count. complete verifies; '
+                                 'revise replaces one step. Use typed checks or real read-only shell commands, '
+                                 'not API tool names. scope requires the latest user quote.',
                   'parameters': {'type': 'object',
                                  'properties': {'action': {'type': 'string',
                                                            'enum': ['plan',
@@ -235,6 +228,7 @@ def bind_step_checker_schemas(tools: list) -> None:
     for name in ("check_tool", "check_arguments"):
         command["properties"].pop(name)
     command["required"] = ["phase", "title", "check_command"]
+    command["properties"]["check_command"]["not"] = {"enum": sorted(by_name)}
     alternatives = [command]
     for kind in ("check_python_function", "check_javascript_function", "check_webapp", "run_verifier"):
         branch = copy.deepcopy(base)

@@ -20,7 +20,7 @@ import native_agent
 import task_context
 
 
-def run(runtime: Path, model: str, invalid_nested: bool = False) -> dict:
+def run(runtime: Path, model: str, invalid_nested: bool = False, invalid_command: bool = False) -> dict:
     require_idle_media(runtime)
     info = cloud_ai.post("http://127.0.0.1:11434/api/show", {"model": model}, timeout=10)
     if info.get("remote_host") or info.get("remote_model") or "tools" not in info.get("capabilities", []):
@@ -28,7 +28,7 @@ def run(runtime: Path, model: str, invalid_nested: bool = False) -> dict:
     expected = {"action": "plan", "steps": [{"phase": "Check", "title": "Verify identity",
         "check_tool": "check_python_function", "check_arguments": {"path": "logic.py",
         "function": "identity", "cases": [{"args": [2], "expected": 2}]}}]}
-    if invalid_nested:
+    if invalid_nested or invalid_command:
         expected = {"action": "plan", "steps": [{"phase": "Check", "title": "Verify expense total",
             "check_tool": "check_webapp", "check_arguments": {"path": "index.html", "cases": [
                 {"set": {"amount": "10"}, "click": ["Add expense"], "expect": {"tot": "10.00"}}]}}]}
@@ -38,7 +38,9 @@ def run(runtime: Path, model: str, invalid_nested: bool = False) -> dict:
         "tools": [tool], "tool_choice": {"type": "function", "function": {"name": "task_steps"}},
         "stream": False, "temperature": 0, "reasoning_effort": "none", "max_tokens": 512}
     bad = copy.deepcopy(expected)
-    if invalid_nested:
+    if invalid_command:
+        bad["steps"][0] = {"phase": "Check", "title": "Verify expense total", "check_command": "write_file"}
+    elif invalid_nested:
         bad["steps"][0]["check_arguments"]["cases"] = [{"input": "amount=10", "expect": "Total: $10.00"}]
     else:
         bad["steps"] = json.dumps(bad["steps"]) + " trailing invalid data"
@@ -76,7 +78,8 @@ def run(runtime: Path, model: str, invalid_nested: bool = False) -> dict:
     message = raw["choices"][0]["message"]
     return {"passed": True, "scenario": "injected malformed arguments; real local correction and SQLite plan",
         "seconds": round(time.monotonic() - started, 2), "model": model,
-        "initial_bad_response": ("injected nested browser cases with unsupported input field and text expect"
+        "initial_bad_response": ("injected API tool name as shell checker" if invalid_command else
+                                 "injected nested browser cases with unsupported input field and text expect"
                                  if invalid_nested else "injected quoted steps array with trailing invalid data"),
         "correction": "live local inference",
         "tool_choice_sent": "tool_choice" in repair, "requested_format": repair["response_format"]["type"],
@@ -91,8 +94,9 @@ if __name__ == "__main__":
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--invalid-nested", action="store_true")
+    parser.add_argument("--invalid-command", action="store_true")
     args = parser.parse_args()
-    result = run(args.runtime_root.resolve(strict=True), args.model, args.invalid_nested)
+    result = run(args.runtime_root.resolve(strict=True), args.model, args.invalid_nested, args.invalid_command)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result))
     raise SystemExit(0 if result["passed"] else 1)

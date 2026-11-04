@@ -279,6 +279,14 @@ def step_status(folder: str | Path) -> dict:
 
 def validate_repeatable_check(tool: str, arguments: dict) -> None:
     """A durable acceptance check cannot replay a one-time suite mutation."""
+    if tool == "run_command":
+        from native_agent import TOOLS
+
+        command = str(arguments.get("command", "")).strip().strip("'\"`").removesuffix("()").strip().casefold()
+        if command in {item["function"]["name"].casefold() for item in TOOLS}:
+            raise ValueError(f"check_command names the Cale tool '{command}', not a shell acceptance check. "
+                "Use that tool to implement changes. Revise this step with check_tool/check_arguments "
+                "(check_webapp for HTML, or run_verifier for an existing verifier), or a real read-only shell command.")
     if tool in {"check_python_function", "check_javascript_function", "check_webapp"} and any(
             key in arguments for key in ("saved_case", "saved_sequence", "suite_sha256")):
         raise ValueError("Saved-case revision is a one-time checker action, not repeatable step acceptance. "
@@ -324,6 +332,7 @@ def _validate_steps(steps: list) -> list[tuple]:
                     or "\x00" in command or "check_arguments" in step):
                 raise ValueError("Use a short check_command, or prefer structured check_tool/check_arguments.")
             arguments = {}
+            validate_repeatable_check(tool, {"command": command})
         else:
             if tool not in {"check_python_function", "check_javascript_function", "check_webapp", "run_verifier"} or "check_command" in step or "shell" in step:
                 raise ValueError("Structured steps support check_python_function, check_javascript_function, check_webapp or run_verifier; omit shell/check_command.")
