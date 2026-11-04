@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path, PurePosixPath
@@ -110,18 +111,20 @@ def validated_manifest(archive):
     if not isinstance(manifest, list) or not manifest or len(manifest) > 250:
         raise ValueError("Invalid release manifest.")
     files = [*manifest, "install-files.json"]
-    if len(set(files)) != len(files):
+    if not all(isinstance(name, str) for name in files):
+        raise ValueError("Invalid release path.")
+    if len({name.casefold() for name in files}) != len(files):
         raise ValueError("Duplicate release file.")
     protected = {
-        "LongTasks",
-        "Projects",
-        "Cloud",
-        "Media",
+        "longtasks",
+        "projects",
+        "cloud",
+        "media",
         "data",
-        "Toolbox",
-        "Updates",
-        "Temp",
-        "Downloads",
+        "toolbox",
+        "updates",
+        "temp",
+        "downloads",
     }
     expanded = 0
     for name in files:
@@ -135,7 +138,8 @@ def validated_manifest(archive):
             or ":" in name
             or name != pure.as_posix()
             or any(part in ("", ".", "..") for part in pure.parts)
-            or pure.parts[0] in protected
+            or any(part.endswith((".", " ")) for part in pure.parts)
+            or pure.parts[0].casefold() in protected
             or name not in names
             or archive.getinfo(name).is_dir()
         ):
@@ -533,17 +537,36 @@ def add_design_tools_to_config(root, backup):
     return config, previous
 
 
+def _replace_update_file(target, content):
+    """Publish bytes through a private sibling without borrowing existing paths."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".cale-update-",
+                                         suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def write_version_marker(root, version):
     """Commit the installed version only after its source files are in place."""
-    marker = root / ".cale-ai-install"
-    temporary = root / ".cale-ai-install.updating"
-    try:
-        temporary.write_text(
-            "Cale AI Workbench " + ".".join(map(str, version)), encoding="utf-8"
-        )
-        os.replace(temporary, marker)
-    finally:
-        temporary.unlink(missing_ok=True)
+    content = "Cale AI Workbench " + ".".join(map(str, version))
+    _replace_update_file(root / ".cale-ai-install", content.encode("utf-8"))
+
+
+def _validate_update_destinations(files):
+    """Reject release destinations redirected by existing filesystem links."""
+    root = ROOT.resolve()
+    for name in files:
+        target = root / name
+        for path in (target, *target.parents):
+            if path == root:
+                break
+            if path.is_symlink() or path.is_junction():
+                raise ValueError("Update destination is redirected by a filesystem link: " + name)
 
 
 def apply(archive_path, version):
@@ -553,7 +576,7 @@ def apply(archive_path, version):
     # Install new app-owned Python dependencies before swapping source. A
     # source update must not expose tools that the installed runtimes lack.
     with ZipFile(archive_path) as archive:
-        validated_manifest(archive)
+        _validate_update_destinations(validated_manifest(archive))
         sync_new_media_requirements(archive)
         sync_new_toolbox_requirements(archive)
     backup = (
@@ -567,15 +590,14 @@ def apply(archive_path, version):
         files = validated_manifest(archive)
         try:
             for name in files:
+                _validate_update_destinations([name])
                 target = ROOT / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 previous = backup / name
                 if target.is_file():
                     previous.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(target, previous)
-                staged = target.with_name(target.name + ".updating")
-                staged.write_bytes(archive.read(name))
-                os.replace(staged, target)
+                _replace_update_file(target, archive.read(name))
                 replaced.append((target, previous))
             migration = add_design_tools_to_config(ROOT, backup)
             if migration:
