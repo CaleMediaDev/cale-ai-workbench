@@ -20,7 +20,7 @@ def test_failed_scan_export_closes_image_resources(tmp_path):
     pdf = tmp_path / "scan.pdf"
     pdf.write_bytes(b"%PDF mocked")
     textpage = Mock()
-    textpage.get_text_range.return_value = ""
+    textpage.get_text_bounded.return_value = ""
     image = Mock()
     image.save.side_effect = OSError("image export failed")
     bitmap = Mock()
@@ -55,7 +55,7 @@ def test_native_pdf_does_not_require_vision_worker(tmp_path):
     pdf = tmp_path / "native.pdf"
     pdf.write_bytes(b"%PDF mocked")
     textpage = Mock()
-    textpage.get_text_range.return_value = "Native invoice 4817"
+    textpage.get_text_bounded.return_value = "Native invoice 4817"
     page = Mock()
     page.get_textpage.return_value = textpage
     document = Mock()
@@ -92,11 +92,11 @@ def test_text_layer_error_falls_back_to_vision_and_preserves_native_text(tmp_pat
     pdf = tmp_path / "damaged-text.pdf"
     pdf.write_bytes(b"%PDF mocked")
     native_textpage = Mock()
-    native_textpage.get_text_range.return_value = "Order A-1742"
+    native_textpage.get_text_bounded.return_value = "Order A-1742"
     native_page = Mock()
     native_page.get_textpage.return_value = native_textpage
     damaged_textpage = Mock()
-    damaged_textpage.get_text_range.side_effect = PdfiumError("unreadable text layer")
+    damaged_textpage.get_text_bounded.side_effect = PdfiumError("unreadable text layer")
     image = Mock()
     bitmap = Mock()
     bitmap.to_pil.return_value = image
@@ -130,6 +130,42 @@ def test_text_layer_error_falls_back_to_vision_and_preserves_native_text(tmp_pat
     assert damaged_page.close.call_count == 2
     image.close.assert_called_once_with()
     bitmap.close.assert_called_once_with()
+    document.close.assert_called_once_with()
+
+
+def test_native_pdf_preserves_supplementary_unicode(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    pdf = tmp_path / "unicode.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    text = "Name: \U00020000"
+    textpage = Mock()
+    # Model the range API's UCS-2 limitation versus bounded Unicode extraction.
+    textpage.get_text_range.return_value = "Name: "
+    textpage.get_text_bounded.return_value = text
+    page = Mock()
+    page.get_textpage.return_value = textpage
+    document = Mock()
+    document.__len__ = Mock(return_value=1)
+    document.__getitem__ = Mock(return_value=page)
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(PdfDocument=Mock(return_value=document)),
+        "media_worker": None,
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert result["text"] == (
+        "[Selectable PDF text]\n\n[Page 1; selectable text]\n" + text
+    )
+    assert result["pages_read"] == [1]
+    assert result["scanned_pages"] == []
+    textpage.get_text_bounded.assert_called_once_with()
+    textpage.get_text_range.assert_not_called()
+    page.render.assert_not_called()
+    textpage.close.assert_called_once_with()
+    page.close.assert_called_once_with()
     document.close.assert_called_once_with()
 
 
