@@ -7045,3 +7045,29 @@ def test_recovery_claim_preserves_permission_and_account_authentication_barriers
         'I cannot use local tools because the file access adapter is missing.',
     ]:
         assert native_agent.capability_claim_with_unmet_goal(item,message),message
+
+
+def test_recovery_preserves_real_focused_browser_specialist_without_spending_turn(tmp_path):
+    import long_tasks
+    item,folder,source,bad,active,revision,runtime=submission_decision_fixture(tmp_path,'recovery-specialist')
+    suite=folder/'.local-ai/webapp-check.json';saved=suite.read_bytes()
+    state=native_agent.read_state(item);state.update(step_focus_turns=1,status='continue')
+    native_agent.save_state(item,state)
+    notice=native_agent.active_step_repair_notice(item,copy.deepcopy(state))
+    specialist=native_agent.focused_step_repair_request(item,copy.deepcopy(state),native_agent.TOOLS,notice,65536)
+    assert [tool['function']['name'] for tool in specialist['tools']]==['check_webapp']
+    goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='repeated_failure')
+    task_context.recovery_catalog(folder,episode['id'],[])
+    seen=[]
+    def complete(payload):
+        seen.append(payload)
+        return {'choices':[{'message':{'role':'assistant','content':'I will preserve the original acceptance.'}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',runtime):
+        native_agent.run_slice(item,complete=complete)
+    assert len(seen)==1
+    assert [tool['function']['name'] for tool in seen[0]['tools']]==['check_webapp']
+    assert not seen[0].get('_native_capability_recovery')
+    assert task_context.recovery_episode(folder,goal,active)['turns']==0
+    assert suite.read_bytes()==saved and (folder/'index.html').read_bytes()==source
+    assert task_context.step_status(folder)['done']==0

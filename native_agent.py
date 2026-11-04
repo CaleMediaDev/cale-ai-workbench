@@ -5140,7 +5140,13 @@ def run_slice(project: dict, complete=None) -> dict:
         available_tools = acceptance_repair_tools(project, state, available_tools)
         if planning:
             available_tools = initial_plan_tools(project, available_tools)
-        recovery_request = None if needs_initial_plan else capability_recovery_request(project,state,messages,available_tools)
+        # Prefer an already diagnosed narrow checker repair before reserving a
+        # generic recovery turn. A missing module has no such browser specialist.
+        decision = active_step_repair_notice(project, state) if not focus and not planning else None
+        scoped_request = (focused_step_repair_request(project, state, available_tools, decision, context_limit)
+                          if not needs_initial_plan and not focus else None)
+        recovery_request = (None if needs_initial_plan or focus or scoped_request else
+                            capability_recovery_request(project,state,messages,available_tools))
         if recovery_request and recovery_request.get('_capability_recovery_reload'):
             latest=read_state(project)
             if latest.get('status') in {'paused','stopped','done'}:return latest
@@ -5165,7 +5171,6 @@ def run_slice(project: dict, complete=None) -> dict:
                 "Avoid searching for another copy of the same error or saving unverified lessons. "
                 "Other discovery tools return periodically if the repair needs them."
             )}]
-        decision = active_step_repair_notice(project, state) if not focus and not planning else None
         if decision:
             call_messages = [*call_messages, decision]
         request = {"model": LOCAL_MODEL, "messages": call_messages,
@@ -5188,7 +5193,7 @@ def run_slice(project: dict, complete=None) -> dict:
                 "before creating this queue. A plan records work still to do; it is not a passing result. "
                 "Normal implementation tools return after a valid plan has been saved.")}]
         elif not focus:
-            scoped = recovery_request or focused_step_repair_request(project, state, available_tools, decision, context_limit)
+            scoped = scoped_request or recovery_request
             if scoped:
                 request.update(scoped)
                 save_state(project, state)  # Reserve the bounded turn before a crash or network failure.
