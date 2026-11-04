@@ -174,8 +174,12 @@ def main() -> int:
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--keep-folder", type=Path, required=True)
     parser.add_argument("--slices", type=int, default=2)
+    parser.add_argument("--max-seconds", type=float, default=300,
+                        help="Inference budget; grading runs separately and acceptance stays unchanged")
     parser.add_argument("--resume", action="store_true", help="Continue only this synthetic fixture; retain prior evidence")
     args = parser.parse_args()
+    if not 0 < args.max_seconds <= 1800:
+        parser.error("Use an inference budget above zero and at most 1800 seconds")
     runtime = args.runtime_root.resolve(strict=True)
     if not (runtime / "LongTasks/model-approvals.json").is_file():
         parser.error("Use an installed runtime's actual model approvals")
@@ -197,9 +201,9 @@ def main() -> int:
     initial_turns = native_agent.read_state(project).get("turns", 0)
     initial_source = hashlib.sha256((folder / "index.html").read_bytes()).hexdigest() if (folder / "index.html").is_file() else None
     stats = {"model_calls": 0, "tool_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "tools_used": [], "routes": []}
-    router = observed_router(stats)
     state, failure = {}, None
     started = time.monotonic()
+    router = observed_router(stats, deadline=started + args.max_seconds)
     with (patch("routing_mode.load_scope", return_value="local_only"), patch("cloud_ai.Router", return_value=router),
           patch.object(model_library, "ROOT", runtime), patch.object(long_tasks, "projects", return_value=[project])):
         try:
@@ -221,6 +225,7 @@ def main() -> int:
     passed = state.get("status") == "done" and graded["passed"] and not failure
     deferred = bool(failure and failure.startswith("RuntimeError: Benchmark deferred:"))
     report = {"scenario": "offline_expense_app", "brief": BRIEF, "seconds": round(elapsed, 2), **stats,
+              "inference_budget_seconds": args.max_seconds,
               "grade_seconds": round(time.monotonic() - grading_started, 2),
               "total_seconds": round(time.monotonic() - started, 2),
               "resumed": args.resume, "initial_turns": initial_turns, "initial_source_sha256": initial_source,

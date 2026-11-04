@@ -35,22 +35,37 @@ def require_idle_media(runtime: Path) -> None:
                 continue
 
 
-def observed_router(stats: dict):
+def observed_router(stats: dict, deadline: float | None = None):
     """Observe production routing without replacing native feedback or eligibility."""
     import cloud_ai
 
     class ObservedRouter(cloud_ai.Router):
         def complete(self, payload, task_id="", **kwargs):
+            if deadline is not None and time.monotonic() >= deadline:
+                stats["time_budget_exhausted"] = True
+                raise RuntimeError("Benchmark time budget exhausted")
             require_idle_media(model_library.ROOT)
             started = time.monotonic()
             stats["router_call_attempts"] = stats.get("router_call_attempts", 0) + 1
             post = cloud_ai.post
             def observed_post(url, body, *args, **options):
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        stats["time_budget_exhausted"] = True
+                        raise RuntimeError("Benchmark time budget exhausted")
+                    options["timeout"] = min(options.get("timeout", 1800), remaining)
                 inference = url.endswith("/v1/chat/completions")
                 if inference:
                     require_idle_media(model_library.ROOT)  # Include internal schema/empty-output retries.
                     stats["upstream_local_calls"] = stats.get("upstream_local_calls", 0) + 1
-                response = post(url, body, *args, **options)
+                try:
+                    response = post(url, body, *args, **options)
+                except Exception:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        stats["time_budget_exhausted"] = True
+                        stats["token_usage_incomplete"] = bool(inference)
+                    raise
                 if inference:
                     for name in ("prompt_tokens", "completion_tokens"):
                         stats[name] += int((response.get("usage") or {}).get(name) or 0)
