@@ -248,6 +248,30 @@ def test_recovery_retries_png_with_invalid_chunk_checksum(tmp_path):
     assert not output.exists()
 
 
+def test_recovery_skips_null_recovery_count_without_aborting_other_jobs(tmp_path):
+    bad_id = "2" * 32
+    good_id = "3" * 32
+    malformed = {
+        "job_id": bad_id, "status": "working", "prompt": "a dog",
+        "output_path": str(tmp_path / "bad.png"), "recoveries": None,
+    }
+    quick_image._write_job(tmp_path, bad_id, malformed)
+    quick_image._write_job(tmp_path, good_id, {
+        "job_id": good_id, "status": "working", "prompt": "a dog",
+        "output_path": str(tmp_path / "good.png"),
+    })
+
+    with (patch.object(quick_image, "_worker_running", return_value=False),
+          patch.object(quick_image, "_launch_job") as launch):
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_called_once_with(tmp_path, good_id)
+
+    assert quick_image.image_job_status(tmp_path, bad_id) == malformed
+    recovered = quick_image.image_job_status(tmp_path, good_id)
+    assert recovered["status"] == "queued"
+    assert recovered["recoveries"] == 1
+
+
 def test_recovery_skips_non_object_job_records(tmp_path):
     for index, malformed in enumerate((None, [], "invalid", 42)):
         root = tmp_path / str(index)
