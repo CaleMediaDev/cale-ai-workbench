@@ -102,6 +102,7 @@ def test_failed_pages_consume_the_crawl_budget(tmp_path, monkeypatch, failure):
 
 @pytest.mark.parametrize("markdown, expected", [
     (types.SimpleNamespace(fit_markdown="", raw_markdown="Raw page content"), "Raw page content"),
+    (types.SimpleNamespace(fit_markdown=" \n\t", raw_markdown="Raw page content"), "Raw page content"),
     (types.SimpleNamespace(fit_markdown="Fitted content", raw_markdown="Raw content"), "Fitted content"),
     ("Plain Markdown", "Plain Markdown"),
     (types.SimpleNamespace(fit_markdown="", raw_markdown=""), None),

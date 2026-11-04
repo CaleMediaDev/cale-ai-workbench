@@ -62,8 +62,9 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 if isinstance(markdown_result, str):
                     markdown = markdown_result
                 else:
-                    markdown = (getattr(markdown_result, "fit_markdown", "")
-                                or getattr(markdown_result, "raw_markdown", "") or "")
+                    markdown = getattr(markdown_result, "fit_markdown", "") or ""
+                    if not str(markdown).strip():
+                        markdown = getattr(markdown_result, "raw_markdown", "") or ""
                 markdown = str(markdown)[:100_000]
                 if not markdown.strip():
                     raise RuntimeError("No readable page content")
