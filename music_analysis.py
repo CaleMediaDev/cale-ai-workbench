@@ -64,6 +64,8 @@ def analyze_music(source_path: str) -> dict:
     if not np.isfinite(duration) or duration <= 0:
         raise ValueError("The audio file has no playable duration.")
     signal, sample_rate = librosa.load(str(source), sr=22050, mono=True, duration=MAX_SECONDS)
+    if not np.isfinite(signal).all():
+        raise ValueError("The audio contains non-finite samples and cannot be analyzed.")
     if len(signal) == 0 or float(np.max(np.abs(signal))) < 0.001:
         raise ValueError("The audio is silent or too quiet to analyze.")
 
