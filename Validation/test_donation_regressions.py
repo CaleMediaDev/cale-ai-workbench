@@ -70,6 +70,12 @@ class CalculatorPrecisionTests(unittest.TestCase):
         self.assertNotIn("about", displayed)
         self.assertEqual(Fraction(displayed), Fraction(1, 2**200))
 
+    def test_division_by_zero_returns_safe_message(self):
+        expression = "1/0"
+        result = calculate(expression)
+        self.assertIsNotNone(result)
+        self.assertIn("Cannot divide by zero", result)
+
 
 class TaskElapsedTimeRegressionTests(unittest.TestCase):
     def test_nonfinite_elapsed_timestamps_are_unavailable(self):

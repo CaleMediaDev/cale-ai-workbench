@@ -45,6 +45,8 @@ def _evaluate(node: ast.AST, expression: str, depth: int = 0) -> Fraction:
         if isinstance(node.op, ast.Mult):
             return _bounded(left * right)
         if isinstance(node.op, ast.Div):
+            if right == 0:
+                raise ValueError("Cannot divide by zero.")
             return _bounded(left / right)
         if isinstance(node.op, ast.Pow) and right.denominator == 1 and abs(right) <= 100:
             return _bounded(left ** right.numerator)
