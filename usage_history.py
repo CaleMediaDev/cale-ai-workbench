@@ -18,19 +18,27 @@ OBSERVER = ContextVar("cale_usage_observer", default=None)
 def _connection():
     DATABASE.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DATABASE, timeout=20)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("""CREATE TABLE IF NOT EXISTS usage_events (
-        id INTEGER PRIMARY KEY, timestamp REAL NOT NULL, source TEXT NOT NULL,
-        model TEXT NOT NULL, prompt_tokens INTEGER NOT NULL,
-        completion_tokens INTEGER NOT NULL, total_tokens INTEGER NOT NULL
-    )""")
-    conn.execute("CREATE INDEX IF NOT EXISTS usage_time ON usage_events(timestamp)")
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(usage_events)")}
-    if "tokens_per_second" not in columns:
-        conn.execute("ALTER TABLE usage_events ADD COLUMN tokens_per_second REAL")
-    if "task_id" not in columns:
-        conn.execute("ALTER TABLE usage_events ADD COLUMN task_id TEXT NOT NULL DEFAULT ''")
-    conn.execute("CREATE INDEX IF NOT EXISTS usage_task ON usage_events(task_id)")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        # Schema inspection and migration must share one writer lock. Otherwise
+        # parallel completions can both try to add the same missing column.
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("""CREATE TABLE IF NOT EXISTS usage_events (
+            id INTEGER PRIMARY KEY, timestamp REAL NOT NULL, source TEXT NOT NULL,
+            model TEXT NOT NULL, prompt_tokens INTEGER NOT NULL,
+            completion_tokens INTEGER NOT NULL, total_tokens INTEGER NOT NULL
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS usage_time ON usage_events(timestamp)")
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(usage_events)")}
+        if "tokens_per_second" not in columns:
+            conn.execute("ALTER TABLE usage_events ADD COLUMN tokens_per_second REAL")
+        if "task_id" not in columns:
+            conn.execute("ALTER TABLE usage_events ADD COLUMN task_id TEXT NOT NULL DEFAULT ''")
+        conn.execute("CREATE INDEX IF NOT EXISTS usage_task ON usage_events(task_id)")
+        conn.commit()
+    except BaseException:
+        conn.close()
+        raise
     return conn
 
 

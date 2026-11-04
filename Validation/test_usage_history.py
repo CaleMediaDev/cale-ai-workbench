@@ -1,8 +1,43 @@
 """Token graph counts only real provider-reported usage."""
 
 import sqlite3
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import usage_history
+
+
+def test_concurrent_legacy_migration_does_not_drop_usage(tmp_path, monkeypatch):
+    database = tmp_path / "usage.db"
+    monkeypatch.setattr(usage_history, "DATABASE", database)
+    connect = sqlite3.connect
+    with connect(database) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""CREATE TABLE usage_events (
+            id INTEGER PRIMARY KEY, timestamp REAL NOT NULL, source TEXT NOT NULL,
+            model TEXT NOT NULL, prompt_tokens INTEGER NOT NULL,
+            completion_tokens INTEGER NOT NULL, total_tokens INTEGER NOT NULL)""")
+
+    class SlowMigration(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql.startswith("ALTER TABLE usage_events"):
+                # Simulate a descheduled worker after reading the old schema.
+                time.sleep(.05)
+            return super().execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(usage_history.sqlite3, "connect",
+                        lambda *args, **kwargs: connect(*args, factory=SlowMigration, **kwargs))
+    start = threading.Barrier(8)
+
+    def record(_):
+        start.wait(timeout=5)
+        return usage_history.record_completion({"usage": {"total_tokens": 17}}, "ollama")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(record, range(8)))
+    assert all(results)
+    assert usage_history.history()["total"] == 136
 
 
 def test_radio_usage_keeps_exact_station_attribution(tmp_path, monkeypatch):
