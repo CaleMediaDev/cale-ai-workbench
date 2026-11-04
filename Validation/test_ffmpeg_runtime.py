@@ -63,6 +63,36 @@ def test_version_health_check_uses_bytes(tmp_path, stdout, returncode, expected)
     )
 
 
+@pytest.mark.parametrize("repair_fails", [False, True])
+def test_background_repair_only_throttles_failures(tmp_path, repair_fails):
+    with patch.object(ffmpeg_runtime, "_last_attempt", None), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", return_value=False), \
+            patch.object(ffmpeg_runtime, "ensure") as ensure, \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        ensure.return_value = ffmpeg_runtime.executable(tmp_path)
+        if repair_fails:
+            ensure.side_effect = RuntimeError("repair failed")
+        thread.return_value.is_alive.return_value = False
+        # Run the worker synchronously without installing anything.
+        thread.return_value.start.side_effect = (
+            lambda: thread.call_args.kwargs["target"]()
+        )
+
+        ffmpeg_runtime.start_background(tmp_path)
+        ensure.assert_called_once_with(tmp_path)
+        assert ffmpeg_runtime._last_attempt == (10.0 if repair_fails else None)
+
+        # Model another missing executable shortly after the first attempt.
+        clock.return_value = 20.0
+        ffmpeg_runtime.start_background(tmp_path)
+
+        expected_attempts = 1 if repair_fails else 2
+        assert ensure.call_count == expected_attempts
+        assert thread.return_value.start.call_count == expected_attempts
+
+
 def test_first_background_repair_is_not_throttled_at_low_uptime(tmp_path):
     # Preserve the module's initial timestamp while restoring it after this test.
     with patch.object(ffmpeg_runtime, "_last_attempt", ffmpeg_runtime._last_attempt), \

@@ -112,10 +112,13 @@ def start_background(root: Path = ROOT) -> None:
     _last_attempt = time.monotonic()
 
     def repair() -> None:
+        global _last_attempt
         try:
             ensure(root)
         except (OSError, RuntimeError, subprocess.TimeoutExpired):
             pass  # The checklist remains in attention; retry after five minutes.
+        else:
+            _last_attempt = None
 
     _thread = threading.Thread(target=repair, name="ffmpeg-repair", daemon=True)
     _thread.start()
