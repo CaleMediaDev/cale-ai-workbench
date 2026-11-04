@@ -105,6 +105,41 @@ def test_background_update_is_not_started_twice(tmp_path, monkeypatch):
     assert len(launches) == 1
 
 
+def test_background_launch_failure_records_failed_progress_and_can_retry(tmp_path, monkeypatch):
+    progress = tmp_path / "install-progress.json"
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ROOT", tmp_path)
+    monkeypatch.setattr(runtime_features, "ready", lambda: False)
+    monkeypatch.setattr(runtime_features.time, "time", lambda: 1000)
+    launches = []
+
+    def launch(*args, **kwargs):
+        launches.append(args)
+        if len(launches) == 1:
+            raise OSError("Unable to launch installer")
+
+    monkeypatch.setattr(runtime_features.subprocess, "Popen", launch)
+
+    with pytest.raises(OSError, match="Unable to launch installer"):
+        runtime_features.start_background()
+
+    current = json.loads(progress.read_text(encoding="utf-8"))
+    assert current["status"] == "failed"
+    assert current["percent"] == 0
+    assert current["attempts"] == 1
+    assert current["owner"] == "runtime_features"
+    assert current["current"] == "Tool update needs attention: Unable to launch installer"
+    assert not runtime_features.start_background()
+    assert len(launches) == 1
+
+    monkeypatch.setattr(runtime_features.time, "time", lambda: 1031)
+    assert runtime_features.start_background()
+    assert len(launches) == 2
+    current = json.loads(progress.read_text(encoding="utf-8"))
+    assert current["status"] == "working"
+    assert current["attempts"] == 2
+
+
 def test_verified_tools_clear_stale_failed_setup(tmp_path, monkeypatch):
     progress = tmp_path / "install-progress.json"
     progress.write_text(json.dumps({"status": "failed", "current": "pip missing", "owner": "runtime_features"}), encoding="utf-8")
