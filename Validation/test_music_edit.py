@@ -182,6 +182,45 @@ def test_edit_music_rejects_truncated_wav_after_successful_exit(tmp_path, monkey
     assert len(staged_paths) == 2
 
 
+@pytest.mark.parametrize("channels", [1, 2])
+def test_edit_music_rejects_incomplete_final_wav_frame(tmp_path, monkeypatch, channels):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio"
+    source.write_bytes(original)
+    staged_paths = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def incomplete_success(command, **kwargs):
+        assert kwargs["timeout"] == 3600
+        assert "-n" in command
+        staged = Path(command[-1])
+        staged_paths.append(staged)
+        frame_size = channels * 2
+        with wave.open(str(staged), "wb") as audio:
+            audio.setnchannels(channels)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x00" * (160 * frame_size + 1))
+        # The frame count hides the extra byte declared in the data chunk.
+        with wave.open(str(staged), "rb") as audio:
+            assert audio.getnframes() == 160
+            assert len(audio.readframes(160)) == 160 * frame_size
+            assert audio.readframes(1) == b"\x00"
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", incomplete_success)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="incomplete WAV frame"):
+            music_edit.edit_music(str(source), str(output))
+        assert not output.exists()
+        assert source.read_bytes() == original
+        assert all(not path.parent.exists() for path in staged_paths)
+
+    assert len(staged_paths) == 2
+
+
 def test_edit_music_timeout_discards_partial_audio_and_allows_retry(tmp_path, monkeypatch):
     source = tmp_path / "song.wav"
     output = tmp_path / "clip.wav"
