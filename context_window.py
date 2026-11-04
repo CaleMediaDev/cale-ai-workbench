@@ -74,7 +74,9 @@ def desired_context(info, ram_bytes, weight_bytes):
         raise ValueError("This model has less than the 64K Hermes minimum")
     reserve = max(8 * 2**30, ram_bytes // 8)
     available = max(0, ram_bytes - weight_bytes - reserve)
-    affordable = max(MIN_AGENT_CONTEXT, available // (128 * 1024))
+    affordable = available // (128 * 1024)
+    if affordable < MIN_AGENT_CONTEXT:
+        raise ValueError("Insufficient memory for the 64K Hermes minimum")
     if affordable >= native:
         return native
     window = MIN_AGENT_CONTEXT
