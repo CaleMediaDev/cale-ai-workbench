@@ -117,6 +117,44 @@ def test_background_repair_ignores_non_object_progress(tmp_path, monkeypatch):
             missing.assert_called_once_with(tmp_path)
 
 
+def test_background_repair_resolves_relative_installation_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "installation"
+    root.mkdir()
+    (root / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    script = root / "Repair-CoreTools.ps1"
+    script.touch()
+    monkeypatch.setattr(core_tool_health, "_last_repair", None)
+    monkeypatch.setattr(core_tool_health, "_repair_thread", None)
+    launches = []
+
+    class ImmediateThread:
+        def __init__(self, target, **kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+        def is_alive(self):
+            return False
+
+    def run(args, **kwargs):
+        launches.append((args, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(core_tool_health.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(core_tool_health.subprocess, "run", run)
+    with patch.object(core_tool_health, "missing", side_effect=[["GitHub CLI"], []]):
+        assert core_tool_health.start_background(Path("installation"))
+
+    assert len(launches) == 1
+    args, kwargs = launches[0]
+    assert kwargs["cwd"] == root
+    assert Path(args[args.index("-File") + 1]) == script
+    assert args[-2:] == ["-Destination", str(root)]
+    assert json.loads((root / "LongTasks/core-tool-repair.json").read_text())["status"] == "complete"
+
+
 def test_background_repair_runs_once_and_rechecks(tmp_path, monkeypatch):
     (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
     progress = tmp_path / "LongTasks/install-progress.json"
