@@ -86,7 +86,7 @@ def cpu_percent(previous, current):
         return None
     idle = current[0] - previous[0]
     total = current[1] - previous[1]
-    if total <= 0 or idle < 0:
+    if total <= 0 or idle < 0 or idle > total:
         return None
     return max(0, min(100, round(100 * (1 - idle / total))))
 
