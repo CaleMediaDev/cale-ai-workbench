@@ -273,3 +273,22 @@ def test_explicit_bpm_is_parsed_for_music_engine():
     assert music_style.requested_bpm("80-bpm synth groove") == 80
     assert music_style.requested_bpm("a fast electronic track") is None
     assert music_style.requested_bpm("10 bpm drone") is None
+
+
+def test_explicit_lead_and_chops_keep_full_lead_caption_idempotent():
+    for gender in ("female", "male"):
+        request = f"Dubstep with vocal chops and {gender} lead vocals"
+        caption = music_style.enhance(request)
+        assert f"{gender} lead vocals throughout" in caption
+        assert f"short {gender} vocal hooks" not in caption
+        assert "vocal chops" in caption
+        assert music_style.enhance(caption) == caption
+        assert music_style.requires_sustained_vocals(caption)
+
+
+def test_lead_cue_from_old_feedback_does_not_override_current_chopped_texture():
+    request = "Heavy dubstep with vocal chops, without any male lead vocals"
+    caption = music_style.enhance(request + "\nPast user feedback: Add female lead vocals")
+    assert caption.startswith("Sparse chopped vocal syllables")
+    assert "clear sung verses and chorus" not in caption
+    assert not music_style.requires_sustained_vocals(caption)
