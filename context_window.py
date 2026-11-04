@@ -62,7 +62,9 @@ def native_context(info):
     ]
     if not values:
         raise ValueError("Cannot determine native context limit from model metadata")
-    return max(values)
+    if len(set(values)) != 1:
+        raise ValueError("Cannot determine native context limit from ambiguous model metadata")
+    return values[0]
 
 
 def model_bytes(model):
