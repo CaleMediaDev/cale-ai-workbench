@@ -8,6 +8,26 @@ import public_api_catalog
 import toolbox_mcp
 
 
+def test_catalog_preserves_last_good_snapshot_on_non_utf8_download(tmp_path):
+    cache = tmp_path / "apis.json"
+    snapshot = [{"name": "Last good catalog"}]
+    original = json.dumps(snapshot).encode("utf-8")
+    cache.write_bytes(original)
+    now = cache.stat().st_mtime + public_api_catalog.MAX_AGE + 1
+    downloaded = json.dumps([{"name": "Replacement"}]).encode("utf-16")
+
+    with patch.object(public_api_catalog, "CACHE", cache), \
+            patch.object(public_api_catalog.time, "time", return_value=now), \
+            patch.object(public_api_catalog, "urlopen") as open_url:
+        open_url.return_value.__enter__.return_value.read.return_value = downloaded
+        data, fresh = public_api_catalog._catalog()
+
+    open_url.assert_called_once()
+    assert data == snapshot
+    assert fresh is False
+    assert cache.read_bytes() == original
+
+
 def test_search_public_apis_sorts_non_string_names(tmp_path):
     cache = tmp_path / "apis.json"
     cache.write_text(json.dumps([
