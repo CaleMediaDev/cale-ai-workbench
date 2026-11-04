@@ -252,7 +252,10 @@ def watch(device=0, parent_pid=None, parent_started=None):
                     enrolling_started = time.monotonic()
                 except (OSError, ValueError, KeyError, TypeError):
                     pass
-                ENROLL_REQUEST.unlink(missing_ok=True)
+                try:
+                    ENROLL_REQUEST.unlink(missing_ok=True)
+                except OSError:
+                    emit("notice", "The face enrollment request could not be removed.")
             if enrolling_name and time.monotonic() - enrolling_started > 12:
                 emit("notice", "I couldn't learn that face. Try introducing yourself while looking at the camera.")
                 enrolling_name = None
