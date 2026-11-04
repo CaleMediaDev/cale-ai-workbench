@@ -400,7 +400,7 @@ def game_probe_current(source, root, info=None):
             and 0 <= time.time() - report["updated"] < 30 * 86400
             and isinstance(report.get("build", {}).get("passed"), bool)
         )
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError):
         return False
 
 
