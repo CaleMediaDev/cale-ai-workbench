@@ -214,6 +214,23 @@ def test_download_filename_does_not_reuse_dangling_symlink(tmp_path):
     assert target.read_text(encoding="utf-8") == "downloaded"
 
 
+@pytest.mark.parametrize("character", ["界", "😀"])
+def test_download_filename_bounds_unicode_bytes_and_preserves_collisions(tmp_path, character):
+    filename = character * 120 + ".txt"
+    first = native_browser._download_target(tmp_path, filename)
+    assert first.parent == tmp_path / "Downloads"
+    assert 0 < len(first.name.encode("utf-8")) <= 120
+    assert first.name == character * (120 // len(character.encode("utf-8")))
+    first.write_text("original", encoding="utf-8")
+
+    second = native_browser._download_target(tmp_path, filename)
+    assert second != first
+    assert second.parent == first.parent
+    second.write_text("new download", encoding="utf-8")
+    assert first.read_text(encoding="utf-8") == "original"
+    assert second.read_text(encoding="utf-8") == "new download"
+
+
 def test_download_filename_stays_in_project_and_does_not_overwrite(tmp_path):
     first = native_browser._download_target(tmp_path, "../secret.txt")
     assert first.parent == tmp_path / "Downloads"
