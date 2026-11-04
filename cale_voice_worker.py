@@ -72,7 +72,8 @@ def main():
     for line in sys.stdin:
         try:
             request = json.loads(line)
-            response = generate(model, voice_prompt, request["text"], request["output_path"])
+            with contextlib.redirect_stdout(sys.stderr):
+                response = generate(model, voice_prompt, request["text"], request["output_path"])
         except Exception as exc:
             response = {"error": str(exc)[:300]}
         print(json.dumps(response, ensure_ascii=True), flush=True)
