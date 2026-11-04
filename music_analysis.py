@@ -93,7 +93,12 @@ def analyze_music(source_path: str) -> dict:
     for segment_index in range(segment_count):
         # Round absolute boundaries rather than accumulating a rounded interval.
         start = round(segment_index * frames_per_segment)
-        end = round((segment_index + 1) * frames_per_segment)
+        # Include trailing frames in the final segment, not a new segment.
+        end = (
+            chroma.shape[1]
+            if segment_index == segment_count - 1
+            else round((segment_index + 1) * frames_per_segment)
+        )
         if start >= chroma.shape[1]:
             break
         name = _best_chord(np.mean(chroma[:, start:end], axis=1))
