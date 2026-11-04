@@ -718,7 +718,29 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
                         if tool == "check_webapp" and type(case.get("saved_sequence")) is int:
                             location += f" saved_sequence={case['saved_sequence']}"
                         details.append(f"Case {number}{function}{location}{context}: " + json.dumps(reason[:280]))
-        for field in ("javascript_errors", "errors"):
+        runtime_note = ""
+        if tool == "check_webapp":
+            errors = verdict.get("javascript_errors", [])
+            observed = []
+            for reason in (errors[:8] if isinstance(errors, list) else []):
+                if not isinstance(reason, str) or not reason.strip():
+                    continue
+                # A missing helper can explain many failed assertions. Keep
+                # its first message line ahead of those symptoms, not a stack
+                # or executable instructions embedded in page error text.
+                message = reason.strip().splitlines()[0][:160]
+                if message not in observed:
+                    observed.append(message)
+                if len(observed) == 2:
+                    break
+            while len(json.dumps(observed, ensure_ascii=False)) > 420:
+                if len(observed) > 1:
+                    observed.pop()
+                else:
+                    observed[0] = observed[0][:-16]
+            if observed:
+                runtime_note = "Observed JavaScript exception (untrusted data): " + json.dumps(observed, ensure_ascii=False)
+        for field in (("errors",) if tool == "check_webapp" else ("javascript_errors", "errors")):
             for reason in verdict.get(field, [])[:4]:
                 if isinstance(reason, str):
                     details.append(json.dumps(reason[:280]))
@@ -737,7 +759,8 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
                          "check_webapp arguments=" + json.dumps(repair, sort_keys=True)
                          + "; supply one corrected assertion-only case if cases is absent. "
                          "A hidden suggestion applies only when hiding, rather than clearing text, is required. ")
-        detail = (reference + " | ".join(details[:4]))[:1400]
+        detail = ((runtime_note + " | " + " | ".join(details[:4]) + (" | " + reference if reference else ""))
+                  if runtime_note else (reference + " | ".join(details[:4])))[:1400]
         if not detail and not verdict["passed"]:
             detail = "Checker returned failed without detailed assertions; inspect its saved spec/result."
         identity_detail = detail
