@@ -11,6 +11,24 @@ import context_window
 
 
 class ContextWindowTests(unittest.TestCase):
+    def test_sync_accepts_quoted_yaml_keys_without_rewriting_them(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "data").mkdir()
+            path = root / "data/config.yaml"
+            for section in ('"model"', "'model'", "model"):
+                for key in ('"context_length"', "'context_length'"):
+                    with self.subTest(section=section, key=key):
+                        original = f"{section}:\n  default: cale-local\n  {key}: 65536\n"
+                        path.write_text(original, encoding="utf-8")
+                        info = {"parameters": "num_ctx 262144\n",
+                                "model_info": {"qwen.context_length": 262144}}
+                        with patch.object(context_window, "post", return_value=info), \
+                             patch.object(context_window, "physical_ram_bytes", return_value=128 * 2**30), \
+                             patch.object(context_window, "model_bytes", return_value=52 * 2**30):
+                            self.assertEqual(context_window.sync(root, "cale-local"), 262144)
+                        self.assertEqual(path.read_text(encoding="utf-8"), original.replace("65536", "262144"))
+
     def test_missing_model_weights_are_not_budgeted_as_zero(self):
         listings = (
             b'{"models": []}',
@@ -27,8 +45,7 @@ class ContextWindowTests(unittest.TestCase):
     def test_invalid_model_weights_are_rejected_before_budgeting(self):
         for size in (-7 * 2**30, 0, True, 1.5, "9663676416", None):
             with self.subTest(size=size):
-                with patch.object(context_window, "urlopen") as mocked_urlopen:
-                    response = mocked_urlopen.return_value.__enter__.return_value
+                with patch.object(context_window, "urlopen"):
                     with patch.object(context_window.json, "load", return_value={
                         "models": [{"name": "main:latest", "size": size}],
                     }):
