@@ -516,6 +516,34 @@ def test_pausing_and_muting_keep_both_decks_and_fade_position_consistent(tmp_pat
     assert not old.opened and not new.opened and not player.mixing
 
 
+def test_failed_volume_change_during_paused_fade_still_allows_resume(tmp_path):
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    player.play(tmp_path/"first.wav")
+    player.blend(tmp_path/"second.wav", 8)
+    moment[0] = 2
+    player.advance_mix()
+    player.pause()
+    old, new = player.outgoing, player.active
+    moment[0] = 52
+
+    with patch.object(new, "set_volume", side_effect=RuntimeError("Cannot set volume")):
+        with pytest.raises(RuntimeError, match="Cannot set volume"):
+            player.set_volume(40)
+
+    assert player.paused_at == 52
+    assert old.paused and new.paused
+    moment[0] = 62
+    player.resume()
+    assert player.paused_at is None
+    assert not old.paused and not new.paused
+    moment[0] = 64
+    player.advance_mix()
+    assert old.busy() and new.busy()
+    assert new.volume == pytest.approx(old.volume)
+    assert new.volume**2 + old.volume**2 == pytest.approx(40**2)
+
+
 def test_service_stages_ready_audio_immediately_and_blends_eight_seconds_before_eof(tmp_path):
     _, service, _, jobs, calls, generate = fixture(tmp_path)
     moment = [0]
