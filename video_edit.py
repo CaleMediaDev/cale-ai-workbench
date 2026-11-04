@@ -87,6 +87,8 @@ def edit_video(source_path: str, output_path: str, start_seconds: float = 0,
         filters.append(f"setpts=PTS/{rate:g}")
     if sizes[layout]:
         width, height = sizes[layout]
+        # Preserve display proportions before fitting square-pixel layouts.
+        filters.extend(["scale=iw*sar:ih", "setsar=1"])
         filters.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
         filters.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
         filters.append("setsar=1")
@@ -127,7 +129,8 @@ def join_videos(source_paths: list[str], output_path: str, layout: str = "wide")
     graph = []
     for index, source in enumerate(sources):
         args += ["-i", str(source)]
-        graph.append(f"[{index}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        graph.append(f"[{index}:v:0]scale=iw*sar:ih,setsar=1,"
+                     f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
                      f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,"
                      f"setpts=PTS-STARTPTS[v{index}]")
     # The concat filter accepts video-only clips; an optional soundtrack can be
