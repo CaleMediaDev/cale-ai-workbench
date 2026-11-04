@@ -33,6 +33,21 @@ def test_transcription_keeps_source_and_existing_outputs(tmp_path):
     assert (target / "existing.mid").read_bytes() == b"keep"
 
 
+def test_transcription_rejects_existing_file_as_output_directory(tmp_path):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"audio")
+    target = tmp_path / "notes"
+    target.write_bytes(b"keep existing file")
+
+    with patch.object(music_midi, "install") as install:
+        with pytest.raises(ValueError, match="output folder, not an existing file"):
+            music_midi.transcribe_to_midi(str(source), str(target))
+
+    install.assert_not_called()
+    assert source.read_bytes() == b"audio"
+    assert target.read_bytes() == b"keep existing file"
+
+
 def test_transcription_reports_real_midi_and_notes(tmp_path):
     source = tmp_path / "guitar.wav"
     source.write_bytes(b"audio")
