@@ -1,5 +1,6 @@
 """The voice upgrade runs independently of the desktop window."""
 
+import errno
 import json
 import stat
 import sys
@@ -101,6 +102,26 @@ class NaturalVoiceTests(unittest.TestCase):
                 self.assertEqual(run.call_count, 2)
                 self.assertIn("--download-voice", run.call_args_list[1].args[0])
                 self.assertEqual(json.loads(status.read_text())["status"], "complete")
+
+    def test_unexpected_lock_failure_replaces_stale_working_status_with_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            status = Path(folder) / "voice-status.json"
+            status.write_text(json.dumps({"status": "working"}))
+            failure = OSError(errno.EBADF, "Invalid lock descriptor")
+
+            def fail_lock(*args):
+                raise failure
+
+            fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=fail_lock)
+            with (
+                patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+                patch.object(natural_voice, "STATUS", status),
+                patch.object(natural_voice.subprocess, "run") as run,
+            ):
+                natural_voice.install()
+            self.assertEqual(json.loads(status.read_text())["status"], "error")
+            self.assertIn("Invalid lock descriptor", status.read_text())
+            run.assert_not_called()
 
     def test_missing_media_python_replaces_stale_working_status_with_error(self):
         with tempfile.TemporaryDirectory() as folder:

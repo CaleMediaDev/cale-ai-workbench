@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 import subprocess
@@ -57,7 +58,9 @@ def install():
         lock.seek(0)
         try:
             msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError:
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                save_download_status(STATUS, "error", str(exc)[:400], 0)
             return
         try:
             if not MEDIA_PYTHON.is_file():
