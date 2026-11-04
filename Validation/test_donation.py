@@ -761,7 +761,7 @@ def test_submitted_cross_revision_guard_waits_for_authoritative_review(tmp_path)
     with patch.object(donation.time, "time", return_value=1000):
         run = donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "a" * 40)
         donation.finish(tmp_path, run, "submitted", f"https://github.com/{donation.UPSTREAM}/pull/7")
-    closed = {"number": 7, "state": "closed", "merged_at": None, "base": {"repo": {"full_name": donation.UPSTREAM}},
+    closed = {"number": 7, "state": "closed", "merged_at": None, "labels": [], "base": {"repo": {"full_name": donation.UPSTREAM}},
               "head": {"ref": "cale-donation-" + run[:16]}, "body": "<!-- cale-donation:same-area -->"}
     with patch.object(donation.time, "time", return_value=100000):
         assert not donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "b" * 40)
@@ -985,7 +985,7 @@ def test_review_facts_missing_or_malformed_do_not_release_pending(tmp_path, fact
     run = donation.claim_run(tmp_path, JOB['id'], 'chatgpt', 'full_blast', 'a' * 40)
     url = f'https://github.com/{donation.UPSTREAM}/pull/7'
     donation.finish(tmp_path, run, 'submitted', url)
-    closed = {'number':7, 'state':'closed', 'base':{'repo':{'full_name':donation.UPSTREAM}},
+    closed = {'number':7, 'state':'closed', 'labels':[], 'base':{'repo':{'full_name':donation.UPSTREAM}},
               'head':{'ref':'cale-donation-' + run[:16]}, 'body':f'<!-- cale-donation:{JOB["id"]} -->', **facts}
     donation.refresh_pending_reviews(tmp_path, fetch=lambda _: closed)
     assert not donation.claim_run(tmp_path, JOB['id'], 'chatgpt', 'full_blast', 'b' * 40)
@@ -1064,7 +1064,7 @@ def test_actual_closed_review_blocks_same_fingerprint_after_global_revision_chan
     fingerprint=donation.scope_fingerprint(JOB,BLOBS)
     run=donation.claim_run(tmp_path,JOB['id'],'chatgpt','full_blast','a'*40,fingerprint)
     donation.finish(tmp_path,run,'submitted',f'https://github.com/{donation.UPSTREAM}/pull/7')
-    closed={'number':7,'state':'closed','merged_at':None,'base':{'repo':{'full_name':donation.UPSTREAM}},'head':{'ref':'cale-donation-'+run[:16]},'body':f'<!-- cale-donation:{JOB["id"]} -->'}
+    closed={'number':7,'state':'closed','merged_at':None,'labels':[],'base':{'repo':{'full_name':donation.UPSTREAM}},'head':{'ref':'cale-donation-'+run[:16]},'body':f'<!-- cale-donation:{JOB["id"]} -->'}
     donation.refresh_pending_reviews(tmp_path,fetch=lambda _:closed)
     assert not donation.claim_run(tmp_path,JOB['id'],'chatgpt','full_blast','b'*40,fingerprint)
     assert donation.claim_run(tmp_path,'unrelated-area','chatgpt','full_blast','b'*40,fingerprint)
@@ -1094,3 +1094,23 @@ def test_historical_unfamiliar_generator_does_not_guess_old_scope(tmp_path):
     fetch.assert_not_called()
     with closing(donation.connection(tmp_path)) as conn:
         assert conn.execute('SELECT scope_sha FROM runs').fetchone()[0]==''
+
+@pytest.mark.parametrize('label_facts', [{},{'labels':None},{'labels':{}},{'labels':'cale-accepted-fix'},{'labels':[None]},{'labels':[{}]},{'labels':[{'name':None}]},{'labels':[{'name':''}]},{'labels':[{'name':123}]},{'labels':[{'name':'cale-accepted-fix'},False]}])
+def test_unknown_review_labels_preserve_pending_reservation(tmp_path,label_facts):
+    run=donation.claim_run(tmp_path,JOB['id'],'chatgpt','full_blast','a'*40)
+    donation.finish(tmp_path,run,'submitted',f'https://github.com/{donation.UPSTREAM}/pull/7')
+    facts={'number':7,'state':'closed','merged_at':None,'base':{'repo':{'full_name':donation.UPSTREAM}},'head':{'ref':'cale-donation-'+run[:16]},'body':f'<!-- cale-donation:{JOB["id"]} -->',**label_facts}
+    donation.refresh_pending_reviews(tmp_path,fetch=lambda _:facts)
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute('SELECT status,review_state FROM runs WHERE id=?',(run,)).fetchone()==('submitted','')
+    assert not donation.claim_run(tmp_path,JOB['id'],'chatgpt','full_blast','b'*40)
+
+
+@pytest.mark.parametrize('merged_at,labels,expected', [('2026-11-04T15:00:00Z',[],'accepted'),(None,[{'name':'cale-accepted-fix'}],'accepted'),(None,[],'closed_unmerged'),(None,[{'name':'reviewed'}],'closed_unmerged')])
+def test_usable_review_labels_keep_positive_closure_classification(tmp_path,merged_at,labels,expected):
+    run=donation.claim_run(tmp_path,JOB['id'],'chatgpt','full_blast','a'*40)
+    donation.finish(tmp_path,run,'submitted',f'https://github.com/{donation.UPSTREAM}/pull/7')
+    facts={'number':7,'state':'closed','merged_at':merged_at,'labels':labels,'base':{'repo':{'full_name':donation.UPSTREAM}},'head':{'ref':'cale-donation-'+run[:16]},'body':f'<!-- cale-donation:{JOB["id"]} -->'}
+    donation.refresh_pending_reviews(tmp_path,fetch=lambda _:facts)
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute('SELECT status,review_state FROM runs WHERE id=?',(run,)).fetchone()==('reviewed',expected)

@@ -444,6 +444,12 @@ def refresh_pending_reviews(root: Path, fetch=None, check_cancel=lambda: None) -
                     or pr.get("base", {}).get("repo", {}).get("full_name", "").casefold() != UPSTREAM.casefold()
                     or pr.get("head", {}).get("ref") != "cale-donation-" + run_id[:16]
                     or f"<!-- cale-donation:{job} -->" not in str(pr.get("body") or "")
+                    # REST returns an array of label objects (possibly empty).
+                    # Missing/damaged labels cannot prove manual acceptance
+                    # is absent, so retain the existing pending reservation.
+                    or not isinstance(pr.get("labels"), list)
+                    or not all(isinstance(label, dict) and isinstance(label.get("name"), str)
+                               and label["name"].strip() for label in pr["labels"])
                     or "merged_at" not in pr or not (pr["merged_at"] is None or isinstance(pr["merged_at"], str) and pr["merged_at"])):
                 continue
         except (OSError, ValueError, TypeError, AttributeError, RuntimeError):
