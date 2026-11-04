@@ -37,6 +37,45 @@ def test_missing_ffmpeg_is_installed_and_validated(tmp_path):
         assert ffmpeg_runtime.working(tmp_path)
 
 
+def test_repair_restores_missing_binary_from_already_installed_package(tmp_path):
+    from types import SimpleNamespace
+
+    python = tmp_path / "Toolbox/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fake runtime")
+    source = tmp_path / "installed-package/ffmpeg.exe"
+    source.parent.mkdir()
+    target = ffmpeg_runtime.executable(tmp_path)
+    installs = []
+
+    def run(args, **kwargs):
+        if args[1] == "-c":
+            if source.is_file():
+                return subprocess.CompletedProcess(args, 0, str(source) + "\n", "")
+            return subprocess.CompletedProcess(args, 1, "", "Bundled executable missing")
+        if args[1:4] == ["-m", "pip", "install"]:
+            installs.append(args)
+            # Plain pip install leaves an already-satisfied package untouched.
+            if "--force-reinstall" in args:
+                source.write_bytes(b"restored executable")
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args == [str(target), "-version"]:
+            assert target.read_bytes() == b"restored executable"
+            return subprocess.CompletedProcess(args, 0, "ffmpeg version test\n", "")
+        raise AssertionError(f"Unexpected subprocess: {args}")
+
+    fake_msvcrt = SimpleNamespace(LK_NBLCK=1, LK_UNLCK=2, locking=lambda *args: None)
+    with patch.dict(sys.modules, {"msvcrt": fake_msvcrt}), \
+            patch.object(ffmpeg_runtime.subprocess, "run", side_effect=run):
+        assert ffmpeg_runtime.ensure(tmp_path) == target
+        assert ffmpeg_runtime.working(tmp_path)
+
+    assert len(installs) == 1
+    assert "--force-reinstall" in installs[0]
+    assert "imageio-ffmpeg==0.6.0" in installs[0]
+    assert target.read_bytes() == b"restored executable"
+
+
 def test_undecodable_version_output_is_a_failed_health_check(tmp_path):
     target = ffmpeg_runtime.executable(tmp_path)
     target.parent.mkdir(parents=True)
