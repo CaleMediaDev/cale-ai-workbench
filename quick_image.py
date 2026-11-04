@@ -98,6 +98,8 @@ def image_file_ok(path: str | Path) -> bool:
     try:
         with Image.open(source) as picture:
             picture.verify()
+        with Image.open(source) as picture:
+            picture.load()
         return True
     except (OSError, ValueError):
         return False

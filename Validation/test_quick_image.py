@@ -80,6 +80,45 @@ def test_direct_image_job_survives_starting_process_and_verifies_pixels(tmp_path
     assert quick_image.image_job_status(tmp_path, job_id)["status"] == "complete"
 
 
+def test_recovery_retries_png_with_valid_checksums_but_invalid_pixels(tmp_path):
+    import struct
+    import zlib
+
+    output = tmp_path / "broken.png"
+    Image.new("RGB", (64, 64), "orange").save(output)
+    data = bytearray(output.read_bytes())
+    offset = 8
+    while offset < len(data):
+        length = struct.unpack_from(">I", data, offset)[0]
+        if data[offset + 4:offset + 8] == b"IDAT":
+            # Break the zlib header while retaining a valid PNG chunk checksum.
+            data[offset + 8:offset + 10] = b"\x00\x00"
+            checksum = zlib.crc32(data[offset + 4:offset + 8 + length])
+            struct.pack_into(">I", data, offset + 8 + length, checksum)
+            break
+        offset += length + 12
+    else:
+        raise AssertionError("Expected an IDAT chunk")
+    output.write_bytes(data)
+    assert output.stat().st_size >= 100
+    with Image.open(output) as picture:
+        picture.verify()
+    assert not quick_image.image_file_ok(output)
+
+    job_id = "c" * 32
+    quick_image._write_job(tmp_path, job_id, {
+        "job_id": job_id, "status": "working", "prompt": "a dog",
+        "output_path": str(output),
+    })
+    with patch.object(quick_image, "_worker_running", return_value=False), patch.object(
+        quick_image, "_launch_job"
+    ) as launch:
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_called_once_with(tmp_path, job_id)
+    assert quick_image.image_job_status(tmp_path, job_id)["status"] == "queued"
+    assert not output.exists()
+
+
 def test_image_job_pause_and_resume_reuse_same_id(tmp_path):
     job_id = "a" * 32
     quick_image._write_job(tmp_path, job_id, {
