@@ -205,6 +205,32 @@ def test_optional_checks_save_results_when_browser_status_is_not_an_object(tmp_p
     assert saved == result
 
 
+@pytest.mark.parametrize("payload", [
+    b"null", b"[]", b"1", b'{"models":null}',
+    b'{"models":{}}', b'{"models":[null]}',
+])
+def test_malformed_ollama_tags_do_not_abort_readiness_checks(tmp_path, payload):
+    with (patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(payload)),
+          patch.object(readiness_checklist.capability_index, "health",
+                       return_value={"ok": False}),
+          patch.object(readiness_checklist.core_tool_health, "missing", return_value=[]),
+          patch.object(readiness_checklist.ffmpeg_runtime, "working", return_value=False)):
+        rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
+    assert rows["Local AI"]["state"] == "attention"
+    assert rows["Local AI"]["detail"] == "Ollama is not responding yet"
+
+    with (patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(payload)),
+          patch.object(readiness_checklist, "_heavy_gpu_active", return_value=False),
+          patch.object(readiness_checklist, "_media_probe", return_value={"ok": False}),
+          patch.object(readiness_checklist, "_probe_local_ai") as probe):
+        result = readiness_checklist.run_optional_checks(tmp_path, test_local=True)
+    probe.assert_not_called()
+    assert "local_ai" not in result
+    saved = json.loads((tmp_path / "LongTasks/readiness-probes.json").read_text(
+        encoding="utf-8"))
+    assert saved == result
+
+
 def test_local_ai_probe_requires_a_completed_generated_token():
     with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
             b'{"done":true,"eval_count":0}')):
