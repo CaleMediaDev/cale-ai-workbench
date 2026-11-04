@@ -89,7 +89,9 @@ class AutoRouteTests(unittest.TestCase):
                     self.assertIs(repair_messages(messages), messages)
 
     def test_excessively_nested_json_does_not_crash_recovery_routing(self):
-        depth = sys.getrecursionlimit() + 100
+        # Python 3.13's C JSON decoder can exceed the Python recursion limit.
+        # A bounded 16 KB payload reaches its actual decoder nesting guard.
+        depth = 8000
         nested = '[' * depth + '0' + ']' * depth
         messages = [{"role": "user", "content": "Calculate a tip."}]
         messages.append({"role": "system", "content":
