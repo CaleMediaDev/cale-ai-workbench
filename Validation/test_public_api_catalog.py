@@ -36,3 +36,25 @@ def test_search_public_apis_filters_auth_and_keeps_caveat(tmp_path):
                            json.dumps({"query": "weather"})))
     assert [item["name"] for item in result["results"]] == ["Open Weather"]
     assert "research leads" in result["note"]
+
+
+def test_catalog_preserves_stale_snapshot_on_incompatible_encoding(tmp_path):
+    cache = tmp_path / "apis.json"
+    snapshot = [{"name": "Last good snapshot"}]
+    original = json.dumps(snapshot).encode("utf-8")
+    cache.write_bytes(original)
+    expired_time = cache.stat().st_mtime + public_api_catalog.MAX_AGE + 1
+    downloaded = json.dumps([{"name": "Replacement"}]).encode("utf-16")
+
+    with patch.object(public_api_catalog, "CACHE", cache), \
+         patch.object(public_api_catalog.time, "time", return_value=expired_time), \
+         patch.object(public_api_catalog, "urlopen") as open_url:
+        response = open_url.return_value.__enter__.return_value
+        response.read.return_value = downloaded
+        data, fresh = public_api_catalog._catalog()
+
+    open_url.assert_called_once()
+    response.read.assert_called_once_with(public_api_catalog.MAX_BYTES + 1)
+    assert data == snapshot
+    assert fresh is False
+    assert cache.read_bytes() == original

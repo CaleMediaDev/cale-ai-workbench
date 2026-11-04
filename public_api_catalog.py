@@ -29,7 +29,7 @@ def _catalog() -> tuple[list[dict], bool]:
                 raw = response.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:
                 raise ValueError("Public API catalog exceeded its download limit.")
-            parsed = json.loads(raw)
+            parsed = json.loads(raw.decode("utf-8"))
             if not isinstance(parsed, list):
                 raise ValueError("Unexpected public API catalog format.")
             CACHE.parent.mkdir(parents=True, exist_ok=True)
