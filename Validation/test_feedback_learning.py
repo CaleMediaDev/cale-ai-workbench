@@ -41,6 +41,26 @@ def test_up_rating_is_idempotent_and_becomes_similar_success_example(tmp_path):
     assert len(feedback_learning.for_task(tmp_path, "song-2")) == 1
 
 
+def test_repeated_review_refreshes_task_snapshot_for_matching(tmp_path):
+    original = task("edited-song", "Techno synth bass", title="Techno synth bass")
+    first = feedback_learning.record(tmp_path, original, -1, "Use electronic drums")
+    assert "Use electronic drums" in feedback_learning.guidance(
+        tmp_path, "music", "Techno synth bass"
+    )
+
+    revised = task(
+        "edited-song", "Classical piano sonata", title="Classical piano sonata"
+    )
+    assert feedback_learning.record(
+        tmp_path, revised, -1, "Use softer piano dynamics"
+    ) == first
+    assert len(feedback_learning.for_task(tmp_path, "edited-song")) == 1
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    learned = feedback_learning.guidance(tmp_path, "music", "Classical piano sonata")
+    assert "Use softer piano dynamics" in learned
+    assert "Use electronic drums" not in learned
+
+
 def test_schema_initialization_failure_closes_connection(tmp_path, monkeypatch):
     import sqlite3
     from unittest.mock import Mock
