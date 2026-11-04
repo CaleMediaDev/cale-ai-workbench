@@ -11,6 +11,7 @@ import csv
 import json
 import math
 import statistics
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -206,10 +207,11 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
     while output_column in columns:
         output_column = f"prediction_{suffix}"
         suffix += 1
-    created = False
-    try:
-        with output.open("x", encoding="utf-8", newline="") as stream:
-            created = True
+    # Keep partial batches private. Publish on the same filesystem without
+    # replacing any destination created while prediction was running.
+    with tempfile.TemporaryDirectory(prefix=".table-prediction-", dir=output.parent) as temporary:
+        staged = Path(temporary) / output.name
+        with staged.open("x", encoding="utf-8", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=[*columns, output_column])
             writer.writeheader()
             for start in range(0, len(rows), 4096):
@@ -227,13 +229,7 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
                     predictions = [classes[index] for index in np.argmax(scores, axis=1)]
                 for row, prediction in zip(batch, predictions):
                     writer.writerow({**row, output_column: prediction})
-    except BaseException:
-        if created:
-            try:
-                output.unlink()
-            except OSError:
-                pass  # Preserve the original prediction or write failure.
-        raise
+        output.hardlink_to(staged)
     better = (
         model["holdout_score"] > model["baseline_score"]
         if model["problem_type"] == "classification"
