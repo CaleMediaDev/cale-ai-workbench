@@ -37,18 +37,20 @@ def total_time(created: float, updated: float, status: str,
     now = time.time() if now is None else now
     try:
         start = float(created)
-        last_change = float(updated)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "—"
     if not math.isfinite(start) or start <= 0:
         return "—"
     if status in ("ready_for_review", "accepted", "stopped"):
         try:
-            end = float(finished or 0) or last_change
+            end = float(finished or 0)
         except (TypeError, ValueError, OverflowError):
-            end = last_change
+            end = 0
         if not math.isfinite(end) or end < start:
-            end = last_change
+            try:
+                end = float(updated)
+            except (TypeError, ValueError, OverflowError):
+                return "—"
     else:
         end = now
     if not math.isfinite(end):
