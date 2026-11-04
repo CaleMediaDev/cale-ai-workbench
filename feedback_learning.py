@@ -172,10 +172,13 @@ def guidance(root: str | Path, kind: str, request: str,
     for score, row in ranked:
         if score < 0.12:
             continue  # Unrelated feedback must not pollute a new task.
+        lesson = ""
         if row["rating"] < 0 and row["note"]:
-            lessons.append("Improve: " + row["note"][:240])
+            lesson = "Improve: " + row["note"][:240]
         elif row["rating"] > 0 and score >= 0.30:
-            lessons.append("Similar task the user liked: " + row["title"][:140])
+            lesson = "Similar task the user liked: " + row["title"][:140]
+        if lesson and lesson not in lessons:
+            lessons.append(lesson)
         if len(lessons) >= min(3, limit):
             break
     if not lessons:

@@ -202,6 +202,32 @@ def test_forgotten_feedback_id_cannot_delete_a_later_review(tmp_path):
         )
 
 
+def test_duplicate_lessons_do_not_displace_distinct_feedback(tmp_path, monkeypatch):
+    timestamps = iter([10.0, 20.0, 30.0])
+    monkeypatch.setattr(feedback_learning.time, "time", lambda: next(timestamps))
+    for identifier, note in (
+        ("distinct-song", "Use a slower tempo"),
+        ("duplicate-song-1", "Use electronic drums"),
+        ("duplicate-song-2", "Use electronic drums"),
+    ):
+        feedback_learning.record(
+            tmp_path,
+            task(identifier, "Techno synth bass", title="Techno synth bass"),
+            -1, note,
+        )
+
+    learned = feedback_learning.guidance(
+        tmp_path, "music", "Techno synth bass", limit=2
+    )
+    assert learned.count("Improve: Use electronic drums") == 1
+    assert "Improve: Use a slower tempo" in learned
+    assert learned.count("\n- ") == 2
+    assert learned.index("Use electronic drums") < learned.index("Use a slower tempo")
+    # Deduplication affects retrieval only; each task retains its own review.
+    for identifier in ("distinct-song", "duplicate-song-1", "duplicate-song-2"):
+        assert len(feedback_learning.for_task(tmp_path, identifier)) == 1
+
+
 def test_review_requires_comment_for_thumbs_down(tmp_path):
     import pytest
 
