@@ -58,6 +58,8 @@ def test_crawl_saves_pages_and_searchable_memory(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("markdown, expected", [
     (types.SimpleNamespace(fit_markdown="", raw_markdown="Raw page content"), "Raw page content"),
+    (types.SimpleNamespace(fit_markdown=" \n\t", raw_markdown="Raw page content"), "Raw page content"),
+    (types.SimpleNamespace(fit_markdown=" \n\t", raw_markdown=" \n"), None),
     (types.SimpleNamespace(fit_markdown="Fitted content", raw_markdown="Raw content"), "Fitted content"),
     ("Plain Markdown", "Plain Markdown"),
     (types.SimpleNamespace(fit_markdown="", raw_markdown=""), None),
