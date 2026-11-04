@@ -15,6 +15,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager
@@ -453,9 +454,26 @@ def _render_job(job_id: str, data: dict) -> None:
                                     pass
                                 raise
                     else:
-                        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-i", str(rendered),
-                                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", str(destination)],
-                                       check=True, timeout=3600, creationflags=HIDE)
+                        # A failed conversion must not leave a partial destination
+                        # that prevents retrying the export.
+                        with tempfile.TemporaryDirectory(prefix="cale-video-") as temporary:
+                            converted = Path(temporary) / "converted.mp4"
+                            subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-i", str(rendered),
+                                            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", str(converted)],
+                                           check=True, timeout=3600, creationflags=HIDE)
+                            if not converted.is_file() or converted.stat().st_size < 1000:
+                                raise RuntimeError("The generated video file is empty.")
+                            with converted.open("rb") as source:
+                                target = destination.open("xb")
+                                try:
+                                    with target:
+                                        shutil.copyfileobj(source, target)
+                                except BaseException:
+                                    try:
+                                        destination.unlink()
+                                    except OSError:
+                                        pass
+                                    raise
                     if not destination.is_file() or destination.stat().st_size < 1000:
                         raise RuntimeError("The generated video file is empty.")
                     _write(job_id, state="complete", detail="Video saved", bytes=destination.stat().st_size)
