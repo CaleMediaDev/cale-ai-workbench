@@ -120,12 +120,13 @@ def music_countdown(job: dict, now: float | None = None) -> str:
     try:
         expected = float(job.get("estimated_seconds") or 0)
         started = float(job.get("requested_at") or job.get("created") or 0)
+        now = float(time.time() if now is None else now)
     except (TypeError, ValueError, OverflowError):
         return "Estimating from recent songs…"
     if (not math.isfinite(expected) or not math.isfinite(started) or
-            expected <= 0 or started <= 0):
+            not math.isfinite(now) or expected <= 0 or started <= 0):
         return "Estimating from recent songs…"
-    remaining = expected - max(0, (time.time() if now is None else now) - started)
+    remaining = expected - max(0, now - started)
     if remaining <= 0:
         return "Taking longer than recent songs · still working"
     return f"About {_duration(remaining)} left · estimate from recent songs"
