@@ -129,8 +129,22 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
         for notes in staging.glob("*.csv"):
             normalize_note_events(notes)
         files = sorted(path for path in staging.iterdir() if path.is_file() and path.stat().st_size > 0)
-        for path in files:
-            path.replace(target / path.name)
+        published = []
+        try:
+            for path in files:
+                destination = target / path.name
+                # Staging is on this filesystem. A link publishes complete
+                # bytes exclusively instead of overwriting a concurrent file.
+                os.link(path, destination)
+                published.append((path, destination))
+        except BaseException:
+            for staged, destination in reversed(published):
+                try:
+                    if destination.samefile(staged):
+                        destination.unlink()
+                except OSError:
+                    pass  # Preserve a replacement or an inaccessible file.
+            raise
         midi = [target / path.name for path in midi]
         files = [target / path.name for path in files]
     return {"source": str(source), "output_dir": str(target),
