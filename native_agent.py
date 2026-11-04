@@ -3550,6 +3550,26 @@ def initial_plan_tools(project: dict, available: list) -> list:
         steps["minItems"] = 2
         steps["items"]["anyOf"] = [branch for branch in steps["items"]["anyOf"]
             if branch["properties"].get("check_tool", {}).get("enum") == ["check_webapp"]]
+        # At least one unit must plan actual interaction and an observable
+        # result in the same sequence. Separate setup/observation cases remain
+        # legal because normalize_spec coalesces that adjacent representation.
+        action = {"anyOf": [
+            {"required": ["set"], "properties": {"set": {"minProperties": 1}}},
+            {"required": ["click"], "properties": {"click": {"minItems": 1}}},
+            {"required": ["keys"], "properties": {"keys": {"minItems": 1}}},
+            {"required": ["reload"], "properties": {"reload": {"const": True}}},
+        ]}
+        outcome = {"anyOf": [
+            {"required": [field], "properties": {field: {"minProperties": 1}}}
+            for field in ("expect", "state")
+        ] + [
+            {"required": [field], "properties": {field: {"minItems": 1}}}
+            for field in ("visible", "hidden")
+        ]}
+        steps["contains"] = {"required": ["check_tool", "check_arguments"], "properties": {
+            "check_tool": {"const": "check_webapp"},
+            "check_arguments": {"required": ["cases"], "properties": {
+                "cases": {"allOf": [{"contains": action}, {"contains": outcome}]}}}}}
         for branch in steps["items"]["anyOf"]:
             branch["properties"]["check_arguments"]["description"] = (
                 "set maps editable HTML IDs to strings; filling does not submit. Put any required click "
@@ -3558,7 +3578,9 @@ def initial_plan_tools(project: dict, available: list) -> list:
                 "not markup or selectors. Use expect with an output ID for rendered literal text, "
                 "including HTML markup displayed as text. "
                 "Create required rows/items through real inputs before testing their actions. "
-                "New pages may choose IDs during planning, then implement those exact controls.")
+                "New pages may choose IDs during planning, then implement those exact controls. "
+                "At least one unit must include real input actions and an observable outcome in its sequence; "
+                "layout-only units may remain static.")
     # Tighten only newly planned browser acceptance. Public checks and repair
     # contracts still support their existing literal-text visibility behavior.
     for branch in parameters["properties"]["steps"]["items"]["anyOf"]:

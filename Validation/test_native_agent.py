@@ -5916,3 +5916,78 @@ def test_initial_planning_visibility_accepts_ids_and_preserves_literal_markup_ex
         document.getElementById('preview').textContent=document.getElementById('editor').value;};</script>""")
     assert webapp_check.check(folder, saved)["passed"]  # Literal markup remains actual visible text.
     assert native_agent.TOOLS == original_tools and task_context.step_status(folder)["done"] == 0
+
+
+@pytest.mark.parametrize("defect", ["no_action", "action_only", "empty_action", "empty_outcome", "across_units"])
+def test_initial_planning_interaction_requirement_rejects_inert_sequences_before_sql(tmp_path, defect):
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "inert-plan-" + defect)
+    if defect == "no_action":
+        steps[1]["check_arguments"]["cases"] = [{"visible": ["total"]}]
+    elif defect == "action_only":
+        steps[1]["check_arguments"]["cases"] = [{"click": ["compute"]}]
+    elif defect == "empty_action":
+        steps[1]["check_arguments"]["cases"] = [{"set": {}, "click": [], "keys": [], "reload": False, "expect": {"total": "36"}}]
+    elif defect == "empty_outcome":
+        steps[1]["check_arguments"]["cases"] = [{"set": {"units": "7.2"}, "expect": {}, "state": {}, "visible": [], "hidden": []}]
+    else:
+        steps[0]["check_arguments"]["cases"] = [{"click": ["compute"]}]
+        steps[1]["check_arguments"]["cases"] = [{"visible": ["total"]}]
+    original_tools = copy.deepcopy(native_agent.TOOLS)
+    def complete(payload):
+        assert payload["_native_workload"] == "initial_step_planning"
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps}, "inert-planned-sequence")
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    reply = next(message["content"] for message in state["messages"] if message.get("tool_call_id") == "inert-planned-sequence")
+    assert "offered schema" in reply and task_context.step_status(folder)["total"] == 0
+    assert not (folder / "index.html").exists() and native_agent.TOOLS == original_tools
+
+
+@pytest.mark.parametrize("adjacent", [False, True])
+def test_initial_planning_interaction_accepts_static_layout_then_real_sequence_and_adjacent_observation(tmp_path, adjacent):
+    import webapp_check
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "interactive-plan-" + str(adjacent))
+    if adjacent:
+        steps[1]["check_arguments"]["cases"] = [
+            {"set": {"units": "7.2"}, "click": ["compute"]}, {"expect": {"total": "36"}}]
+    def complete(payload):
+        assert payload["_native_workload"] == "initial_step_planning"
+        return initial_planning_reply("task_steps", {"action": "plan", "steps": steps})
+    with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 1), patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", runtime_state):
+        state = native_agent.run_slice(item, complete=complete)
+    queue = task_context.step_status(folder)
+    assert queue["total"] == 2 and queue["done"] == 0 and state["status"] == "continue"
+    assert queue["active"]["check_arguments"]["cases"] == steps[0]["check_arguments"]["cases"]
+    with project_memory.connection(folder) as conn:
+        saved = json.loads(conn.execute("SELECT check_arguments FROM task_steps WHERE title=?", (steps[1]["title"],)).fetchone()[0])
+    assert webapp_check.normalize_spec(saved)["cases"] == [
+        {"set": {"units": "7.2"}, "click": ["compute"], "expect": {"total": "36"}}]
+    (folder / "index.html").write_text("""<form id="calculator"><input id="units"><button id="compute">Compute</button></form>
+        <output id="total">0</output><script>document.getElementById('calculator').onsubmit=e=>{e.preventDefault();
+        document.getElementById('total').textContent=String(Number(document.getElementById('units').value)*5);};</script>""")
+    assert webapp_check.check(folder, saved)["passed"]
+    assert task_context.step_status(folder)["done"] == 0
+
+
+def test_initial_planning_interaction_contract_preserves_each_action_outcome_and_nonbrowser_tools(tmp_path):
+    from jsonschema import validate
+    item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "plan-contract-scope")
+    original_tools = copy.deepcopy(native_agent.TOOLS)
+    tools = native_agent.initial_plan_tools(item, native_agent.TOOLS)
+    schema = next(tool["function"]["parameters"] for tool in tools if tool["function"]["name"] == "task_steps")
+    for action in ({"set": {"units": "7.2"}}, {"click": ["compute"]}, {"keys": [{"key": "Enter"}]}, {"reload": True}):
+        for outcome in ({"expect": {"total": "36"}}, {"state": {"app.ready": True}}, {"visible": ["total"]}, {"hidden": ["error"]}):
+            candidate = copy.deepcopy(steps)
+            candidate[1]["check_arguments"]["cases"] = [{**action, **outcome}]
+            validate({"action": "plan", "steps": candidate}, schema)
+    other = {**item, "brief": "Use SQLite steps to build a Python CLI calculator."}
+    nonbrowser_tools = native_agent.initial_plan_tools(other, native_agent.TOOLS)
+    nonbrowser = next(tool["function"]["parameters"] for tool in nonbrowser_tools if tool["function"]["name"] == "task_steps")
+    assert "contains" not in nonbrowser["properties"]["steps"]
+    validate({"action": "plan", "steps": [{"phase": "Logic", "title": "Add arguments", "check_tool": "check_python_function",
+        "check_arguments": {"path": "cli.py", "function": "add", "cases": [{"args": [2, 3], "expected": 5}]}}]}, nonbrowser)
+    public = next(tool["function"]["parameters"] for tool in native_agent.TOOLS if tool["function"]["name"] == "task_steps")
+    inert = copy.deepcopy(steps)
+    inert[1]["check_arguments"]["cases"] = [{"visible": ["total"]}]
+    validate({"action": "plan", "steps": inert}, public)
+    assert native_agent.TOOLS == original_tools
