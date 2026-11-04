@@ -61,15 +61,15 @@ def source(folder):
     """Prefer a declared local server; otherwise preview a project HTML file."""
     folder = Path(folder).resolve()
     declaration = folder / ".local-ai/preview.json"
-    if declaration.is_file():
-        try:
+    try:
+        if declaration.is_file():
             url = safe_loopback_url(
                 json.loads(declaration.read_text(encoding="utf-8"))["url"]
             )
             if url:
                 return url
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
     for name in HTML_CANDIDATES:
         try:
             html = (folder / name).resolve()
