@@ -296,6 +296,10 @@ async def lifespan(_server):
                 )
                 await session.initialize()
                 listing = await session.list_tools()
+                tools = list(listing.tools)
+                while getattr(listing, "nextCursor", None):
+                    listing = await session.list_tools(cursor=listing.nextCursor)
+                    tools.extend(listing.tools)
             except BaseException as exc:
                 ERRORS[group] = str(exc) or type(exc).__name__
                 try:
@@ -308,7 +312,7 @@ async def lifespan(_server):
                 continue
             await stack.enter_async_context(backend_stack)
             SESSIONS[group] = session
-            for tool in listing.tools:
+            for tool in tools:
                 CATALOG[f"{group}.{tool.name}"] = tool.model_dump(
                     by_alias=True, exclude_none=True
                 )

@@ -455,6 +455,69 @@ def test_failed_backend_cleanup_does_not_abort_independent_backend():
     asyncio.run(check())
 
 
+def test_paginated_backend_tools_are_discoverable_and_callable():
+    cursors = []
+    calls = []
+    original = {"isError": False, "content": []}
+
+    @asynccontextmanager
+    async def fake_stdio(params):
+        if "rea.mjs" not in " ".join(params.args):
+            raise OSError("DevTools unavailable")
+        yield (object(), object())
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def initialize(self):
+            pass
+
+        async def list_tools(self, cursor=None):
+            cursors.append(cursor)
+            assert cursor in (None, "page-2")
+            name = "first" if cursor is None else "paginated_probe"
+            tool = SimpleNamespace(
+                name=name,
+                model_dump=lambda **_kwargs: {
+                    "name": name,
+                    "description": "Backend inspection tool",
+                    "inputSchema": {"type": "object"},
+                },
+            )
+            return SimpleNamespace(
+                tools=[tool], nextCursor="page-2" if cursor is None else None
+            )
+
+        async def call_tool(self, name, arguments):
+            calls.append((name, arguments))
+            return SimpleNamespace(
+                is_error=False, model_dump=lambda **_kwargs: original
+            )
+
+    async def check():
+        with (patch.object(toolbox_mcp, "stdio_client", fake_stdio),
+              patch.object(toolbox_mcp, "ClientSession",
+                           lambda *_args, **_kwargs: FakeSession())):
+            async with toolbox_mcp.lifespan(None):
+                assert cursors == [None, "page-2"]
+                assert toolbox_mcp.toolbox_status()["backends"]["rea"]["tools"] == 2
+                found = toolbox_mcp.toolbox_search("paginated_probe")
+                assert [tool["name"] for tool in found["tools"]] == ["rea.paginated_probe"]
+                assert toolbox_mcp.toolbox_schema("rea.paginated_probe")["inputSchema"] == {
+                    "type": "object"
+                }
+                assert await toolbox_mcp.toolbox_call("rea.paginated_probe") == original
+                assert calls == [("paginated_probe", {})]
+        assert toolbox_mcp.CATALOG == {}
+        assert toolbox_mcp.SESSIONS == {}
+
+    asyncio.run(check())
+
+
 def test_failed_specialist_backend_keeps_other_tools_available():
     @asynccontextmanager
     async def fake_stdio(params):
