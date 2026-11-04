@@ -37,6 +37,21 @@ def test_missing_ffmpeg_is_installed_and_validated(tmp_path):
         assert ffmpeg_runtime.working(tmp_path)
 
 
+def test_undecodable_version_output_is_a_failed_health_check(tmp_path):
+    target = ffmpeg_runtime.executable(tmp_path)
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"invalid executable")
+    decode_error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    with patch.object(ffmpeg_runtime.subprocess, "run", side_effect=decode_error) as run:
+        assert ffmpeg_runtime.working(tmp_path) is False
+
+    run.assert_called_once_with(
+        [str(target), "-version"], capture_output=True,
+        text=True, timeout=10, creationflags=ffmpeg_runtime.HIDE,
+    )
+
+
 def test_first_background_repair_is_not_throttled_at_low_uptime(tmp_path):
     # Preserve the module's initial timestamp while restoring it after this test.
     with patch.object(ffmpeg_runtime, "_last_attempt", ffmpeg_runtime._last_attempt), \
