@@ -98,6 +98,15 @@ class BusinessContactTests(unittest.TestCase):
         ])
         self.assertEqual(page["contact_links"], ["tel:+15172581313"])
 
+    def test_reader_preserves_trailing_ampersand(self):
+        body = '<p>Research &amp; development</p>Contact &'
+        with patch.object(
+            web_tools, "fetch",
+            return_value=("https://example.org/details", body, "text/html", 200),
+        ):
+            page = web_tools.read_webpage("https://example.org/details")
+        self.assertEqual(page["text"], "Research & development\nContact &")
+
     def test_reader_preserves_closing_block_text_boundaries(self):
         body = (
             '<p>First <strong>paragraph</strong>.</p>Trailing text'

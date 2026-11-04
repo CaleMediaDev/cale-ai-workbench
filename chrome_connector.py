@@ -14,9 +14,9 @@ EXPECTED_VERSION = "0.2.6"
 def installed_version() -> str:
     """A matching local companion is required by the Chrome extension."""
     manifest = PLUGIN / "plugin.yaml"
-    if not manifest.is_file():
-        return ""
     try:
+        if not manifest.is_file():
+            return ""
         contents = manifest.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError):
         return ""

@@ -16,6 +16,35 @@ def test_key_estimate_declines_empty_input():
     assert music_analysis._best_key(np.zeros(12)) is None
 
 
+def test_analysis_does_not_start_chord_segment_at_audio_endpoint(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    source = tmp_path / "four-seconds.wav"
+    source.touch()
+    sample_rate = 22050
+    sample_count = 4 * sample_rate
+    # Centered STFT includes one more frame than the number of full hops.
+    chroma = np.zeros((12, 1 + sample_count // 512))
+    chroma[[0, 4, 7], :-1] = 1.0
+    chroma[[2, 7, 11], -1] = 1.0
+    librosa_stub = SimpleNamespace(
+        get_duration=lambda *, path: 4.0,
+        load=lambda *args, **kwargs: (np.full(sample_count, 0.1), sample_rate),
+        effects=SimpleNamespace(harmonic=lambda signal: signal),
+        feature=SimpleNamespace(chroma_stft=lambda **kwargs: chroma),
+        beat=SimpleNamespace(beat_track=lambda **kwargs: (0.0, np.array([]))),
+    )
+    monkeypatch.setitem(sys.modules, "librosa", librosa_stub)
+
+    result = music_analysis.analyze_music(str(source))
+
+    assert result["analyzed_seconds"] == 4.0
+    assert result["chord_changes"] == [
+        {"at_seconds": 0.0, "chord": "C major"},
+    ]
+
+
 def test_analysis_reports_only_finite_positive_tempos(tmp_path, monkeypatch):
     import json
     import sys

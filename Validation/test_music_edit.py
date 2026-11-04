@@ -145,6 +145,43 @@ def test_edit_music_rejects_header_only_wav_after_successful_exit(tmp_path, monk
     assert len(staged_paths) == 2
 
 
+@pytest.mark.parametrize("missing_bytes", [1, 320])
+def test_edit_music_rejects_truncated_wav_after_successful_exit(tmp_path, monkeypatch, missing_bytes):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio"
+    source.write_bytes(original)
+    staged_paths = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def truncated_success(command, **kwargs):
+        assert kwargs["timeout"] == 3600
+        assert "-n" in command
+        staged = Path(command[-1])
+        staged_paths.append(staged)
+        with wave.open(str(staged), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x00\x00" * 160)
+        staged.write_bytes(staged.read_bytes()[:-missing_bytes])
+        # The header still declares frames even when their data is missing.
+        with wave.open(str(staged), "rb") as audio:
+            assert audio.getnframes() == 160
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", truncated_success)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="truncated WAV"):
+            music_edit.edit_music(str(source), str(output))
+        assert not output.exists()
+        assert source.read_bytes() == original
+        assert all(not path.parent.exists() for path in staged_paths)
+
+    assert len(staged_paths) == 2
+
+
 def test_edit_music_timeout_discards_partial_audio_and_allows_retry(tmp_path, monkeypatch):
     source = tmp_path / "song.wav"
     output = tmp_path / "clip.wav"

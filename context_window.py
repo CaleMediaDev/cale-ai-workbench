@@ -66,7 +66,7 @@ def model_bytes(model):
         models = json.load(response).get("models", [])
     names = {model, model + ":latest"}
     size = next((item["size"] for item in models if item.get("name") in names), None)
-    if size is None:
+    if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
         raise ValueError("Cannot determine model weight size for memory budget")
     return size
 

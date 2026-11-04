@@ -52,9 +52,9 @@ def select_excerpt(text: str, question: str, limit: int = 12000, subject: str = 
     summary = bool(re.search(r"\b(summarize|summary|overview|main points)\b", question, re.I))
     hints = []
     if re.search(r"\b(end|ending|final|conclusion|last)\b", question, re.I):
-        hints.append(len(chunks) - 2)
+        hints.append(max(0, len(chunks) - 2))
     if re.search(r"\b(start|beginning|first|intro)\b", question, re.I):
-        hints.append(1)
+        hints.append(min(1, len(chunks) - 1))
     if summary or not any(scores):
         priority = [*hints, 0, len(chunks) - 1, len(chunks) // 3,
                     2 * len(chunks) // 3]

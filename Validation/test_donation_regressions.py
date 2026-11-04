@@ -60,6 +60,22 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class CalculatorPrecisionTests(unittest.TestCase):
+    def test_leading_zero_integers_are_decimal(self):
+        for expression, answer in (
+            ("0012 + 3", "15"),
+            ("0008 + 0009", "17"),
+            ("-0012 + 3", "-9"),
+            ("000 + 1", "1"),
+            ("00,012 + 1", "13"),
+            ("0.001 + 0002", "2.001"),
+            (".001 + 0002", "2.001"),
+        ):
+            with self.subTest(expression=expression):
+                self.assertEqual(calculate(expression), f"{expression} = {answer}")
+        for expression in ("00..12 + 1", "00,12 + 1", "0002 // 1"):
+            with self.subTest(expression=expression):
+                self.assertIsNone(calculate(expression))
+
     def test_unicode_multiplication_does_not_create_exponentiation(self):
         for expression in ("2 ×× 3", "2 ×* 3", "2 *× 3"):
             with self.subTest(expression=expression):

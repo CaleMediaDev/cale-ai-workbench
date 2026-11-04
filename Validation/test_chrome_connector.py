@@ -81,6 +81,28 @@ def test_corrupt_manifest_reports_repair_without_launching_broker(tmp_path, monk
         chrome_connector.pairing_code()
 
 
+def test_manifest_probe_error_reports_repair_without_launching_broker(tmp_path, monkeypatch):
+    plugin = tmp_path / "plugin"
+    manifest = plugin / "plugin.yaml"
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+    original_is_file = Path.is_file
+
+    def inaccessible_is_file(path):
+        if path == manifest:
+            raise PermissionError("Manifest directory is inaccessible")
+        return original_is_file(path)
+
+    def unexpected_run(*args, **kwargs):
+        pytest.fail("The broker must not run with an inaccessible manifest")
+
+    monkeypatch.setattr(Path, "is_file", inaccessible_is_file)
+    monkeypatch.setattr(chrome_connector.subprocess, "run", unexpected_run)
+
+    assert chrome_connector.installed_version() == ""
+    with pytest.raises(RuntimeError, match="Run the installer again to repair it"):
+        chrome_connector.pairing_code()
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()

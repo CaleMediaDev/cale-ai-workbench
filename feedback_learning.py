@@ -127,8 +127,12 @@ def guidance(root: str | Path, kind: str, request: str,
         return ""
     with _connect(root) as conn:
         rows = [dict(row) for row in conn.execute(
-            "SELECT task_id,rating,title,brief,note,created FROM feedback "
-            "WHERE kind=? AND task_id!=? ORDER BY created DESC LIMIT 300",
+            "SELECT task_id,rating,title,brief,note,created FROM feedback AS candidate "
+            "WHERE kind=? AND task_id!=? AND NOT EXISTS ("
+            "SELECT 1 FROM feedback AS newer "
+            "WHERE newer.task_id=candidate.task_id "
+            "AND newer.generation>candidate.generation) "
+            "ORDER BY created DESC LIMIT 300",
             (kind, exclude_task_id),
         )]
     if not rows:

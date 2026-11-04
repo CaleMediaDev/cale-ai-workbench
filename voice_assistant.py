@@ -212,7 +212,8 @@ def rephrase_status(line, recent=(), required=()):
             timeout=3,
         )
         candidate = str(result["choices"][0]["message"].get("content") or "").strip().strip('"')
-    except (KeyError, IndexError, OSError, ValueError, TimeoutError):
+    except (KeyError, IndexError, OSError, ValueError, TimeoutError,
+            TypeError, AttributeError):
         return fallback
     if (
         not candidate or len(candidate) > 240 or len(candidate.split()) > 24

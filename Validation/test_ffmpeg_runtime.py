@@ -12,6 +12,48 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ffmpeg_runtime
 
 
+@pytest.mark.parametrize("second_fails", [False, True])
+def test_alternating_roots_keep_each_failed_repairs_cooldown(tmp_path, second_fails):
+    first, second = tmp_path / "first", tmp_path / "second"
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+         patch.object(ffmpeg_runtime, "_thread", None), \
+         patch.object(ffmpeg_runtime, "working", return_value=False), \
+         patch.object(ffmpeg_runtime, "ensure") as ensure, \
+         patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
+         patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        ensure.side_effect = [RuntimeError("first failed"),
+                              RuntimeError("second failed") if second_fails else second / "ffmpeg.exe",
+                              RuntimeError("first failed again")]
+        thread.return_value.is_alive.return_value = False
+        thread.return_value.start.side_effect = lambda: thread.call_args.kwargs["target"]()
+        ffmpeg_runtime.start_background(first)
+        ffmpeg_runtime.start_background(second)
+        ffmpeg_runtime.start_background(first)
+        assert ensure.call_count == 2
+        clock.return_value = 311.0
+        ffmpeg_runtime.start_background(first)
+        assert ensure.call_count == 3
+
+
+def test_root_failure_cache_is_bounded_and_keeps_recent_roots_throttled(tmp_path):
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+         patch.object(ffmpeg_runtime, "_thread", None), \
+         patch.object(ffmpeg_runtime, "working", return_value=False), \
+         patch.object(ffmpeg_runtime, "ensure", side_effect=RuntimeError("offline")) as ensure, \
+         patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0), \
+         patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        thread.return_value.is_alive.return_value = False
+        thread.return_value.start.side_effect = lambda: thread.call_args.kwargs["target"]()
+        count = ffmpeg_runtime.MAX_REPAIR_ROOTS + 10
+        for number in range(count):
+            ffmpeg_runtime.start_background(tmp_path / str(number))
+        assert ensure.call_count == count
+        assert len(ffmpeg_runtime._last_attempts) <= ffmpeg_runtime.MAX_REPAIR_ROOTS
+        for number in range(count - 10, count):
+            ffmpeg_runtime.start_background(tmp_path / str(number))
+        assert ensure.call_count == count
+
+
 @pytest.mark.skipif(os.name != "nt", reason="The app and executable are Windows-only")
 def test_missing_ffmpeg_is_installed_and_validated(tmp_path):
     import imageio_ffmpeg
@@ -95,7 +137,7 @@ def test_version_health_check_uses_bytes(tmp_path, stdout, returncode, expected)
 
 @pytest.mark.parametrize("repair_fails", [False, True])
 def test_background_repair_only_throttles_failures(tmp_path, repair_fails):
-    with patch.object(ffmpeg_runtime, "_last_attempt", None), \
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
             patch.object(ffmpeg_runtime, "_thread", None), \
             patch.object(ffmpeg_runtime, "working", return_value=False), \
             patch.object(ffmpeg_runtime, "ensure") as ensure, \
@@ -112,7 +154,7 @@ def test_background_repair_only_throttles_failures(tmp_path, repair_fails):
 
         ffmpeg_runtime.start_background(tmp_path)
         ensure.assert_called_once_with(tmp_path)
-        assert ffmpeg_runtime._last_attempt == (10.0 if repair_fails else None)
+        assert ffmpeg_runtime._last_attempts.get(tmp_path.resolve()) == (10.0 if repair_fails else None)
 
         # Model another missing executable shortly after the first attempt.
         clock.return_value = 20.0
@@ -123,9 +165,37 @@ def test_background_repair_only_throttles_failures(tmp_path, repair_fails):
         assert thread.return_value.start.call_count == expected_attempts
 
 
+def test_failed_background_repair_does_not_throttle_another_root(tmp_path):
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", return_value=False), \
+            patch.object(ffmpeg_runtime, "ensure", side_effect=RuntimeError("repair failed")) as ensure, \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0), \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        thread.return_value.is_alive.return_value = False
+        thread.return_value.start.side_effect = (
+            lambda: thread.call_args.kwargs["target"]()
+        )
+
+        ffmpeg_runtime.start_background(first_root)
+        ensure.assert_called_once_with(first_root)
+
+        # The same runtime remains subject to the failure cooldown.
+        ffmpeg_runtime.start_background(first_root)
+        assert ensure.call_count == 1
+
+        # A different runtime must receive its own repair attempt immediately.
+        ffmpeg_runtime.start_background(second_root)
+        assert ensure.call_count == 2
+        ensure.assert_called_with(second_root)
+        assert thread.return_value.start.call_count == 2
+
+
 def test_first_background_repair_is_not_throttled_at_low_uptime(tmp_path):
     # Preserve the module's initial timestamp while restoring it after this test.
-    with patch.object(ffmpeg_runtime, "_last_attempt", ffmpeg_runtime._last_attempt), \
+    with patch.object(ffmpeg_runtime, "_last_attempts", dict(ffmpeg_runtime._last_attempts)), \
             patch.object(ffmpeg_runtime, "_thread", None), \
             patch.object(ffmpeg_runtime, "working", return_value=False), \
             patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
@@ -136,7 +206,7 @@ def test_first_background_repair_is_not_throttled_at_low_uptime(tmp_path):
 
         thread.assert_called_once()
         thread.return_value.start.assert_called_once_with()
-        assert ffmpeg_runtime._last_attempt == 10.0
+        assert ffmpeg_runtime._last_attempts[tmp_path.resolve()] == 10.0
 
         clock.return_value = 20.0
         ffmpeg_runtime.start_background(tmp_path)
