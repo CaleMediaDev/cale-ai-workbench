@@ -120,6 +120,30 @@ class TableMLTests(unittest.TestCase):
                 predict_table_model(str(model), str(prediction),
                                     str(root / "predicted.csv"))
 
+    def test_prediction_rejects_score_overflow(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            prediction = root / "new.csv"
+            prediction.write_text("size\n2\n", encoding="utf-8")
+            for kind, classes, metric in (
+                ("regression", [], "holdout_mean_absolute_error"),
+                ("classification", ["cold", "hot"], "holdout_accuracy"),
+            ):
+                with self.subTest(problem_type=kind):
+                    model.write_text(json.dumps({
+                        "format": "cale-table-model-v1", "problem_type": kind,
+                        "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
+                        "feature_names": ["size"], "coefficients": [[1e308]],
+                        "intercepts": [0], "classes": classes, "target_column": "value",
+                        "metric": metric, "holdout_score": .5, "baseline_score": .5,
+                    }), encoding="utf-8")
+                    output = root / f"{kind}.csv"
+                    with self.assertRaisesRegex(ValueError, "Prediction scores overflowed"):
+                        predict_table_model(str(model), str(prediction), str(output))
+                    with output.open(newline="", encoding="utf-8") as stream:
+                        self.assertEqual(list(csv.DictReader(stream)), [])
+
     def test_malformed_model_is_rejected_before_writing(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
