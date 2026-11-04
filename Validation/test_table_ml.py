@@ -36,6 +36,29 @@ class TableMLTests(unittest.TestCase):
                 self.assertEqual([row["prediction"] for row in csv.DictReader(stream)],
                                  ["cold", "hot"])
 
+    def test_training_rejects_colliding_encoded_feature_names(self):
+        cases = (
+            (["color", "color=red", "label"],
+             lambda index: ["red", index, "hot" if index % 2 else "cold"]),
+            (["color", "color=red", "label"],
+             lambda index: ["red=dark", "dark", "hot" if index % 2 else "cold"]),
+        )
+        for header, make_row in cases:
+            with self.subTest(example=make_row(0)):
+                with tempfile.TemporaryDirectory() as folder:
+                    root = Path(folder)
+                    training = root / "training.csv"
+                    with training.open("w", newline="", encoding="utf-8") as stream:
+                        writer = csv.writer(stream)
+                        writer.writerow(header)
+                        for index in range(40):
+                            writer.writerow(make_row(index))
+                    model = root / "model.json"
+                    with self.assertRaisesRegex(ValueError, "Feature names collide"):
+                        train_table_model(str(training), "label", str(model),
+                                          "classification")
+                    self.assertFalse(model.exists())
+
     def test_large_finite_feature_median_can_be_trained_and_reused(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
