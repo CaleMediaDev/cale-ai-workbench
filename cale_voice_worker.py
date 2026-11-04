@@ -20,13 +20,16 @@ def load_model():
         from qwen_tts import Qwen3TTSModel
 
         cuda = torch.cuda.is_available()
+        dtype = torch.float32
+        if cuda:
+            dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         # Resolve the pinned cache snapshot first. Passing a local directory
         # prevents Transformers from probing Hugging Face during offline use.
         local_model = snapshot_download(MODEL_ID, local_files_only=True)
         return Qwen3TTSModel.from_pretrained(
             local_model,
             device_map="cuda:0" if cuda else "cpu",
-            dtype=torch.bfloat16 if cuda else torch.float32,
+            dtype=dtype,
             attn_implementation="sdpa",
         )
 
