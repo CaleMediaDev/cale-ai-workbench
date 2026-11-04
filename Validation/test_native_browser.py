@@ -255,6 +255,25 @@ def test_download_multibyte_filename_can_be_saved_and_collision_resolved(tmp_pat
     assert second.read_bytes() == b"second download"
 
 
+def test_download_directory_symlink_cannot_redirect_outside_project(tmp_path):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    destination = folder / "Downloads"
+    try:
+        destination.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks are unavailable in this test environment")
+
+    with pytest.raises(ValueError, match="inside the task folder"):
+        target = native_browser._download_target(folder, "report.txt")
+        target.write_bytes(b"downloaded")
+
+    assert destination.is_symlink()
+    assert list(outside.iterdir()) == []
+
+
 def test_download_filename_stays_in_project_and_does_not_overwrite(tmp_path):
     first = native_browser._download_target(tmp_path, "../secret.txt")
     assert first.parent == tmp_path / "Downloads"

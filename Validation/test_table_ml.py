@@ -141,8 +141,33 @@ class TableMLTests(unittest.TestCase):
                     output = root / f"{kind}.csv"
                     with self.assertRaisesRegex(ValueError, "Prediction scores overflowed"):
                         predict_table_model(str(model), str(prediction), str(output))
-                    with output.open(newline="", encoding="utf-8") as stream:
-                        self.assertEqual(list(csv.DictReader(stream)), [])
+                    self.assertFalse(output.exists())
+
+    def test_late_prediction_failure_removes_partial_output_and_allows_retry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            model.write_text(json.dumps({
+                "format": "cale-table-model-v1", "problem_type": "regression",
+                "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
+                "feature_names": ["size"], "coefficients": [[1e308]],
+                "intercepts": [0], "classes": [], "target_column": "value",
+                "metric": "holdout_mean_absolute_error", "holdout_score": 1,
+                "baseline_score": 2,
+            }), encoding="utf-8")
+            prediction = root / "new.csv"
+            output = root / "predicted.csv"
+            # The first batch is written successfully; the next batch overflows.
+            prediction.write_text("size\n" + "0\n" * 4096 + "2\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Prediction scores overflowed"):
+                predict_table_model(str(model), str(prediction), str(output))
+            self.assertFalse(output.exists())
+
+            prediction.write_text("size\n0\n", encoding="utf-8")
+            result = predict_table_model(str(model), str(prediction), str(output))
+            self.assertEqual(result["rows"], 1)
+            with output.open(newline="", encoding="utf-8") as stream:
+                self.assertEqual([row["prediction"] for row in csv.DictReader(stream)], ["0"])
 
     def test_malformed_model_is_rejected_before_writing(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -245,3 +270,48 @@ class TableMLTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_prediction_error_and_publication_preserve_concurrent_destination(tmp_path):
+    from contextlib import contextmanager
+    from unittest.mock import patch
+    import pytest
+    from sklearn.feature_extraction import DictVectorizer
+    for outcome in ("failure", "success"):
+        root = tmp_path / outcome
+        root.mkdir()
+        model, source, output = root / "model.json", root / "input.csv", root / "predicted.csv"
+        model.write_text(json.dumps({
+            "format": "cale-table-model-v1", "problem_type": "regression",
+            "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
+            "feature_names": ["size"], "coefficients": [[1]], "intercepts": [0], "classes": [],
+            "target_column": "value", "metric": "holdout_mean_absolute_error", "holdout_score": 1, "baseline_score": 2}))
+        source.write_text("size\n2\n")
+        original_open, transform = Path.open, DictVectorizer.transform
+        staged_paths = []
+        @contextmanager
+        def closed_writer_replacement(path, *args, **kwargs):
+            staged_paths.append(path)
+            try:
+                with original_open(path, *args, **kwargs) as stream:
+                    yield stream
+            finally:
+                # The original writer is closed; another process creates or
+                # replaces the public destination before recovery/publication.
+                with original_open(output, "wb") as stream:
+                    stream.write(b"concurrent user replacement")
+        def opening(path, *args, **kwargs):
+            if path.name == output.name and args and args[0] == "x":
+                return closed_writer_replacement(path, *args, **kwargs)
+            return original_open(path, *args, **kwargs)
+        def transforming(self, *args, **kwargs):
+            if outcome == "failure":
+                raise RuntimeError("prediction failed")
+            return transform(self, *args, **kwargs)
+        with patch.object(Path, "open", opening), patch.object(DictVectorizer, "transform", transforming):
+            with pytest.raises(RuntimeError if outcome == "failure" else FileExistsError):
+                predict_table_model(str(model), str(source), str(output))
+        assert output.read_bytes() == b"concurrent user replacement"
+        assert source.read_text() == "size\n2\n"
+        assert staged_paths and all(path != output and not path.exists() for path in staged_paths)
+        assert not list(root.glob(".table-prediction-*"))

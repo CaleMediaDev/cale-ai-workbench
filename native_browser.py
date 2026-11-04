@@ -35,6 +35,10 @@ def _download_target(folder: Path, filename: str) -> Path:
     # Filesystem component limits count bytes, not Unicode characters.
     name = name.encode("utf-8")[:120].decode("utf-8", errors="ignore").strip(" .") or "download.bin"
     destination = folder / "Downloads"
+    try:
+        destination.resolve().relative_to(folder.resolve())
+    except ValueError:
+        raise ValueError("Download directory must stay inside the task folder") from None
     destination.mkdir(parents=True, exist_ok=True)
     target = destination / name
     stem, suffix = target.stem, target.suffix

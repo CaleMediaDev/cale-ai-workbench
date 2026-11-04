@@ -53,6 +53,26 @@ def test_countdown_needs_real_progress_and_survives_restart(tmp_path):
     assert task_eta.countdown(db, "task", 50, "working", 1070) == "About 57s to review"
 
 
+def test_countdown_invalid_timestamps_leave_observations_unchanged(tmp_path):
+    db = tmp_path / "projects.db"
+    task_eta.countdown(db, "task", 10, "working", 1000)
+    task_eta.countdown(db, "task", 30, "working", 1030)
+    assert task_eta.countdown(db, "task", 50, "working", 1060) == (
+        "About 1m 07s to review"
+    )
+    for invalid in (float("nan"), float("inf"), float("-inf"),
+                    "invalid", "nan", "inf"):
+        assert task_eta.countdown(db, "task", 70, "working", invalid) == (
+            "Estimating time…"
+        )
+        assert task_eta.countdown(db, "task", 50, "paused", invalid) == "Paused"
+    # Invalid observations must neither add progress nor replace the last
+    # valid timestamp or active status used to accumulate elapsed time.
+    assert task_eta.countdown(db, "task", 50, "working", 1070) == (
+        "About 57s to review"
+    )
+
+
 def test_pause_does_not_advance_active_clock(tmp_path):
     db = tmp_path / "projects.db"
     task_eta.countdown(db, "task", 10, "working", 1000)

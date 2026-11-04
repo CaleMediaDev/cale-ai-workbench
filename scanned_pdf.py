@@ -68,7 +68,12 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                     image_path = Path(folder) / "page.png"
                     width, height = page.get_size()
                     scale = min(2, 1800 / max(width, height))
-                    bitmap = page.render(scale=scale)
+                    try:
+                        bitmap = page.render(scale=scale)
+                    except pdfium.PdfiumError:
+                        # Preserve other pages and report this scan as omitted.
+                        selected.discard(index)
+                        continue
                     try:
                         image = bitmap.to_pil()
                         try:

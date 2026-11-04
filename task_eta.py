@@ -143,6 +143,14 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
     active = status in ("working", "checking")
     if status in ("ready_for_review", "accepted"):
         return ""
+    try:
+        now = float(now)
+    except (TypeError, ValueError, OverflowError):
+        now = float("nan")
+    if not math.isfinite(now):
+        if active:
+            return "Estimating time…"
+        return "Paused" if status == "paused" else ""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     # sqlite3's context manager commits but does not close the connection.
     # On Windows, an open handle can prevent task-folder cleanup or updates.

@@ -146,7 +146,11 @@ def _stop_check(process: subprocess.Popen) -> None:
         process.terminate()
         _, alive = psutil.wait_procs(children, timeout=5)
         for child in alive:
-            child.kill()
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                # A child may exit after wait_procs; still kill its siblings.
+                pass
         process.wait(timeout=5)
     except (OSError, psutil.Error, subprocess.TimeoutExpired):
         if process.poll() is None:

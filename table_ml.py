@@ -11,6 +11,7 @@ import csv
 import json
 import math
 import statistics
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -206,24 +207,29 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
     while output_column in columns:
         output_column = f"prediction_{suffix}"
         suffix += 1
-    with output.open("x", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=[*columns, output_column])
-        writer.writeheader()
-        for start in range(0, len(rows), 4096):
-            batch = rows[start:start + 4096]
-            matrix = vectorizer.transform(_features(batch, model["schema"]))
-            with np.errstate(over="ignore", invalid="ignore"):
-                scores = matrix @ weights.T + biases
-            if not np.isfinite(scores).all():
-                raise ValueError("Prediction scores overflowed; cannot produce finite predictions.")
-            if model["problem_type"] == "regression":
-                predictions = [f"{number:.6g}" for number in scores[:, 0]]
-            elif len(classes) == 2:
-                predictions = [classes[int(number > 0)] for number in scores[:, 0]]
-            else:
-                predictions = [classes[index] for index in np.argmax(scores, axis=1)]
-            for row, prediction in zip(batch, predictions):
-                writer.writerow({**row, output_column: prediction})
+    # Keep partial batches private. Publish on the same filesystem without
+    # replacing any destination created while prediction was running.
+    with tempfile.TemporaryDirectory(prefix=".table-prediction-", dir=output.parent) as temporary:
+        staged = Path(temporary) / output.name
+        with staged.open("x", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=[*columns, output_column])
+            writer.writeheader()
+            for start in range(0, len(rows), 4096):
+                batch = rows[start:start + 4096]
+                matrix = vectorizer.transform(_features(batch, model["schema"]))
+                with np.errstate(over="ignore", invalid="ignore"):
+                    scores = matrix @ weights.T + biases
+                if not np.isfinite(scores).all():
+                    raise ValueError("Prediction scores overflowed; cannot produce finite predictions.")
+                if model["problem_type"] == "regression":
+                    predictions = [f"{number:.6g}" for number in scores[:, 0]]
+                elif len(classes) == 2:
+                    predictions = [classes[int(number > 0)] for number in scores[:, 0]]
+                else:
+                    predictions = [classes[index] for index in np.argmax(scores, axis=1)]
+                for row, prediction in zip(batch, predictions):
+                    writer.writerow({**row, output_column: prediction})
+        output.hardlink_to(staged)
     better = (
         model["holdout_score"] > model["baseline_score"]
         if model["problem_type"] == "classification"
