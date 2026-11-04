@@ -6,6 +6,7 @@ Matchering source or model weights are copied into the Workbench distribution.
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import subprocess
@@ -83,6 +84,22 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
             os.link(staged, output)
         except FileExistsError:
             raise ValueError("Choose a new output filename so existing audio is preserved.") from None
+        except OSError as exc:
+            if exc.errno not in {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS}:
+                raise
+            # Some destination filesystems cannot create hard links. Exclusive
+            # creation still protects files created during rendering.
+            try:
+                destination = output.open("xb")
+            except FileExistsError:
+                raise ValueError("Choose a new output filename so existing audio is preserved.") from None
+            try:
+                with destination:
+                    with staged.open("rb") as rendered:
+                        shutil.copyfileobj(rendered, destination)
+            except BaseException:
+                output.unlink()
+                raise
     return {"source": str(source), "reference": str(reference), "path": str(output),
             "engine": "Matchering 2.0.6"}
 
