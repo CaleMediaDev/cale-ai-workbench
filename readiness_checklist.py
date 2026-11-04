@@ -153,7 +153,8 @@ def _probe_local_ai(model: str) -> dict:
     try:
         with urlopen(request, timeout=45) as response:
             answer = json.load(response)
-        good = bool(answer.get("done") and int(answer.get("eval_count") or 0) > 0)
+        good = bool(isinstance(answer, dict) and answer.get("done")
+                    and int(answer.get("eval_count") or 0) > 0)
         return {"ok": good, "model": model,
                 "detail": f"{model} answered a local test" if good
                           else f"{model} did not complete the local test"}

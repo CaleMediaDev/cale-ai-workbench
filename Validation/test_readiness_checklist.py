@@ -196,6 +196,18 @@ def test_local_ai_probe_requires_a_completed_generated_token():
         assert readiness_checklist._probe_local_ai("cale-fast:latest")["ok"]
 
 
+@pytest.mark.parametrize("payload", [b"[]", b"null", b'"unexpected"', b"1"])
+def test_local_ai_probe_rejects_non_object_json_without_crashing(payload):
+    model = "cale-fast:latest"
+    with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(payload)):
+        result = readiness_checklist._probe_local_ai(model)
+    assert result == {
+        "ok": False,
+        "model": model,
+        "detail": f"{model} did not complete the local test",
+    }
+
+
 def test_background_checks_do_not_probe_a_model_with_real_usage(tmp_path):
     state = tmp_path / "LongTasks"
     state.mkdir()
