@@ -182,6 +182,34 @@ class ProjectMemoryTests(unittest.TestCase):
             memory.get(self.folder, identifier)
         self.assertFalse(memory.search(self.folder, "fresh_invoice", kind="file"))
 
+    def test_code_scan_uses_canonical_identity_for_symlink_aliases(self):
+        source = self.folder / "implementation.py"
+        source.write_text("originalmarker", encoding="utf-8")
+        alias = self.folder / "alias.py"
+        try:
+            alias.symlink_to(source)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Symlinks unavailable: {exc}")
+
+        memory.index(self.folder, include_code=True)
+        found = memory.search(self.folder, "originalmarker", kind="file")
+        self.assertEqual([row["id"] for row in found], ["file:implementation.py"])
+        self.assertEqual(found[0]["source_path"], "implementation.py")
+
+        alias.write_text("replacementmarker", encoding="utf-8")
+        self.assertEqual(memory.get(self.folder, found[0]["id"])["body"],
+                         "replacementmarker")
+        self.assertEqual(memory.search(self.folder, "originalmarker", kind="file"), [])
+        refreshed = memory.search(self.folder, "replacementmarker", kind="file")
+        self.assertEqual([row["id"] for row in refreshed], ["file:implementation.py"])
+        with memory.connection(self.folder) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM memories WHERE kind='file'"
+            ).fetchone()[0], 1)
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM memory_fts"
+            ).fetchone()[0], 1)
+
     def test_old_identifier_does_not_match_new_identifier_by_shared_word(self):
         source = self.folder / "app.py"
         source.write_text("def old_widget(): return 1", encoding="utf-8")
