@@ -239,6 +239,26 @@ class SelfDiagnosticsTests(unittest.TestCase):
         process.wait.assert_called_once_with(timeout=5)
         process.kill.assert_not_called()
 
+    def test_stop_check_cleans_children_when_parent_termination_is_denied(self):
+        process = Mock(pid=123)
+        process.poll.return_value = None
+        process.terminate.side_effect = PermissionError("termination denied")
+        process.wait.side_effect = [
+            diagnostics.subprocess.TimeoutExpired("pytest", 5), None,
+        ]
+        child = Mock()
+        with (patch("psutil.Process") as parent,
+              patch("psutil.wait_procs", return_value=([], [child])) as wait):
+            parent.return_value.children.return_value = [child]
+            diagnostics._stop_check(process)
+
+        child.terminate.assert_called_once_with()
+        process.terminate.assert_called_once_with()
+        wait.assert_called_once_with([child], timeout=5)
+        child.kill.assert_called_once_with()
+        process.kill.assert_called_once_with()
+        self.assertEqual(process.wait.call_count, 2)
+
     def test_stop_check_kills_siblings_when_a_child_exits_before_kill(self):
         import psutil
 
