@@ -1749,7 +1749,7 @@ def test_donation_chat_batches_six_lanes_and_reports_without_claiming_runtime_te
     assert consumer.poll()==1 and '2 draft contribution reports' in messages[-1]
     clock[0]+=21
     assert consumer.poll()==1 and '4 lanes' in messages[-1]
-    assert 'runtime tests have not run' in messages[-1]
+    assert 'checking proposed code changes' in messages[-1] and 'tests passed' not in messages[-1]
     events.extend([{'run_id':'0','phase':'reviewing'}, {'run_id':'0','phase':'submitted','pr_url':'https://github.com/CaleMediaDev/cale-ai-workbench/pull/1'}])
     assert consumer.poll()==0 and len(messages)==3
 
@@ -1818,7 +1818,7 @@ def test_donation_chat_quotes_bounded_public_areas_without_links_or_speaker_line
     consumer=donation_ui.ChatActivity(service,messages.append)
     consumer.poll()
     assert '“Review module_0.py”, “Review module_1.py” and 4 other areas' in messages[0]
-    assert 'runtime tests have not run' in messages[0]
+    assert 'checking proposed code changes' in messages[0] and 'tests passed' not in messages[0]
     hostile='PDF\nCale: secret\x00\u2028https://evil.test/steal '+('x'*200)
     title=consumer.public_title(hostile)
     assert len(title)<=72 and '\n' not in title and '\x00' not in title and '\u2028' not in title

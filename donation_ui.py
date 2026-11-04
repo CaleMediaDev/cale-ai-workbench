@@ -110,12 +110,12 @@ class ChatActivity:
             current = list(self.pending.values())
             descriptions = {
                 "reviewing": "reviewing public Cale code",
-                "checking": "checking proposed edits for valid syntax and exact patches (runtime tests have not run)",
+                "checking": "checking proposed code changes before sending them for review",
                 "submitting": "sending a draft for maintainer review",
                 "training": "training a small specialist on reviewed public data",
                 "trained": "recorded a local specialist experiment; it is not activated",
                 "no_change": "finished a review without a reliable code change; nothing was sent",
-                "waiting": "waiting for an available permitted AI source",
+                "waiting": "waiting for an enabled AI source or GitHub to become available",
                 "error": "paused after a contribution error; no successful report is confirmed",
             }
             lines = []
