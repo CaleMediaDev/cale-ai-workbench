@@ -81,6 +81,32 @@ def test_disk_requirement_shrinks_after_verified_install(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows GPU setup")
+def test_hardware_check_handles_missing_runtime_parent(tmp_path):
+    base = tmp_path / "Media" / "video"
+    output = tmp_path / "exports" / "clip.mp4"
+    checked_paths = []
+
+    def disk_usage(path):
+        path = Path(path)
+        if not path.is_dir():
+            raise FileNotFoundError(str(path))
+        checked_paths.append(path)
+        return SimpleNamespace(free=50 * 1024 ** 3)
+
+    gpu = subprocess.CompletedProcess([], 0, "12288\n", "")
+    with patch.object(video_generation, "BASE", base), patch.object(
+        video_generation, "_verified_runtime", return_value=False
+    ), patch.object(video_generation.shutil, "disk_usage", side_effect=disk_usage), patch.object(
+        video_generation.subprocess, "run", return_value=gpu
+    ):
+        video_generation._hardware_ready(output)
+
+    assert checked_paths == [tmp_path, tmp_path]
+    assert not base.parent.exists()
+    assert not output.parent.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows GPU setup")
 def test_missing_nvidia_driver_reports_hardware_requirement(tmp_path):
     with patch.object(video_generation.subprocess, "run", side_effect=FileNotFoundError), patch.object(
         video_generation.shutil, "disk_usage", return_value=SimpleNamespace(free=50 * 1024**3)
