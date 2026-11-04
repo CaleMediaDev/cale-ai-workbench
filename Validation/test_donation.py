@@ -761,7 +761,7 @@ def test_submitted_cross_revision_guard_waits_for_authoritative_review(tmp_path)
     with patch.object(donation.time, "time", return_value=1000):
         run = donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "a" * 40)
         donation.finish(tmp_path, run, "submitted", f"https://github.com/{donation.UPSTREAM}/pull/7")
-    closed = {"number": 7, "state": "closed", "base": {"repo": {"full_name": donation.UPSTREAM}},
+    closed = {"number": 7, "state": "closed", "merged_at": None, "base": {"repo": {"full_name": donation.UPSTREAM}},
               "head": {"ref": "cale-donation-" + run[:16]}, "body": "<!-- cale-donation:same-area -->"}
     with patch.object(donation.time, "time", return_value=100000):
         assert not donation.claim_run(tmp_path, "same-area", "chatgpt", "full_blast", "b" * 40)
@@ -933,3 +933,164 @@ def test_v486_integrated_pr_numbers_receive_credit_after_maintainer_backfill(tmp
         result = donation.refresh_leaderboard(tmp_path, fetch=lambda _: [integrated_fix(n, draft=draft) for n in numbers])
     assert result["complete"]
     assert result["rows"] == [{"login":"alice", "accepted":24}]
+
+# Reviewed-source suppression is local to this consenting donor, not a shared
+# user/account block. Trees and review facts below are pinned public fixtures.
+BLOBS = {path: str(index) * 40 for index, path in enumerate(SOURCES, 1)}
+
+
+def closed_scope_run(root, job=JOB, blobs=BLOBS, *, state='closed_unmerged', scope=True):
+    run = donation.claim_run(root, job['id'], 'chatgpt', 'full_blast', 'a' * 40)
+    donation.finish(root, run, 'reviewed', f'https://github.com/{donation.UPSTREAM}/pull/7')
+    with closing(donation.connection(root)) as conn, conn:
+        conn.execute('UPDATE runs SET scope_sha=?,review_state=? WHERE id=?',
+                     (donation.scope_fingerprint(job, blobs) if scope else '', state, run))
+    return run
+
+
+def test_reviewed_scope_identical_blobs_different_commit_stays_blocked(tmp_path):
+    closed_scope_run(tmp_path)
+    fingerprint = donation.scope_fingerprint(JOB, BLOBS)
+    assert donation.scope_suppressed(tmp_path, JOB['id'], fingerprint)
+    assert not donation.claim_run(tmp_path, JOB['id'], 'chatgpt', 'full_blast', 'b' * 40, fingerprint)
+    assert donation.claim_run(tmp_path, 'another-area', 'chatgpt', 'full_blast', 'b' * 40, fingerprint)
+
+
+@pytest.mark.parametrize('change', ['source', 'test', 'instructions', 'accepted'])
+def test_reviewed_scope_changed_inputs_or_accepted_scope_reopens(tmp_path, change):
+    closed_scope_run(tmp_path, state='accepted' if change == 'accepted' else 'closed_unmerged')
+    job, blobs = dict(JOB), dict(BLOBS)
+    if change == 'source': blobs['example.py'] = 'c' * 40
+    if change == 'test': blobs['Validation/test_example.py'] = 'd' * 40
+    if change == 'instructions': job['instructions'] = 'New explicit maintainer purpose'
+    fingerprint = donation.scope_fingerprint(job, blobs)
+    assert not donation.scope_suppressed(tmp_path, JOB['id'], fingerprint)
+    assert donation.claim_run(tmp_path, JOB['id'], 'chatgpt', 'full_blast', 'b' * 40, fingerprint)
+
+
+def test_reviewed_scope_atomic_claim_rechecks_after_selection_snapshot(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    fingerprint = donation.scope_fingerprint(JOB, BLOBS)
+    assert not donation.scope_suppressed(tmp_path, JOB['id'], fingerprint)
+    closed_scope_run(tmp_path)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda _: donation.claim_run(tmp_path, JOB['id'], 'chatgpt', 'full_blast', 'b' * 40, fingerprint), range(6)))
+    assert results == [''] * 6
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 1
+
+
+@pytest.mark.parametrize('facts', [{}, {'merged_at': False}, {'merged_at': ''}, {'merged_at': 123}])
+def test_review_facts_missing_or_malformed_do_not_release_pending(tmp_path, facts):
+    run = donation.claim_run(tmp_path, JOB['id'], 'chatgpt', 'full_blast', 'a' * 40)
+    url = f'https://github.com/{donation.UPSTREAM}/pull/7'
+    donation.finish(tmp_path, run, 'submitted', url)
+    closed = {'number':7, 'state':'closed', 'base':{'repo':{'full_name':donation.UPSTREAM}},
+              'head':{'ref':'cale-donation-' + run[:16]}, 'body':f'<!-- cale-donation:{JOB["id"]} -->', **facts}
+    donation.refresh_pending_reviews(tmp_path, fetch=lambda _: closed)
+    assert not donation.claim_run(tmp_path, JOB['id'], 'chatgpt', 'full_blast', 'b' * 40)
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute('SELECT status,review_state FROM runs').fetchone() == ('submitted','')
+
+
+@pytest.mark.parametrize('integrated', [False, True])
+def test_reviewed_scope_closure_classification_preserves_manual_acceptance(tmp_path, integrated):
+    run = closed_scope_run(tmp_path, state='', scope=False)
+    closed = {'number':7, 'state':'closed', 'merged_at':None,
+              'base':{'repo':{'full_name':donation.UPSTREAM}},
+              'head':{'ref':'cale-donation-' + run[:16]}, 'body':f'<!-- cale-donation:{JOB["id"]} -->',
+              'labels':[{'name':donation.ACCEPTED_FIX_LABEL}] if integrated else []}
+    donation.refresh_pending_reviews(tmp_path, fetch=lambda _: closed)
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute('SELECT review_state FROM runs').fetchone()[0] == ('accepted' if integrated else 'closed_unmerged')
+
+
+def test_historical_scope_backfill_is_bounded_and_uses_old_instructions(tmp_path):
+    run = closed_scope_run(tmp_path, scope=False)
+    old = {**JOB, 'instructions':'old instruction'}
+    calls = []
+    tree = {'tree':[{'type':'blob','path':path,'sha':sha} for path,sha in BLOBS.items()]}
+    with patch.object(donation, 'public_file', side_effect=lambda path, revision: calls.append((path,revision)) or json.dumps([old])), patch.object(donation, 'gh_api', return_value=tree) as api:
+        donation.backfill_reviewed_scope(tmp_path, JOB)
+        donation.backfill_reviewed_scope(tmp_path, JOB)
+    assert len(calls) == 1 and api.call_count == 1
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute('SELECT scope_sha FROM runs WHERE id=?',(run,)).fetchone()[0] == donation.scope_fingerprint(old, BLOBS)
+    assert not donation.scope_suppressed(tmp_path, JOB['id'], donation.scope_fingerprint(JOB, BLOBS))
+
+
+@pytest.mark.parametrize('failure', ['offline','malformed','truncated'])
+def test_historical_scope_unknown_is_not_guessed_or_indefinitely_suppressed(tmp_path, failure):
+    closed_scope_run(tmp_path, scope=False)
+    with patch.object(donation, 'public_file', side_effect=OSError('offline') if failure == 'offline' else None,
+                      return_value='null' if failure == 'malformed' else json.dumps([JOB])), patch.object(donation,'gh_api', return_value={'truncated':True,'tree':[]}):
+        donation.backfill_reviewed_scope(tmp_path, JOB)
+    fingerprint = donation.scope_fingerprint(JOB, BLOBS)
+    assert not donation.scope_suppressed(tmp_path, JOB['id'], fingerprint)
+    assert donation.claim_run(tmp_path, JOB['id'], 'chatgpt', 'full_blast', 'b' * 40, fingerprint)
+
+
+def test_historical_generated_scope_reads_literal_old_generator_not_current_instruction(tmp_path):
+    job = {'id':'review-example-' + hashlib.sha256(b'example.py').hexdigest()[:8],
+           'paths':list(SOURCES), 'instructions':'new instruction'}
+    closed_scope_run(tmp_path, job, scope=False)
+    generator = 'def continuous_jobs(jobs, revision):\n    slug = re.sub(r"[^a-z0-9-]", "-", Path(path).stem.lower()).strip("-") or "module"\n    identity = "review-" + slug[:44] + "-" + hashlib.sha256(path.encode()).hexdigest()[:8]\n    test = "Validation/test_" + path\n    result.append({"id":identity,"title":"Review "+path,"instructions":"old generated instruction","paths":[path,test]})\n'
+    tree = {'tree':[{'type':'blob','path':path,'sha':sha} for path,sha in BLOBS.items()]}
+    with patch.object(donation,'public_file', side_effect=lambda path, revision: '[]' if path=='donation-tasks.json' else generator), patch.object(donation,'gh_api',return_value=tree):
+        donation.backfill_reviewed_scope(tmp_path,job)
+    assert donation.scope_suppressed(tmp_path,job['id'],donation.scope_fingerprint({**job,'instructions':'old generated instruction'}, BLOBS))
+    assert not donation.scope_suppressed(tmp_path,job['id'],donation.scope_fingerprint(job,BLOBS))
+
+
+def test_full_blast_skips_closed_scope_and_immediately_uses_other_area(tmp_path):
+    donation.set_enabled(True,tmp_path,chatgpt_account=FINGERPRINT,github_account='donor',sources=['chatgpt'],intensity='full_blast')
+    blocked={**JOB,'id':'closed-area','_scope_blobs':{path:'f'*40 for path in SOURCES}}
+    other={**JOB,'id':'open-area','_scope_blobs':BLOBS}
+    closed_scope_run(tmp_path,blocked)
+    before=donation.settings(tmp_path)
+    payloads=[]
+    def complete(payload,*args):
+        payloads.append(payload)
+        return {'choices':[{'message':{'content':'{"changes":[]}'}}]}
+    with patch('pc_offline.offline',return_value=False), patch('github_account.account',return_value='donor'), patch('chatgpt_auth.status',return_value={'sharing':True}), patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT), patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kwargs: jobs), patch.object(donation,'public_file',side_effect=lambda path,revision:json.dumps([blocked,other]) if path=='donation-tasks.json' else SOURCES[path]), patch.object(donation,'gh_api',side_effect=lambda endpoint: {'total_count':0} if 'search/' in endpoint else {'tree':[{'type':'blob','path':path,'sha':sha} for path,sha in BLOBS.items()]} if '/git/trees/' in endpoint else COMMIT), patch.object(donation,'complete_donation',side_effect=complete):
+        service=donation.Service(tmp_path);service._run(threading.Event())
+    assert len(payloads)==1
+    assert json.loads(payloads[0]['messages'][1]['content'])['task']['id']=='open-area'
+    assert service.next_attempt==0
+    assert donation.settings(tmp_path)==before
+
+
+def test_actual_closed_review_blocks_same_fingerprint_after_global_revision_changes(tmp_path):
+    fingerprint=donation.scope_fingerprint(JOB,BLOBS)
+    run=donation.claim_run(tmp_path,JOB['id'],'chatgpt','full_blast','a'*40,fingerprint)
+    donation.finish(tmp_path,run,'submitted',f'https://github.com/{donation.UPSTREAM}/pull/7')
+    closed={'number':7,'state':'closed','merged_at':None,'base':{'repo':{'full_name':donation.UPSTREAM}},'head':{'ref':'cale-donation-'+run[:16]},'body':f'<!-- cale-donation:{JOB["id"]} -->'}
+    donation.refresh_pending_reviews(tmp_path,fetch=lambda _:closed)
+    assert not donation.claim_run(tmp_path,JOB['id'],'chatgpt','full_blast','b'*40,fingerprint)
+    assert donation.claim_run(tmp_path,'unrelated-area','chatgpt','full_blast','b'*40,fingerprint)
+
+
+def test_backfill_shared_lease_bounds_different_candidate_areas(tmp_path):
+    closed_scope_run(tmp_path,scope=False)
+    other={**JOB,'id':'another-area'}
+    closed_scope_run(tmp_path,other,scope=False)
+    calls=[]
+    with patch.object(donation,'public_file',side_effect=lambda *args:calls.append(args) or 'null'):
+        donation.backfill_reviewed_scope(tmp_path,JOB)
+        donation.backfill_reviewed_scope(tmp_path,other)
+    assert len(calls)==1
+
+@pytest.mark.parametrize('job,blobs', [(JOB,{}),(JOB,None),({**JOB,'paths':[[]]},BLOBS),({**JOB,'paths':['../private.py']},BLOBS),(JOB,{path:'not-a-sha' for path in SOURCES})])
+def test_scope_fingerprint_unknown_or_invalid_metadata_is_not_a_match(job,blobs):
+    assert donation.scope_fingerprint(job,blobs)==''
+
+
+def test_historical_unfamiliar_generator_does_not_guess_old_scope(tmp_path):
+    job={'id':'review-example-'+hashlib.sha256(b'example.py').hexdigest()[:8],'paths':list(SOURCES)}
+    closed_scope_run(tmp_path,job,scope=False)
+    unknown='def continuous_jobs(jobs, revision):\n    result.append({"id":identity,"title":"Review "+path,"instructions":"unproven","paths":[path,test]})\n'
+    with patch.object(donation,'public_file',side_effect=lambda path,revision:'[]' if path=='donation-tasks.json' else unknown),patch.object(donation,'gh_api') as fetch:
+        donation.backfill_reviewed_scope(tmp_path,job)
+    fetch.assert_not_called()
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute('SELECT scope_sha FROM runs').fetchone()[0]==''

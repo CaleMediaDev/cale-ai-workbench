@@ -119,6 +119,10 @@ def connection(root: Path):
     for name in ("updated", "review_checked"):
         if name not in columns:
             conn.execute(f"ALTER TABLE runs ADD COLUMN {name} REAL NOT NULL DEFAULT 0")
+    for name in ("scope_sha", "review_state"):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS reviewed_scope ON runs(job,review_state,scope_sha)")
     conn.execute("""CREATE TABLE IF NOT EXISTS receipts (
         run TEXT NOT NULL, event TEXT NOT NULL, tokens INTEGER NOT NULL,
         source TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(run,event))""")
@@ -149,12 +153,19 @@ def total_tokens(root: Path = ROOT) -> int:
         return conn.execute("SELECT COALESCE(SUM(tokens),0) FROM runs").fetchone()[0]
 
 
-def claim_run(root: Path, job: str, resource="chatgpt", intensity="slow", revision="") -> str:
+def claim_run(root: Path, job: str, resource="chatgpt", intensity="slow", revision="", scope_sha="") -> str:
     """Atomically reserve an attempt under the selected intensity's rolling cap."""
     if resource not in SOURCES or intensity not in PROFILES:
         raise ValueError("Invalid donation resource or intensity")
+    if scope_sha and not re.fullmatch(r"[a-f0-9]{64}", scope_sha):
+        raise ValueError("Invalid contribution source fingerprint")
     with closing(connection(root)) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
+        if scope_sha and conn.execute(
+            "SELECT 1 FROM runs WHERE job=? AND review_state='closed_unmerged' AND scope_sha=?",
+            (job, scope_sha),
+        ).fetchone():
+            return ""
         if conn.execute("SELECT 1 FROM runs WHERE job=? AND " + RESERVED_RUN,
                         (job, time.time() - RESERVATION_SECONDS)).fetchone():
             return ""
@@ -163,8 +174,8 @@ def claim_run(root: Path, job: str, resource="chatgpt", intensity="slow", revisi
             return ""
         run_id = uuid.uuid4().hex
         now = time.time()
-        conn.execute("INSERT INTO runs(id,started,status,job,resource,intensity,revision,updated) VALUES(?,?,?,?,?,?,?,?)",
-                     (run_id, now, "requested", job, resource, intensity, revision, now))
+        conn.execute("INSERT INTO runs(id,started,status,job,resource,intensity,revision,updated,scope_sha) VALUES(?,?,?,?,?,?,?,?,?)",
+                     (run_id, now, "requested", job, resource, intensity, revision, now, scope_sha))
         return run_id
 
 
@@ -415,7 +426,7 @@ def refresh_pending_reviews(root: Path, fetch=None, check_cancel=lambda: None) -
         until = conn.execute("SELECT until FROM cooldowns WHERE resource='review_sync'").fetchone()
         if until and until[0] > now:
             return
-        rows = conn.execute("SELECT id,url,job FROM runs WHERE status='submitted' ORDER BY review_checked,started LIMIT 3").fetchall()
+        rows = conn.execute("SELECT id,url,job FROM runs WHERE status='submitted' OR (status='reviewed' AND review_state='') ORDER BY review_checked,started LIMIT 3").fetchall()
         if not rows:
             return
         conn.execute("INSERT INTO cooldowns VALUES('review_sync',?) ON CONFLICT(resource) DO UPDATE SET until=excluded.until", (now + 30,))
@@ -432,13 +443,20 @@ def refresh_pending_reviews(root: Path, fetch=None, check_cancel=lambda: None) -
             if (not isinstance(pr, dict) or pr.get("number") != number or pr.get("state") != "closed"
                     or pr.get("base", {}).get("repo", {}).get("full_name", "").casefold() != UPSTREAM.casefold()
                     or pr.get("head", {}).get("ref") != "cale-donation-" + run_id[:16]
-                    or f"<!-- cale-donation:{job} -->" not in str(pr.get("body") or "")):
+                    or f"<!-- cale-donation:{job} -->" not in str(pr.get("body") or "")
+                    or "merged_at" not in pr or not (pr["merged_at"] is None or isinstance(pr["merged_at"], str) and pr["merged_at"])):
                 continue
         except (OSError, ValueError, TypeError, AttributeError, RuntimeError):
             continue
         with closing(connection(root)) as conn, conn:
-            conn.execute("UPDATE runs SET status='reviewed',updated=? WHERE id=? AND status='submitted' AND url=?",
-                         (time.time(), run_id, url))
+            # Closure is not a judgement that the proposal was unsafe. In
+            # particular, trusted manually integrated fixes keep accepted credit.
+            integrated = isinstance(pr.get("labels"), list) and any(
+                isinstance(label, dict) and label.get("name") == ACCEPTED_FIX_LABEL
+                for label in pr["labels"])
+            state = "accepted" if pr["merged_at"] or integrated else "closed_unmerged"
+            conn.execute("UPDATE runs SET status='reviewed',review_state=?,updated=? WHERE id=? AND status IN ('submitted','reviewed') AND url=?",
+                         (state, time.time(), run_id, url))
 
 
 def gh_api(endpoint: str, data: dict | None = None):
@@ -585,6 +603,123 @@ def intensity_description(intensity: str) -> str:
     return f"{wait} idle · {profile['daily']} {attempts}/day · up to {profile['open']} open {drafts}"
 
 
+def scope_fingerprint(job: dict, blobs: dict) -> str:
+    """Identify exact reviewed public inputs, independent of unrelated commits.
+
+    Unknown/missing tree facts return no fingerprint, never an assumed match.
+    This ledger is donor-local; it does not coordinate different people's PCs.
+    """
+    if not isinstance(job, dict) or not isinstance(blobs, dict):
+        return ""
+    paths = job.get("paths")
+    if (not re.fullmatch(r"[a-z0-9-]{1,60}", str(job.get("id", "")))
+            or not isinstance(paths, list) or not 1 <= len(paths) <= 4
+            or not all(allowed_path(path) for path in paths)
+            or len(set(paths)) != len(paths)
+            or not isinstance(job.get("instructions", ""), str)
+            or not all(isinstance(blobs.get(path), str) and re.fullmatch(r"[a-f0-9]{40}", blobs[path]) for path in paths)):
+        return ""
+    body = {"id": job["id"], "instructions": job.get("instructions", ""),
+            "sources": {path: blobs[path] for path in sorted(paths)}}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _tree_blobs(tree: dict) -> dict:
+    if not isinstance(tree, dict) or tree.get("truncated") or not isinstance(tree.get("tree"), list):
+        return {}
+    return {entry["path"]: entry["sha"] for entry in tree["tree"]
+            if isinstance(entry, dict) and entry.get("type") == "blob"
+            and isinstance(entry.get("path"), str) and allowed_path(entry["path"])
+            and isinstance(entry.get("sha"), str) and re.fullmatch(r"[a-f0-9]{40}", entry["sha"])}
+
+
+def scope_suppressed(root: Path, job: str, scope_sha: str) -> bool:
+    if not scope_sha:
+        return False
+    with closing(connection(root)) as conn:
+        return bool(conn.execute("SELECT 1 FROM runs WHERE job=? AND scope_sha=? AND review_state='closed_unmerged'",
+                                 (job, scope_sha)).fetchone())
+
+
+def backfill_reviewed_scope(root: Path, job: dict, check_cancel=lambda: None) -> None:
+    """Resolve at most one historic scope per shared 30-second lease.
+
+    At most three extra public requests: old task list, optional generator
+    source, and old tree. Existing bounded review-facts sync is separate.
+    Failed/unsupported history stays unknown and does not suppress new work.
+    """
+    now = time.time()
+    with closing(connection(root)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        lease = conn.execute("SELECT until FROM cooldowns WHERE resource='scope_backfill'").fetchone()
+        if lease and lease[0] > now:
+            return
+        row = conn.execute("SELECT id,revision FROM runs WHERE job=? AND review_state='closed_unmerged' AND scope_sha='' ORDER BY review_checked,started LIMIT 1",
+                           (job["id"],)).fetchone()
+        if not row:
+            return
+        conn.execute("INSERT INTO cooldowns VALUES('scope_backfill',?) ON CONFLICT(resource) DO UPDATE SET until=excluded.until", (now + 30,))
+        conn.execute("UPDATE runs SET review_checked=? WHERE id=?", (now, row[0]))
+    run_id, revision = row
+    if not re.fullmatch(r"[a-f0-9]{40}", revision):
+        return
+    try:
+        check_cancel()
+        old_jobs = json.loads(public_file("donation-tasks.json", revision))
+        if not isinstance(old_jobs, list):
+            return
+        old = next((item for item in old_jobs if isinstance(item, dict) and item.get("id") == job["id"]), None)
+        if old is None:
+            paths = job.get("paths", [])
+            if len(paths) != 2 or paths[1] != "Validation/test_" + paths[0] or "/" in paths[0]:
+                return
+            identity = "review-" + re.sub(r"[^a-z0-9-]", "-", Path(paths[0]).stem.lower()).strip("-")[:44] + "-" + hashlib.sha256(paths[0].encode()).hexdigest()[:8]
+            if identity != job["id"]:
+                return
+            check_cancel()
+            module = ast.parse(public_file("donation.py", revision))
+            generator = next((node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "continuous_jobs"), None)
+            known = ast.parse('slug = re.sub(r"[^a-z0-9-]", "-", Path(path).stem.lower()).strip("-") or "module"\n'
+                              'identity = "review-" + slug[:44] + "-" + hashlib.sha256(path.encode()).hexdigest()[:8]\n'
+                              'test = "Validation/test_" + path').body
+            assignments = [node for node in ast.walk(generator) if isinstance(node, ast.Assign)] if generator is not None else []
+            for expected in known:
+                name = expected.targets[0].id
+                observed = [node for node in assignments if any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+                if len(observed) != 1 or ast.dump(observed[0]) != ast.dump(expected):
+                    return  # An unfamiliar generator is unknown, not today's job.
+            # Read only literal instructions from the known append-job shape;
+            # never evaluate historical Python or assume today's instructions.
+            choices = []
+            for call in ast.walk(generator) if generator is not None else []:
+                if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and isinstance(call.func.value, ast.Name) and call.func.value.id == "result"
+                        and call.func.attr == "append" and len(call.args) == 1 and not call.keywords
+                        and isinstance(call.args[0], ast.Dict)):
+                    node = call.args[0]
+                    pairs = {key.value: value for key, value in zip(node.keys, node.values) if isinstance(key, ast.Constant) and isinstance(key.value, str)}
+                    value = pairs.get("instructions")
+                    identifiers = pairs.get("paths")
+                    if ({"id", "title", "instructions", "paths"} <= pairs.keys()
+                            and isinstance(pairs["id"], ast.Name) and pairs["id"].id == "identity"
+                            and isinstance(identifiers, ast.List)
+                            and [item.id if isinstance(item, ast.Name) else None for item in identifiers.elts] == ["path", "test"]
+                            and isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                        choices.append(value.value)
+            if len(choices) != 1:
+                return
+            old = {"id": identity, "paths": paths, "instructions": choices[0]}
+        check_cancel()
+        blobs = _tree_blobs(gh_api(f"repos/{UPSTREAM}/git/trees/{revision}?recursive=1"))
+        fingerprint = scope_fingerprint(old, blobs)
+        if fingerprint:
+            with closing(connection(root)) as conn, conn:
+                conn.execute("UPDATE runs SET scope_sha=? WHERE id=? AND scope_sha='' AND review_state='closed_unmerged' AND revision=?",
+                             (fingerprint, run_id, revision))
+    except (OSError, ValueError, TypeError, AttributeError, RuntimeError, SyntaxError):
+        return
+
+
 def continuous_jobs(jobs: list, revision: str, *, source_budget=35_000) -> list:
     """Extend the maintainer queue with bounded public production/test pairs.
 
@@ -619,7 +754,9 @@ def continuous_jobs(jobs: list, revision: str, *, source_budget=35_000) -> list:
                        "instructions": "Find one demonstrated correctness or recovery bug and a focused regression test. "
                        "Preserve public interfaces and do not change authentication, consent, accounting or update policy.",
                        "paths": [path, test]})
-    return result
+    blobs = _tree_blobs(tree)
+    return [{**job, "_scope_blobs": {path: blobs[path] for path in job["paths"]}}
+            if scope_fingerprint(job, blobs) else job for job in result]
 
 
 class Service:
@@ -772,6 +909,10 @@ class Service:
             jobs = json.loads(public_file("donation-tasks.json", revision))
             if not isinstance(jobs, list):
                 raise ValueError("Invalid public maintainer task list")
+            # Only authenticated tree discovery below may supply this cache;
+            # never accept a task manifest's claimed source fingerprint.
+            jobs = [{key: value for key, value in job.items() if key != "_scope_blobs"}
+                    if isinstance(job, dict) else job for job in jobs]
             source_budget = 160_000 if consent["intensity"] == "full_blast" and resource == "chatgpt" else 40_000
             if consent["intensity"] in {"medium", "full_blast"}:
                 jobs = (continuous_jobs(jobs, revision, source_budget=source_budget) if source_budget > 40_000
@@ -779,6 +920,14 @@ class Service:
             if not jobs:
                 self.message = "Waiting for a maintainer contribution task. Retrying automatically."
                 return
+            # Continuous discovery already pinned these blob IDs. Slow mode
+            # needs one metadata-only tree request; no extra file downloads.
+            blobs = next((job.get("_scope_blobs") for job in jobs if isinstance(job, dict) and job.get("_scope_blobs")), None)
+            if blobs is None:
+                try:
+                    blobs = _tree_blobs(gh_api(f"repos/{UPSTREAM}/git/trees/{revision}?recursive=1"))
+                except (OSError, RuntimeError, ValueError, TypeError):
+                    blobs = {}
             index = (int(hashlib.sha256((login + str(int(time.time() // DAY_SECONDS))).encode()).hexdigest(), 16) + count) % len(jobs)
             pending_jobs = {match for item in opened.get("items", []) for match in
                             re.findall(r"<!-- cale-donation:([a-z0-9-]{1,60}) -->", str(item.get("body") or ""))}
@@ -799,7 +948,12 @@ class Service:
                         not all(allowed_path(path) for path in paths)):
                     raise ValueError("Invalid maintainer contribution task")
                 check_cancel()
-                run_id = claim_run(self.root, candidate["id"], resource, consent["intensity"], revision)
+                candidate_blobs = candidate.get("_scope_blobs", blobs)
+                fingerprint = scope_fingerprint(candidate, candidate_blobs)
+                backfill_reviewed_scope(self.root, candidate, check_cancel)
+                if scope_suppressed(self.root, candidate["id"], fingerprint):
+                    continue
+                run_id = claim_run(self.root, candidate["id"], resource, consent["intensity"], revision, fingerprint)
                 if run_id:
                     job = candidate
                     break
