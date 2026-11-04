@@ -108,6 +108,45 @@ class FileCatalogTests(unittest.TestCase):
             self.assertIn(str(kept), paths)
             self.assertEqual(file_catalog.search(state, "kept")[0]["path"], str(kept))
 
+    def test_unreadable_directory_preserves_prior_entries_until_retry(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            file_catalog, "enough_space", return_value=True
+        ):
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            blocked = root / "blocked"
+            blocked.mkdir(parents=True)
+            kept = blocked / "kept.txt"
+            stale = root / "stale.txt"
+            kept.write_text("", encoding="utf-8")
+            stale.write_text("", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            stale.unlink()
+            real_scandir = file_catalog.os.scandir
+
+            def scandir_with_denied_directory(path):
+                if Path(path) == blocked:
+                    raise PermissionError("temporarily inaccessible")
+                return real_scandir(path)
+
+            with patch.object(
+                file_catalog.os, "scandir", side_effect=scandir_with_denied_directory
+            ):
+                result = file_catalog.scan_computer(state, [root])
+
+            self.assertEqual(result["unreadable"], 1)
+            with file_catalog.database(state) as conn:
+                paths = {row["path"] for row in conn.execute("SELECT path FROM entries")}
+            self.assertIn(str(kept), paths)
+            self.assertIn(str(stale), paths)
+
+            result = file_catalog.scan_computer(state, [root])
+            self.assertEqual(result["unreadable"], 0)
+            with file_catalog.database(state) as conn:
+                paths = {row["path"] for row in conn.execute("SELECT path FROM entries")}
+            self.assertIn(str(kept), paths)
+            self.assertNotIn(str(stale), paths)
+
     def test_scan_search_and_prune(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"
