@@ -67,7 +67,10 @@ def inspect(folder: str | Path, path: str, question: str = "",
     limit = max(1, min(int(max_chars), MAX_EXCERPT_CHARS))
     relative = source.relative_to(root).as_posix()
     if source.suffix.casefold() in file_chat.IMAGES:
+        digest = _digest(source)
         description = file_chat.image_description(source, question)[:limit]
+        if _digest(source) != digest:
+            raise RuntimeError("The document changed while it was being read; try again")
         return {"source": relative, "text": description, "kind": "image",
                 "total_characters": len(description), "next_start_char": None,
                 "cached": False}
