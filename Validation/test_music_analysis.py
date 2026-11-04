@@ -45,6 +45,35 @@ def test_analysis_does_not_start_chord_segment_at_audio_endpoint(tmp_path, monke
     ]
 
 
+def test_analysis_does_not_move_pre_boundary_frame_into_short_tail(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    source = tmp_path / "four-seconds-plus-one-sample.wav"
+    source.touch()
+    sample_rate = 22050
+    sample_count = 4 * sample_rate + 1
+    chroma = np.zeros((12, 1 + sample_count // 512))
+    chroma[[0, 4, 7], :-1] = 1.0
+    chroma[[2, 7, 11], -1] = 1.0
+    # The last frame belongs before four seconds, not to the tiny tail.
+    assert (chroma.shape[1] - 1) * 512 < 4 * sample_rate
+    librosa_stub = SimpleNamespace(
+        get_duration=lambda *, path: sample_count / sample_rate,
+        load=lambda *args, **kwargs: (np.full(sample_count, 0.1), sample_rate),
+        effects=SimpleNamespace(harmonic=lambda signal: signal),
+        feature=SimpleNamespace(chroma_stft=lambda **kwargs: chroma),
+        beat=SimpleNamespace(beat_track=lambda **kwargs: (0.0, np.array([]))),
+    )
+    monkeypatch.setitem(sys.modules, "librosa", librosa_stub)
+
+    result = music_analysis.analyze_music(str(source))
+
+    assert result["chord_changes"] == [
+        {"at_seconds": 0.0, "chord": "C major"},
+    ]
+
+
 def test_analysis_includes_pitch_evidence_in_final_chroma_frame(tmp_path, monkeypatch):
     import sys
     from types import SimpleNamespace
