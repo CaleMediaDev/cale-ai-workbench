@@ -294,7 +294,13 @@ async def lifespan(_server):
                 listing = await session.list_tools()
             except Exception as exc:
                 ERRORS[group] = str(exc) or type(exc).__name__
-                await backend_stack.aclose()
+                try:
+                    await backend_stack.aclose()
+                except Exception as cleanup_exc:
+                    ERRORS[group] += (
+                        "; cleanup failed: "
+                        + (str(cleanup_exc) or type(cleanup_exc).__name__)
+                    )
                 continue
             await stack.enter_async_context(backend_stack)
             SESSIONS[group] = session
