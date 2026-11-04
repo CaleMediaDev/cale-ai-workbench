@@ -220,6 +220,18 @@ class VoiceTests(unittest.TestCase):
         with patch.object(voice_assistant, "urlopen", side_effect=OSError):
             self.assertFalse(voice_assistant._fast_model_loaded("cale-fast"))
 
+    def test_gpu_activity_ignores_malformed_lease_pids(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            state = root / "LongTasks"
+            state.mkdir()
+            for kind in ("music", "image"):
+                (state / f"{kind}-gpu-active-invalid.json").write_text('{}')
+            with (patch.object(voice_assistant, "ROOT", root),
+                  patch("psutil.Process") as process):
+                self.assertFalse(voice_assistant._heavy_gpu_active())
+                process.assert_not_called()
+
     def test_music_render_keeps_status_speech_from_reloading_gpu_model(self):
         from types import SimpleNamespace
 
