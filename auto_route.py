@@ -146,7 +146,9 @@ def repeated_tool_failures(messages):
             continue
         command = re.match(r"^Exit code: (-?\d+)(?:\r?\n|$)", content)
         if command:
-            if int(command.group(1)) != 0:
+            # Tool output is unbounded; converting the whole code to int can
+            # exceed Python's integer-string digit limit and crash routing.
+            if any(int(digit) != 0 for digit in command.group(1).lstrip("-")):
                 failures += 1
                 continue
             break

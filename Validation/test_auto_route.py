@@ -387,6 +387,26 @@ class AutoRouteTests(unittest.TestCase):
                 self.assertEqual(task_size(messages), "balanced")
                 self.assertIs(repair_messages(messages), messages)
 
+    def test_oversized_native_exit_codes_do_not_crash_recovery(self):
+        for code, expected in (("1" * 8000, True),
+                               ("-" + "1" * 8000, True),
+                               ("0" * 8000, False)):
+            with self.subTest(negative=code.startswith("-"), expected=expected):
+                messages = [{"role": "user", "content": "Calculate a tip."}]
+                messages.extend(
+                    {"role": "tool", "content": "Exit code: " + code + "\nOutput"}
+                    for _ in range(3)
+                )
+                self.assertEqual(repeated_tool_failures(messages), expected)
+                self.assertEqual(task_size(messages), "deep" if expected else "quick")
+                if expected:
+                    self.assertIn("Do not repeat", repair_messages(messages)[0]["content"])
+                else:
+                    self.assertIs(repair_messages(messages), messages)
+                messages.append({"role": "tool", "content": "Exit code: 0\nPassed"})
+                self.assertFalse(repeated_tool_failures(messages))
+                self.assertIs(repair_messages(messages), messages)
+
     def test_missing_verifier_handoff_uses_deeper_model(self):
         messages = [{"role": "user", "content": "Build a recipe app."},
                     {"role": "user", "content": "[Completion gate: missing verifier] Create real checks."}]
