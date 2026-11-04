@@ -22,7 +22,7 @@ NEGATED_GUITAR = re.compile(
 )
 NEGATED_SINGER = re.compile(
     rf"\b{NEGATION}\s+(?:a\s+)?(male|man|guy|boy|female|woman|girl)"
-    r"\s+(?:voice|vocals?|singer)\b", re.I,
+    r"\s+(?:lead\s+)?(?:voice|vocals?|singer)\b", re.I,
 )
 VOCAL_TEXTURE = re.compile(
     r"\b(?:vocal chops?|chopped vocals?|wordless vocals?|"
