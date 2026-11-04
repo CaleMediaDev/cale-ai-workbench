@@ -136,7 +136,7 @@ def repeated_tool_failures(messages):
               if isinstance(msg, dict) and msg.get("role") == "tool"][-8:]
     failures = 0
     for content in reversed(recent):
-        if "[Tool loop warning:" in content:
+        if content.startswith("[Tool loop warning:"):
             failures += 1
             continue
         # Native worker tools use short human-readable results. Recognize
