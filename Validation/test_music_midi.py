@@ -54,9 +54,11 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
     target = tmp_path / "notes"
 
     def render(args, **_kwargs):
-        assert args[-2:] == [str(source), str(target)]
-        (target / "guitar_basic_pitch.mid").write_bytes(b"MThd" + b"\x00" * 32)
-        (target / "guitar_note_events.csv").write_text(
+        assert args[-2] == str(source)
+        staging = Path(args[-1])
+        assert staging.parent == target
+        (staging / "guitar_basic_pitch.mid").write_bytes(b"MThd" + b"\x00" * 32)
+        (staging / "guitar_note_events.csv").write_text(
             "start_time_s,end_time_s,pitch_midi,velocity,pitch_bend\n\n"
             "0.0,1.0,69,85,1,2,3\n\n"
         )
@@ -73,6 +75,38 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
         row = next(csv.DictReader(stream))
     assert list(row) == music_midi.NOTE_COLUMNS
     assert json.loads(row["pitch_bend"]) == [1.0, 2.0, 3.0]
+
+
+def test_failed_transcription_with_partial_output_can_be_retried(tmp_path):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"audio")
+    target = tmp_path / "notes"
+    attempts = []
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        attempts.append(staging)
+        (staging / "guitar_basic_pitch.mid").write_bytes(b"MThd")
+        failed = len(attempts) == 1
+        return type("Done", (), {
+            "returncode": 1 if failed else 0,
+            "stdout": "", "stderr": "inference failed" if failed else "",
+        })()
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), patch.object(
+        music_midi, "install", return_value=Path("python.exe")
+    ), patch.object(music_midi.subprocess, "run", side_effect=render):
+        with pytest.raises(RuntimeError, match="inference failed"):
+            music_midi.transcribe_to_midi(str(source), str(target))
+        assert list(target.iterdir()) == []
+        result = music_midi.transcribe_to_midi(str(source), str(target))
+
+    assert len(attempts) == 2
+    assert all(not path.exists() for path in attempts)
+    assert Path(result["midi_path"]) == target / "guitar_basic_pitch.mid"
+    assert Path(result["midi_path"]).read_bytes() == b"MThd"
+    assert result["files"] == [result["midi_path"]]
+    assert source.read_bytes() == b"audio"
 
 
 @pytest.mark.parametrize("bends", ["1,2,3", "0"])

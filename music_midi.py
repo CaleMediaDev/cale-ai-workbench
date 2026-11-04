@@ -112,19 +112,27 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
         "from basic_pitch import ICASSP_2022_MODEL_PATH; "
         "predict_and_save([sys.argv[1]],sys.argv[2],True,False,False,True,ICASSP_2022_MODEL_PATH)"
     )
-    result = subprocess.run(
-        [str(python), "-c", script, str(source), str(target)],
-        capture_output=True, text=True, timeout=3600, creationflags=HIDE,
-        env={**os.environ, "PYTHONUTF8": "1"},
-    )
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Audio-to-MIDI failed.")
-    midi = sorted(path for path in target.glob("*.mid") if path.stat().st_size > 0)
-    if not midi:
-        raise RuntimeError("Basic Pitch finished without a MIDI file.")
-    for notes in target.glob("*.csv"):
-        normalize_note_events(notes)
-    files = sorted(path for path in target.iterdir() if path.is_file() and path.stat().st_size > 0)
+    # Failed inference or CSV validation must not leave partial outputs that
+    # prevent retrying with the same otherwise-empty destination.
+    with tempfile.TemporaryDirectory(prefix=".cale-midi-", dir=target) as directory:
+        staging = Path(directory)
+        result = subprocess.run(
+            [str(python), "-c", script, str(source), str(staging)],
+            capture_output=True, text=True, timeout=3600, creationflags=HIDE,
+            env={**os.environ, "PYTHONUTF8": "1"},
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Audio-to-MIDI failed.")
+        midi = sorted(path for path in staging.glob("*.mid") if path.stat().st_size > 0)
+        if not midi:
+            raise RuntimeError("Basic Pitch finished without a MIDI file.")
+        for notes in staging.glob("*.csv"):
+            normalize_note_events(notes)
+        files = sorted(path for path in staging.iterdir() if path.is_file() and path.stat().st_size > 0)
+        for path in files:
+            path.replace(target / path.name)
+        midi = [target / path.name for path in midi]
+        files = [target / path.name for path in files]
     return {"source": str(source), "output_dir": str(target),
             "midi_path": str(midi[0]), "files": [str(path) for path in files],
             "model": "Spotify Basic Pitch"}
