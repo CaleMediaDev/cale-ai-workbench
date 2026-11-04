@@ -34,6 +34,29 @@ class ModelIdentityTests(unittest.TestCase):
             )
             self.assertEqual(configured_main_alias(root), "cale-local")
 
+    def test_nested_model_defaults_do_not_select_aliases(self):
+        cases = (
+            (
+                "model:\n  options:\n    default: cale-local\n"
+                "  default: qwen3-coder-local\n",
+                "qwen3-coder-local",
+                "qwen3-coder-permissive",
+            ),
+            (
+                "model:\n  options:\n    default: qwen3-coder-local\n",
+                "cale-local",
+                "cale-permissive",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            for config, main, permissive in cases:
+                with self.subTest(config=config):
+                    (root / "data/config.yaml").write_text(config, encoding="utf-8")
+                    self.assertEqual(configured_main_alias(root), main)
+                    self.assertEqual(configured_permissive_alias(root), permissive)
+
     def test_quoted_legacy_alias_keeps_its_model_names(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

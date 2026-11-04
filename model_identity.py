@@ -26,6 +26,7 @@ def configured_main_alias(root: Path) -> str:
     except (OSError, UnicodeError):
         return DEFAULT_MAIN
     in_model = False
+    model_indent = None
     for line in lines:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -35,6 +36,11 @@ def configured_main_alias(root: Path) -> str:
         if in_model and not line[0].isspace():
             break
         if in_model:
+            indent = len(line) - len(line.lstrip())
+            if model_indent is None:
+                model_indent = indent
+            if indent != model_indent:
+                continue
             match = re.fullmatch(
                 r"\s+default:\s*(['\"]?)([a-zA-Z0-9._-]+)\1(?:\s+#.*)?\s*", line
             )
