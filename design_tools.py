@@ -106,7 +106,7 @@ def add_astro_ai_ui(project_path: str) -> dict:
     files = [(p, destination / p.relative_to(source)) for p in source_files]
     files.append((AI_UI_KIT / "LICENSE", destination / "LICENSE"))
     conflicts = [str(target) for original, target in files
-                 if any(parent.exists() and not parent.is_dir() for parent in target.parents)
+                 if any((parent.exists() or parent.is_symlink()) and not parent.is_dir() for parent in target.parents)
                  or target.is_symlink()
                  or (target.exists() and (not target.is_file() or target.read_bytes() != original.read_bytes()))]
     if conflicts:
