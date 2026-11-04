@@ -1,0 +1,1253 @@
+{
+  "version": "0.5.488",
+  "scope": "Pull requests 369-410",
+  "accepted": 41,
+  "rejected": [
+    393
+  ],
+  "reviews": [
+    {
+      "number": 369,
+      "head": "9cef6cd8782240297e5b37492c96bf3e0a957786",
+      "new_tests": [
+        "test_leading_zero_integers_are_decimal",
+        "test_unicode_multiplication_does_not_create_exponentiation"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": ".........                                  [100%]\n9 passed, 102 subtests passed in 0.33s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "           (\"000 + 1\", \"1\"),\n            (\"00,012 + 1\", \"13\"),\n            (\"0.001 + 0002\", \"2.001\"),\n            (\".001 + 0002\", \"2.001\"),\n        ):\n            with self.subTest(expression=expression):\n>               self.assertEqual(calculate(expression), f\"{expression} = {answer}\")\nE               AssertionError: None != '.001 + 0002 = 2.001'\n\nValidation\\test_donation_regressions.py:74: AssertionError\n=========================== short test summary info ===========================\nSUBFAILED(expression='0012 + 3') Validation/test_donation_regressions.py::CalculatorPrecisionTests::test_leading_zero_integers_are_decimal\nSUBFAILED(expression='0008 + 0009') Validation/test_donation_regressions.py::CalculatorPrecisionTests::test_leading_zero_integers_are_decimal\nSUBFAILED(expression='-0012 + 3') Validation/test_donation_regressions.py::CalculatorPrecisionTests::test_leading_zero_integers_are_decimal\nSUBFAILED(expression='00,012 + 1') Validation/test_donation_regressions.py::CalculatorPrecisionTests::test_leading_zero_integers_are_decimal\nSUBFAILED(expression='0.001 + 0002') Validation/test_donation_regressions.py::CalculatorPrecisionTests::test_leading_zero_integers_are_decimal\nSUBFAILED(expression='.001 + 0002') Validation/test_donation_regressions.py::CalculatorPrecisionTests::test_leading_zero_integers_are_decimal\n6 failed, 2 passed, 7 deselected, 11 subtests passed in 0.37s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": ".........                                  [100%]\n9 passed, 102 subtests passed in 1.77s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Normalizes padded integer tokens as decimal without rewriting fractional tokens or accepting malformed operators.",
+      "reviewed_head": "9cef6cd8782240297e5b37492c96bf3e0a957786"
+    },
+    {
+      "number": 370,
+      "head": "0cf65a33556df0318acd9cfd11210a4ed4fcd76f",
+      "new_tests": [
+        "test_edit_music_rejects_truncated_wav_after_successful_exit",
+        "test_edit_music_timeout_discards_partial_audio_and_allows_retry"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": ".....................                                                    [100%]\n21 passed in 1.60s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "d, **kwargs):\n            assert kwargs[\"timeout\"] == 3600\n            assert \"-n\" in command\n            staged = Path(command[-1])\n            staged_paths.append(staged)\n            with wave.open(str(staged), \"wb\") as audio:\n                audio.setnchannels(1)\n                audio.setsampwidth(2)\n                audio.setframerate(16000)\n                audio.writeframes(b\"\\x00\\x00\" * 160)\n            staged.write_bytes(staged.read_bytes()[:-missing_bytes])\n            # The header still declares frames even when their data is missing.\n            with wave.open(str(staged), \"rb\") as audio:\n                assert audio.getnframes() == 160\n            return music_edit.subprocess.CompletedProcess(command, 0, \"\", \"\")\n    \n        monkeypatch.setattr(music_edit.subprocess, \"run\", truncated_success)\n    \n        for _ in range(2):\n>           with pytest.raises(RuntimeError, match=\"truncated WAV\"):\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE           Failed: DID NOT RAISE RuntimeError\n\nValidation\\test_music_edit.py:176: Failed\n=========================== short test summary info ===========================\nFAILED Validation/test_music_edit.py::test_edit_music_rejects_truncated_wav_after_successful_exit[1]\nFAILED Validation/test_music_edit.py::test_edit_music_rejects_truncated_wav_after_successful_exit[320]\n2 failed, 1 passed, 18 deselected in 1.30s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": ".....................                                                    [100%]\n21 passed in 1.54s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Rejects WAVs whose readable frame bytes are shorter than their header before exclusive publication.",
+      "reviewed_head": "0cf65a33556df0318acd9cfd11210a4ed4fcd76f"
+    },
+    {
+      "number": 371,
+      "head": "1465e390160440a181acf32a204c5d86cd710216",
+      "new_tests": [
+        "test_invalid_model_weights_are_rejected_before_budgeting",
+        "test_large_machine_uses_full_native_window"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": ".............                                                 [100%]\n13 passed, 11 subtests passed in 0.16s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": ", \"urlopen\") as mocked_urlopen:\n                    response = mocked_urlopen.return_value.__enter__.return_value\n                    with patch.object(context_window.json, \"load\", return_value={\n                        \"models\": [{\"name\": \"main:latest\", \"size\": size}],\n                    }):\n>                       with self.assertRaisesRegex(ValueError, \"model weight size\"):\n                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE                       AssertionError: ValueError not raised\n\nValidation\\test_context_window.py:35: AssertionError\n=========================== short test summary info ===========================\nSUBFAILED(size=-7516192768) Validation/test_context_window.py::ContextWindowTests::test_invalid_model_weights_are_rejected_before_budgeting\nSUBFAILED(size=0) Validation/test_context_window.py::ContextWindowTests::test_invalid_model_weights_are_rejected_before_budgeting\nSUBFAILED(size=True) Validation/test_context_window.py::ContextWindowTests::test_invalid_model_weights_are_rejected_before_budgeting\nSUBFAILED(size=1.5) Validation/test_context_window.py::ContextWindowTests::test_invalid_model_weights_are_rejected_before_budgeting\nSUBFAILED(size='9663676416') Validation/test_context_window.py::ContextWindowTests::test_invalid_model_weights_are_rejected_before_budgeting\n5 failed, 2 passed, 11 deselected, 1 subtests passed in 0.31s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": ".............                                                 [100%]\n13 passed, 11 subtests passed in 0.14s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Rejects missing, zero, negative, boolean and non-integer model sizes before memory budgeting.",
+      "reviewed_head": "1465e390160440a181acf32a204c5d86cd710216"
+    },
+    {
+      "number": 372,
+      "head": "042a584d46d2f09b762ffa452a7f6a04cf64af0b",
+      "new_tests": [
+        "test_failed_transcription_with_partial_output_can_be_retried"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": ".............                                                            [100%]\n13 passed in 0.46s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "s, **_kwargs):\n            staging = Path(args[-1])\n            attempts.append(staging)\n            (staging / \"guitar_basic_pitch.mid\").write_bytes(b\"MThd\")\n            failed = len(attempts) == 1\n            return type(\"Done\", (), {\n                \"returncode\": 1 if failed else 0,\n                \"stdout\": \"\", \"stderr\": \"inference failed\" if failed else \"\",\n            })()\n    \n        with patch.object(music_midi.music_backend, \"_setup_lock\", return_value=nullcontext()), patch.object(\n            music_midi, \"install\", return_value=Path(\"python.exe\")\n        ), patch.object(music_midi.subprocess, \"run\", side_effect=render):\n            with pytest.raises(RuntimeError, match=\"inference failed\"):\n                music_midi.transcribe_to_midi(str(source), str(target))\n>           assert list(target.iterdir()) == []\nE           AssertionError: assert [WindowsPath(...c_pitch.mid')] == []\nE             \nE             Left contains one more item: WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1693/test_failed_transcription_with0/notes/guitar_basic_pitch.mid')\nE             Use -v to get more diff\n\nValidation\\test_music_midi.py:101: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_midi.py::test_failed_transcription_with_partial_output_can_be_retried\n1 failed, 12 deselected in 1.81s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": ".............                                                            [100%]\n13 passed in 0.41s\n"
+        }
+      },
+      "verdict": "accept_adapted",
+      "adaptation": {
+        "patch": "C:\\Users\\tahoe\\AppData\\Local\\Temp\\cale-pr-review-369-389-d19cnu9u\\372-adaptation.patch",
+        "apply_after_original_head": "042a584d46d2f09b762ffa452a7f6a04cf64af0b",
+        "repo": "C:\\Users\\tahoe\\AppData\\Local\\Temp\\cale-pr-review-369-389-d19cnu9u\\adjustments",
+        "branch": "corrected-372",
+        "commit": "3a79bd2e8a03401f807b0e4efabfb3cb1c9d2b6a",
+        "before": "Original PR372 silently overwrote a MIDI file created concurrently; new preservation test failed DID NOT RAISE.",
+        "after": "15 passed in0.43sec; includes original staging retry and exclusive full-byte publication plus rollback only of still-owned artifacts."
+      },
+      "disposition": "accept_adapted",
+      "reason": "Valid staged-transcription retry fix adapted to publish exclusively and roll back only owned outputs; original replace publication overwrote concurrent user files.",
+      "reviewed_head": "042a584d46d2f09b762ffa452a7f6a04cf64af0b"
+    },
+    {
+      "number": 373,
+      "head": "6ce77c2030960d58635bacad65942c1442acbe5d",
+      "new_tests": [
+        "test_cache_lookup_keeps_results_from_its_own_installation",
+        "test_browser_runtime_failure_is_visible_even_when_node_runs"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": ".............                                                            [100%]\n13 passed in 0.24s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "F.                                                                       [100%]\n================================== FAILURES ===================================\n__________ test_cache_lookup_keeps_results_from_its_own_installation __________\n\ntmp_path = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1697/test_cache_lookup_keeps_result0')\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002BBB0181480>\n\n    def test_cache_lookup_keeps_results_from_its_own_installation(tmp_path, monkeypatch):\n        broken = tmp_path / \"broken\"\n        healthy = tmp_path / \"healthy\"\n        for root in (broken, healthy):\n            ghidra = root / \"Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat\"\n            ghidra.parent.mkdir(parents=True)\n            ghidra.touch()\n    \n>       monkeypatch.setattr(core_tool_health, \"_health_cache\", (None, (), 0.0))\nE       AttributeError: <module 'core_tool_health' from 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\cale-pr-review-369-389-d19cnu9u\\\\repo\\\\core_tool_health.py'> has no attribute '_health_cache'\n\nValidation\\test_core_tool_health.py:55: AttributeError\n=========================== short test summary info ===========================\nFAILED Validation/test_core_tool_health.py::test_cache_lookup_keeps_results_from_its_own_installation\n1 failed, 1 passed, 11 deselected in 1.83s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": ".............                                                            [100%]\n13 passed in 0.22s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Captures a single immutable health-cache publication, keeping root eligibility and returned results consistent.",
+      "reviewed_head": "6ce77c2030960d58635bacad65942c1442acbe5d"
+    },
+    {
+      "number": 374,
+      "head": "f129b24995dc31f045a9a494c252b09b0331f41b",
+      "new_tests": [
+        "test_guidance_uses_latest_reviewed_generation_not_latest_review_time",
+        "test_review_requires_comment_for_thumbs_down"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "........                                                                 [100%]\n8 passed in 0.45s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "ew_time _____\n\ntmp_path = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1700/test_guidance_uses_latest_revi0')\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000019C59744050>\n\n    def test_guidance_uses_latest_reviewed_generation_not_latest_review_time(tmp_path, monkeypatch):\n        timestamps = iter([10.0, 20.0, 30.0])\n        monkeypatch.setattr(feedback_learning.time, \"time\", lambda: next(timestamps))\n        original = task(\"revised-song\", \"Techno synth bass\", title=\"Techno synth bass\")\n        feedback_learning.record(tmp_path, original, -1, \"Use electronic drums\")\n        feedback_learning.record(tmp_path, dict(original, generation=1), 1)\n    \n        learned = feedback_learning.guidance(tmp_path, \"music\", \"Techno synth bass\")\n        assert \"Similar task the user liked: Techno synth bass\" in learned\n>       assert \"Use electronic drums\" not in learned\nE       AssertionError: assert 'Use electronic drums' not in 'Past user f...tronic drums'\nE         \nE         'Use electronic drums' is contained here:\nE           - Improve: Use electronic drums\n\nValidation\\test_feedback_learning.py:148: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_feedback_learning.py::test_guidance_uses_latest_reviewed_generation_not_latest_review_time\n1 failed, 1 passed, 6 deselected in 1.05s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "........                                                                 [100%]\n8 passed in 0.43s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Uses latest reviewed task generation rather than recency of an older generation when learning feedback.",
+      "reviewed_head": "f129b24995dc31f045a9a494c252b09b0331f41b"
+    },
+    {
+      "number": 375,
+      "head": "4af5665a24ff9607de5035116c86d40795c01a15",
+      "new_tests": [
+        "test_watcher_recovers_from_frame_read_exception",
+        "test_enrollment_rejects_multiple_visible_faces"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "................                                                         [100%]\n16 passed in 0.37s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": " in __call__\n    return self._mock_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n..\\..\\..\\Programs\\Python\\Python313\\Lib\\unittest\\mock.py:1173: in _mock_call\n    return self._execute_mock_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = <Mock name='mock.read' id='1487210098240'>, args = (), kwargs = {}\n\n    def _execute_mock_call(self, /, *args, **kwargs):\n        # separate from _increment_mock_call so that awaited functions are\n        # executed separately from their call, also AsyncMock overrides this method\n    \n        effect = self.side_effect\n        if effect is not None:\n            if _is_exception(effect):\n                raise effect\n            elif not _callable(effect):\n                result = next(effect)\n                if _is_exception(result):\n>                   raise result\nE                   test_camera_presence.CameraPresenceTests.test_watcher_recovers_from_frame_read_exception.<locals>.ReadError: temporary read failure\n\n..\\..\\..\\Programs\\Python\\Python313\\Lib\\unittest\\mock.py:1232: ReadError\n=========================== short test summary info ===========================\nFAILED Validation/test_camera_presence.py::CameraPresenceTests::test_watcher_recovers_from_frame_read_exception\n1 failed, 1 passed, 14 deselected in 0.47s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "................                                                         [100%]\n16 passed in 0.31s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Routes cv2 frame-read exceptions through existing bounded failed-read retry and camera cleanup.",
+      "reviewed_head": "4af5665a24ff9607de5035116c86d40795c01a15"
+    },
+    {
+      "number": 376,
+      "head": "1b44e3c9e859596abf76eacebea2016bc77d4986",
+      "new_tests": [
+        "test_missing_fts_table_is_repopulated_for_unchanged_capabilities",
+        "test_damaged_index_is_preserved_and_rebuilt"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "........                                                                 [100%]\n8 passed in 1.60s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "F.                                                                       [100%]\n================================== FAILURES ===================================\n______ test_missing_fts_table_is_repopulated_for_unchanged_capabilities _______\n\n    def test_missing_fts_table_is_repopulated_for_unchanged_capabilities():\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            skill, tools = fixture(root)\n            original = skill.read_bytes()\n            with patch.object(capability_index, \"_registered_tools\", return_value=tools):\n                capability_index.sync(root)\n                with capability_index._database(root) as conn:\n                    conn.execute(\"DROP TABLE capabilities_fts\")\n                result = capability_index.sync(root)\n                assert result[\"skills\"] == 1 and result[\"tools\"] == 1\n>               assert result[\"updated\"] == 2\nE               assert 0 == 2\n\nValidation\\test_capability_index.py:72: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_capability_index.py::test_missing_fts_table_is_repopulated_for_unchanged_capabilities\n1 failed, 1 passed, 6 deselected in 0.35s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "........                                                                 [100%]\n8 passed in 1.56s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Repopulates missing capability FTS entries even when source hashes and paths are unchanged.",
+      "reviewed_head": "1b44e3c9e859596abf76eacebea2016bc77d4986"
+    },
+    {
+      "number": 377,
+      "head": "f95d7d28c0ab11821a3e3ebe0011b6cb288e5b94",
+      "new_tests": [
+        "test_recalled_file_replaced_by_alias_evicts_obsolete_identity",
+        "test_old_identifier_does_not_match_new_identifier_by_shared_word"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "..ss...................                                        [100%]\n21 passed, 4 skipped, 8 subtests passed in 4.28s\n"
+      },
+      "before_on_root_base": {
+        "code": 0,
+        "tail": "..                                                                     [100%]\n2 passed, 2 skipped, 21 deselected in 1.19s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Auto-merging Validation/test_project_memory.py\nAuto-merging project_memory.py\nAutomatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "...ss...................                                       [100%]\n22 passed, 4 skipped, 8 subtests passed in 5.55s\n"
+        }
+      },
+      "verdict": "accept",
+      "supplemental_alias_identity": {
+        "before": {
+          "old_id_rejected": false,
+          "found_ids": [
+            "file:implementation.py",
+            "file:app.py"
+          ]
+        },
+        "after": {
+          "old_id_rejected": true,
+          "found_ids": [
+            "file:implementation.py"
+          ]
+        }
+      },
+      "limitation": "Real symlink test skips without Windows privileges; mocked canonical resolution reproduces old same-hash identity leak and proves removal/reindexing.",
+      "disposition": "accept",
+      "reason": "Evicts obsolete indexed file identities when a canonical path changes; supplemental mocked resolution verifies behavior where Windows symlinks are unavailable.",
+      "reviewed_head": "f95d7d28c0ab11821a3e3ebe0011b6cb288e5b94"
+    },
+    {
+      "number": 378,
+      "head": "cc2f733e75326631a996b1d9a47090cb3f8f92e2",
+      "new_tests": [
+        "test_manifest_probe_error_reports_repair_without_launching_broker",
+        "test_wrong_companion_version_cannot_pair"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "............                                                             [100%]\n12 passed in 0.21s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "tory is inaccessible\")\n            return original_is_file(path)\n    \n        def unexpected_run(*args, **kwargs):\n            pytest.fail(\"The broker must not run with an inaccessible manifest\")\n    \n        monkeypatch.setattr(Path, \"is_file\", inaccessible_is_file)\n        monkeypatch.setattr(chrome_connector.subprocess, \"run\", unexpected_run)\n    \n>       assert chrome_connector.installed_version() == \"\"\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nValidation\\test_chrome_connector.py:101: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\nchrome_connector.py:17: in installed_version\n    if not manifest.is_file():\n           ^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\npath = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1705/test_manifest_probe_error_repo0/plugin/plugin.yaml')\n\n    def inaccessible_is_file(path):\n        if path == manifest:\n>           raise PermissionError(\"Manifest directory is inaccessible\")\nE           PermissionError: Manifest directory is inaccessible\n\nValidation\\test_chrome_connector.py:92: PermissionError\n=========================== short test summary info ===========================\nFAILED Validation/test_chrome_connector.py::test_manifest_probe_error_reports_repair_without_launching_broker\n1 failed, 1 passed, 10 deselected in 0.26s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "............                                                             [100%]\n12 passed in 0.18s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Treats a filesystem error probing the companion manifest as repair-required without launching its broker.",
+      "reviewed_head": "cc2f733e75326631a996b1d9a47090cb3f8f92e2"
+    },
+    {
+      "number": 379,
+      "head": "734c959fc120f244219a4f9879dc4fa44f7eb7cf",
+      "new_tests": [
+        "test_small_excerpt_budget_keeps_single_chunk_hints_in_bounds",
+        "test_long_file_answer_discloses_omitted_sections"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "...........................                                              [100%]\n27 passed in 0.41s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "(text))}]\\n{chunks[index]}\"\n                                                                                                        ^^^^^^^^^^^^^\nE           IndexError: list index out of range\n\nfile_chat.py:72: IndexError\n_ test_small_excerpt_budget_keeps_single_chunk_hints_in_bounds[What is the final section?] _\n\nquestion = 'What is the final section?'\n\n    @pytest.mark.parametrize(\"question\", [\"What is first?\", \"What is the final section?\"])\n    def test_small_excerpt_budget_keeps_single_chunk_hints_in_bounds(question):\n        text = \"Opening notes. \" + \"material \" * 30\n        assert 200 < len(text) < 350\n        excerpt = file_chat.select_excerpt(text, question, limit=200)\n>       assert \"[Characters 1-\" in excerpt\nE       AssertionError: assert '[Characters 1-' in '[Selected excerpts from a longer file; other sections are omitted.]\\n[Characters -349-...]\\nOpening notes. material material material material material material material material material material mater'\n\nValidation\\test_file_chat.py:114: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_file_chat.py::test_small_excerpt_budget_keeps_single_chunk_hints_in_bounds[What is first?]\nFAILED Validation/test_file_chat.py::test_small_excerpt_budget_keeps_single_chunk_hints_in_bounds[What is the final section?]\n2 failed, 1 passed, 24 deselected in 0.44s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "...........................                                              [100%]\n27 passed in 0.40s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Clamps excerpt hint indexes for one-chunk small-budget input.",
+      "reviewed_head": "734c959fc120f244219a4f9879dc4fa44f7eb7cf"
+    },
+    {
+      "number": 380,
+      "head": "8c3ab9dead1a92f2fb632d182dcf117ba2ba7f17",
+      "new_tests": [
+        "test_document_check_rejects_malformed_thousands_groups"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "....................                                                     [100%]\n20 passed in 5.00s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "ec = {\"source_path\": \"terms.txt\", \"report_path\": \"summary.md\",\n                \"calculations\": [{\"operation\": \"add\",\n                                  \"source_texts\": [f\"Base fee: ${source_amount}\",\n                                                   \"Extra fee: $0\"],\n                                  \"report_text\": f\"Total payable: ${report_amount}\"}]}\n>       with pytest.raises(ValueError, match=\"Calculation phrases need a dollar amount\"):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       Failed: DID NOT RAISE ValueError\n\nValidation\\test_document_check.py:99: Failed\n=========================== short test summary info ===========================\nFAILED Validation/test_document_check.py::test_document_check_rejects_malformed_thousands_groups[source-1,00]\nFAILED Validation/test_document_check.py::test_document_check_rejects_malformed_thousands_groups[source-12,34]\nFAILED Validation/test_document_check.py::test_document_check_rejects_malformed_thousands_groups[source-1,0000]\nFAILED Validation/test_document_check.py::test_document_check_rejects_malformed_thousands_groups[report-1,00]\nFAILED Validation/test_document_check.py::test_document_check_rejects_malformed_thousands_groups[report-12,34]\nFAILED Validation/test_document_check.py::test_document_check_rejects_malformed_thousands_groups[report-1,0000]\n6 failed, 14 deselected in 0.77s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "....................                                                     [100%]\n20 passed in 2.98s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Rejects malformed grouped dollar amounts rather than silently stripping arbitrary commas.",
+      "reviewed_head": "8c3ab9dead1a92f2fb632d182dcf117ba2ba7f17"
+    },
+    {
+      "number": 381,
+      "head": "a100fe063e9d2a99c31a7d0b91149e103dd247e5",
+      "new_tests": [
+        "test_preserves_local_file_at_marker_staging_path",
+        "test_preserves_local_skill_edits"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": ".s.....                                                                  [100%]\n6 passed, 1 skipped in 0.72s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "hon313\\Lib\\pathlib\\_abc.py:632: in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/tmpqpmsw97x/data/.cale-skill-files.json.tmp')\nmode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None\n\n    def open(self, mode='r', buffering=-1, encoding=None,\n             errors=None, newline=None):\n        \"\"\"\n        Open the file pointed to by this path and return a file object, as\n        the built-in open() function does.\n        \"\"\"\n        if \"b\" not in mode:\n            encoding = io.text_encoding(encoding)\n>       return io.open(self, mode, buffering, encoding, errors, newline)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       FileNotFoundError: [Errno 2] No such file or directory: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpqpmsw97x\\\\data\\\\.cale-skill-files.json.tmp'\n\n..\\..\\..\\Programs\\Python\\Python313\\Lib\\pathlib\\_local.py:537: FileNotFoundError\n=========================== short test summary info ===========================\nFAILED Validation/test_skill_catalog.py::SkillCatalogTests::test_preserves_local_file_at_marker_staging_path\n1 failed, 1 passed, 5 deselected in 2.61s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": ".s.....                                                                  [100%]\n6 passed, 1 skipped in 0.62s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Uses unique private marker staging files and preserves user files at the old fixed temporary filename.",
+      "reviewed_head": "a100fe063e9d2a99c31a7d0b91149e103dd247e5"
+    },
+    {
+      "number": 382,
+      "head": "6c5ca4ebf358e3b78db8340d753451b8355e291a",
+      "new_tests": [
+        "test_status_rephrasing_falls_back_for_malformed_model_responses",
+        "test_status_rephrasing_rejects_missing_fact"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "............................................     [100%]\n44 passed, 24 subtests passed in 1.05s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "27.0.0.1:11434/v1/chat/completions\",\n                {\"model\": FAST_MODEL, \"messages\": messages, \"stream\": False,\n                 \"max_tokens\": 72, \"temperature\": 0.85, \"reasoning_effort\": \"none\"},\n                timeout=3,\n            )\n>           candidate = str(result[\"choices\"][0][\"message\"].get(\"content\") or \"\").strip().strip('\"')\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE           AttributeError: 'list' object has no attribute 'get'\n\nvoice_assistant.py:214: AttributeError\n=========================== short test summary info ===========================\nSUBFAILED(response=None) Validation/test_voice_assistant.py::VoiceTests::test_status_rephrasing_falls_back_for_malformed_model_responses\nSUBFAILED(response={'choices': None}) Validation/test_voice_assistant.py::VoiceTests::test_status_rephrasing_falls_back_for_malformed_model_responses\nSUBFAILED(response={'choices': [None]}) Validation/test_voice_assistant.py::VoiceTests::test_status_rephrasing_falls_back_for_malformed_model_responses\nSUBFAILED(response={'choices': [{'message': None}]}) Validation/test_voice_assistant.py::VoiceTests::test_status_rephrasing_falls_back_for_malformed_model_responses\nSUBFAILED(response={'choices': [{'message': []}]}) Validation/test_voice_assistant.py::VoiceTests::test_status_rephrasing_falls_back_for_malformed_model_responses\n5 failed, 2 passed, 42 deselected in 0.42s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "............................................     [100%]\n44 passed, 24 subtests passed in 1.10s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Falls back to a grounded short spoken status for malformed local model response shapes.",
+      "reviewed_head": "6c5ca4ebf358e3b78db8340d753451b8355e291a"
+    },
+    {
+      "number": 383,
+      "head": "3df08eba33f8d01d13157f3de9d4f39fabb0fcc1",
+      "new_tests": [
+        "test_explicit_singing_exclusion_does_not_gain_singer_cues",
+        "test_explicit_instrumental_request_does_not_gain_vocal_cues"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "................                                                         [100%]\n16 passed in 0.15s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "F.                                                                       [100%]\n================================== FAILURES ===================================\n__________ test_explicit_singing_exclusion_does_not_gain_singer_cues __________\n\n    def test_explicit_singing_exclusion_does_not_gain_singer_cues():\n        for exclusion in (\"no singing\", \"without singing\"):\n            request = \"Katy Perry-style techno with \" + exclusion\n>           assert music_style.vocal_intent(request) == \"none\"\nE           AssertionError: assert 'female' == 'none'\nE             \nE             - none\nE             + female\n\nValidation\\test_music_style.py:152: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_style.py::test_explicit_singing_exclusion_does_not_gain_singer_cues\n1 failed, 1 passed, 14 deselected in 0.24s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "................                                                         [100%]\n16 passed in 0.13s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Honors explicit no/without singing while preserving requested wordless-vocal texture behavior.",
+      "reviewed_head": "3df08eba33f8d01d13157f3de9d4f39fabb0fcc1"
+    },
+    {
+      "number": 384,
+      "head": "ad27386d1798264f681328cbf25d699a68918fa8",
+      "new_tests": [
+        "test_reader_preserves_trailing_ampersand",
+        "test_reader_preserves_closing_block_text_boundaries"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "....................                                                   [100%]\n20 passed, 2 subtests passed in 0.97s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": ".F                                                                       [100%]\n================================== FAILURES ===================================\n________ BusinessContactTests.test_reader_preserves_trailing_ampersand ________\n\nself = <test_web_tools.BusinessContactTests testMethod=test_reader_preserves_trailing_ampersand>\n\n    def test_reader_preserves_trailing_ampersand(self):\n        body = '<p>Research &amp; development</p>Contact &'\n        with patch.object(\n            web_tools, \"fetch\",\n            return_value=(\"https://example.org/details\", body, \"text/html\", 200),\n        ):\n            page = web_tools.read_webpage(\"https://example.org/details\")\n>       self.assertEqual(page[\"text\"], \"Research & development\\nContact &\")\nE       AssertionError: 'Research & development' != 'Research & development\\nContact &'\nE         Research & development\nE       + Contact &\n\nValidation\\test_web_tools.py:108: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_web_tools.py::BusinessContactTests::test_reader_preserves_trailing_ampersand\n1 failed, 1 passed, 18 deselected in 1.07s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "....................                                                   [100%]\n20 passed, 2 subtests passed in 0.89s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Finalizes HTMLParser input so trailing incomplete entities remain in reader/search content.",
+      "reviewed_head": "ad27386d1798264f681328cbf25d699a68918fa8"
+    },
+    {
+      "number": 385,
+      "head": "c18056847f34a31eaa24acfdd120da4f4f8569cf",
+      "new_tests": [
+        "test_mastering_rejects_dangling_output_symlink",
+        "test_mastering_rejects_overwrite_and_same_reference"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "........s.                                                               [100%]\n9 passed, 1 skipped in 1.18s\n"
+      },
+      "before_on_root_base": {
+        "code": 0,
+        "tail": "s.                                                                       [100%]\n1 passed, 1 skipped, 8 deselected in 0.99s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "........s.                                                               [100%]\n9 passed, 1 skipped in 1.16s\n"
+        }
+      },
+      "verdict": "accept",
+      "supplemental_dangling_output": {
+        "before": {
+          "error": "ReachedInstall",
+          "reached_install": true,
+          "missing_target_written": false
+        },
+        "after": {
+          "error": "ValueError",
+          "reached_install": false,
+          "missing_target_written": false
+        }
+      },
+      "limitation": "Real symlink test skips without Windows privileges; mocked final-component symlink resolution proves early rejection without installation or rendering.",
+      "disposition": "accept",
+      "reason": "Rejects a dangling final-component output symlink without following it to a missing target; supplemental mocked path guard verifies no installation/render starts.",
+      "reviewed_head": "c18056847f34a31eaa24acfdd120da4f4f8569cf"
+    },
+    {
+      "number": 386,
+      "head": "aaef16af1adc2596b61736e2dcef6d97315802ee",
+      "new_tests": [
+        "test_directory_metadata_is_not_ready_after_stale_file_check",
+        "test_file_removed_during_readiness_check_is_not_ready"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "........                                                           [100%]\n8 passed, 6 subtests passed in 0.24s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "F.                                                                     [100%]\n================================== FAILURES ===================================\n_ NaturalVoiceTests.test_directory_metadata_is_not_ready_after_stale_file_check _\n\nself = <test_natural_voice.NaturalVoiceTests testMethod=test_directory_metadata_is_not_ready_after_stale_file_check>\n\n    def test_directory_metadata_is_not_ready_after_stale_file_check(self):\n        path = SimpleNamespace(\n            is_file=lambda: True,\n            stat=lambda: SimpleNamespace(st_mode=stat.S_IFDIR, st_size=4096),\n        )\n>       self.assertFalse(natural_voice._nonempty_file(path))\nE       AssertionError: True is not false\n\nValidation\\test_natural_voice.py:22: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_natural_voice.py::NaturalVoiceTests::test_directory_metadata_is_not_ready_after_stale_file_check\n1 failed, 1 passed, 6 deselected, 2 subtests passed in 0.26s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "........                                                           [100%]\n8 passed, 6 subtests passed in 0.26s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Validates regular-file type and nonempty size from one stat snapshot, avoiding inconsistent readiness metadata.",
+      "reviewed_head": "aaef16af1adc2596b61736e2dcef6d97315802ee"
+    },
+    {
+      "number": 387,
+      "head": "e959a7fa667b61b6a2ebebd27d3f9b262ee222c8",
+      "new_tests": [
+        "test_music_releases_only_this_installations_voice_worker"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "....................                                                     [100%]\n20 passed in 0.25s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "_procs\", return_value=([], alive)) as wait_procs):\n            cale_voice.release_for_gpu_task()\n        own.terminate.assert_called_once()\n        own.wait.assert_called_once_with(timeout=5)\n>       own.children.assert_called_once_with(recursive=True)\n\nValidation\\test_cale_voice.py:105: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = <Mock name='mock.children' id='1731841885920'>, args = ()\nkwargs = {'recursive': True}\n\n    def assert_called_once_with(self, /, *args, **kwargs):\n        \"\"\"assert that the mock was called exactly once and that that call was\n        with the specified arguments.\"\"\"\n        if not self.call_count == 1:\n            msg = (\"Expected '%s' to be called once. Called %s times.%s\"\n                   % (self._mock_name or 'mock',\n                      self.call_count,\n                      self._calls_repr()))\n>           raise AssertionError(msg)\nE           AssertionError: Expected 'children' to be called once. Called 0 times.\n\n..\\..\\..\\Programs\\Python\\Python313\\Lib\\unittest\\mock.py:990: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_cale_voice.py::test_music_releases_only_this_installations_voice_worker[False]\nFAILED Validation/test_cale_voice.py::test_music_releases_only_this_installations_voice_worker[True]\n2 failed, 18 deselected in 0.43s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "....................                                                     [100%]\n20 passed in 0.29s\n"
+        }
+      },
+      "verdict": "accept_adapted",
+      "adaptation": {
+        "patch": "C:\\Users\\tahoe\\AppData\\Local\\Temp\\cale-pr-review-369-389-d19cnu9u\\387-adaptation.patch",
+        "apply_after_original_head": "e959a7fa667b61b6a2ebebd27d3f9b262ee222c8",
+        "repo": "C:\\Users\\tahoe\\AppData\\Local\\Temp\\cale-pr-review-369-389-d19cnu9u\\adjustments",
+        "branch": "corrected-387",
+        "commit": "4080f54df6f74ff7ca6d37c781ea21eae8858ec5",
+        "before": "Three new mocked process regressions fail original PR387: inaccessible children bypass parent termination; force-killed parent and children are not awaited.",
+        "after": "23passed in3.10sec. Parent cleanup survives inaccessible child enumeration; parent kill has bounded5s wait; killed children have bounded3s second wait. Unrelated workers remain untouched."
+      },
+      "disposition": "accept_adapted",
+      "reason": "Valid descendant cleanup adapted to retain parent termination on enumeration errors and bound waits after forced termination.",
+      "reviewed_head": "e959a7fa667b61b6a2ebebd27d3f9b262ee222c8"
+    },
+    {
+      "number": 388,
+      "head": "eec665f4c13063ad5a064191d4bf7e1e72a8ca11",
+      "new_tests": [
+        "test_failed_background_repair_does_not_throttle_another_root",
+        "test_first_background_repair_is_not_throttled_at_low_uptime"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": "..........                                                               [100%]\n10 passed in 1.46s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "thon313\\Lib\\unittest\\mock.py:1497: in __enter__\n    original, local = self.get_original()\n                      ^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = <unittest.mock._patch object at 0x000002185BA0BED0>\n\n    def get_original(self):\n        target = self.getter()\n        name = self.attribute\n    \n        original = DEFAULT\n        local = False\n    \n        try:\n            original = target.__dict__[name]\n        except (AttributeError, KeyError):\n            original = getattr(target, name, DEFAULT)\n        else:\n            local = True\n    \n        if name in _builtins and isinstance(target, ModuleType):\n            self.create = True\n    \n        if not self.create and original is DEFAULT:\n>           raise AttributeError(\n                \"%s does not have the attribute %r\" % (target, name)\n            )\nE           AttributeError: <module 'ffmpeg_runtime' from 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\cale-pr-review-369-389-d19cnu9u\\\\repo\\\\ffmpeg_runtime.py'> does not have the attribute '_last_attempt_root'\n\n..\\..\\..\\Programs\\Python\\Python313\\Lib\\unittest\\mock.py:1467: AttributeError\n=========================== short test summary info ===========================\nFAILED Validation/test_ffmpeg_runtime.py::test_failed_background_repair_does_not_throttle_another_root\n1 failed, 1 passed, 8 deselected in 0.29s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": "..........                                                               [100%]\n10 passed in 1.39s\n"
+        }
+      },
+      "verdict": "accept_adapted",
+      "adaptation": {
+        "patch": "C:\\Users\\tahoe\\AppData\\Local\\Temp\\cale-pr-review-369-389-d19cnu9u\\388-adaptation.patch",
+        "apply_after_original_head": "eec665f4c13063ad5a064191d4bf7e1e72a8ca11",
+        "repo": "C:\\Users\\tahoe\\AppData\\Local\\Temp\\cale-pr-review-369-389-d19cnu9u\\adjustments",
+        "branch": "corrected-388",
+        "commit": "978a399f120aa4183166dc558bbe107f684b52a3",
+        "before": "Two new alternating-root regressions fail original PR388: switching roots (including successful repair elsewhere) bypasses first roots failure cooldown.",
+        "after": "Per-root cooldown dictionary, bounded64roots and synchronized publication; successful repair clears only its own root. Full13tests pass including expiry and bounded retention."
+      },
+      "disposition": "accept_adapted",
+      "reason": "Valid per-root repair isolation adapted to retain each roots cooldown across alternating calls and unrelated success, with a synchronized64-root cap.",
+      "reviewed_head": "eec665f4c13063ad5a064191d4bf7e1e72a8ca11"
+    },
+    {
+      "number": 389,
+      "head": "4c3c4443a562d527140ca2247cecf052644439ab",
+      "new_tests": [
+        "test_analysis_does_not_start_chord_segment_at_audio_endpoint",
+        "test_analysis_reports_only_finite_positive_tempos"
+      ],
+      "head_tests": {
+        "code": 0,
+        "tail": ".........                                                                [100%]\n9 passed in 0.79s\n"
+      },
+      "before_on_root_base": {
+        "code": 1,
+        "tail": "   # Centered STFT includes one more frame than the number of full hops.\n        chroma = np.zeros((12, 1 + sample_count // 512))\n        chroma[[0, 4, 7], :-1] = 1.0\n        chroma[[2, 7, 11], -1] = 1.0\n        librosa_stub = SimpleNamespace(\n            get_duration=lambda *, path: 4.0,\n            load=lambda *args, **kwargs: (np.full(sample_count, 0.1), sample_rate),\n            effects=SimpleNamespace(harmonic=lambda signal: signal),\n            feature=SimpleNamespace(chroma_stft=lambda **kwargs: chroma),\n            beat=SimpleNamespace(beat_track=lambda **kwargs: (0.0, np.array([]))),\n        )\n        monkeypatch.setitem(sys.modules, \"librosa\", librosa_stub)\n    \n        result = music_analysis.analyze_music(str(source))\n    \n        assert result[\"analyzed_seconds\"] == 4.0\n>       assert result[\"chord_changes\"] == [\n            {\"at_seconds\": 0.0, \"chord\": \"C major\"},\n        ]\nE       AssertionError: assert [{'at_seconds...': 'G major'}] == [{'at_seconds...': 'C major'}]\nE         \nE         Left contains one more item: {'at_seconds': 4.0, 'chord': 'G major'}\nE         Use -v to get more diff\n\nValidation\\test_music_analysis.py:43: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_analysis.py::test_analysis_does_not_start_chord_segment_at_audio_endpoint\n1 failed, 1 passed, 7 deselected in 0.39s\n"
+      },
+      "integration": {
+        "base": "376cc777c0ea93b3e6b926347b13486b657c59ee",
+        "merge_code": 0,
+        "merge_output": "Automatic merge went well; stopped before committing as requested\n",
+        "tests": {
+          "code": 0,
+          "tail": ".........                                                                [100%]\n9 passed in 0.26s\n"
+        }
+      },
+      "verdict": "accept",
+      "disposition": "accept",
+      "reason": "Caps chord segment starts by actual analyzed sample duration as well as centered STFT frame extent.",
+      "reviewed_head": "4c3c4443a562d527140ca2247cecf052644439ab"
+    },
+    {
+      "number": 390,
+      "head": "e08ced1ba0a854d30e952420c752e8ee0f8a38ff",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_runtime_diagnostics.py",
+        "runtime_diagnostics.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 3.46,
+          "summary": "..F..........                                                            [100%]\r\n================================== FAILURES ===================================\r\n____________ test_ongoing_failures_do_not_extend_reported_episode _____________\r\nValidation\\test_runtime_diagnostics.py:49: in test_ongoing_failures_do_not_extend_reported_episode\r\n    assert issue[\"first_seen\"] == new_start\r\nE   assert 100.0 == 3701\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_runtime_diagnostics.py::test_ongoing_failures_do_not_extend_reported_episode\r\n1 failed, 12 passed in 2.84s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 3.55,
+          "summary": ".............                                                            [100%]\r\n13 passed in 2.80s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 2.11,
+          "summary": ".............                                                            [100%]\r\n13 passed in 1.44s\r\n"
+        }
+      }
+    },
+    {
+      "number": 391,
+      "head": "c2cae6a632e576a2da8572b0fed2a0e0ead9953c",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_cale_voice_worker.py",
+        "cale_voice_worker.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 1.08,
+          "summary": "                                                   [100%]\r\n================================== FAILURES ===================================\r\n_________ test_empty_generated_waveform_preserves_existing_recording __________\r\nValidation\\test_cale_voice_worker.py:125: in test_empty_generated_waveform_preserves_existing_recording\r\n    with pytest.raises(ValueError, match=\"empty waveform\"):\r\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nE   Failed: DID NOT RAISE ValueError\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_cale_voice_worker.py::test_empty_generated_waveform_preserves_existing_recording\r\n1 failed, 6 passed in 0.40s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 0.83,
+          "summary": ".......                                                                  [100%]\r\n7 passed in 0.13s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 0.79,
+          "summary": ".......                                                                  [100%]\r\n7 passed in 0.12s\r\n"
+        }
+      },
+      "voice_candidate_integration": "101passed19subtests5.17sec; temporary application restored; no hardware inference"
+    },
+    {
+      "number": 392,
+      "head": "c31cf18dacda39a55d0696029f4069a6966fbb61",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_public_api_catalog.py",
+        "public_api_catalog.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 2.11,
+          "summary": "n\\test_public_api_catalog.py:47: in test_search_public_apis_rejects_non_integer_limits_before_catalog_access\r\n    with pytest.raises(ValueError, match=\"Result count must be between 1 and 20\"):\r\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nE   AssertionError: Regex pattern did not match.\r\nE     Expected regex: 'Result count must be between 1 and 20'\r\nE     Actual message: 'not enough values to unpack (expected 2, got 0)'\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_public_api_catalog.py::test_search_public_apis_rejects_non_integer_limits_before_catalog_access[True]\r\n1 failed, 12 passed in 1.29s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 1.72,
+          "summary": ".............                                                            [100%]\r\n13 passed in 0.93s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 1.77,
+          "summary": ".............                                                            [100%]\r\n13 passed in 0.97s\r\n"
+        }
+      }
+    },
+    {
+      "number": 393,
+      "head": "281fe3d68fe36e16a9d818206a66afcb760e42a1",
+      "status": "reject",
+      "reason": "Removes SQL LIMIT; query limit1 expands46->5000 filesystem probes/0.059->2.983sec across5000 stale matches. Whole-index search work unbounded.",
+      "files": [
+        "Validation/test_file_catalog.py",
+        "file_catalog.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 2.33,
+          "summary": "row in results], [str(target)])\r\nE   AssertionError: Lists differ: [] != ['C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\[66 chars]txt']\r\nE   \r\nE   Second list contains 1 additional elements.\r\nE   First extra element 0:\r\nE   'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpm73c4hub\\\\drive\\\\group-live\\\\needle expanded document filename.txt'\r\nE   \r\nE   - []\r\nE   + ['C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpm73c4hub\\\\drive\\\\group-live\\\\needle '\r\nE   +  'expanded document filename.txt']\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_file_catalog.py::FileCatalogTests::test_stale_search_hits_do_not_hide_existing_match\r\n1 failed, 12 passed in 1.65s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 1.44,
+          "summary": ".............                                                            [100%]\r\n13 passed in 0.79s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 1.44,
+          "summary": ".............                                                            [100%]\r\n13 passed in 0.79s\r\n"
+        }
+      }
+    },
+    {
+      "number": 394,
+      "head": "8be495b860314ff07162b850f9689a23e0c36860",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_table_ml.py",
+        "table_ml.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 3.99,
+          "summary": "and_reused\r\n    train_table_model(str(training), \"label\", str(model), \"classification\")\r\ntable_ml.py:146: in train_table_model\r\n    x_train = vectorizer.fit_transform(_features(train_rows, schema))\r\n                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\ntable_ml.py:85: in _features\r\n    raise ValueError(f\"Numeric feature {column!r} overflowed during normalization.\")\r\nE   ValueError: Numeric feature 'signal' overflowed during normalization.\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_table_ml.py::TableMLTests::test_large_finite_feature_median_can_be_trained_and_reused\r\n1 failed, 13 passed, 8 subtests passed in 3.17s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 4.1,
+          "summary": "..............                                                   [100%]\r\n14 passed, 8 subtests passed in 3.22s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 3.21,
+          "summary": "..............                                                   [100%]\r\n14 passed, 8 subtests passed in 2.36s\r\n"
+        }
+      }
+    },
+    {
+      "number": 395,
+      "head": "45fe477836d912753a0612f2332660195bb4ba80",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_project_documents.py",
+        "project_documents.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 4.61,
+          "summary": "                                 [100%]\r\n================================== FAILURES ===================================\r\n_______ test_inspector_rejects_source_changes_during_excerpt_selection ________\r\nValidation\\test_project_documents.py:166: in test_inspector_rejects_source_changes_during_excerpt_selection\r\n    raise AssertionError(\"Source edited during excerpt selection returned stale text\")\r\nE   AssertionError: Source edited during excerpt selection returned stale text\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_project_documents.py::test_inspector_rejects_source_changes_during_excerpt_selection\r\n1 failed, 11 passed in 3.78s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 3.16,
+          "summary": "............                                                             [100%]\r\n12 passed in 2.33s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 3.15,
+          "summary": "............                                                             [100%]\r\n12 passed in 2.30s\r\n"
+        }
+      }
+    },
+    {
+      "number": 396,
+      "head": "fd4e3bd8534b37f79ffc3c3b4f3eeba4100d55ca",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_music_backend.py",
+        "music_backend.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 3.83,
+          "summary": "^^^^^^^^^^^^^^^^^^^^^^^^^\r\nE   OverflowError: int too large to convert to float\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_music_backend.py::test_project_jobs_skips_invalid_timestamp_and_sorts_valid_jobs[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]\r\n1 failed, 73 passed in 2.96s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 5.55,
+          "summary": "........................................................................ [ 97%]\r\n..                                                                       [100%]\r\n74 passed in 4.86s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 6.02,
+          "summary": "........................................................................ [ 97%]\r\n..                                                                       [100%]\r\n74 passed in 5.30s\r\n"
+        }
+      }
+    },
+    {
+      "number": 397,
+      "head": "c87359b81a5ded7fd1e79eda29a6d000d3c56efc",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_readiness_checklist.py",
+        "readiness_checklist.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 2.25,
+          "summary": "eadiness_checklist.py::test_snapshot_ignores_malformed_cached_probe_sections[unexpected-vision]\r\nFAILED Validation/test_readiness_checklist.py::test_snapshot_ignores_malformed_cached_probe_sections[unexpected-browser]\r\nFAILED Validation/test_readiness_checklist.py::test_snapshot_ignores_malformed_cached_probe_sections[1-local_ai]\r\nFAILED Validation/test_readiness_checklist.py::test_snapshot_ignores_malformed_cached_probe_sections[1-voice]\r\nFAILED Validation/test_readiness_checklist.py::test_snapshot_ignores_malformed_cached_probe_sections[1-vision]\r\nFAILED Validation/test_readiness_checklist.py::test_snapshot_ignores_malformed_cached_probe_sections[1-browser]\r\n16 failed, 55 passed in 1.52s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 2.98,
+          "summary": ".......................................................................  [100%]\r\n71 passed in 2.25s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 2.12,
+          "summary": ".......................................................................  [100%]\r\n71 passed in 1.40s\r\n"
+        }
+      }
+    },
+    {
+      "number": 398,
+      "head": "04fffd2646b8ee74636dad7316cac6e94bc115c6",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_quick_image.py",
+        "quick_image.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 1.33,
+          "summary": "ller_than_100_bytes ___________\r\nValidation\\test_quick_image.py:204: in test_recovery_preserves_valid_png_smaller_than_100_bytes\r\n    assert quick_image.image_file_ok(output)\r\nE   AssertionError: assert False\r\nE    +  where False = <function image_file_ok at 0x000001F95038FA60>(WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1659/test_recovery_preserves_valid_0/small.png'))\r\nE    +    where <function image_file_ok at 0x000001F95038FA60> = quick_image.image_file_ok\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_quick_image.py::test_recovery_preserves_valid_png_smaller_than_100_bytes\r\n1 failed, 10 passed in 0.60s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 1.1,
+          "summary": "...........                                                              [100%]\r\n11 passed in 0.43s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 1.18,
+          "summary": "...........                                                              [100%]\r\n11 passed in 0.44s\r\n"
+        }
+      }
+    },
+    {
+      "number": 399,
+      "head": "f6de6ff4effb3476060d714c9440d85754ff726a",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_self_diagnostics.py",
+        "self_diagnostics.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 3.16,
+          "summary": "========================== FAILURES ===================================\r\n__ SelfDiagnosticsTests.test_monitoring_error_preserves_captured_test_output __\r\nValidation\\test_self_diagnostics.py:171: in test_monitoring_error_preserves_captured_test_output\r\n    self.assertIn(\"failure details before monitoring error\", output)\r\nE   AssertionError: 'failure details before monitoring error' not found in 'Self-check could not finish: OSError: monitoring failed\\n'\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_self_diagnostics.py::SelfDiagnosticsTests::test_monitoring_error_preserves_captured_test_output\r\n1 failed, 12 passed, 1 skipped in 0.53s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 1.02,
+          "summary": "......s.......                                                           [100%]\r\n13 passed, 1 skipped in 0.33s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 1.03,
+          "summary": "......s.......                                                           [100%]\r\n13 passed, 1 skipped in 0.35s\r\n"
+        }
+      }
+    },
+    {
+      "number": 400,
+      "head": "694a6637f4df4769c6e8e57226fe49262de25102",
+      "status": "accept_adapted",
+      "reason": "Original regressed valid --check-hash-based-pycs option with separate argument. Credited correction consumes flag value and handles attached -c/-m;7 supplemental cases,3 fail original;48 full module passed.",
+      "files": [
+        "Validation/test_runtime_features.py",
+        "runtime_features.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 1.42,
+          "summary": "_background()\r\nE   assert False\r\nE    +  where False = <function start_background at 0x0000017FCA5B0CC0>()\r\nE    +    where <function start_background at 0x0000017FCA5B0CC0> = runtime_features.start_background\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_runtime_features.py::test_installer_path_in_another_programs_arguments_does_not_block_repair[prefix0]\r\nFAILED Validation/test_runtime_features.py::test_installer_path_in_another_programs_arguments_does_not_block_repair[prefix1]\r\nFAILED Validation/test_runtime_features.py::test_installer_path_in_another_programs_arguments_does_not_block_repair[prefix2]\r\n3 failed, 38 passed in 0.75s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 1.18,
+          "summary": ".........................................                                [100%]\r\n41 passed in 0.45s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 1.18,
+          "summary": ".........................................                                [100%]\r\n41 passed in 0.48s\r\n"
+        }
+      },
+      "corrected_commit": "8ab52265f623f4ec6c60c70bf71e89e10ea75a1c",
+      "credited_commit": "80f6bb3723acaef3405aec924f01c6d1ed7643e5",
+      "additional_checks": "pr400-adaptation-before.txt / pr400-adaptation-after.txt"
+    },
+    {
+      "number": 401,
+      "head": "d74a80fe91aa351a68077e814adc6749f731c01b",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_site_crawler.py",
+        "site_crawler.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 3.52,
+          "summary": "ta\\Local\\Programs\\Python\\Python313\\Lib\\urllib\\parse.py:567: in urljoin\r\n    base, url, _coerce_result = _coerce_args(base, url)\r\n                                ^^^^^^^^^^^^^^^^^^^^^^^\r\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\urllib\\parse.py:130: in _coerce_args\r\n    raise TypeError(\"Cannot mix str and non-str arguments\")\r\nE   TypeError: Cannot mix str and non-str arguments\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_site_crawler.py::test_malformed_link_target_does_not_abort_crawl[123]\r\nFAILED Validation/test_site_crawler.py::test_malformed_link_target_does_not_abort_crawl[/broken]\r\n2 failed, 16 passed in 2.73s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 2.02,
+          "summary": "..................                                                       [100%]\r\n18 passed in 1.23s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 3.11,
+          "summary": "..................                                                       [100%]\r\n18 passed in 2.33s\r\n"
+        }
+      }
+    },
+    {
+      "number": 402,
+      "head": "86a6bc1be2cb09091039ef30eeb02b11b69ed99c",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_scanned_pdf.py",
+        "scanned_pdf.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 4.84,
+          "summary": "cute_mock_call(*args, **kwargs)\r\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\mock.py:1234: in _execute_mock_call\r\n    result = effect(*args, **kwargs)\r\n             ^^^^^^^^^^^^^^^^^^^^^^^\r\nValidation\\test_scanned_pdf.py:248: in load_page\r\n    raise PdfiumError(\"cannot load page\")\r\nE   test_scanned_pdf.test_unloadable_page_preserves_other_pages_and_reports_omission.<locals>.PdfiumError: cannot load page\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_scanned_pdf.py::test_unloadable_page_preserves_other_pages_and_reports_omission\r\n1 failed, 10 passed in 2.78s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 3.47,
+          "summary": "...........                                                              [100%]\r\n11 passed in 2.54s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 3.37,
+          "summary": "...........                                                              [100%]\r\n11 passed in 2.36s\r\n"
+        }
+      }
+    },
+    {
+      "number": 403,
+      "head": "029839d65db35102ff5b47eed359b37f7e925dcc",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_system_gauges.py",
+        "system_gauges.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 0.92,
+          "summary": "============================\r\n______ test_cpu_percent_rejects_idle_delta_exceeding_total_and_recovers _______\r\nValidation\\test_system_gauges.py:22: in test_cpu_percent_rejects_idle_delta_exceeding_total_and_recovers\r\n    assert system_gauges.cpu_percent(previous, current) is None\r\nE   assert 0 is None\r\nE    +  where 0 = <function cpu_percent at 0x000001933D17CAE0>((100, 200), (250, 300))\r\nE    +    where <function cpu_percent at 0x000001933D17CAE0> = system_gauges.cpu_percent\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_system_gauges.py::test_cpu_percent_rejects_idle_delta_exceeding_total_and_recovers\r\n1 failed, 12 passed in 0.25s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 0.75,
+          "summary": ".............                                                            [100%]\r\n13 passed in 0.10s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 0.74,
+          "summary": ".............                                                            [100%]\r\n13 passed in 0.09s\r\n"
+        }
+      }
+    },
+    {
+      "number": 404,
+      "head": "b50b09d845a8968c311a78a465f946ff5777279b",
+      "status": "accept_adapted",
+      "reason": "Original unbounded repeated cursor pagination could stall startup. Credited correction max32pages/2000tools/15sec, cursor cycle/shape limits;4 independent budget/cancellation/cleanup regressions fail original;29 module tests pass.",
+      "files": [
+        "Validation/test_toolbox_mcp.py",
+        "toolbox_mcp.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 2.43,
+          "summary": "  return self._loop.run_until_complete(task)\r\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\asyncio\\base_events.py:725: in run_until_complete\r\n    return future.result()\r\n           ^^^^^^^^^^^^^^^\r\nValidation\\test_toolbox_mcp.py:528: in check\r\n    assert discovery_calls == [None, \"page-2\"]\r\nE   AssertionError: assert [None] == [None, 'page-2']\r\nE     \r\nE     Right contains one more item: 'page-2'\r\nE     Use -v to get more diff\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_toolbox_mcp.py::test_backend_discovery_includes_tools_from_later_pages\r\n1 failed, 24 passed in 1.63s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 1.97,
+          "summary": ".........................                                                [100%]\r\n25 passed in 1.13s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 1.98,
+          "summary": ".........................                                                [100%]\r\n25 passed in 1.15s\r\n"
+        }
+      },
+      "corrected_commit": "d9f0e2d252fd394bc218d5350815f15bbe0026da",
+      "credited_commit": "f2b92cd1184d0461a4ebcd0a433ad05c13107a5d",
+      "additional_checks": "pr404-adaptation-before.txt / pr404-adaptation-after.txt"
+    },
+    {
+      "number": 405,
+      "head": "51b5f7c280cce83b82e41e025ef15b10dbc1b595",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_task_eta.py",
+        "task_eta.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 1.37,
+          "summary": "========== FAILURES ===================================\r\n___________ test_music_countdown_rejects_invalid_current_timestamps ___________\r\nValidation\\test_task_eta.py:156: in test_music_countdown_rejects_invalid_current_timestamps\r\n    assert task_eta.music_countdown(job, now=invalid) == (\r\nE   AssertionError: nan\r\nE   assert 'About 1m 00s... recent songs' == 'Estimating f...recent songs\ufffd'\r\nE     \r\nE     - Estimating from recent songs\ufffd\r\nE     + About 1m 00s left \ufffd estimate from recent songs\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_task_eta.py::test_music_countdown_rejects_invalid_current_timestamps\r\n1 failed, 13 passed in 0.69s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 1.13,
+          "summary": "..............                                                           [100%]\r\n14 passed in 0.46s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 1.89,
+          "summary": "..............                                                           [100%]\r\n14 passed in 1.17s\r\n"
+        }
+      }
+    },
+    {
+      "number": 406,
+      "head": "8276928d0cdc6ddabc7a1cf3f4d7acf85d4aad1a",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_user_file_memory.py",
+        "user_file_memory.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 4.99,
+          "summary": "pwq/first.txt')]\r\n_ UserFileMemoryTests.test_get_rejects_source_deleted_before_refresh_enumeration _\r\nValidation\\test_user_file_memory.py:91: in test_get_rejects_source_deleted_before_refresh_enumeration\r\n    with self.assertRaises(ValueError):\r\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nE   AssertionError: ValueError not raised\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_user_file_memory.py::UserFileMemoryTests::test_get_refreshes_only_requested_file\r\nFAILED Validation/test_user_file_memory.py::UserFileMemoryTests::test_get_rejects_source_deleted_before_refresh_enumeration\r\n2 failed, 30 passed, 1 skipped, 2 subtests passed in 4.30s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 3.87,
+          "summary": ".........................s.......                                      [100%]\r\n32 passed, 1 skipped, 2 subtests passed in 3.20s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 11.9,
+          "summary": ".........................s.......                                      [100%]\r\n32 passed, 1 skipped, 2 subtests passed in 11.23s\r\n"
+        }
+      }
+    },
+    {
+      "number": 407,
+      "head": "62ba08531aa78107c3a93fab4f8b1a6fc184f2c8",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_native_browser.py",
+        "native_browser.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 8.32,
+          "summary": "safe_and_collision_resolved[AUX-_AUX]\r\nFAILED Validation/test_native_browser.py::test_download_device_names_are_safe_and_collision_resolved[NUL.txt-_NUL.txt]\r\nFAILED Validation/test_native_browser.py::test_download_device_names_are_safe_and_collision_resolved[COM1.log-_COM1.log]\r\nFAILED Validation/test_native_browser.py::test_download_device_names_are_safe_and_collision_resolved[LPT9.txt-_LPT9.txt]\r\nFAILED Validation/test_native_browser.py::test_download_device_names_are_safe_and_collision_resolved[COM\\xb9.txt-_COM\\xb9.txt]\r\nFAILED Validation/test_native_browser.py::test_download_device_names_are_safe_and_collision_resolved[LPT\\xb2.txt-_LPT\\xb2.txt]\r\n9 failed, 15 passed, 2 skipped in 7.65s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 12.34,
+          "summary": "..........s..s............                                               [100%]\r\n24 passed, 2 skipped in 11.60s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 9.17,
+          "summary": "..........s..s............                                               [100%]\r\n24 passed, 2 skipped in 8.40s\r\n"
+        }
+      }
+    },
+    {
+      "number": 408,
+      "head": "e02088ca709e5bb48028d3ecb380784b4d3d3030",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77. Authored symlink test Windows-skips; portable exact-path symlink-observation proof red before (renderer called), green after (ValueError before renderer), source preserved.",
+      "files": [
+        "Validation/test_music_video.py",
+        "music_video.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 0,
+          "seconds": 5.2,
+          "summary": "s...........                                                             [100%]\r\n11 passed, 1 skipped in 4.35s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 4.54,
+          "summary": "s...........                                                             [100%]\r\n11 passed, 1 skipped in 3.14s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 4.41,
+          "summary": "s...........                                                             [100%]\r\n11 passed, 1 skipped in 3.55s\r\n"
+        }
+      }
+    },
+    {
+      "number": 409,
+      "head": "8dd276ae0185720c8365c6917b84e9f2f4284996",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_music_stems.py",
+        "music_stems.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 2.45,
+          "summary": "wav')}\r\nE     \r\nE     Extra items in the left set:\r\nE     WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1684/test_successful_separation_pub0/stems/scratch')\r\nE     WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1684/test_successful_separation_pub0/stems/separator.log')\r\nE     WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-1684/test_successful_separation_pub0/stems/empty.wav')\r\nE     Use -v to get more diff\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_music_stems.py::test_successful_separation_publishes_only_validated_stems\r\n1 failed, 8 passed, 1 skipped in 1.66s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 2.1,
+          "summary": ".......s..                                                               [100%]\r\n9 passed, 1 skipped in 1.32s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 2.19,
+          "summary": ".......s..                                                               [100%]\r\n9 passed, 1 skipped in 1.37s\r\n"
+        }
+      }
+    },
+    {
+      "number": 410,
+      "head": "b847ebc4b156ecedf0d7fc8adb702adc1cae6349",
+      "status": "accept",
+      "reason": "Production diff reviewed; authored regression red on parent, touched full module green at exact head and current main376cc77.",
+      "files": [
+        "Validation/test_setup_recovery.py",
+        "setup_recovery.py"
+      ],
+      "checks": {
+        "baseline": {
+          "exit": 1,
+          "seconds": 3.32,
+          "summary": "       [100%]\r\n================================== FAILURES ===================================\r\n____________ test_nonfinite_retry_timestamps_do_not_launch_repair _____________\r\nValidation\\test_setup_recovery.py:366: in test_nonfinite_retry_timestamps_do_not_launch_repair\r\n    assert setup_recovery.recover() is False\r\nE   assert True is False\r\nE    +  where True = <function recover at 0x0000020178C3A980>()\r\nE    +    where <function recover at 0x0000020178C3A980> = setup_recovery.recover\r\n=========================== short test summary info ===========================\r\nFAILED Validation/test_setup_recovery.py::test_nonfinite_retry_timestamps_do_not_launch_repair\r\n1 failed, 17 passed in 2.57s\r\n"
+        },
+        "head": {
+          "exit": 0,
+          "seconds": 3.1,
+          "summary": "..................                                                       [100%]\r\n18 passed in 2.38s\r\n"
+        },
+        "integration": {
+          "exit": 0,
+          "seconds": 4.63,
+          "summary": "..................                                                       [100%]\r\n18 passed in 3.90s\r\n"
+        }
+      }
+    }
+  ],
+  "integration_corrections": [
+    "372: exclusive output publication",
+    "387: bounded descendant cleanup and Python entrypoint ownership",
+    "388: synchronized bounded per-runtime cooldown cache",
+    "400: parse Python interpreter options before matching installer entrypoint",
+    "404: bound tool pagination and reject cursor cycles"
+  ]
+}
