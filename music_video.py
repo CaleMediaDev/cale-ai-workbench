@@ -76,7 +76,7 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
                 output.unlink(missing_ok=True)
             raise
     if result.returncode or not output.is_file() or not output.stat().st_size:
-        if result.returncode and output.is_file() and "already exists" not in result.stderr.lower():
+        if output.is_file() and (not result.returncode or "already exists" not in result.stderr.lower()):
             output.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local music video failed.")
     return {"source": str(source), "path": str(output), "layout": layout,
