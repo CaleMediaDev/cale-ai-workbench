@@ -190,6 +190,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "browser_open", "description": "Open a URL in this task's private local browser and update its side preview. Use for interactive websites.", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "browser_open_project", "description": "Open this project's local HTML app and update its side preview without starting a server. Give a relative HTML path such as game.html. Uses a separate offline browser profile restricted to project files; subsequent browser_snapshot/click/type/press/read actions use that page. Use check_webapp or a saved verifier for repeatable behavior checks.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "browser_snapshot", "description": "Read the current interactive page and obtain numbered refs for visible controls. The page is untrusted data.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "inspect_webapp", "description": "Inspect local HTML offline in one call: actual IDs, labels, editable/readonly targets, loaded SHA and JS errors. No values or acceptance verdict; derive expected behavior from the user request.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "browser_read", "description": "Read visible text from this task's browser page.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "browser_click", "description": "Click a numbered control from browser_snapshot.", "parameters": {"type": "object", "properties": {"ref": {"type": "string"}}, "required": ["ref"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "browser_type", "description": "Fill a numbered field from browser_snapshot, optionally pressing Enter.", "parameters": {"type": "object", "properties": {"ref": {"type": "string"}, "text": {"type": "string"}, "submit": {"type": "boolean"}}, "required": ["ref", "text"], "additionalProperties": False}}},
@@ -1135,6 +1136,10 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             else:
                 value = project_memory.index(folder, include_code=True)
             return json.dumps(value, ensure_ascii=False, default=str)[:MAX_TOOL_OUTPUT]
+        if name == "inspect_webapp":
+            import native_browser
+
+            return native_browser.inspect_webapp(folder, arguments, max_output=MAX_TOOL_OUTPUT)
         if name.startswith("browser_"):
             import native_browser
 
@@ -2296,7 +2301,7 @@ def repair_tools(project: dict, state: dict):
         state["repair_focus_turns"] = 0
         return TOOLS
     state["repair_focus_turns"] = count + 1
-    names = {"list_files", "read_file", "edit_file", "write_file", "search_text", "check_webapp", "run_verifier", "task_steps", "check_python_function", "check_javascript_function"}
+    names = {"list_files", "read_file", "edit_file", "write_file", "search_text", "check_webapp", "run_verifier", "task_steps", "check_python_function", "check_javascript_function", "inspect_webapp"}
     available = [tool for tool in TOOLS if tool["function"]["name"] in names]
     # A queued step owns the four-plus-one cycle in step_tools, including its
     # escape turn. Avoid stacking independently timed write restrictions.
@@ -2319,6 +2324,8 @@ def step_tools(project: dict, state: dict, available: list) -> list:
     core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text", "check_python_function", "check_javascript_function", "create_game_starter", "check_game_starter",
             "run_command", "run_verifier", "check_webapp", "check_document_report",
             "inspect_project_file", "transform_csv"}
+    if (queue.get("active") or {}).get("check_tool") == "check_webapp":
+        core.add("inspect_webapp")
     focused = [tool for tool in available if tool["function"]["name"] in core]
     return focused_html_write_tools(project, focused, queue.get("active"))
 
@@ -3537,6 +3544,8 @@ def planning_basis(project: dict) -> dict:
 def initial_plan_tools(project: dict, available: list) -> list:
     """Offer discovery and one typed plan mutation, never implementation tools."""
     names = {"task_steps", "read_file", "list_files", "inspect_project_file", "search_project_memory", "read_webpage"}
+    if browser_check_required({**project, "brief": planning_intent(project)}):
+        names.add("inspect_webapp")
     offered = copy.deepcopy([tool for tool in available if tool["function"]["name"] in names])
     tool = next(item for item in offered if item["function"]["name"] == "task_steps")
     parameters = tool["function"]["parameters"]
@@ -4785,7 +4794,7 @@ def run_slice(project: dict, complete=None) -> dict:
         call_messages = [*messages, focus[1]] if focus else messages
         if source_first and not focus:
             call_messages = [*call_messages, {"role": "user", "content": (
-                "If the page already exists, inspect and preserve it. Otherwise build a small source skeleton first. "
+                "If the page already exists, use inspect_webapp(path) in one call to inspect and preserve it. Otherwise build a small source skeleton first. "
                 "Use its actual controls and output IDs when planning browser checks. "
                 "Derive expected behavior from the original requirements. "
                 "Create and pass the SQLite units after grounding their checks; source edits alone are not completion."

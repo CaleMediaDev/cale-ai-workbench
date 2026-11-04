@@ -129,6 +129,7 @@ def test_local_dom_contract_describes_targets_without_values_and_tracks_loaded_b
       <input id="password" type="password" aria-label="Password" value="private-password-value">
       <div id="error" hidden></div><output id="result"></output>
       <div id="duplicate"></div><span id="duplicate"></span>
+      <div id="react:target"></div>
       <input id="disabled" disabled><label>Notes <textarea id="notes">private-notes-value</textarea></label>
       <button id="submit-default">Add</button><div id="editable" contenteditable="true">private-edited-text</div>
     </form>'''
@@ -138,6 +139,7 @@ def test_local_dom_contract_describes_targets_without_values_and_tracks_loaded_b
         result = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
         contract = result["dom_contract"]
         assert contract["path"] == "index.html"
+        assert contract["scope"] == "main_html_only"
         assert contract["page_sha256"] == hashlib.sha256(original).hexdigest()
         assert contract["current_page_sha256"] == contract["page_sha256"] and not contract["stale"]
         targets = {row["id"]: row for row in contract["targets"] if row["id"]}
@@ -148,6 +150,9 @@ def test_local_dom_contract_describes_targets_without_values_and_tracks_loaded_b
         assert targets["total"]["readOnly"] and not targets["total"]["editable"]
         assert not targets["error"]["visible"] and targets["result"]["tag"] == "output"
         assert targets["duplicate"]["id_count"] == 2
+        assert not targets["duplicate"]["checker_id_supported"]
+        assert targets["react:target"]["id"] == "react:target" and not targets["react:target"]["checker_id_supported"]
+        assert targets["amount"]["checker_id_supported"]
         assert targets["disabled"]["disabled"] and not targets["disabled"]["editable"]
         assert targets["notes"]["labels"] == ["Notes"]
         assert targets["password"]["editable"] and not targets["password"]["readOnly"]
@@ -193,6 +198,59 @@ def test_local_dom_contract_bounds_targets_and_unicode_output(tmp_path):
         contract = json.loads(native_browser.execute(tmp_path, "snapshot", {}))["dom_contract"]
         assert 0 < len(contract["targets"]) <= 64 and contract["truncated"]
         assert len(json.dumps(contract, ensure_ascii=False).encode("utf-8")) <= 24000
+    finally:
+        native_browser.close()
+
+
+def test_inspect_webapp_returns_only_grounded_metadata_and_startup_errors(tmp_path):
+    import task_context
+    pytest.importorskip("playwright")
+    (tmp_path / "index.html").write_text(
+        '<label for="email">Email</label><input id="email" value="PRIVATE_EMAIL">'
+        '<input type="password" value="PRIVATE_PASSWORD"><textarea>PRIVATE_NOTES</textarea>'
+        '<output id="total"></output><p>LEGACY_BODY_TEXT</p><script>escapeHtml()</script>', encoding="utf-8")
+    task_context.plan_steps(tmp_path, [{"phase": "App", "title": "Use real controls", "check_tool": "check_webapp",
+        "check_arguments": {"path": "index.html", "cases": [{"visible": ["total"]}]}}])
+    before = task_context.step_status(tmp_path)
+    try:
+        raw = native_agent.execute_tool(tmp_path, "inspect_webapp", {"path": "index.html"})
+        result = json.loads(raw)
+        assert set(result) == {"dom_contract", "javascript_errors", "javascript_errors_note"}
+        assert any("escapeHtml is not defined" in message for message in result["javascript_errors"])
+        assert any(row["id"] == "email" and row["editable"] for row in result["dom_contract"]["targets"])
+        assert not result["dom_contract"]["stale"]
+        assert all(value not in raw for value in ["PRIVATE_EMAIL", "PRIVATE_PASSWORD", "PRIVATE_NOTES", "LEGACY_BODY_TEXT"])
+        assert task_context.step_status(tmp_path) == before
+        assert not (tmp_path / ".local-ai/verify.ps1").exists()
+        assert "passed" not in result and "controls" not in result and "text" not in result
+    finally:
+        native_browser.close()
+
+
+def test_inspect_webapp_rejects_escape_before_browser_starts(tmp_path):
+    with patch.object(native_browser, "_page", side_effect=AssertionError("Browser must not start")):
+        result = native_agent.execute_tool(tmp_path, "inspect_webapp", {"path": "../outside.html"})
+    assert result.startswith("Tool error:") and "HTML file in this project" in result
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("symlink loop"), ValueError("invalid path")])
+def test_dom_contract_stale_path_resolution_failure_retains_loaded_identity(tmp_path, failure):
+    pytest.importorskip("playwright")
+    source = tmp_path / "index.html"
+    source.write_text('<input id="amount">', encoding="utf-8")
+    try:
+        native_browser.execute(tmp_path, "open_project", {"path": "index.html"})
+        before = json.loads(native_browser.execute(tmp_path, "snapshot", {}))["dom_contract"]
+        resolve = Path.resolve
+        def raced_path(path, *args, **kwargs):
+            if path == source:
+                raise failure
+            return resolve(path, *args, **kwargs)
+        with patch.object(Path, "resolve", raced_path):
+            after = json.loads(native_browser.execute(tmp_path, "snapshot", {}))["dom_contract"]
+        assert after["stale"] and after["current_page_sha256"] is None
+        assert after["page_sha256"] == before["page_sha256"] and after["path"] == before["path"]
+        assert any(row["id"] == "amount" for row in after["targets"])
     finally:
         native_browser.close()
 

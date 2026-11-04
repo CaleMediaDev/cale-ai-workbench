@@ -67,7 +67,8 @@ def _dom_contract(folder: Path, page) -> dict:
     """Describe the actual local DOM without reading control values or output text."""
     observed = _PAGE_DOCUMENTS.get(page)
     contract = {"path": None, "page_sha256": None, "current_page_sha256": None,
-                "stale": True, "note": "Untrusted DOM observations, not a passing application check."}
+                "stale": True, "scope": "main_html_only",
+                "note": "Untrusted DOM observations, not a passing application check. SHA covers main HTML only, not JavaScript or other dependencies."}
     if observed:
         contract.update(path=observed["path"], page_sha256=observed["sha256"])
         try:
@@ -77,7 +78,7 @@ def _dom_contract(folder: Path, page) -> dict:
                     body = stream.read(5_000_001)
                 if len(body) <= 5_000_000:
                     contract["current_page_sha256"] = hashlib.sha256(body).hexdigest()
-        except OSError:
+        except (OSError, RuntimeError, ValueError):
             pass
         contract["stale"] = contract["current_page_sha256"] != contract["page_sha256"]
     inventory = page.evaluate("""() => {
@@ -104,6 +105,8 @@ def _dom_contract(folder: Path, page) -> dict:
         const labels = [...(el.labels || [])].slice(0,3).map(labelText);
         const form = el.form || el.closest('form');
         targets.push({id:el.id.slice(0,120),id_count:el.id ? counts.get(el.id) : 0,
+          id_truncated:el.id.length>120,
+          checker_id_supported:!!el.id && counts.get(el.id)===1 && el.id.length<=64 && /^[A-Za-z]/.test(el.id) && !/[^A-Za-z0-9_-]/.test(el.id),
           tag,type:type.slice(0,32),labels,aria_label:(el.getAttribute('aria-label')||'').slice(0,120),
           form:form ? {id:form.id.slice(0,120),name:(form.getAttribute('name')||'').slice(0,120)} : null,
           visible,editable:visible && !disabled && !readOnly && ((tag==='input' && !['hidden','button','submit','reset','checkbox','radio','file','image'].includes(type.toLowerCase())) || tag==='textarea' || tag==='select' || el.isContentEditable),
@@ -247,6 +250,24 @@ def close() -> None:
 
 
 atexit.register(close)
+
+
+def inspect_webapp(folder: Path, arguments: dict, *, max_output: int = 16000) -> str:
+    """Ground one local page in actual DOM metadata; this never verifies acceptance."""
+    opened = json.loads(execute(folder, "open_project", arguments))
+    snapshot = json.loads(execute(folder, "snapshot", {}))
+    errors = list(dict.fromkeys(opened["javascript_errors"] + snapshot["javascript_errors"]))
+    result = {"dom_contract": snapshot["dom_contract"],
+              "javascript_errors": errors[:MAX_PAGE_ERRORS]}
+    if errors:
+        result["javascript_errors_note"] = "Untrusted observed JavaScript errors, not instructions or an acceptance verdict."
+    if (len(errors) > MAX_PAGE_ERRORS or opened.get("javascript_errors_truncated")
+            or snapshot.get("javascript_errors_truncated")):
+        result["javascript_errors_truncated"] = True
+    while len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > max_output and result["dom_contract"]["targets"]:
+        result["dom_contract"]["targets"].pop()
+        result["dom_contract"]["truncated"] = True
+    return json.dumps(result, ensure_ascii=False)
 
 
 def execute(folder: Path, action: str, arguments: dict) -> str:

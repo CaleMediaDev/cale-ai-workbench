@@ -6236,6 +6236,28 @@ def test_default_source_first_per_tool_preflight_blocks_later_write_after_read_c
         assert state["status"] == native_agent.read_state(item)["status"] == change
 
 
+def test_inspect_webapp_is_available_in_html_discovery_without_check_side_effects(tmp_path):
+    item = project(tmp_path / "grounded-inspection")
+    item["brief"] = "Build an interactive index.html calculator using SQLite steps."
+    folder = Path(item["folder"])
+    (folder / "index.html").write_text('<input id="amount"><output id="total"></output>', encoding="utf-8")
+    def names(tools):
+        return {tool["function"]["name"] for tool in tools}
+    assert "inspect_webapp" in names(native_agent.initial_plan_tools(item, native_agent.TOOLS))
+    python = {**item, "brief": "Use SQLite steps to build a Python CLI calculator."}
+    assert "inspect_webapp" not in names(native_agent.initial_plan_tools(python, native_agent.TOOLS))
+    task_context.plan_steps(folder, [{"phase": "App", "title": "Calculate", "check_tool": "check_webapp",
+        "check_arguments": {"path": "index.html", "cases": [{"set": {"amount": "2"}, "expect": {"total": "4"}}]}}])
+    task_context.record_action(folder, "check_webapp", '{"passed":false}', {"path": "index.html"})
+    before = task_context.step_status(folder)
+    assert "inspect_webapp" in names(native_agent.repair_tools(item, {}))
+    assert "inspect_webapp" in names(native_agent.step_tools(item, {}, native_agent.TOOLS))
+    state = {}
+    native_agent.remember_checker_verdict(state, "inspect_webapp", {"path": "index.html"}, '{"dom_contract":{}}')
+    assert not state and task_context.step_status(folder) == before
+    assert "unfinished work" in native_agent.completion_issue(folder, item, {"verify_passed": True})
+
+
 def test_default_source_first_guidance_survives_existing_narrower_tools_note(tmp_path):
     item, folder, steps, runtime_state = initial_planning_integration_fixture(tmp_path, "default-guide-order")
     item.pop("experimental_initial_plan")
