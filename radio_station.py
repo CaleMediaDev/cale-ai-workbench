@@ -392,11 +392,13 @@ class Service:
             self.skip_requested = False
             self.enabled = False
             self.paused = False
-            self.player.stop()
-            if self.current:
-                self._update(self.current["id"], "played")
-                self.current = None
-            self.message = "Radio stopped. Your stations are saved; the current render can finish in cache."
+            try:
+                self.player.stop()
+            finally:
+                if self.current:
+                    self._update(self.current["id"], "played")
+                    self.current = None
+                self.message = "Radio stopped. Your stations are saved; the current render can finish in cache."
 
     def skip(self):
         self.commands.put(("skip", None))
