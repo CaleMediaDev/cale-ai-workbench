@@ -248,7 +248,14 @@ class Player:
             return False
         self.prepare(path)
         # Keep the outgoing channel intact if the new channel cannot start.
-        self.prepared.start()
+        try:
+            self.prepared.start()
+        except Exception:
+            try:
+                self.prepared.stop()
+            finally:
+                self.prepared = None
+            raise
         self.outgoing, self.active = self.active, self.prepared
         self.prepared = None
         self.fade_start = self.now()
