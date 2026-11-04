@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -53,7 +54,10 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
             + spectrum + ",format=rgba,colorkey=0x000000:0.05:0.1[spec];"
             f"[cover][spec]overlay=shortest=1:format=auto,format=yuv420p[{video_label}]"
         )
-    with tempfile.TemporaryDirectory(prefix="cale-music-video-") as temp:
+    # Keep partial renders private and on the destination filesystem so that
+    # publication can be atomic without ever replacing an existing output.
+    with tempfile.TemporaryDirectory(prefix="cale-music-video-", dir=output.parent) as temp:
+        rendered = Path(temp) / "render.mp4"
         if captions:
             # A relative filename avoids Windows drive-letter escaping inside
             # FFmpeg's filter language. The copied SRT is deleted afterward.
@@ -64,21 +68,15 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
             *inputs, "-filter_complex", filters,
             "-map", "[v]", "-map", "0:a:0", "-c:v", "libx264", "-preset", "veryfast",
             "-pix_fmt", "yuv420p", "-crf", "23", "-c:a", "aac", "-b:a", "192k",
-            "-movflags", "+faststart", "-shortest", str(output),
+            "-movflags", "+faststart", "-shortest", str(rendered),
         ]
-        try:
-            result = subprocess.run(command, capture_output=True, text=True,
-                                    errors="replace", timeout=3600, creationflags=HIDE, cwd=temp)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            # subprocess.run has stopped FFmpeg, but its incomplete MP4 can
-            # remain after a timeout or interruption and prevent a retry.
-            if output.is_file():
-                output.unlink(missing_ok=True)
-            raise
-    if result.returncode or not output.is_file() or not output.stat().st_size:
-        if output.is_file() and "already exists" not in result.stderr.lower():
-            output.unlink(missing_ok=True)
-        raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local music video failed.")
+        result = subprocess.run(command, capture_output=True, text=True,
+                                errors="replace", timeout=3600, creationflags=HIDE, cwd=temp)
+        if result.returncode or not rendered.is_file() or not rendered.stat().st_size:
+            raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local music video failed.")
+        # Unlike replace/rename, link refuses a destination created since the
+        # initial validation. TemporaryDirectory cleans up only our own files.
+        os.link(rendered, output)
     return {"source": str(source), "path": str(output), "layout": layout,
             "background_image": str(image) if image else "",
             "captions_path": str(captions) if captions else "", "kind": "music_visualizer"}

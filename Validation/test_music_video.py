@@ -28,13 +28,14 @@ def test_music_video_timeout_removes_partial_output_and_allows_retry(tmp_path, m
     monkeypatch.setattr(music_video.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
 
     def fake_run(command, **kwargs):
-        assert command[-1] == str(video)
+        rendered = type(video)(command[-1])
+        assert not rendered.exists()
         assert not video.exists()
         calls.append(command)
         if len(calls) == 1:
-            video.write_bytes(b"incomplete MP4")
+            rendered.write_bytes(b"incomplete MP4")
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
-        video.write_bytes(b"completed MP4")
+        rendered.write_bytes(b"completed MP4")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(music_video.subprocess, "run", fake_run)
@@ -63,13 +64,14 @@ def test_music_video_interruption_removes_partial_output_and_allows_retry(tmp_pa
     monkeypatch.setattr(music_video.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
 
     def fake_run(command, **kwargs):
-        assert command[-1] == str(video)
+        rendered = type(video)(command[-1])
+        assert not rendered.exists()
         assert not video.exists()
         calls.append(command)
         if len(calls) == 1:
-            video.write_bytes(b"interrupted MP4")
+            rendered.write_bytes(b"interrupted MP4")
             raise KeyboardInterrupt()
-        video.write_bytes(b"completed MP4")
+        rendered.write_bytes(b"completed MP4")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(music_video.subprocess, "run", fake_run)
@@ -98,10 +100,11 @@ def test_music_video_empty_output_is_removed_and_allows_retry(tmp_path, monkeypa
     monkeypatch.setattr(music_video.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
 
     def fake_run(command, **kwargs):
-        assert command[-1] == str(video)
+        rendered = type(video)(command[-1])
+        assert not rendered.exists()
         assert not video.exists()
         calls.append(command)
-        video.write_bytes(b"" if len(calls) == 1 else b"completed MP4")
+        rendered.write_bytes(b"" if len(calls) == 1 else b"completed MP4")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(music_video.subprocess, "run", fake_run)
@@ -129,17 +132,18 @@ def test_music_video_invalid_diagnostic_bytes_allow_cleanup_and_retry(tmp_path, 
     monkeypatch.setattr(music_video.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
 
     def fake_run(command, **kwargs):
-        assert command[-1] == str(video)
+        rendered = type(video)(command[-1])
+        assert not rendered.exists()
         assert not video.exists()
         calls.append(command)
         if len(calls) == 1:
-            video.write_bytes(b"incomplete MP4")
+            rendered.write_bytes(b"incomplete MP4")
             # Model subprocess text decoding of non-UTF-8 FFmpeg diagnostics.
             stderr = b"Encoder failed: \xff".decode(
                 "utf-8", errors=kwargs.get("errors", "strict")
             )
             return subprocess.CompletedProcess(command, 1, stdout="", stderr=stderr)
-        video.write_bytes(b"completed MP4")
+        rendered.write_bytes(b"completed MP4")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(music_video.subprocess, "run", fake_run)
@@ -152,6 +156,40 @@ def test_music_video_invalid_diagnostic_bytes_allow_cleanup_and_retry(tmp_path, 
     assert video.read_bytes() == b"completed MP4"
     assert len(calls) == 2
     assert song.read_bytes() == original
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "timeout"])
+def test_music_video_preserves_concurrently_created_destination(tmp_path, monkeypatch, outcome):
+    song = tmp_path / "song.wav"
+    song.write_bytes(b"source audio")
+    video = tmp_path / "song-video.mp4"
+    renders = []
+    monkeypatch.setattr(music_video.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def fake_run(command, **kwargs):
+        rendered = type(video)(command[-1])
+        renders.append(rendered)
+        # Another process creates the requested destination after validation.
+        video.write_bytes(b"another process's video")
+        if rendered != video:
+            rendered.write_bytes(b"our render")
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return subprocess.CompletedProcess(
+            command, 1 if outcome == "failure" else 0,
+            stdout="", stderr="encoder failed" if outcome == "failure" else "",
+        )
+
+    monkeypatch.setattr(music_video.subprocess, "run", fake_run)
+    error = {"success": FileExistsError, "failure": RuntimeError,
+             "timeout": subprocess.TimeoutExpired}[outcome]
+    with pytest.raises(error):
+        music_video.make_music_video(str(song), str(video))
+    assert video.read_bytes() == b"another process's video"
+    assert song.read_bytes() == b"source audio"
+    assert renders and renders[0] != video
+    assert not renders[0].exists()
+    assert not list(tmp_path.glob("cale-music-video-*"))
 
 
 def test_music_video_renders_offline_and_preserves_source(tmp_path):
