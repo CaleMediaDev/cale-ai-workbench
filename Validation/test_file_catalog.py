@@ -1,5 +1,6 @@
 """The whole-PC catalog must stay local and recover from changed files."""
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -82,6 +83,35 @@ class FileCatalogTests(unittest.TestCase):
             file_catalog.folder_priority(home, home),
             file_catalog.folder_priority(Path("C:/Windows"), home),
         )
+
+    def test_pruning_removes_stale_entries_from_current_directory_root(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            file_catalog, "enough_space", return_value=True
+        ):
+            root = Path(temp).absolute() / "drive"
+            state = Path(temp).absolute() / "state"
+            root.mkdir()
+            stale = root / "stale.txt"
+            stale.write_text("", encoding="utf-8")
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                file_catalog.scan_computer(state, ["."])
+                with file_catalog.database(state) as conn:
+                    self.assertEqual(
+                        conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0], 1
+                    )
+
+                stale.unlink()
+                result = file_catalog.scan_computer(state, ["."])
+
+                self.assertEqual(result["status"], "complete")
+                with file_catalog.database(state) as conn:
+                    self.assertEqual(
+                        conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0], 0
+                    )
+            finally:
+                os.chdir(original_cwd)
 
     def test_pruning_preserves_unscanned_sibling_with_shared_prefix(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(
