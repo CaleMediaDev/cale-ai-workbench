@@ -7,6 +7,41 @@ from unittest.mock import Mock, patch
 import cale_voice_worker
 
 
+def test_model_loading_uses_float16_when_cuda_does_not_support_bfloat16():
+    import sys
+    from types import SimpleNamespace
+
+    torch = SimpleNamespace(
+        cuda=SimpleNamespace(
+            is_available=Mock(return_value=True),
+            is_bf16_supported=Mock(return_value=False),
+        ),
+        bfloat16=object(),
+        float16=object(),
+        float32=object(),
+    )
+    snapshot_download = Mock(return_value="cached-model")
+    model_class = Mock()
+    with patch.dict(sys.modules, {
+        "torch": torch,
+        "huggingface_hub": SimpleNamespace(snapshot_download=snapshot_download),
+        "qwen_tts": SimpleNamespace(Qwen3TTSModel=model_class),
+    }):
+        result = cale_voice_worker.load_model()
+
+    torch.cuda.is_bf16_supported.assert_called_once_with()
+    snapshot_download.assert_called_once_with(
+        cale_voice_worker.MODEL_ID, local_files_only=True,
+    )
+    model_class.from_pretrained.assert_called_once_with(
+        "cached-model",
+        device_map="cuda:0",
+        dtype=torch.float16,
+        attn_implementation="sdpa",
+    )
+    assert result is model_class.from_pretrained.return_value
+
+
 def test_worker_builds_one_voice_prompt_for_multiple_lines():
     model = Mock()
     prompt = object()
