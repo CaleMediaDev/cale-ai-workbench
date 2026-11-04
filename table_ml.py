@@ -273,7 +273,10 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
                     predictions = [classes[index] for index in np.argmax(scores, axis=1)]
                 for row, prediction in zip(batch, predictions):
                     writer.writerow({**row, output_column: prediction})
-        output.hardlink_to(staged)
+        if os.name == "nt":
+            staged.rename(output)
+        else:
+            output.hardlink_to(staged)
     better = (
         model["holdout_score"] > model["baseline_score"]
         if model["problem_type"] == "classification"

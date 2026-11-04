@@ -2,11 +2,33 @@
 
 import csv
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from table_ml import predict_table_model, train_table_model
+
+
+@unittest.skipUnless(os.name == "nt", "Windows publication without hard links")
+def test_prediction_exports_without_hard_link_support(tmp_path, monkeypatch):
+    model, source, output = tmp_path / "model.json", tmp_path / "input.csv", tmp_path / "predicted.csv"
+    model.write_text(json.dumps({
+        "format": "cale-table-model-v1", "problem_type": "regression",
+        "schema": {"size": {"kind": "number", "median": 0, "scale": 1}},
+        "feature_names": ["size"], "coefficients": [[1]], "intercepts": [0], "classes": [],
+        "target_column": "value", "metric": "holdout_mean_absolute_error", "holdout_score": 1, "baseline_score": 2,
+    }), encoding="utf-8")
+    source.write_text("size\n2\n", encoding="utf-8")
+
+    def no_links(*args, **kwargs):
+        raise OSError("Filesystem does not support hard links")
+
+    monkeypatch.setattr(os, "link", no_links)
+    result = predict_table_model(str(model), str(source), str(output))
+    assert result["rows"] == 1
+    with output.open(newline="", encoding="utf-8") as stream:
+        assert list(csv.DictReader(stream)) == [{"size": "2", "prediction": "2"}]
 
 
 class TableMLTests(unittest.TestCase):
