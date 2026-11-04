@@ -145,6 +145,8 @@ def network_bandwidth(previous, current, elapsed, link_mbps):
     """Return receive/send Mbps and link utilization from byte counters."""
     if previous is None or current is None or elapsed <= 0:
         return None, None, None
+    if any(current[index] < previous[index] for index in (0, 1)):
+        return None, None, None
     down = max(0, (current[0] - previous[0]) * 8 / elapsed / 1_000_000)
     up = max(0, (current[1] - previous[1]) * 8 / elapsed / 1_000_000)
     load = round(min(100, 100 * (down + up) / link_mbps)) if link_mbps else None

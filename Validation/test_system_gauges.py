@@ -49,6 +49,18 @@ def test_network_bandwidth_includes_link_load():
     ) == (100, 20, 60)
 
 
+def test_network_bandwidth_rejects_counter_rollback_and_recovers():
+    previous = (8_000_000, 4_000_000)
+    for current in ((1_000_000, 5_000_000), (9_000_000, 1_000_000)):
+        assert system_gauges.network_bandwidth(
+            previous, current, 2, 100
+        ) == (None, None, None)
+        following = (current[0] + 2_000_000, current[1] + 1_000_000)
+        assert system_gauges.network_bandwidth(
+            current, following, 2, 100
+        ) == (8, 4, 12)
+
+
 def test_non_windows_sample_returns_all_sensor_fields_as_unavailable(monkeypatch):
     from types import SimpleNamespace
 
