@@ -111,6 +111,40 @@ def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeyp
     assert len(calls) == 2
 
 
+def test_edit_music_rejects_header_only_wav_after_successful_exit(tmp_path, monkeypatch):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio"
+    source.write_bytes(original)
+    staged_paths = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def header_only_success(command, **kwargs):
+        assert kwargs["timeout"] == 3600
+        assert "-n" in command
+        staged = Path(command[-1])
+        staged_paths.append(staged)
+        with wave.open(str(staged), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"")
+        assert staged.stat().st_size > 0
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", header_only_success)
+
+    # A seek beyond EOF can succeed while producing only a WAV header.
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="no audio frames"):
+            music_edit.edit_music(str(source), str(output), start_seconds=100)
+        assert not output.exists()
+        assert source.read_bytes() == original
+        assert all(not path.parent.exists() for path in staged_paths)
+
+    assert len(staged_paths) == 2
+
+
 def test_edit_music_timeout_discards_partial_audio_and_allows_retry(tmp_path, monkeypatch):
     source = tmp_path / "song.wav"
     output = tmp_path / "clip.wav"
@@ -129,7 +163,11 @@ def test_edit_music_timeout_discards_partial_audio_and_allows_retry(tmp_path, mo
         staged.write_bytes(b"partial audio")
         if len(staged_paths) == 1:
             raise music_edit.subprocess.TimeoutExpired(command, kwargs["timeout"])
-        staged.write_bytes(b"completed audio")
+        with wave.open(str(staged), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x00\x00" * 160)
         return music_edit.subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(music_edit.subprocess, "run", timeout_then_success)
@@ -142,7 +180,7 @@ def test_edit_music_timeout_discards_partial_audio_and_allows_retry(tmp_path, mo
     assert source.read_bytes() == original
 
     music_edit.edit_music(str(source), str(output))
-    assert output.read_bytes() == b"completed audio"
+    assert duration(output) == pytest.approx(0.01)
     assert source.read_bytes() == original
     assert len(staged_paths) == 2
     assert all(not path.parent.exists() for path in staged_paths)
@@ -153,7 +191,11 @@ def test_edit_music_preserves_destination_created_during_render(tmp_path, monkey
     monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
 
     def successful_render(command, **kwargs):
-        Path(command[-1]).write_bytes(b"edited audio")
+        with wave.open(str(command[-1]), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x00\x00" * 160)
         output.write_bytes(b"concurrently created audio")
         return music_edit.subprocess.CompletedProcess(command, 0, "", "")
 
