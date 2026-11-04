@@ -250,7 +250,11 @@ def run(root: Path = ROOT, state: Path = STATE) -> dict:
             output += "\nSelf-check exceeded its time limit.\n"
         passed = returncode == 0 and not deferred and not timed_out
     except (OSError, subprocess.TimeoutExpired) as exc:
-        output = f"Self-check could not finish: {type(exc).__name__}: {exc}\n"
+        try:
+            output = log.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            output = ""
+        output += f"\nSelf-check could not finish: {type(exc).__name__}: {exc}\n"
         passed = False
     with _report_lock(state, blocking=True):
         if version(root) != started_version:

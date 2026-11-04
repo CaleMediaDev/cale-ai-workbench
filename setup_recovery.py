@@ -172,10 +172,13 @@ def recover() -> bool:
     attempts = max(0, int(record.get("attempts", 0)))
     if attempts < len(RETRY_DELAYS):
         try:
-            last_update = max(float(progress.get("updated", 0)),
-                              float(record.get("started", 0)))
+            timestamps = (float(progress.get("updated", 0)),
+                          float(record.get("started", 0)))
         except (TypeError, ValueError):
             return False
+        if not all(math.isfinite(value) for value in timestamps):
+            return False
+        last_update = max(timestamps)
         if time.time() - last_update < RETRY_DELAYS[attempts]:
             return False
     import msvcrt
@@ -216,10 +219,13 @@ def recover() -> bool:
             if attempts >= len(RETRY_DELAYS):
                 return False
             try:
-                last_update = max(float(progress.get("updated", 0)),
-                                  float(record.get("started", 0)))
+                timestamps = (float(progress.get("updated", 0)),
+                              float(record.get("started", 0)))
             except (TypeError, ValueError):
                 return False
+            if not all(math.isfinite(value) for value in timestamps):
+                return False
+            last_update = max(timestamps)
             if time.time() - last_update < RETRY_DELAYS[attempts]:
                 return False
             now = time.time()

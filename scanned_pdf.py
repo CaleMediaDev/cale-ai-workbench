@@ -33,7 +33,12 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
         native = {}
         scan_indices = []
         for index in range(total):
-            page = document[index]
+            try:
+                page = document[index]
+            except pdfium.PdfiumError:
+                # Retry loading this page during the transcription pass.
+                scan_indices.append(index)
+                continue
             try:
                 try:
                     textpage = page.get_textpage()
@@ -62,7 +67,12 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                 continue
             if index not in selected:
                 continue
-            page = document[index]
+            try:
+                page = document[index]
+            except pdfium.PdfiumError:
+                # A page that cannot be loaded must not discard readable pages.
+                selected.discard(index)
+                continue
             try:
                 with tempfile.TemporaryDirectory(prefix="cale-pdf-") as folder:
                     image_path = Path(folder) / "page.png"

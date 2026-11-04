@@ -15,6 +15,30 @@ import music_video
 import toolbox_mcp
 
 
+def test_music_video_rejects_dangling_output_symlink(tmp_path, monkeypatch):
+    song = tmp_path / "song.wav"
+    song.write_bytes(b"source audio")
+    video = tmp_path / "song-video.mp4"
+    target = tmp_path / "missing-target.mp4"
+    try:
+        video.symlink_to(target.name)
+    except (OSError, NotImplementedError):
+        pytest.skip("Creating symlinks is unavailable on this platform")
+
+    def unexpected_run(*args, **kwargs):
+        pytest.fail("An existing output symlink must be rejected before rendering")
+
+    monkeypatch.setattr(music_video.subprocess, "run", unexpected_run)
+    with pytest.raises(ValueError, match="new MP4"):
+        music_video.make_music_video(str(song), str(video))
+
+    assert video.is_symlink()
+    assert video.readlink() == type(video)(target.name)
+    assert not target.exists()
+    assert song.read_bytes() == b"source audio"
+    assert not list(tmp_path.glob("cale-music-video-*"))
+
+
 def test_music_video_timeout_removes_partial_output_and_allows_retry(tmp_path, monkeypatch):
     song = tmp_path / "song.wav"
     video = tmp_path / "song-video.mp4"

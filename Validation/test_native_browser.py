@@ -457,6 +457,33 @@ def test_download_directory_symlink_cannot_redirect_outside_project(tmp_path):
     assert list(outside.iterdir()) == []
 
 
+@pytest.mark.parametrize("filename, expected", [
+    ("CON", "_CON"),
+    ("con.txt", "_con.txt"),
+    ("PRN.pdf", "_PRN.pdf"),
+    ("AUX", "_AUX"),
+    ("NUL.txt", "_NUL.txt"),
+    ("COM1.log", "_COM1.log"),
+    ("LPT9.txt", "_LPT9.txt"),
+    ("COM¹.txt", "_COM¹.txt"),
+    ("LPT².txt", "_LPT².txt"),
+    ("console.txt", "console.txt"),
+    ("COM10.txt", "COM10.txt"),
+])
+def test_download_device_names_are_safe_and_collision_resolved(tmp_path, filename, expected):
+    first = native_browser._download_target(tmp_path, filename)
+    assert first.name == expected
+    assert first.parent == tmp_path / "Downloads"
+    first.write_bytes(b"first download")
+
+    second = native_browser._download_target(tmp_path, filename)
+    assert second != first
+    assert second.name == f"{first.stem}-2{first.suffix}"
+    second.write_bytes(b"second download")
+    assert first.read_bytes() == b"first download"
+    assert second.read_bytes() == b"second download"
+
+
 def test_download_filename_stays_in_project_and_does_not_overwrite(tmp_path):
     first = native_browser._download_target(tmp_path, "../secret.txt")
     assert first.parent == tmp_path / "Downloads"

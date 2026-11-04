@@ -153,6 +153,25 @@ class SelfDiagnosticsTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["creationflags"],
                          diagnostics.HIDE | diagnostics.LOW_PRIORITY)
 
+    def test_monitoring_error_preserves_captured_test_output(self):
+        process = Mock()
+        process.poll.side_effect = OSError("monitoring failed")
+
+        def launch(*_args, **kwargs):
+            kwargs["stdout"].write(b"failure details before monitoring error\n")
+            kwargs["stdout"].flush()
+            return process
+
+        with patch.object(diagnostics.subprocess, "Popen", side_effect=launch):
+            report = diagnostics.run(self.root, self.state)
+
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failures"], 1)
+        output = (self.state / "self-check.log").read_text()
+        self.assertIn("failure details before monitoring error", output)
+        self.assertIn("Self-check could not finish: OSError: monitoring failed", output)
+        self.assertIn("failure details before monitoring error", report["summary"])
+
     def test_failure_count_resets_after_passing_check(self):
         (self.state / "self-check.json").write_text(json.dumps({
             "version": diagnostics.version(self.root), "status": "running", "failures": 2,

@@ -145,6 +145,9 @@ def _control(page, ref: str):
 def _download_target(folder: Path, filename: str) -> Path:
     """Keep an untrusted server filename inside this task's download folder."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", filename).strip(" .")
+    # Windows reserves device basenames even when an extension is present.
+    if re.match(r'^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)', name, re.IGNORECASE):
+        name = "_" + name
     # Filesystem component limits count bytes, not Unicode characters.
     name = name.encode("utf-8")[:120].decode("utf-8", errors="ignore").strip(" .") or "download.bin"
     destination = folder / "Downloads"

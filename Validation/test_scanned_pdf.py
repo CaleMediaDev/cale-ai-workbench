@@ -220,6 +220,65 @@ def test_unrenderable_scan_preserves_other_pages_and_reports_omission(tmp_path):
     document.close.assert_called_once_with()
 
 
+def test_unloadable_page_preserves_other_pages_and_reports_omission(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    class PdfiumError(Exception):
+        pass
+
+    pdf = tmp_path / "unloadable-page.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    native_textpage = Mock()
+    native_textpage.get_text_bounded.return_value = "Native order"
+    native_page = Mock()
+    native_page.get_textpage.return_value = native_textpage
+    scan_textpage = Mock()
+    scan_textpage.get_text_bounded.return_value = ""
+    scan_page = Mock()
+    scan_page.get_textpage.return_value = scan_textpage
+    scan_page.get_size.return_value = (600, 800)
+    image = Mock()
+    bitmap = Mock()
+    bitmap.to_pil.return_value = image
+    scan_page.render.return_value = bitmap
+
+    def load_page(index):
+        if index == 1:
+            raise PdfiumError("cannot load page")
+        return native_page if index == 0 else scan_page
+
+    document = Mock()
+    document.__len__ = Mock(return_value=3)
+    document.__getitem__ = Mock(side_effect=load_page)
+    recognize = Mock(return_value={"description": "Readable scan"})
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(
+            PdfDocument=Mock(return_value=document), PdfiumError=PdfiumError
+        ),
+        "media_worker": SimpleNamespace(recognize_image=recognize),
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert "[Page 1; selectable text]\nNative order" in result["text"]
+    assert "[Page 3; vision transcription]\nReadable scan" in result["text"]
+    assert "[1 scanned pages were not read: 2.]" in result["text"]
+    assert "[Page 2; vision transcription]" not in result["text"]
+    assert result["pages_read"] == [1, 3]
+    assert result["scanned_pages"] == [2, 3]
+    assert result["has_scans"] is True
+    assert result["partial"] is True
+    recognize.assert_called_once()
+    native_page.render.assert_not_called()
+    native_textpage.close.assert_called_once_with()
+    scan_textpage.close.assert_called_once_with()
+    native_page.close.assert_called_once_with()
+    assert scan_page.close.call_count == 2
+    image.close.assert_called_once_with()
+    bitmap.close.assert_called_once_with()
+    document.close.assert_called_once_with()
+
+
 def test_page_selection_spans_long_document():
     assert scanned_pdf.sampled_pages(1, 6) == [0]
     assert scanned_pdf.sampled_pages(10, 4) == [0, 3, 6, 9]

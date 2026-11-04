@@ -41,7 +41,7 @@ def test_search_public_apis_filters_auth_and_keeps_caveat(tmp_path):
     assert "research leads" in result["note"]
 
 
-@pytest.mark.parametrize("max_results", [1.5, "2", None])
+@pytest.mark.parametrize("max_results", [1.5, "2", None, True, False])
 def test_search_public_apis_rejects_non_integer_limits_before_catalog_access(max_results):
     with patch.object(public_api_catalog, "_catalog") as catalog:
         with pytest.raises(ValueError, match="Result count must be between 1 and 20"):

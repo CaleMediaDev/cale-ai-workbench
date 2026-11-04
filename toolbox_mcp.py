@@ -30,6 +30,9 @@ NODE = BOX / "node-v26.13.0-win-x64/node.exe"
 CATALOG = {}
 SESSIONS = {}
 ERRORS = {}
+DISCOVERY_MAX_PAGES = 32
+DISCOVERY_MAX_TOOLS = 2000
+DISCOVERY_SECONDS = 15
 LOCAL_CATALOG = {
     "local.start_3d_job": {
         "description": "Generate a real local 3D model with TripoSR from an image, or draw a local reference from a prompt first. Auto-installs isolated dependencies and verified weights; no account. Needs one NVIDIA GPU with 6 GB VRAM. Export GLB, OBJ or STL. Poll local.model_3d_job_status; do not start duplicate jobs while it downloads. Vertex colors, no UV/PBR textures or rigging.",
@@ -253,6 +256,27 @@ def child_environment():
     return env
 
 
+async def _discover_tools(session):
+    """Bound optional backend discovery so a broken cursor cannot stall startup."""
+    tools = []
+    seen = set()
+    cursor = None
+    async with asyncio.timeout(DISCOVERY_SECONDS):
+        for page in range(DISCOVERY_MAX_PAGES):
+            listing = (await session.list_tools() if cursor is None
+                       else await session.list_tools(cursor=cursor))
+            if len(tools) + len(listing.tools) > DISCOVERY_MAX_TOOLS:
+                raise ValueError("Backend tool discovery exceeded its tool limit")
+            tools.extend(listing.tools)
+            cursor = getattr(listing, "next_cursor", None)
+            if cursor is None:
+                return tools
+            if not isinstance(cursor, str) or not cursor or len(cursor) > 2048 or cursor in seen:
+                raise ValueError("Backend tool discovery returned an invalid or repeated cursor")
+            seen.add(cursor)
+        raise ValueError("Backend tool discovery exceeded its page limit")
+
+
 @asynccontextmanager
 async def lifespan(_server):
     CATALOG.clear()
@@ -295,7 +319,7 @@ async def lifespan(_server):
                     )
                 )
                 await session.initialize()
-                listing = await session.list_tools()
+                tools = await _discover_tools(session)
             except BaseException as exc:
                 ERRORS[group] = str(exc) or type(exc).__name__
                 try:
@@ -308,7 +332,7 @@ async def lifespan(_server):
                 continue
             await stack.enter_async_context(backend_stack)
             SESSIONS[group] = session
-            for tool in listing.tools:
+            for tool in tools:
                 CATALOG[f"{group}.{tool.name}"] = tool.model_dump(
                     by_alias=True, exclude_none=True
                 )

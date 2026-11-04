@@ -49,6 +49,8 @@ def generate(model, voice_prompt, text: str, output_path: str) -> dict:
             language="English",
             voice_clone_prompt=voice_prompt,
         )
+    if len(audio[0]) == 0:
+        raise ValueError("Voice generation returned an empty waveform")
     # Keep an existing recording intact if encoding or writing fails.
     # Preserve the suffix so soundfile can infer the requested audio format.
     with tempfile.NamedTemporaryFile(

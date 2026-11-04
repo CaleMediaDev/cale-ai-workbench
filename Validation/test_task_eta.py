@@ -148,6 +148,19 @@ def test_music_countdown_rejects_nonfinite_estimates_and_timestamps():
             ), (field, invalid)
 
 
+def test_music_countdown_rejects_invalid_current_timestamps():
+    job = {"status": "working", "estimated_seconds": 60,
+           "created": 1000}
+    for invalid in (float("nan"), float("inf"), float("-inf"),
+                    "nan", "inf", "-inf", "invalid"):
+        assert task_eta.music_countdown(job, now=invalid) == (
+            "Estimating from recent songs…"
+        ), invalid
+    assert task_eta.music_countdown(job, now=1030) == (
+        "About 30s left · estimate from recent songs"
+    )
+
+
 def test_short_vocal_eta_prefers_similar_songs_over_scaled_long_renders(tmp_path):
     jobs = tmp_path / "music-jobs"
     jobs.mkdir()
