@@ -37,6 +37,21 @@ class SkillCatalogTests(unittest.TestCase):
         self.assertIn("New upstream", installed.read_text(encoding="utf-8"))
         self.assertTrue((self.root / "data/skills/references/security-checklist.md").is_file())
 
+    def test_preserves_local_file_obstructing_skills_root(self):
+        destination = self.root / "data/skills"
+        destination.parent.mkdir()
+        destination.write_text("My local notes", encoding="utf-8")
+        expected = {
+            "installed": 0,
+            "updated": 0,
+            "preserved": len(skill_catalog.SKILLS) + len(skill_catalog.SHARED_REFERENCES),
+        }
+
+        for _ in range(2):
+            self.assertEqual(skill_catalog.sync(self.root), expected)
+            self.assertTrue(destination.is_file())
+            self.assertEqual(destination.read_text(encoding="utf-8"), "My local notes")
+
     def test_preserves_local_dangling_skill_symlink(self):
         skill_catalog.sync(self.root)
         installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
