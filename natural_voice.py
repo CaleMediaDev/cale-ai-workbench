@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -17,7 +18,8 @@ HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 def _nonempty_file(path):
     try:
-        return path.is_file() and path.stat().st_size > 0
+        info = path.stat()
+        return stat.S_ISREG(info.st_mode) and info.st_size > 0
     except FileNotFoundError:
         # A file removed during the check still needs repair.
         return False

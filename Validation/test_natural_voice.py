@@ -1,6 +1,7 @@
 """The voice upgrade runs independently of the desktop window."""
 
 import json
+import stat
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,13 @@ import natural_voice
 
 
 class NaturalVoiceTests(unittest.TestCase):
+    def test_directory_metadata_is_not_ready_after_stale_file_check(self):
+        path = SimpleNamespace(
+            is_file=lambda: True,
+            stat=lambda: SimpleNamespace(st_mode=stat.S_IFDIR, st_size=4096),
+        )
+        self.assertFalse(natural_voice._nonempty_file(path))
+
     def test_file_removed_during_readiness_check_is_not_ready(self):
         for check_name, names in (
             ("ready", ("kokoro-v1.0.int8.onnx", "voices-v1.0.bin")),
@@ -27,20 +35,19 @@ class NaturalVoiceTests(unittest.TestCase):
                 for name in names:
                     (model_folder / name).write_bytes(b"weights")
                 target = model_folder / names[0]
-                original_is_file = Path.is_file
+                original_stat = Path.stat
                 removed = []
 
-                def remove_after_is_file(path):
-                    result = original_is_file(path)
-                    if path == target and result:
+                def remove_before_stat(path, *args, **kwargs):
+                    if path == target and not removed:
                         path.unlink()
                         removed.append(path)
-                    return result
+                    return original_stat(path, *args, **kwargs)
 
                 with (
                     patch.object(natural_voice, "ROOT", root),
                     patch.object(natural_voice, "VOICE", voice),
-                    patch.object(Path, "is_file", remove_after_is_file),
+                    patch.object(Path, "stat", remove_before_stat),
                 ):
                     self.assertFalse(getattr(natural_voice, check_name)())
                 self.assertEqual(removed, [target])
