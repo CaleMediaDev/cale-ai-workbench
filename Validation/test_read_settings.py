@@ -58,3 +58,10 @@ def test_disabled_auxiliary_still_skips_route_validation():
     config = _config("cale-local")
     config["auxiliary"]["vision"] = {"enabled": False}
     assert read_settings.validate_config(config)["model"] == "cale-local"
+
+
+def test_auxiliary_main_cannot_replace_main_route_during_validation():
+    config = _config("cale-local", url="https://example.com:11434/v1")
+    config["auxiliary"]["main"] = _config("cale-local")["model"]
+    with pytest.raises(ValueError):
+        read_settings.validate_config(config)

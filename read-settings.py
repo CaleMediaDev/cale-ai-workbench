@@ -14,7 +14,10 @@ def validate_config(config):
     context = int(config["model"].get("context_length", 0))
     if context < 64000:
         raise ValueError("Long tasks require at least a 64K model context window.")
-    models = {"main": config["model"], **config.get("auxiliary", {})}
+    auxiliary = config.get("auxiliary", {})
+    if "main" in auxiliary:
+        raise ValueError("The auxiliary model name 'main' is reserved for the main route.")
+    models = {"main": config["model"], **auxiliary}
     for name, setting in models.items():
         if name != "main" and setting.get("enabled") is False:
             continue
