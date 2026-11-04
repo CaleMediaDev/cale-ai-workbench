@@ -93,6 +93,14 @@ def calculate(question: str) -> str | None:
         if "," in token and not re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d*)?", token):
             return None
     normalized = expression.replace(",", "")
+    # Chat integers are decimal, even when padded with leading zeros.
+    # Match complete numeric tokens so fractional digits are never rewritten.
+    normalized = re.sub(
+        r"[\d.]+",
+        lambda match: (match.group(0) if "." in match.group(0)
+                       else match.group(0).lstrip("0") or "0"),
+        normalized,
+    )
     # Keep multiplication tokens separate so mixed/repeated symbols cannot form **.
     normalized = normalized.replace("×", " * ").replace("÷", "/").replace("^", "**")
     try:
