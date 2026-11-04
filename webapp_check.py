@@ -514,7 +514,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None) 
                         failures.append(f"State {path} was {observed['value']!r}; expected {expected!r}")
                 for element_id, text in case.get("expect", {}).items():
                     target = page.locator("#" + element_id)
-                    actual = target.inner_text()[:200] if target.count() == 1 else "<missing>"
+                    full_text = target.inner_text() if target.count() == 1 else "<missing>"
+                    actual = full_text[:200]
                     if target.count() != 1:
                         failures.append(f"Missing expected element #{element_id}")
                     elif text == "":
@@ -529,7 +530,7 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None) 
                             failures.append(f"#{element_id} contained {actual!r}; expected cleared text." + hint)
                     elif not target.is_visible():
                         failures.append(f"#{element_id} is hidden; text was {actual!r}. Expected visible text containing {text!r}")
-                    elif text not in actual:
+                    elif text not in full_text:
                         failures.append(
                             f"#{element_id} displayed {actual!r}; expected visible text containing {text!r}"
                         )
