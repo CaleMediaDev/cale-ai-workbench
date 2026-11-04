@@ -87,6 +87,23 @@ class ContextWindowTests(unittest.TestCase):
             65536,
         )
 
+    def test_missing_or_invalid_native_limit_cannot_use_auxiliary_limit(self):
+        for native in (None, 0, -1, True, "65536"):
+            with self.subTest(native=native):
+                info = {
+                    "parameters": "num_ctx 524288\n",
+                    "model_info": {
+                        "general.architecture": "qwen",
+                        "clip.context_length": 262144,
+                    },
+                }
+                if native is not None:
+                    info["model_info"]["qwen.context_length"] = native
+                with self.assertRaisesRegex(ValueError, "native context limit"):
+                    context_window.desired_context(
+                        info, 128 * 2**30, 7 * 2**30
+                    )
+
     def test_non_power_of_two_native_window_is_used_when_memory_fits(self):
         info = {"model_info": {"qwen.context_length": 98304}}
         self.assertEqual(

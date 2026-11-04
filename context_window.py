@@ -52,8 +52,10 @@ def native_context(info):
     model_info = info.get("model_info", {})
     architecture = model_info.get("general.architecture")
     native = model_info.get(f"{architecture}.context_length")
-    if architecture and isinstance(native, int) and native > 0:
-        return native
+    if architecture:
+        if isinstance(native, int) and not isinstance(native, bool) and native > 0:
+            return native
+        raise ValueError("Cannot determine native context limit for model architecture")
     values = [
         int(value) for key, value in model_info.items()
         if key.endswith(".context_length") and isinstance(value, int) and value > 0
