@@ -35,6 +35,14 @@ def test_disk_transfer_speed_uses_counter_delta_and_elapsed_time():
     assert system_gauges.disk_transfer_speed(None, (10, 20), 2) == (None, None)
 
 
+def test_disk_transfer_speed_rejects_counter_rollback_and_recovers():
+    previous = (8_000_000, 4_000_000)
+    for current in ((1_000_000, 5_000_000), (9_000_000, 1_000_000)):
+        assert system_gauges.disk_transfer_speed(previous, current, 2) == (None, None)
+        following = (current[0] + 2_000_000, current[1] + 1_000_000)
+        assert system_gauges.disk_transfer_speed(current, following, 2) == (1, 0.5)
+
+
 def test_network_bandwidth_includes_link_load():
     assert system_gauges.network_bandwidth(
         (0, 0), (12_500_000, 2_500_000), 1, 200
