@@ -88,7 +88,7 @@ def _dom_contract(folder: Path, page) -> dict:
       const targets = [];
       for (const el of nodes) {
         if(targets.length === 64) break;
-        const tag = el.localName, type = el.type || el.getAttribute('type') || '';
+        const tag = el.localName, type = (typeof el.type === 'string' && el.type) || el.getAttribute('type') || '';
         const disabled = el.matches(':disabled'), readOnly = !!el.readOnly;
         const visible = !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden],[aria-hidden="true"]');
         const constraints = {};
