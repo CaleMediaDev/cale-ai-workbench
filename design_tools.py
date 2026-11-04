@@ -88,7 +88,7 @@ def add_astro_ai_ui(project_path: str) -> dict:
     if not package_file.is_file():
         raise ValueError("Choose an existing Astro project folder with package.json.")
     try:
-        package = json.loads(package_file.read_text(encoding="utf-8"))
+        package = json.loads(package_file.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         raise ValueError("The project's package.json is not valid JSON.") from exc
     if not isinstance(package, dict) or any(
