@@ -129,7 +129,6 @@ def snapshot(folder: str | Path) -> str:
         documents = {}
         steps = {}
         stamps = {}
-        refreshed = {}
         sources = {}
         hashes = {}
         for name in DOCUMENTS:
@@ -159,7 +158,6 @@ def snapshot(folder: str | Path) -> str:
                 documents[name] = row["body"]
                 steps[name] = row["next_step"]
                 stamps[name] = stamp
-                refreshed[name] = row["updated"]
                 continue
             # Source bytes are checked every turn; parsed excerpts and next
             # steps still come from SQLite when the exact bytes are unchanged.
@@ -180,18 +178,15 @@ def snapshot(folder: str | Path) -> str:
             documents[name] = excerpt
             steps[name] = next_step
             stamps[name] = stamp
-            refreshed[name] = checked_at
         events = conn.execute("SELECT tool,outcome,subject FROM task_events ORDER BY id DESC LIMIT 5").fetchall()
         checks = conn.execute("""SELECT checker,path,details,repeats FROM task_check_results
             WHERE passed=0 AND request_hash=? ORDER BY updated DESC LIMIT 128""",
             (hashes["USER-REQUESTS.md"],)).fetchall()
     # A newer explicit progress note can supersede an older unchecked plan
     # item. A subsequently edited plan takes priority again.
-    progress_is_newer = (
-        stamps["PROGRESS.md"][0], refreshed["PROGRESS.md"]
-    ) >= (
-        stamps["PLAN.md"][0], refreshed["PLAN.md"]
-    )
+    # Cache refresh times describe parsing, not document freshness. Equal
+    # source timestamps must retain the same priority across cache refreshes.
+    progress_is_newer = stamps["PROGRESS.md"][0] >= stamps["PLAN.md"][0]
     next_step = ((steps["PROGRESS.md"] or steps["PLAN.md"])
                  if progress_is_newer else (steps["PLAN.md"] or steps["PROGRESS.md"]))
     queue = step_status(root)
