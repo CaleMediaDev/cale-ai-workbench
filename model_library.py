@@ -661,7 +661,7 @@ def owned_sources():
     path = ROOT / "LongTasks/auto-owned-models.json"
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-        return set(value) if isinstance(value, list) else set()
+        return {source for source in value if isinstance(source, str)} if isinstance(value, list) else set()
     except (OSError, ValueError):
         return set()
 
