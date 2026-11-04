@@ -31,7 +31,8 @@ def train_classifier(
     rows = {}
     with Path(dataset_path).open(encoding="utf-8-sig", newline="") as stream:
         for row in csv.DictReader(stream):
-            text, label = row[text_column].strip(), row[label_column].strip()
+            text = (row[text_column] or "").strip()
+            label = (row[label_column] or "").strip()
             key = " ".join(text.lower().split())
             if not text or not label:
                 continue
