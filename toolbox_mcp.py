@@ -292,13 +292,15 @@ async def lifespan(_server):
                 )
                 await session.initialize()
                 listing = await session.list_tools()
-            except Exception as exc:
+            except BaseException as exc:
                 ERRORS[group] = str(exc) or type(exc).__name__
                 try:
                     await backend_stack.aclose()
                 except Exception as cleanup_exc:
                     detail = str(cleanup_exc) or type(cleanup_exc).__name__
                     ERRORS[group] += f"; cleanup failed: {detail}"
+                if not isinstance(exc, Exception):
+                    raise
                 continue
             await stack.enter_async_context(backend_stack)
             SESSIONS[group] = session
