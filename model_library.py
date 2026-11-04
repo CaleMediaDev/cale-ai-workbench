@@ -321,6 +321,7 @@ def probe_tool_use(alias, reasoning_effort=None):
         args = function.get("arguments", {})
         if (
             function.get("name") == "multiply"
+            and isinstance(args, dict)
             and args.get("a") == 7
             and args.get("b") == 13
         ):
