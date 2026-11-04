@@ -161,9 +161,25 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
     # Fit preprocessing on training rows only, so the reported holdout score
     # does not benefit from categories or numeric statistics in test rows.
     schema = _schema(train_rows, [column for column in columns if column != target_column])
+    train_features = _features(train_rows, schema)
+    test_features = _features(test_rows, schema)
+    # DictVectorizer joins categorical columns and values with '='. Distinct
+    # source features must not silently become the same vector coordinate.
+    feature_owners = {}
+    for features in (train_features, test_features):
+        for row in features:
+            for column, value in row.items():
+                categorical = schema[column]["kind"] == "category"
+                name = f"{column}={value}" if categorical else column
+                owner = (column, value) if categorical else (column,)
+                if name in feature_owners and feature_owners[name] != owner:
+                    raise ValueError(
+                        "Feature names collide after categorical encoding; rename the columns."
+                    )
+                feature_owners[name] = owner
     vectorizer = DictVectorizer(sparse=True)
-    x_train = vectorizer.fit_transform(_features(train_rows, schema))
-    x_test = vectorizer.transform(_features(test_rows, schema))
+    x_train = vectorizer.fit_transform(train_features)
+    x_test = vectorizer.transform(test_features)
     if x_train.shape[1] > 10_000:
         raise ValueError("Too many distinct categories; remove ID/text columns first.")
     if classes:
