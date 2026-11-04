@@ -140,9 +140,14 @@ def repair_exhausted(progress: dict) -> bool:
     if progress.get("owner") == "runtime_features":
         return (progress.get("status") == "failed" and
                 int(progress.get("attempts", 0)) >= 3)
-    return (progress.get("status") == "error" and
-            str(progress.get("current", "")).startswith("Setup needs attention:") and
-            int(_read(STATE / "base-install-repair.json").get("attempts", 0)) >= len(RETRY_DELAYS) and
+    if not (progress.get("status") == "error" and
+            str(progress.get("current", "")).startswith("Setup needs attention:")):
+        return False
+    try:
+        attempts = int(_read(STATE / "base-install-repair.json").get("attempts", 0))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return (attempts >= len(RETRY_DELAYS) and
             not _installer_running(progress) and not _retry_runner_running())
 
 
@@ -169,7 +174,10 @@ def recover() -> bool:
     if not script.is_file():
         return False
     record = _read(record_path)
-    attempts = max(0, int(record.get("attempts", 0)))
+    try:
+        attempts = max(0, int(record.get("attempts", 0)))
+    except (TypeError, ValueError, OverflowError):
+        return False
     if attempts < len(RETRY_DELAYS):
         try:
             timestamps = (float(progress.get("updated", 0)),
@@ -205,7 +213,10 @@ def recover() -> bool:
             if _installer_running(progress):
                 return False
             record = _read(record_path)
-            attempts = max(0, int(record.get("attempts", 0)))
+            try:
+                attempts = max(0, int(record.get("attempts", 0)))
+            except (TypeError, ValueError, OverflowError):
+                return False
             stalled = _stalled(progress)
             failed = (progress.get("status") == "error" and
                       str(progress.get("current", "")).startswith("Setup needs attention:"))
