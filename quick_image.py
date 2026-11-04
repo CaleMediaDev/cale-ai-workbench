@@ -87,6 +87,8 @@ def generate(root: Path, prompt: str, output_path: str = "") -> Path:
         raise RuntimeError("The image maker did not save the requested file.")
     with Image.open(destination) as picture:
         picture.verify()
+    with Image.open(destination) as picture:
+        picture.load()
     return destination
 
 
