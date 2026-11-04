@@ -265,6 +265,18 @@ class ProjectMemoryTests(unittest.TestCase):
                 found = memory.search(self.folder, query, kind="note")
                 self.assertEqual([row["id"] for row in found], [saved["id"]])
 
+    def test_fallback_filters_single_term_hits_before_result_limit(self):
+        for number in range(6):
+            memory.save(self.folder, "note", f"Alpha {number}", "Short entry.")
+        saved = memory.save(
+            self.folder, "note", "Relevant entry",
+            "alpha beta " + "background " * 1000,
+        )
+
+        found = memory.search(self.folder, "alpha beta gamma", kind="note", limit=1)
+
+        self.assertEqual([row["id"] for row in found], [saved["id"]])
+
     def test_search_treats_query_as_text_not_fts_syntax(self):
         memory.save(self.folder, "component", "Search API", "The database stores app components.")
         self.assertTrue(memory.search(self.folder, '"Search" OR component*'))

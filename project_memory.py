@@ -354,15 +354,20 @@ def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> li
                 exact = matches(" AND ".join('"' + word + '"' for word in words))
                 if exact:
                     return exact
-                loose = matches(" OR ".join('"' + word + '"' for word in words))
                 # Quoted/asterisk input may be a literal example of FTS syntax;
                 # keep useful plain-text matches while never executing it raw.
                 minimum = 1 if len(words) == 1 or re.search(r'["*]', query) else 2
-                return [row for row in loose if len(set(words) & {
-                    word.lower() for word in WORD.findall(
-                        row["title"] + " " + row["body"] + " " + row["tags"]
+                if minimum == 1:
+                    expression = " OR ".join('"' + word + '"' for word in words)
+                else:
+                    # Require a pair before LIMIT is applied, so single-term
+                    # hits cannot crowd valid fallback results out of the window.
+                    expression = " OR ".join(
+                        f'("{left}" AND "{right}")'
+                        for number, left in enumerate(words)
+                        for right in words[number + 1:]
                     )
-                }) >= minimum]
+                return matches(expression)
             return conn.execute("""SELECT id,kind,title,body,tags,source_path,
                 source_hash,updated,substr(body,1,500) AS excerpt FROM memories
                 WHERE (?='' OR kind=?) ORDER BY updated DESC LIMIT ?""",
