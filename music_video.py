@@ -66,8 +66,15 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
             "-pix_fmt", "yuv420p", "-crf", "23", "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart", "-shortest", str(output),
         ]
-        result = subprocess.run(command, capture_output=True, text=True,
-                                timeout=3600, creationflags=HIDE, cwd=temp)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    timeout=3600, creationflags=HIDE, cwd=temp)
+        except subprocess.TimeoutExpired:
+            # subprocess.run has stopped FFmpeg, but its incomplete MP4 can
+            # remain and would prevent a retry using the same output path.
+            if output.is_file():
+                output.unlink(missing_ok=True)
+            raise
     if result.returncode or not output.is_file() or not output.stat().st_size:
         if result.returncode and output.is_file() and "already exists" not in result.stderr.lower():
             output.unlink(missing_ok=True)
