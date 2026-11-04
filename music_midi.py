@@ -8,6 +8,7 @@ voice or music-generation dependencies.
 from __future__ import annotations
 
 import csv
+import errno
 import json
 import os
 import shutil
@@ -136,14 +137,24 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
         try:
             for path in files:
                 destination = target / path.name
-                # Staging is on this filesystem. A link publishes complete
-                # bytes exclusively instead of overwriting a concurrent file.
-                os.link(path, destination)
-                published.append((path, destination))
-        except BaseException:
-            for staged, destination in reversed(published):
+                # Prefer publishing complete bytes atomically, but support
+                # filesystems without hard links using exclusive creation.
                 try:
-                    if destination.samefile(staged):
+                    os.link(path, destination)
+                except OSError as error:
+                    if error.errno not in {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS}:
+                        raise
+                    with destination.open("xb") as output:
+                        published.append((os.fstat(output.fileno()), destination))
+                        with path.open("rb") as source_file:
+                            shutil.copyfileobj(source_file, output)
+                else:
+                    published.append((path.stat(), destination))
+        except BaseException:
+            for owned, destination in reversed(published):
+                try:
+                    current = destination.stat()
+                    if (current.st_dev, current.st_ino) == (owned.st_dev, owned.st_ino):
                         destination.unlink()
                 except OSError:
                     pass  # Preserve a replacement or an inaccessible file.
