@@ -255,7 +255,7 @@ def _verified_runtime() -> bool:
             return False
         if digest.hexdigest() != expected:
             return False
-    temporary = marker.with_suffix(".tmp")
+    temporary = marker.with_suffix(f".{uuid.uuid4().hex}.tmp")
     temporary.write_text(json.dumps(fingerprints), encoding="utf-8")
     temporary.replace(marker)
     return True

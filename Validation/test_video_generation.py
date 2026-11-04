@@ -234,6 +234,42 @@ def test_mp4_export_preserves_destination_created_after_exists_check(tmp_path):
     assert rendered.read_bytes() == b"rendered video" * 200
 
 
+def test_concurrent_runtime_verification_uses_independent_markers(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    runtime = tmp_path / "runtime"
+    python = runtime / "ComfyUI" / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"python")
+    model = runtime / "ComfyUI" / "models" / "model.safetensors"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"verified model")
+    hashes = {"model.safetensors": hashlib.sha256(model.read_bytes()).hexdigest()}
+    fingerprints = {"model.safetensors": [100_000_001, 1]}
+    marker = runtime / "cale-video-ready.json"
+    ready_to_replace = Barrier(2)
+    original_replace = Path.replace
+
+    def synchronized_replace(path, target):
+        if target == marker:
+            # Both verifiers must finish writing before either renames its file.
+            ready_to_replace.wait(timeout=10)
+        return original_replace(path, target)
+
+    with patch.object(video_generation, "RUNTIME", runtime), patch.object(
+        video_generation, "MODEL_HASHES", hashes
+    ), patch.object(
+        video_generation, "_model_fingerprints", return_value=fingerprints
+    ), patch.object(Path, "replace", synchronized_replace):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(video_generation._verified_runtime) for _ in range(2)]
+            assert [future.result(timeout=20) for future in futures] == [True, True]
+
+    assert json.loads(marker.read_text(encoding="utf-8")) == fingerprints
+    assert not list(runtime.glob("*.tmp"))
+
+
 def test_runtime_requires_all_verified_weights_before_reuse(tmp_path):
     runtime = tmp_path / "runtime"
     models = runtime / "ComfyUI" / "models"
