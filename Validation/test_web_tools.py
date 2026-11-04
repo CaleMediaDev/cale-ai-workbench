@@ -8,6 +8,13 @@ import web_tools
 
 
 class BusinessContactTests(unittest.TestCase):
+    def test_visible_phone_does_not_reuse_label_for_reference_identifiers(self):
+        for label in ("Invoice number", "Order number", "Account ID", "Tracking number", "Reference"):
+            with self.subTest(label=label):
+                text = f"Phone: 517-258-1313\n{label}: 1234567890"
+                self.assertEqual(web_tools.visible_phone_numbers(text), ["517-258-1313"])
+        self.assertEqual(web_tools.visible_phone_numbers("Call to order: 517-258-1313"), ["517-258-1313"])
+
     def test_web_reader_uses_bundled_curl_when_windows_omits_it(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory

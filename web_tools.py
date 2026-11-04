@@ -333,6 +333,10 @@ VISIBLE_PHONE = re.compile(
     r"(?<!\d)(?:\+?1[\s().-]*)?(?:\(\d{3}\)|\d{3})[\s().-]*\d{3}[\s.-]*\d{4}(?!\d)"
 )
 PHONE_LABEL = re.compile(r"\b(?:phone|telephone|tel|call|text|mobile|office|contact|fax)\b", re.I)
+REFERENCE_LABEL = re.compile(
+    r"\b(?:(?:invoice|order|account|tracking)\s+(?:number|no\.?|id)|"
+    r"reference(?:\s+(?:number|no\.?|id))?)\s*[:#]\s*$", re.I,
+)
 
 
 def visible_phone_numbers(text: str) -> list[str]:
@@ -344,6 +348,8 @@ def visible_phone_numbers(text: str) -> list[str]:
     found = []
     for match in VISIBLE_PHONE.finditer(text):
         context = text[max(0, match.start() - 80):match.start()]
+        if REFERENCE_LABEL.search(context):
+            continue
         labels = list(PHONE_LABEL.finditer(context))
         if not labels or labels[-1].group().casefold() == "fax":
             continue
