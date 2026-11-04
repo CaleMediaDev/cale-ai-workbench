@@ -321,3 +321,19 @@ def test_base_installer_progress_is_not_overwritten(tmp_path, monkeypatch):
     progress.write_text(json.dumps({"status": "working", "current": "Downloading model files"}))
     assert not runtime_features.start_background()
     assert json.loads(progress.read_text(encoding="utf-8"))["status"] == "working"
+
+
+@pytest.mark.parametrize("absolute", [True, False])
+def test_installer_absolute_path_does_not_require_access_to_process_cwd(monkeypatch, absolute):
+    import psutil
+    from unittest.mock import Mock
+    script = runtime_features.Path(runtime_features.__file__).resolve()
+    process = Mock()
+    process.cmdline.return_value = ["python", "-u", str(script) if absolute else script.name, "--install"]
+    process.cwd.side_effect = psutil.AccessDenied(12345)
+    monkeypatch.setattr(psutil, "Process", lambda pid: process)
+    assert runtime_features._installer_running(12345) is absolute
+    if absolute:
+        process.cwd.assert_not_called()
+    else:
+        process.cwd.assert_called_once_with()

@@ -71,12 +71,19 @@ def _installer_running(pid=None) -> bool:
         for process in processes:
             try:
                 command = process.cmdline()
-                if ("--install" in command and any(
-                    (Path(part) if Path(part).is_absolute()
-                     else Path(process.cwd()) / part).resolve() == script
-                    for part in command[1:]
-                )):
+                if "--install" not in command:
+                    continue
+                # An absolute script is sufficient even when cwd is protected.
+                # Options such as -u must not force a cwd lookup before it.
+                candidates = [Path(part) for part in command[1:]]
+                if any(part.is_absolute() and part.resolve() == script for part in candidates):
                     return True
+                relative = [part for part in candidates if not part.is_absolute()
+                            and not str(part).startswith("-")]
+                if relative:
+                    working = Path(process.cwd())
+                    if any((working / part).resolve() == script for part in relative):
+                        return True
             except (OSError, ValueError, psutil.Error):
                 continue
     except (OSError, ValueError, TypeError, OverflowError, psutil.Error):
