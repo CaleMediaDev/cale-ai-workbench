@@ -52,6 +52,37 @@ def test_lyric_tool_uses_vocal_stem_and_writes_editable_captions(tmp_path):
     ]
 
 
+def test_save_skips_overlapping_and_backward_captions(tmp_path):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    vocal = tmp_path / "vocals.wav"
+    vocal.write_bytes(b"isolated")
+    target = tmp_path / "lyrics"
+    first = {"start": 1.0, "end": 3.0, "text": "First line"}
+    adjacent = {"start": 3.0, "end": 4.0, "text": "Next line"}
+
+    result = music_lyrics.save(source, vocal, target, {"segments": [
+        first,
+        {"start": 2.0, "end": 5.0, "text": "Overlapping line"},
+        {"start": 0.0, "end": 1.0, "text": "Backward line"},
+        adjacent,
+    ]})
+
+    assert result["segments"] == 2
+    assert (target / "lyrics.txt").read_text(encoding="utf-8") == (
+        "First line\nNext line\n"
+    )
+    assert (target / "lyrics.srt").read_text(encoding="utf-8") == (
+        "1\n00:00:01,000 --> 00:00:03,000\nFirst line\n\n"
+        "2\n00:00:03,000 --> 00:00:04,000\nNext line\n"
+    )
+    assert json.loads((target / "lyrics.json").read_text(encoding="utf-8"))[
+        "segments"
+    ] == [first, adjacent]
+    assert source.read_bytes() == b"original"
+    assert vocal.read_bytes() == b"isolated"
+
+
 def test_save_rejects_infinite_end_without_leaving_partial_output(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
