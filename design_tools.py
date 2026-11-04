@@ -120,8 +120,16 @@ def add_astro_ai_ui(project_path: str) -> dict:
     for original, target in files:
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
-            with original.open("rb") as input_stream, target.open("xb") as output:
-                shutil.copyfileobj(input_stream, output)
+            with original.open("rb") as input_stream:
+                output = target.open("xb")
+                try:
+                    with output:
+                        shutil.copyfileobj(input_stream, output)
+                except BaseException:
+                    # Remove only the file this call exclusively created so a
+                    # failed partial copy does not block a later retry.
+                    target.unlink()
+                    raise
             shutil.copystat(original, target)
             added.append(str(target))
     return {

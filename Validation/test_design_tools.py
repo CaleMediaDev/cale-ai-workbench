@@ -324,6 +324,42 @@ def test_kit_install_missing_source_does_not_leave_empty_destination(tmp_path, m
     assert not (destination / "LICENSE").exists()
 
 
+def test_kit_partial_copy_failure_allows_retry(tmp_path, monkeypatch):
+    import design_tools
+
+    kit = tmp_path / "kit"
+    (kit / "src").mkdir(parents=True)
+    component = b"complete bundled component"
+    (kit / "src/Message.astro").write_bytes(component)
+    (kit / "LICENSE").write_text("fixture license", encoding="utf-8")
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", kit)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text(
+        json.dumps({"dependencies": {"astro": "^5"}}), encoding="utf-8"
+    )
+    destination = project / "src/vendor/ai-ui"
+    real_copy = design_tools.shutil.copyfileobj
+
+    def fail_after_partial_write(input_stream, output):
+        output.write(input_stream.read(4))
+        raise OSError("simulated copy failure")
+
+    monkeypatch.setattr(design_tools.shutil, "copyfileobj", fail_after_partial_write)
+    with pytest.raises(OSError, match="simulated copy failure"):
+        add_astro_ai_ui(str(project))
+
+    assert not (destination / "Message.astro").exists()
+    assert not (destination / "LICENSE").exists()
+
+    monkeypatch.setattr(design_tools.shutil, "copyfileobj", real_copy)
+    assert add_astro_ai_ui(str(project))["files_added"] == 2
+    assert (destination / "Message.astro").read_bytes() == component
+    assert (destination / "LICENSE").read_text(encoding="utf-8") == "fixture license"
+    assert add_astro_ai_ui(str(project))["files_added"] == 0
+
+
 def test_conflict_does_not_copy_other_files(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"devDependencies": {"astro": "^5"}}), encoding="utf-8")
     existing = tmp_path / "src/vendor/ai-ui/components/ai-ui/Message.astro"
