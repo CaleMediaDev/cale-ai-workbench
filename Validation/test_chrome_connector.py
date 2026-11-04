@@ -96,6 +96,25 @@ def test_installed_version_accepts_indented_mapping_with_unindented_comment(
     assert chrome_connector.installed_version() == "0.2.6"
 
 
+@pytest.mark.parametrize("start,end", [
+    ("---\n", ""),
+    ("---\n", "...\n"),
+    ("--- # document start\n", "... # document end\n"),
+])
+def test_installed_version_accepts_indented_mapping_with_document_markers(
+    tmp_path, monkeypatch, start, end
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text(
+        start + "  name: hermes-connector\n  version: 0.2.6\n" + end,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    assert chrome_connector.installed_version() == "0.2.6"
+
+
 def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
