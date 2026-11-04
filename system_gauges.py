@@ -133,6 +133,8 @@ def disk_transfer_speed(previous, current, elapsed):
     """Convert PC-wide disk byte counters into read/write MB per second."""
     if previous is None or current is None or elapsed <= 0:
         return None, None
+    if current[0] < previous[0] or current[1] < previous[1]:
+        return None, None
     return (
         max(0, (current[0] - previous[0]) / elapsed / 1_000_000),
         max(0, (current[1] - previous[1]) / elapsed / 1_000_000),
