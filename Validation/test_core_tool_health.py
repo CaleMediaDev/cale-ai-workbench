@@ -77,6 +77,35 @@ def test_cache_lookup_keeps_results_from_its_own_installation(tmp_path, monkeypa
     assert core_tool_health.missing(healthy) == []
 
 
+def test_older_probe_cannot_overwrite_newer_healthy_cache(tmp_path, monkeypatch):
+    ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+    ghidra.parent.mkdir(parents=True)
+    ghidra.touch()
+    monkeypatch.setattr(core_tool_health, "_health_cache", (None, (), 0.0))
+    monkeypatch.setattr(core_tool_health, "_health_generation", 0)
+    monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: 1000.0)
+    monkeypatch.setattr(core_tool_health, "_agent_python", lambda root: None)
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
+    interleaved = []
+
+    def runnable(path, *args):
+        if path.name == "gh.exe" and not interleaved:
+            # The older probe observed failure before a newer probe observed
+            # recovery, but resumes and publishes only after the newer one.
+            interleaved.append(True)
+            assert core_tool_health.missing(tmp_path, fresh=True) == []
+            return False
+        return True
+
+    monkeypatch.setattr(core_tool_health, "_runnable", runnable)
+    assert core_tool_health.missing(tmp_path, fresh=True) == ["GitHub CLI"]
+    assert interleaved == [True]
+    with patch.object(core_tool_health, "_runnable",
+                      side_effect=AssertionError("expected cached health")):
+        assert core_tool_health.missing(tmp_path) == []
+
+
 def test_browser_runtime_failure_is_visible_even_when_node_runs(tmp_path, monkeypatch):
     monkeypatch.setattr(core_tool_health, "_runnable", lambda path, *args: True)
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: False)
