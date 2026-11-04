@@ -182,7 +182,16 @@ def index_document_text(folder: str | Path, path: str | Path, text: str,
         ).fetchone()
         if (existing[0] == len(chunks) and existing[1] == existing[2] == source_hash
                 and existing[3] == existing[4] == "extractor:" + revision):
-            return {"source_path": relative, "parts": len(chunks), "updated": False}
+            stored_chunks = dict(conn.execute(
+                "SELECT id,body FROM memories WHERE kind='document' AND source_path=?",
+                (relative,),
+            ))
+            expected_chunks = {
+                f"document:{relative}:{number}": body
+                for number, body in enumerate(chunks, 1)
+            }
+            if stored_chunks == expected_chunks:
+                return {"source_path": relative, "parts": len(chunks), "updated": False}
         old = [row[0] for row in conn.execute(
             "SELECT id FROM memories WHERE kind='document' AND source_path=?", (relative,)
         )]

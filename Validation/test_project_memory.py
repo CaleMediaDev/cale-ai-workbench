@@ -270,6 +270,33 @@ class ProjectMemoryTests(unittest.TestCase):
         found = memory.search(self.folder, "distinctive zebra", kind="document")
         self.assertEqual([row["id"] for row in found], [identifier])
 
+    def test_document_reindex_replaces_changed_text_with_same_source_and_revision(self):
+        source = self.folder / "manual.pdf"
+        source.write_bytes(b"unchanged document bytes")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        original = "obsoletezebra " + "x" * memory.DOCUMENT_CHUNK_CHARS
+        corrected = "correctedzebra " + "y" * memory.DOCUMENT_CHUNK_CHARS
+        first = memory.index_document_text(self.folder, source, original, digest)
+
+        result = memory.index_document_text(self.folder, source, corrected, digest)
+
+        self.assertEqual(result["parts"], first["parts"])
+        self.assertTrue(result["updated"])
+        self.assertEqual(memory.search(self.folder, "obsoletezebra", kind="document"), [])
+        found = memory.search(self.folder, "correctedzebra", kind="document")
+        self.assertEqual([row["id"] for row in found], ["document:manual.pdf:1"])
+        with memory.connection(self.folder) as conn:
+            bodies = [row[0] for row in conn.execute(
+                "SELECT body FROM memories WHERE kind='document' ORDER BY id"
+            )]
+            self.assertEqual("".join(bodies), corrected)
+            for table in ("memories", "memory_fts"):
+                self.assertEqual(conn.execute(
+                    f"SELECT COUNT(*) FROM {table}"
+                ).fetchone()[0], result["parts"])
+        self.assertFalse(memory.index_document_text(
+            self.folder, source, corrected, digest)["updated"])
+
     def test_document_chunks_are_searchable_and_source_checked(self):
         source = self.folder / "manual.pdf"
         source.write_bytes(b"first document bytes")
