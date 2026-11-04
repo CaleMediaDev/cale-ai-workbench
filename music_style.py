@@ -99,6 +99,7 @@ def requires_sustained_vocals(prompt: str, lyrics: str = "",
     request = prompt.split("Past user feedback", 1)[0]
     if VOCAL_FREE.search(request) or WHOLE_INSTRUMENTAL.search(request):
         return False
+    request, _, _ = _clean_negations(request)
     return not (VOCAL_TEXTURE.search(request) and not LEAD_VOCALS.search(request))
 
 

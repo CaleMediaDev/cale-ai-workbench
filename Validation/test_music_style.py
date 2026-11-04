@@ -84,6 +84,20 @@ def test_vocal_chops_are_texture_not_full_length_singing():
     assert music_style.requires_sustained_vocals("Make a pop song with lead vocals")
 
 
+def test_rejected_singer_does_not_turn_vocal_texture_into_sustained_singing():
+    for exclusion in ("no male singer", "without a female singer"):
+        request = "Heavy dubstep with vocal chops, " + exclusion
+        assert not music_style.requires_sustained_vocals(request)
+        caption = music_style.enhance(request)
+        assert "Sparse chopped vocal syllables" in caption
+        assert "clear sung verses and chorus" not in caption
+        assert not music_style.requires_sustained_vocals(caption)
+        assert music_style.requires_sustained_vocals(
+            request + ", but include lead vocals"
+        )
+        assert music_style.requires_sustained_vocals(request, lyrics="Sing this verse")
+
+
 def test_sparse_female_hook_does_not_get_full_verse_direction():
     request = ("Female singing voice, main vocal hook: waapy waaap. "
                "Very little conventional singing, with massive instrumental drops.")
