@@ -525,3 +525,16 @@ class SelfDiagnosticsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_optional_history_limits_release_string_before_regex_and_write(tmp_path):
+    state=tmp_path/'LongTasks';state.mkdir()
+    report={'status':'deferred','version':'Cale AI Workbench '+'1'*100000+'.2.3','checked_at':1}
+    diagnostics._retain_previous_attempt(state,report)
+    target=state/'self-check-history.json';raw=target.read_bytes();history=json.loads(raw)
+    assert len(raw)<diagnostics.HISTORY_READ_BYTES
+    assert history['attempts'][-1]['version']=='unknown'
+    diagnostics._retain_previous_attempt(state,{'status':'passed','version':'Cale AI Workbench 0.5.500','checked_at':2})
+    history=json.loads(target.read_bytes())
+    assert history['attempts'][-1]['version']=='Cale AI Workbench 0.5.500'
+    assert len(target.read_bytes())<diagnostics.HISTORY_READ_BYTES

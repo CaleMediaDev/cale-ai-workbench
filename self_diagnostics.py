@@ -70,7 +70,7 @@ def _safe_attempt(report: dict) -> dict | None:
             "passed", "failed", "deferred", "running", "interrupted"}:
         return None
     release = report.get("version")
-    if (not isinstance(release, str) or not re.fullmatch(
+    if (not isinstance(release, str) or len(release) > 64 or not re.fullmatch(
             r"Cale AI Workbench \d+\.\d+\.\d+|development", release)):
         release = "unknown"
     item = {"version": release, "status": "interrupted" if report["status"] == "running" else report["status"]}
