@@ -119,9 +119,12 @@ def _text(path: Path) -> str:
             "analyze_video", path, max_frames=4, include_audio=False,
             question="Describe the visible events and transcribe readable text.",
         )
+        frames = result["sampled_frames"]
+        if not isinstance(frames, list):
+            raise RuntimeError("The local media reader returned invalid video frames.")
         observations = "\n".join(
             f"{frame['timestamp_seconds']}s: {frame['description']}"
-            for frame in result["sampled_frames"]
+            for frame in frames
         )
         try:
             audio = _media_call("transcribe_audio", path).get("text", "")

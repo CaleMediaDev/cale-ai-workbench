@@ -127,6 +127,41 @@ class NaturalVoiceTests(unittest.TestCase):
             self.assertEqual(run.call_args_list[2].args[0], import_command)
             self.assertTrue(run.call_args_list[2].kwargs["check"])
 
+    def test_empty_whisper_file_triggers_repair_before_completion(self):
+        names = ("config.json", "model.bin")
+        for empty_name in names:
+            with self.subTest(empty_file=empty_name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                media_python = root / "python.exe"
+                media_python.touch()
+                whisper = root / "Media/models/whisper"
+                whisper.mkdir(parents=True)
+                for name in names:
+                    (whisper / name).write_bytes(b"" if name == empty_name else b"data")
+                status = root / "voice-status.json"
+                fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=lambda *args: None)
+
+                def run_command(command, **kwargs):
+                    if "--download-whisper" in command:
+                        for name in names:
+                            (whisper / name).write_bytes(b"repaired data")
+                    return SimpleNamespace(returncode=0)
+
+                with (
+                    patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+                    patch.object(natural_voice, "ROOT", root),
+                    patch.object(natural_voice, "MEDIA_PYTHON", media_python),
+                    patch.object(natural_voice, "STATUS", status),
+                    patch.object(natural_voice, "ready", return_value=True),
+                    patch.object(natural_voice.subprocess, "run", side_effect=run_command) as run,
+                ):
+                    self.assertFalse(natural_voice.whisper_ready())
+                    natural_voice.install()
+                    self.assertTrue(natural_voice.whisper_ready())
+                self.assertEqual(run.call_count, 2)
+                self.assertIn("--download-whisper", run.call_args_list[1].args[0])
+                self.assertEqual(json.loads(status.read_text())["status"], "complete")
+
     def test_missing_whisper_weights_are_restored_without_redownloading_voice(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

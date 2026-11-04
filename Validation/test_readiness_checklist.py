@@ -133,6 +133,35 @@ def test_removed_voice_or_vision_model_cannot_keep_a_cached_ready_status(tmp_pat
     assert "missing" in rows["Image recognition"]["detail"]
 
 
+@pytest.mark.parametrize("vision_model, expected_state", [
+    ("cale-vision", "ready"),
+    ("cale-vision:latest", "ready"),
+    ("cale-vision:other", "attention"),
+])
+def test_vision_installation_matches_configured_model_tag(tmp_path, vision_model, expected_state):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    (state / "readiness-probes.json").write_text(json.dumps({
+        "version": "Cale AI Workbench 1",
+        "vision": {"ok": True, "detail": "Image test passed"},
+    }))
+    runtime = tmp_path / "Media/python/Scripts/python.exe"
+    runtime.parent.mkdir(parents=True)
+    runtime.touch()
+    (tmp_path / "Media/settings.json").write_text(json.dumps({
+        "vision_model": vision_model,
+    }))
+    with (patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
+            b'{"models":[{"name":"cale-vision:latest"}]}')),
+          patch.object(readiness_checklist.capability_index, "health",
+                       return_value={"ok": False}),
+          patch.object(readiness_checklist.core_tool_health, "missing", return_value=[]),
+          patch.object(readiness_checklist.ffmpeg_runtime, "working", return_value=False)):
+        rows = {row["label"]: row for row in readiness_checklist.snapshot(tmp_path)["rows"]}
+    assert rows["Image recognition"]["state"] == expected_state
+
+
 def test_local_browser_is_ready_without_optional_chrome_pairing(tmp_path):
     state = tmp_path / "LongTasks"
     state.mkdir()

@@ -60,6 +60,20 @@ class SelfDiagnosticsTests(unittest.TestCase):
             connection.commit()
             self.assertTrue(diagnostics.active_projects(state))
 
+    def test_schedule_preserves_report_when_supervisor_launch_is_denied(self):
+        report_path = self.state / "self-check.json"
+        previous = json.dumps({
+            "version": "older", "status": "passed", "checked_at": 1,
+        })
+        report_path.write_text(previous)
+        with (patch.object(diagnostics.subprocess, "Popen",
+                           side_effect=PermissionError("execution denied")) as launch,
+              patch("psutil.Process") as process):
+            self.assertFalse(diagnostics.schedule(self.root, self.state, now=100))
+            launch.assert_called_once()
+            process.assert_not_called()
+        self.assertEqual(report_path.read_text(), previous)
+
     def test_failed_check_retries_then_backs_off_for_a_week(self):
         proc = SimpleNamespace(pid=123)
         with (patch.object(diagnostics.subprocess, "Popen", return_value=proc) as launch,

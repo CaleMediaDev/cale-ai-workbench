@@ -80,6 +80,23 @@ def test_document_check_rejects_truncated_decimal_amounts(tmp_path, source_amoun
         document_check.check(folder, spec)
 
 
+@pytest.mark.parametrize("suffix", [".50", ",000"])
+@pytest.mark.parametrize("location", ["source", "report"])
+def test_document_check_rejects_numeric_evidence_prefixes(tmp_path, suffix, location):
+    folder = _project(tmp_path)
+    if location == "source":
+        (folder / "terms.txt").write_text(
+            SOURCE.replace("$1,280", "$1,280" + suffix), encoding="utf-8")
+        expected_error = "Calculation 1: source amounts were not found"
+    else:
+        (folder / "summary.md").write_text(
+            REPORT.replace("$1,100", "$1,100" + suffix), encoding="utf-8")
+        expected_error = "Calculation 1: report text was not found"
+    result = document_check.check(folder, SPEC)
+    assert result["passed"] is False
+    assert expected_error in result["errors"]
+
+
 def test_document_check_rejects_source_change_during_extraction(tmp_path):
     folder = _project(tmp_path)
     original_inspect = document_check.project_documents.inspect

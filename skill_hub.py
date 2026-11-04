@@ -91,7 +91,12 @@ def inspect(identifier: str) -> dict:
 
 def install(identifier: str) -> dict:
     """Install a recently inspected skill only if Hermes' scanner allows it."""
-    if not IDENTIFIER.fullmatch(identifier) or time.monotonic() - INSPECTED.get(identifier, -1e9) > MAX_AGE:
+    now = time.monotonic()
+    if (
+        not IDENTIFIER.fullmatch(identifier)
+        or now - SEEN.get(identifier, -1e9) > MAX_AGE
+        or now - INSPECTED.get(identifier, -1e9) > MAX_AGE
+    ):
         raise ValueError("Search and inspect this exact skill first.")
     result = _run("install", identifier, "--yes", timeout=120)
     INSPECTED.pop(identifier, None)

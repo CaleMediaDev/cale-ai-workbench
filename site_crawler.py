@@ -5,7 +5,7 @@ import re
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urldefrag, urlsplit
+from urllib.parse import urldefrag, urljoin, urlsplit
 
 import project_memory
 from web_tools import check_url
@@ -77,7 +77,7 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 for link in (result.links or {}).get("internal", []):
                     candidate = link.get("href", "")
                     try:
-                        candidate = normalized_url(candidate, host)
+                        candidate = normalized_url(urljoin(url, candidate), host)
                     except (OSError, ValueError):
                         continue
                     if candidate not in queued and len(queued) < 100:

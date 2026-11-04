@@ -246,6 +246,55 @@ def test_preview_backend_errors_preserve_successful_browser_result(tmp_path):
         asyncio.run(check(failing_stage))
 
 
+def test_cancelled_backend_initialization_closes_partial_backend():
+    async def check():
+        initializing = asyncio.Event()
+        opened = []
+        closed = []
+
+        @asynccontextmanager
+        async def fake_stdio(params):
+            opened.append("stdio")
+            try:
+                yield (object(), object())
+            finally:
+                closed.append("stdio")
+
+        class FakeSession:
+            async def __aenter__(self):
+                opened.append("session")
+                return self
+
+            async def __aexit__(self, *_args):
+                closed.append("session")
+
+            async def initialize(self):
+                initializing.set()
+                await asyncio.Future()
+
+        async def consume():
+            async with toolbox_mcp.lifespan(None):
+                raise AssertionError("Cancelled startup must not yield")
+
+        with (patch.object(toolbox_mcp, "stdio_client", fake_stdio),
+              patch.object(toolbox_mcp, "ClientSession",
+                           lambda *_args, **_kwargs: FakeSession()),
+              patch.dict(toolbox_mcp.SESSIONS, {}, clear=True),
+              patch.dict(toolbox_mcp.CATALOG, {}, clear=True),
+              patch.dict(toolbox_mcp.ERRORS, {}, clear=True)):
+            task = asyncio.create_task(consume())
+            await initializing.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert opened == ["stdio", "session"]
+            assert closed == ["session", "stdio"]
+            assert toolbox_mcp.SESSIONS == {}
+            assert toolbox_mcp.CATALOG == {}
+
+    asyncio.run(check())
+
+
 def test_exceptional_lifespan_exit_clears_closed_backend_registries():
     closed = []
 

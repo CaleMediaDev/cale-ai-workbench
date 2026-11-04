@@ -242,6 +242,24 @@ class VoiceTests(unittest.TestCase):
         with patch.object(voice_assistant, "urlopen", side_effect=OSError):
             self.assertFalse(voice_assistant._fast_model_loaded("cale-fast"))
 
+    def test_loaded_model_check_requires_matching_explicit_tag(self):
+        cases = (
+            ("cale-fast:small", "cale-fast:large", False),
+            ("cale-fast:small", "cale-fast", False),
+            ("cale-fast:latest", "cale-fast:large", False),
+            ("cale-fast:small", "cale-fast:small", True),
+            ("cale-fast", "cale-fast:latest", True),
+            ("cale-fast:latest", "cale-fast", True),
+        )
+        for loaded, requested, expected in cases:
+            with self.subTest(loaded=loaded, requested=requested):
+                response = json.dumps({"models": [{"name": loaded}]}).encode()
+                with patch.object(voice_assistant, "urlopen",
+                                  return_value=io.BytesIO(response)):
+                    self.assertEqual(
+                        voice_assistant._fast_model_loaded(requested), expected
+                    )
+
     def test_gpu_activity_ignores_malformed_lease_pids(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)

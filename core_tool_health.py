@@ -146,6 +146,7 @@ def start_background(root: Path = ROOT) -> bool:
         return False
 
     def repair() -> None:
+        global _last_repair
         _status(root, "working", "Repairing " + ", ".join(unavailable))
         log_path = root / "LongTasks/core-tool-repair.log"
         try:
@@ -163,6 +164,9 @@ def start_background(root: Path = ROOT) -> bool:
                 _status(root, "complete", "Repaired " + ", ".join(unavailable))
         except (OSError, subprocess.TimeoutExpired) as exc:
             _status(root, "failed", f"Repair will retry: {type(exc).__name__}")
+        finally:
+            # Long repairs must not consume the cooldown for their next retry.
+            _last_repair = time.monotonic()
 
     _repair_thread = threading.Thread(target=repair, name="core-tool-repair", daemon=True)
     _last_repair = time.monotonic()

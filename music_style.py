@@ -41,6 +41,7 @@ EXPLICIT_LEAD = re.compile(
     r"(?:male|female|lead|layered|backing|deep|gritty)\s+vocals?|"
     r"vocal\s+(?:verses?|chorus|hook)|rap\s+verses?)\b", re.I,
 )
+VOCAL_FREE = re.compile(r"\b(?:no|without)\s+vocals\b", re.I)
 NO_VOCALS = re.compile(
     r"\b(?:no vocals|without vocals|no singing|no lyrics|without lyrics)\b", re.I,
 )
@@ -96,6 +97,8 @@ def requires_sustained_vocals(prompt: str, lyrics: str = "",
     if lyrics.strip():
         return True
     request = prompt.split("Past user feedback", 1)[0]
+    if VOCAL_FREE.search(request) or WHOLE_INSTRUMENTAL.search(request):
+        return False
     return not (VOCAL_TEXTURE.search(request) and not LEAD_VOCALS.search(request))
 
 
@@ -113,7 +116,9 @@ def _clean_negations(prompt: str) -> tuple[str, bool, bool]:
 
 def vocal_intent(prompt: str, instrumental: bool = False) -> str:
     """Use the person's current request before any appended learned examples."""
-    if instrumental:
+    current_request = prompt.split("Past user feedback", 1)[0]
+    if (instrumental or VOCAL_FREE.search(current_request)
+            or WHOLE_INSTRUMENTAL.search(current_request)):
         return "none"
     request, no_male, no_female = _clean_negations(
         prompt.split("Past user feedback", 1)[0]
@@ -139,6 +144,7 @@ def vocal_intent(prompt: str, instrumental: bool = False) -> str:
 def enhance(prompt: str, instrumental: bool = False) -> str:
     """Make vocal intent unambiguous in the local music model's caption."""
     intent = vocal_intent(prompt, instrumental)
+    instrumental = instrumental or intent == "none"
     cleaned, _, _ = _clean_negations(prompt)
     cues = []
     sustained = requires_sustained_vocals(cleaned, instrumental=instrumental)

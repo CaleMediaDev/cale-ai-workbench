@@ -88,10 +88,11 @@ def calculate(question: str) -> str | None:
         return f"{expression} = {'$' if '$' in percent.group(2) else ''}{answer}"
     if not ALLOWED.fullmatch(expression) or not any(op in expression for op in "+-*/^×÷"):
         return None
-    # Commas are allowed only as thousands separators, never tuple syntax.
-    normalized = re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", expression)
-    if "," in normalized:
-        return None
+    # Validate complete numeric tokens before removing thousands separators.
+    for token in re.findall(r"[\d.,]+", expression):
+        if "," in token and not re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d*)?", token):
+            return None
+    normalized = expression.replace(",", "")
     normalized = normalized.replace("×", "*").replace("÷", "/").replace("^", "**")
     try:
         tree = ast.parse(normalized, mode="eval")

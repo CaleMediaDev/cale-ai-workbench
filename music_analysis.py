@@ -42,6 +42,9 @@ def _best_key(chroma):
     strength = np.asarray(chroma, dtype=float)
     if not np.isfinite(strength).all() or strength.sum() < 0.01:
         return None
+    # Correlation is undefined without variation between pitch classes.
+    if np.ptp(strength) == 0:
+        return None
     choices = []
     for quality, profile in KEY_PROFILES.items():
         for root in range(12):

@@ -32,7 +32,8 @@ def _control(page, ref: str):
 def _download_target(folder: Path, filename: str) -> Path:
     """Keep an untrusted server filename inside this task's download folder."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", filename).strip(" .")
-    name = name[:120] or "download.bin"
+    # Filesystem component limits count bytes, not Unicode characters.
+    name = name.encode("utf-8")[:120].decode("utf-8", errors="ignore").strip(" .") or "download.bin"
     destination = folder / "Downloads"
     destination.mkdir(parents=True, exist_ok=True)
     target = destination / name

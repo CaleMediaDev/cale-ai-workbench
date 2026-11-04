@@ -241,7 +241,7 @@ def candidate_approved(item):
         approvals = json.loads((ROOT / "LongTasks/model-approvals.json").read_text())
     except (OSError, ValueError):
         return False
-    return approvals.get(item["alias"]) == item["source"]
+    return isinstance(approvals, dict) and approvals.get(item["alias"]) == item["source"]
 
 
 def approve_candidate(item):
@@ -250,6 +250,8 @@ def approve_candidate(item):
     try:
         approvals = json.loads(path.read_text())
     except (OSError, ValueError):
+        approvals = {}
+    if not isinstance(approvals, dict):
         approvals = {}
     approvals[item["alias"]] = item["source"]
     temporary = path.with_suffix(f".{os.getpid()}.tmp")

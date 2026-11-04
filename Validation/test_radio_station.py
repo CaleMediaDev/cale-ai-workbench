@@ -340,6 +340,27 @@ def test_preload_and_equal_power_overlap_start_before_the_first_track_ends(tmp_p
     assert not old.opened and player.outgoing is None and staged.busy() and staged.volume == pytest.approx(65)
 
 
+def test_failed_blend_start_releases_prepared_deck_and_allows_retry(tmp_path):
+    player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
+    first, second = tmp_path/"first.wav", tmp_path/"second.wav"
+    player.play(first)
+    current = player.active
+    player.prepare(second)
+    failed = player.prepared
+
+    with patch.object(failed, "start", side_effect=RuntimeError("Cannot start track")):
+        with pytest.raises(RuntimeError, match="Cannot start track"):
+            player.blend(second)
+
+    assert player.active is current and current.busy() and current.volume == 65
+    assert not player.mixing and player.prepared is None
+    assert not failed.opened and failed.path is None
+    assert str(second.resolve()) not in player.protected_paths()
+    assert player.blend(second)
+    assert player.active is not failed and player.active.busy()
+    assert player.outgoing is current and current.busy()
+
+
 def test_pausing_and_muting_keep_both_decks_and_fade_position_consistent(tmp_path):
     moment = [0]
     player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
@@ -522,6 +543,31 @@ def test_stop_attempts_both_channels_even_if_one_close_reports_an_error(tmp_path
     with patch.object(player.active, "stop", side_effect=RuntimeError("Close failed")), pytest.raises(RuntimeError):
         player.stop()
     assert not old.opened and player.outgoing is None
+
+
+def test_service_finalizes_stop_when_audio_cleanup_reports_an_error(tmp_path):
+    _, service, player, jobs, calls, generate = fixture(tmp_path)
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        current_id = service.current["id"]
+
+        def stop_with_error():
+            player.active = False
+            raise RuntimeError("Close failed")
+
+        service.stop()
+        with patch.object(player, "stop", side_effect=stop_with_error), pytest.raises(RuntimeError, match="Close failed"):
+            service.tick()
+
+        assert not player.active
+        assert not service.enabled and not service.paused
+        assert service.current is None
+        assert next(row for row in service._rows() if row["id"] == current_id)["status"] == "played"
+        assert service.snapshot()["message"].startswith("Radio stopped.")
+        service.tick()
+        assert len(player.played) == 1 and len(calls) == 2
 
 
 def test_worker_survives_failure_to_publish_its_retry_status(tmp_path):

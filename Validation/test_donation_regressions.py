@@ -60,6 +60,24 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class CalculatorPrecisionTests(unittest.TestCase):
+    def test_thousands_separators_require_valid_numeric_grouping(self):
+        for expression in (
+            "1234,567 + 1",
+            "1,23,456 + 1",
+            "1.234,567 + 1",
+            "1,234.567,890 + 1",
+            "1, 234 + 1",
+        ):
+            with self.subTest(expression=expression):
+                self.assertIsNone(calculate(expression))
+        for expression, answer in (
+            ("1,234,567 + 1", "1234568"),
+            ("-12,345.50 + .5", "-12345"),
+            ("1,234. + 1", "1235"),
+        ):
+            with self.subTest(expression=expression):
+                self.assertEqual(calculate(expression), f"{expression} = {answer}")
+
     def test_oversized_percentage_result_falls_back(self):
         number = "9" * 60
         expression = f"{number}% of {number}"

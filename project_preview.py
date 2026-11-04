@@ -68,7 +68,7 @@ def source(folder):
             )
             if url:
                 return url
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
         pass
     for name in HTML_CANDIDATES:
         try:

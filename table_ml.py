@@ -79,7 +79,10 @@ def _features(rows: list[dict], schema: dict) -> list[dict]:
                         raise ValueError
                 except ValueError:
                     number = spec["median"]
-                features[column] = (number - spec["median"]) / spec["scale"]
+                normalized = (number - spec["median"]) / spec["scale"]
+                if not math.isfinite(normalized):
+                    raise ValueError(f"Numeric feature {column!r} overflowed during normalization.")
+                features[column] = normalized
             else:
                 features[column] = value or "(missing)"
         output.append(features)

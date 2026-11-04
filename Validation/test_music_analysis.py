@@ -45,6 +45,13 @@ def test_analysis_records_same_chord_returning_after_silence(tmp_path, monkeypat
     ]
 
 
+def test_key_estimate_declines_flat_pitch_evidence_without_invalid_arithmetic():
+    with np.errstate(divide="raise", invalid="raise"):
+        for strength in (0.25, 1.0):
+            assert music_analysis._best_key(np.full(12, strength)) is None
+
+
+
 def test_analysis_rejects_nonfinite_duration_before_loading(tmp_path, monkeypatch):
     import sys
     from types import SimpleNamespace

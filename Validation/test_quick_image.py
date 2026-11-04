@@ -36,6 +36,45 @@ def test_direct_image_uses_local_worker_and_checks_saved_file():
             assert image.size == (512, 512)
 
 
+def test_direct_image_rejects_valid_checksums_but_invalid_pixels(tmp_path):
+    import struct
+    import zlib
+
+    import pytest
+
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"")
+    output = tmp_path / "broken.png"
+
+    def worker(*args, **kwargs):
+        request = json.loads(kwargs["input"])
+        path = Path(request["output_path"])
+        Image.new("RGB", (64, 64), "orange").save(path)
+        data = bytearray(path.read_bytes())
+        offset = 8
+        while offset < len(data):
+            length = struct.unpack_from(">I", data, offset)[0]
+            if data[offset + 4:offset + 8] == b"IDAT":
+                data[offset + 8:offset + 10] = b"\x00\x00"
+                checksum = zlib.crc32(data[offset + 4:offset + 8 + length])
+                struct.pack_into(">I", data, offset + 8 + length, checksum)
+                break
+            offset += length + 12
+        else:
+            raise AssertionError("Expected an IDAT chunk")
+        path.write_bytes(data)
+        # Metadata and chunk verification alone do not detect this corruption.
+        with Image.open(path) as picture:
+            picture.verify()
+        return subprocess.CompletedProcess(args, 0, json.dumps({"path": str(path)}), "")
+
+    with (patch.object(quick_image.subprocess, "run", side_effect=worker),
+          patch.object(quick_image, "clarify_prompt", return_value="a dog")):
+        with pytest.raises(OSError):
+            quick_image.generate(tmp_path, "a dog", str(output))
+
+
 def test_prompt_clarification_resolves_ambiguous_subject_locally():
     reply = {"message": {"content": "A small red diamond-shaped kite with a string against a clear blue sky."}}
     with patch.object(quick_image, "urlopen", return_value=BytesIO(json.dumps(reply).encode())) as opened:

@@ -74,6 +74,72 @@ def test_inspector_paginates_and_invalidates_changed_source(tmp_path):
     assert fresh["text"] == "updated" and not fresh["cached"]
 
 
+def test_inspector_rejects_source_changes_during_cache_hits(tmp_path):
+    source = tmp_path / "notes.txt"
+    source.write_text("original document", encoding="utf-8")
+    real_digest = project_documents._digest
+    changed = False
+
+    def change_after_hash(path):
+        nonlocal changed
+        digest = real_digest(path)
+        if not changed:
+            changed = True
+            source.write_text("updated document", encoding="utf-8")
+        return digest
+
+    with patch.object(project_memory, "index_file") as index:
+        first = project_documents.inspect(tmp_path, "notes.txt")
+        assert first["text"] == "original document" and not first["cached"]
+        index.reset_mock()
+        with patch.object(project_documents, "_digest", side_effect=change_after_hash):
+            try:
+                project_documents.inspect(tmp_path, "notes.txt")
+            except RuntimeError as exc:
+                assert "document changed" in str(exc)
+            else:
+                raise AssertionError("Changed source returned stale cached text")
+        index.assert_not_called()
+        fresh = project_documents.inspect(tmp_path, "notes.txt")
+        cached = project_documents.inspect(tmp_path, "notes.txt")
+
+    assert changed
+    assert fresh["text"] == cached["text"] == "updated document"
+    assert not fresh["cached"] and cached["cached"]
+    assert source.read_text(encoding="utf-8") == "updated document"
+
+
+def test_inspector_rejects_source_changes_during_cache_publication(tmp_path):
+    source = tmp_path / "notes.pdf"
+    source.write_bytes(b"original PDF source")
+    real_replace = os.replace
+
+    def publish_then_change_source(temporary, cache):
+        result = real_replace(temporary, cache)
+        source.write_bytes(b"updated PDF source")
+        return result
+
+    with patch.object(file_chat, "ROOT", tmp_path), patch.object(
+        file_chat, "document_text", side_effect=["original text", "updated text"],
+    ) as extract, patch.object(project_memory, "index_document_text") as index:
+        with patch.object(project_documents.os, "replace", side_effect=publish_then_change_source):
+            try:
+                project_documents.inspect(tmp_path, "notes.pdf")
+            except RuntimeError as exc:
+                assert "document changed" in str(exc)
+            else:
+                raise AssertionError("Changed source returned stale extracted text")
+        index.assert_not_called()
+        fresh = project_documents.inspect(tmp_path, "notes.pdf")
+        cached = project_documents.inspect(tmp_path, "notes.pdf")
+
+    assert fresh["text"] == cached["text"] == "updated text"
+    assert not fresh["cached"] and cached["cached"]
+    assert extract.call_count == 2
+    assert source.read_bytes() == b"updated PDF source"
+    assert not list((tmp_path / ".local-ai/document-cache").glob("*.tmp"))
+
+
 def test_inspector_handles_overlapping_cache_publications(tmp_path):
     source = tmp_path / "notes.txt"
     source.write_text("shared document text", encoding="utf-8")
