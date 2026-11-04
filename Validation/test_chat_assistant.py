@@ -812,6 +812,29 @@ def test_web_sources_read_pages_and_skip_search_only_leads():
     assert read.call_count == 2
 
 
+@pytest.mark.parametrize("first_read", [RuntimeError("blocked"), {"text": "Too short"}])
+def test_web_sources_retry_host_until_a_readable_page_is_found(first_read):
+    leads = [
+        {"title": "Unavailable", "url": "https://example.org/blocked"},
+        {"title": "Readable", "url": "https://example.org/readable"},
+        {"title": "Duplicate host", "url": "https://example.org/another"},
+    ]
+    page = {
+        "title": "Readable", "source_url": leads[1]["url"],
+        "retrieved_at": "2026-11-01T00:00:00Z", "text": "A" * 150,
+    }
+    with (
+        patch("web_tools.search_web", return_value={"results": leads}),
+        patch("web_tools.read_webpage", side_effect=[first_read, page]) as read,
+    ):
+        sources, returned_leads = chat_assistant.web_sources("current information")
+    assert [source["url"] for source in sources] == [page["source_url"]]
+    assert returned_leads == leads
+    assert [call.args[0] for call in read.call_args_list] == [
+        leads[0]["url"], leads[1]["url"],
+    ]
+
+
 def test_web_sources_stop_after_bounded_failed_page_reads():
     leads = [{"title": f"Page {index}", "url": f"https://site{index}.example/page"}
              for index in range(8)]
