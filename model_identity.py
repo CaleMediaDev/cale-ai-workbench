@@ -36,7 +36,7 @@ def configured_main_alias(root: Path) -> str:
             break
         if in_model:
             match = re.fullmatch(
-                r"\s+default:\s*(['\"]?)([a-zA-Z0-9._-]+)\1\s*", line
+                r"\s+default:\s*(['\"]?)([a-zA-Z0-9._-]+)\1(?:\s+#.*)?\s*", line
             )
             if match:
                 candidate = match.group(2).lower()
