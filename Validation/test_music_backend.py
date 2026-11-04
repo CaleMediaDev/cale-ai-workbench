@@ -884,6 +884,27 @@ def test_durable_reference_path_survives_worker_directory_change(tmp_path, monke
         assert music_backend.music_job_status(started["job_id"])["status"] == "complete"
 
 
+def test_missing_worker_runtime_marks_submission_error(tmp_path):
+    jobs = tmp_path / "jobs"
+    output = tmp_path / "song.mp3"
+    with (patch.object(music_backend, "ROOT", tmp_path),
+          patch.object(music_backend, "JOBS", jobs),
+          patch.object(music_backend.subprocess, "Popen") as launch):
+        with pytest.raises(RuntimeError, match="Toolbox runtime is missing"):
+            music_backend.start_music_job(
+                "instrumental piano", str(output), instrumental=True,
+                make_video=False,
+            )
+        records = list(jobs.glob("*.json"))
+        assert len(records) == 1
+        job = music_backend.music_job_status(records[0].stem)
+    launch.assert_not_called()
+    assert job["status"] == "error"
+    assert job["current"] == "The local Toolbox runtime is missing."
+    assert job["output_path"] == str(output)
+    assert not output.exists()
+
+
 def test_music_job_id_cannot_escape_job_directory():
     with pytest.raises(ValueError, match="Invalid local music job ID"):
         music_backend.music_job_status("../outside")
