@@ -74,6 +74,41 @@ def test_inspector_paginates_and_invalidates_changed_source(tmp_path):
     assert fresh["text"] == "updated" and not fresh["cached"]
 
 
+def test_inspector_rejects_source_changes_during_cache_hits(tmp_path):
+    source = tmp_path / "notes.txt"
+    source.write_text("original document", encoding="utf-8")
+    real_digest = project_documents._digest
+    changed = False
+
+    def change_after_hash(path):
+        nonlocal changed
+        digest = real_digest(path)
+        if not changed:
+            changed = True
+            source.write_text("updated document", encoding="utf-8")
+        return digest
+
+    with patch.object(project_memory, "index_file") as index:
+        first = project_documents.inspect(tmp_path, "notes.txt")
+        assert first["text"] == "original document" and not first["cached"]
+        index.reset_mock()
+        with patch.object(project_documents, "_digest", side_effect=change_after_hash):
+            try:
+                project_documents.inspect(tmp_path, "notes.txt")
+            except RuntimeError as exc:
+                assert "document changed" in str(exc)
+            else:
+                raise AssertionError("Changed source returned stale cached text")
+        index.assert_not_called()
+        fresh = project_documents.inspect(tmp_path, "notes.txt")
+        cached = project_documents.inspect(tmp_path, "notes.txt")
+
+    assert changed
+    assert fresh["text"] == cached["text"] == "updated document"
+    assert not fresh["cached"] and cached["cached"]
+    assert source.read_text(encoding="utf-8") == "updated document"
+
+
 def test_inspector_handles_overlapping_cache_publications(tmp_path):
     source = tmp_path / "notes.txt"
     source.write_text("shared document text", encoding="utf-8")
