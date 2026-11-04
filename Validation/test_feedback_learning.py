@@ -136,6 +136,28 @@ def test_rating_change_replaces_only_same_generation_review(tmp_path):
     }
 
 
+def test_guidance_uses_latest_reviewed_generation_not_latest_review_time(tmp_path, monkeypatch):
+    timestamps = iter([10.0, 20.0, 30.0])
+    monkeypatch.setattr(feedback_learning.time, "time", lambda: next(timestamps))
+    original = task("revised-song", "Techno synth bass", title="Techno synth bass")
+    feedback_learning.record(tmp_path, original, -1, "Use electronic drums")
+    feedback_learning.record(tmp_path, dict(original, generation=1), 1)
+
+    learned = feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    assert "Similar task the user liked: Techno synth bass" in learned
+    assert "Use electronic drums" not in learned
+
+    # Reviewing an older output again must not supersede the newer generation.
+    feedback_learning.record(tmp_path, original, -1, "Use softer electronic drums")
+    reviews = feedback_learning.for_task(tmp_path, "revised-song")
+    assert {(row["generation"], row["rating"]) for row in reviews} == {
+        (0, -1), (1, 1)
+    }
+    learned = feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    assert "Similar task the user liked: Techno synth bass" in learned
+    assert "Improve:" not in learned
+
+
 def test_review_requires_comment_for_thumbs_down(tmp_path):
     import pytest
 
