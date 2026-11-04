@@ -36,12 +36,11 @@ def _download_target(folder: Path, filename: str) -> Path:
     destination = folder / "Downloads"
     destination.mkdir(parents=True, exist_ok=True)
     target = destination / name
-    if target.exists():
-        target = next(
-            destination / f"{target.stem}-{number}{target.suffix}"
-            for number in range(2, 1000)
-            if not (destination / f"{target.stem}-{number}{target.suffix}").exists()
-        )
+    stem, suffix = target.stem, target.suffix
+    number = 2
+    while target.exists():
+        target = destination / f"{stem}-{number}{suffix}"
+        number += 1
     return target
 
 

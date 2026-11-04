@@ -85,7 +85,7 @@ def _hardware_ready(output: Path) -> None:
     # The 35 GB allowance covers the first model/runtime download. Once those
     # verified files exist, require only scratch space for a short render.
     required_gb = 5 if _verified_runtime() else 35
-    if shutil.disk_usage(BASE.parent).free < required_gb * 1024 ** 3:
+    if shutil.disk_usage(_existing_parent(BASE)).free < required_gb * 1024 ** 3:
         raise RuntimeError(f"Video generation needs {required_gb} GB free on Cale's runtime drive.")
     try:
         output_free = shutil.disk_usage(_existing_parent(output)).free

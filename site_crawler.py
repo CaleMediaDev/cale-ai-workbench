@@ -57,7 +57,13 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 result = await crawler.arun(url=url, config=settings)
                 if not result.success:
                     raise RuntimeError(str(result.error_message or "Crawl failed")[:300])
-                markdown = str(getattr(result.markdown, "fit_markdown", "") or result.markdown or "")[:100_000]
+                markdown_result = result.markdown
+                if isinstance(markdown_result, str):
+                    markdown = markdown_result
+                else:
+                    markdown = (getattr(markdown_result, "fit_markdown", "")
+                                or getattr(markdown_result, "raw_markdown", "") or "")
+                markdown = str(markdown)[:100_000]
                 if not markdown.strip():
                     raise RuntimeError("No readable page content")
                 path = page_path(project, url)

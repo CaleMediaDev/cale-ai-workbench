@@ -54,11 +54,19 @@ def _evaluate(node: ast.AST, expression: str, depth: int = 0) -> Fraction:
 def _display(value: Fraction) -> str:
     """Show terminating decimals exactly; retain a fraction for repeating ones."""
     denominator = value.denominator
+    decimal_places = 0
     for factor in (2, 5):
+        exponent = 0
         while denominator % factor == 0:
             denominator //= factor
+            exponent += 1
+        decimal_places = max(decimal_places, exponent)
     with localcontext() as context:
-        context.prec = 120 if denominator == 1 else 16
+        # Scaling to a power-of-ten denominator adds at most this many digits.
+        context.prec = (
+            len(str(abs(value.numerator))) + decimal_places
+            if denominator == 1 else 16
+        )
         decimal = format(Decimal(value.numerator) / Decimal(value.denominator), "f")
     if denominator == 1:
         return decimal.rstrip("0").rstrip(".") if "." in decimal else decimal

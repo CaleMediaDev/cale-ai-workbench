@@ -193,7 +193,7 @@ def read_webpage(url: str, find: str = "", start_char: int = 0, question: str = 
     """
     final_url, content, content_type, status = fetch(url)
     page = Page(final_url)
-    if "html" in content_type:
+    if "html" in content_type.lower():
         page.feed(content)
         text = page.clean_text()
     else:

@@ -61,6 +61,25 @@ def test_document_check_rejects_wrong_amount_and_prefix_match(tmp_path):
     assert "report text was not found" in str(document_check.check(folder, SPEC)["errors"])
 
 
+@pytest.mark.parametrize("source_amount,report_amount", [
+    ("$1.001", "$3.00"),
+    ("$1.00", "$3.001"),
+])
+def test_document_check_rejects_truncated_decimal_amounts(tmp_path, source_amount, report_amount):
+    folder = _project(tmp_path)
+    (folder / "terms.txt").write_text(
+        f"Base fee: {source_amount}\nExtra fee: $2.00\n", encoding="utf-8")
+    (folder / "summary.md").write_text(
+        f"Total payable: {report_amount}\n", encoding="utf-8")
+    spec = {"source_path": "terms.txt", "report_path": "summary.md",
+            "calculations": [{"operation": "add",
+                              "source_texts": [f"Base fee: {source_amount}",
+                                               "Extra fee: $2.00"],
+                              "report_text": f"Total payable: {report_amount}"}]}
+    with pytest.raises(ValueError, match="Calculation phrases need a dollar amount"):
+        document_check.check(folder, spec)
+
+
 def test_document_check_rejects_source_change_during_extraction(tmp_path):
     folder = _project(tmp_path)
     original_inspect = document_check.project_documents.inspect

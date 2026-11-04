@@ -8,6 +8,19 @@ import public_api_catalog
 import toolbox_mcp
 
 
+def test_search_public_apis_sorts_non_string_names(tmp_path):
+    cache = tmp_path / "apis.json"
+    cache.write_text(json.dumps([
+        {"name": name, "description": "Weather data", "category": "Weather",
+         "url": "https://example.org/docs", "auth": "none", "status": "up"}
+        for name in ["Zulu", None, 42]
+    ]), encoding="utf-8")
+    with patch.object(public_api_catalog, "CACHE", cache):
+        result = public_api_catalog.search_public_apis("weather")
+    assert result["count"] == 3
+    assert [item["name"] for item in result["results"]] == [42, None, "Zulu"]
+
+
 def test_search_public_apis_filters_auth_and_keeps_caveat(tmp_path):
     cache = tmp_path / "apis.json"
     cache.write_text(json.dumps([

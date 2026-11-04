@@ -71,9 +71,13 @@ def source(folder):
         except (OSError, ValueError, KeyError, TypeError):
             pass
     for name in HTML_CANDIDATES:
-        html = (folder / name).resolve()
-        if html.is_relative_to(folder) and html.is_file():
-            return html.as_uri()
+        try:
+            html = (folder / name).resolve()
+            if html.is_relative_to(folder) and html.is_file():
+                return html.as_uri()
+        except (OSError, RuntimeError):
+            # An unreadable path or symlink loop must not block later candidates.
+            continue
     return ""
 
 

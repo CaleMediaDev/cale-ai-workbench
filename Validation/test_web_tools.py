@@ -1,7 +1,7 @@
 """Business contact lookup must return live page evidence, not search snippets."""
 
-import unittest
 import os
+import unittest
 from unittest.mock import patch
 
 import web_tools
@@ -9,8 +9,8 @@ import web_tools
 
 class BusinessContactTests(unittest.TestCase):
     def test_web_reader_uses_bundled_curl_when_windows_omits_it(self):
-        from tempfile import TemporaryDirectory
         from pathlib import Path
+        from tempfile import TemporaryDirectory
 
         with TemporaryDirectory() as folder:
             root = Path(folder)
@@ -62,6 +62,22 @@ class BusinessContactTests(unittest.TestCase):
             question="Pure Michigan Lawn Care public email address",
         )
         self.assertEqual(result["sources"][0]["email_addresses"], ["hello@puremichiganlawncare.com"])
+
+    def test_reader_parses_mixed_case_html_content_type(self):
+        body = (
+            '<html><head><title>Business contact</title></head><body>'
+            '<p>Call our office.</p><a href="tel:+15172581313">Phone</a>'
+            '</body></html>'
+        )
+        with patch.object(
+            web_tools, "fetch",
+            return_value=("https://example.org/contact", body, "Text/HTML; charset=UTF-8", 200),
+        ):
+            page = web_tools.read_webpage("https://example.org/contact")
+        self.assertEqual(page["title"], "Business contact")
+        self.assertEqual(page["contact_links"], ["tel:+15172581313"])
+        self.assertIn("Call our office.", page["text"])
+        self.assertNotIn("<", page["text"])
 
     def test_question_selects_late_live_page_passage(self):
         body = "Opening notes.\n" + "Ordinary material.\n" * 1400

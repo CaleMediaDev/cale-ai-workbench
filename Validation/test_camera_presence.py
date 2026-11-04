@@ -84,6 +84,15 @@ class CameraPresenceTests(unittest.TestCase):
         self.assertEqual(tracker.observe([], 3), [])
         self.assertEqual(tracker.observe([alex], 4), [])
 
+    def test_tracker_requires_consecutive_detections_before_greeting(self):
+        tracker = VisitorTracker(cooldown=10)
+        face = [1.0, 0.0]
+        self.assertEqual(tracker.observe([face], 0), [])
+        self.assertEqual(tracker.observe([], 0.35), [])
+        self.assertEqual(tracker.observe([face], 0.7), [])
+        self.assertEqual(tracker.observe([face], 1.05), [face])
+        self.assertEqual(tracker.observe([face], 1.4), [])
+
     def test_person_staying_in_view_is_not_greeted_again_after_cooldown(self):
         tracker = VisitorTracker(cooldown=10)
         face = [1.0, 0.0]

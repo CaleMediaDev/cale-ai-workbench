@@ -68,7 +68,7 @@ def search_public_apis(query: str, max_results: int = 10) -> dict:
         score += sum(1 for term in terms if term in str(item.get("description", "")).casefold())
         matches.append((score, {key: item.get(key, "") for key in
                                 ("name", "description", "category", "url", "lastChecked")}))
-    matches.sort(key=lambda row: (-row[0], row[1]["name"].casefold()))
+    matches.sort(key=lambda row: (-row[0], str(row[1]["name"]).casefold()))
     selected = [item for _, item in matches[:max_results]]
     return {"results": selected, "count": len(selected), "catalog_url": SOURCE,
             "cache_fresh": fresh,

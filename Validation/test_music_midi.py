@@ -60,6 +60,28 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
     assert json.loads(row["pitch_bend"]) == [1.0, 2.0, 3.0]
 
 
+@pytest.mark.parametrize("bends", ["1,2,3", "0"])
+def test_note_csv_normalization_can_be_repeated(tmp_path, bends):
+    path = tmp_path / "notes.csv"
+    path.write_text(
+        ",".join(music_midi.NOTE_COLUMNS) + "\n"
+        + "0.0,1.0,69,85," + bends + "\n"
+    )
+    music_midi.normalize_note_events(path)
+    normalized = path.read_bytes()
+
+    music_midi.normalize_note_events(path)
+
+    assert path.read_bytes() == normalized
+    with path.open(newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == 1
+    assert json.loads(rows[0]["pitch_bend"]) == [
+        float(value) for value in bends.split(",")
+    ]
+    assert not path.with_suffix(".csv.tmp").exists()
+
+
 def test_unexpected_note_csv_is_preserved_for_diagnosis(tmp_path):
     path = tmp_path / "notes.csv"
     path.write_text("unknown,format\n1,2\n")
