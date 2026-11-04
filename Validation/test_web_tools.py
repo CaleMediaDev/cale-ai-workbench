@@ -186,6 +186,26 @@ class BusinessContactTests(unittest.TestCase):
             {"title": "Official story", "url": "https://example.gov/story"},
         ])
 
+    def test_search_only_unwraps_actual_duckduckgo_hosts(self):
+        lookalike = "https://notduckduckgo.com/story?uddg=https%3A%2F%2Fother.example%2F"
+        html = (
+            f'<a href="{lookalike}">Original story</a>'
+            '<a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.gov%2Fstory">'
+            'Official story</a>'
+            '<a href="https://lite.duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fstory">'
+            'Another story</a>'
+        )
+        with patch.object(
+            web_tools, "fetch",
+            return_value=("https://search.brave.com/search?q=test", html, "text/html", 200),
+        ):
+            result = web_tools.search_web("test")
+        self.assertEqual(result["results"], [
+            {"title": "Original story", "url": lookalike},
+            {"title": "Official story", "url": "https://example.gov/story"},
+            {"title": "Another story", "url": "https://example.org/story"},
+        ])
+
     def test_search_falls_back_after_brave_rate_limit(self):
         html = (
             '<a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.gov%2Fstory">'
