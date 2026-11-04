@@ -158,6 +158,50 @@ def test_guidance_uses_latest_reviewed_generation_not_latest_review_time(tmp_pat
     assert "Improve:" not in learned
 
 
+def test_forgotten_feedback_id_cannot_delete_a_later_review(tmp_path):
+    import sqlite3
+
+    for legacy in (False, True):
+        root = tmp_path / ("legacy" if legacy else "fresh")
+        root.mkdir()
+        if legacy:
+            with sqlite3.connect(root / "feedback-learning.sqlite3") as conn:
+                conn.execute("""CREATE TABLE feedback (
+                    id INTEGER PRIMARY KEY, task_id TEXT NOT NULL,
+                    generation INTEGER NOT NULL, kind TEXT NOT NULL,
+                    rating INTEGER NOT NULL, title TEXT NOT NULL,
+                    brief TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+                    created REAL NOT NULL, UNIQUE(task_id, generation, rating)
+                )""")
+                conn.execute("""INSERT INTO feedback VALUES
+                    (7, 'old-song', 0, 'music', -1, 'Techno synth bass',
+                     'Techno synth bass', 'Use electronic drums', 10.0)""")
+            reviews = feedback_learning.for_task(root, "old-song")
+            assert len(reviews) == 1
+            assert reviews[0]["id"] == 7
+            assert reviews[0]["note"] == "Use electronic drums"
+            old_id = reviews[0]["id"]
+        else:
+            old_id = feedback_learning.record(
+                root, task("old-song", "Techno synth bass"),
+                -1, "Use electronic drums"
+            )
+
+        assert feedback_learning.forget(root, old_id)
+        new_id = feedback_learning.record(
+            root, task("new-song", "Classical piano sonata"),
+            -1, "Use softer piano dynamics"
+        )
+        assert new_id > old_id
+        assert not feedback_learning.forget(root, old_id)
+        reviews = feedback_learning.for_task(root, "new-song")
+        assert len(reviews) == 1
+        assert reviews[0]["id"] == new_id
+        assert "Use softer piano dynamics" in feedback_learning.guidance(
+            root, "music", "Classical piano sonata"
+        )
+
+
 def test_review_requires_comment_for_thumbs_down(tmp_path):
     import pytest
 
