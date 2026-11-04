@@ -15,7 +15,7 @@ FEMALE_REFERENCES = (
     "miley cyrus", "olivia rodrigo", "sabrina carpenter", "chappell roan",
 )
 
-NEGATION = r"(?:without|no|not|avoid|exclude|skip|don'?t want|do not want)"
+NEGATION = r"(?:without|no|not|avoid|exclude|skip|don['\u2019]?t want|do not want)"
 NEGATED_GUITAR = re.compile(
     rf"\b{NEGATION}\s+(?:any\s+)?(?:(?:electric|acoustic|distorted)\s+)?guitars?\b",
     re.I,
