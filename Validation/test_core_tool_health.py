@@ -218,6 +218,61 @@ def test_long_repair_timeout_starts_cooldown_at_completion(tmp_path, monkeypatch
         missing.assert_called_once_with(tmp_path)
 
 
+def test_overlapping_background_checks_launch_only_one_repair(tmp_path, monkeypatch):
+    from threading import Event, Thread
+
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    monkeypatch.setattr(core_tool_health, "_last_repair", None)
+    monkeypatch.setattr(core_tool_health, "_repair_thread", None)
+    probing = Event()
+    release_probe = Event()
+    launches = []
+    results = []
+    errors = []
+    checks = []
+
+    def missing(root):
+        checks.append(root)
+        if len(checks) == 1:
+            probing.set()
+            if not release_probe.wait(5):
+                raise AssertionError("probe was not released")
+        return ["GitHub CLI"]
+
+    class InertRepairThread:
+        def __init__(self, target, **kwargs):
+            pass
+
+        def start(self):
+            launches.append(self)
+
+        def is_alive(self):
+            return True
+
+    def first_call():
+        try:
+            results.append(core_tool_health.start_background(tmp_path))
+        except Exception as exc:
+            errors.append(exc)
+
+    caller = Thread(target=first_call)
+    monkeypatch.setattr(core_tool_health, "missing", missing)
+    monkeypatch.setattr(core_tool_health.threading, "Thread", InertRepairThread)
+    caller.start()
+    try:
+        assert probing.wait(5)
+        assert not core_tool_health.start_background(tmp_path)
+    finally:
+        release_probe.set()
+        caller.join(5)
+
+    assert not caller.is_alive()
+    assert errors == []
+    assert results == [True]
+    assert len(checks) == 1
+    assert len(launches) == 1
+
+
 def test_background_repair_runs_once_and_rechecks(tmp_path, monkeypatch):
     (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
     progress = tmp_path / "LongTasks/install-progress.json"
