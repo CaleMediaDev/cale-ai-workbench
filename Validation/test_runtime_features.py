@@ -213,6 +213,27 @@ def test_live_feature_installer_is_not_restarted(tmp_path, monkeypatch):
     assert not runtime_features.start_background()
 
 
+@pytest.mark.parametrize("matching_script", [True, False])
+def test_installer_detection_uses_process_working_directory(tmp_path, monkeypatch, matching_script):
+    import psutil
+
+    script = runtime_features.Path(runtime_features.__file__).resolve()
+    installer_cwd = script.parent if matching_script else tmp_path
+
+    class InstallerProcess:
+        def cmdline(self):
+            return ["python", script.name, "--install"]
+
+        def cwd(self):
+            return str(installer_cwd)
+
+    monkeypatch.setattr(psutil, "Process", lambda pid: InstallerProcess())
+    # The checker and installer need not share a working directory.
+    monkeypatch.chdir(tmp_path if matching_script else script.parent)
+
+    assert runtime_features._installer_running(12345) is matching_script
+
+
 def test_missing_pip_is_bootstrapped(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_features, "PROGRESS", tmp_path / "install-progress.json")
     calls = []

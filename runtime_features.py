@@ -72,7 +72,9 @@ def _installer_running(pid=None) -> bool:
             try:
                 command = process.cmdline()
                 if ("--install" in command and any(
-                    Path(part).resolve() == script for part in command[1:]
+                    (Path(part) if Path(part).is_absolute()
+                     else Path(process.cwd()) / part).resolve() == script
+                    for part in command[1:]
                 )):
                     return True
             except (OSError, ValueError, psutil.Error):
