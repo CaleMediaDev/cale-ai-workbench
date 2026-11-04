@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _thread: threading.Thread | None = None
-_last_attempt = 0.0
+_last_attempt: float | None = None
 
 
 def executable(root: Path = ROOT) -> Path:
@@ -107,7 +107,7 @@ def start_background(root: Path = ROOT) -> None:
     global _thread, _last_attempt
     if working(root) or (_thread is not None and _thread.is_alive()):
         return
-    if time.monotonic() - _last_attempt < 300:
+    if _last_attempt is not None and time.monotonic() - _last_attempt < 300:
         return
     _last_attempt = time.monotonic()
 

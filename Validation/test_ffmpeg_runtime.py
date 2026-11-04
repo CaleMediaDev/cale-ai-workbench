@@ -35,3 +35,25 @@ def test_missing_ffmpeg_is_installed_and_validated(tmp_path):
         assert ffmpeg_runtime.working(tmp_path) is False
         assert ffmpeg_runtime.ensure(tmp_path) == target
         assert ffmpeg_runtime.working(tmp_path)
+
+
+def test_first_background_repair_is_not_throttled_at_low_uptime(tmp_path):
+    # Preserve the module's initial timestamp while restoring it after this test.
+    with patch.object(ffmpeg_runtime, "_last_attempt", ffmpeg_runtime._last_attempt), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", return_value=False), \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        thread.return_value.is_alive.return_value = False
+
+        ffmpeg_runtime.start_background(tmp_path)
+
+        thread.assert_called_once()
+        thread.return_value.start.assert_called_once_with()
+        assert ffmpeg_runtime._last_attempt == 10.0
+
+        clock.return_value = 20.0
+        ffmpeg_runtime.start_background(tmp_path)
+
+        thread.assert_called_once()
+        thread.return_value.start.assert_called_once_with()
