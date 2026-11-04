@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 import task_eta
 
 
@@ -170,6 +172,28 @@ def test_music_eta_requires_a_valid_historical_start_timestamp(tmp_path):
             "finished": 1000 + elapsed,
         }), encoding="utf-8")
     assert task_eta.music_estimate_seconds(jobs, 180, False) == 60
+
+
+@pytest.mark.parametrize("record", [None, [], "old record", 42, True])
+def test_music_eta_skips_non_object_history(tmp_path, record):
+    for index, elapsed in enumerate((48, 60, 72)):
+        (tmp_path / f"{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 180, "created": 1000,
+            "finished": 1000 + elapsed,
+        }), encoding="utf-8")
+    (tmp_path / "bad.json").write_text(json.dumps(record), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(tmp_path, 180, False) == 60
+
+
+@pytest.mark.parametrize("length", [-180, float("nan"), float("inf"), float("-inf")])
+def test_music_eta_requires_positive_finite_historical_duration(tmp_path, length):
+    for index in range(3):
+        (tmp_path / f"{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": length, "created": 1000, "finished": 1060,
+        }), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(tmp_path, 180, False) is None
 
 
 def test_music_countdown_rejects_nonfinite_estimates_and_timestamps():
