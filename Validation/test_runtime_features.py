@@ -234,6 +234,43 @@ def test_installer_detection_uses_process_working_directory(tmp_path, monkeypatc
     assert runtime_features._installer_running(12345) is matching_script
 
 
+@pytest.mark.parametrize("prefix", [
+    ["other.py"],
+    ["-m", "other_module"],
+    ["-c", "pass"],
+])
+def test_installer_path_in_another_programs_arguments_does_not_block_repair(
+    tmp_path, monkeypatch, prefix,
+):
+    import psutil
+
+    script = runtime_features.Path(runtime_features.__file__).resolve()
+
+    class UnrelatedProcess:
+        def cmdline(self):
+            return ["python", *prefix, str(script), "--install"]
+
+        def cwd(self):
+            return str(tmp_path)
+
+    monkeypatch.setattr(psutil, "Process", lambda pid: UnrelatedProcess())
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({
+        "status": "working", "updated": 900,
+        "attempts": 1, "owner": "runtime_features", "pid": 12345,
+    }), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ROOT", tmp_path)
+    monkeypatch.setattr(runtime_features, "ready", lambda: False)
+    monkeypatch.setattr(runtime_features.time, "time", lambda: 1000)
+    launches = []
+    monkeypatch.setattr(runtime_features.subprocess, "Popen", lambda *args, **kwargs: launches.append(args))
+
+    assert runtime_features.start_background()
+    assert len(launches) == 1
+    assert json.loads(progress.read_text(encoding="utf-8"))["attempts"] == 2
+
+
 def test_missing_pip_is_bootstrapped(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_features, "PROGRESS", tmp_path / "install-progress.json")
     calls = []
