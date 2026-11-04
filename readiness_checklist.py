@@ -84,7 +84,9 @@ def _media_probe(root: Path, action: str, **arguments) -> dict:
             capture_output=True, timeout=45, cwd=root,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        answer = json.loads(result.stdout) if result.stdout.strip() else {}
+        if not result.stdout.strip():
+            return {"ok": False, "detail": "Check failed"}
+        answer = json.loads(result.stdout)
         if not isinstance(answer, dict):
             return {"ok": False, "detail": "Check failed"}
         if result.returncode or answer.get("error"):
