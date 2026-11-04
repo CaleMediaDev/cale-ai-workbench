@@ -81,6 +81,41 @@ def test_separation_returns_only_real_nonempty_stems(tmp_path):
     assert source.read_bytes() == b"music"
 
 
+def test_successful_separation_publishes_only_validated_stems(tmp_path):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        (staging / "song_(Vocals).wav").write_bytes(b"vocals")
+        (staging / "song_(Instrumental).wav").write_bytes(b"instrumental")
+        (staging / "empty.wav").write_bytes(b"")
+        (staging / "separator.log").write_text("completed")
+        scratch = staging / "scratch"
+        scratch.mkdir()
+        (scratch / "partial.wav").write_bytes(b"temporary audio")
+        return SimpleNamespace(returncode=0)
+
+    with patch.object(
+        music_stems.music_backend, "_setup_lock", side_effect=nullcontext
+    ), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext
+    ), patch.object(
+        music_stems, "install", return_value=Path("python.exe")
+    ), patch.object(music_stems.subprocess, "run", side_effect=render):
+        result = music_stems.separate_stems(str(source), str(output))
+
+    expected = {output / "song_(Vocals).wav", output / "song_(Instrumental).wav"}
+    assert {Path(path) for path in result["files"]} == expected
+    assert set(output.iterdir()) == expected
+    assert {path.read_bytes() for path in expected} == {b"vocals", b"instrumental"}
+    assert source.read_bytes() == b"music"
+
+
 def test_output_rechecked_after_waiting_for_setup_lock(tmp_path):
     from contextlib import contextmanager, nullcontext
 
