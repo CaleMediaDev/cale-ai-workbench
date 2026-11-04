@@ -32,6 +32,19 @@ def test_voice_ready_rejects_a_stale_marker_with_wrong_dependencies():
             assert not cale_voice.ready()
 
 
+@pytest.mark.parametrize("error", [
+    OSError("worker pipe failed"),
+    ValueError("I/O operation on closed file"),
+])
+def test_worker_stream_errors_reach_the_caller(error):
+    stream = Mock()
+    stream.readline.side_effect = error
+    with pytest.raises(type(error)) as raised:
+        cale_voice._line_with_timeout(stream, 1)
+    assert raised.value is error
+    stream.readline.assert_called_once_with()
+
+
 def test_idle_release_ignores_newer_speech():
     with patch.object(cale_voice, "_stop_worker") as stop, patch.object(
         cale_voice, "_generation", 12
