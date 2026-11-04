@@ -19,6 +19,7 @@ import os
 import threading
 
 AGENT_ROOT = Path(__file__).resolve().parent / "Toolbox" / "subscription-agents"
+AGENT_TOOLBOX = Path(__file__).resolve().parent / "Toolbox"
 _AGENT_LOCK = threading.RLock()
 SUBSCRIPTION_AGENTS = {
     "claude": {"name": "Claude Code", "version": "2.1.318", "scope": "@anthropic-ai", "package": "claude-code", "member": "package/claude.exe",
@@ -93,24 +94,32 @@ def enable_subscription_agent(provider, enabled):
     return subscription_agent_status(provider)
 
 
-def _subscription_environment():
+def _subscription_environment(provider=None):
     """Use the vendor's own saved session; never silently fall back to an API key."""
     denied = {"XAI_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN",
               "GROK_API_KEY", "GROK_API_BASE_URL", "GROK_BASE_URL", "GROK_MODEL",
               "XAI_BASE_URL", "XAI_API_BASE", "XAI_API_BASE_URL", "OPENAI_API_BASE",
               "CLAUDE_CODE_API_KEY_HELPER_TTL_MS"}
-    return {key: value for key, value in os.environ.items()
+    env = {key: value for key, value in os.environ.items()
             if key.upper() not in denied and not key.upper().startswith("ANTHROPIC_")
             and not key.upper().startswith("CLAUDE_CODE_USE_")}
+    if provider is not None:
+        _subscription_spec(provider)
+        # Vendor CLI owns its credentials in its own isolated profile. We never
+        # open/copy them, and unrelated global API helpers/custom models cannot
+        # silently become this subscription connection's billing backend.
+        env["CLAUDE_CONFIG_DIR"] = str(AGENT_ROOT / "profiles" / "claude")
+        env["GROK_HOME"] = str(AGENT_ROOT / "profiles" / "grok")
+    return env
 
 
-def _agent_process(command, *, cwd, timeout, max_output=1024 * 1024, cancel=None):
+def _agent_process(command, *, cwd, timeout, max_output=1024 * 1024, cancel=None, provider=None):
     """Bound time/output; terminate only this owned process tree on interruption."""
     import subprocess
     import tempfile
     import psutil
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen(command, cwd=str(cwd), env=_subscription_environment(),
+        process = subprocess.Popen(command, cwd=str(cwd), env=_subscription_environment(provider),
             stdin=subprocess.DEVNULL, stdout=output, stderr=errors,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         deadline = time.monotonic() + timeout
@@ -183,7 +192,7 @@ def _install_subscription_agent(provider, on_progress=None):
         if provider == "grok":
             # Vendor npm bootstrap does the same Brotli decompression. Existing
             # Workbench Node is used only as a decoder, not for install scripts.
-            node = Path(__file__).resolve().parent / "Toolbox/node-v26.13.0-win-x64/node.exe"
+            node = AGENT_TOOLBOX / "node-v26.13.0-win-x64/node.exe"
             if not node.is_file(): raise RuntimeError("Workbench Node tools are still installing. Try again when setup finishes.")
             unpacked = folder / "grok.exe"
             code = "const f=require('fs'),z=require('zlib');f.writeFileSync(process.argv[2],z.brotliDecompressSync(f.readFileSync(process.argv[1]),{maxOutputLength:419430400}));"
@@ -208,11 +217,12 @@ def connect_subscription_agent(provider, on_progress=None):
             if on_progress: on_progress("Installing official " + spec["name"] + ".")
             _install_subscription_agent(provider, on_progress)
         if on_progress: on_progress("Complete sign-in in the official browser window.")
+        (AGENT_ROOT / "profiles" / provider).mkdir(parents=True, exist_ok=True)
         command = [str(_subscription_binary(provider))] + (["auth", "login"] if provider == "claude" else ["--no-auto-update", "login"])
-        code, _, _ = _agent_process(command, cwd=AGENT_ROOT, timeout=600)
+        code, _, _ = _agent_process(command, cwd=AGENT_ROOT, timeout=600, provider=provider)
         if code != 0: raise RuntimeError("Official sign-in did not finish. Please try connecting again.")
         if provider == "claude":
-            code, output, _ = _agent_process([str(_subscription_binary(provider)), "auth", "status"], cwd=AGENT_ROOT, timeout=15)
+            code, output, _ = _agent_process([str(_subscription_binary(provider)), "auth", "status"], cwd=AGENT_ROOT, timeout=15, provider=provider)
             try: status = json.loads(output)
             except ValueError: status = {}
             if code != 0 or status.get("authMethod") != "claude.ai":
@@ -236,8 +246,15 @@ def build_subscription_task_command(provider, folder, prompt):
     if provider == "claude":
         # Manual permissions remain active; never bypass permissions or approve
         # shell/filesystem tools merely because a subscription was connected.
-        return [str(executable), *common, "--permission-mode", "default"]
-    return [str(executable), "--no-auto-update", *common, "--no-subagents"]
+        command = [str(executable), *common, "--permission-mode", "default"]
+    else:
+        command = [str(executable), "--no-auto-update", *common, "--model", "grok-4.7", "--no-subagents"]
+    import subprocess
+    # Windows CreateProcess uses UTF-16 units, including quoting and the full
+    # executable path. Reserve headroom below its32767-unit command-line cap.
+    if len(subprocess.list2cmdline(command).encode("utf-16-le")) // 2 > 24000:
+        raise ValueError("The task is too long for the official Windows CLI. Use a shorter task with project file references (24,000 UTF-16 command-line units maximum).")
+    return command
 
 
 def run_subscription_task(provider, folder, prompt, timeout=300):
@@ -256,9 +273,16 @@ def run_subscription_task(provider, folder, prompt, timeout=300):
     if not subscription_agent_status(provider)["enabled"]:
         raise ValueError("Enable use of your subscription before handing off a task.")
     command = build_subscription_task_command(provider, folder, prompt)
+    if provider == "claude":
+        code, output, _ = _agent_process([str(_subscription_binary(provider)), "auth", "status"],
+            cwd=folder, timeout=15, provider=provider)
+        try: auth = json.loads(output)
+        except ValueError: auth = {}
+        if code != 0 or auth.get("authMethod") != "claude.ai":
+            raise ValueError("The official agent is not currently signed into your Claude subscription.")
     started = time.monotonic()
     code, output, _ = _agent_process(command, cwd=folder, timeout=timeout,
-        cancel=lambda: blocked() or not subscription_agent_status(provider)["enabled"])
+        cancel=lambda: blocked() or not subscription_agent_status(provider)["enabled"], provider=provider)
     if code != 0: raise RuntimeError("Official agent could not finish this task; sign-in, plan limits, or permissions may need attention.")
     try: result = json.loads(output)
     except ValueError: raise ValueError("Official agent did not return its documented JSON result.") from None
@@ -267,8 +291,17 @@ def run_subscription_task(provider, folder, prompt, timeout=300):
     # Claude cache read/write input is separate from its uncached input count.
     usage = _subscription_usage(provider, result)
     if usage is not None:
-        usage_history.record_completion({"model": result.get("model", SUBSCRIPTION_AGENTS[provider]["name"]),
-                                         "usage": usage}, provider + "_subscription", time.monotonic() - started)
+        models = result.get("modelUsage") if provider == "claude" else None
+        if isinstance(models, dict) and models:
+            for model, values in models.items():
+                per_model = _subscription_usage(provider, {"modelUsage": {model: values}})
+                # The CLI reports per-model counts, not per-model latency. Do
+                # not fabricate individual speeds from the total agent time.
+                usage_history.record_completion({"model": str(model)[:150], "usage": per_model},
+                                                 provider + "_subscription")
+        else:
+            usage_history.record_completion({"model": result.get("model", SUBSCRIPTION_AGENTS[provider]["name"] + " (model unreported)"),
+                                             "usage": usage}, provider + "_subscription", time.monotonic() - started)
     return {"provider": provider, "status": "agent_error" if result.get("is_error") else "finished",
             "exit_code": code, "output": result, "errors": [], "usage": usage,
             "verification": "agent_report_only"}

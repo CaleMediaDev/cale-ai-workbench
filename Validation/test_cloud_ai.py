@@ -2327,7 +2327,7 @@ class SubscriptionAgentTests(unittest.TestCase):
             token=usage_history.CURRENT_TASK.set('b'*12)
             try:
                 report={'model':'haiku','usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':10,'cache_creation_input_tokens':4}}
-                with patch.object(cloud_providers,'_agent_process',return_value=(0,json.dumps(report),'')):
+                with patch.object(cloud_providers,'_agent_process',side_effect=[(0,json.dumps({'authMethod':'claude.ai'}),''),(0,json.dumps(report),'')]):
                     measured=cloud_providers.run_subscription_task('claude',folder,'task')
                 self.assertEqual(measured['usage'],{'prompt_tokens':16,'completion_tokens':3,'total_tokens':19})
                 with patch.object(cloud_providers,'_agent_process',return_value=(0,json.dumps({'result':'done'}),'')):
@@ -2359,3 +2359,39 @@ class SubscriptionAgentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(InterruptedError):
                 cloud_providers._agent_process([sys.executable,'-c','import time;time.sleep(10)'],cwd=d,timeout=10,cancel=lambda:True)
+
+
+    def test_subscription_profile_isolation_and_current_api_auth_rejection(self):
+        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'),patch.object(cloud,'STATE',Path(d)/'Cloud'),patch.object(cloud.pc_offline,'offline',return_value=False):
+            folder=Path(d)/'project';folder.mkdir()
+            with patch.dict('os.environ',{'CLAUDE_CONFIG_DIR':'unrelated-global-config','GROK_HOME':'unrelated-api-profile','ANTHROPIC_BASE_URL':'https://bad.invalid','XAI_BASE_URL':'https://bad.invalid'}):
+                env=cloud_providers._subscription_environment('claude')
+            self.assertEqual(env['CLAUDE_CONFIG_DIR'],str(cloud_providers.AGENT_ROOT/'profiles/claude'))
+            self.assertEqual(env['GROK_HOME'],str(cloud_providers.AGENT_ROOT/'profiles/grok'))
+            self.assertNotIn('ANTHROPIC_BASE_URL',env);self.assertNotIn('XAI_BASE_URL',env)
+            exe=cloud_providers._subscription_binary('claude');exe.parent.mkdir(parents=True);exe.write_bytes(b'MZfake')
+            cloud_providers._save_agent_preferences('claude',{'login_completed':True,'enabled':True})
+            with patch.object(cloud_providers,'_agent_process',return_value=(0,json.dumps({'authMethod':'api_key_helper'}),'')) as execute:
+                with self.assertRaisesRegex(ValueError,'not currently signed'):cloud_providers.run_subscription_task('claude',folder,'task')
+            self.assertEqual(execute.call_count,1);self.assertEqual(execute.call_args.args[0][-2:],['auth','status'])
+            self.assertEqual(execute.call_args.kwargs['provider'],'claude')
+
+    def test_failed_reconnect_revokes_saved_plan_use_before_login(self):
+        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)):
+            exe=cloud_providers._subscription_binary('grok');exe.parent.mkdir(parents=True);exe.write_bytes(b'MZfake')
+            cloud_providers._save_agent_preferences('grok',{'login_completed':True,'enabled':True})
+            with patch.object(cloud_providers,'_agent_process',return_value=(1,'','')):
+                with self.assertRaises(RuntimeError):cloud_providers.connect_subscription_agent('grok')
+            self.assertFalse(cloud_providers.subscription_agent_status('grok')['enabled'])
+            self.assertFalse(cloud_providers.subscription_agent_status('grok')['connected'])
+
+
+    def test_subscription_windows_command_limit_counts_utf16_and_never_truncates(self):
+        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'):
+            folder=Path(d)/'project';folder.mkdir()
+            for provider in ('claude','grok'):
+                exe=cloud_providers._subscription_binary(provider);exe.parent.mkdir(parents=True,exist_ok=True);exe.write_bytes(b'MZfake')
+                short='a'*20000
+                self.assertIn(short,cloud_providers.build_subscription_task_command(provider,folder,short))
+                for too_long in ('a'*24000,chr(0x1f680)*12000):
+                    with self.assertRaisesRegex(ValueError,'UTF-16'):cloud_providers.build_subscription_task_command(provider,folder,too_long)
