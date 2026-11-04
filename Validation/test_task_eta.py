@@ -84,6 +84,26 @@ def test_music_eta_uses_completed_local_songs_and_explains_overrun(tmp_path):
     assert task_eta.music_countdown({**current, "status": "complete"}, now=2100) == ""
 
 
+def test_music_eta_requires_a_valid_historical_start_timestamp(tmp_path):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    for index, elapsed in enumerate((48, 60, 72)):
+        (jobs / f"{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 180, "finished": elapsed,
+        }), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(jobs, 180, False) is None
+
+    # The same render durations are usable when measured from a valid start.
+    for index, elapsed in enumerate((48, 60, 72)):
+        (jobs / f"{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 180, "created": 1000,
+            "finished": 1000 + elapsed,
+        }), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(jobs, 180, False) == 60
+
+
 def test_music_countdown_rejects_nonfinite_estimates_and_timestamps():
     for invalid in (float("nan"), float("inf"), float("-inf"),
                     "nan", "inf", "-inf"):
