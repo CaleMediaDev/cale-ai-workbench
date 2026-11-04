@@ -521,6 +521,23 @@ def test_multiple_tasks_require_a_clear_followup_target():
     assert chat_assistant.choose_task("start something else", tasks[:1], allow_single=False) is None
 
 
+@pytest.mark.parametrize("blank_title", ["", "   "])
+def test_blank_task_titles_do_not_match_named_followups(blank_title):
+    tasks = [
+        {"id": "unnamed", "title": blank_title},
+        {"id": "named", "title": "Research suppliers"},
+    ]
+    assert chat_assistant.choose_task("Also add a contact page", tasks) is None
+    assert chat_assistant.choose_task(
+        "For Research suppliers, check availability", tasks
+    ) == tasks[1]
+    assert chat_assistant.choose_task("1", tasks) == tasks[0]
+    assert chat_assistant.choose_task("Change it", tasks[:1]) == tasks[0]
+    assert chat_assistant.choose_task(
+        "Change it", tasks[:1], allow_single=False
+    ) is None
+
+
 def test_status_covers_all_active_tasks_or_one_named_task():
     tasks = [
         {"id": "a", "title": "Build bakery site"},

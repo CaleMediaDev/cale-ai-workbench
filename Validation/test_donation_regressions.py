@@ -8,15 +8,30 @@ does not execute submitted tests on a contributor's computer.
 import os
 import tempfile
 import unittest
+from fractions import Fraction
 from pathlib import Path
 from unittest.mock import patch
 
 import project_memory
 import task_context
+from quick_calculator import calculate
 from task_eta import total_time
 
 
 class CheckpointFreshnessRegressionTests(unittest.TestCase):
+    def test_empty_plan_checkbox_does_not_hide_next_step(self):
+        with self.subTest(source="later plan item"):
+            self.assertEqual(
+                task_context._next_step(
+                    "- [ ]   \n- [ ] Verify the current milestone\n",
+                    "Next step: Review progress\n"),
+                "Verify the current milestone")
+        with self.subTest(source="progress fallback"):
+            self.assertEqual(
+                task_context._next_step(
+                    "- [ ]   \n", "Next step: Review progress\n"),
+                "Review progress")
+
     def test_equal_timestamp_priority_survives_plan_cache_refresh(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -44,7 +59,38 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
             self.assertIn(expected, refreshed.splitlines())
 
 
+class CalculatorPrecisionTests(unittest.TestCase):
+    def test_long_terminating_decimal_is_exact(self):
+        expression = "1 / (2^100)^2"
+        result = calculate(expression)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.startswith(expression + " = "))
+        displayed = result.split(" = ", 1)[1]
+        self.assertIn(".", displayed)
+        self.assertNotIn("about", displayed)
+        self.assertEqual(Fraction(displayed), Fraction(1, 2**200))
+
+
 class TaskElapsedTimeRegressionTests(unittest.TestCase):
+    def test_nonfinite_elapsed_timestamps_are_unavailable(self):
+        for timestamp in (float("nan"), float("inf"), float("-inf")):
+            for status in ("working", "paused", "ready_for_review", "accepted", "stopped"):
+                with self.subTest(created=timestamp, status=status):
+                    self.assertEqual(
+                        total_time(timestamp, 160, status, now=1000), "—"
+                    )
+            for status in ("ready_for_review", "accepted", "stopped"):
+                for finished in (None, "invalid", float("nan")):
+                    with self.subTest(updated=timestamp, status=status, finished=finished):
+                        self.assertEqual(
+                            total_time(100, timestamp, status, now=1000, finished=finished),
+                            "—",
+                        )
+                with self.subTest(updated=timestamp, status=status, finished=130):
+                    self.assertEqual(
+                        total_time(100, timestamp, status, now=1000, finished=130), "30s"
+                    )
+
     def test_terminal_time_falls_back_for_invalid_finished_timestamp(self):
         for status in ("ready_for_review", "accepted", "stopped"):
             for finished in (None, 0, "invalid", {"bad": "timestamp"},

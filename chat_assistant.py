@@ -436,7 +436,8 @@ def choose_task(text: str, tasks: list[dict], *, allow_single=True) -> dict | No
     if value.isdigit():
         index = int(value) - 1
         return tasks[index] if 0 <= index < len(tasks) else None
-    matches = [task for task in tasks if task["title"].casefold() in value]
+    matches = [task for task in tasks
+               if task["title"].strip() and task["title"].casefold() in value]
     return matches[0] if len(matches) == 1 else None
 
 

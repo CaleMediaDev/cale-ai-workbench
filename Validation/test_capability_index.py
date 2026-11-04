@@ -1,6 +1,7 @@
 """The local skill and tool database stays searchable and rebuildable."""
 
 import json
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -69,6 +70,29 @@ def test_damaged_index_is_preserved_and_rebuilt():
         assert result["skills"] == 1 and result["tools"] == 1
         assert capability_index.health(root)["ok"]
         assert list(path.parent.glob("capabilities.sqlite3.corrupt-*"))
+
+
+def test_busy_index_is_not_moved_or_rebuilt():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        _, tools = fixture(root)
+        with patch.object(capability_index, "_registered_tools", return_value=tools):
+            capability_index.sync(root)
+        path = capability_index.database_path(root)
+        original = path.read_bytes()
+        error = sqlite3.OperationalError("database is locked")
+        error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        with patch.object(capability_index, "_sync_once", side_effect=error) as refresh:
+            try:
+                capability_index.sync(root)
+            except sqlite3.OperationalError as caught:
+                assert caught is error
+            else:
+                raise AssertionError("Expected the busy database error to propagate")
+            refresh.assert_called_once_with(root)
+        assert path.read_bytes() == original
+        assert not list(path.parent.glob("capabilities.sqlite3.corrupt-*"))
+        assert capability_index.health(root)["ok"]
 
 
 def test_specialist_snapshot_joins_fast_tool_index():
