@@ -331,9 +331,11 @@ def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> li
         raise ValueError("Unknown memory kind.")
     root = Path(folder).resolve(strict=True)
     index(root)
+    # unicode61 does not expand characters such as ß into multiple letters.
+    # Full casefolding would turn an exact source term into a different token.
     words = list(dict.fromkeys(
-        word.casefold() for word in WORD.findall(query)
-        if word.casefold() not in SEARCH_STOPWORDS
+        word.lower() for word in WORD.findall(query)
+        if word.lower() not in SEARCH_STOPWORDS
     ))[:12]
     limit = max(1, min(int(limit), 20))
     def query_rows():
@@ -355,7 +357,7 @@ def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> li
                 # keep useful plain-text matches while never executing it raw.
                 minimum = 1 if len(words) == 1 or re.search(r'["*]', query) else 2
                 return [row for row in loose if len(set(words) & {
-                    word.casefold() for word in WORD.findall(
+                    word.lower() for word in WORD.findall(
                         row["title"] + " " + row["body"] + " " + row["tags"]
                     )
                 }) >= minimum]
