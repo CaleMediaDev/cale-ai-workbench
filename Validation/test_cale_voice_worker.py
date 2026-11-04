@@ -109,6 +109,27 @@ def test_successful_audio_write_atomically_replaces_existing_recording(tmp_path)
     assert list(tmp_path.iterdir()) == [target]
 
 
+def test_empty_generated_waveform_preserves_existing_recording(tmp_path):
+    import sys
+    from types import SimpleNamespace
+
+    import pytest
+
+    target = tmp_path / "voice.wav"
+    target.write_bytes(b"previous recording")
+    model = Mock()
+    model.generate_voice_clone.return_value = ([[]], 24000)
+    writer = Mock()
+
+    with patch.dict(sys.modules, {"soundfile": SimpleNamespace(write=writer)}):
+        with pytest.raises(ValueError, match="empty waveform"):
+            cale_voice_worker.generate(model, object(), "hello", str(target))
+
+    writer.assert_not_called()
+    assert target.read_bytes() == b"previous recording"
+    assert list(tmp_path.iterdir()) == [target]
+
+
 def test_failed_audio_write_preserves_existing_recording(tmp_path):
     import sys
     from pathlib import Path
