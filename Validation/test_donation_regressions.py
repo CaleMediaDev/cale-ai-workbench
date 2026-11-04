@@ -15,7 +15,7 @@ from unittest.mock import patch
 import project_memory
 import task_context
 from quick_calculator import calculate
-from task_eta import total_time
+from task_eta import music_countdown, total_time
 
 
 class CheckpointFreshnessRegressionTests(unittest.TestCase):
@@ -69,6 +69,24 @@ class CalculatorPrecisionTests(unittest.TestCase):
         self.assertIn(".", displayed)
         self.assertNotIn("about", displayed)
         self.assertEqual(Fraction(displayed), Fraction(1, 2**200))
+
+
+class MusicCountdownRegressionTests(unittest.TestCase):
+    def test_nonfinite_estimates_and_start_timestamps_are_unavailable(self):
+        for status in ("queued", "working"):
+            for field in ("estimated_seconds", "requested_at", "created"):
+                for value in (float("nan"), float("inf"), float("-inf")):
+                    with self.subTest(status=status, field=field, value=value):
+                        job = {
+                            "status": status,
+                            "estimated_seconds": 120,
+                            "created": 100,
+                        }
+                        job[field] = value
+                        self.assertEqual(
+                            music_countdown(job, now=130),
+                            "Estimating from recent songs…",
+                        )
 
 
 class TaskElapsedTimeRegressionTests(unittest.TestCase):
