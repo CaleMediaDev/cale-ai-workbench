@@ -237,6 +237,21 @@ class AutoRouteTests(unittest.TestCase):
         messages += [{"role": "tool", "content": '{"output":"ok","exit_code":0,"error":null}'}] * 8
         self.assertEqual(task_size(messages), "quick")
 
+    def test_quoted_loop_warnings_in_successful_output_clear_repair(self):
+        warning = "[Tool loop warning: repeated call]"
+        failures = [{"role": "tool", "content": warning} for _ in range(3)]
+        self.assertTrue(repeated_tool_failures(failures))
+        for content in (
+            "Exit code: 0\nFound source text: " + warning,
+            json.dumps({"success": True, "output": warning}),
+        ):
+            with self.subTest(content=content):
+                messages = failures + [
+                    {"role": "tool", "content": content} for _ in range(3)
+                ]
+                self.assertFalse(repeated_tool_failures(messages))
+                self.assertIs(repair_messages(messages), messages)
+
     def test_native_plain_text_tool_failures_escalate_then_recover(self):
         messages = [{"role": "user", "content": "Build and test a recipe app."},
                     {"role": "assistant", "tool_calls": [{"function": {"name": "run_command"}}]}]
