@@ -224,6 +224,6 @@ def answer_from_files(question: str, paths: list[str]) -> str:
                 if partial_files:
                     answer += "\nSelected passages only; other sections were omitted from " + ", ".join(partial_files) + "."
                 return answer + "\nFiles read: " + names
-        except (KeyError, IndexError, OSError, ValueError):
+        except (KeyError, IndexError, TypeError, OSError, ValueError):
             continue
     raise RuntimeError("I read the file, but the local model couldn't answer yet.")

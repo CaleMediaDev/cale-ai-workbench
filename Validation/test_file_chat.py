@@ -35,6 +35,28 @@ def test_file_answer_uses_read_only_local_excerpt(tmp_path):
     assert payload["reasoning_effort"] == "none"
 
 
+@pytest.mark.parametrize("malformed", [
+    {"choices": None},
+    {"choices": [{"message": None}]},
+])
+def test_null_response_fields_fall_back_to_next_local_model(tmp_path, malformed):
+    report = tmp_path / "report.txt"
+    report.write_text("Revenue increased in June.", encoding="utf-8")
+    valid = {"choices": [{"message": {"content": "Revenue rose in June [1]."}}]}
+    with (
+        patch("cloud_ai.FAST_MODEL", "first-local-model"),
+        patch("cloud_ai.LOCAL_MODEL", "second-local-model"),
+        patch("cloud_ai.post", side_effect=[malformed, valid]) as post,
+        patch("cloud_ai.retry_derestricted", side_effect=lambda payload, result, model: result),
+    ):
+        answer = file_chat.answer_from_files("What changed?", [str(report)])
+    assert "Revenue rose in June [1]." in answer
+    assert "Files read: [1] report.txt" in answer
+    assert [call.args[1]["model"] for call in post.call_args_list] == [
+        "first-local-model", "second-local-model",
+    ]
+
+
 def test_image_question_uses_local_vision_description(tmp_path):
     image = tmp_path / "garden.png"
     image.write_bytes(b"fake image for mocked vision")
