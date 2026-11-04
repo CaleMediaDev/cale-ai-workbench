@@ -36,6 +36,29 @@ class SkillHubTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[0].args[0:2], ("search", "accessibility"))
         self.assertEqual(run.call_args_list[2].args, ("install", identifier, "--yes"))
 
+    def test_search_matches_non_ascii_topic(self):
+        identifier = "skills-sh/example/translation"
+        payload = json.dumps([
+            {
+                "identifier": "skills-sh/example/unrelated",
+                "name": "Unrelated",
+                "description": "Check interface accessibility.",
+            },
+            {
+                "identifier": identifier,
+                "name": "日本語",
+                "description": "Japanese translation assistance.",
+            },
+        ])
+        with patch.object(skill_hub, "_run", return_value=payload):
+            result = skill_hub.search("日本語")
+        self.assertEqual(
+            [match["identifier"] for match in result["matches"]],
+            [identifier],
+        )
+        self.assertEqual(set(skill_hub.SEEN), {identifier})
+        self.assertEqual(skill_hub.INSPECTED, {})
+
     def test_search_skips_non_object_entries(self):
         identifier = "skills-sh/example/workflows/accessibility"
         payload = json.dumps([None, "invalid entry", [], {
