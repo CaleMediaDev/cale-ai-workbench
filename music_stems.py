@@ -28,7 +28,7 @@ def _python() -> Path:
 def install() -> Path:
     """Pin the upstream separator in an isolated runtime, only when needed."""
     marker = ENGINE / ".cale-installed"
-    if marker.is_file() and marker.read_text(encoding="ascii") == VERSION and _python().is_file():
+    if marker.is_file() and marker.read_bytes() == VERSION.encode("ascii") and _python().is_file():
         return _python()
     if shutil.disk_usage(ROOT).free < 6 * 1024**3:
         raise RuntimeError("Separating audio needs at least 6 GB of free disk space.")

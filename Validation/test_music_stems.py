@@ -42,6 +42,28 @@ def test_failed_runtime_rebuild_is_retried(tmp_path):
         assert marker.read_text(encoding="ascii") == music_stems.VERSION
 
 
+def test_corrupted_installation_marker_triggers_rebuild(tmp_path):
+    engine = tmp_path / "audio-separator"
+    engine.mkdir()
+    marker = engine / ".cale-installed"
+    marker.write_bytes(b"\xff")
+    python = engine / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"python")
+
+    with patch.object(music_stems, "ENGINE", engine), patch.object(
+        music_stems.shutil, "disk_usage", return_value=type("Usage", (), {"free": 10 * 1024**3})()
+    ), patch.object(music_stems.music_backend, "_tool", return_value="uv"), patch.object(
+        music_stems.subprocess, "run"
+    ) as run:
+        assert music_stems.install() == python
+
+    assert run.call_count == 2
+    assert run.call_args_list[0].args[0][1] == "venv"
+    assert run.call_args_list[1].args[0][1:3] == ["pip", "install"]
+    assert marker.read_text(encoding="ascii") == music_stems.VERSION
+
+
 def test_separation_requires_existing_audio_and_empty_output(tmp_path):
     source = tmp_path / "song.mp3"
     source.write_bytes(b"music")
