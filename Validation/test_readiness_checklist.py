@@ -302,6 +302,32 @@ def test_optional_checks_recover_from_malformed_cached_sections(tmp_path, sectio
     assert json.loads(cache.read_text(encoding="utf-8")) == result
 
 
+@pytest.mark.parametrize("section", ["local_ai", "voice", "vision", "browser"])
+@pytest.mark.parametrize("value", [None, [], "unexpected", 1])
+def test_snapshot_ignores_malformed_cached_probe_sections(tmp_path, section, value):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    cache = state / "readiness-probes.json"
+    cache.write_text(json.dumps({"version": "", section: value}), encoding="utf-8")
+    original = cache.read_bytes()
+
+    with (patch.object(readiness_checklist, "urlopen", side_effect=lambda *args, **kwargs:
+                       io.BytesIO(b'{"models":[{"name":"cale-fast:latest"}]}')),
+          patch.object(readiness_checklist, "_recent_local_completion", return_value=""),
+          patch.object(readiness_checklist.capability_index, "health",
+                       return_value={"ok": False}),
+          patch.object(readiness_checklist.core_tool_health, "missing",
+                       return_value=["Node.js"]),
+          patch.object(readiness_checklist.ffmpeg_runtime, "working", return_value=False)):
+        malformed = readiness_checklist.snapshot(tmp_path)
+        assert cache.read_bytes() == original
+        cache.write_text(json.dumps({"version": ""}), encoding="utf-8")
+        absent = readiness_checklist.snapshot(tmp_path)
+
+    assert malformed == absent
+    assert len(malformed["rows"]) == malformed["total"]
+
+
 def test_local_ai_probe_requires_a_completed_generated_token():
     with patch.object(readiness_checklist, "urlopen", return_value=io.BytesIO(
             b'{"done":true,"eval_count":0}')):
