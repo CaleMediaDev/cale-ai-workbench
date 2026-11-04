@@ -68,6 +68,18 @@ class ProjectPreviewTests(unittest.TestCase):
         ):
             self.assertEqual(preview.safe_loopback_url(url), "", url)
 
+    def test_symlink_loop_does_not_block_static_html_fallback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary).resolve()
+            (folder / "dist").mkdir()
+            fallback = folder / "dist/index.html"
+            fallback.write_text("hello", encoding="utf-8")
+            try:
+                (folder / "index.html").symlink_to("index.html")
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"Symlinks unavailable: {error}")
+            self.assertEqual(preview.source(folder), fallback.as_uri())
+
     def test_declaration_and_static_html_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)
