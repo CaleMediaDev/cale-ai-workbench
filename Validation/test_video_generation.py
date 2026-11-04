@@ -234,6 +234,35 @@ def test_mp4_export_preserves_destination_created_after_exists_check(tmp_path):
     assert rendered.read_bytes() == b"rendered video" * 200
 
 
+def test_render_cleanup_waits_for_killed_server(tmp_path):
+    job_id = "c" * 32
+    events = []
+
+    def wait_for_exit(timeout=None):
+        events.append(("wait", timeout))
+        if timeout is not None:
+            raise subprocess.TimeoutExpired("ComfyUI", timeout)
+        return 0
+
+    with patch.object(video_generation, "JOBS", tmp_path), patch.object(
+        video_generation, "_write"
+    ), patch.object(video_generation, "_free_port", return_value=8188), patch.object(
+        video_generation.subprocess, "Popen"
+    ) as launch:
+        server = launch.return_value
+        server.poll.return_value = 1
+        server.terminate.side_effect = lambda: events.append(("terminate", None))
+        server.kill.side_effect = lambda: events.append(("kill", None))
+        server.wait.side_effect = wait_for_exit
+
+        with pytest.raises(RuntimeError, match="exited during startup"):
+            video_generation._render_job(job_id, {})
+
+    assert events == [
+        ("terminate", None), ("wait", 20), ("kill", None), ("wait", None)
+    ]
+
+
 def test_runtime_requires_all_verified_weights_before_reuse(tmp_path):
     runtime = tmp_path / "runtime"
     models = runtime / "ComfyUI" / "models"
