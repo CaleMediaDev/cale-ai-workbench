@@ -790,8 +790,11 @@ def retire_slow_model(item):
     if source and source in owned_sources():
         try:
             delete_model(source)
+        except HTTPError as error:
+            if error.code != 404:
+                return False
         except Exception:
-            pass
+            return False
     return True
 
 
