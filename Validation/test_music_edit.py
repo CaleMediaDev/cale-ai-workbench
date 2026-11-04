@@ -95,7 +95,7 @@ def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeyp
         assert "-n" in command
         assert kwargs["timeout"] == 3600
         assert source.read_bytes() == original
-        output.write_bytes(b"")
+        type(output)(command[-1]).write_bytes(b"")
         return music_edit.subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(music_edit.subprocess, "run", empty_success)
@@ -108,6 +108,39 @@ def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeyp
         assert source.read_bytes() == original
 
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize("concurrent_output", [False, True])
+def test_edit_music_timeout_cleans_partial_audio(tmp_path, monkeypatch, concurrent_output):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original input"
+    source.write_bytes(original)
+    staged_paths = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def timeout(command, **kwargs):
+        assert "-n" in command
+        assert kwargs["timeout"] == 3600
+        staged = type(output)(command[-1])
+        assert staged != output
+        staged_paths.append(staged)
+        staged.write_bytes(b"incomplete audio")
+        if concurrent_output:
+            output.write_bytes(b"another process's audio")
+        raise music_edit.subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(music_edit.subprocess, "run", timeout)
+
+    for _ in range(1 if concurrent_output else 2):
+        with pytest.raises(music_edit.subprocess.TimeoutExpired):
+            music_edit.edit_music(str(source), str(output))
+        assert source.read_bytes() == original
+        assert all(not path.parent.exists() for path in staged_paths)
+        if concurrent_output:
+            assert output.read_bytes() == b"another process's audio"
+        else:
+            assert not output.exists()
 
 
 def test_mix_music_refuses_to_replace_source(tmp_path):
