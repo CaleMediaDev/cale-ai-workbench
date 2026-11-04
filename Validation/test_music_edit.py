@@ -95,7 +95,7 @@ def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeyp
         assert "-n" in command
         assert kwargs["timeout"] == 3600
         assert source.read_bytes() == original
-        output.write_bytes(b"")
+        music_edit.Path(command[-1]).write_bytes(b"")
         return music_edit.subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(music_edit.subprocess, "run", empty_success)
@@ -108,6 +108,59 @@ def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeyp
         assert source.read_bytes() == original
 
     assert len(calls) == 2
+
+
+def test_edit_music_discards_partial_output_on_timeout(tmp_path, monkeypatch):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio"
+    source.write_bytes(original)
+    calls = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def timed_out(command, **kwargs):
+        staged = music_edit.Path(command[-1])
+        calls.append(staged)
+        assert staged != output
+        assert staged.suffix == output.suffix
+        assert "-n" in command
+        assert kwargs["timeout"] == 3600
+        staged.write_bytes(b"partial audio")
+        raise music_edit.subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(music_edit.subprocess, "run", timed_out)
+    for _ in range(2):
+        with pytest.raises(music_edit.subprocess.TimeoutExpired):
+            music_edit.edit_music(str(source), str(output))
+        assert not output.exists()
+        assert source.read_bytes() == original
+        assert set(tmp_path.iterdir()) == {source}
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("destination_created", [False, True])
+def test_edit_music_publishes_without_overwriting(tmp_path, monkeypatch, destination_created):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    source.write_bytes(b"original audio")
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def success(command, **kwargs):
+        music_edit.Path(command[-1]).write_bytes(b"completed audio")
+        if destination_created:
+            output.write_bytes(b"concurrent file")
+        return music_edit.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(music_edit.subprocess, "run", success)
+    if destination_created:
+        with pytest.raises(ValueError, match="new output"):
+            music_edit.edit_music(str(source), str(output))
+        assert output.read_bytes() == b"concurrent file"
+    else:
+        music_edit.edit_music(str(source), str(output))
+        assert output.read_bytes() == b"completed audio"
+    assert source.read_bytes() == b"original audio"
+    assert set(tmp_path.iterdir()) == {source, output}
 
 
 def test_mix_music_refuses_to_replace_source(tmp_path):
