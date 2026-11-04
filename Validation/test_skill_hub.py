@@ -100,6 +100,29 @@ class SkillHubTests(unittest.TestCase):
                         all(call.args == ("inspect", identifier) for call in run.call_args_list)
                     )
 
+    def test_install_rejects_expired_search_with_recent_inspection(self):
+        identifier = "skills-sh/example/workflows/accessibility"
+        payload = json.dumps([{
+            "identifier": identifier,
+            "name": "accessibility",
+        }])
+        with patch.object(skill_hub.time, "monotonic", return_value=100) as clock:
+            with patch.object(
+                skill_hub, "_run", side_effect=[payload, "Skill preview"]
+            ) as run:
+                skill_hub.search("accessibility")
+                clock.return_value = 100 + skill_hub.MAX_AGE - 1
+                skill_hub.inspect(identifier)
+                clock.return_value = 100 + skill_hub.MAX_AGE + 1
+                self.assertLess(
+                    clock.return_value - skill_hub.INSPECTED[identifier],
+                    skill_hub.MAX_AGE,
+                )
+                with self.assertRaisesRegex(ValueError, "Search and inspect"):
+                    skill_hub.install(identifier)
+                self.assertEqual(run.call_count, 2)
+                self.assertEqual(run.call_args.args, ("inspect", identifier))
+
     def test_rejects_unsearched_urls_and_blocked_scans(self):
         with self.assertRaises(ValueError):
             skill_hub.inspect("https://example.com/SKILL.md")
