@@ -8,11 +8,12 @@ to a cloud service. Page content is always untrusted tool output.
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import re
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urldefrag, urlparse
 
 import project_memory
 
@@ -20,6 +21,7 @@ _PLAYWRIGHT = None
 _CONTEXTS = {}
 _ACTIVE_LOCAL = {}
 _PAGE_ERRORS = {}
+_PAGE_DOCUMENTS = {}
 MAX_PAGE_ERRORS = 5
 MAX_PAGE_ERROR_LENGTH = 300
 MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
@@ -49,10 +51,72 @@ def _watch_page(page) -> None:
         if frame.parent_frame is None:
             state["messages"].clear()
             state["truncated"] = False
+            document = _PAGE_DOCUMENTS.get(page)
+            if document and urldefrag(frame.url)[0] != urldefrag(document["url"])[0]:
+                _PAGE_DOCUMENTS.pop(page, None)
 
     page.on("pageerror", remember)
     page.on("framenavigated", navigated)
-    page.on("close", lambda closed_page: _PAGE_ERRORS.pop(closed_page, None))
+    def discard_page(closed_page):
+        _PAGE_ERRORS.pop(closed_page, None)
+        _PAGE_DOCUMENTS.pop(closed_page, None)
+    page.on("close", discard_page)
+
+
+def _dom_contract(folder: Path, page) -> dict:
+    """Describe the actual local DOM without reading control values or output text."""
+    observed = _PAGE_DOCUMENTS.get(page)
+    contract = {"path": None, "page_sha256": None, "current_page_sha256": None,
+                "stale": True, "note": "Untrusted DOM observations, not a passing application check."}
+    if observed:
+        contract.update(path=observed["path"], page_sha256=observed["sha256"])
+        try:
+            path = (folder / observed["path"]).resolve()
+            if path.is_relative_to(folder.resolve()) and path.is_file() and path.stat().st_size <= 5_000_000:
+                with path.open("rb") as stream:
+                    body = stream.read(5_000_001)
+                if len(body) <= 5_000_000:
+                    contract["current_page_sha256"] = hashlib.sha256(body).hexdigest()
+        except OSError:
+            pass
+        contract["stale"] = contract["current_page_sha256"] != contract["page_sha256"]
+    inventory = page.evaluate("""() => {
+      const counts = new Map();
+      document.querySelectorAll('[id]').forEach(el => counts.set(el.id, (counts.get(el.id)||0)+1));
+      const nodes = document.querySelectorAll('[id],input,select,textarea,button,output,form,[role="status"],[role="alert"],[aria-live],[contenteditable="true"]');
+      const targets = [];
+      for (const el of nodes) {
+        if(targets.length === 64) break;
+        const tag = el.localName, type = el.type || el.getAttribute('type') || '';
+        const disabled = el.matches(':disabled'), readOnly = !!el.readOnly;
+        const visible = !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden],[aria-hidden="true"]');
+        const constraints = {};
+        for(const key of ['required','min','max','step','minlength','maxlength','pattern','multiple']) {
+          if(el.hasAttribute(key)) constraints[key] = el.getAttribute(key).slice(0,120);
+        }
+        // label.textContent can include nested textarea contents: remove every
+        // control from a detached clone before reading label text.
+        const labelText = label => {
+          const copy = label.cloneNode(true);
+          copy.querySelectorAll('input,select,textarea,output,[contenteditable]').forEach(n => n.remove());
+          return (copy.textContent || '').trim().slice(0,120);
+        };
+        const labels = [...(el.labels || [])].slice(0,3).map(labelText);
+        const form = el.form || el.closest('form');
+        targets.push({id:el.id.slice(0,120),id_count:el.id ? counts.get(el.id) : 0,
+          tag,type:type.slice(0,32),labels,aria_label:(el.getAttribute('aria-label')||'').slice(0,120),
+          form:form ? {id:form.id.slice(0,120),name:(form.getAttribute('name')||'').slice(0,120)} : null,
+          visible,editable:visible && !disabled && !readOnly && ((tag==='input' && !['hidden','button','submit','reset','checkbox','radio','file','image'].includes(type.toLowerCase())) || tag==='textarea' || tag==='select' || el.isContentEditable),
+          readOnly,disabled,constraints});
+      }
+      return {targets,truncated:nodes.length>targets.length};
+    }""")
+    contract.update(inventory)
+    # Keep metadata bounded even with 64 exceptionally long labels/constraints.
+    while len(json.dumps(contract, ensure_ascii=False).encode("utf-8")) > 24000 and contract["targets"]:
+        contract["targets"].pop()
+        contract["truncated"] = True
+    return contract
 
 
 def _response(page, result: dict) -> str:
@@ -116,7 +180,13 @@ def _page(folder: Path, local: bool | None = None):
         if local:
             from webapp_check import project_only_route
 
-            context.route("**/*", project_only_route(folder))
+            def loaded_document(path, body, sha256, request):
+                frame = request.frame
+                if frame.parent_frame is None:
+                    _PAGE_DOCUMENTS[frame.page] = {"path": path.relative_to(folder.resolve()).as_posix(),
+                                                   "sha256": sha256, "url": request.url}
+
+            context.route("**/*", project_only_route(folder, on_document=loaded_document))
         _CONTEXTS[key] = context
         observed_pages = set()
 
@@ -134,6 +204,7 @@ def _page(folder: Path, local: bool | None = None):
         def discard_closed_context(_closed_context):
             for observed_page in observed_pages:
                 _PAGE_ERRORS.pop(observed_page, None)
+                _PAGE_DOCUMENTS.pop(observed_page, None)
             observed_pages.clear()
             if _CONTEXTS.get(key) is context:
                 _CONTEXTS.pop(key, None)
@@ -163,6 +234,7 @@ def close() -> None:
     _CONTEXTS.clear()
     _ACTIVE_LOCAL.clear()
     _PAGE_ERRORS.clear()
+    _PAGE_DOCUMENTS.clear()
     if _PLAYWRIGHT is not None:
         try:
             _PLAYWRIGHT.stop()
@@ -245,7 +317,8 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
     elif action == "scroll":
         page.mouse.wheel(0, max(-5000, min(5000, int(arguments.get("pixels", 600)))))
     elif action == "snapshot":
-        controls = page.evaluate("""() => {
+        local = _ACTIVE_LOCAL.get(str(folder.resolve()), False)
+        controls = page.evaluate("""local => {
           document.querySelectorAll('[data-cale-ref]').forEach(el => el.removeAttribute('data-cale-ref'));
           const nodes = [...document.querySelectorAll('a,button,input,textarea,select,[role="button"],[contenteditable="true"]')];
           let n = 0;
@@ -253,17 +326,28 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
             .slice(0, 100).map(el => {
               const ref = String(++n);
               el.setAttribute('data-cale-ref', ref);
+              let label = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
+              if(local && !label) {
+                label = [...(el.labels || [])].slice(0,3).map(node => {
+                  const copy = node.cloneNode(true);
+                  copy.querySelectorAll('input,select,textarea,output,[contenteditable]').forEach(n => n.remove());
+                  return (copy.textContent || '').trim();
+                }).join(' ');
+              }
+              if(!label && (!local || el.matches('a,button,[role="button"]'))) label = el.innerText || '';
+              if(!label && !local) label = el.value || '';
               return {ref, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
-                label: (el.getAttribute('aria-label') || el.getAttribute('placeholder') ||
-                  el.innerText || el.value || '').trim().slice(0, 120),
+                label: label.trim().slice(0, 120),
                 href: (el.getAttribute('href') || '').slice(0, 180)};
             });
-        }""")
+        }""", local)
         _preview(folder, page)
         result = {"url": page.url, "title": page.title(), "controls": controls,
                   "text": page.locator("body").inner_text(timeout=10000)[:6000]}
         while len(json.dumps(result, ensure_ascii=False)) > 15000 and result["controls"]:
             result["controls"].pop()
+        if local:
+            result["dom_contract"] = _dom_contract(folder, page)
         return _response(page, result)
     elif action == "read":
         return _response(page, {"url": page.url, "title": page.title(),

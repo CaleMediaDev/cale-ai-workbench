@@ -16,6 +16,46 @@ import project_memory
 import task_context
 import webapp_check
 
+
+def test_project_route_optional_observer_receives_exact_served_document(tmp_path):
+    import hashlib
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    source = tmp_path / "index.html"
+    body = b"<title>Observed source</title>"
+    source.write_bytes(body)
+    request = SimpleNamespace(url=source.as_uri(), resource_type="document")
+    route = Mock(request=request)
+    observations = []
+    def observed(path, loaded, digest, actual_request):
+        observations.append((path, loaded, digest, actual_request))
+        source.write_bytes(b"changed after fulfil")
+    webapp_check.project_only_route(tmp_path, on_document=observed)(route)
+    route.fulfill.assert_called_once_with(body=body, content_type="text/html; charset=utf-8")
+    route.continue_.assert_not_called()
+    route.abort.assert_not_called()
+    assert observations == [(source, body, hashlib.sha256(body).hexdigest(), request)]
+    assert source.read_bytes() != body
+
+
+def test_project_route_default_and_resources_preserve_existing_routing(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    source = tmp_path / "index.html"
+    source.write_text("<body>Local</body>", encoding="utf-8")
+    route = Mock(request=SimpleNamespace(url=source.as_uri(), resource_type="document"))
+    webapp_check.project_only_route(tmp_path)(route)
+    route.continue_.assert_called_once_with()
+    route.fulfill.assert_not_called()
+    observer = Mock()
+    for url, kind, allowed in [(source.as_uri(), "script", True), ("data:text/plain,ok", "document", True),
+                               ("https://example.invalid/remote", "script", False),
+                               ((tmp_path.parent / "outside.html").as_uri(), "document", False)]:
+        routed = Mock(request=SimpleNamespace(url=url, resource_type=kind))
+        webapp_check.project_only_route(tmp_path, on_document=observer)(routed)
+        (routed.continue_ if allowed else routed.abort).assert_called_once_with()
+    observer.assert_not_called()
+
 PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head>
 <body><label for="bill">Bill</label><input id="bill" value="100">
 <p id="answer"></p><p id="error" hidden>Bad amount</p>

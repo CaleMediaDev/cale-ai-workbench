@@ -359,8 +359,8 @@ def validate_spec(folder: Path, spec: dict) -> Path:
     return page
 
 
-def project_only_route(folder: Path):
-    """Restrict a local preview/check to project files and inline resources."""
+def project_only_route(folder: Path, *, on_document=None):
+    """Restrict local files; optional observers receive the exact served HTML bytes."""
     root = folder.resolve()
 
     def handle(route):
@@ -368,6 +368,20 @@ def project_only_route(folder: Path):
         if parsed.scheme == "file":
             local = Path(url2pathname(parsed.path)).resolve()
             if local.is_relative_to(root):
+                if on_document is not None and route.request.resource_type == "document":
+                    try:
+                        validated = _project_file(root, local.relative_to(root).as_posix())
+                        with validated.open("rb") as stream:
+                            body = stream.read(5_000_001)
+                        if len(body) > 5_000_000:
+                            raise ValueError("HTML document exceeds 5 MB")
+                        # Serve precisely the bytes observed, rather than re-reading
+                        # a file which may change between observation and loading.
+                        route.fulfill(body=body, content_type="text/html; charset=utf-8")
+                        on_document(validated, body, hashlib.sha256(body).hexdigest(), route.request)
+                    except (OSError, ValueError):
+                        route.abort()
+                    return
                 route.continue_()
                 return
         elif parsed.scheme in {"data", "blob", "about"}:

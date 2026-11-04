@@ -119,6 +119,84 @@ def test_existing_and_future_pages_observe_errors_and_context_close_cleans_state
     assert not native_browser._PAGE_ERRORS
 
 
+def test_local_dom_contract_describes_targets_without_values_and_tracks_loaded_bytes(tmp_path):
+    import hashlib
+    pytest.importorskip("playwright")
+    source = tmp_path / "index.html"
+    original = b'''<title>Contract</title><form id="expenses">
+      <label for="amount">Amount</label><input id="amount" type="number" min="0" max="100" step=".01" required value="private-input-value">
+      <label>Total <input id="total" readonly value="private-total-value"></label>
+      <input id="password" type="password" aria-label="Password" value="private-password-value">
+      <div id="error" hidden></div><output id="result"></output>
+      <div id="duplicate"></div><span id="duplicate"></span>
+      <input id="disabled" disabled><label>Notes <textarea id="notes">private-notes-value</textarea></label>
+      <button id="submit-default">Add</button><div id="editable" contenteditable="true">private-edited-text</div>
+    </form>'''
+    source.write_bytes(original)
+    try:
+        native_browser.execute(tmp_path, "open_project", {"path": "index.html"})
+        result = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        contract = result["dom_contract"]
+        assert contract["path"] == "index.html"
+        assert contract["page_sha256"] == hashlib.sha256(original).hexdigest()
+        assert contract["current_page_sha256"] == contract["page_sha256"] and not contract["stale"]
+        targets = {row["id"]: row for row in contract["targets"] if row["id"]}
+        assert targets["amount"]["labels"] == ["Amount"]
+        assert targets["amount"]["editable"] and targets["amount"]["form"]["id"] == "expenses"
+        assert targets["amount"]["constraints"] == {"required": "", "min": "0", "max": "100", "step": ".01"}
+        assert targets["total"]["labels"] == ["Total"]
+        assert targets["total"]["readOnly"] and not targets["total"]["editable"]
+        assert not targets["error"]["visible"] and targets["result"]["tag"] == "output"
+        assert targets["duplicate"]["id_count"] == 2
+        assert targets["disabled"]["disabled"] and not targets["disabled"]["editable"]
+        assert targets["notes"]["labels"] == ["Notes"]
+        assert targets["password"]["editable"] and not targets["password"]["readOnly"]
+        password_ref = next(row["ref"] for row in result["controls"] if row["label"] == "Password")
+        # Exercise actual fill support without inspecting the stored password.
+        native_browser.execute(tmp_path, "type", {"ref": password_ref, "text": "replacement-private-password"})
+        after_fill = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        assert "replacement-private-password" not in json.dumps(after_fill)
+        assert targets["total"]["type"] == "text" and targets["submit-default"]["type"] == "submit"
+        control_labels = [row["label"] for row in result["controls"]]
+        assert "Notes" in control_labels and "Total" in control_labels
+        assert "private-edited-text" not in control_labels
+        assert all("private-notes-value" not in label for label in control_labels)
+        assert all(secret not in json.dumps(contract) for secret in
+                   ("private-input-value", "private-total-value", "private-password-value", "private-notes-value"))
+        assert "private-password-value" not in json.dumps(result)
+        source.write_bytes(b"<title>Changed</title><button id='new'>New</button>")
+        stale = json.loads(native_browser.execute(tmp_path, "snapshot", {}))["dom_contract"]
+        assert stale["stale"] and stale["page_sha256"] == contract["page_sha256"]
+        assert stale["current_page_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+        assert any(row["id"] == "amount" for row in stale["targets"])
+        native_browser.execute(tmp_path, "open_project", {"path": "index.html"})
+        reloaded = json.loads(native_browser.execute(tmp_path, "snapshot", {}))["dom_contract"]
+        assert not reloaded["stale"] and reloaded["page_sha256"] == stale["current_page_sha256"]
+        page = native_browser._page(tmp_path)
+        page.goto("about:blank")
+        assert page not in native_browser._PAGE_DOCUMENTS
+        context = page.context
+        context.close()
+        assert page not in native_browser._PAGE_DOCUMENTS
+    finally:
+        native_browser.close()
+    assert not native_browser._PAGE_DOCUMENTS
+
+
+def test_local_dom_contract_bounds_targets_and_unicode_output(tmp_path):
+    pytest.importorskip("playwright")
+    (tmp_path / "index.html").write_text("".join(
+        f'<label>{"界" * 120}<input id="target-{number}" min="{"界" * 120}" pattern="{"界" * 120}"></label>'
+        for number in range(100)), encoding="utf-8")
+    try:
+        native_browser.execute(tmp_path, "open_project", {"path": "index.html"})
+        contract = json.loads(native_browser.execute(tmp_path, "snapshot", {}))["dom_contract"]
+        assert 0 < len(contract["targets"]) <= 64 and contract["truncated"]
+        assert len(json.dumps(contract, ensure_ascii=False).encode("utf-8")) <= 24000
+    finally:
+        native_browser.close()
+
+
 def test_rejected_file_url_does_not_start_a_browser(tmp_path):
     with patch.object(native_browser, "_page", side_effect=AssertionError("browser started")):
         with pytest.raises(ValueError, match="full http"):
