@@ -440,14 +440,14 @@ def test_attached_video_reference_starts_direct_song_without_hijacking_video_edi
     ) is None
 
 
-@pytest.mark.parametrize("request", [
+@pytest.mark.parametrize("prompt", [
     "Make a 1-minute 30-second song",
     "Make a 1-minute and 30-second song",
     "Make a one-minute thirty-second song",
     "Make a one-minute and thirty-second song",
 ])
-def test_combined_hyphenated_song_durations_keep_both_components(request):
-    assert chat_assistant.music_request(request)["duration_seconds"] == 90
+def test_combined_hyphenated_song_durations_keep_both_components(prompt):
+    assert chat_assistant.music_request(prompt)["duration_seconds"] == 90
 
 
 def test_spoken_song_durations_keep_the_requested_length():
