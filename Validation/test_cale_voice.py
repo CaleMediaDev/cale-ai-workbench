@@ -88,16 +88,29 @@ def test_stopping_worker_kills_it_if_termination_times_out():
     worker.wait.assert_called_with(timeout=3)
 
 
-def test_music_releases_only_this_installations_voice_worker(tmp_path):
+@pytest.mark.parametrize("child_survives", [False, True])
+def test_music_releases_only_this_installations_voice_worker(tmp_path, child_survives):
     own = Mock(pid=100, info={"cmdline": ["python.exe", str(tmp_path / "cale_voice_worker.py")]})
     other = Mock(pid=101, info={"cmdline": ["python.exe", str(tmp_path / "other.py")]})
-    with patch.object(cale_voice, "ROOT", tmp_path), patch(
-        "psutil.process_iter", return_value=[own, other]
-    ), patch("os.getpid", return_value=500):
+    child = Mock()
+    own.children.return_value = [child]
+    alive = [child] if child_survives else []
+    with (patch.object(cale_voice, "ROOT", tmp_path),
+          patch("psutil.process_iter", return_value=[own, other]),
+          patch("os.getpid", return_value=500),
+          patch("psutil.wait_procs", return_value=([], alive)) as wait_procs):
         cale_voice.release_for_gpu_task()
     own.terminate.assert_called_once()
     own.wait.assert_called_once_with(timeout=5)
+    own.children.assert_called_once_with(recursive=True)
+    child.terminate.assert_called_once_with()
+    wait_procs.assert_called_once_with([child], timeout=3)
+    if child_survives:
+        child.kill.assert_called_once_with()
+    else:
+        child.kill.assert_not_called()
     other.terminate.assert_not_called()
+    other.children.assert_not_called()
 
 
 @pytest.mark.parametrize("lines", [

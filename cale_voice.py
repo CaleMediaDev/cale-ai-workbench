@@ -175,11 +175,25 @@ def release_for_gpu_task() -> None:
                 str(Path(part).resolve()).casefold() == script for part in command
             ):
                 continue
-            process.terminate()
+            descendants = process.children(recursive=True)
+            for child in reversed(descendants):
+                try:
+                    child.terminate()
+                except psutil.Error:
+                    pass
             try:
-                process.wait(timeout=5)
-            except psutil.TimeoutExpired:
-                process.kill()
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except psutil.TimeoutExpired:
+                    process.kill()
+            finally:
+                _, alive = psutil.wait_procs(descendants, timeout=3)
+                for child in alive:
+                    try:
+                        child.kill()
+                    except psutil.Error:
+                        pass
         except (OSError, psutil.Error, ValueError):
             continue
 
