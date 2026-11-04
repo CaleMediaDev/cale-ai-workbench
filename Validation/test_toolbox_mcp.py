@@ -13,6 +13,40 @@ import toolbox_mcp
 
 
 @pytest.mark.parametrize("already_exited", [False, True])
+def test_media_communication_error_stops_and_reaps_worker(tmp_path, already_exited):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    cleanup = []
+    failure = OSError("Worker pipe failed")
+
+    class FakeProcess:
+        returncode = 1 if already_exited else None
+
+        async def communicate(self, data):
+            raise failure
+
+        def kill(self):
+            cleanup.append("kill")
+
+        async def wait(self):
+            cleanup.append("wait")
+            self.returncode = -1
+            return self.returncode
+
+    async def fake_spawn(*args, **kwargs):
+        return FakeProcess()
+
+    with (patch.object(toolbox_mcp, "ROOT", tmp_path),
+          patch.object(toolbox_mcp.asyncio, "create_subprocess_exec", fake_spawn)):
+        with pytest.raises(OSError) as caught:
+            asyncio.run(toolbox_mcp.media_run("generate_image"))
+
+    assert caught.value is failure
+    assert cleanup == (["wait"] if already_exited else ["kill", "wait"])
+
+
+@pytest.mark.parametrize("already_exited", [False, True])
 def test_cancelled_media_call_stops_and_reaps_worker(tmp_path, already_exited):
     python = tmp_path / "Media/python/Scripts/python.exe"
     python.parent.mkdir(parents=True)
