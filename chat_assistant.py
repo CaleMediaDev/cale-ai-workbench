@@ -794,8 +794,11 @@ def web_sources(question: str, preferred_business: str = "") -> tuple[list[dict]
         if time.monotonic() >= read_deadline:
             break
         url = lead.get("url", "")
-        parsed = urlsplit(url)
-        host = (parsed.hostname or "").lower()
+        try:
+            parsed = urlsplit(url)
+            host = (parsed.hostname or "").lower()
+        except ValueError:
+            continue
         home = parsed.path in ("", "/")
         relevant_home = preferred_business and name_matching_domain(preferred_business, url)
         if not host or (not supplied_urls and (host in seen_hosts or (home and not relevant_home))):

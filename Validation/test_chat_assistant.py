@@ -867,6 +867,25 @@ def test_web_sources_retry_host_until_a_readable_page_is_found(first_read):
     ]
 
 
+def test_web_sources_skip_malformed_url_and_read_next_result():
+    leads = [
+        {"title": "Malformed host", "url": "https://[::1/broken"},
+        {"title": "Readable", "url": "https://example.org/current"},
+    ]
+    page = {
+        "title": "Readable", "source_url": leads[1]["url"],
+        "retrieved_at": "2026-11-01T00:00:00Z", "text": "A" * 150,
+    }
+    with (
+        patch("web_tools.search_web", return_value={"results": leads}),
+        patch("web_tools.read_webpage", return_value=page) as read,
+    ):
+        sources, returned_leads = chat_assistant.web_sources("current information")
+    assert [source["url"] for source in sources] == [page["source_url"]]
+    assert returned_leads == leads
+    read.assert_called_once_with(leads[1]["url"], question="current information")
+
+
 def test_web_sources_stop_after_bounded_failed_page_reads():
     leads = [{"title": f"Page {index}", "url": f"https://site{index}.example/page"}
              for index in range(8)]
