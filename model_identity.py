@@ -21,7 +21,7 @@ def configured_main_alias(root: Path) -> str:
     """Read `model.default` without importing the whole agent configuration."""
     try:
         lines = (
-            (Path(root) / "data/config.yaml").read_text(encoding="utf-8").splitlines()
+            (Path(root) / "data/config.yaml").read_text(encoding="utf-8-sig").splitlines()
         )
     except (OSError, UnicodeError):
         return DEFAULT_MAIN
