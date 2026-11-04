@@ -198,6 +198,34 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["model"], "cale-fast")
         self.assertLessEqual(calls[0][2]["timeout"], 12)
 
+    def test_status_rephrasing_falls_back_for_malformed_model_responses(self):
+        fake = ModuleType("cloud_ai")
+        fake.FAST_MODEL = "cale-fast"
+        fake.post = Mock()
+        responses = (
+            None,
+            {"choices": None},
+            {"choices": [None]},
+            {"choices": [{"message": None}]},
+            {"choices": [{"message": []}]},
+        )
+        with (
+            patch.dict(sys.modules, {"cloud_ai": fake}),
+            patch.object(voice_assistant, "_heavy_gpu_active", return_value=False),
+            patch.object(voice_assistant, "_fast_model_loaded", return_value=True),
+        ):
+            for response in responses:
+                with self.subTest(response=response):
+                    fake.post.return_value = response
+                    self.assertEqual(
+                        voice_assistant.rephrase_status(
+                            "Recipe app. Checking files.",
+                            required=("Recipe app", "Checking files"),
+                        ),
+                        "Recipe app: Checking files.",
+                    )
+        self.assertEqual(fake.post.call_count, len(responses))
+
     def test_status_rephrasing_rejects_missing_fact(self):
         fake = ModuleType("cloud_ai")
         fake.FAST_MODEL = "cale-fast"
