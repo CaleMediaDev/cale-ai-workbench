@@ -124,6 +124,34 @@ class VoiceTests(unittest.TestCase):
             with patch.object(voice_assistant, "_stop_media_process"):
                 voice_assistant._stop_mic_worker()
 
+    def test_microphone_worker_recovers_from_non_object_json(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Media/python/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            for response in ('null', '[]', '"unexpected"', '42'):
+                with self.subTest(response=response):
+                    broken, replacement = Mock(), Mock()
+                    broken.poll.return_value = None
+                    replacement.poll.return_value = None
+                    with (
+                        patch.object(voice_assistant, "ROOT", root),
+                        patch.object(voice_assistant, "_mic_worker", None),
+                        patch.object(voice_assistant.subprocess, "Popen",
+                                     side_effect=[broken, replacement]) as launch,
+                        patch.object(voice_assistant, "_stop_media_process") as stop,
+                        patch.object(cale_voice, "_line_with_timeout",
+                                     side_effect=[response, '{"input_device":"Mic"}']),
+                    ):
+                        self.assertIsNone(voice_assistant._persistent_mic_call(
+                            "microphone_status", {}))
+                        stop.assert_called_once_with(broken)
+                        self.assertIsNone(voice_assistant._mic_worker)
+                        self.assertEqual(voice_assistant._persistent_mic_call(
+                            "microphone_status", {}), {"input_device": "Mic"})
+                        self.assertEqual(launch.call_count, 2)
+
     def test_status_rephrasing_uses_fast_local_model_and_keeps_facts(self):
         fake = ModuleType("cloud_ai")
         fake.FAST_MODEL = "cale-fast"
