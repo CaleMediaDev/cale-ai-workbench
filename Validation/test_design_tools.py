@@ -202,6 +202,40 @@ def test_blocked_kit_parent_does_not_copy_earlier_files(tmp_path, monkeypatch):
     assert list(destination.iterdir()) == [blocker]
 
 
+def test_dangling_kit_destination_symlink_is_rejected_before_copy(tmp_path, monkeypatch):
+    import design_tools
+
+    kit = tmp_path / "kit"
+    (kit / "src").mkdir(parents=True)
+    (kit / "src/a.astro").write_text("early component", encoding="utf-8")
+    (kit / "src/z.astro").write_text("later component", encoding="utf-8")
+    (kit / "LICENSE").write_text("fixture license", encoding="utf-8")
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", kit)
+
+    project = tmp_path / "project"
+    destination = project / "src/vendor/ai-ui"
+    destination.mkdir(parents=True)
+    (project / "package.json").write_text(
+        json.dumps({"dependencies": {"astro": "^5"}}), encoding="utf-8"
+    )
+    outside = tmp_path / "outside.astro"
+    link = destination / "z.astro"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("Creating symlinks is not supported in this environment")
+
+    with pytest.raises(FileExistsError, match="no files were changed"):
+        add_astro_ai_ui(str(project))
+
+    assert link.is_symlink()
+    assert link.readlink() == outside
+    assert not outside.exists()
+    assert not (destination / "a.astro").exists()
+    assert not (destination / "LICENSE").exists()
+    assert list(destination.iterdir()) == [link]
+
+
 def test_3d_scene_rejects_unbounded_or_invalid_geometry():
     import media_worker
 
