@@ -108,6 +108,44 @@ def test_inspector_paginates_and_invalidates_changed_source(tmp_path):
     assert fresh["text"] == "updated" and not fresh["cached"]
 
 
+def test_inspector_rejects_growth_beyond_size_limit_on_cache_hit(tmp_path):
+    source = tmp_path / "notes.txt"
+    expanded = b"expanded document"
+    source.write_bytes(expanded)
+    real_digest = project_documents._digest
+
+    with patch.object(project_memory, "index_file"):
+        first = project_documents.inspect(tmp_path, "notes.txt")
+    assert first["text"] == expanded.decode("utf-8")
+    assert not first["cached"]
+    source.write_bytes(b"small")
+    changed = False
+
+    def grow_after_size_check(path):
+        nonlocal changed
+        if not changed:
+            changed = True
+            source.write_bytes(expanded)
+        return real_digest(path)
+
+    with patch.object(project_documents, "MAX_SOURCE_BYTES", 5), patch.object(
+        project_documents, "_digest", side_effect=grow_after_size_check,
+    ), patch.object(project_documents, "_extract_snapshot") as extract, patch.object(
+        project_memory, "index_file",
+    ) as index:
+        try:
+            project_documents.inspect(tmp_path, "notes.txt")
+        except ValueError as exc:
+            assert "local reader limit" in str(exc)
+        else:
+            raise AssertionError("Oversized source was accepted through a cache hit")
+        extract.assert_not_called()
+        index.assert_not_called()
+
+    assert changed
+    assert source.read_bytes() == expanded
+
+
 def test_inspector_rejects_source_changes_during_cache_hits(tmp_path):
     source = tmp_path / "notes.txt"
     source.write_text("original document", encoding="utf-8")
