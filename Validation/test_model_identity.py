@@ -122,6 +122,26 @@ class ModelIdentityTests(unittest.TestCase):
                         configured_permissive_alias(root), "qwen3-coder-permissive"
                     )
 
+    def test_tabs_before_mapping_colons_preserve_legacy_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            for header, key in (
+                ("model\t:", "default"),
+                ("model:", "default\t"),
+                ("model \t : # local models", "default \t "),
+            ):
+                with self.subTest(header=header, key=key):
+                    (root / "data/config.yaml").write_text(
+                        f"{header}\n  options:\n    default: cale-local\n"
+                        f"  {key}: qwen3-coder-local\n",
+                        encoding="utf-8",
+                    )
+                    self.assertEqual(configured_main_alias(root), "qwen3-coder-local")
+                    self.assertEqual(
+                        configured_permissive_alias(root), "qwen3-coder-permissive"
+                    )
+
     def test_quoted_model_key_preserves_legacy_aliases(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
