@@ -184,7 +184,9 @@ def validated_recommendations(document):
         origin = item.get("origin", "")
         previous = CATALOG.get(profile)
         if not (
-            re.fullmatch(r"cale-[a-z0-9-]{3,40}", alias)
+            isinstance(alias, str)
+            and isinstance(source, str)
+            and re.fullmatch(r"cale-[a-z0-9-]{3,40}", alias)
             and re.fullmatch(
                 r"[a-z0-9][a-z0-9._-]{1,50}:[a-z0-9][a-z0-9._-]{1,50}", source
             )
