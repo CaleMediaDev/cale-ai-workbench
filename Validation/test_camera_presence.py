@@ -84,6 +84,20 @@ class CameraPresenceTests(unittest.TestCase):
         self.assertEqual(tracker.observe([], 3), [])
         self.assertEqual(tracker.observe([alex], 4), [])
 
+    def test_ambiguous_detection_does_not_steal_an_exact_match(self):
+        tracker = VisitorTracker(cooldown=30)
+        alex = [1.0, 0.0]
+        jamie = [0.6, 0.8]
+        ambiguous_alex = [0.8, 0.6]
+        self.assertEqual(tracker.observe([alex, jamie], 0), [])
+        self.assertEqual(tracker.observe([alex, jamie], 0.5), [alex, jamie])
+
+        # This detection resembles Jamie more than Alex, but Jamie also has
+        # an exact detection. Reserve that exact match before matching Alex.
+        self.assertEqual(tracker.observe([ambiguous_alex, jamie], 1), [])
+        self.assertEqual(len(tracker.tracks), 2)
+        self.assertEqual(tracker.observe([ambiguous_alex, jamie], 1.5), [])
+
     def test_tracker_requires_consecutive_detections_before_greeting(self):
         tracker = VisitorTracker(cooldown=10)
         face = [1.0, 0.0]

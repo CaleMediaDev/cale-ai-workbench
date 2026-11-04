@@ -83,17 +83,26 @@ class VisitorTracker:
         self.tracks = [track for track in self.tracks
                        if now - track["last_seen"] <= max(self.cooldown, 30)]
         greetings = []
+        features = features[:8]
         matched = set()
-        for feature in features[:8]:
-            candidates = [
-                (sum(a * b for a, b in zip(feature, track["feature"])), index)
-                for index, track in enumerate(self.tracks)
-                if index not in matched and len(feature) == len(track["feature"])
-            ]
-            score, index = max(candidates, default=(-1, -1))
-            if score >= self.similarity:
-                track = self.tracks[index]
-                matched.add(index)
+        assignments = {}
+        # Reserve the strongest matches before an ambiguous detection can
+        # consume another visitor's track merely by appearing first.
+        candidates = sorted(
+            (sum(a * b for a, b in zip(feature, track["feature"])),
+             feature_index, track_index)
+            for feature_index, feature in enumerate(features)
+            for track_index, track in enumerate(self.tracks)
+            if len(feature) == len(track["feature"])
+        )
+        for score, feature_index, track_index in reversed(candidates):
+            if (score >= self.similarity and feature_index not in assignments
+                    and track_index not in matched):
+                assignments[feature_index] = track_index
+                matched.add(track_index)
+        for feature_index, feature in enumerate(features):
+            if feature_index in assignments:
+                track = self.tracks[assignments[feature_index]]
                 if track["misses"] >= 5:
                     # A real departure starts a new visit. Decide eligibility
                     # now, so waiting in the room cannot outlast a cooldown.
