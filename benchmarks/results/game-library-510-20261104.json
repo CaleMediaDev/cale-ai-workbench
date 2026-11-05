@@ -14,7 +14,7 @@
     "yuka": {"version": "0.7.8", "commit": "e6250dc7f5899fa9a752d817cfa4b0d37e7fd983"},
     "license": "MIT notices retained", "actual_offline_engine_smoke": true,
     "phaser_canvas": "320x180 rendered local canvas, zero JS errors/external requests",
-    "yuka": "Actual seek and patrol simulation; movement observed",
+    "yuka_simulation": "Actual seek and patrol simulation; movement observed",
     "global_native_tool_schema_growth": false},
   "checks": {"combined_camera_home_game_toolbox_preview": "391 passed,6 skipped,6 subtests in89.71s",
     "native_after_public509_merge": "417 passed in475.14s before final scope/junction corrections",
