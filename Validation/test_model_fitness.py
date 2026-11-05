@@ -57,6 +57,36 @@ def test_avatar_headroom_requires_matching_live_process_and_preserves_physical_g
     assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
 
 
+def test_avatar_headroom_ignores_overflowing_timestamp_and_recovers(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import psutil
+
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    record = {"pid": 123, "started": 100.0, "reserved_bytes": 2 * 1024 ** 3,
+              "phase": "active"}
+    process = SimpleNamespace(
+        is_running=lambda: True,
+        create_time=lambda: 100.0,
+        cmdline=lambda: ["python.exe", str(tmp_path / "camera_presence.py"), "--avatar"],
+    )
+    monkeypatch.setattr(psutil, "Process", lambda _pid: process)
+    (state / "avatar-gpu-active-123.json").write_text(
+        json.dumps(record), encoding="utf-8"
+    )
+    current = state / "avatar-gpu-current.json"
+    current.write_text(
+        json.dumps({**record, "started": 10 ** 400}), encoding="utf-8"
+    )
+    # This is valid JSON below the marker size limit, but float() overflows.
+    assert current.stat().st_size < 4096
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 2
+    current.write_text(
+        json.dumps({**record, "reserved_bytes": 3 * 1024 ** 3}), encoding="utf-8"
+    )
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 3
+
+
 def test_27b_hardware_rejection_happens_before_download():
     import pytest
 

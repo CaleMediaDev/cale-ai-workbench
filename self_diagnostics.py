@@ -507,7 +507,7 @@ def _read_live_progress(context):
         if value.get("complete") is True and value.get("unconfigured") is not True:
             value["complete"] = False  # Session-finish alone is not the final process lifecycle.
         return value
-    except (OSError, ValueError, TypeError, sqlite3.Error):
+    except (OSError, ValueError, TypeError, RecursionError, sqlite3.Error):
         return {"complete": False}
 
 

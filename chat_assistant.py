@@ -312,12 +312,12 @@ def route(text: str, active_tasks: list[dict]) -> str:
         return "image"
     if re.search(r"\b(?:what(?:'s| is) the status|status (?:of|for)|how(?:'s| is) (?:it|the task) going|what are you working on)\b", first_line):
         return "status"
-    if active_tasks and re.match(r"^(?:also|actually|change it|add to (?:it|that)|tell (?:it|the ai) to|instead)\b", value):
-        return "note"
     command = re.sub(
         r"^(?:(?:please|can you|could you|i want you to|i need you to|i want to|i need to|help me(?: to)?)\s+)+",
         "", value,
     )
+    if active_tasks and re.match(r"^(?:also|actually|change it|add to (?:it|that)|tell (?:it|the ai) to|instead)\b", command):
+        return "note"
     if music_edit_request(command):
         return "task"
     if active_tasks and (

@@ -228,8 +228,9 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
         sample = root / "assets/cale-wake-ack.wav"
         recognition = (_media_probe(root, "transcribe_audio", path=str(sample), fast=True)
                        if sample.is_file() else {"ok": False, "detail": "Speech sample is missing"})
-        recognition_ok = bool(recognition["ok"] and
-                              str(recognition.get("data", {}).get("text", "")).strip())
+        transcription = recognition.get("data", {}).get("text", "")
+        recognition_ok = bool(recognition["ok"] and isinstance(transcription, str)
+                              and transcription.strip())
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "voice-check.wav"
             speech = _media_probe(root, "speak", text="Cale is ready.",

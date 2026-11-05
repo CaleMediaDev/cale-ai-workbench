@@ -60,6 +60,21 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class CalculatorPrecisionTests(unittest.TestCase):
+    def test_helper_decimal_literals_preserve_exact_source_values(self):
+        from quick_calculator import normalize_helper, run_helper
+
+        definition = normalize_helper(
+            "exact_decimal", {"x": "integer"}, "9007199254740993.0 - x"
+        )
+        self.assertEqual(run_helper(definition, {"x": 9007199254740992}), 1)
+
+        # A tiny literal must not cause unbounded denominator construction.
+        definition = normalize_helper(
+            "bounded_decimal", {"x": "integer"}, "1e-999999999 + x"
+        )
+        with self.assertRaises(ValueError):
+            run_helper(definition, {"x": 0})
+
     def test_unsupported_tuple_is_rejected_before_sibling_evaluation(self):
         for expression in (
             "1 / 0 + ()",

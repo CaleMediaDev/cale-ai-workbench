@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import tempfile
+import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -98,7 +99,12 @@ def test_self_referential_skill_symlink_does_not_block_index():
         skill, tools = fixture(root)
         invalid = root / "vendor/agent-skills/cyclic/SKILL.md"
         invalid.parent.mkdir(parents=True)
-        invalid.symlink_to("SKILL.md")
+        try:
+            invalid.symlink_to("SKILL.md")
+        except OSError as error:
+            if getattr(error, "winerror", None) != 1314:
+                raise
+            pytest.skip("Windows account cannot create symbolic links")
         with patch.object(capability_index, "_registered_tools", return_value=tools):
             result = capability_index.sync(root)
             assert result["skills"] == 1 and result["tools"] == 1
@@ -108,6 +114,29 @@ def test_self_referential_skill_symlink_does_not_block_index():
             assert capability_index.sync(root)["updated"] == 0
         assert invalid.is_symlink()
         assert invalid.readlink() == Path("SKILL.md")
+
+
+def test_skill_link_is_skipped_before_resolving_its_target(monkeypatch, tmp_path):
+    skill, tools = fixture(tmp_path)
+    invalid = tmp_path / "vendor/agent-skills/cyclic/SKILL.md"
+    invalid.parent.mkdir(parents=True)
+    invalid.write_text("unreviewed link target", encoding="utf-8")
+    is_link, resolve = Path.is_symlink, Path.resolve
+
+    def classified_link(path):
+        return path == invalid or is_link(path)
+
+    def guarded_resolve(path, *args, **kwargs):
+        assert path != invalid, "A known symbolic link must not be resolved"
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_symlink", classified_link)
+    monkeypatch.setattr(Path, "resolve", guarded_resolve)
+    with patch.object(capability_index, "_registered_tools", return_value=tools):
+        result = capability_index.sync(tmp_path)
+        assert result["skills"] == 1 and result["tools"] == 1
+        assert capability_index.search(tmp_path, "accessible", kind="skill")
+    assert invalid.read_text(encoding="utf-8") == "unreviewed link target"
 
 
 def test_directory_named_skill_md_does_not_block_index():

@@ -177,6 +177,38 @@ def test_background_repair_only_throttles_failures(tmp_path, repair_fails):
         assert thread.return_value.start.call_count == expected_attempts
 
 
+def test_slow_failed_repair_gets_full_cooldown_after_completion(tmp_path):
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+            patch.object(ffmpeg_runtime, "_repairing_roots", set()), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", return_value=False), \
+            patch.object(ffmpeg_runtime, "ensure") as ensure, \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        def slow_failure(root):
+            clock.return_value += 300.0
+            raise RuntimeError("repair failed after five minutes")
+
+        ensure.side_effect = slow_failure
+        thread.return_value.start.side_effect = (
+            lambda: thread.call_args.kwargs["target"]()
+        )
+
+        ffmpeg_runtime.start_background(tmp_path)
+        ensure.assert_called_once_with(tmp_path.resolve())
+        assert ffmpeg_runtime._last_attempts[tmp_path.resolve()] == 310.0
+
+        for now in (311.0, 609.0):
+            clock.return_value = now
+            ffmpeg_runtime.start_background(tmp_path)
+            assert ensure.call_count == 1
+
+        clock.return_value = 610.0
+        ffmpeg_runtime.start_background(tmp_path)
+        assert ensure.call_count == 2
+        assert not ffmpeg_runtime._repairing_roots
+
+
 def test_observed_external_recovery_clears_failed_repair_cooldown(tmp_path):
     with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
             patch.object(ffmpeg_runtime, "_repairing_roots", set()), \

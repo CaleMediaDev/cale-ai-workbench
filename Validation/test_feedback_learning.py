@@ -251,6 +251,59 @@ def test_existing_opposite_ratings_use_only_latest_review(tmp_path, monkeypatch)
         assert "Improve:" not in learned
 
 
+def test_generation_history_backfill_runs_once_across_connections(tmp_path, monkeypatch):
+    import sqlite3
+
+    reviewed = task("legacy", "Techno synth bass", title="Techno synth bass")
+    feedback_learning.record(tmp_path, dict(reviewed, generation=2), 1)
+    database = tmp_path / "feedback-learning.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TABLE feedback_generations")
+    original_connect = sqlite3.connect
+    statements = []
+
+    def traced(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", traced)
+    for _ in range(2):
+        with feedback_learning._connect(tmp_path) as connection:
+            assert connection.execute(
+                "SELECT generation FROM feedback_generations WHERE task_id='legacy'"
+            ).fetchone()[0] == 2
+    assert sum("SELECT task_id,MAX(generation) FROM feedback" in sql for sql in statements) == 1
+
+
+def test_retracting_latest_generation_does_not_revive_stale_feedback(tmp_path):
+    original = task("retracted-song", "Techno synth bass", title="Techno synth bass")
+    old_id = feedback_learning.record(
+        tmp_path, original, -1, "Use electronic drums"
+    )
+    latest = dict(original, generation=1)
+    latest_id = feedback_learning.record(tmp_path, latest, 1)
+    assert "Similar task the user liked:" in feedback_learning.guidance(
+        tmp_path, "music", "Techno synth bass"
+    )
+
+    assert feedback_learning.forget(tmp_path, latest_id)
+    # Historical reviews remain available for explicit retraction, but opening
+    # new connections must not reactivate their superseded preferences.
+    assert feedback_learning.for_task(tmp_path, original["id"])[0]["id"] == old_id
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    assert feedback_learning.record(
+        tmp_path, original, -1, "Use softer electronic drums"
+    ) == old_id
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+
+    # An explicit new review of the current generation remains eligible.
+    feedback_learning.record(tmp_path, latest, -1, "Use a slower tempo")
+    learned = feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    assert "Use a slower tempo" in learned
+    assert "electronic drums" not in learned
+
+
 def test_review_requires_comment_for_thumbs_down(tmp_path):
     import pytest
 

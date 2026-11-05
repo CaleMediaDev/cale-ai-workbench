@@ -85,7 +85,11 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
 
 def inspect(identifier: str) -> dict:
     """Preview one recently discovered skill before considering installation."""
-    if not IDENTIFIER.fullmatch(identifier) or time.monotonic() - SEEN.get(identifier, -1e9) > MAX_AGE:
+    if (
+        not IDENTIFIER.fullmatch(identifier)
+        or identifier not in SEEN
+        or time.monotonic() - SEEN[identifier] > MAX_AGE
+    ):
         raise ValueError("Search for this exact skill first.")
     INSPECTED.pop(identifier, None)
     content = _run("inspect", identifier)
@@ -100,8 +104,10 @@ def install(identifier: str) -> dict:
     now = time.monotonic()
     if (
         not IDENTIFIER.fullmatch(identifier)
-        or now - SEEN.get(identifier, -1e9) > MAX_AGE
-        or now - INSPECTED.get(identifier, -1e9) > MAX_AGE
+        or identifier not in SEEN
+        or identifier not in INSPECTED
+        or now - SEEN[identifier] > MAX_AGE
+        or now - INSPECTED[identifier] > MAX_AGE
     ):
         raise ValueError("Search and inspect this exact skill first.")
     INSPECTED.pop(identifier, None)

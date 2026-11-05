@@ -208,6 +208,26 @@ def test_installed_version_rejects_scalar_without_mapping_separator(
     assert chrome_connector.installed_version() == ""
 
 
+@pytest.mark.parametrize("contents", [
+    "name: hermes-connector\n---\nversion: 0.2.6\n",
+    "---\nname: hermes-connector\n---\nversion: 0.2.6\n",
+    "name: hermes-connector\n...\n---\nversion: 0.2.6\n",
+    "name: hermes-connector\n...\nversion: 0.2.6\n",
+])
+def test_installed_version_does_not_merge_yaml_documents(tmp_path, monkeypatch, contents):
+    monkeypatch.setattr(chrome_connector, "PLUGIN", tmp_path)
+    (tmp_path / "plugin.yaml").write_text(contents, encoding="utf-8")
+
+    def unexpected_run(*args, **kwargs):
+        pytest.fail("The broker must not run with a multi-document manifest")
+
+    monkeypatch.setattr(chrome_connector.subprocess, "run", unexpected_run)
+
+    assert chrome_connector.installed_version() == ""
+    with pytest.raises(RuntimeError, match="Run the installer again to repair it"):
+        chrome_connector.pairing_code()
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()

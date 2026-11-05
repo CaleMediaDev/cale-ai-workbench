@@ -60,6 +60,21 @@ def _connect(root: str | Path):
                     FROM feedback_legacy""")
                 conn.execute("DROP TABLE feedback_legacy")
                 conn.execute("CREATE INDEX feedback_kind ON feedback(kind, created DESC)")
+        # Retraction must not make superseded generations current again.
+        # Keep only generation metadata here, never review text or preferences.
+        generation_schema = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='feedback_generations'"
+        if not conn.execute(generation_schema).fetchone():
+            # Backfill once, under the same writer lock as table creation.
+            # Rechecking after admission avoids rescanning history when two
+            # openers simultaneously encounter an older database.
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute(generation_schema).fetchone():
+                conn.execute("""CREATE TABLE feedback_generations (
+                    task_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
+                )""")
+                conn.execute("""INSERT INTO feedback_generations (task_id,generation)
+                    SELECT task_id,MAX(generation) FROM feedback GROUP BY task_id""")
         yield conn
         conn.commit()
     finally:
@@ -97,6 +112,11 @@ def record(root: str | Path, task: dict, rating: int, note: str = "") -> int:
     if rating < 0 and not note:
         raise ValueError("Tell Cale what to improve before giving thumbs down.")
     with _connect(root) as conn:
+        conn.execute("""INSERT INTO feedback_generations (task_id,generation)
+            VALUES (?,?) ON CONFLICT(task_id) DO UPDATE SET
+                generation=MAX(feedback_generations.generation,excluded.generation)""",
+            (str(task["id"]), int(task.get("generation", 0))),
+        )
         conn.execute(
             "DELETE FROM feedback WHERE task_id=? AND generation=? AND rating!=?",
             (str(task["id"]), int(task.get("generation", 0)), rating),
@@ -150,7 +170,9 @@ def guidance(root: str | Path, kind: str, request: str,
     with _connect(root) as conn:
         rows = [dict(row) for row in conn.execute(
             "SELECT task_id,rating,title,brief,note,created FROM feedback AS candidate "
-            "WHERE kind=? AND task_id!=? AND NOT EXISTS ("
+            "WHERE kind=? AND task_id!=? AND generation=("
+            "SELECT generation FROM feedback_generations "
+            "WHERE task_id=candidate.task_id) AND NOT EXISTS ("
             "SELECT 1 FROM feedback AS newer "
             "WHERE newer.task_id=candidate.task_id "
             "AND (newer.generation>candidate.generation OR ("

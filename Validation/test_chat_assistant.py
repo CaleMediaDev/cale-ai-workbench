@@ -493,6 +493,25 @@ def test_followup_attaches_to_active_task():
     assert chat_assistant.route("What is the status?", task) == "status"
 
 
+@pytest.mark.parametrize("prefix", ["Please", "Can you", "Please could you"])
+@pytest.mark.parametrize("revision", [
+    "also add a contact page",
+    "actually use a blue background",
+    "instead use a blue background",
+    "tell the AI to add a contact page",
+])
+def test_polite_followup_markers_route_to_existing_task(prefix, revision):
+    tasks = [
+        {"id": "site", "title": "Bakery website", "status": "accepted", "updated": 10},
+    ]
+    text = f"{prefix} {revision}"
+    candidates = chat_assistant.followup_tasks(tasks, text)
+    assert candidates == tasks
+    assert chat_assistant.route(text, candidates) == "note"
+    assert chat_assistant.choose_task(text, candidates) == tasks[0]
+    assert chat_assistant.route(text, []) != "note"
+
+
 def test_reviewed_task_can_receive_chat_feedback():
     tasks = [
         {"id": "review", "title": "Build bakery site", "status": "ready_for_review"},
