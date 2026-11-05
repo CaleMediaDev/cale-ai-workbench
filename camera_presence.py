@@ -791,7 +791,7 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
             elapsed = preview_now - capture_started
             if not measured_reported and elapsed >= 2:
                 measured_reported = True
-                emit("notice", f"Camera capture measured {captured_frames / elapsed:.1f} frames/s at {frame.shape[1]}×{frame.shape[0]}; no video saved.")
+                emit("notice", f"Startup camera sample: {captured_frames / elapsed:.1f} frames/s at {frame.shape[1]}×{frame.shape[0]}; no video saved.")
             if avatar_worker is not None:
                 avatar_worker.submit(frame)
             if not avatar and preview_now - last_preview >= 1 / 15:

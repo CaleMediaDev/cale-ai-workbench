@@ -813,7 +813,7 @@ def ensure_avatar_profile(root=None, progress=None, cancelled=None, virtual_outp
                     subprocess.run([music_backend._tool("uv"),"pip","install","--python",str(python),"--no-deps","pyvirtualcam==0.15.0"],check=True,timeout=120,capture_output=True,creationflags=HIDE,env=_avatar_environment())
                     (profile/"virtual-camera-provenance.json").write_text(json.dumps({"package":"pyvirtualcam","version":"0.15.0","license":"GPL-2.0","source":"https://github.com/letmaik/pyvirtualcam","execution":"separate optional avatar-only frame sender","obs_driver":"existing Windows OBS installation required","virtual_output_tested":False}),encoding="utf-8")
             if defer_probe:
-                report("prepared","Live Cale files checked; the camera worker will test inference",
+                report("prepared","Getting your animated camera ready...",
                        virtual_output_requested=bool(virtual_output),virtual_output_tested=False)
                 return python
             report("testing","Testing Live Cale CUDA imports and actual avatar inference")

@@ -1,0 +1,41 @@
+{
+  "release": "0.5.516",
+  "base": "d01e68b375cb004bece3df73ae368a42513b53d2",
+  "core_implementation": "4f5955548b1776e0568946f923fe7a6ee53a6b37",
+  "problem": "In one session, changing normalized features below the matching threshold created new tracks that bypassed the intended greeting cooldown, even while one face remained continuously visible.",
+  "behavior": [
+    "Valid face vectors retain aligned optional RAM-only normalized boxes; features() remains vector-only and compatible",
+    "Strong embedding matches are reserved first; unique recent overlap can mark temporary unknown-greeting continuity",
+    "Suppression rechecks the original anchor, current overlap, ambiguity, age and separately visible original face at greeting time",
+    "Current embeddings still supply recognized names; independent known-name cooldowns prevent drift from bypassing the existing120-second intent",
+    "No new enrollment, persistent boxes, raw images, identity assignment or changes to user-requested speech"
+  ],
+  "tests": {
+    "baseline": "Controlled normalized A/B/C vectors produced3 introductions for one continuous face in both unknown and same-known-name cases",
+    "author": {"passed":71,"seconds":4.84},
+    "independent_correction": {"genuine_baseline_failures":4,"passed":75,"seconds":4.59,"meaning":"Both detection orders after occlusion, moved geometry and newly ambiguous overlap retain new visitor greetings"},
+    "root_final_camera_video": {"passed":124,"seconds":11.72}
+  },
+  "actual_cpu_video_qualification": {
+    "source": "Owner-provided clip, same transient observations supplied to baseline and candidate",
+    "candidate": "4f5955548b1776e0568946f923fe7a6ee53a6b37",
+    "models": "Existing pinned OpenCV YuNet/SFace on CPU",
+    "sampled_frames":14,
+    "detected_faces":12,
+    "face_count_range":[0,1],
+    "baseline_greetings":1,
+    "candidate_greetings":1,
+    "minimum_adjacent_single_face_cosine":0.8380328354,
+    "below_threshold_pairs":0,
+    "camera_or_gpu_calls":0,
+    "raw_frames_embeddings_or_boxes_saved":false,
+    "claim":"Compatibility on one stable single-person clip, not measured drift improvement or general recognition accuracy"
+  },
+  "limits": [
+    "Unknown people replacing one another in the same position without an observed absence remain ambiguous and may share presentation continuity",
+    "Greeting memory is session-local; restarting the camera can introduce Cale again",
+    "Geometry only affects automatic greeting presentation, never identity recognition, enrollment or access",
+    "No live webcam, multiple-person video, new GPU/frame-rate, fresh-PC or full installed self-check qualification in this release",
+    "Optional dependency snapshot prototype and expression-helper port are not included"
+  ]
+}
