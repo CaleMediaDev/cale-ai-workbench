@@ -516,6 +516,31 @@ def current_progress_file(project):
     return document_path(project, "PROGRESS.md")
 
 
+def game_import_activity(folder, now=None):
+    """Show fresh source-transfer activity without awarding task completion."""
+    try:
+        root = Path(folder).resolve()
+        path = (root / ".local-ai/game-import-progress.json").resolve()
+        if not path.is_relative_to(root) or path.stat().st_size > 4096:
+            return ""
+        record = json.loads(path.read_text(encoding="utf-8"))
+        age = (time.time() if now is None else now) - float(record["updated"])
+        if not 0 <= age <= 15:
+            return ""
+        phase = record.get("phase")
+        label = {"resolving": "Finding game source", "downloading": "Downloading game source",
+                 "archive_cached": "Checking downloaded source", "checking_cache": "Verifying game source",
+                 "copying_source": "Copying editable game source"}.get(phase)
+        if not label:
+            return ""  # source_ready is not an active transfer or a finished game.
+        done, total = record.get("bytes_done", 0), record.get("bytes_total", 0)
+        if type(done) is int and type(total) is int and 0 <= done <= total < 100_000_000_000 and total:
+            return f"{label} · {done / 1048576:.1f}/{total / 1048576:.1f} MB"
+        return label
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, OverflowError):
+        return ""
+
+
 def task_progress(p):
     """Show 100% once independent checks finish; edits can reopen the work."""
     state = p["status"]
@@ -614,7 +639,10 @@ def task_progress(p):
         if setup.get("status") in ("failed", "error"):
             step = "AI setup needs attention: " + str(setup.get("current", "Unknown error"))
     elif state == "working":
-        waiting = active_worker_wait(p)
+        importing = game_import_activity(p["folder"])
+        if importing:
+            step = importing
+        waiting = "" if importing else active_worker_wait(p)
         if waiting:
             step = f"{step[:85]} · {waiting}"
     if p["detail"].startswith("Supervisor will retry this task"):

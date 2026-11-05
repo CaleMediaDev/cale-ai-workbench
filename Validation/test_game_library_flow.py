@@ -15,6 +15,21 @@ import game_library_ui
 import native_agent
 import project_preview
 import toolbox_mcp
+import long_tasks
+
+
+def test_source_progress_is_fresh_transfer_only_and_never_task_completion(tmp_path):
+    folder = tmp_path / ".local-ai"
+    folder.mkdir()
+    path = folder / "game-import-progress.json"
+    record = {"updated": 100, "phase": "downloading", "bytes_done": 1048576,
+              "bytes_total": 2097152, "whole_task_complete": False}
+    path.write_text(json.dumps(record), encoding="utf-8")
+    assert long_tasks.game_import_activity(tmp_path, now=105) == "Downloading game source · 1.0/2.0 MB"
+    assert long_tasks.game_import_activity(tmp_path, now=130) == ""
+    record["phase"] = "source_ready"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    assert long_tasks.game_import_activity(tmp_path, now=105) == ""
 
 
 def test_native_import_declares_actual_nested_game_and_keeps_existing_server(tmp_path):

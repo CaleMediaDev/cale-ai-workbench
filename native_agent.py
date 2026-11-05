@@ -1162,7 +1162,23 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             target = project_path(folder, arguments["path"])
             if target == folder.resolve():
                 raise ValueError("Choose a new subdirectory such as game; the task root already exists.")
-            result = design_tools.import_game_example(arguments["game_id"], str(target))
+            def save_import_progress(value):
+                # Real transfer/file counters are separate from acceptance
+                # progress. Source-ready never means the whole task is done.
+                destination = project_path(folder, ".local-ai/game-import-progress.json")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                record = {**value, "updated": time.time()}
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                        dir=destination.parent, delete=False) as stream:
+                    staged = Path(stream.name)
+                    json.dump(record, stream)
+                try:
+                    os.replace(staged, destination)
+                finally:
+                    staged.unlink(missing_ok=True)
+
+            with design_tools.game_import_progress(save_import_progress):
+                result = design_tools.import_game_example(arguments["game_id"], str(target))
             if Path(result["folder"]).resolve() != target.resolve():
                 raise ValueError("Game import returned an unexpected destination.")
             entrypoint = result.get("entrypoint")
