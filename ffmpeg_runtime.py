@@ -81,7 +81,7 @@ def ensure(root: Path = ROOT) -> Path:
             if found.returncode or not source.is_file():
                 install = subprocess.run(
                     [str(python), "-m", "pip", "install", "--disable-pip-version-check",
-                     "imageio-ffmpeg==0.6.0"], capture_output=True, text=True,
+                     "--force-reinstall", "imageio-ffmpeg==0.6.0"], capture_output=True, text=True,
                     timeout=300, creationflags=HIDE,
                 )
                 if install.returncode:
