@@ -12,6 +12,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import project_memory as memory
+import subprocess
+import sys
+import long_tasks
+import quick_calculator
 
 
 def test_legacy_extracted_hits_are_invalidated_lazily_without_scanning_or_erasing_notes(tmp_path):
@@ -1210,3 +1214,127 @@ def test_helper_staging_scan_is_bounded_and_preserves_unknown_crash_bytes(regist
     assert len(list(staging.iterdir()))==128
     assert all(path.read_bytes()==b'partial preserve' for path in staging.iterdir())
     assert len(memory.find_expression_helpers(root)['helpers'])==1
+
+
+# Independently reviewed adversarial checks use real child processes and TEMP-only state.
+@pytest.fixture
+def independent_helper_project(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    root.mkdir()
+    state = tmp_path / "state"
+    state.mkdir()
+    conn = sqlite3.connect(state / "projects.db")
+    try:
+        conn.execute("create table projects(id text, folder text, brief text)")
+        conn.execute("insert into projects values(?,?,?)", ("a" * 12, str(root), "Compute invoice totals accurately"))
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setattr(long_tasks, "STATE", state)
+    return root, state
+
+
+def independent_register_helper(root):
+    return memory.register_expression_helper(root, "plus_one", {"x": "number"}, "x+1",
+                                             [{"inputs": {"x": 1}, "expected": 2}])
+
+
+def test_concurrent_process_registrations_publish_one_complete_record(independent_helper_project):
+    root, state = independent_helper_project
+    script = '''import sys,json,time,long_tasks,project_memory as m
+from pathlib import Path
+long_tasks.STATE=Path(sys.argv[2]);m.time.time=lambda:123.0
+while not Path(sys.argv[3]).exists():time.sleep(.01)
+print(json.dumps(m.register_expression_helper(Path(sys.argv[1]),'plus_one',{'x':'number'},'x+1',[{'inputs':{'x':1},'expected':2}])))
+'''
+    gate = state / "start"
+    command = [sys.executable, "-B", "-c", script, str(root), str(state), str(gate)]
+    children = [subprocess.Popen(command, cwd=Path(memory.__file__).parent,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
+    gate.touch()
+    results = []
+    for child in children:
+        stdout, stderr = child.communicate(timeout=25)
+        assert child.returncode == 0, stderr
+        results.append(json.loads(stdout))
+    assert results[0]["id"] == results[1]["id"]
+    records = list((root / ".local-ai/expression-helpers/v1/records").iterdir())
+    assert len(records) == 1
+    assert memory.run_expression_helper(root, results[0]["id"], {"x": 9})["value"] == 10
+
+
+def test_record_handle_prevents_real_concurrent_in_place_write(independent_helper_project):
+    root, _ = independent_helper_project
+    independent_register_helper(root)
+    path = next((root / ".local-ai/expression-helpers/v1/records").iterdir())
+    before = path.read_bytes()
+    original = os.fstat
+    attempted = []
+    def raced(fd):
+        # _helper_read has already opened its share-read-only handle here.
+        result = subprocess.run([sys.executable, "-I", "-c",
+                                 "import sys;open(sys.argv[1],'r+b').write(b'X')", str(path)],
+                                capture_output=True, text=True, timeout=10)
+        attempted.append(result.returncode)
+        return original(fd)
+    with patch.object(memory.os, "fstat", side_effect=raced):
+        assert memory._helper_read(path) == before
+    assert attempted and all(code != 0 for code in attempted)
+    assert path.read_bytes() == before
+
+
+def test_valid_record_replacement_during_execution_discards_computed_result(independent_helper_project):
+    root, _ = independent_helper_project
+    record = independent_register_helper(root)
+    path = next((root / ".local-ai/expression-helpers/v1/records").iterdir())
+    original = quick_calculator.run_helper
+    calls = []
+    def raced(*args):
+        value = original(*args)
+        calls.append(True)
+        if len(calls) == 2:  # verified examples, then the actual invocation
+            row = json.loads(path.read_bytes())
+            row["created"] += 1
+            raw = memory._helper_bytes(row)
+            replacement = path.parent / (row["id"] + "-" + hashlib.sha256(raw).hexdigest() + ".json")
+            path.unlink()
+            replacement.write_bytes(raw)
+        return value
+    with patch.object(quick_calculator, "run_helper", side_effect=raced):
+        with pytest.raises(ValueError, match="changed during invocation"):
+            memory.run_expression_helper(root, record["id"], {"x": 9})
+    assert len(calls) == 2
+
+
+def test_preexisting_staging_junction_preserves_outside_bytes(independent_helper_project, tmp_path):
+    import _winapi
+    root, _ = independent_helper_project
+    parent = root / ".local-ai/expression-helpers/v1"
+    parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "keep"
+    sentinel.write_bytes(b"private unknown bytes")
+    junction = parent / "staging"
+    _winapi.CreateJunction(str(outside), str(junction))
+    try:
+        with pytest.raises((OSError, ValueError)):
+            independent_register_helper(root)
+        assert list(outside.iterdir()) == [sentinel]
+        assert sentinel.read_bytes() == b"private unknown bytes"
+    finally:
+        os.rmdir(junction)
+
+
+def test_large_unknown_record_rejected_before_json_and_preserved(independent_helper_project):
+    root, _ = independent_helper_project
+    record = independent_register_helper(root)
+    path = next((root / ".local-ai/expression-helpers/v1/records").iterdir())
+    raw = b"{" + b" " * 250_000
+    path.write_bytes(raw)
+    # Record decoding must never receive the oversized payload.
+    with patch.object(json, "loads", side_effect=AssertionError("oversized bytes reached JSON")):
+        with pytest.raises(ValueError, match="byte budget"):
+            memory._validated_expression_record(root, path)
+    assert path.read_bytes() == raw
+    assert not (root / ".local-ai/memory.sqlite3").exists()
