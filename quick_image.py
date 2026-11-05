@@ -276,7 +276,7 @@ def recover_image_jobs(root: Path) -> None:
             _write_job(root, job_id, {**info, "status": "queued", "current": "Resuming local image",
                                       "worker_pid": None, "recoveries": attempts, "created": time.time()})
             _launch_job(root, job_id)
-        except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError, OverflowError):
             continue
 
 
