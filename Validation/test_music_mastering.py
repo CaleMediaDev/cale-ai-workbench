@@ -212,6 +212,44 @@ def test_mastering_without_filesystem_hard_link_support(tmp_path, destination_cr
     assert not staged_paths[0].parent.exists()
 
 
+def test_mastering_closes_fallback_output_when_fstat_fails(tmp_path):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    source.write_bytes(b"source")
+    reference.write_bytes(b"reference")
+    metadata_error = OSError(music_mastering.errno.EIO, "Metadata lookup failed")
+    opened = []
+    real_open = Path.open
+
+    def track_open(path, *args, **kwargs):
+        stream = real_open(path, *args, **kwargs)
+        if path == output and args == ("xb",):
+            opened.append(stream)
+        return stream
+
+    def render(*args, **kwargs):
+        Path(args[0][-1]).write_bytes(b"mastered")
+        return type("Result", (), {"returncode": 0})()
+
+    with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
+        music_mastering, "install", return_value=Path("python.exe")
+    ), patch.object(music_mastering.subprocess, "run", side_effect=render), patch.object(
+        music_mastering.os, "link",
+        side_effect=OSError(music_mastering.errno.EOPNOTSUPP, "Hard links unsupported"),
+    ), patch.object(Path, "open", new=track_open), patch.object(
+        music_mastering.os, "fstat", side_effect=metadata_error
+    ):
+        with pytest.raises(OSError) as caught:
+            music_mastering.master_music(str(source), str(reference), str(output))
+
+    assert caught.value is metadata_error
+    assert len(opened) == 1
+    assert opened[0].closed
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"reference"
+
+
 def test_mastering_preserves_copy_error_when_partial_output_cleanup_fails(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"
