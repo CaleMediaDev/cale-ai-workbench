@@ -150,6 +150,43 @@ def test_disk_counter_runtime_failure_is_isolated_and_recovers(monkeypatch):
     assert recovered["drive_write_mbps"] == 1
 
 
+def test_disk_rate_uses_timestamp_after_counter_acquisition(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    clock = [10.0]
+    delays = iter([3.0, 0.0])
+
+    def disk_counters():
+        clock[0] += next(delays)
+        return SimpleNamespace(
+            read_bytes=int(clock[0] * 1_000_000),
+            write_bytes=int(clock[0] * 2_000_000),
+        )
+
+    monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(
+        disk_io_counters=disk_counters,
+        net_io_counters=lambda: None,
+        net_if_stats=lambda: {},
+    ))
+    monkeypatch.setattr(system_gauges, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(system_gauges, "_cpu_times", lambda: None)
+    monkeypatch.setattr(system_gauges, "_ram_percent", lambda: None)
+    monkeypatch.setattr(system_gauges, "_gpu_percent", lambda: None)
+    monkeypatch.setattr(system_gauges, "_drive_space", lambda: (None, None))
+    monkeypatch.setattr(system_gauges.time, "monotonic", lambda: clock[0])
+
+    sampler = system_gauges.HardwareSampler()
+    first = sampler.sample()
+    assert first["drive_read_mbps"] is None
+    assert first["drive_write_mbps"] is None
+    clock[0] = 20.0
+    second = sampler.sample()
+    # Counter snapshots occur at 13 and 20 seconds, not 10 and 20.
+    assert second["drive_read_mbps"] == pytest.approx(1)
+    assert second["drive_write_mbps"] == pytest.approx(2)
+
+
 def test_network_bandwidth_includes_link_load():
     assert system_gauges.network_bandwidth(
         (0, 0), (12_500_000, 2_500_000), 1, 200

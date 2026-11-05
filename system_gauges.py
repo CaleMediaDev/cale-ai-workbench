@@ -190,7 +190,6 @@ class HardwareSampler:
             drive, drive_free = _drive_space()
         except OSError:
             drive, drive_free = None, None
-        now = time.monotonic()
         try:
             import psutil
 
@@ -198,6 +197,7 @@ class HardwareSampler:
             current_disk = (counters.read_bytes, counters.write_bytes) if counters else None
         except (ImportError, AttributeError, OSError, RuntimeError):
             current_disk = None
+        now = time.monotonic()
         elapsed = now - self.previous_disk_time if self.previous_disk_time is not None else 0
         drive_read, drive_write = disk_transfer_speed(self.previous_disk, current_disk, elapsed)
         self.previous_disk, self.previous_disk_time = current_disk, now
