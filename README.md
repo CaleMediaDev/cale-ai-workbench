@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.531 includes three reviewed donated fixes: recovery from malformed self-check reports, invalid game-model probe responses, and tool-call metadata in social speech. [Validation and limits](benchmarks/results/donated-recovery-531-20261105.json).
+
 Release 0.5.530 preserves reported Claude subscription usage when a bounded coding step ends in an error, rejects unrecognized completion envelopes, and handles malformed authentication status cleanly. [Validation and limits](benchmarks/results/claude-result-accounting-530-20261105.json).
 
 Release 0.5.529 gives scheduled trained-model donations a durable upload journal, verified fork reuse and public delivery checks. Qualified cached uploads retry after one minute without retraining; the original hourly training limit and trainer bytes remain unchanged. SQLite creates the new table automatically. [Validation and limits](benchmarks/results/model-upload-journal-529-20261105.json).
