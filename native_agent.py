@@ -1316,14 +1316,44 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             import toolbox_mcp
 
             tool = arguments["tool"]
+            call_arguments = arguments["arguments"]
+            game_mutator = tool in {"local.import_game_example", "import_game_example",
+                "local.install_game_libraries", "install_game_libraries", "design.import_game_example"}
+            if game_mutator:
+                import task_context
+                # A model working on A cannot use a registered B as an escape
+                # hatch. Copy the tool payload so action history stays exact.
+                call_arguments = copy.deepcopy(call_arguments)
+                if not isinstance(call_arguments, dict):
+                    raise ValueError("Game task arguments must be an object")
+                current_folder = folder.resolve(strict=True)
+                request_before = (user_request_stamp(current_folder), task_context.request_identity(current_folder))
+                supplied = call_arguments.get("project_folder", str(current_folder))
+                if not isinstance(supplied, str) or Path(supplied).resolve() != current_folder:
+                    raise ValueError("Game tools must use the current task folder")
+                if tool != "design.import_game_example":
+                    call_arguments["project_folder"] = str(current_folder)
+                else:
+                    # The backend form takes a destination rather than a task
+                    # folder. Keep it inside this task and use the host wrapper.
+                    target = Path(call_arguments["project_path"])
+                    target = (target if target.is_absolute() else current_folder / target).resolve()
+                    if target == current_folder or not target.is_relative_to(current_folder):
+                        raise ValueError("Game source destination leaves the current task")
+                    relative = target.relative_to(current_folder).as_posix()
             registered = {item.name for item in asyncio.run(toolbox_mcp.server.list_tools())
                           if not item.name.startswith("toolbox_")}
-            if tool in registered:
-                value = asyncio.run(toolbox_mcp.server.call_tool(tool, arguments["arguments"]))
+            if game_mutator and request_before != (user_request_stamp(current_folder), task_context.request_identity(current_folder)):
+                raise ValueError("The task request changed before the game tool could act")
+            if tool == "design.import_game_example":
+                value = json.loads(execute_tool(current_folder, "import_game_example",
+                    {"game_id": call_arguments["game_id"], "path": relative}))
+            elif tool in registered:
+                value = asyncio.run(toolbox_mcp.server.call_tool(tool, call_arguments))
             elif tool in toolbox_mcp.LOCAL_CATALOG:
-                value = asyncio.run(toolbox_mcp.toolbox_call(tool, json.dumps(arguments["arguments"])))
+                value = asyncio.run(toolbox_mcp.toolbox_call(tool, json.dumps(call_arguments)))
             else:
-                value = native_specialists.runtime().call(tool, arguments["arguments"], str(folder))
+                value = native_specialists.runtime().call(tool, call_arguments, str(folder))
             if hasattr(value, "model_dump"):
                 value = value.model_dump(by_alias=True, exclude_none=True)
             return json.dumps(value, ensure_ascii=False, default=str)[:MAX_TOOL_OUTPUT]

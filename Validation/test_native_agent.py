@@ -13,7 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 import pytest
 
@@ -7266,3 +7266,107 @@ def test_repeated_failure_guidance_requires_live_registry_before_next_action(tmp
         assert len(seen) == 2 and episode["turns"] == 0
         assert "ownership or instructions changed" in state["current"]
         assert not (folder / "next-step.txt").exists()
+
+
+@pytest.mark.parametrize("alias", ["local.import_game_example", "import_game_example", "local.install_game_libraries", "install_game_libraries", "design.import_game_example"])
+def test_game_mutators_cannot_target_another_registered_task(tmp_path, monkeypatch, alias):
+    import contextlib, toolbox_mcp, design_tools
+    current=tmp_path/'current';other=tmp_path/'other';current.mkdir();other.mkdir()
+    root=tmp_path/'app';(root/'LongTasks').mkdir(parents=True)
+    with contextlib.closing(sqlite3.connect(root/'LongTasks/projects.db')) as conn:
+        conn.execute('CREATE TABLE projects(folder TEXT)')
+        conn.executemany('INSERT INTO projects VALUES(?)',[(str(current),),(str(other),)]);conn.commit()
+    monkeypatch.setattr(toolbox_mcp,'ROOT',root)
+    called=[]
+    def imported(game_id,target):
+        called.append(target);Path(target).mkdir();raise AssertionError('Foreign source import executed')
+    monkeypatch.setattr(design_tools,'import_game_example',imported)
+    monkeypatch.setattr(toolbox_mcp,'_game_library_download',lambda *_:pytest.fail('Foreign libraries downloaded'))
+    arguments=({'game_id':'TEMP','project_path':str(other/'game')} if alias.startswith('design.') else
+               {'project_folder':str(other), **({'libraries':['phaser']} if 'install' in alias else {'game_id':'TEMP','path':'game'})})
+    with patch('native_specialists.runtime') as remote:
+        result=native_agent.execute_tool(current,'call_local_tool',{'tool':alias,'arguments':arguments})
+        assert result.startswith('Tool error:') and 'task' in result.lower(),result
+        remote.assert_not_called()
+    assert called==[] and not (other/'game').exists() and not (other/'vendor').exists()
+
+
+@pytest.mark.parametrize('alias', ['local.import_game_example','import_game_example','design.import_game_example'])
+def test_game_import_current_task_handoff_preserves_caller_arguments(tmp_path, monkeypatch, alias):
+    import contextlib, toolbox_mcp, design_tools
+    folder=tmp_path/'task';folder.mkdir();root=tmp_path/'app';(root/'LongTasks').mkdir(parents=True)
+    with contextlib.closing(sqlite3.connect(root/'LongTasks/projects.db')) as conn:
+        conn.execute('CREATE TABLE projects(folder TEXT)');conn.execute('INSERT INTO projects VALUES(?)',(str(folder),));conn.commit()
+    monkeypatch.setattr(toolbox_mcp,'ROOT',root)
+    def imported(game_id,target):
+        path=Path(target);path.mkdir();(path/'index.html').write_text('<script>/* TEMP */</script>');(path/'CALE-IMPORT.json').write_text('{}')
+        return {'folder':str(path),'entrypoint':'index.html','receipt_path':str(path/'CALE-IMPORT.json'),'game':{'id':game_id,'title':'TEMP'}}
+    monkeypatch.setattr(design_tools,'import_game_example',imported)
+    args={'game_id':'TEMP',**({'project_path':str(folder/'game')} if alias.startswith('design.') else {'path':'game'})}
+    before=copy.deepcopy(args)
+    result=native_agent.execute_tool(folder,'call_local_tool',{'tool':alias,'arguments':args})
+    assert not result.startswith('Tool error:'),result
+    assert (folder/'game/index.html').is_file() and args==before
+
+
+def test_game_mutator_changed_request_during_discovery_cannot_publish(tmp_path,monkeypatch):
+    import toolbox_mcp, design_tools
+    folder=tmp_path/'task';(folder/'.local-ai').mkdir(parents=True)
+    async def changed():
+        (folder/'.local-ai/USER-REQUESTS.md').write_text('New instruction: do not import')
+        return []
+    monkeypatch.setattr(toolbox_mcp.server,'list_tools',changed)
+    imported=Mock();monkeypatch.setattr(design_tools,'import_game_example',imported)
+    result=native_agent.execute_tool(folder,'call_local_tool',{'tool':'local.import_game_example','arguments':{'game_id':'TEMP','path':'game'}})
+    assert result.startswith('Tool error:') and 'changed' in result.lower(),result
+    imported.assert_not_called();assert not (folder/'game').exists()
+
+
+@pytest.mark.parametrize('foreign',[False,True])
+def test_game_task_folder_junction_alias_is_canonicalized_before_import(tmp_path,monkeypatch,foreign):
+    import contextlib, toolbox_mcp, design_tools
+    folder=tmp_path/'current';other=tmp_path/'other';folder.mkdir();other.mkdir()
+    alias=tmp_path/'alias'
+    if os.name=='nt':
+        made=subprocess.run(['cmd','/c','mklink','/J',str(alias),str(other if foreign else folder)],capture_output=True)
+        assert made.returncode==0
+    else:alias.symlink_to(other if foreign else folder,target_is_directory=True)
+    root=tmp_path/'app';(root/'LongTasks').mkdir(parents=True)
+    with contextlib.closing(sqlite3.connect(root/'LongTasks/projects.db')) as conn:
+        conn.execute('CREATE TABLE projects(folder TEXT)');conn.executemany('INSERT INTO projects VALUES(?)',[(str(folder),),(str(other),)]);conn.commit()
+    monkeypatch.setattr(toolbox_mcp,'ROOT',root)
+    def imported(game_id,target):
+        path=Path(target);path.mkdir();(path/'index.html').write_text('<script>/* TEMP */</script>');(path/'CALE-IMPORT.json').write_text('{}')
+        return {'folder':str(path),'entrypoint':'index.html','receipt_path':str(path/'CALE-IMPORT.json'),'game':{'id':game_id,'title':'TEMP'}}
+    importer=Mock(side_effect=imported);monkeypatch.setattr(design_tools,'import_game_example',importer)
+    arguments={'project_folder':str(alias),'game_id':'TEMP','path':'game'};original=copy.deepcopy(arguments)
+    try:
+        result=native_agent.execute_tool(folder,'call_local_tool',{'tool':'local.import_game_example','arguments':arguments})
+        assert arguments==original
+        if foreign:
+            assert result.startswith('Tool error:');importer.assert_not_called()
+            assert not (other/'game').exists()
+        else:
+            assert not result.startswith('Tool error:'),result
+            assert (folder/'game/index.html').is_file()
+    finally:
+        if os.name=='nt':alias.rmdir()
+        else:alias.unlink()
+
+
+@pytest.mark.parametrize('alias',['local.install_game_libraries','install_game_libraries'])
+def test_game_libraries_omitted_task_folder_is_bound_to_current_project(tmp_path,monkeypatch,alias):
+    import contextlib, toolbox_mcp
+    folder=tmp_path/'current';folder.mkdir();root=tmp_path/'app';(root/'LongTasks').mkdir(parents=True)
+    with contextlib.closing(sqlite3.connect(root/'LongTasks/projects.db')) as conn:
+        conn.execute('CREATE TABLE projects(folder TEXT)');conn.execute('INSERT INTO projects VALUES(?)',(str(folder),));conn.commit()
+    monkeypatch.setattr(toolbox_mcp,'ROOT',root)
+    payload=b'/* public TEMP library fixture */';digest=hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(toolbox_mcp,'GAME_LIBRARIES',{'phaser':{'version':'test','repo':'test/repo','commit':'a'*40,
+        'files':[{'source_path':'phaser.min.js','url':'https://invalid.test/not-contacted','bytes':len(payload),'sha256':digest}]}})
+    monkeypatch.setattr(toolbox_mcp,'_game_library_download',lambda *_:payload)
+    arguments={'libraries':['phaser']};before=copy.deepcopy(arguments)
+    result=native_agent.execute_tool(folder,'call_local_tool',{'tool':alias,'arguments':arguments})
+    assert not result.startswith('Tool error:'),result
+    assert (folder/'vendor/cale-game/phaser/phaser.min.js').read_bytes()==payload
+    assert arguments==before

@@ -22,7 +22,6 @@ missing_tests = sorted(
 if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
-    "Validation/test_game_library_flow.py",
     "assets/cale-logo-original.jpg",
     "design-qa.md",
     "benchmarks/results/nightshift-508-20261104.json",
