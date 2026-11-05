@@ -1,0 +1,39 @@
+{
+  "status": "qualified",
+  "release": "0.5.532",
+  "startup_code_sha256": "0161cc131c41ee63729eb7245a388fadecd432f5359a40b0872da5b332f31137",
+  "tests_sha256": "0c4027987bcd3548b727f84aea05c51ad71612d469efec7b0b51beb4606a13b6",
+  "scope": "Actual Python 3.11 ACE imports and console-help only, not rendering.",
+  "original": {
+    "help_exit_code": 0,
+    "seconds": 35.54699999996228,
+    "candidate_sha256": "0161cc131c41ee63729eb7245a388fadecd432f5359a40b0872da5b332f31137",
+    "source_files_unchanged": 5,
+    "source_snapshot_fixture": true,
+    "decode_source_sha256": "4cd434b7ec4367b34711587ba18d7d3f82b4b171dded017c3ed12a3fd87438b4",
+    "network_or_listener_attempts": 1,
+    "all_network_and_bind_calls_blocked": true,
+    "unexpected_network_attempts": 0,
+    "blocked_outside_temp_writes": 0,
+    "cuda_hidden": true,
+    "models_loaded": false,
+    "music_submissions": 0,
+    "scope": "Actual ACE environment imports and console-help path only."
+  },
+  "patched": {
+    "help_exit_code": 0,
+    "seconds": 15.21899999998277,
+    "candidate_sha256": "0161cc131c41ee63729eb7245a388fadecd432f5359a40b0872da5b332f31137",
+    "source_files_unchanged": 5,
+    "source_snapshot_fixture": true,
+    "decode_source_sha256": "f77db5f289a298326b996ae5c0327e89a078f3c155263a2a10574dafcc9d75d3",
+    "network_or_listener_attempts": 1,
+    "all_network_and_bind_calls_blocked": true,
+    "unexpected_network_attempts": 0,
+    "blocked_outside_temp_writes": 0,
+    "cuda_hidden": true,
+    "models_loaded": false,
+    "music_submissions": 0,
+    "scope": "Actual ACE environment imports and console-help path only."
+  }
+}

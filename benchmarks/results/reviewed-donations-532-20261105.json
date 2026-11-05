@@ -1,0 +1,2373 @@
+{
+  "release": "0.5.532",
+  "source_before_documentation": "3831e4f29b3b161f9d08f8cae0c2168933e18c17",
+  "sha256": {
+    "Validation/test_auto_route.py": "eca51ffee59c3ab6398056b0dfa140ccc10a25060eb4c75e083909ef9dc4c756",
+    "Validation/test_cale_voice.py": "bfa57ddf46fbc470187f5c89ad1dce636374286caa93a841bd6d834dd1a30454",
+    "Validation/test_cale_voice_worker.py": "466b1f3a21bec40c5d292a8034b0846dfcee906bdb20eafc7df63c79f1d3033a",
+    "Validation/test_camera_presence.py": "0184a9f305b669a397247b58f8dfa7538e154dda9f1eb4fcc03a7b374bacd5d6",
+    "Validation/test_capability_index.py": "688bfafc9b2421d03e084edd40c35779ac8e94c1e74cb6fda63e29714cd8a598",
+    "Validation/test_chat_assistant.py": "b8c9395d78445c3ae27a4dd6f9232045fb6940cad5cb94511debeeb1116f3cf6",
+    "Validation/test_chrome_connector.py": "e9f0de5a572424cb16194da37d0c5d24842dc16687e0bfb04c4551ffe409f72e",
+    "Validation/test_context_window.py": "909af492b9742a06f0a38d189207f525cba6f2b3ad41d824cf560cd7a045772b",
+    "Validation/test_core_tool_health.py": "53d16e1a2167c1dfdbf826b1360435c0eafee782e28f4e844955c84d9104486e",
+    "Validation/test_design_tools.py": "cb73c18a867c273178f4f6109a764f7efbda3086abdecc4a85ffe333c586e9cd",
+    "Validation/test_document_check.py": "23cf882dbc7d14a64835f2c30facadda9a9ce6d43e352b836665c0e041e75a9d",
+    "Validation/test_donation_regressions.py": "30e90602fa0d8c0b498f2f85f019ea8fd7aece94232aae2027e7a6238ce23e0e",
+    "Validation/test_feedback_learning.py": "eb51f39c6df5bf530d43344a28a7d1a40fdc4402b4dd71d3c4670ea963253b6c",
+    "Validation/test_ffmpeg_runtime.py": "bba853e05e33ff0d01d9a7eada39159fbde50237c43d12e6db34b706bca0382a",
+    "Validation/test_file_chat.py": "82100852026104817eb148803679a4881ee13e6444e84409b8e4ec4f88b388b8",
+    "Validation/test_model_fitness.py": "5fac0ae5112051f3c2ba739ad240940ea5b7b954e16dcd5b9a59eb4ef22d795b",
+    "Validation/test_model_library.py": "5ec97adfff8c56fd54193ca93c0ec7705aa3d5f3e82c98a55469b15a8799f7ea",
+    "Validation/test_music_analysis.py": "34e867232a1a4f1fbb518c83c2d779895e5f525e5165dc81d088967e98f57e64",
+    "Validation/test_music_backend.py": "0c4027987bcd3548b727f84aea05c51ad71612d469efec7b0b51beb4606a13b6",
+    "Validation/test_music_edit.py": "64268d3c7900602432327a1bf75b60416f4011a40dc19ae8d2b2e6e2f9942333",
+    "Validation/test_music_lyrics.py": "1b17ab58385f638c4ab65596dbdcb07538e79273798f6a3797f5ae14def3dd7c",
+    "Validation/test_music_mastering.py": "50169cbe6167a8c09100d7b61e1b30adc33e3d75f2ffc2a6f54f0e6b48c39884",
+    "Validation/test_music_midi.py": "39614b7e2c670aa756887260cf2adf1e83eba1c6dac3cb43dcdf74a2dc257b64",
+    "Validation/test_music_stems.py": "4ce364db8896e5591bcffb3d9790d1115bf78a2ce77f99b5415ed3323a5e8cc4",
+    "Validation/test_music_style.py": "178346ae3ce978e8dc9328651d70fab298f41ea56f1228929213d56c75ddc7d4",
+    "Validation/test_music_video.py": "df3ad02499ddbdde1be01c686528de5e4b45a9519137325f4c193e18e13a6279",
+    "Validation/test_native_browser.py": "a005fd3dc87e6665f0e7357b4ae5029b53b3944d830552746ad3a0c48bd08742",
+    "Validation/test_natural_voice.py": "d7d69053e809051a79a1f82a4b0c983b5552778928b098ed04ffa51c8d72d9b2",
+    "Validation/test_project_documents.py": "8e9f39acfe69eec3498abab72ec43c2ee5ce844ee0a492c1a177a5b3f6458d71",
+    "Validation/test_project_memory.py": "0952525304a444ed8e4fc6afb045084255fa4184573cd9844785424d2a7923aa",
+    "Validation/test_project_preview.py": "e2763a5944c85162e09d452043caf8711bcf9e64ea52ca5f68a330777b0591b4",
+    "Validation/test_public_api_catalog.py": "e162818a0cb252820fd57c29269a6a62300390b5009dce9f52164c17740a1c90",
+    "Validation/test_quick_image.py": "31d09d36dd9a786a3225cfe0eba17f1b2e62612559d26fabc2f07908abe2b1b2",
+    "Validation/test_radio_station.py": "bc94cc93f94f24180c6788cb2cd4694690b4c4c3be6d6f90cdb323909d704229",
+    "Validation/test_readiness_checklist.py": "fa0bc31a96ea40aad365eb03d5309f842955fbc3c07c177add6d3459a7a0782e",
+    "Validation/test_routing_memory.py": "02776643eb6b1221099eb8aea5889a2b0e0a16a4d763e6978f3481a3d860e088",
+    "Validation/test_runtime_features.py": "18cde383e9873ea394da4499d76ec2e4ab347ae81a2dff4c0a710a0c237f9fcc",
+    "Validation/test_scanned_pdf.py": "513d308c56ffb988306642ba7d2da51162cc977dd43c8ea04dae576ff4bffea1",
+    "Validation/test_self_diagnostics.py": "383157f35da1958519cdcef9ba25b39ba5c19ff7a61f4f63d860a72692b07ddc",
+    "Validation/test_setup_recovery.py": "850ecdd2deef8bfb891826e6ba276d6e5dce8dad4bc912753a089aca1dcd37cc",
+    "Validation/test_site_crawler.py": "917e5b019eacd31173b56ad0c3cf1b88c67d67678aaaddd52fb2bb62a321693e",
+    "Validation/test_skill_catalog.py": "636ff864680d2fc79403947ace94c6b0d0c887b3c3701892c4be27c032d3e43a",
+    "Validation/test_skill_hub.py": "9f4b1a16a0ba9ac8be39578fa1e59b4a2627ff1c262ca658c6efbaec8056cf63",
+    "Validation/test_system_gauges.py": "d3917f5eb15c58e553318286cb4465dc9c99a800ba823717c17d5af0f502da5e",
+    "Validation/test_table_ml.py": "cc7374c20405f35cf1333d41676ed1ffa6551be192ea226c07ff065158b1a88d",
+    "Validation/test_task_eta.py": "88940dc0ce44bcbaf5b3af03564d64518f8de10fa4fe8e6ad6238a0eb6a50ea2",
+    "Validation/test_toolbox_mcp.py": "91c0a812f4772320e9cf56ef95f05f295ba4e01f328f46b812305a9f95cc2beb",
+    "Validation/test_video_edit.py": "dd01c827ca9be780b6d96a533636ae53098961b959b3f1d7e8e418e5b28f5106",
+    "Validation/test_video_generation.py": "ff4b827006b3bef5690fd4ca9a40a33bd080c4fe7f12a79991dcfaebd6849404",
+    "Validation/test_voice_assistant.py": "c175d5ac5df77b71acbace59d3027cfcb9e7f5244b5b3eed0361ab7ceabaec98",
+    "Validation/test_web_tools.py": "3ca6216615dfa58d84bbbf7b028362020a27ef8a30afb5bb7624a0e1a21c8c3c",
+    "auto_route.py": "582f2d90e5fceb0b101946499af54dd0625d786db5c4f4071022f3dddfcff205",
+    "cale_voice.py": "c3381056787117db0e46339343583ddce0d6a112ad10c630963384d921232e9a",
+    "cale_voice_worker.py": "5e7e1e5fe4667e5bf697e11b5f0644181e106af668eb03939ceb42ed8894b471",
+    "camera_presence.py": "080df38c06946087471e23904c9dc8475b644993aa79936ddbb585c904092f03",
+    "capability_index.py": "292cf3cc3603c160a935447ba3e2ad4ce89cfc0904fafd8ae8c7991834b98822",
+    "chat_assistant.py": "e097be46f996542b3ee7b98242c106e18bda3c5c57a7bb5a0a0fd3a3cf3b03ae",
+    "chrome_connector.py": "41cd84b59b42923490a0079ead306ac67e5ff4948a866f2154169c035a412a73",
+    "context_window.py": "29c02e73531cdc20419c9a3d289b74392c0165e1a0d30377cffe9b0deb6530c6",
+    "core_tool_health.py": "4f243116cc8707d7a83455232332e9b16ac841df889a0487353bff6e37f783f9",
+    "design_tools.py": "36f7a926cb3fe17faf2ebb8dc78ee71003d738652a85921943797d419e37e90f",
+    "document_check.py": "598ec9c413ded94090deae8ef9c899d78fa2ee29b341dd9a18532d572d9c18c0",
+    "feedback_learning.py": "4bae70ac83819918e5161127575ec4ea1ff59c8cd71dc3329e20cae4595190a1",
+    "ffmpeg_runtime.py": "269f973f72e6cf177956918aee63ccec1e9fab55e73c093c2767f0142a492b3a",
+    "file_chat.py": "bc236198c4d0f25b999e3abe97a7c8a65d937a00bd88dbaa52a376a59dd9d963",
+    "model_fitness.py": "4e9afbc62fca6a6af4164575ebf20f7982ac6000b4e8c69ba764c0d6f5b919a4",
+    "model_library.py": "d54f931160ba8235a40841ef5b9ab868762510c30954b9e15c7b86243af644e7",
+    "music_analysis.py": "0263f2f6469985858733e622dc64670c6d3d447643177bef21ed6dd174e60f2b",
+    "music_backend.py": "0161cc131c41ee63729eb7245a388fadecd432f5359a40b0872da5b332f31137",
+    "music_edit.py": "1b7f00e6df9efcd586efd326a96f4b0a28fc51d7ed7b09dbf7da926ee127dde2",
+    "music_lyrics.py": "8354175d5d91ea014936494244874e4572e55e103ed8dfcac2498d74777c3f43",
+    "music_mastering.py": "cf43aedfbce878ef1f0319cefba0bc4f1e60cd242904d3bbc4c48ad1f8495386",
+    "music_midi.py": "78472dd62814ca96486b3c4cf6d4e78256c127679ec0b0d6cc16ececafd8b116",
+    "music_stems.py": "ea5378e3ed6244bf42b9207c3058df85479c92707a88578be8f48431cb468c89",
+    "music_style.py": "8049b5578b9e54cb42c1db4bb1cff7a8587e5bf86057cd78470e760a73e8977b",
+    "music_video.py": "5a9baf2f5a9150ff051b0549026c7c297320be33811f5602f81ae27db64cb623",
+    "native_browser.py": "315c317702da2e911120ab9b0a31fa6ef9a51a9a5a7d2760289b6444db0fab05",
+    "natural_voice.py": "631b1d1dbd48d09f01c9665780d51e66e11858c62004d4d64bfe41f03cfd2d70",
+    "project_documents.py": "83a566ec30fdd10e7490a88d8b68fd94b9e16192ec394fa24a59840d60b669ed",
+    "project_memory.py": "f9e9c31f38b23ca0501c4afa336f74241d3b38eef53ee437e4e847344ae29b2f",
+    "project_preview.py": "cbf1efade55aa347632cb9380cbe8f2489ec463783a9138f1dc0d1dd0d91fda0",
+    "public_api_catalog.py": "474161a4b681e1a2f069d8105e072753e78106b66ebaf302bd098e5f92e0e636",
+    "quick_calculator.py": "0f2a1aa0e285fe43ed9408bb417ea50fa61feae3c15795ad4987a90cdb669274",
+    "quick_image.py": "5fbe24b3ff4ce117e31f03899601c28f1345c608ea13aa6763bbaa3d53fc2c5f",
+    "radio_station.py": "10eeda3e5e18001595bd7319b23d027a14f65f9f5fb547581e0f3e4a2f4c5918",
+    "readiness_checklist.py": "338c9fbd5ab13e4d209a40f39570815e486ebf021968516c82eee9cafc7249ff",
+    "runtime_features.py": "1882c68b4baf77cf8e062e9f02df12922c8f6eb2e8b9ce2b061b8210d6853bcf",
+    "scanned_pdf.py": "dd0934c20f715e07df70b17139e5fa3c6a9391fddecf0cc3af87a41bd4317c46",
+    "self_diagnostics.py": "8b2fca384172b8401f078904f70f4332c8cc9323aaca0dd06f1cce19bb800179",
+    "setup_recovery.py": "ba6fc182c2de75fae52c6ea633bc51f2ef7ad9e91a07380a0f51f57e11894d11",
+    "site_crawler.py": "b78c9fbf73b2905bf1ac7958c4914d232f15555cfb7bc16672498726d6a36a28",
+    "skill_catalog.py": "18e097b8f0e09088b9bc01291fad10550b0cd4a71c6ab42cd1e36d5759560cc3",
+    "skill_hub.py": "7a38d21e8a53dcb0c107e6cca455a5000bc5987125f206b14afd92d2f5ad6612",
+    "system_gauges.py": "27a9eeea83624cb6799c663e8a4ae685bf2246194f57f13948245ae04f9485fa",
+    "table_ml.py": "6a55d0479af8755a8f5779f3a2beede5e96201f2a81e1a13ca0045a432da6d1f",
+    "task_eta.py": "51c1e81cbe94150a2fa75a27ceb6720a1da49f5eb18c65961bb7e11075f618f9",
+    "toolbox_mcp.py": "dd101a87ae2d5110042c75533ffbe8ee8bda7a9d7678e3566096c139fdfb0393",
+    "video_edit.py": "7c116f9247f8e7ec02e788fc567d21f72bb35e1178252e17cea4e44831dfe016",
+    "video_generation.py": "366beb48f25ff2da9dab142982acde81a5c69ab9cf8f877733e2b15639b330b3",
+    "voice_assistant.py": "656ebb73440fbdebc13400c850a540515bd4b5994918d37ea2db920f988d9405",
+    "web_tools.py": "25533ddf3b6c0a3ee2074b038069c1b3066430573ddf75171e4630775f31b7cd"
+  },
+  "validation": {
+    "affected_modules": {
+      "source": "3831e4f29b3b161f9d08f8cae0c2168933e18c17",
+      "exit_code": 0,
+      "seconds": 187.4854059999925,
+      "summary": "1974 passed, 26 skipped, 333 subtests passed in 186.17s (0:03:06)",
+      "modules": [
+        "Validation/test_auto_route.py",
+        "Validation/test_cale_voice.py",
+        "Validation/test_cale_voice_worker.py",
+        "Validation/test_camera_presence.py",
+        "Validation/test_capability_index.py",
+        "Validation/test_chat_assistant.py",
+        "Validation/test_chrome_connector.py",
+        "Validation/test_context_window.py",
+        "Validation/test_core_tool_health.py",
+        "Validation/test_design_tools.py",
+        "Validation/test_document_check.py",
+        "Validation/test_donation_regressions.py",
+        "Validation/test_feedback_learning.py",
+        "Validation/test_ffmpeg_runtime.py",
+        "Validation/test_file_chat.py",
+        "Validation/test_model_fitness.py",
+        "Validation/test_model_library.py",
+        "Validation/test_music_analysis.py",
+        "Validation/test_music_backend.py",
+        "Validation/test_music_edit.py",
+        "Validation/test_music_lyrics.py",
+        "Validation/test_music_mastering.py",
+        "Validation/test_music_midi.py",
+        "Validation/test_music_stems.py",
+        "Validation/test_music_style.py",
+        "Validation/test_music_video.py",
+        "Validation/test_native_browser.py",
+        "Validation/test_natural_voice.py",
+        "Validation/test_project_documents.py",
+        "Validation/test_project_memory.py",
+        "Validation/test_project_preview.py",
+        "Validation/test_public_api_catalog.py",
+        "Validation/test_quick_image.py",
+        "Validation/test_radio_station.py",
+        "Validation/test_readiness_checklist.py",
+        "Validation/test_routing_memory.py",
+        "Validation/test_runtime_features.py",
+        "Validation/test_scanned_pdf.py",
+        "Validation/test_self_diagnostics.py",
+        "Validation/test_setup_recovery.py",
+        "Validation/test_site_crawler.py",
+        "Validation/test_skill_catalog.py",
+        "Validation/test_skill_hub.py",
+        "Validation/test_system_gauges.py",
+        "Validation/test_table_ml.py",
+        "Validation/test_task_eta.py",
+        "Validation/test_toolbox_mcp.py",
+        "Validation/test_video_edit.py",
+        "Validation/test_video_generation.py",
+        "Validation/test_voice_assistant.py",
+        "Validation/test_web_tools.py"
+      ],
+      "source_bytes_unchanged": true,
+      "limits": [
+        "Changed modules only; no fresh installation, rendered song, account quota or whole-app completion claim."
+      ]
+    }
+  },
+  "reviewed_pr_resolutions": [
+    {
+      "number": 635,
+      "resolution": "merged",
+      "batch": "batch-635-637-638-639",
+      "merge": {
+        "headRefOid": "cf81de8664e07b23c4966e74d9d6044e86e7b3f6",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "d6a9fe1ac259f58bf79bec0dce843624a3c36a72"
+        },
+        "mergedAt": "2026-11-05T21:59:38Z",
+        "number": 635,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/635"
+      },
+      "validation": {
+        "passed": 82,
+        "skipped": 0,
+        "subtests": 32,
+        "seconds": 7.89,
+        "exit_code": 0,
+        "baseline_failed": 7
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 636,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "83c749e1c3da24f0f40de4098dba8b2a971f74be",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "20c610039cc91192942d5514310884493363e3b6"
+        },
+        "mergedAt": "2026-11-05T22:21:14Z",
+        "number": 636,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/636"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 637,
+      "resolution": "merged",
+      "batch": "batch-635-637-638-639",
+      "merge": {
+        "headRefOid": "e812e5fb9b54cf7b5fb10a73f6e4a7b46c2f9bfd",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "f502be2f35a9c30f37576596a13701eb804220b5"
+        },
+        "mergedAt": "2026-11-05T21:59:44Z",
+        "number": 637,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/637"
+      },
+      "validation": {
+        "passed": 82,
+        "skipped": 0,
+        "subtests": 32,
+        "seconds": 7.89,
+        "exit_code": 0,
+        "baseline_failed": 7
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 638,
+      "resolution": "merged",
+      "batch": "batch-635-637-638-639",
+      "merge": {
+        "headRefOid": "d355e454906e8d4590858fb737309e840ee3a727",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "a4b0fdf9b426edd5dac64ef41fd132f22631bb88"
+        },
+        "mergedAt": "2026-11-05T21:59:49Z",
+        "number": 638,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/638"
+      },
+      "validation": {
+        "passed": 82,
+        "skipped": 0,
+        "subtests": 32,
+        "seconds": 7.89,
+        "exit_code": 0,
+        "baseline_failed": 7
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 639,
+      "resolution": "merged",
+      "batch": "batch-635-637-638-639",
+      "merge": {
+        "headRefOid": "9d960ab35e684983a9a6db326dc626c05b57f45f",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "0b9d0137af82257fbe55ae868d0808c003cd0a7e"
+        },
+        "mergedAt": "2026-11-05T21:59:55Z",
+        "number": 639,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/639"
+      },
+      "validation": {
+        "passed": 82,
+        "skipped": 0,
+        "subtests": 32,
+        "seconds": 7.89,
+        "exit_code": 0,
+        "baseline_failed": 7
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 640,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "2f99833bea11549cac40087b670d3bf0ff65a9bc",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "9e7be48bda1fe62aaca83c0807232a6eb8880736"
+        },
+        "mergedAt": "2026-11-05T22:08:44Z",
+        "number": 640,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/640"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 641,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "aa1a587f1c92e0f0a353cde642a17ec2eaba7776",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "d4a6f0d216c20b4b728bd6ed64eddff3f7f25a51"
+        },
+        "mergedAt": "2026-11-05T22:08:16Z",
+        "number": 641,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/641"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 642,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "af46e2c4ad5198a5027a809106e3e7b1e1afc7fd",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "5ed237581d81b73ab76227b9f1e57081f852f7bb"
+        },
+        "mergedAt": "2026-11-05T22:21:19Z",
+        "number": 642,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/642"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 643,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "684e0e969807623b21385cc8a587833405150b5e",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "fb4e2739348aade8936be84d69e39b5ee4cd6ede"
+        },
+        "mergedAt": "2026-11-05T22:08:50Z",
+        "number": 643,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/643"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 644,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "8ecc1c2fbdfd7c07d00b1fd69a44d0c8643f5348",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "b8567bfc8714510c45848f7f0f97c81dfe46677d"
+        },
+        "mergedAt": "2026-11-05T22:08:57Z",
+        "number": 644,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/644"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 645,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "5a8ef5decb793718d75696945e7fe0457d2290bc",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "8fedeb03309ae0f6bb3c0f64ea414ae16196ea6c"
+        },
+        "mergedAt": "2026-11-05T22:08:21Z",
+        "number": 645,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/645"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 646,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "696a35156f3f0e29531acee5c7786091e6f47e33",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "ee18d5d3f52bd2e4f678537f503a4abd78a0242b"
+        },
+        "mergedAt": "2026-11-05T22:09:04Z",
+        "number": 646,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/646"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 647,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "f3707a073c371980dc004a7bc8cc986468082431",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "af03f59926bb35adf50863db64e82c762cce46f6"
+        },
+        "mergedAt": "2026-11-05T22:11:11Z",
+        "number": 647,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/647"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 648,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "d06ffbdfc3844ff039c09e5e1cf4eb60c14cb406",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "ca7dbfa8d609f15344c2614b0b6efbc7607de92d"
+        },
+        "mergedAt": "2026-11-05T22:08:26Z",
+        "number": 648,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/648"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 649,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "a7c89a4a818410fbf4c671522afccfd3760deb1f",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "d1ab3e54266c707d567257924da617ebaa35ba76"
+        },
+        "mergedAt": "2026-11-05T22:11:19Z",
+        "number": 649,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/649"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 650,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "476504e332e5c6f8dc1287b8a2c16797ff74ea10",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "a40b2401ac9cd51064adc383034fff6e93cb0470"
+        },
+        "mergedAt": "2026-11-05T22:08:31Z",
+        "number": 650,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/650"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 651,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "1e21f4027f8f4f7f1a8c6b933bad7fdb685a7e52",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "081f7bbdbd8ed091ee589434c03abf512b1e8aee"
+        },
+        "mergedAt": "2026-11-05T22:11:25Z",
+        "number": 651,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/651"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 652,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "cfad3c00b5f5424ace1a71bdffb37dde131912d7",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "01485162a0677f9d566e2ee5b934fd35e4f64d75"
+        },
+        "mergedAt": "2026-11-05T22:11:31Z",
+        "number": 652,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/652"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 653,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "80a82197db9fdfb5acb7977c992053f70c77aab2",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "76d97130a8f6ce0abdfeb5a1870da730ab933003"
+        },
+        "mergedAt": "2026-11-05T22:11:36Z",
+        "number": 653,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/653"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 654,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "4951fe773453edb45e2aeb927ee3c4ccac0d7fbd",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "d29ff97a217789c2b49505308da95df071a3b930"
+        },
+        "mergedAt": "2026-11-05T22:21:25Z",
+        "number": 654,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/654"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 655,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "06e771132fc8bcb23aef90aa157304e507229f00",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "df2cd219d39654f0eb021eac2253058a221faae7"
+        },
+        "mergedAt": "2026-11-05T22:11:42Z",
+        "number": 655,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/655"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 656,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "5d6595155eb71849ae968a82ea1c222ffb9aafe9",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "227f8995730e30f7d2c2d5fd376041d9137c622d"
+        },
+        "mergedAt": "2026-11-05T22:21:30Z",
+        "number": 656,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/656"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 657,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "c13f3020e0671b3e2bd6db8b0fa3769cb558c13c",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "c08edca3313807991069a55cacb10144a311d83e"
+        },
+        "mergedAt": "2026-11-05T22:21:34Z",
+        "number": 657,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/657"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 658,
+      "resolution": "merged",
+      "batch": "batch-641-645-648-650-658-640-643-644-646-647-649-651-652-653-655",
+      "merge": {
+        "headRefOid": "b1002a5e0030b6574796a6b868e80eec45b85f15",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "4a3454c27ab6b0a9fa619a82dfb1e2fed8cf6910"
+        },
+        "mergedAt": "2026-11-05T22:08:37Z",
+        "number": 658,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/658"
+      },
+      "validation": {
+        "passed": 599,
+        "skipped": 7,
+        "subtests": 258,
+        "seconds": 56.75,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 659,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "0c653f3f3a4fb8478ade4316b8a1fe8f7a51775c",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "652d2a2e0a86889e7b3bedb37c593d6c63bfa18f"
+        },
+        "mergedAt": "2026-11-05T22:21:40Z",
+        "number": 659,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/659"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 660,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "35244cbf73dc9df0bc8a47dbc7ec7e92f3d2594a",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "27bcedcf3476f44f012aa87477d1e64c35fe10ed"
+        },
+        "mergedAt": "2026-11-05T22:21:44Z",
+        "number": 660,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/660"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 661,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "f539856118bd993c049327fc0bff31be48ab2325",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "25cc8964250d0efcdeb3ec5dfbe9be31c4864801"
+        },
+        "mergedAt": "2026-11-05T22:21:50Z",
+        "number": 661,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/661"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 662,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "3c54c33a8cee7a7bd802bc087ba9c2beb4ad4146",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "4fe960f08326ba6eb8e2a5ee2f1be8ca3ce29447"
+        },
+        "mergedAt": "2026-11-05T22:21:55Z",
+        "number": 662,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/662"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 663,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "1e4ec4f3b74448b91dd8f605b453a93e2f05a5a6",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "23c4dba0893bef39c7fcdc62ed1ce1d91742eb41"
+        },
+        "mergedAt": "2026-11-05T22:22:01Z",
+        "number": 663,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/663"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 664,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "e50429240993734d0f8d58862bdd16f0015918ae",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "4bb74670efbd65a0db0de5cc0e2ec2b2ee5092d2"
+        },
+        "mergedAt": "2026-11-05T22:22:06Z",
+        "number": 664,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/664"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 665,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "d6f441d138dc9f256034eead3a3e0206eb86753c",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "39530b2ff8b209b25ab7debca403129ff5a1ebf3"
+        },
+        "mergedAt": "2026-11-05T22:22:11Z",
+        "number": 665,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/665"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 666,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "9ffdce2e4d9d6ccf263d862894fd8f9d12878041",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "d4603c457b5538d01ff45eab162cff872f73e3dd"
+        },
+        "mergedAt": "2026-11-05T22:22:16Z",
+        "number": 666,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/666"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 667,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "db5362deeb1c21931d717969e640f9edb1257165",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "0f6fad90230734c39ee76b7f482993f066126f1e"
+        },
+        "mergedAt": "2026-11-05T22:22:21Z",
+        "number": 667,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/667"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 668,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "9ee34623da3fb303661bef2b7933a97ec97289c6",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "2aaf0a127e3cb431ae3b7fd05c62e936a60ac2d5"
+        },
+        "mergedAt": "2026-11-05T22:22:26Z",
+        "number": 668,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/668"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 670,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "2f2f88f868c63dcdcead0ac9eb3bfb4280cbefb3",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "b8bb79675c53c704d30a9a169d38b1505d1721f5"
+        },
+        "mergedAt": "2026-11-05T22:22:31Z",
+        "number": 670,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/670"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 672,
+      "resolution": "merged",
+      "batch": "batch-672",
+      "merge": {
+        "headRefOid": "a8f7bc6eeca1a31f13557ebd518aa47c79b56aba",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "87d3b552135a35e33643a716f214de18b051b8ec"
+        },
+        "mergedAt": "2026-11-05T22:26:03Z",
+        "number": 672,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/672"
+      },
+      "validation": {
+        "passed": 91,
+        "skipped": 3,
+        "subtests": 0,
+        "seconds": 16.0,
+        "exit_code": 0,
+        "baseline_failed": 1
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 673,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "23cfc1ce5a91a02b7d9a84b9aba90b0c687d6e25",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "90f92aa4a11cda54a7d12dddac7d61b9c72a1cde"
+        },
+        "mergedAt": "2026-11-05T22:22:36Z",
+        "number": 673,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/673"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 677,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "030b914a318fda6e679707ebba59f5fe236da11e",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "65ffeaa9f5d4516fe79edc9783323f5d7fffd40a"
+        },
+        "mergedAt": "2026-11-05T22:22:42Z",
+        "number": 677,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/677"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 679,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "555fb1bc5ed2bba3762d7a305973d397ea902485",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "1a16ef49108943288073f9d7f0c63fc6e28d1714"
+        },
+        "mergedAt": "2026-11-05T22:22:48Z",
+        "number": 679,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/679"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 680,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "c1fa93cdcdf1ed26ff04a980ff8c6762ad87262a",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "5170259d01b49c3539737b49886988d23ff20e38"
+        },
+        "mergedAt": "2026-11-05T22:22:53Z",
+        "number": 680,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/680"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 707,
+      "resolution": "merged",
+      "batch": "batch-731-729-707-708-710",
+      "merge": {
+        "headRefOid": "62dc0e4cf5d5cb3f90b01ee103715d3b9349e1a8",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "eb49d4f0eb29ee18b19d471d15f5a1b895a958e9"
+        },
+        "mergedAt": "2026-11-05T21:58:44Z",
+        "number": 707,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/707"
+      },
+      "validation": {
+        "passed": 189,
+        "skipped": 2,
+        "subtests": 26,
+        "seconds": 85.39,
+        "exit_code": 0,
+        "baseline_failed": 5
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 708,
+      "resolution": "merged",
+      "batch": "batch-731-729-707-708-710",
+      "merge": {
+        "headRefOid": "0fcb3e0ef3a429d0cc0a34d0fd1f1340007fa78a",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "101c6217fa41fd31af6cd9f787f8ef85a46a015a"
+        },
+        "mergedAt": "2026-11-05T21:58:49Z",
+        "number": 708,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/708"
+      },
+      "validation": {
+        "passed": 189,
+        "skipped": 2,
+        "subtests": 26,
+        "seconds": 85.39,
+        "exit_code": 0,
+        "baseline_failed": 5
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 709,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "aee472a5a10368397b30372a707a81e267b1b9ce",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "15f598e624a1f12949f6dc982a05960776ae159d"
+        },
+        "mergedAt": "2026-11-05T22:22:58Z",
+        "number": 709,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/709"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 710,
+      "resolution": "merged",
+      "batch": "batch-731-729-707-708-710",
+      "merge": {
+        "headRefOid": "99b488f9e715e94831bd0108a2bec0ac9d332967",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "555892eeebbb25c3fd28cef820e7950f8f9a0623"
+        },
+        "mergedAt": "2026-11-05T21:58:54Z",
+        "number": 710,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/710"
+      },
+      "validation": {
+        "passed": 189,
+        "skipped": 2,
+        "subtests": 26,
+        "seconds": 85.39,
+        "exit_code": 0,
+        "baseline_failed": 5
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 711,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "a4832d3d5e157e7f205e3c4df107bc960ff46ae9",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "01185e61e914e9dd281a9d292d6e9bf2dcd81546"
+        },
+        "mergedAt": "2026-11-05T22:23:04Z",
+        "number": 711,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/711"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 712,
+      "resolution": "merged",
+      "batch": "batch-636-642-654-656-657-659-660-661-662-663-664-665-666-667-668-670-673-677-679-680-709-711-712",
+      "merge": {
+        "headRefOid": "d93f426ac60403dff59d03bd79180b2fa9f0031a",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "77231c67c3832f5872c01907509b3f3ebf7a50c0"
+        },
+        "mergedAt": "2026-11-05T22:23:10Z",
+        "number": 712,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/712"
+      },
+      "validation": {
+        "passed": 836,
+        "skipped": 12,
+        "subtests": 8,
+        "seconds": 66.45,
+        "exit_code": 0,
+        "baseline_failed": 44
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 716,
+      "head": "a198615b6f4c9c2465be1f59f25243c852e3356d",
+      "resolution": "closed_superseded",
+      "reason": "Release524 independently validates TAG directive prefixes, malformed escapes and placement. The original proposal accepts malformed manifests. Current full Chrome connector module53PASS1.01s; corrected production already shipped.",
+      "production_sha256": "30df8ea2964f8d3523583702a568d81bc570b1b28085aa042f1b2fa4e90a5c0e",
+      "observed_at": 1793915871.848973
+    },
+    {
+      "number": 729,
+      "resolution": "merged",
+      "batch": "batch-731-729-707-708-710",
+      "merge": {
+        "headRefOid": "d8fb9a82436b76e73eac8f13adae1d5907d8d750",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "baa05ddcae2f8ae1421e7a563ea1c904d42449f3"
+        },
+        "mergedAt": "2026-11-05T21:58:37Z",
+        "number": 729,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/729"
+      },
+      "validation": {
+        "passed": 189,
+        "skipped": 2,
+        "subtests": 26,
+        "seconds": 85.39,
+        "exit_code": 0,
+        "baseline_failed": 5
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 731,
+      "resolution": "merged",
+      "batch": "batch-731-729-707-708-710",
+      "merge": {
+        "headRefOid": "5e14c9c1100e8b0cae56efdfe8e72523fe24e3ea",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "bb306d3754129d5f4a90a54d2ee7b3f6f56c4824"
+        },
+        "mergedAt": "2026-11-05T21:58:32Z",
+        "number": 731,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/731"
+      },
+      "validation": {
+        "passed": 189,
+        "skipped": 2,
+        "subtests": 26,
+        "seconds": 85.39,
+        "exit_code": 0,
+        "baseline_failed": 5
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 732,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "e1c504fc28e911aafb3f179f91d3dc0ebe4da3b5",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "bba4bb7e9e559b84b79a20cc7ae267ff5a5a88c0"
+        },
+        "mergedAt": "2026-11-05T22:35:09Z",
+        "number": 732,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/732"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 733,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "1e4b03289adba2c8180b19b85c967fc82d6a8fd1",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "b4d7155283b9ae9a444c297a605d00cad46d6afc"
+        },
+        "mergedAt": "2026-11-05T22:35:14Z",
+        "number": 733,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/733"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 734,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "34039318d7c12bfd0d492adeaed78acef562c467",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "c861fac6a9a4c5ed9ed29274a14c6fd35358dc78"
+        },
+        "mergedAt": "2026-11-05T22:35:19Z",
+        "number": 734,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/734"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 735,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "6fe180b07ef9402e26dcae370fd91416c8b8663e",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "cbb8e5861c842b751210f4b9c7f0219843265394"
+        },
+        "mergedAt": "2026-11-05T22:35:25Z",
+        "number": 735,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/735"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 736,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "623a068a6d13536f717dd511ff2100382f7c3cc9",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "2149ef0666a86adef31305aed11919e7502fe68f"
+        },
+        "mergedAt": "2026-11-05T22:35:30Z",
+        "number": 736,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/736"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 737,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "5b636b1a89d0f40b2603f944e81fd966f48af6e3",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "66bffa4f713f1434eba64f6663718e7fa8ef1473"
+        },
+        "mergedAt": "2026-11-05T22:35:35Z",
+        "number": 737,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/737"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 738,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "1bc3f291559a37b33c0509f38189fd1fd45c7132",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "a7fa25590c3381cd921f8499830a764b8df3e8de"
+        },
+        "mergedAt": "2026-11-05T22:35:41Z",
+        "number": 738,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/738"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 739,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "432b9dac40fa2aaf92911ea12b8bcad136d3ca4d",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "b38e3e646fb4205ed538cae5f82190652ca672c6"
+        },
+        "mergedAt": "2026-11-05T22:35:46Z",
+        "number": 739,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/739"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 740,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "19f4d7ebd8efbf5e280d5fcd99d3c2a5e7d996cc",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "ebc668424d21a8b6babefb3ddf5ae8d114807dfd"
+        },
+        "mergedAt": "2026-11-05T22:35:51Z",
+        "number": 740,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/740"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 741,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "3b386732a2be1c626b52c930d810ea62f1e89ff5",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "9299455d968eb053eb4da33ea95a2319eac8d77c"
+        },
+        "mergedAt": "2026-11-05T22:35:56Z",
+        "number": 741,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/741"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 742,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "be50cd1973b432bdf36855015986f1cd1b5e6dc9",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "b18bd4621f7f1b525a82676a3af3f7ae832605b2"
+        },
+        "mergedAt": "2026-11-05T22:36:01Z",
+        "number": 742,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/742"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 743,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "dd168c8d522cbc4bb1162e6ac7902b4bb6598c6c",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "bf1da866683773f0bb78598e7b933f3bf522812b"
+        },
+        "mergedAt": "2026-11-05T22:36:06Z",
+        "number": 743,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/743"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 744,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "056243461474f3a7bfc49905d34cf02d31791a31",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "2dc6137ae446bdba2772494f8770c6210d978649"
+        },
+        "mergedAt": "2026-11-05T22:36:11Z",
+        "number": 744,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/744"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 745,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "33b303914f8b24b6e1ae2a0123c15f922e0f9348",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "b6e68eee766e8b727b1da42344fe0021ffb4eff8"
+        },
+        "mergedAt": "2026-11-05T22:36:16Z",
+        "number": 745,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/745"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 746,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "4b7bde02bd689954981e911bc5736cc212774448",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "7f5eff6e410faf65ebb1fc72562f48255037669e"
+        },
+        "mergedAt": "2026-11-05T22:36:21Z",
+        "number": 746,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/746"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 747,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "54a40f5bc858bb6a001dd1f59a734b5f4cab078f",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "05f566bd85192519cba3626dca7256bb2291c221"
+        },
+        "mergedAt": "2026-11-05T22:36:26Z",
+        "number": 747,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/747"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 748,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "b586a2301810d8efa7b10aef01fc562b6ecf1f1a",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "6dbd31bbb94799f08daf2dc98383f558336f6c25"
+        },
+        "mergedAt": "2026-11-05T22:36:31Z",
+        "number": 748,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/748"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 749,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "5a19324c439cae1aa925d7826bebc0672da97e5e",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "65c93741ef711a3262ff3fd305dce7f3d6ed0827"
+        },
+        "mergedAt": "2026-11-05T22:36:35Z",
+        "number": 749,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/749"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 750,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "3521c2d2af496925185eae9f84349b7814fba682",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "08fff67176ae0b6be5d1d26a43b0982fdb67f611"
+        },
+        "mergedAt": "2026-11-05T22:36:40Z",
+        "number": 750,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/750"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 751,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "7c6b557888b59a6fb652fd975ac5644c3c2e43a4",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "e99c01208004ee7b36e7f4ea9c992186fecc8de6"
+        },
+        "mergedAt": "2026-11-05T22:36:44Z",
+        "number": 751,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/751"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 752,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "a46ac9a64b59f2e39b13fca1c80f9ab16494fff2",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "68cf448d5300d20228fa0fff6cacd749007b6d1d"
+        },
+        "mergedAt": "2026-11-05T22:36:49Z",
+        "number": 752,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/752"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 753,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "29ca68f38ffdb0277dc3f757e6b2692e607a2491",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "3e52f65a4ad4f2b5325483f6cf0c50e234139eb9"
+        },
+        "mergedAt": "2026-11-05T22:36:55Z",
+        "number": 753,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/753"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 754,
+      "resolution": "merged",
+      "batch": "batch-732-733-734-735-736-737-738-739-740-741-742-743-744-745-746-747-748-749-750-751-752-753-754",
+      "merge": {
+        "headRefOid": "28c9d07bafe8c85c874f6526187c7ec51583ffd3",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "a39fa6551321cf69c04221a982449b48969b3e64"
+        },
+        "mergedAt": "2026-11-05T22:37:03Z",
+        "number": 754,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/754"
+      },
+      "validation": {
+        "passed": 852,
+        "skipped": 2,
+        "subtests": 271,
+        "seconds": 109.7,
+        "exit_code": 0,
+        "baseline_failed": 52
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 755,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "2642935d5500543c07032a911abbf3cc5f08fb1b",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "83496036c09e3d30a042285d0c728249b707b000"
+        },
+        "mergedAt": "2026-11-05T22:51:26Z",
+        "number": 755,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/755"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 756,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "00140d1b1289c20d4b4fa3d4664a2143998c5488",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "055785f162eb1ac130ca866a44addb237745d4d3"
+        },
+        "mergedAt": "2026-11-05T22:51:31Z",
+        "number": 756,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/756"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 757,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "a54993f60bf444df48226da479a6488a24bc4fd8",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "4ca5907123c144589cc2ed093eded0cbeb215d1c"
+        },
+        "mergedAt": "2026-11-05T22:51:36Z",
+        "number": 757,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/757"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 758,
+      "head": "0401543b3add269b742ee5bb4367a7397c347675",
+      "resolution": "closed_rejected",
+      "reason": "The proposed condition discards a relevant middle passage when there are no positional hints. The PR removes the existing warranty-code and end-of-file assertions instead of preserving that regression.",
+      "baseline_finds_warranty": true,
+      "candidate_finds_warranty": false,
+      "synthetic_text_only": true,
+      "model_calls": 0,
+      "observed_at": 1793918341.211879
+    },
+    {
+      "number": 759,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "13b35af7e74a8a89a59b47493dc916d1133883ca",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "11127e02df23d4ffbbcabd735eaf15fa49cfb602"
+        },
+        "mergedAt": "2026-11-05T22:51:41Z",
+        "number": 759,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/759"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 760,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "3242df57c925195c354d69daf358af16e9fba6a4",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "3f74b3b9171a3f50850bcb33cb564995f8164022"
+        },
+        "mergedAt": "2026-11-05T22:51:45Z",
+        "number": 760,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/760"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 761,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "68c724f7f7894db806a0b562e4c46e89acdd0930",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "94dce76aec84308dc7ccf7f291bcd814f6506dd9"
+        },
+        "mergedAt": "2026-11-05T22:51:50Z",
+        "number": 761,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/761"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 762,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "3c16b4c8f2ed4356cb3566f9422ba590f35ab67a",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "751104fc51d4191f49631832fb74e9a4de82d890"
+        },
+        "mergedAt": "2026-11-05T22:51:56Z",
+        "number": 762,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/762"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 763,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "d2041ca724ec9412299818666fc5beb1da382a1d",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "d5326e17ddf746cc01f786721fc77655b7ff50a5"
+        },
+        "mergedAt": "2026-11-05T22:52:01Z",
+        "number": 763,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/763"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 764,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "21bf281470bcfb8798bb5bd91fa99edb8ff322ed",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "936611ae699df08d229e14ab474ab16194e8db29"
+        },
+        "mergedAt": "2026-11-05T22:52:06Z",
+        "number": 764,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/764"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 765,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "859c8fff2899abdd8995e7507755799c1b141f16",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "b6b1e62a9d4d1187b7148bed884b1950cad6279b"
+        },
+        "mergedAt": "2026-11-05T22:52:11Z",
+        "number": 765,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/765"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 766,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "a1ca1386bf6dd1f061aaaa34d891f085df45061a",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "0da28f1faf321ced33fb05eb7eab11a969606afe"
+        },
+        "mergedAt": "2026-11-05T22:52:16Z",
+        "number": 766,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/766"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 767,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "126f2c6d1c1089a1d0d51ee06e42b42b9e304975",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "974d43d297015edc3699d72416af492ffb6ebe94"
+        },
+        "mergedAt": "2026-11-05T22:52:21Z",
+        "number": 767,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/767"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 768,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "f71906fb9a1fbf58d151cbc10a96ec998b365b8a",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "72dafa9a32c44045899b6ec82794b7873f14c013"
+        },
+        "mergedAt": "2026-11-05T22:52:27Z",
+        "number": 768,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/768"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 769,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "49890c9ae4212726acd4e33f4244f6c2334822e2",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "7390bc2ec3fc8692e30bbbbc35156dadd2e33c29"
+        },
+        "mergedAt": "2026-11-05T22:52:33Z",
+        "number": 769,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/769"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 770,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "f8b6bd4e9e468c009da7f0cbd73db1e86868a973",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "a373f71b3684b42604f3d51ab4aece885276f266"
+        },
+        "mergedAt": "2026-11-05T22:52:38Z",
+        "number": 770,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/770"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    },
+    {
+      "number": 771,
+      "resolution": "merged",
+      "batch": "batch-755-756-757-759-760-761-762-763-764-765-766-767-768-769-770-771",
+      "merge": {
+        "headRefOid": "4f030ade522a271d12ab6667fe927a364f739d26",
+        "isDraft": false,
+        "mergeCommit": {
+          "oid": "3831e4f29b3b161f9d08f8cae0c2168933e18c17"
+        },
+        "mergedAt": "2026-11-05T22:52:43Z",
+        "number": 771,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/771"
+      },
+      "validation": {
+        "passed": 618,
+        "skipped": 13,
+        "subtests": 2,
+        "seconds": 45.63,
+        "exit_code": 0,
+        "baseline_failed": 26
+      },
+      "merged_bytes_match_tested": true
+    }
+  ],
+  "limits": [
+    "Focused and combined module validation is not a full installed self-check or fresh-PC qualification.",
+    "Actual music startup checks do not prove rendered vocals, quality or five-minute completion.",
+    "Original autonomous app benchmark remains incomplete; no model promotion is claimed."
+  ]
+}

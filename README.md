@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.532 integrates reviewed donated fixes for task timing, local memory, file handling, voice workers, music processing and recovery. Contributions were reproduced, corrected where needed and checked together. [Validation and limits](benchmarks/results/reviewed-donations-532-20261105.json).
+
 Release 0.5.531 includes three reviewed donated fixes: recovery from malformed self-check reports, invalid game-model probe responses, and tool-call metadata in social speech. [Validation and limits](benchmarks/results/donated-recovery-531-20261105.json).
 
 Release 0.5.530 preserves reported Claude subscription usage when a bounded coding step ends in an error, rejects unrecognized completion envelopes, and handles malformed authentication status cleanly. [Validation and limits](benchmarks/results/claude-result-accounting-530-20261105.json).
