@@ -3022,3 +3022,121 @@ def test_explicit_effort_does_not_relax_original_required_tool_contract():
         assert upstream.call_args.args[1]["think"] is True
     finally:
         case.doCleanups()
+
+
+# Union diagnostics select intent; the original validator remains authoritative.
+def union_discriminator_combined_schema(union="oneOf"):
+    import copy
+    fields = {"type": "object", "additionalProperties": {"type": "string"}}
+    case = {"type": "object", "properties": {
+        "set": fields, "click": {"type": "array", "items": {"type": "string"}},
+        "field_values": fields, "expect": fields}, "additionalProperties": False}
+    base = {"type": "object", "properties": {
+        "path": {"type": "string"}, "revise_inputs": {"type": "boolean"},
+        "assertion_replacements": fields,
+        "cases": {"type": "array", "items": case}},
+        "required": ["path", "cases"], "additionalProperties": False}
+    branches = []
+    for absent, flag in (("assertion_replacements", None), ("revise_inputs", None), (None, False)):
+        branch = copy.deepcopy(base)
+        if absent:
+            branch["properties"].pop(absent)
+        if absent != "assertion_replacements":
+            branch["required"].append("assertion_replacements")
+        if flag is False:
+            branch["properties"]["revise_inputs"] = {"type": "boolean", "const": False}
+            branch["required"].append("revise_inputs")
+        branches.append(branch)
+    combined = copy.deepcopy(base)
+    combined["properties"]["revise_inputs"] = {"type": "boolean", "const": True}
+    combined["properties"]["cases"]["items"]["properties"].pop("expect")
+    combined["properties"]["cases"]["items"]["required"] = ["set", "click", "field_values"]
+    combined["required"] += ["revise_inputs", "assertion_replacements"]
+    return {"type": "object", union: [*branches, combined]}
+
+
+@pytest.mark.parametrize("union", ["oneOf", "anyOf"])
+@pytest.mark.parametrize("fault", ["extra_assertion", "missing_fields"])
+def test_union_discriminator_combined_leaf_not_remove_mapping(union, fault):
+    from jsonschema import Draft202012Validator
+    schema = union_discriminator_combined_schema(union)
+    args = {"path": "index.html", "revise_inputs": True,
+        "assertion_replacements": {"state:amount.value": "field:amount"},
+        "cases": [{"set": {"amount": "10"}, "click": ["submit"],
+                   "field_values": {"amount": "10"}}]}
+    validator = Draft202012Validator(schema)
+    assert validator.is_valid(args)
+    if fault == "extra_assertion":
+        args["cases"][0]["expect"] = {"status": "PRIVATE_EXPECTED_SENTINEL"}
+        expected = ["cases", 0, "expect"]
+    else:
+        args["cases"][0].pop("field_values")
+        expected = ["cases", 0, "field_values"]
+    error = next(validator.iter_errors(args))
+    failure = cloud.ToolArgumentError("check_webapp", error, args)
+    assert failure.path == expected
+    assert "PRIVATE_EXPECTED_SENTINEL" not in str(failure)
+    assert not validator.is_valid(args)  # Diagnostic selection never grants acceptance.
+
+
+def test_union_discriminator_boolean_true_is_not_numeric_one():
+    from jsonschema import Draft202012Validator
+    schema = {"oneOf": [
+        {"type": "object", "properties": {"kind": {"const": 1}, "payload": {}},
+         "required": ["kind", "payload"], "additionalProperties": False},
+        {"type": "object", "properties": {"kind": {"const": True}, "payload": {
+            "type": "object", "required": ["name", "value"]}},
+         "required": ["kind", "payload"], "additionalProperties": False}]}
+    args = {"kind": True, "payload": {}}
+    error = next(Draft202012Validator(schema).iter_errors(args))
+    assert cloud.ToolArgumentError("typed_union", error).path == ["payload", "name"]
+
+
+@pytest.mark.parametrize("pattern", [False, True])
+def test_union_discriminator_forbidden_present_keys_respect_pattern_properties(pattern):
+    from jsonschema import Draft202012Validator
+    generic = {"type": "object", "properties": {"payload": {}},
+               "additionalProperties": False}
+    explicit = {"type": "object", "properties": {"payload": {
+        "type": "object", "required": ["name"]}}, "additionalProperties": False}
+    key = "x_mode" if pattern else "mode"
+    if pattern:
+        explicit["patternProperties"] = {"^x_": {"type": "string"}}
+    else:
+        explicit["properties"][key] = {"type": "string"}
+    schema = {"oneOf": [generic, explicit]}
+    error = next(Draft202012Validator(schema).iter_errors({key: "chosen", "payload": {}}))
+    assert cloud.ToolArgumentError("shape_union", error).path == ["payload", "name"]
+
+
+@pytest.mark.parametrize("operation", ["action", "check_tool"])
+def test_union_discriminator_operation_priority_precedes_secondary_scalar_matches(operation):
+    from jsonschema import Draft202012Validator
+    schema = {"oneOf": [
+        {"type": "object", "properties": {
+            operation: {"const": "plan"}, "mode": {"const": "json"},
+            "encoding": {"const": "utf8"}},
+         "required": [operation, "mode", "encoding"], "additionalProperties": False},
+        {"type": "object", "properties": {
+            operation: {"const": "run"}, "mode": {"const": "text"},
+            "encoding": {"const": "ascii"}},
+         "required": [operation, "mode", "encoding"], "additionalProperties": False}]}
+    args = {operation: "plan", "mode": "text", "encoding": "ascii"}
+    error = next(Draft202012Validator(schema).iter_errors(args))
+    failure = cloud.ToolArgumentError("operation_union", error, args)
+    assert failure.path == ["mode"]  # Preserve selected operation; correct its options.
+    assert not Draft202012Validator(schema).is_valid(args)
+
+
+@pytest.mark.parametrize("value", [{"mode": "selected"}, ["selected"]])
+def test_union_discriminator_ignores_nonscalar_enum_values_when_scoring(value):
+    from jsonschema import Draft202012Validator
+    schema = {"oneOf": [
+        {"type": "object", "properties": {"payload": {"enum": [value]},
+            "detail": {"type": "object", "required": ["name"]}},
+         "required": ["payload", "detail"], "additionalProperties": False},
+        {"type": "object", "properties": {"payload": {},
+            "detail": {"type": "object", "required": ["other"]}},
+         "required": ["payload", "detail"], "additionalProperties": False}]}
+    error = next(Draft202012Validator(schema).iter_errors({"payload": value, "detail": {}}))
+    assert cloud.ToolArgumentError("structured_enum_union", error).path == ["detail", "name"]

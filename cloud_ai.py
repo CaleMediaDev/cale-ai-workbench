@@ -426,6 +426,26 @@ def argument_error_detail(error):
     relevant leaf gives the worker a useful path without printing that schema
     or the rejected instance. This changes diagnostics, never validation.
     """
+    def scalar(value):
+        return value is None or type(value) in (bool, int, float, str)
+
+    def scalar_equal(left, right):
+        # JSON booleans are not numbers, even though Python True == 1.
+        if not scalar(left) or not scalar(right):
+            return False
+        if type(left) in (int, float) and type(right) in (int, float):
+            return left == right
+        return type(left) is type(right) and left == right
+
+    def scalar_choices(rule):
+        choices = rule.get("enum")
+        if "const" in rule:
+            fixed = rule["const"]
+            choices = ([fixed] if choices is None else
+                       [value for value in choices if scalar_equal(value, fixed)])
+        return ([value for value in choices if scalar(value)]
+                if isinstance(choices, list) else None)
+
     for _ in range(12):
         if error.validator not in {"anyOf", "oneOf"} or not error.context:
             break
@@ -440,10 +460,10 @@ def argument_error_detail(error):
                 rule = branch.get("properties", {}).get(key, {}) if isinstance(branch, dict) else {}
                 if not isinstance(rule, dict):
                     continue
-                for value in rule.get("enum", [rule["const"]] if "const" in rule else []):
-                    if value not in allowed:
+                for value in scalar_choices(rule) or []:
+                    if not any(scalar_equal(value, present) for present in allowed):
                         allowed.append(value)
-            if allowed and error.instance[key] not in allowed:
+            if allowed and not any(scalar_equal(error.instance[key], value) for value in allowed):
                 return ValidationError("Invalid operation discriminator", validator="enum",
                     validator_value=allowed, instance=error.instance[key],
                     path=[*error.absolute_path, key])
@@ -456,23 +476,34 @@ def argument_error_detail(error):
             if not children:
                 continue
             properties = branch.get("properties", {})
-            matches = 0
-            conflicts = 0
-            for key in ("action", "check_tool"):
-                if key not in error.instance:
-                    continue
+            operation_matches = operation_conflicts = 0
+            matches = conflicts = 0
+            for key, attempted in error.instance.items():
+                if not scalar(attempted):
+                    continue  # Structured enum values are not scalar discriminators.
                 rule = properties.get(key, {})
                 if not isinstance(rule, dict):
                     continue
-                allowed = rule.get("enum", [rule["const"]] if "const" in rule else None)
+                allowed = scalar_choices(rule)
                 if allowed is not None:
-                    if error.instance[key] in allowed:
+                    if any(scalar_equal(attempted, value) for value in allowed):
                         matches += 1
+                        if key in ("action", "check_tool"):
+                            operation_matches += 1
                     else:
                         conflicts += 1
-            # Prefer an explicit action/checker match, then the branch needing
-            # the fewest corrections. Child order remains deterministic.
-            candidates.append(((matches, -conflicts, -len(children)), children))
+                        if key in ("action", "check_tool"):
+                            operation_conflicts += 1
+            forbidden = 0
+            if branch.get("additionalProperties") is False:
+                patterns = branch.get("patternProperties", {})
+                forbidden = sum(key not in properties and not any(
+                    re.search(pattern, key) for pattern in patterns) for key in error.instance)
+            # Preserve the selected operation before considering its options.
+            # Generic scalar discriminators and complete shapes break ties;
+            # the original child order remains deterministic.
+            candidates.append(((operation_matches, -operation_conflicts,
+                                matches, -conflicts, -forbidden, -len(children)), children))
         if not candidates:
             break
         _score, children = max(candidates, key=lambda item: item[0])
