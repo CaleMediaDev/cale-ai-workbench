@@ -53,7 +53,8 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
         # The cover fills the frame; black spectrum pixels become transparent
         # so the animated colors sit over the person's own image.
         filters = (
-            f"[1:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            "[1:v]scale=iw*sar:ih,setsar=1,"
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},format=rgba[cover];"
             + spectrum + ",format=rgba,colorkey=0x000000:0.05:0.1[spec];"
             f"[cover][spec]overlay=shortest=1:format=auto,setsar=1,format=yuv420p[{video_label}]"
