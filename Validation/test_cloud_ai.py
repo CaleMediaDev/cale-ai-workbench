@@ -25,6 +25,116 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cloud_ai as cloud
 import cloud_providers
 
+
+@pytest.fixture
+def claude_result_case(tmp_path, monkeypatch):
+    """Owned registry and fake official CLI; no account or model invocation."""
+    import usage_history
+    monkeypatch.setattr(cloud_providers, 'AGENT_ROOT', tmp_path/'agents')
+    monkeypatch.setattr(cloud, 'ROOT', tmp_path)
+    monkeypatch.setattr(cloud, 'STATE', tmp_path/'Cloud')
+    monkeypatch.setattr(cloud.pc_offline, 'offline', lambda:False)
+    monkeypatch.setattr(usage_history, 'DATABASE', tmp_path/'usage.db')
+    cloud.routing_mode.save_scope(cloud.STATE, 'both')
+    state=tmp_path/'LongTasks';state.mkdir()
+    with sqlite3.connect(state/'projects.db') as db:
+        db.execute('CREATE TABLE projects(id TEXT PRIMARY KEY,ai_route TEXT)')
+        db.execute('INSERT INTO projects VALUES(?,?)',('c'*12,'both'))
+    folder=tmp_path/'project';folder.mkdir()
+    binary=cloud_providers._subscription_binary('claude');binary.parent.mkdir(parents=True);binary.write_bytes(b'MZfake')
+    cloud_providers._save_agent_preferences('claude',{'login_completed':True,'enabled':True})
+    token=usage_history.CURRENT_TASK.set('c'*12)
+    def run(report, code=0):
+        with patch.object(cloud_providers,'_agent_process',side_effect=[
+                (0,json.dumps({'authMethod':'claude.ai'}),''),(code,json.dumps(report),'')]):
+            return cloud_providers.run_subscription_task('claude',folder,'Repair one function')
+    def rows():
+        if not usage_history.DATABASE.exists():return []
+        with sqlite3.connect(usage_history.DATABASE) as db:
+            return db.execute('SELECT source,task_id,total_tokens FROM usage_events').fetchall()
+    try:yield SimpleNamespace(run=run,rows=rows,folder=folder)
+    finally:usage_history.CURRENT_TASK.reset(token)
+
+
+def claude_final(subtype='success',is_error=False):
+    report={'type':'result','subtype':subtype,'is_error':is_error,
+        'usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':10,'cache_creation_input_tokens':4}}
+    if subtype=='success':report['result']='Proposed edits; independent checks still required.'
+    else:report['errors']=['Partial edits may exist.']
+    return report
+
+
+@pytest.mark.parametrize('subtype',['error_max_turns','error_during_execution','error_max_budget_usd','error_max_structured_output_retries'])
+def test_claude_failed_final_result_keeps_reported_usage_and_failure(claude_result_case,subtype):
+    result=claude_result_case.run(claude_final(subtype,True),1)
+    assert result['status']=='agent_error' and result['exit_code']==1
+    assert result['usage']['total_tokens']==19 and result['verification']=='agent_report_only'
+    assert result['errors']
+    assert claude_result_case.rows()==[('claude_subscription','c'*12,19)]
+
+
+@pytest.mark.parametrize('report',[{}, {'result':'done'},
+    {'type':'result','subtype':'future_unknown','is_error':False,'result':'done'},
+    {'type':'result','subtype':'success','is_error':'false','result':'done'},
+    {'type':'result','subtype':[],'is_error':False,'result':'done'},
+    {'type':'result','subtype':'error_max_turns','is_error':True,'errors':'wrong type'},
+    {'type':'result','subtype':'success','is_error':False,'result':None}])
+def test_claude_unknown_final_shape_never_claims_finished_or_attributes_usage(claude_result_case,report):
+    report={**report,'usage':{'input_tokens':5,'output_tokens':6}}
+    result=claude_result_case.run(report)
+    assert result['status']=='agent_error' and result['usage'] is None
+    assert result['errors'] and claude_result_case.rows()==[]
+
+
+def test_claude_success_still_requires_host_verification(claude_result_case):
+    result=claude_result_case.run(claude_final())
+    assert result['status']=='finished' and result['verification']=='agent_report_only'
+    assert result['errors']==[] and result['usage']['total_tokens']==19
+
+
+def test_claude_nonzero_exit_cannot_turn_success_envelope_into_finished(claude_result_case):
+    result=claude_result_case.run(claude_final(),1)
+    assert result['status']=='agent_error' and result['usage']['total_tokens']==19 and result['errors']
+
+
+def test_claude_error_subtype_dominates_zero_exit_and_false_error_flag(claude_result_case):
+    result=claude_result_case.run(claude_final('error_max_turns',False),0)
+    assert result['status']=='agent_error' and result['usage']['total_tokens']==19
+    assert 'turn limit' in result['errors'][0]
+
+
+def test_claude_failed_final_without_reported_usage_stays_unknown(claude_result_case):
+    report=claude_final('error_during_execution',True);report.pop('usage')
+    result=claude_result_case.run(report,1)
+    assert result['status']=='agent_error' and result['usage'] is None
+    assert claude_result_case.rows()==[]
+
+
+def test_claude_failed_final_prefers_actual_per_model_usage(claude_result_case):
+    report=claude_final('error_max_turns',True)
+    report['modelUsage']={'haiku':{'inputTokens':1,'outputTokens':2,'cacheReadInputTokens':3,'cacheCreationInputTokens':4},
+        'sonnet':{'inputTokens':5,'outputTokens':6}}
+    result=claude_result_case.run(report,1)
+    assert result['status']=='agent_error' and result['usage']['total_tokens']==21
+    assert claude_result_case.rows()==[('claude_subscription','c'*12,10),('claude_subscription','c'*12,11)]
+
+
+@pytest.mark.parametrize('auth',[[],None,'not a status',42])
+def test_claude_malformed_auth_stops_before_task_dispatch(claude_result_case,auth):
+    with patch.object(cloud_providers,'_agent_process',return_value=(0,json.dumps(auth),'')) as process:
+        with pytest.raises(ValueError,match='not currently signed'):
+            cloud_providers.run_subscription_task('claude',claude_result_case.folder,'One step')
+    assert process.call_count==1 and claude_result_case.rows()==[]
+
+
+@pytest.mark.parametrize('auth',[[],None,'not a status',42])
+def test_claude_malformed_login_status_never_records_connected(claude_result_case,auth):
+    with patch.object(cloud_providers,'_agent_process',side_effect=[(0,'ignored',''),(0,json.dumps(auth),'')]):
+        with pytest.raises(RuntimeError,match='subscription'):
+            cloud_providers.connect_subscription_agent('claude')
+    status=cloud_providers.subscription_agent_status('claude')
+    assert status['connected'] is False and status['enabled'] is False
+
 ANSWER = {
     "id": "test",
     "created": 1,
@@ -2668,7 +2778,8 @@ class SubscriptionAgentTests(unittest.TestCase):
                 cloud_providers._save_agent_preferences(provider,{'login_completed':True,'enabled':True})
             token=usage_history.CURRENT_TASK.set('b'*12)
             try:
-                report={'model':'haiku','usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':10,'cache_creation_input_tokens':4}}
+                report={'type':'result','subtype':'success','is_error':False,'result':'Proposed changes',
+                    'model':'haiku','usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':10,'cache_creation_input_tokens':4}}
                 with patch.object(cloud_providers,'_agent_process',side_effect=[(0,json.dumps({'authMethod':'claude.ai'}),''),(0,json.dumps(report),'')]):
                     measured=cloud_providers.run_subscription_task('claude',folder,'task')
                 self.assertEqual(measured['usage'],{'prompt_tokens':16,'completion_tokens':3,'total_tokens':19})

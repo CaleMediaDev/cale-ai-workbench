@@ -228,8 +228,8 @@ def connect_subscription_agent(provider, on_progress=None):
         if provider == "claude":
             code, output, _ = _agent_process([str(_subscription_binary(provider)), "--setting-sources", "user", "auth", "status"], cwd=AGENT_ROOT, timeout=15, provider=provider)
             try: status = json.loads(output)
-            except ValueError: status = {}
-            if code != 0 or status.get("authMethod") != "claude.ai":
+            except (ValueError, RecursionError): status = {}
+            if code != 0 or not isinstance(status, dict) or status.get("authMethod") != "claude.ai":
                 raise RuntimeError("Sign in to Claude Code with your Claude subscription, rather than an API account.")
         value = _agent_preferences(provider)
         value.update(login_completed=True, enabled=False)
@@ -318,19 +318,43 @@ def run_subscription_task(provider, folder, prompt, timeout=300):
         code, output, _ = _agent_process([str(_subscription_binary(provider)), "--setting-sources", "user", "auth", "status"],
             cwd=folder, timeout=15, provider=provider)
         try: auth = json.loads(output)
-        except ValueError: auth = {}
-        if code != 0 or auth.get("authMethod") != "claude.ai":
+        except (ValueError, RecursionError): auth = {}
+        if code != 0 or not isinstance(auth, dict) or auth.get("authMethod") != "claude.ai":
             raise ValueError("The official agent is not currently signed into your Claude subscription.")
     started = time.monotonic()
     code, output, _ = _agent_process(command, cwd=folder, timeout=timeout,
         cancel=lambda: blocked() or not subscription_agent_status(provider)["enabled"], provider=provider, subscription_task=True)
-    if code != 0: raise RuntimeError("Official agent could not finish this task; sign-in, plan limits, or permissions may need attention.")
+    failed_process = "Official agent could not finish this task; sign-in, plan limits, or permissions may need attention."
+    if code != 0 and provider != "claude":raise RuntimeError(failed_process)
     try: result = json.loads(output)
-    except ValueError: raise ValueError("Official agent did not return its documented JSON result.") from None
+    except (ValueError, RecursionError):
+        if code != 0:raise RuntimeError(failed_process) from None
+        raise ValueError("Official agent did not return its documented JSON result.") from None
     if not isinstance(result, dict): raise ValueError("Official agent returned an invalid task result.")
+    recognized = True
+    failed = code != 0 or bool(result.get("is_error"))
+    error_message = failed_process
+    if provider == "claude":
+        # Error result envelopes carry real usage too. Validate the documented
+        # discriminator before treating numbers as CLI-reported usage; arbitrary
+        # JSON/model prose must not look like a completed coding session.
+        subtype = result.get("subtype")
+        failures = {
+            "error_max_turns": "Claude Code reached this step's turn limit. Inspect partial edits and continue from the saved project.",
+            "error_during_execution": "Claude Code reported an execution error. Inspect partial edits and run the project's checks.",
+            "error_max_budget_usd": "Claude Code reached its configured budget. Inspect partial edits and continue with an enabled route.",
+            "error_max_structured_output_retries": "Claude Code could not produce the requested structured result. Inspect partial edits before continuing.",
+        }
+        recognized = (result.get("type") == "result" and type(result.get("is_error")) is bool
+            and isinstance(subtype, str) and (subtype == "success" and isinstance(result.get("result"), str)
+                or subtype in failures and isinstance(result.get("errors"), list)
+                and all(isinstance(item, str) for item in result["errors"])))
+        failed = not recognized or code != 0 or result.get("is_error") is True or subtype != "success"
+        error_message = ("Claude Code returned an unrecognized final result; completion and usage are unconfirmed."
+            if not recognized else failures.get(subtype, failed_process))
     # Record only reported counts, never estimated plan quota or inferred cost.
     # Claude cache read/write input is separate from its uncached input count.
-    usage = _subscription_usage(provider, result)
+    usage = _subscription_usage(provider, result) if recognized else None
     if usage is not None:
         models = result.get("modelUsage") if provider == "claude" else None
         if isinstance(models, dict) and models:
@@ -343,8 +367,8 @@ def run_subscription_task(provider, folder, prompt, timeout=300):
         else:
             usage_history.record_completion({"model": result.get("model", SUBSCRIPTION_AGENTS[provider]["name"] + " (model unreported)"),
                                              "usage": usage}, provider + "_subscription", time.monotonic() - started)
-    return {"provider": provider, "status": "agent_error" if result.get("is_error") else "finished",
-            "exit_code": code, "output": result, "errors": [], "usage": usage,
+    return {"provider": provider, "status": "agent_error" if failed else "finished",
+            "exit_code": code, "output": result, "errors": [error_message] if failed else [], "usage": usage,
             "verification": "agent_report_only"}
 
 
