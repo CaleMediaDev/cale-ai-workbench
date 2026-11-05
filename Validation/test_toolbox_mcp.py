@@ -355,6 +355,43 @@ def test_analyze_music_tool_is_discoverable_and_callable():
     assert result["tempo_bpm"] == 120
 
 
+@pytest.mark.parametrize("stalled_stage", ["list_pages", "take_screenshot"])
+def test_stalled_preview_preserves_successful_browser_result(tmp_path, stalled_stage):
+    original = {"isError": False, "content": [{"type": "text", "text": "done"}]}
+    cancelled = []
+
+    class FakeSession:
+        async def call_tool(self, name, arguments):
+            if name == "navigate_page":
+                return SimpleNamespace(
+                    is_error=False, model_dump=lambda **_kwargs: original
+                )
+            if name == stalled_stage:
+                try:
+                    await asyncio.Future()
+                finally:
+                    cancelled.append(name)
+            assert name == "list_pages"
+            return SimpleNamespace(
+                is_error=False,
+                content=[SimpleNamespace(text="1: https://example.com [selected]")],
+            )
+
+    async def check():
+        with (patch.object(toolbox_mcp, "PREVIEW_SECONDS", 0.01),
+              patch.dict(toolbox_mcp.CATALOG, {"devtools.navigate_page": {}}, clear=True),
+              patch.dict(toolbox_mcp.SESSIONS, {"devtools": FakeSession()}, clear=True),
+              patch.object(toolbox_mcp, "registered_project", return_value=tmp_path)):
+            result = await toolbox_mcp.toolbox_call(
+                "devtools.navigate_page", "{}", project_folder=str(tmp_path)
+            )
+        assert result == original
+        assert cancelled == [stalled_stage]
+        assert not (tmp_path / ".local-ai/browser.png").exists()
+
+    asyncio.run(asyncio.wait_for(check(), timeout=1))
+
+
 def test_preview_backend_errors_preserve_successful_browser_result(tmp_path):
     class PreviewBackendError(Exception):
         pass
