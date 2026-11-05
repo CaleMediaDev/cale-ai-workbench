@@ -41,7 +41,7 @@ def _run(arguments: list[str], output: Path) -> None:
     # Staging beside the destination allows atomic, no-overwrite publication.
     with tempfile.TemporaryDirectory(prefix=".music-edit-", dir=output.parent) as directory:
         staged = Path(directory) / output.name
-        command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel", "error", "-n", *arguments, str(staged)]
+        command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel", "error", "-xerror", "-n", *arguments, str(staged)]
         result = subprocess.run(command, capture_output=True, text=True, timeout=3600, creationflags=HIDE)
         if result.returncode or not staged.is_file() or not staged.stat().st_size:
             raise RuntimeError((result.stderr or result.stdout)[-800:] or "Local audio edit failed.")
