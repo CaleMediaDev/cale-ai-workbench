@@ -929,6 +929,126 @@ def test_deeply_nested_live_progress_is_incomplete_instead_of_raising(tmp_path):
     assert diagnostics._read_live_progress(context) == {"complete": False}
 
 
+def progress_writer_fixture(tmp_path):
+    import importlib.util
+    import os
+    import psutil
+    # These hooks can also be running the installed suite containing this
+    # test. Exercise an isolated module, never replace that live plugin.
+    spec = importlib.util.spec_from_file_location('owned_progress_writer_probe', diagnostics.__file__)
+    owned = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owned)
+    state = tmp_path / 'LongTasks'
+    state.mkdir()
+    context = {'state': str(state), 'nonce': 'owned-writer', 'basis': 'fixed-source',
+               'owner': {'pid': os.getpid(), 'started': psutil.Process().create_time()}}
+    owned._save_live_progress(context, {**context, 'complete': False}, initialize=True)
+    return state, context, owned
+
+
+def test_progress_writer_reuses_one_connection_and_commits_each_finalized_node(tmp_path, monkeypatch):
+    state, context, diagnostics = progress_writer_fixture(tmp_path)
+    actual_connect = sqlite3.connect
+    connections = []
+    def tracked_connect(*args, **kwargs):
+        connection = actual_connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+    monkeypatch.setattr(diagnostics.sqlite3, 'connect', tracked_connect)
+    plugin = diagnostics._LiveSelfCheck(context)
+    monkeypatch.setattr(diagnostics, '_LIVE_PLUGIN', plugin)
+    nodes = [f'Validation/test_sample.py::test_{index}' for index in range(10)]
+    try:
+        diagnostics.pytest_collection_finish(SimpleNamespace(items=[SimpleNamespace(nodeid=node) for node in nodes]))
+        for index, node in enumerate(nodes):
+            for phase in ('setup', 'call', 'teardown'):
+                diagnostics.pytest_runtest_logreport(SimpleNamespace(nodeid=node, when=phase, outcome='passed'))
+            # Independent readers must see each commit, not a single deferred
+            # transaction when pytest eventually exits.
+            with closing(actual_connect((state/'self-check-progress.sqlite3').as_uri()+'?mode=ro', uri=True)) as reader:
+                assert reader.execute('SELECT count(*) FROM live_results').fetchone()[0] == index + 1
+        assert len(connections) == 1
+    finally:
+        lifecycle = diagnostics.pytest_unconfigure(None)
+        next(lifecycle)
+        with pytest.raises(StopIteration):
+            next(lifecycle)
+    with pytest.raises(sqlite3.ProgrammingError):
+        connections[0].execute('SELECT 1')
+
+
+def test_reused_progress_writer_rejects_a_superseded_session(tmp_path, monkeypatch):
+    state, context, diagnostics = progress_writer_fixture(tmp_path)
+    plugin = diagnostics._LiveSelfCheck(context)
+    monkeypatch.setattr(diagnostics, '_LIVE_PLUGIN', plugin)
+    try:
+        plugin.publish()
+        other = {**context, 'nonce': 'replacement-owner'}
+        diagnostics._save_live_progress(other, {**other, 'complete': False}, initialize=True)
+        with pytest.raises(ValueError, match='superseded'):
+            plugin.publish()
+        with closing(sqlite3.connect(state/'self-check-progress.sqlite3')) as reader:
+            value = json.loads(reader.execute('SELECT value FROM live_session').fetchone()[0])
+        assert value['nonce'] == other['nonce'] and value['complete'] is False
+    finally:
+        # Cleanup must close the owned writer even if final publication fails.
+        lifecycle = diagnostics.pytest_unconfigure(None)
+        next(lifecycle)
+        with pytest.raises(StopIteration):
+            next(lifecycle)
+
+
+def test_reused_progress_writer_rolls_back_header_when_node_insert_fails(tmp_path, monkeypatch):
+    state, context, diagnostics = progress_writer_fixture(tmp_path)
+    plugin = diagnostics._LiveSelfCheck(context)
+    monkeypatch.setattr(diagnostics, '_LIVE_PLUGIN', plugin)
+    try:
+        plugin.publish()
+        with closing(sqlite3.connect(state/'self-check-progress.sqlite3')) as editor, editor:
+            editor.execute("CREATE TRIGGER reject_bad_node BEFORE INSERT ON live_results WHEN NEW.nodeid='bad' BEGIN SELECT RAISE(ABORT,'owned probe failure'); END")
+        plugin.data.update(completed=1, passed=1)
+        with pytest.raises(sqlite3.IntegrityError):
+            plugin.publish(('bad', 'passed'))
+        with closing(sqlite3.connect(state/'self-check-progress.sqlite3')) as reader:
+            header = json.loads(reader.execute('SELECT value FROM live_session').fetchone()[0])
+            assert header['completed'] == 0 and reader.execute('SELECT count(*) FROM live_results').fetchone()[0] == 0
+        # The same owned connection must recover cleanly after the rollback.
+        plugin.publish(('good', 'passed'))
+        with closing(sqlite3.connect(state/'self-check-progress.sqlite3')) as reader:
+            assert reader.execute('SELECT nodeid FROM live_results').fetchall() == [('good',)]
+            assert json.loads(reader.execute('SELECT value FROM live_session').fetchone()[0])['completed'] == 1
+    finally:
+        lifecycle = diagnostics.pytest_unconfigure(None)
+        next(lifecycle)
+        with pytest.raises(StopIteration):
+            next(lifecycle)
+
+
+def test_configure_failure_closes_new_progress_writer(tmp_path, monkeypatch):
+    state, context, diagnostics = progress_writer_fixture(tmp_path)
+    context['root'] = str(tmp_path)
+    connections = []
+    actual_connect = sqlite3.connect
+    def tracked_connect(*args, **kwargs):
+        connection = actual_connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+    monkeypatch.setattr(diagnostics.sqlite3, 'connect', tracked_connect)
+    monkeypatch.setenv(diagnostics._LIVE_ENV, json.dumps(context))
+    monkeypatch.setattr(diagnostics, '_live_basis', lambda *args: context['basis'])
+    monkeypatch.setattr(diagnostics, '_read_live_progress', lambda *args: {'nonce': context['nonce']})
+    monkeypatch.setattr(diagnostics._LiveSelfCheck, 'publish', Mock(side_effect=OSError('owned probe')))
+    diagnostics.pytest_configure(SimpleNamespace(invocation_params=SimpleNamespace(dir=tmp_path), args=['Validation']))
+    try:
+        assert diagnostics._LIVE_PLUGIN is None
+        assert len(connections) == 1
+        with pytest.raises(sqlite3.ProgrammingError):
+            connections[0].execute('SELECT 1')
+    finally:
+        for connection in connections:
+            connection.close()
+
+
 @pytest.mark.parametrize("fault", ["missing-node", "replaced-node", "unconfigure-missing"])
 def test_partial_or_substituted_completion_receipt_never_becomes_green(tmp_path, fault):
     import hashlib

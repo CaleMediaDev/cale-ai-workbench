@@ -462,18 +462,34 @@ def _live_progress_db(state):
         connection.close()
 
 
-def _save_live_progress(context, data, result=None, *, initialize=False):
-    with _live_progress_db(context["state"]) as connection:
-        if initialize:
-            connection.execute("DELETE FROM live_results")
-        else:
-            row = connection.execute("SELECT substr(value,1,8001),length(value) FROM live_session WHERE slot=1").fetchone()
-            previous = json.loads(row[0]) if row and row[1] <= 8000 else None
-            if not isinstance(previous, dict) or previous.get("nonce") != context["nonce"]:
-                raise ValueError("Self-check session was superseded")
-        connection.execute("INSERT OR REPLACE INTO live_session VALUES (1,?)", (json.dumps(data, sort_keys=True),))
-        if result:
-            connection.execute("INSERT OR REPLACE INTO live_results VALUES (?,?)", result)
+def _write_live_progress(connection, context, data, result, initialize):
+    """Update the header and node result together under the same ownership check."""
+    if initialize:
+        connection.execute("DELETE FROM live_results")
+    else:
+        row = connection.execute("SELECT substr(value,1,8001),length(value) FROM live_session WHERE slot=1").fetchone()
+        previous = json.loads(row[0]) if row and row[1] <= 8000 else None
+        if not isinstance(previous, dict) or previous.get("nonce") != context["nonce"]:
+            raise ValueError("Self-check session was superseded")
+    connection.execute("INSERT OR REPLACE INTO live_session VALUES (1,?)", (json.dumps(data, sort_keys=True),))
+    if result:
+        connection.execute("INSERT OR REPLACE INTO live_results VALUES (?,?)", result)
+
+
+def _save_live_progress(context, data, result=None, *, initialize=False, _connection=None):
+    if _connection is None:
+        with _live_progress_db(context["state"]) as connection:
+            _write_live_progress(connection, context, data, result, initialize)
+    else:
+        # One pytest process owns this connection. Every update still commits
+        # independently so the supervisor can observe it immediately. Failures
+        # roll back both records before this writer can be reused.
+        try:
+            _write_live_progress(_connection, context, data, result, initialize)
+            _connection.commit()
+        except BaseException:
+            _connection.rollback()
+            raise
 
 
 def _read_live_progress(context):
@@ -535,9 +551,20 @@ class _LiveSelfCheck:
             "nonce": context["nonce"], "basis": context["basis"], "finished": False,
             "complete": False, "collected": 0, "completed": 0, "passed": 0, "failed": 0, "skipped": 0,
             "plugin_active": True, "child_pid": os.getpid()}
+        self._writer_scope = _live_progress_db(context["state"])
+        self._writer = self._writer_scope.__enter__()
 
-    def publish(self):
-        _save_live_progress(self.context, self.data)
+    def publish(self, result=None):
+        if self._writer is None:
+            raise ValueError("Self-check progress writer is closed")
+        _save_live_progress(self.context, self.data, result, _connection=self._writer)
+
+    def close(self):
+        if self._writer is not None:
+            try:
+                self._writer_scope.__exit__(None, None, None)
+            finally:
+                self._writer = None
 
     def defer(self, details):
         import pytest
@@ -603,6 +630,12 @@ def pytest_configure(config):
             _LIVE_PLUGIN = _LiveSelfCheck(context)
             _LIVE_PLUGIN.publish()
     except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
+        if _LIVE_PLUGIN is not None:
+            try:
+                _LIVE_PLUGIN.close()
+            except (OSError, ValueError, sqlite3.Error):
+                pass
+        _LIVE_PLUGIN = None
         return
 
 
@@ -650,7 +683,7 @@ def pytest_runtest_logreport(report):
     plugin.finished_nodes.add(report.nodeid)
     plugin.data["completed"] += 1
     plugin.data[outcome] += 1
-    _save_live_progress(plugin.context, plugin.data, (report.nodeid, outcome))
+    plugin.publish((report.nodeid, outcome))
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -679,6 +712,8 @@ def pytest_unconfigure(config):
             _LIVE_PLUGIN.publish()
         except (OSError, ValueError, TypeError, sqlite3.Error):
             pass
+        finally:
+            _LIVE_PLUGIN.close()
 
 
 pytest_unconfigure.pytest_impl = {"hookwrapper": True, "tryfirst": True}

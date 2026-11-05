@@ -1,0 +1,69 @@
+{
+  "release": "0.5.534",
+  "base": "05b06b6eb0db05e6c9b697569d5a2ac5e1f26884",
+  "sha256": {
+    "self_diagnostics.py": "171620612720efd006b092a914b882c1938dc5379ad3e67ee5c7dab9d1330bdb",
+    "Validation/test_self_diagnostics.py": "ea78d027332f7c7bdc5e896bcdf493771b25600d444c1eaa9794b127f377a7c8"
+  },
+  "validation": {
+    "affected_modules": {
+      "passed": 67,
+      "skipped": 1,
+      "subtests": 2,
+      "seconds": 68.98,
+      "exit_code": 0,
+      "source_bytes_unchanged": true
+    }
+  },
+  "regression_baseline": "Ten finalized node writes opened11 connections before the fix; the new regression requires one writer and independently visible commits.",
+  "performance": {
+    "old_commit": "05b06b6eb0db05e6c9b697569d5a2ac5e1f26884",
+    "candidate_sha256": "171620612720efd006b092a914b882c1938dc5379ad3e67ee5c7dab9d1330bdb",
+    "runs": [
+      {
+        "implementation": "original",
+        "seconds": 2.483065999986138,
+        "finalized_synthetic_nodes": 200,
+        "full_suite_pass_claimed": false
+      },
+      {
+        "implementation": "candidate",
+        "seconds": 0.5217310999869369,
+        "finalized_synthetic_nodes": 200,
+        "full_suite_pass_claimed": false
+      },
+      {
+        "implementation": "candidate",
+        "seconds": 0.4348380999872461,
+        "finalized_synthetic_nodes": 200,
+        "full_suite_pass_claimed": false
+      },
+      {
+        "implementation": "original",
+        "seconds": 7.079649799969047,
+        "finalized_synthetic_nodes": 200,
+        "full_suite_pass_claimed": false
+      }
+    ],
+    "scope": "Actual plugin publication hooks on 200 synthetic TEMP nodes per run. No full-suite execution or installed-state mutation.",
+    "process_controls": 0,
+    "model_calls": 0
+  },
+  "owned_plugin_session": {
+    "passed": 5,
+    "source_bound": true,
+    "all_nodes_finalized": true,
+    "unconfigured": true,
+    "test_isolation_sentinel_passed": true
+  },
+  "changes": [
+    "One progress writer connection per owned pytest process; each header/result update remains independently committed.",
+    "Reject superseded ownership, roll back partial writes and close on normal shutdown or failed configuration.",
+    "New tests load isolated plugin modules so their probes cannot replace the active installed test runner."
+  ],
+  "limits": [
+    "Synthetic progress-publication timing only; no measured full-suite speedup or installed-suite pass.",
+    "The running installed530 self-check was not altered or stopped.",
+    "Native app benchmark remains incomplete; the private native recovery candidate is not included."
+  ]
+}

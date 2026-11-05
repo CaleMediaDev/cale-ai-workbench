@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.534 reduces self-check progress database overhead by reusing its owned writer connection. Each update still commits separately, and completion gates remain intact. [Validation and limits](benchmarks/results/selfcheck-writer-534-20261105.json).
+
 Release 0.5.533 shows the exact saved PR link when GitHub cannot publicly confirm a donation, labelled unconfirmed. Saved work and duplicate-submission protection remain intact. [Validation and limits](benchmarks/results/pending-proposal-link-533-20261105.json).
 
 Release 0.5.532 integrates reviewed donated fixes for task timing, local memory, file handling, voice workers, music processing and recovery. Contributions were reproduced, corrected where needed and checked together. [Validation and limits](benchmarks/results/reviewed-donations-532-20261105.json).
