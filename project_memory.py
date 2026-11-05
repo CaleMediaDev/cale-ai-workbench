@@ -290,24 +290,26 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
             text = data.decode("utf-8-sig", errors="replace")
             _put(conn, identifier, "file", relative, text, "", relative, digest)
             changed += 1
-        # Remove vanished index entries only when the whole source walk was seen.
         existing_files = {row[0] for row in conn.execute("SELECT id FROM memories WHERE kind='file'")}
+        # Even a complete walk excludes SKIP_DIRS. Explicitly indexed files in
+        # those directories must not disappear merely because they were unvisited.
+        inspected = set()
+        for path in paths:
+            try:
+                # Indexing stores resolved source identities, so invalid
+                # aliases must evict that same canonical record too.
+                resolved = path.resolve()
+                if resolved.is_relative_to(root):
+                    inspected.add("file:" + resolved.relative_to(root).as_posix())
+            except (OSError, RuntimeError, ValueError):
+                continue  # Unresolvable or escaped aliases provide no safe identity.
+        stale_ids = existing_files & (inspected - seen)
         if include_code and not truncated:
-            stale = list(existing_files - seen)
-        else:
-            # Inspected paths that failed eligibility or text validation must
-            # lose their old records too. Preserve files outside this scan.
-            inspected = set()
-            for path in paths:
-                try:
-                    # Indexing stores resolved source identities, so invalid
-                    # aliases must evict that same canonical record too.
-                    resolved = path.resolve()
-                    if resolved.is_relative_to(root):
-                        inspected.add("file:" + resolved.relative_to(root).as_posix())
-                except (OSError, RuntimeError, ValueError):
-                    continue  # Unresolvable or escaped aliases provide no safe identity.
-            stale = list(existing_files & (inspected - seen))
+            # Retire vanished or ineligible sources outside the inspected set,
+            # without discarding valid records from excluded directories.
+            stale_ids.update(identifier for identifier in existing_files - seen
+                             if not _eligible(root, root / identifier[len("file:"):]))
+        stale = list(stale_ids)
         for identifier in stale:
             conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
             conn.execute("DELETE FROM memory_fts WHERE id=?", (identifier,))
