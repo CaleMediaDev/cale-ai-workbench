@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.525 fixes automatic updates for connected accounts and makes recovered task context explicit about saved progress and unavailable database facts. It retains the 0.5.524 proposal-search fix. Connected users stuck on 0.5.523/524 can run the Windows installer once to receive the update-guard correction. [Validation and limits](benchmarks/results/runtime-context-updater-525-20261105.json).
+
 Release 0.5.524 removes GitHub author-search dependency from donation discovery, fixing the reproduced HTTP422 proposal-search failure. Complete pull listings retain duplicate-work checks and saved draft accounting. Chrome manifest recognition and the camera self-check fixture are also corrected. [Validation and limits](benchmarks/results/proposal-discovery-524-20261105.json).
 
 Release 0.5.523 saves finished donation drafts across connection failures and restarts, avoids duplicate submissions after uncertain responses, and keeps token counters responsive. The donation panel can stay open during automatic updates once account connections finish. [Validation and limits](benchmarks/results/durable-donation-523-20261105.json).
