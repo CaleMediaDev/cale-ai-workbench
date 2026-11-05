@@ -1471,3 +1471,26 @@ def test_game_library_removed_task_during_download_prevents_project_publication(
     with pytest.raises(ValueError,match='exact folder'):
         asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
     assert list(project.iterdir())==[]
+
+
+def test_registered_helper_catalog_dispatch_reuses_current_task_without_model(tmp_path,monkeypatch):
+    import native_agent,project_memory,long_tasks,cloud_ai
+    root=tmp_path/'project';root.mkdir();app=tmp_path/'app';state=app/'LongTasks';state.mkdir(parents=True)
+    project={'id':'c'*12,'folder':str(root),'brief':'Compute tax totals using a local reusable helper.'}
+    with sqlite3.connect(state/'projects.db') as conn:
+        conn.execute('CREATE TABLE projects(id TEXT,folder TEXT,brief TEXT)')
+        conn.execute('INSERT INTO projects VALUES(?,?,?)',(project['id'],project['folder'],project['brief']))
+    monkeypatch.setattr(toolbox_mcp,'ROOT',app);monkeypatch.setattr(long_tasks,'STATE',state)
+    with patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No inference')) as model:
+        def call(name,args):
+            return json.loads(native_agent.execute_tool(root,'call_local_tool',{'tool':name,'arguments':args}))
+        registered=call('local.register_expression_helper',{'name':'tax_total','parameters':{'amount':'number','tax':'number'},
+            'expression':'round(amount*(1+tax),2)','cases':[{'inputs':{'amount':10,'tax':.06},'expected':10.6}]})
+        assert registered['registered']
+        discovered=call('local.find_expression_helpers',{'query':'tax'})
+        assert discovered['helpers'][0]['id']==registered['id']
+        assert 'expression' not in discovered['helpers'][0] and 'cases' not in discovered['helpers'][0]
+        result=call('local.run_expression_helper',{'helper_id':registered['id'],'inputs':{'amount':100,'tax':.1}})
+        assert result['value']==110 and result['inference_calls']==0
+        assert not result['task_completion']
+    model.assert_not_called()

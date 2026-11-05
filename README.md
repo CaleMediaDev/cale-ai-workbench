@@ -602,3 +602,10 @@ A host receipt additionally consumes a one-use in-process execution permit bound
 
 
 Collection observations capture pristine DOM descriptors before the app starts, including table/section rows, list children, collection lengths/items and query/tag helpers. Later instance or prototype overrides are not called. Global witness selection reserves complete creation/removal pairs for the same collection and sequence before generic evidence, within 32 items and a 24 KB metadata budget; all actual verdicts, case counts and saved sequence numbers remain authoritative.
+
+
+### Project-local expression helpers
+
+Cale can register and discover small reusable JSON/arithmetic helpers in a project's SQLite memory. These are restricted expressions, not Python scripts or trained models: imports, attributes, shell, network and filesystem effects are unavailable. Registration runs 1–24 supplied examples; passing them establishes only those examples, not general correctness. Definitions, examples, the loaded interpreter and the full original instructions are hash-bound and rechecked before reuse. Helpers stay in their own registered task; they are not shared globally or donated as training data.
+
+A saved `check_expression_helper` unit can run through the ordinary worker without an inference call, compare its real output with the unchanged saved expectations, and checkpoint at the next unfinished unit. This does not complete the whole project or replace its independent verifier. Changed instructions or interpreter code require revalidation. The interpreter is portable Python; registry operations currently require Windows ownership handles to keep project state contained during SQLite access. No new packages, models or accounts are needed.

@@ -782,3 +782,325 @@ def test_verification_final_file_recheck_fails_closed_without_reading_again(tmp_
     assert len(stats) == 3 and reads == [source]
     assert observed['scope'] == 'limited_dependency_manifest'
     assert ('unavailable_path' if failure == 'unavailable' else 'elapsed_budget') in observed['limitations']
+
+
+_PORTED_EXPRESSION_CASES = frozenset(['test_tested_expression_registration_and_reuse_uses_no_model_or_sql_completion', 'test_failed_expression_case_is_not_registered_and_tampered_records_never_run', 'test_expression_helper_request_changes_and_verification_race_are_not_committed', 'test_expression_helper_interpreter_upgrade_and_invocation_request_race_discard_result', 'test_expression_helpers_reject_real_directory_junction_escape_before_database_write', 'test_expression_registration_rejects_interpreter_changed_during_passed_cases', 'test_expression_registration_rejects_already_hot_replaced_interpreter', 'test_expression_invocation_rejects_interpreter_changed_during_execution', 'test_helper_oversized_stored_cases_are_rejected_before_json_decode', 'test_helper_discovery_rejects_tampered_parameter_data_without_exporting_literals', 'test_helper_discovery_and_invocation_reject_consistently_hashed_invalid_case_shape', 'test_expression_helper_attestation_and_registration_survive_fresh_process'])
+
+
+@pytest.fixture(autouse=True)
+def _ported_expression_owner_context(request,tmp_path,monkeypatch):
+    """Give the earlier pure-DSL unit tests an explicit synthetic task owner.
+
+    These tests exercise interpreter/record invariants. Separate integration
+    tests below use the real task registry and test missing/deleted ownership.
+    """
+    if request.node.name not in _PORTED_EXPRESSION_CASES:return
+    actual=memory.verification_basis
+    def basis(folder,project=None):
+        root=Path(folder).resolve()
+        assert root.is_relative_to(tmp_path.resolve())
+        return actual(root,project or {'id':'helper-fixture','folder':str(root),'brief':'Owned helper fixture'})
+    monkeypatch.setattr(memory,'verification_basis',basis)
+
+def example_expression_helper(root):
+    return memory.register_expression_helper(root, "invoice_total", {"amounts": "numbers", "tax": "number"},
+        'round(sum(amounts) * (1 + tax), 2)', [
+            {"inputs": {"amounts": [10, 5], "tax": 0.06}, "expected": 15.9},
+            {"inputs": {"amounts": [], "tax": 0}, "expected": 0}])
+
+
+def test_tested_expression_registration_and_reuse_uses_no_model_or_sql_completion(tmp_path):
+    import quick_calculator
+    import task_context
+    root = tmp_path / "helper-project"; root.mkdir()
+    active = task_context.plan_steps(root, [{"phase": "Core", "title": "Build app", "check_command": "exit 0"}])["active"]
+    before = task_context.step_status(root)
+    record = example_expression_helper(root)
+    assert record["registered"] and record["verified_cases"] == 2
+    assert record["check_sha256"] == task_context.step_check_identity(active)
+    with patch("cloud_ai.Router.complete", side_effect=AssertionError("Helper must not call a model")), patch("subprocess.run", side_effect=AssertionError("Helper must not execute a process")):
+        value = memory.run_expression_helper(root, record["id"], {"amounts": [100, 25], "tax": 0.1})
+    assert value["value"] == 137.5 and value["inference_calls"] == 0 and value["task_completion"] is False
+    assert task_context.step_status(root) == before
+    found = memory.find_expression_helpers(root, "invoice")
+    assert found["helpers"][0]["uses"] == 1 and found["helpers"][0]["current_request"] is True
+    assert "cases" not in found["helpers"][0] and "expression" not in found["helpers"][0]
+    other = tmp_path / "other-project"; other.mkdir()
+    assert memory.find_expression_helpers(other)["helpers"] == []
+
+
+def test_failed_expression_case_is_not_registered_and_tampered_records_never_run(tmp_path):
+    import pytest
+    import json
+    failed = memory.register_expression_helper(tmp_path, "wrong", {"x": "number"}, "x + 1", [{"inputs": {"x": 2}, "expected": 99}])
+    assert failed["registered"] is False and memory.find_expression_helpers(tmp_path)["helpers"] == []
+    record = example_expression_helper(tmp_path)
+    with memory.connection(tmp_path) as conn:
+        raw = json.loads(conn.execute("SELECT definition FROM expression_helpers WHERE id=?", (record["id"],)).fetchone()[0])
+        raw["expression"] = '0'
+        conn.execute("UPDATE expression_helpers SET definition=? WHERE id=?", (json.dumps(raw), record["id"]))
+    with pytest.raises(ValueError, match="changed"):
+        memory.run_expression_helper(tmp_path, record["id"], {"amounts": [10], "tax": 0.06})
+
+
+def test_expression_helper_request_changes_and_verification_race_are_not_committed(tmp_path):
+    import pytest
+    import quick_calculator
+    record = example_expression_helper(tmp_path)
+    requests = tmp_path / ".local-ai/USER-REQUESTS.md"
+    requests.write_text("New requirement")
+    assert memory.find_expression_helpers(tmp_path)["helpers"][0]["current_request"] is False
+    with pytest.raises(ValueError, match="instructions changed"):
+        memory.run_expression_helper(tmp_path, record["id"], {"amounts": [10], "tax": 0.06})
+    second = tmp_path / "raced";second.mkdir()
+    actual = quick_calculator.run_helper
+    def changed(*args):
+        result = actual(*args)
+        (second / ".local-ai/USER-REQUESTS.md").write_text("Changed during cases")
+        return result
+    with patch.object(quick_calculator, "run_helper", side_effect=changed), pytest.raises(ValueError, match="instructions changed"):
+        example_expression_helper(second)
+    assert memory.find_expression_helpers(second)["helpers"] == []
+
+
+def test_expression_helper_interpreter_upgrade_and_invocation_request_race_discard_result(tmp_path):
+    import pytest
+    import quick_calculator
+    record = example_expression_helper(tmp_path)
+    changed = tmp_path / "upgraded-interpreter.py"; changed.write_text("new version")
+    with patch.object(quick_calculator, "__file__", str(changed)), pytest.raises(ValueError, match="interpreter changed"):
+        memory.run_expression_helper(tmp_path, record["id"], {"amounts": [1], "tax": 0})
+    actual = quick_calculator.run_helper
+    def raced(*args):
+        result = actual(*args)
+        (tmp_path / ".local-ai/USER-REQUESTS.md").write_text("Changed during invocation")
+        return result
+    with patch.object(quick_calculator, "run_helper", side_effect=raced), pytest.raises(ValueError, match="during invocation"):
+        memory.run_expression_helper(tmp_path, record["id"], {"amounts": [1], "tax": 0})
+    with memory.connection(tmp_path) as conn:
+        assert conn.execute("SELECT uses FROM expression_helpers").fetchone()[0] == 0
+
+
+def test_expression_helpers_reject_real_directory_junction_escape_before_database_write(tmp_path):
+    import pytest
+    root=tmp_path/'project';outside=tmp_path/'outside';root.mkdir();outside.mkdir()
+    notes=root/'.local-ai'
+    if os.name=='nt':
+        import _winapi
+        _winapi.CreateJunction(str(outside),str(notes))
+    else:
+        notes.symlink_to(outside,target_is_directory=True)
+    assert not notes.resolve().is_relative_to(root)
+    with pytest.raises(ValueError,match='project'):
+        example_expression_helper(root)
+    with pytest.raises(ValueError,match='project'):
+        memory.find_expression_helpers(root)
+    with pytest.raises(ValueError,match='project'):
+        memory.run_expression_helper(root,'0'*64,{'x':1})
+    assert not (outside/'memory.sqlite3').exists()
+
+
+def copied_expression_interpreter(tmp_path):
+    import importlib.util
+    import quick_calculator
+    path=tmp_path/'helper_interpreter.py'
+    path.write_bytes(Path(quick_calculator.__file__).read_bytes())
+    spec=importlib.util.spec_from_file_location('helper_interpreter_probe',path)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module,path
+
+
+def test_expression_registration_rejects_interpreter_changed_during_passed_cases(tmp_path):
+    import pytest,sys
+    module,path=copied_expression_interpreter(tmp_path)
+    root=tmp_path/'project';root.mkdir();actual=module.run_helper
+    def changed(*args):
+        result=actual(*args)
+        path.write_bytes(path.read_bytes()+b'\n# changed after cases executed\n')
+        return result
+    with patch.dict(sys.modules,{'quick_calculator':module}),patch.object(module,'run_helper',side_effect=changed):
+        with pytest.raises(ValueError,match='interpreter changed'):
+            example_expression_helper(root)
+    assert memory.find_expression_helpers(root)['helpers']==[]
+
+
+def test_expression_registration_rejects_already_hot_replaced_interpreter(tmp_path):
+    import pytest,sys
+    module,path=copied_expression_interpreter(tmp_path)
+    path.write_bytes(path.read_bytes()+b'\n# changed after module loaded\n')
+    root=tmp_path/'project';root.mkdir()
+    with patch.dict(sys.modules,{'quick_calculator':module}):
+        with pytest.raises(ValueError,match='interpreter changed'):
+            example_expression_helper(root)
+    assert memory.find_expression_helpers(root)['helpers']==[]
+
+
+def test_expression_invocation_rejects_interpreter_changed_during_execution(tmp_path):
+    import pytest,sys
+    module,path=copied_expression_interpreter(tmp_path)
+    root=tmp_path/'project';root.mkdir()
+    with patch.dict(sys.modules,{'quick_calculator':module}):
+        record=example_expression_helper(root)
+        actual=module.run_helper
+        def changed(*args):
+            result=actual(*args)
+            path.write_bytes(path.read_bytes()+b'\n# changed during invocation\n')
+            return result
+        with patch.object(module,'run_helper',side_effect=changed):
+            with pytest.raises(ValueError,match='changed'):
+                memory.run_expression_helper(root,record['id'],{'amounts':[10],'tax':0})
+    with memory.connection(root) as conn:
+        assert conn.execute('SELECT uses FROM expression_helpers').fetchone()[0]==0
+
+
+def test_helper_oversized_stored_cases_are_rejected_before_json_decode(tmp_path):
+    import pytest,json
+    record=example_expression_helper(tmp_path)
+    with memory.connection(tmp_path) as conn:
+        cases=conn.execute('SELECT cases FROM expression_helpers WHERE id=?',(record['id'],)).fetchone()[0]
+        conn.execute('UPDATE expression_helpers SET cases=? WHERE id=?',(' '*1_000_000+cases,record['id']))
+    original=json.loads
+    def bounded(value,*args,**kwargs):
+        assert len(value.encode() if isinstance(value,str) else value)<=64000,'Oversized stored cases were decoded'
+        return original(value,*args,**kwargs)
+    with patch('json.loads',side_effect=bounded),pytest.raises(ValueError,match='budget|size'):
+        memory.run_expression_helper(tmp_path,record['id'],{'amounts':[10],'tax':0})
+
+
+def test_helper_discovery_rejects_tampered_parameter_data_without_exporting_literals(tmp_path):
+    import json
+    record=example_expression_helper(tmp_path)
+    with memory.connection(tmp_path) as conn:
+        definition=json.loads(conn.execute('SELECT definition FROM expression_helpers WHERE id=?',(record['id'],)).fetchone()[0])
+        definition['parameters']={'private':'PRIVATE_LITERAL_METADATA'}
+        conn.execute('UPDATE expression_helpers SET definition=? WHERE id=?',(json.dumps(definition),record['id']))
+    found=memory.find_expression_helpers(tmp_path)
+    assert found['helpers']==[] and 'PRIVATE_LITERAL_METADATA' not in json.dumps(found)
+
+
+def test_helper_discovery_and_invocation_reject_consistently_hashed_invalid_case_shape(tmp_path):
+    import json,pytest
+    record=example_expression_helper(tmp_path)
+    with memory.connection(tmp_path) as conn:
+        row=conn.execute('SELECT * FROM expression_helpers WHERE id=?',(record['id'],)).fetchone()
+        bad=[{'inputs':{'amounts':[],'tax':0},'expected':0,'extra':'not a supported case'}]
+        digest=memory._helper_digest(bad)
+        new_id=memory._helper_digest([str(tmp_path.resolve()),row['source_hash'],digest,row['runner_hash'],row['request_hash'],row['check_hash']])
+        conn.execute('UPDATE expression_helpers SET id=?,cases=?,cases_hash=? WHERE id=?',(new_id,json.dumps(bad),digest,record['id']))
+    assert memory.find_expression_helpers(tmp_path)['helpers']==[]
+    with pytest.raises(ValueError):
+        memory.run_expression_helper(tmp_path,new_id,{'amounts':[10],'tax':0})
+
+
+def test_expression_helper_attestation_and_registration_survive_fresh_process(tmp_path):
+    import subprocess,sys,json
+    script="""import sys,json,project_memory as memory
+root=sys.argv[1]
+context=memory.verification_context({'id':'child-helper','folder':root,'brief':'Owned helper fixture'})
+context.__enter__()
+if sys.argv[2]=='register':
+ result=memory.register_expression_helper(root,'plus_one',{'x':'number'},'x+1',[{'inputs':{'x':1},'expected':2}])
+else:
+ result=memory.run_expression_helper(root,sys.argv[3],{'x':10})
+print(json.dumps(result))
+"""
+    command=[sys.executable,'-B','-c',script,str(tmp_path)]
+    first=subprocess.run(command+['register'],cwd=Path(memory.__file__).parent,capture_output=True,text=True,timeout=15,check=True)
+    identifier=json.loads(first.stdout)['id']
+    second=subprocess.run(command+['run',identifier],cwd=Path(memory.__file__).parent,capture_output=True,text=True,timeout=15,check=True)
+    assert json.loads(second.stdout)['value']==11
+
+
+
+
+@pytest.fixture
+def registered_expression_project(tmp_path,monkeypatch):
+    import long_tasks
+    root=tmp_path/'project';root.mkdir()
+    state=tmp_path/'workbench/LongTasks';state.mkdir(parents=True)
+    project={'id':'a'*12,'folder':str(root),'brief':'Compute invoice totals using tested project-local arithmetic.'}
+    with sqlite3.connect(state/'projects.db') as conn:
+        conn.execute('CREATE TABLE projects(id TEXT,folder TEXT,brief TEXT)')
+        conn.execute('INSERT INTO projects VALUES(?,?,?)',(project['id'],project['folder'],project['brief']))
+    monkeypatch.setattr(long_tasks,'STATE',state)
+    return root,project,state
+
+
+@pytest.mark.parametrize('changed',['brief','rules','followup','deleted'])
+def test_helper_reuse_binds_real_registered_original_instructions(registered_expression_project,changed):
+    root,project,state=registered_expression_project
+    record=example_expression_helper(root)
+    assert memory.run_expression_helper(root,record['id'],{'amounts':[100],'tax':.1})['value']==110
+    if changed in {'brief','deleted'}:
+        with sqlite3.connect(state/'projects.db') as conn:
+            if changed=='brief':conn.execute('UPDATE projects SET brief=?',('Different original task',))
+            else:conn.execute('DELETE FROM projects')
+    else:
+        path=root/'AGENTS.md' if changed=='rules' else root/'.local-ai/USER-REQUESTS.md'
+        path.write_text('New required behavior')
+    with pytest.raises(ValueError,match='instructions|registered'):
+        memory.run_expression_helper(root,record['id'],{'amounts':[100],'tax':.1})
+
+
+def test_helper_missing_owner_never_creates_project_state(tmp_path,monkeypatch):
+    import long_tasks
+    state=tmp_path/'missing-registry';monkeypatch.setattr(long_tasks,'STATE',state)
+    root=tmp_path/'unknown';root.mkdir()
+    with pytest.raises(ValueError,match='registered'):
+        example_expression_helper(root)
+    assert not (root/'.local-ai').exists()
+
+
+def test_helper_held_state_prevents_real_junction_swap_before_sqlite_open(registered_expression_project,monkeypatch,tmp_path):
+    import contextlib,_winapi
+    root,project,_=registered_expression_project
+    notes=root/'.local-ai';notes.mkdir()
+    outside=tmp_path/'outside';outside.mkdir();moved=root/'moved-state'
+    actual=memory.connection;attempted=[];blocked=[]
+    @contextlib.contextmanager
+    def raced(folder):
+        if not attempted:
+            attempted.append(True)
+            try:
+                notes.rename(moved)
+                _winapi.CreateJunction(str(outside),str(notes))
+            except OSError:blocked.append(True)
+        with actual(folder) as conn:yield conn
+    monkeypatch.setattr(memory,'connection',raced)
+    record=example_expression_helper(root)
+    assert record['registered'] and attempted and blocked
+    assert not (outside/'memory.sqlite3').exists()
+    assert notes.resolve()==notes and not moved.exists()
+
+
+def test_helper_db_handle_prevents_file_replacement_and_rejects_hardlinks(registered_expression_project,monkeypatch,tmp_path):
+    import contextlib
+    root,_,_=registered_expression_project
+    record=example_expression_helper(root)
+    database=root/'.local-ai/memory.sqlite3';actual=memory.connection;blocked=[]
+    @contextlib.contextmanager
+    def raced(folder):
+        try:database.rename(database.with_suffix('.moved'))
+        except OSError:blocked.append(True)
+        with actual(folder) as conn:yield conn
+    monkeypatch.setattr(memory,'connection',raced)
+    assert memory.run_expression_helper(root,record['id'],{'amounts':[10],'tax':0})['value']==10
+    assert blocked
+    monkeypatch.setattr(memory,'connection',actual)
+    os.link(database,tmp_path/'foreign-alias.sqlite3')
+    with pytest.raises(ValueError,match='hard links'):
+        memory.find_expression_helpers(root)
+
+
+def test_helper_registry_preserves_128_record_bound(registered_expression_project):
+    root,_,_=registered_expression_project
+    record=example_expression_helper(root)
+    with memory.connection(root) as conn:
+        row=conn.execute('SELECT * FROM expression_helpers').fetchone()
+        columns=list(row.keys())
+        for number in range(127):
+            values=list(row);values[0]=str(number).zfill(64)
+            conn.execute('INSERT INTO expression_helpers VALUES('+','.join('?' for _ in values)+')',values)
+    with pytest.raises(ValueError,match='128'):
+        memory.register_expression_helper(root,'second',{'x':'number'},'x+1',[{'inputs':{'x':1},'expected':2}])
+    assert memory.run_expression_helper(root,record['id'],{'amounts':[10],'tax':0})['value']==10

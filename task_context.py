@@ -364,8 +364,8 @@ def _validate_steps(steps: list, folder: str | Path | None = None) -> list[tuple
             arguments = {}
             validate_repeatable_check(tool, {"command": command})
         else:
-            if tool not in {"check_python_function", "check_javascript_function", "check_webapp", "run_verifier"} or "check_command" in step or "shell" in step:
-                raise ValueError("Structured steps support check_python_function, check_javascript_function, check_webapp or run_verifier; omit shell/check_command.")
+            if tool not in {"check_python_function", "check_javascript_function", "check_webapp", "check_expression_helper", "run_verifier"} or "check_command" in step or "shell" in step:
+                raise ValueError("Structured steps support check_python_function, check_javascript_function, check_webapp, check_expression_helper or run_verifier; omit shell/check_command.")
             arguments = step.get("check_arguments", {})
             if not isinstance(arguments, dict):
                 raise ValueError("check_arguments must be a JSON object.")
@@ -580,7 +580,7 @@ def action_outcome(tool: str, result: str) -> str:
             return "Failed" if isinstance(value, dict) and value.get("passed") is False else "Completed"
         except (ValueError, TypeError):
             return "Failed"
-    if tool in {"check_webapp", "check_document_report", "check_python_function", "check_javascript_function"}:
+    if tool in {"check_webapp", "check_document_report", "check_python_function", "check_javascript_function", "check_expression_helper"}:
         # Running the checker successfully is different from its assertions
         # passing. Only an explicit true verdict is evidence of completion.
         try:

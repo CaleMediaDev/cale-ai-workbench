@@ -7939,3 +7939,141 @@ def test_persistence_scope_diagnostic_reports_bounded_reason_without_another_cap
         issue=native_agent.persistence_completion_issue(folder,item)
     assert 'byte_budget' in issue and 'limited_dependency_manifest' in issue
     assert str(folder) not in issue and len(captures)==1
+
+
+def helper_workflow_fixture(folder):
+    folder.mkdir();project={'id':'b'*12,'folder':str(folder),
+        'brief':'Calculate invoice totals with a verified pure helper, then implement the display function.'}
+    with project_memory.verification_context(project):
+        helper=project_memory.register_expression_helper(folder,'invoice_total',{'amounts':'numbers','tax':'number'},
+            'round(sum(amounts)*(1+tax),2)',[{'inputs':{'amounts':[10,5],'tax':.06},'expected':15.9}])
+        step={'phase':'Compute','title':'Reuse invoice totals','check_tool':'check_expression_helper',
+              'check_arguments':{'helper_id':helper['id'],'cases':[
+                  {'inputs':{'amounts':[100,25],'tax':.1},'expected':137.5},
+                  {'inputs':{'amounts':[],'tax':0},'expected':0}]}}
+        next_step={'phase':'Display','title':'Implement display','check_tool':'check_python_function',
+                   'check_arguments':{'path':'display.py','function':'display_total','cases':[{'args':[137.5],'expected':'$137.50'}]}}
+        task_context.plan_steps(folder,[step,next_step])
+    native_agent.save_state(project,{'status':'continue','turns':7,'assertion_facade_budget':{'unsuccessful':5},
+        'messages':[{'role':'system','content':"You are Cale's native project worker."},{'role':'user','content':'Continue saved work.'}]})
+    return project,helper,step,next_step
+
+
+def test_saved_helper_unit_resumes_real_worker_zero_inference_process_or_network(tmp_path,monkeypatch):
+    import socket,urllib.request
+    project,helper,original,next_step=helper_workflow_fixture(tmp_path/'project')
+    before=task_context.step_status(project['folder']);state_before=native_agent.read_state(project)
+    monkeypatch.setattr(long_tasks,'STATE',tmp_path/'supervisor')
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
+    assert long_tasks.projects()[0]['brief']==project['brief']
+    with (patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No LLM inference')) as inference,
+          patch('subprocess.run',side_effect=AssertionError('No external process')) as process,
+          patch('subprocess.Popen',side_effect=AssertionError('No external process')) as popen,
+          patch.object(socket,'create_connection',side_effect=AssertionError('No network')) as network,
+          patch.object(urllib.request,'urlopen',side_effect=AssertionError('No network'))):
+        state=native_agent.run_slice(project)
+    after=task_context.step_status(project['folder'])
+    assert after['done']==1 and after['total']==2 and after['active']['title']==next_step['title']
+    assert after['active']['check_arguments']==next_step['check_arguments']
+    assert state['status']=='continue' and state.get('helper_reuse_checkpoints')==1
+    assert state['turns']==state_before['turns']==7
+    assert state['assertion_facade_budget']=={'unsuccessful':5}
+    assert not state.get('verify_passed')
+    inference.assert_not_called();process.assert_not_called();popen.assert_not_called();network.assert_not_called()
+    assert not (Path(project['folder'])/'display.py').exists()
+    saved_message=state['messages'][-1]['content']
+    assert '"helper_results"' in saved_message and '"actual": 137.5' in saved_message
+
+
+
+def test_helper_wrong_saved_outcome_does_not_commit_sql_step(tmp_path,monkeypatch):
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project')
+    monkeypatch.setattr(long_tasks,'projects',lambda:[project])
+    step['check_arguments']['cases'][0]['expected']=999
+    task_context.revise_step(project['folder'],task_context.step_status(project['folder'])['active']['id'],[step])
+    with project_memory.verification_context(project):
+        result=json.loads(native_agent.execute_tool(Path(project['folder']),'task_steps',{'action':'complete',
+            'step_id':task_context.step_status(project['folder'])['active']['id']}))
+    assert result['passed'] is False and task_context.step_status(project['folder'])['done']==0
+
+
+@pytest.mark.parametrize('tool',['register_expression_helper','find_expression_helpers','run_expression_helper',
+    'local.register_expression_helper','local.find_expression_helpers','local.run_expression_helper'])
+def test_native_helper_dispatch_rejects_another_registered_task_before_discovery(tmp_path,monkeypatch,tool):
+    import toolbox_mcp
+    one=tmp_path/'one';two=tmp_path/'two';one.mkdir();two.mkdir()
+    monkeypatch.setattr(toolbox_mcp.server,'list_tools',Mock(side_effect=AssertionError('Scope rejected first')))
+    result=native_agent.execute_tool(one,'call_local_tool',{'tool':tool,'arguments':{'project_folder':str(two)}})
+    assert result.startswith('Tool error:') and 'current task folder' in result
+    toolbox_mcp.server.list_tools.assert_not_called()
+
+
+def test_helper_tools_auto_join_existing_capability_catalog_without_private_values():
+    import toolbox_mcp
+    results=native_agent.capability_local_search('expression helper')
+    names={row['name'] for row in results}
+    assert {'local.register_expression_helper','local.find_expression_helpers','local.run_expression_helper'}<=names
+    assert all('PRIVATE_EXPRESSION' not in json.dumps(row) for row in results)
+
+
+def test_saved_helper_pass_cannot_advance_after_pause_during_computation(tmp_path,monkeypatch):
+    import quick_calculator
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project')
+    monkeypatch.setattr(long_tasks,'projects',lambda:[project])
+    actual=quick_calculator.run_helper
+    def paused(*args):
+        value=actual(*args)
+        state=native_agent.read_state(project);state['status']='paused';native_agent.save_state(project,state)
+        return value
+    with patch.object(quick_calculator,'run_helper',side_effect=paused),patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')) as inference:
+        state=native_agent.run_slice(project)
+    assert state['status']=='paused' and task_context.step_status(project['folder'])['done']==0
+    assert not state.get('helper_reuse_checkpoints')
+    inference.assert_not_called()
+
+
+@pytest.mark.parametrize('mutation',['source','acceptance'])
+def test_helper_output_does_not_override_source_or_check_commit_guards(tmp_path,monkeypatch,mutation):
+    import quick_calculator
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project')
+    monkeypatch.setattr(long_tasks,'projects',lambda:[project])
+    active=task_context.step_status(project['folder'])['active'];actual=quick_calculator.run_helper;changed=[]
+    def raced(*args):
+        value=actual(*args)
+        if not changed:
+            changed.append(True)
+            if mutation=='source':(Path(project['folder'])/'new-source.py').write_text('value=2')
+            else:
+                replacement=copy.deepcopy(step);replacement['check_arguments']['cases'][0]['expected']=999
+                task_context.revise_step(project['folder'],active['id'],[replacement])
+        return value
+    with project_memory.verification_context(project),patch.object(quick_calculator,'run_helper',side_effect=raced):
+        raw=native_agent.execute_tool(Path(project['folder']),'task_steps',{'action':'complete','step_id':active['id']})
+    if mutation=='acceptance':
+        assert raw.startswith('Tool error:') and 'acceptance check changed' in raw
+    else:
+        assert json.loads(raw)['passed'] is False
+    assert task_context.step_status(project['folder'])['done']==0
+
+
+def test_saved_helper_worker_reuse_survives_fresh_process_restart(tmp_path,monkeypatch):
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project')
+    state=tmp_path/'supervisor';monkeypatch.setattr(long_tasks,'STATE',state)
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
+    script="""from pathlib import Path
+import sys,json,socket,urllib.request
+from unittest.mock import patch
+import long_tasks,native_agent,cloud_ai,task_context
+long_tasks.STATE=Path(sys.argv[1]);project=long_tasks.projects()[0]
+with patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')),patch('subprocess.run',side_effect=AssertionError('No child process')),patch('subprocess.Popen',side_effect=AssertionError('No child process')),patch.object(socket,'create_connection',side_effect=AssertionError('No network')),patch.object(urllib.request,'urlopen',side_effect=AssertionError('No network')):
+ state=native_agent.run_slice(project)
+print(json.dumps({'status':state['status'],'done':task_context.step_status(project['folder'])['done'],'helper_reuse':state.get('helper_reuse_checkpoints'),'turns':state['turns']}))
+"""
+    result=subprocess.run([sys.executable,'-B','-c',script,str(state)],cwd=Path(native_agent.__file__).parent,
+                          capture_output=True,text=True,timeout=20,check=True)
+    assert json.loads(result.stdout)=={'status':'continue','done':1,'helper_reuse':1,'turns':7}
+    assert task_context.step_status(project['folder'])['active']['title']=='Implement display'

@@ -48,6 +48,13 @@ TOOLS = [
             "title": {"type": "string", "minLength": 1, "maxLength": 80},
             "accent": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}},
             "required": ["path"], "additionalProperties": False}}},
+    {"type":"function","function":{"name":"check_expression_helper",
+        "description":"Run concrete input/expected tests using one exact registered project-local expression helper, with zero inference or processes. This tests only supplied examples, never completes the whole task, and cannot change the helper definition.",
+        "parameters":{"type":"object","properties":{
+            "helper_id":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+            "cases":{"type":"array","minItems":1,"maxItems":24,"items":{"type":"object","properties":{
+                "inputs":{"type":"object"},"expected":{}},"required":["inputs","expected"],"additionalProperties":False}}},
+            "required":["helper_id","cases"],"additionalProperties":False}}},
     {"type": "function", "function": {
         "name": "check_game_starter",
         "description": "Verify the current HTML space-shooter starter's DEFAULT contract in real offline browsers: 600x800 logical field, 120 px/s player, requested numeric starting lives (default 3), 10 points per enemy, timing, collisions, waves, HUD, physical controls and reset. Saves and runs a request-bound verifier. Not for other genres or deliberately changed physics; those need appropriate custom integration tests. Never repairs or overwrites game source. Preserves custom verifiers.",
@@ -247,7 +254,7 @@ def bind_step_checker_schemas(tools: list) -> None:
     command["required"] = ["phase", "title", "check_command"]
     command["properties"]["check_command"]["not"] = {"enum": sorted(by_name)}
     alternatives = [command]
-    for kind in ("check_python_function", "check_javascript_function", "check_webapp", "run_verifier"):
+    for kind in ("check_python_function", "check_javascript_function", "check_webapp", "check_expression_helper", "run_verifier"):
         branch = copy.deepcopy(base)
         for name in ("check_command", "shell"):
             branch["properties"].pop(name)
@@ -804,7 +811,7 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                 # Older releases accepted suite-revision references in browser
                 # steps. Reject their replay before any checker mutates a suite.
                 task_context.validate_repeatable_check(kind, check_args)
-                structured = kind in {"check_python_function", "check_javascript_function", "check_webapp"}
+                structured = kind in {"check_python_function", "check_javascript_function", "check_webapp", "check_expression_helper"}
                 before = step_source_fingerprint(folder, structured)
                 if arguments.get("_automatic_game") is True:
                     if kind != "run_verifier" or not owned_game_verifier(folder):
@@ -852,6 +859,12 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                     if not isinstance(verdict, dict):
                         verdict = {}
                     value["check_verdict"] = {"passed": verdict.get("passed") is True if kind == "check_webapp" else value["passed"]}
+                    if kind=="check_expression_helper":
+                        # Keep bounded real outputs in the local checkpoint so
+                        # the next unit can reuse them without another model call.
+                        value["helper_results"]=verdict.get("cases",[])
+                        value["helper_identity"]=verdict.get("helper",{})
+                        value["inference_calls"]=0
                     value["check_summary"] = {
                         "cases": [{key: case[key] for key in
                                    ("case", "path", "function", "saved_sequence", "inputs", "failures", "click_diagnostics", "target_inventory") if key in case}
@@ -966,6 +979,8 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                     folder, arguments, result["source_sha256"])
             result["ok"] = result["passed"]
             return json.dumps(result, ensure_ascii=False)[:MAX_TOOL_OUTPUT]
+        if name == "check_expression_helper":
+            return json.dumps(check_expression_helper(folder,arguments),ensure_ascii=False)
         if name == "check_python_function":
             return json.dumps(check_python_function(folder, arguments), ensure_ascii=False)[:MAX_TOOL_OUTPUT]
         if name == "check_javascript_function":
@@ -1353,6 +1368,15 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
 
             tool = arguments["tool"]
             call_arguments = arguments["arguments"]
+            helper_tools={"local.register_expression_helper","local.find_expression_helpers","local.run_expression_helper",
+                          "register_expression_helper","find_expression_helpers","run_expression_helper"}
+            if tool in helper_tools:
+                call_arguments=copy.deepcopy(call_arguments)
+                if not isinstance(call_arguments,dict):raise ValueError("Helper arguments must be an object")
+                supplied=call_arguments.get("project_folder",str(folder))
+                if not isinstance(supplied,str) or Path(supplied).resolve()!=folder.resolve():
+                    raise ValueError("Helper tools must use the current task folder")
+                call_arguments["project_folder"]=str(folder.resolve())
             game_mutator = tool in {"local.import_game_example", "import_game_example",
                 "local.install_game_libraries", "install_game_libraries", "design.import_game_example"}
             if game_mutator:
@@ -2827,7 +2851,7 @@ def bind_step_completion(folder: Path, arguments: dict, planned_step: dict | Non
 
 def step_exit_result(kind: str, result: str) -> str:
     """Translate only a registered checker's explicit verdict to queue evidence."""
-    if kind not in {"check_python_function", "check_javascript_function", "check_webapp"}:
+    if kind not in {"check_python_function", "check_javascript_function", "check_webapp", "check_expression_helper"}:
         return result
     verdict = None
     try:
@@ -5036,6 +5060,8 @@ def checker_fingerprint(kind: str) -> str:
         modules.append(Path(__file__).with_name("webapp_check.py"))
     if kind == "run_verifier":
         modules.append(Path(__file__).with_name("design_tools.py"))
+    if kind=="check_expression_helper":
+        modules.extend(Path(__file__).with_name(name) for name in ("quick_calculator.py","project_memory.py"))
     digest = hashlib.sha256()
     for module in modules:
         digest.update(module.name.encode("utf-8") + b"\0" + module.read_bytes())
@@ -5250,6 +5276,12 @@ def automatic_step_basis(folder: Path, active: dict) -> dict:
 
     suite = {"check_python_function": "cale-python-checks.json", "run_verifier": "verify.ps1",
              "check_javascript_function": "cale-javascript-checks.json", "check_webapp": "webapp-check.json"}
+    if active["check_tool"]=="check_expression_helper":
+        import project_memory
+        helper=project_memory.expression_helper_basis(folder,active["check_arguments"]["helper_id"])
+        return {"request":task_context.request_identity(folder),"step":task_context.step_check_identity(active),
+                "checker":checker_fingerprint(active["check_tool"]),"source":step_source_fingerprint(folder,True),
+                "suite":hashlib.sha256(json.dumps(helper,sort_keys=True).encode()).hexdigest()}
     path = project_path(folder, ".local-ai/" + suite[active["check_tool"]])
     return {"request": task_context.request_identity(folder), "step": task_context.step_check_identity(active),
             "checker": checker_fingerprint(active["check_tool"]),
@@ -5276,10 +5308,10 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
         if not active:
             break
         automatic_game = active["check_tool"] == "run_verifier" and owned_game_verifier(folder)
-        if not automatic_game and active["check_tool"] not in {"check_python_function", "check_javascript_function", "check_webapp"}:
+        if not automatic_game and active["check_tool"] not in {"check_python_function", "check_javascript_function", "check_webapp", "check_expression_helper"}:
             break  # Arbitrary shell/integration commands remain explicit tools.
         try:
-            if not automatic_game and not project_path(folder, active["check_arguments"].get("path", "")).is_file():
+            if not automatic_game and active["check_tool"]!="check_expression_helper" and not project_path(folder, active["check_arguments"].get("path", "")).is_file():
                 break  # A preceding implementation action has yet to create it.
             basis = automatic_step_basis(folder, active)
         except (OSError, ValueError, RuntimeError):
@@ -5341,6 +5373,10 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
             + "\nContinue the fresh SQLite active step. Component success is not whole-project completion.")})
         state["messages"] = messages
         state["current"] = "Saved acceptance " + ("passed: " if verdict.get("passed") is True else "needs repair: ") + active["title"]
+        if active["check_tool"]=="check_expression_helper" and verdict.get("passed") is True:
+            state["helper_reuse_checkpoints"]=int(state.get("helper_reuse_checkpoints",0))+1
+            save_state(project,state)
+            return True  # Yield this real pure-computation unit before inference.
         save_state(project, state)
         if verdict.get("passed") is not True:
             break
@@ -5432,11 +5468,16 @@ def _run_slice(project: dict, complete=None) -> dict:
             state["messages"] = messages
             known_request_stamp = request_before
             save_state(project, state)
+        helper_checkpoint=int(state.get("helper_reuse_checkpoints",0))
         if int(state.get("turns", 0)) and not advance_checked_steps(project, state, messages):
             latest = read_state(project)
             if latest.get("status") in {"paused", "stopped", "done"}:
                 return latest
             continue  # Rebuild against the new user instruction on the next iteration.
+        if int(state.get("helper_reuse_checkpoints",0))>helper_checkpoint:
+            state.update(status="continue",current="Tested helper reused; next saved step is ready")
+            save_state(project,state)
+            return state
         if review_verified_game_starter(project, state, messages, call):
             return state
         latest = read_state(project)
@@ -6164,6 +6205,31 @@ def _run_function_check_cli(folder, spec_path, expected_sha, *, javascript=False
                 checker_file=__file__,basis_before=basis,loaded_checker_sha256=_LOADED_CHECKER_SHA256,execution_permit=permit)
         except (OSError,ValueError,TypeError,RuntimeError,sqlite3.Error):pass
     return result
+
+
+
+def check_expression_helper(folder, arguments):
+    """Measure the unchanged saved cases through the restricted interpreter."""
+    import project_memory,quick_calculator
+    from jsonschema import validate
+    schema=next(t['function']['parameters'] for t in TOOLS if t['function']['name']=='check_expression_helper')
+    validate(arguments,schema)
+    identity=project_memory.expression_helper_basis(folder,arguments['helper_id'])
+    cases=[]
+    for number,case in enumerate(arguments['cases'],1):
+        expected=quick_calculator.helper_json(case['expected'])
+        result=project_memory.run_expression_helper(folder,arguments['helper_id'],case['inputs'])
+        passed=quick_calculator.helper_values_match(result['value'],expected)
+        raw=json.dumps(result['value'],sort_keys=True,allow_nan=False)
+        observed={'case':number,'passed':passed,'actual_sha256':hashlib.sha256(raw.encode()).hexdigest()}
+        if len(raw)<=300:observed['actual']=result['value']
+        if not passed:observed['failures']=['Computed helper output differs from the saved expected JSON.']
+        cases.append(observed)
+    if project_memory.expression_helper_basis(folder,arguments['helper_id'])!=identity:
+        raise ValueError('Helper changed while checking; discard this result.')
+    return {'passed':all(c['passed'] for c in cases),'cases':cases,'helper':identity,
+            'inference_calls':0,'process_calls':0,'task_completion':False,
+            'note':'Only these concrete helper cases were checked; no general correctness or app completion claim.'}
 
 
 if __name__ == "__main__":
