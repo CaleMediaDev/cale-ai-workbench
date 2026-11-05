@@ -1,0 +1,48 @@
+{
+  "release": "0.5.508",
+  "selected_design": "first displayed Nightshift concept",
+  "runtime_manifest_files": 250,
+  "features": [
+    "Separate Home/Music Studio/Create",
+    "Persistent Home composer",
+    "Project-bound embedded preview and finished project picker",
+    "Dedicated build/song prompts preserve Home attachments",
+    "Real master/deck levels/manual crossfade/Auto-DJ/PCM waveform",
+    "Persistent song launch notice"
+  ],
+  "tests": {
+    "affected_desktop_radio_preview_update": {
+      "passed": 275,
+      "skipped": 3,
+      "subtests": 6,
+      "seconds": 69.53
+    },
+    "final_song_notice_selection": {
+      "passed": 9,
+      "skipped": 1,
+      "deselected": 39
+    },
+    "dedicated_author_tk_notice_cases": {
+      "passed": 3
+    },
+    "actual_owned_windows_audio": "passed",
+    "actual_desktop_fixture": "passed"
+  },
+  "viewports": [
+    [
+      1440,
+      1024
+    ],
+    [
+      1050,
+      740
+    ]
+  ],
+  "limits": [
+    "Native adaptation, not pixel-identical web rendering",
+    "Live EQ unavailable",
+    "Embedded capture opens external project for interaction",
+    "No fresh-PC full install or newly generated end-to-end song/game claimed"
+  ],
+  "private_test_data_shipped": false
+}
