@@ -454,7 +454,7 @@ class AvatarFrameWorker:
         engine=None;lease=None;sequence=0;last_neutral=0;last_error_notice=0;paused=False
         last_frame_at=None;last_output_live=False
         try:
-            import avatar_video
+            import avatar_video,video_generation
             neutral=avatar_video.neutral_camera_avatar()
             self._publish(neutral)
             if not self.authorized():return
@@ -472,9 +472,14 @@ class AvatarFrameWorker:
                     self.stopped.wait(.1);continue
                 if engine is None:
                     lease=AvatarGpuLease()
+                    facts=video_generation._avatar_runtime_facts(self.profile,ROOT)
+                    if not self.authorized():break
                     engine=avatar_video.CaleAvatar(self.profile)
                     if not self.authorized():break
-                    lease.measured(engine.probe())
+                    probe=engine.probe()
+                    lease.measured(probe)
+                    video_generation._avatar_finish_deferred_probe(ROOT,self.profile,facts,probe,self.authorized)
+                    if not self.authorized():break
                     paused=False
                 try:frame,captured_at=self.pending.get(timeout=.1)
                 except queue.Empty:
@@ -502,7 +507,11 @@ class AvatarFrameWorker:
                     self._publish(rendered);last_output_live=True
                 elif time.monotonic()-last_neutral>=.5:
                     self._publish(neutral);last_neutral=time.monotonic();last_output_live=False
-        except Exception:
+        except Exception as error:
+            try:
+                import video_generation
+                video_generation._avatar_fail_deferred_probe(ROOT,error,self.authorized)
+            except (OSError,ValueError):pass
             emit("error","Animated Cale is unavailable. Your real camera stays hidden; switch to Raw camera only if you want to show it.")
         finally:
             if self.sender_worker:self.sender_worker.close()

@@ -5505,7 +5505,7 @@ def gui():
                     if animated:
                         def progress(value):
                             if current():voice_events.put(("camera_session",(generation,"camera_setup",str(value.get("detail","Preparing Live Cale")))))
-                        media_python=video_generation.ensure_avatar_profile(ROOT,progress=progress,cancelled=lambda:not current(),virtual_output=sharing)
+                        media_python=video_generation.ensure_avatar_profile(ROOT,progress=progress,cancelled=lambda:not current(),virtual_output=sharing,defer_probe=True)
                     if not media_python.is_file():raise RuntimeError("Camera tools are still installing.")
                     if not current():return
                     command=camera_worker_command(ROOT,media_python,os.getpid(),psutil.Process(os.getpid()).create_time(),animated,sharing)

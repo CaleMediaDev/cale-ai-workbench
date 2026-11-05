@@ -771,6 +771,8 @@ def test_avatar_worker_keeps_latest_frame_and_never_raw_fallback(monkeypatch,tmp
     monkeypatch.setattr(camera,'ROOT',tmp_path)
     monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
     monkeypatch.setattr(camera,'allowed',lambda:True);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
     monkeypatch.setattr(avatar_video,'CaleAvatar',Engine,raising=False)
     monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:neutral,raising=False)
     monkeypatch.setattr(camera,'emit',Mock())
@@ -798,6 +800,8 @@ def test_avatar_worker_drops_inference_result_after_consent_ends(monkeypatch,tmp
     monkeypatch.setattr(camera,'ROOT',tmp_path)
     monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
     monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
     monkeypatch.setattr(avatar_video,'CaleAvatar',Engine,raising=False)
     monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8),raising=False)
     monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda self,rgb:published.append(int(rgb[0,0,0])))
@@ -822,6 +826,8 @@ def test_avatar_worker_skips_old_pending_input_after_engine_load(monkeypatch,tmp
     monkeypatch.setattr(camera,'ROOT',tmp_path)
     monkeypatch.setattr(camera,'allowed',lambda:True);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
     monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
     monkeypatch.setattr(avatar_video,'CaleAvatar',Engine)
     monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8))
     monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda *_:None);monkeypatch.setattr(camera,'emit',Mock())
@@ -860,6 +866,8 @@ def avatar_stale_output_case(monkeypatch,tmp_path,late_inference,age=10):
     monkeypatch.setattr(camera,'ROOT',tmp_path);monkeypatch.setattr(camera,'time',clock)
     monkeypatch.setattr(camera,'allowed',lambda:True);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
     monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
     monkeypatch.setattr(avatar_video,'CaleAvatar',Engine)
     monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8))
     monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',publish);monkeypatch.setattr(camera,'emit',Mock())
@@ -972,7 +980,9 @@ def test_avatar_launcher_reaps_old_owner_before_setup_and_new_capture(tmp_path,m
     child=Mock();child.stdout=[];child.returncode=0;child.poll.return_value=0
     python=tmp_path/'profile/python.exe';python.parent.mkdir();python.write_bytes(b'fixture')
     def setup(*_args,**_kwargs):
-        assert 'old reaped' in events;events.append('setup');return python
+        assert 'old reaped' in events
+        assert _kwargs.get('defer_probe') is True
+        events.append('setup');return python
     monkeypatch.setattr(video_generation,'ensure_avatar_profile',setup)
     monkeypatch.setitem(__import__('sys').modules,'psutil',SimpleNamespace(Process=lambda _:SimpleNamespace(create_time=lambda:123)))
     def spawned(*args,**kwargs):assert events[-1]=='setup';events.append('new capture');return child
@@ -1019,6 +1029,8 @@ def test_avatar_heavy_gpu_work_pauses_and_releases_before_resuming(monkeypatch,t
         def close(self):closed.append(True);paused.set()
     monkeypatch.setattr(camera,'ROOT',tmp_path);monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
     monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:heavy[0])
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
     monkeypatch.setattr(avatar_video,'CaleAvatar',Engine,raising=False);monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8),raising=False)
     monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda *_:None);monkeypatch.setattr(camera,'emit',Mock())
     worker=camera.AvatarFrameWorker(tmp_path)
@@ -1243,3 +1255,64 @@ def test_camera_switch_wrapper_reaps_real_venv_child_not_only_launcher(tmp_path,
         if actual_pid is not None and psutil.pid_exists(actual_pid):
             owned=psutil.Process(actual_pid);owned.terminate();owned.wait(timeout=3)
         if process.stdin is not None:process.stdin.close()
+
+
+import pytest
+
+
+@pytest.mark.parametrize("outcome", ["passed", "probe_failed", "consent_ended", "runtime_failed", "runtime_consent_ended"])
+def test_live_worker_qualifies_prepared_profile_once_and_never_marks_cancelled_ready(tmp_path,monkeypatch,outcome):
+    import threading,time,video_generation
+    import camera_presence as camera
+    root=tmp_path;profile=video_generation.avatar_profile_root(root)
+    video_generation._avatar_write_status(profile,phase='prepared',ready=False,detail='Files checked')
+    permission=[True];events=[];closed=threading.Event();published=[]
+    facts={'ort':'1.26.0','torch':'2.9.1+cu128','cuda':'12.8','cudnn':123}
+    def runtime(*_):
+        events.append('runtime')
+        if outcome=='runtime_failed':raise RuntimeError('runtime fixture failed')
+        if outcome=='runtime_consent_ended':permission[0]=False
+        return facts
+    class Engine:
+        def __init__(self,*_):events.append('engine')
+        def probe(self):
+            events.append('probe')
+            assert video_generation.avatar_profile_status(root)['ready'] is False
+            if outcome=='probe_failed':raise RuntimeError('inference fixture failed')
+            if outcome=='consent_ended':permission[0]=False
+            return {'ok':True,'gpu_allocation_bytes':123,'frames':4}
+        def render(self,*_,**__):
+            events.append('render');permission[0]=False
+            return np.ones((8,8,3),dtype=np.uint8)
+        def close(self):events.append('close');closed.set()
+    class Lease:
+        def measured(self,_):pass
+        def close(self):closed.set()
+    monkeypatch.setattr(camera,'ROOT',root)
+    monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    monkeypatch.setattr(camera,'AvatarGpuLease',Lease)
+    monkeypatch.setattr(video_generation,'_avatar_runtime_facts',runtime)
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine)
+    monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8))
+    monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda _,image:published.append(image.copy()))
+    monkeypatch.setattr(camera,'emit',Mock())
+    worker=camera.AvatarFrameWorker(profile)
+    try:
+        worker.submit(np.ones((8,8,3),dtype=np.uint8))
+        assert closed.wait(2)
+    finally:worker.close()
+    status=video_generation.avatar_profile_status(root)
+    assert events.count('probe')==(0 if outcome in {'runtime_failed','runtime_consent_ended'} else 1)
+    if outcome=='runtime_consent_ended':assert 'engine' not in events
+    if outcome=='passed':
+        assert status['ready'] is True and status['phase']=='ready'
+        assert status['probe']['torch']==facts['torch'] and status['probe']['probe']['frames']==4
+        assert events[:3]==['runtime','engine','probe'] and 'render' in events
+        # Closing the camera does not erase already-qualified runtime readiness.
+        assert video_generation.avatar_profile_status(root)['ready'] is True
+    else:
+        assert status['ready'] is False
+        assert 'render' not in events
+        if outcome not in {'consent_ended','runtime_consent_ended'}:assert status['phase']=='failed'
+    assert published and all(not image.any() for image in published)
