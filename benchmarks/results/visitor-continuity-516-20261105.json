@@ -7,11 +7,11 @@
     "Valid face vectors retain aligned optional RAM-only normalized boxes; features() remains vector-only and compatible",
     "Strong embedding matches are reserved first; unique recent overlap can mark temporary unknown-greeting continuity",
     "Suppression rechecks the original anchor, current overlap, ambiguity, age and separately visible original face at greeting time",
-    "Current embeddings still supply recognized names; independent known-name cooldowns prevent drift from bypassing the existing120-second intent",
+    "Current embeddings still supply recognized names; independent known-name cooldowns prevent drift from bypassing the existing 120-second intent",
     "No new enrollment, persistent boxes, raw images, identity assignment or changes to user-requested speech"
   ],
   "tests": {
-    "baseline": "Controlled normalized A/B/C vectors produced3 introductions for one continuous face in both unknown and same-known-name cases",
+    "baseline": "Controlled normalized A/B/C vectors produced 3 introductions for one continuous face in both unknown and same-known-name cases",
     "author": {"passed":71,"seconds":4.84},
     "independent_correction": {"genuine_baseline_failures":4,"passed":75,"seconds":4.59,"meaning":"Both detection orders after occlusion, moved geometry and newly ambiguous overlap retain new visitor greetings"},
     "root_final_camera_video": {"passed":124,"seconds":11.72}
