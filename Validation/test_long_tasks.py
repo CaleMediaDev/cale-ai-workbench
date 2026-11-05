@@ -3414,16 +3414,86 @@ def test_create_page_routes_selected_kind_and_keeps_prompt_until_setup_ready():
         node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "submit_creation")
         namespace = {"create_prompt": prompt, "create_kind": kind, "create_status": status,
                      "STATE": Path("unused"), "first_launch_readiness": lambda _: (False, "Downloading tools"),
-                     "submit_chat_text": sent.append}
+                     "submit_chat_text": lambda value, **options: (sent.append((value, options)) or True)}
         exec(compile(ast.Module(body=[node], type_ignores=[]), "real-create-submit", "exec"), namespace)
         namespace["submit_creation"]()
         assert not sent and "booking" in prompt.get("1.0", "end")
         assert status.get() == "Downloading tools"
         namespace["first_launch_readiness"] = lambda _: (True, "")
         namespace["submit_creation"]()
-        assert sent == ["Build a website: A booking page for my business"]
+        assert sent == [("Build a website: A booking page for my business",
+                         {"use_attachments": False, "intent": "task"})]
         assert prompt.get("1.0", "end-1c") == ""
         namespace["submit_creation"]()
         assert len(sent) == 1
+    finally:
+        window.destroy()
+
+
+def test_create_failure_keeps_prompt_and_never_inherits_home_private_attachments(tmp_path):
+    import ast
+    import re
+    import tkinter as tk
+    from types import SimpleNamespace
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        home = tk.Text(window)
+        home.insert("1.0", "My unsent Home question")
+        prompt = tk.Text(window)
+        prompt.insert("1.0", "A booking website")
+        attachments = [str(tmp_path / "private-tax-return.pdf")]
+        attached = []
+        errors = []
+        add_calls = []
+        def add_project(*args, **kwargs):
+            add_calls.append(args)
+            raise OSError("disk full")
+        namespace = {"STATE": tmp_path, "Path": Path,
+            "donation_service": SimpleNamespace(activity=lambda: None),
+            "first_launch_readiness": lambda _: (True, ""),
+            "chat_input": home, "attachments": attachments, "readiness_text": tk.StringVar(master=window),
+            "show_attachments": lambda: None, "assistant_reply": errors.append,
+            "chat_context": lambda _: [], "projects": lambda: [],
+            "save_chat": lambda *args, **kwargs: None, "show_chat": lambda *args: None,
+            "chat_history": lambda *_: [], "read_task_status": lambda _: {},
+            "setup_blocks_tasks": lambda _: False, "add_project": add_project,
+            "render_cards": lambda: None,
+            "create_prompt": prompt, "create_kind": tk.StringVar(master=window, value="Website"),
+            "create_status": tk.StringVar(master=window),
+            "chat_assistant": SimpleNamespace(
+                attach_request=lambda value, paths: (attached.append(list(paths)) or value),
+                FILE_MEMORY_REFERENCE=re.compile(r"(?!)"), PERSONAL_CONTACT=re.compile(r"(?!)"),
+                private_history_for=lambda *args: False, spoken_replay_target=lambda *args: None,
+                followup_tasks=lambda *args: []),
+        }
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "submit_chat_text")
+        factory = ast.parse("def factory():\n pending_followup = None\n").body[0]
+        factory.body.extend([node, ast.Return(value=ast.Name(id="submit_chat_text", ctx=ast.Load()))])
+        module = ast.fix_missing_locations(ast.Module(body=[factory], type_ignores=[]))
+        exec(compile(module, "real-chat-submit-factory", "exec"), namespace)
+        namespace["submit_chat_text"] = namespace["factory"]()
+        creation = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "submit_creation")
+        exec(compile(ast.Module(body=[creation], type_ignores=[]), "real-create-handoff", "exec"), namespace)
+        namespace["submit_creation"]()
+        assert len(add_calls) == 1 and attached == [[]]
+        assert attachments == [str(tmp_path / "private-tax-return.pdf")]
+        assert prompt.get("1.0", "end-1c") == "A booking website"
+        assert home.get("1.0", "end-1c") == "My unsent Home question"
+        assert any("disk full" in error for error in errors)
+        assert "could not start" in namespace["create_status"].get()
+        # A setup-state change between the visible button and shared task
+        # pipeline must also retain the prompt and unsent Home selection.
+        readiness = iter([(True, ""), (False, "Installing runtime")])
+        namespace["first_launch_readiness"] = lambda _: next(readiness)
+        namespace["submit_creation"]()
+        assert len(add_calls) == 1 and len(attached) == 1
+        assert prompt.get("1.0", "end-1c") == "A booking website"
+        assert attachments == [str(tmp_path / "private-tax-return.pdf")]
     finally:
         window.destroy()

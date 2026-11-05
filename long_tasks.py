@@ -5718,21 +5718,21 @@ def gui():
 
     threading.Thread(target=answer_worker, daemon=True).start()
 
-    def submit_chat_text(value=None):
+    def submit_chat_text(value=None, *, use_attachments=True, intent=None):
         nonlocal pending_followup
         donation_service.activity()
         ready, explanation = first_launch_readiness(STATE)
         if not ready:
             readiness_text.set(explanation)
-            return
+            return False
         raw_value = (
             chat_input.get("1.0", "end-1c") if value is None else value
         ).strip()
         if not raw_value:
             if attachments:
                 assistant_reply("Tell me what you'd like me to do with the selected files or folder.")
-            return
-        selected_paths = list(attachments)
+            return False
+        selected_paths = list(attachments) if use_attachments else []
         if selected_paths:
             try:
                 user_file_memory.remember_roots(STATE, selected_paths)
@@ -5742,12 +5742,14 @@ def gui():
         value = chat_assistant.attach_request(raw_value, selected_paths)
         if raw_value == chat_input.get("1.0", "end-1c").strip():
             chat_input.delete("1.0", "end")
-        attachments.clear()
-        show_attachments()
+        if use_attachments:
+            attachments.clear()
+            show_attachments()
 
         def restore_selection():
-            attachments[:] = selected_paths
-            show_attachments()
+            if use_attachments:
+                attachments[:] = selected_paths
+                show_attachments()
         # The pending question belongs only once in the model conversation.
         # Keep machine-readable paths in the task brief, while the chat shows
         # a short, readable reminder of what the person selected.
@@ -5782,7 +5784,7 @@ def gui():
                 assistant_reply("I can't find an earlier reply to read aloud yet.")
             return
         active = chat_assistant.followup_tasks(projects(), raw_value)
-        if pending_followup:
+        if pending_followup and intent is None:
             note, ids = pending_followup
             saved_tasks = {p["id"]: p for p in projects()}
             candidates = [saved_tasks[pid] for pid in ids if pid in saved_tasks]
@@ -5805,7 +5807,7 @@ def gui():
                 return
             pending_followup = None
         try:
-            action = chat_assistant.route_with_files(raw_value, active, selected_paths)
+            action = intent if intent in ("task", "music") else chat_assistant.route_with_files(raw_value, active, selected_paths)
             if action == "image":
                 setup = read_task_status(STATE / "install-progress.json")
                 if setup_blocks_tasks(setup):
@@ -5861,6 +5863,8 @@ def gui():
         except Exception as exc:
             restore_selection()
             assistant_reply("I couldn't do that yet: " + str(exc))
+            return False
+        return True
 
     send_button = ttk.Button(entry_row, text="Send", command=submit_chat_text, style="Accent.TButton")
     send_button.pack(side="right")
@@ -5919,8 +5923,7 @@ def gui():
             status.set(explanation)
             messagebox.showinfo("Getting ready", explanation, parent=window)
             return False
-        submit_chat_text("Make a song: " + prompt)
-        return True
+        return submit_chat_text("Make a song: " + prompt, use_attachments=False, intent="music") is True
 
     studio_controls = radio_station.Controls(
         music_shell, window, radio_service, on_make_song=make_studio_song)
@@ -6004,7 +6007,7 @@ def gui():
     create_prompt = tk.Text(create_chat, height=3, width=28, wrap="word", relief="flat",
         background=field, foreground=text, insertbackground=text,
         font=("Segoe UI", 11), padx=12, pady=12, highlightthickness=0)
-    create_prompt.pack(fill="x", pady=(12, 8))
+    create_prompt.pack(side="bottom", fill="x", pady=(12, 8), before=create_history)
 
     def submit_creation():
         prompt = create_prompt.get("1.0", "end-1c").strip()
@@ -6015,12 +6018,17 @@ def gui():
         if not ready:
             create_status.set(explanation)
             return
-        submit_chat_text("Build a " + create_kind.get().lower() + ": " + prompt)
-        create_prompt.delete("1.0", "end")
-        create_status.set("Request sent. Cale will report progress here and in Home.")
+        accepted = submit_chat_text("Build a " + create_kind.get().lower() + ": " + prompt,
+                                    use_attachments=False, intent="task")
+        if accepted:
+            create_prompt.delete("1.0", "end")
+            create_status.set("Request sent. Cale will report progress here and in Home.")
+        else:
+            create_status.set("Cale could not start that request. Your prompt is still here; check the chat for details.")
 
-    ttk.Button(create_chat, text="Build it", command=submit_creation,
-               style="Accent.TButton").pack(fill="x")
+    create_build_button = ttk.Button(create_chat, text="Build it", command=submit_creation,
+                                    style="Accent.TButton")
+    create_build_button.pack(side="bottom", fill="x", before=create_prompt)
     create_preview_host = ttk.Frame(create_body, style="Card.TFrame", padding=18)
     create_preview_host.grid(row=0, column=1, sticky="nsew")
     create_empty = ttk.Frame(create_preview_host, style="Card.TFrame")
