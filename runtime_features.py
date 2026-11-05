@@ -43,7 +43,7 @@ def progress(percent: int, current: str, status: str = "working", attempts: int 
 
 def _run(args: list[str], env: dict | None = None, timeout: int = 600) -> None:
     result = subprocess.run(
-        args, env=env, capture_output=True, text=True, timeout=timeout,
+        args, env=env, capture_output=True, text=True, errors="replace", timeout=timeout,
         creationflags=HIDE,
     )
     if result.returncode:

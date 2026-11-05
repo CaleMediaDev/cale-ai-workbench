@@ -1099,7 +1099,8 @@ def test_avatar_mode_blocks_raw_camera_tools_before_capture_or_files(tmp_path,mo
     with unittest.TestCase().assertRaisesRegex(ValueError,'cannot be checked'):media_worker.require_raw_camera_mode()
 
 
-def test_avatar_startup_failure_releases_capture_and_recognition_worker(monkeypatch):
+@pytest.mark.parametrize("stage", ["negotiation", "recognition", "avatar"])
+def test_camera_startup_failure_releases_only_acquired_resources(monkeypatch, stage):
     import camera_presence as camera
     import sys
 
@@ -1119,19 +1120,28 @@ def test_avatar_startup_failure_releases_capture_and_recognition_worker(monkeypa
         ENROLL_REQUEST=Mock(), FaceModel=Mock(), enroll=Mock()))
     monkeypatch.setattr(camera, 'allowed', lambda: True)
     monkeypatch.setattr(camera, 'owner_alive', lambda *_: True)
-    monkeypatch.setattr(camera, 'negotiate_capture', lambda *_: {
-        'width': 8, 'height': 8, 'fps': 30})
+    failure = RuntimeError(stage + ' startup failed')
+    negotiate = Mock(return_value={'width': 8, 'height': 8, 'fps': 30})
+    if stage == 'negotiation':
+        negotiate.side_effect = failure
+    monkeypatch.setattr(camera, 'negotiate_capture', negotiate)
     recognition = Mock()
-    monkeypatch.setattr(camera, 'LatestFrameWorker', lambda *_: recognition)
-    monkeypatch.setattr(camera, 'AvatarFrameWorker', Mock(
-        side_effect=RuntimeError('avatar thread startup failed')))
+    recognition_factory = Mock(return_value=recognition)
+    if stage == 'recognition':
+        recognition_factory.side_effect = failure
+    avatar_factory = Mock(side_effect=failure)
+    monkeypatch.setattr(camera, 'LatestFrameWorker', recognition_factory)
+    monkeypatch.setattr(camera, 'AvatarFrameWorker', avatar_factory)
     monkeypatch.setattr(camera, 'emit', Mock())
 
-    with pytest.raises(RuntimeError, match='avatar thread startup failed'):
+    with pytest.raises(RuntimeError) as caught:
         camera.watch(avatar=True)
 
+    assert caught.value is failure
     capture.release.assert_called_once_with()
-    recognition.close.assert_called_once_with()
+    assert recognition.close.call_count == (1 if stage == 'avatar' else 0)
+    assert recognition_factory.call_count == (0 if stage == 'negotiation' else 1)
+    assert avatar_factory.call_count == (1 if stage == 'avatar' else 0)
     capture.read.assert_not_called()
 
 

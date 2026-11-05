@@ -754,10 +754,11 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
                 if names:emit("visitor", greeting_line(names))
         elif state.observe(seen, now):
             emit("visitor", greeting_line([None]))
-    negotiated = negotiate_capture(camera, cv2, isinstance(source, int))
-    worker = LatestFrameWorker(recognize)
+    worker = None
     avatar_worker = None
     try:
+        negotiated = negotiate_capture(camera, cv2, isinstance(source, int))
+        worker = LatestFrameWorker(recognize)
         avatar_worker = AvatarFrameWorker(ROOT/"Media/avatar/v1",parent_pid,parent_started,virtual_output) if avatar else None
         dimensions = (f"{int(negotiated['width'])}×{int(negotiated['height'])}" if negotiated['width'] and negotiated['height'] else "resolution unreported")
         fps = f"{negotiated['fps']:g} driver-reported fps" if negotiated['fps'] else "fps unreported"
@@ -805,9 +806,14 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
             time.sleep(0.005)
     finally:
         recognition_stopped.set()
-        camera.release()
-        worker.close()
-        if avatar_worker is not None:avatar_worker.close()
+        # Attempt each acquired resource's cleanup even if another close fails.
+        try:
+            camera.release()
+        finally:
+            try:
+                if worker is not None:worker.close()
+            finally:
+                if avatar_worker is not None:avatar_worker.close()
     emit("stopped", "Camera greeting is off.")
     return 0
 

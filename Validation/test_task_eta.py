@@ -1,6 +1,7 @@
 """The countdown survives restarts and excludes pauses and supervisor downtime."""
 
 import json
+import pytest
 
 import task_eta
 
@@ -66,6 +67,28 @@ def test_countdown_needs_real_progress_and_survives_restart(tmp_path):
     assert result == "About 1m 07s to review"
     # Each call reads persisted samples; the remaining time falls as work continues.
     assert task_eta.countdown(db, "task", 50, "working", 1070) == "About 57s to review"
+
+
+@pytest.mark.parametrize("initial_status", ["queued", "paused"])
+def test_countdown_baseline_starts_when_first_active_observation_arrives(tmp_path, initial_status):
+    db = tmp_path / "projects.db"
+    task_eta.countdown(db, "task", 0, initial_status, 900)
+    assert task_eta.countdown(db, "task", 0, "working", 1000) == "Estimating time…"
+    assert task_eta.countdown(db, "task", 20, "working", 1030) == "Estimating time…"
+    assert task_eta.countdown(db, "task", 40, "working", 1060) == "About 1m 22s to review"
+
+
+def test_countdown_uses_initial_zero_progress_as_baseline(tmp_path):
+    db = tmp_path / "projects.db"
+    assert task_eta.countdown(db, "task", 0, "working", 1000) == "Estimating time…"
+    assert task_eta.countdown(db, "task", 20, "working", 1030) == "Estimating time…"
+    # Two measured advances cover 40 points in 60 active seconds.
+    assert task_eta.countdown(db, "task", 40, "working", 1060) == (
+        "About 1m 22s to review"
+    )
+    assert task_eta.countdown(db, "task", 40, "working", 1070) == (
+        "About 1m 12s to review"
+    )
 
 
 def test_countdown_invalid_timestamps_leave_observations_unchanged(tmp_path):

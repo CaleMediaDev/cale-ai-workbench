@@ -918,6 +918,17 @@ def test_corrupt_or_oversized_progress_is_not_pass_evidence(tmp_path, invalid):
     assert diagnostics._read_live_progress(context) == {"complete": False}
 
 
+def test_deeply_nested_live_progress_is_incomplete_instead_of_raising(tmp_path):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    context = {"state": str(state), "nonce": "owned", "basis": "source"}
+    invalid = "[" * 3000 + "0" + "]" * 3000
+    assert len(invalid) <= 8000
+    with diagnostics._live_progress_db(state) as database:
+        database.execute("INSERT INTO live_session VALUES (1,?)", (invalid,))
+    assert diagnostics._read_live_progress(context) == {"complete": False}
+
+
 @pytest.mark.parametrize("fault", ["missing-node", "replaced-node", "unconfigure-missing"])
 def test_partial_or_substituted_completion_receipt_never_becomes_green(tmp_path, fault):
     import hashlib

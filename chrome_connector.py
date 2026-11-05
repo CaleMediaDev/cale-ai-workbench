@@ -70,6 +70,23 @@ def installed_version() -> str:
     contents = _strip_tag_directives(contents)
     if contents is None:
         return ""
+    # Do not merge separate YAML documents into one apparent root mapping.
+    document_started, document_ended = False, False
+    for line in contents.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if document_ended:
+            return ""
+        if re.fullmatch(r"%YAML[ \t]+1\.[12](?:[ \t]+#[^\r\n]*)?[ \t]*", line):
+            continue
+        if re.fullmatch(r"---(?:[ \t]+#[^\r\n]*)?[ \t]*", line):
+            if document_started:
+                return ""
+            document_started = True
+        elif re.fullmatch(r"\.\.\.(?:[ \t]+#[^\r\n]*)?[ \t]*", line):
+            document_ended = True
+        else:
+            document_started = True
     # YAML comments, directives and document markers may be less indented than the root mapping.
     mapping_lines = "\n".join(
         line for line in contents.splitlines()

@@ -335,6 +335,30 @@ def test_run_preserves_useful_failure_details(monkeypatch, stderr, stdout, expec
     assert str(error.value) == expected
 
 
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_run_tolerates_output_outside_parent_encoding(monkeypatch, returncode):
+    import sys
+
+    real_run = runtime_features.subprocess.run
+
+    def run_with_ascii_encoding(*args, **kwargs):
+        # Simulate a parent locale that cannot decode the child's output.
+        return real_run(*args, encoding="ascii", **kwargs)
+
+    monkeypatch.setattr(runtime_features.subprocess, "run", run_with_ascii_encoding)
+    command = [
+        sys.executable, "-c",
+        "import os, sys; os.write(2, b'failure: \\xff'); sys.exit(" + str(returncode) + ")",
+    ]
+
+    if returncode:
+        with pytest.raises(RuntimeError) as error:
+            runtime_features._run(command)
+        assert str(error.value) == "failure: \ufffd"
+    else:
+        runtime_features._run(command)
+
+
 def test_missing_pip_is_bootstrapped(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_features, "PROGRESS", tmp_path / "install-progress.json")
     calls = []

@@ -57,6 +57,8 @@ def _agent_python(root: Path) -> Path | None:
             return None
         info = json.loads(facts[0].read_text(encoding="utf-8"))
         environment = info["packages"]["venv"]["environment"]
+        if not isinstance(environment, str) or not environment.strip():
+            return None
         return Path(environment) / "Scripts/python.exe"
     except (OSError, ValueError, KeyError, TypeError):
         return None

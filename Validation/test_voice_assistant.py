@@ -161,16 +161,18 @@ class VoiceTests(unittest.TestCase):
             with (
                 patch.object(voice_assistant, "ROOT", root),
                 patch.object(voice_assistant, "_persistent_mic_call", return_value=None),
-                patch.object(voice_assistant.subprocess, "run") as run,
+                patch.object(voice_assistant.subprocess, "Popen") as launch,
             ):
+                process = launch.return_value
+                process.returncode = 0
                 for response in ('null', '[]', '"unexpected"', '42', 'true'):
                     with self.subTest(response=response):
-                        run.return_value = Mock(stdout=response, returncode=0)
+                        process.communicate.return_value = (response, "")
                         with self.assertRaisesRegex(
                             RuntimeError, "The local voice service did not respond"
                         ):
                             voice_assistant.media_call("microphone_status")
-                run.return_value = Mock(stdout='{"input_device":"Mic"}', returncode=0)
+                process.communicate.return_value = ('{"input_device":"Mic"}', "")
                 self.assertEqual(voice_assistant.media_call("microphone_status"),
                                  {"input_device": "Mic"})
 
@@ -419,6 +421,30 @@ class VoiceTests(unittest.TestCase):
                 stop.assert_called_once_with(process)
             finally:
                 timer.join()
+
+    def test_non_cancellable_media_timeout_stops_worker_tree(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            python = root / "Media/python/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            failure = subprocess.TimeoutExpired("media worker", 180)
+            process = Mock()
+            process.communicate.side_effect = failure
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant, "_persistent_mic_call", return_value=None),
+                patch.object(voice_assistant.subprocess, "Popen", return_value=process),
+                patch.object(voice_assistant, "_stop_media_process") as stop,
+            ):
+                with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                    voice_assistant.media_call("record_audio", seconds=8)
+                self.assertIs(raised.exception, failure)
+                process.communicate.assert_called_once_with(
+                    input=json.dumps({"action": "record_audio", "seconds": 8}),
+                    timeout=180,
+                )
+                stop.assert_called_once_with(process)
 
     def test_cancellable_media_worker_stops_after_communication_failure(self):
         with TemporaryDirectory() as folder:
