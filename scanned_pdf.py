@@ -124,6 +124,11 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                         selected.discard(index)
                         continue
                 passages.append(f"[Page {index + 1}; vision transcription]\n{observed or '[No readable text found]'}")
+            except OSError:
+                # Temporary-directory cleanup can fail on context exit as well.
+                # Preserve readable pages and report this scan as omitted.
+                selected.discard(index)
+                continue
             finally:
                 page.close()
     finally:

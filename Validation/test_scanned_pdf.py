@@ -110,6 +110,67 @@ def test_temp_directory_failure_preserves_native_text_and_reports_omission(tmp_p
     document.close.assert_called_once_with()
 
 
+def test_temp_cleanup_failure_preserves_native_text_and_reports_omission(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    class PdfiumError(Exception):
+        pass
+
+    pdf = tmp_path / "cleanup-failure.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    pages = [Mock(), Mock()]
+    textpages = [Mock(), Mock()]
+    for page, textpage, text in zip(pages, textpages, ["Native order", ""]):
+        page.get_textpage.return_value = textpage
+        textpage.get_text_bounded.return_value = text
+    pages[1].get_size.return_value = (600, 800)
+    image = Mock()
+    bitmap = Mock()
+    bitmap.to_pil.return_value = image
+    pages[1].render.return_value = bitmap
+    document = Mock()
+    document.__len__ = Mock(return_value=2)
+    document.__getitem__ = Mock(side_effect=lambda index: pages[index])
+    recognize = Mock(return_value={"description": "Transcribed scan"})
+    real_temporary_directory = scanned_pdf.tempfile.TemporaryDirectory
+
+    class CleanupFailure:
+        def __init__(self, **kwargs):
+            self.directory = real_temporary_directory(**kwargs)
+
+        def __enter__(self):
+            return self.directory.__enter__()
+
+        def __exit__(self, *args):
+            self.directory.__exit__(*args)
+            raise OSError("temporary image could not be deleted")
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(
+            PdfDocument=Mock(return_value=document), PdfiumError=PdfiumError
+        ),
+        "media_worker": SimpleNamespace(recognize_image=recognize),
+    }), patch.object(scanned_pdf.tempfile, "TemporaryDirectory", CleanupFailure):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert "[Page 1; selectable text]\nNative order" in result["text"]
+    assert "[1 scanned pages were not read: 2.]" in result["text"]
+    assert "[Page 2; vision transcription]" not in result["text"]
+    assert result["pages_read"] == [1]
+    assert result["scanned_pages"] == [2]
+    assert result["has_scans"] is True
+    assert result["partial"] is True
+    recognize.assert_called_once()
+    pages[0].render.assert_not_called()
+    image.close.assert_called_once_with()
+    bitmap.close.assert_called_once_with()
+    for textpage in textpages:
+        textpage.close.assert_called_once_with()
+    assert [page.close.call_count for page in pages] == [1, 2]
+    document.close.assert_called_once_with()
+
+
 def test_native_pdf_does_not_require_vision_worker(tmp_path):
     import sys
     from unittest.mock import Mock
