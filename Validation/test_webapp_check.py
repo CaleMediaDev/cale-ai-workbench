@@ -2573,6 +2573,65 @@ def test_browser_plan_path_format_only_developer_probe_keeps_pure_compatibility(
 
 # Scoped host evidence port: original accepted85552a5 regressions.
 
+
+def test_dependency_observer_bounds_unique_paths_and_keeps_reload_duplicates(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp_check, 'MAX_OBSERVED_DEPENDENCIES', 2)
+    observer = webapp_check._ObservedDependencies(tmp_path)
+    for name in ('a.css', 'b.css', 'a.css', 'b.css'):
+        observer.observe(tmp_path / name)
+    assert observer.scope == 'project_local_dependencies'
+    assert observer.path_bytes == len('a.cssb.css')
+    observer.observe(tmp_path / 'c.css')
+    assert observer.scope == 'limited_dependency_manifest'
+    assert observer.reasons == {'resource_count_limit'}
+    assert len(observer.paths) == 2
+
+
+def test_dependency_observer_preserves_metadata_path_and_runtime_limits(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp_check, 'MAX_DEPENDENCY_PATH_BYTES', 8)
+    observer = webapp_check._ObservedDependencies(tmp_path)
+    observer.observe(tmp_path / 'one.css')
+    observer.observe(tmp_path / 'two.css')
+    assert observer.reasons == {'resource_metadata_limit'}
+    assert observer.path_bytes == 7
+    observer.observe(tmp_path.parent / 'outside.css')
+    assert 'resource_path_unavailable' in observer.reasons
+    monkeypatch.setattr(webapp_check, 'MAX_DEPENDENCY_SINGLE_PATH_BYTES', 4)
+    observer.observe(tmp_path / 'long.css')
+    assert 'resource_path_limit' in observer.reasons
+    observer.observe(tmp_path / 'NODE_MODULES/lib.css')
+    assert 'excluded_runtime_dependency' in observer.reasons
+
+
+def test_many_real_local_assets_keep_complete_observed_dependency_scope(tmp_path):
+    links = []
+    for number in range(300):
+        name = f'asset-{number}.css'
+        (tmp_path / name).write_text('/* local asset */', encoding='utf-8')
+        links.append(f'<link rel="stylesheet" href="{name}">')
+    (tmp_path / 'index.html').write_text('<!doctype html>' + ''.join(links) + '<p id="ready">Ready</p>', encoding='utf-8')
+    report = webapp_check.check(tmp_path, {'path':'index.html', 'cases':[{'expect':{'ready':'Ready'}}]})
+    assert report['passed'], report
+    assert report['dependency_scope'] == 'project_local_dependencies'
+    assert report['dependency_scope_reasons'] == []
+    assert len(webapp_check.serialize_result(report)) <= 16_000
+
+
+def test_real_loaded_runtime_remains_limited_with_actionable_reason(tmp_path):
+    runtime = tmp_path / 'node_modules'
+    runtime.mkdir()
+    (runtime / 'lib.css').write_text('/* actually served runtime */', encoding='utf-8')
+    (tmp_path / 'index.html').write_text('<link rel="stylesheet" href="node_modules/lib.css"><p id="ready">Ready</p>', encoding='utf-8')
+    spec = {'path':'index.html', 'cases':[{'expect':{'ready':'Ready'}}]}
+    report = webapp_check.check(tmp_path, spec)
+    assert report['passed'], report
+    assert report['dependency_scope'] == 'limited_dependency_manifest'
+    assert 'excluded_runtime_dependency' in report['dependency_scope_reasons']
+    webapp_check.save_verifier(tmp_path, spec)
+    saved = webapp_check.run_saved_checks(tmp_path, tmp_path / '.local-ai/webapp-check.json')
+    assert saved['passed'] and saved['dependency_scope'] == 'limited_dependency_manifest'
+    assert 'excluded_runtime_dependency' in saved['dependency_scope_reasons']
+
 def test_persistence_metadata_budget_is_atomic_bounded_and_does_not_mutate_results():
     import copy,json
     noise=[{'target':'text:noise'+str(index),'effect':'mutation','action_case':1,'reload_case':2} for index in range(32)]

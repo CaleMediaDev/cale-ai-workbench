@@ -22,10 +22,55 @@ MAX_SAVED_SEQUENCES = 32
 MAX_SAVED_CASES = 128
 MAX_REPORT_BYTES = 1_000_000
 REPORT_NAME = "browser-check-report.json"
+MAX_OBSERVED_DEPENDENCIES = 16_384
+MAX_DEPENDENCY_PATH_BYTES = 4 * 1024 * 1024
+MAX_DEPENDENCY_SINGLE_PATH_BYTES = 4096
 
 
 # Bind receipts to this loaded implementation, not later hot-replaced bytes.
 _LOADED_CHECKER_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+class _ObservedDependencies:
+    """Bounded host-only dependency bookkeeping; paths never fill model replies."""
+    def __init__(self, folder):
+        self.root = Path(folder).resolve()
+        self.paths = set()
+        self.path_bytes = 0
+        self.reasons = set()
+
+    def blocked(self, reason="external_or_unavailable_resource"):
+        self.reasons.add(reason)
+
+    def observe(self, path):
+        try:
+            relative = Path(path).relative_to(self.root)
+            name = relative.as_posix()
+            size = len(name.encode("utf-8"))
+        except (ValueError, UnicodeError):
+            self.blocked("resource_path_unavailable")
+            return
+        if any(part.casefold() in {'.git', '.local-ai', '__pycache__',
+                'node_modules', '.venv', 'venv', 'toolbox'} for part in relative.parts):
+            self.blocked("excluded_runtime_dependency")
+        # Reloads of already observed files consume no additional path budget.
+        if name in self.paths:
+            return
+        if size > MAX_DEPENDENCY_SINGLE_PATH_BYTES:
+            self.blocked("resource_path_limit")
+            return
+        if len(self.paths) >= MAX_OBSERVED_DEPENDENCIES:
+            self.blocked("resource_count_limit")
+            return
+        if self.path_bytes + size > MAX_DEPENDENCY_PATH_BYTES:
+            self.blocked("resource_metadata_limit")
+            return
+        self.paths.add(name)
+        self.path_bytes += size
+
+    @property
+    def scope(self):
+        return 'limited_dependency_manifest' if self.reasons else 'project_local_dependencies'
 
 
 def _relative_html_path(name: str) -> Path:
@@ -684,18 +729,10 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
               };
               define(window,key,{value:observe,writable:false,configurable:false,enumerable:false});
             })();""".replace('__CALE_KEY__',json.dumps(native_key),1))
-            dependencies=set();dependency_limited=[False]
-            def observe_dependency(path):
-                relative=path.relative_to(folder.resolve())
-                if len(dependencies)>=256 or len(relative.as_posix())>240:
-                    dependency_limited[0]=True;return
-                dependencies.add(relative.as_posix())
-                if any(part in {'.git','.local-ai','__pycache__','node_modules','.venv','venv','Toolbox'} for part in relative.parts):
-                    dependency_limited[0]=True
-            def blocked_dependency():dependency_limited[0]=True
-            context.route("**/*", project_only_route(folder,on_resource=observe_dependency,on_blocked=blocked_dependency))
+            dependencies = _ObservedDependencies(folder)
+            context.route("**/*", project_only_route(folder,on_resource=dependencies.observe,on_blocked=dependencies.blocked))
             page = context.new_page()
-            page.on("requestfailed",lambda _request:blocked_dependency())
+            page.on("requestfailed",lambda _request:dependencies.blocked("unavailable_resource"))
             page.on("pageerror", lambda error: errors.append(str(error)[:300]))
             page.goto(page_path.as_uri(), wait_until="load", timeout=15_000)
             def find_target(token):
@@ -1020,7 +1057,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
             "case_count": len(results), "failed_case_count": sum(not item["passed"] for item in results),
             "cases": results, "javascript_errors": errors,
             "page_sha256": page_hash, "interactions": interactions, "persistence_witnesses": persistence_witnesses[:32],
-            "dependency_scope": 'limited_dependency_manifest' if dependency_limited[0] else 'project_local_dependencies',
+            "dependency_scope": dependencies.scope,
+            "dependency_scope_reasons": sorted(dependencies.reasons),
             "normalized_inputs": normalized_inputs}
 
 
@@ -1237,7 +1275,8 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
                                 "case_count": result["case_count"], "failed_case_count": result["failed_case_count"],
                                 "javascript_errors": result["javascript_errors"][:3],
                                 "persistence_witnesses": result.get("persistence_witnesses", [])[:32],
-                                "dependency_scope": result.get("dependency_scope", "not_observed")})
+                                "dependency_scope": result.get("dependency_scope", "not_observed"),
+                                "dependency_scope_reasons": result.get("dependency_scope_reasons", [])})
         finally:
             browser.close()
     unchanged = (spec_file.read_bytes() == raw
@@ -1250,6 +1289,7 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
     passed = all(result["passed"] for result in results) and unchanged and sources_unchanged
     report = {"passed": passed, "suite_sha256": digest,
             "dependency_scope": ('project_local_dependencies' if all(result.get('dependency_scope')=='project_local_dependencies' for result in results) else 'limited_dependency_manifest'),
+            "dependency_scope_reasons": sorted({reason for result in results for reason in result.get('dependency_scope_reasons', [])}),
             "persistence_witnesses": _select_persistence_witnesses(results),
             "verified_paths": sorted({spec["path"] for spec in checks}) if passed else [],
             "case_count": sum(result["case_count"] for result in results),
