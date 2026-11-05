@@ -9,6 +9,31 @@ import music_mastering
 import toolbox_mcp
 
 
+def test_install_repairs_non_ascii_marker(tmp_path):
+    engine = tmp_path / "matchering"
+    python = engine / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"existing runtime")
+    marker = engine / ".cale-installed"
+    marker.write_bytes(b"\xffcorrupted")
+
+    with patch.object(music_mastering, "ENGINE", engine), patch.object(
+        music_mastering.shutil, "disk_usage", return_value=Mock(free=3 * 1024**3)
+    ), patch.object(
+        music_mastering.music_backend, "_tool", return_value="uv"
+    ), patch.object(music_mastering.subprocess, "run") as run:
+        assert music_mastering.install() == python
+
+    run.assert_called_once()
+    assert run.call_args.args[0] == [
+        "uv", "pip", "install", "--python", str(python),
+        f"matchering=={music_mastering.VERSION}", "imageio-ffmpeg==0.6.0",
+    ]
+    assert run.call_args.kwargs["check"] is True
+    assert marker.read_bytes() == music_mastering.VERSION.encode("ascii")
+    assert python.read_bytes() == b"existing runtime"
+
+
 def test_mastering_discovery():
     names = [item["name"] for item in toolbox_mcp.toolbox_search("master song reference")["tools"]]
     assert "local.master_music" in names
