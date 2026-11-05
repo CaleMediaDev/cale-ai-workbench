@@ -1,6 +1,7 @@
 """Token graph counts only real provider-reported usage."""
 
 import sqlite3
+import pytest
 
 import usage_history
 
@@ -410,3 +411,25 @@ def test_response_speed_keeps_recent_valid_sample_window_and_source_scope(tmp_pa
     with sqlite3.connect(usage_history.DATABASE) as conn:
         conn.execute("UPDATE usage_events SET timestamp=?", (usage_history.time.time()-31*86400,))
     assert usage_history.recent_model_response_speed("window") is None
+
+
+@pytest.mark.parametrize('timestamp_kind',['text','infinite','future','stale'])
+def test_response_speed_requires_finite_numeric_current_window_timestamp(tmp_path,monkeypatch,timestamp_kind):
+    monkeypatch.setattr(usage_history,'DATABASE',tmp_path/'usage.db')
+    now=usage_history.time.time()
+    stamp={'text':'not-a-timestamp','infinite':float('inf'),
+           'future':now+3600,'stale':now-31*86400}[timestamp_kind]
+    with usage_history._connection() as conn:
+        for source in ('ollama','cloud'):
+            for _ in range(3):
+                conn.execute('INSERT INTO usage_events(timestamp,source,model,prompt_tokens,completion_tokens,total_tokens,elapsed_seconds) VALUES(?,?,?,?,?,?,?)',
+                             (stamp,source,'window-invalid',0,900,900,1))
+    assert usage_history.recent_model_response_speed('window-invalid') is None
+    assert usage_history.recent_provider_response_speed('cloud',77)==77
+    for _ in range(3):_local_timed('window-invalid',100,2)
+    # Bad latest rows cannot crowd real samples out of the bounded valid window.
+    with usage_history._connection() as conn:
+        for _ in range(15):
+            conn.execute('INSERT INTO usage_events(timestamp,source,model,prompt_tokens,completion_tokens,total_tokens,elapsed_seconds) VALUES(?,?,?,?,?,?,?)',
+                         (stamp,'ollama','window-invalid',0,900,900,1))
+    assert usage_history.recent_model_response_speed('window-invalid')==50

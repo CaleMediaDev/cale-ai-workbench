@@ -203,11 +203,13 @@ def _response_speed(source, models=(), limit=12):
         for alias in (model.removesuffix(":latest"), model.removesuffix(":latest") + ":latest")
     ))
     model_filter = f"AND model IN ({','.join('?' for _ in aliases)}) " if aliases else ""
+    now = time.time()
     try:
         with closing(_connection()) as conn:
             rows = conn.execute(
                 "SELECT 1.0 * completion_tokens / elapsed_seconds FROM usage_events "
-                "WHERE source=? AND timestamp>? "
+                "WHERE source=? AND typeof(timestamp) IN ('integer','real') "
+                "AND timestamp>? AND timestamp<=? "
                 # SQLite's dynamic types otherwise admit arbitrary text as
                 # numeric comparisons. Reject malformed persisted metrics.
                 "AND typeof(completion_tokens) IN ('integer','real') "
@@ -215,9 +217,10 @@ def _response_speed(source, models=(), limit=12):
                 "AND completion_tokens=CAST(completion_tokens AS INTEGER) "
                 "AND typeof(elapsed_seconds) IN ('integer','real') "
                 "AND elapsed_seconds>0 AND elapsed_seconds<1e100 "
+                "AND 1.0 * completion_tokens / elapsed_seconds > 0 "
                 "AND 1.0 * completion_tokens / elapsed_seconds < 1e100 "
                 + model_filter + "ORDER BY id DESC LIMIT ?",
-                (source, time.time() - 30 * 86400, *aliases, limit),
+                (source, now - 30 * 86400, now, *aliases, limit),
             ).fetchall()
         return statistics.median(row[0] for row in rows) if len(rows) >= 3 else None
     except (OSError, sqlite3.Error):
