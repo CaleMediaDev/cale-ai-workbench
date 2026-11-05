@@ -273,6 +273,35 @@ def test_background_repair_preserves_relative_root_after_cwd_change(tmp_path, mo
         assert expected_root not in ffmpeg_runtime._last_attempts
 
 
+def test_failed_thread_start_allows_immediate_repair_retry(tmp_path):
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+            patch.object(ffmpeg_runtime, "_repairing_roots", set()), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", return_value=False), \
+            patch.object(ffmpeg_runtime, "ensure") as ensure, \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        thread.return_value.start.side_effect = RuntimeError("cannot start thread")
+
+        with pytest.raises(RuntimeError, match="cannot start thread"):
+            ffmpeg_runtime.start_background(tmp_path)
+
+        ensure.assert_not_called()
+        assert tmp_path.resolve() not in ffmpeg_runtime._repairing_roots
+        assert tmp_path.resolve() not in ffmpeg_runtime._last_attempts
+
+        clock.return_value = 20.0
+        thread.return_value.start.side_effect = (
+            lambda: thread.call_args.kwargs["target"]()
+        )
+        ffmpeg_runtime.start_background(tmp_path)
+
+        assert thread.call_count == 2
+        ensure.assert_called_once_with(tmp_path.resolve())
+        assert not ffmpeg_runtime._repairing_roots
+        assert not ffmpeg_runtime._last_attempts
+
+
 def test_first_background_repair_is_not_throttled_at_low_uptime(tmp_path):
     # Preserve the module's initial timestamp while restoring it after this test.
     with patch.object(ffmpeg_runtime, "_last_attempts", dict(ffmpeg_runtime._last_attempts)), \
