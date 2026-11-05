@@ -40,6 +40,33 @@ def test_missing_agent_facts_cannot_cache_ready_health(
         assert core_tool_health.missing(tmp_path) == ["Agent model SDK"]
 
 
+@pytest.mark.parametrize("environment", ["", "   "])
+def test_blank_agent_environment_cannot_cache_ready_health(
+        tmp_path, monkeypatch, healthy_agent_facts, environment):
+    healthy_agent_facts.write_text(json.dumps({"packages": {"venv": {
+        "environment": environment
+    }}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # An unrelated interpreter at the path produced by the malformed facts
+    # must not stand in for the managed agent environment.
+    unrelated = Path(environment) / "Scripts/python.exe"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.touch()
+    ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+    ghidra.parent.mkdir(parents=True)
+    ghidra.touch()
+    monkeypatch.setattr(core_tool_health, "_health_cache", (None, (), 0.0))
+    monkeypatch.setattr(core_tool_health, "_runnable", lambda path, *args: True)
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
+
+    assert core_tool_health._agent_python(tmp_path) is None
+    assert core_tool_health.missing(tmp_path, fresh=True) == ["Agent model SDK"]
+    with patch.object(core_tool_health, "_runnable",
+                      side_effect=AssertionError("expected cached health")):
+        assert core_tool_health.missing(tmp_path) == ["Agent model SDK"]
+
+
 def test_missing_checks_executables_and_ghidra(tmp_path, monkeypatch):
     ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
     ghidra.parent.mkdir(parents=True)
