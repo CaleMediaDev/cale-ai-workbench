@@ -135,7 +135,7 @@ def run():
         except OSError:
             return
         try:
-            # Another worker may have finished after our initial check.
+            # Another worker may have finished after our initial check. If so, exit early.
             if not migration_needed():
                 return
             while busy():

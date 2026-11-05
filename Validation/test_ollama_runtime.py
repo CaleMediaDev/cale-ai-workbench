@@ -120,8 +120,19 @@ class OllamaRuntimeTests(unittest.TestCase):
                 patch.object(ollama_runtime, "save_download_status") as status,
                 patch.object(ollama_runtime.subprocess, "run") as install,
             ):
+                # Initial state: migration needed
                 self.assertTrue(ollama_runtime.migration_needed())
+                
+                # Simulate another process finishing and setting native path before run() proceeds past lock acquisition
+                # Note: In the real code, complete_other_install runs when locking is called.
+                # We assert that if the state changes during the process, run() exits gracefully.
+                
+                # We modify the patch side effect to ensure complete_other_install runs *before* the loop starts, 
+                # mimicking the scenario where another worker finished.
+                # Since the side_effect is called when locking is attempted, we rely on that.
+                
                 ollama_runtime.run()
+                
                 locking.assert_called_once()
                 busy.assert_not_called()
                 pinned.assert_not_called()
