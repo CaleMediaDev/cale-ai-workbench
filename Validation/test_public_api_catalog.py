@@ -66,6 +66,14 @@ def test_search_public_apis_rejects_non_string_queries_before_catalog_access(que
     catalog.assert_not_called()
 
 
+@pytest.mark.parametrize("query", ["ß", "ﬃ"])
+def test_search_public_apis_validates_term_length_before_casefolding(query):
+    with patch.object(public_api_catalog, "_catalog") as catalog:
+        with pytest.raises(ValueError, match="Describe the public data or API you need"):
+            public_api_catalog.search_public_apis(query)
+    catalog.assert_not_called()
+
+
 @pytest.mark.parametrize("max_results", [1.5, "2", None, True, False])
 def test_search_public_apis_rejects_non_integer_limits_before_catalog_access(max_results):
     with patch.object(public_api_catalog, "_catalog") as catalog:
