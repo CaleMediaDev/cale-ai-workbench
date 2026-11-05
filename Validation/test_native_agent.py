@@ -8213,3 +8213,17 @@ def test_explicit_helper_completion_retains_control_without_external_callback(tm
     assert result.startswith('Tool error:') and 'no step advanced' in result
     assert task_context.step_status(project['folder'])['done']==0
     assert native_agent.read_state(project)['status']==control
+
+
+def test_helper_record_tampered_after_real_check_cannot_publish_sql_pass(tmp_path,monkeypatch):
+    project,_,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    folder=Path(project['folder']);active=task_context.step_status(folder)['active']
+    original=task_context.record_step_check
+    def raced(*args,**kwargs):
+        path=next((folder/'.local-ai/expression-helpers/v1/records').iterdir())
+        path.write_bytes(b'changed after actual checker return')
+        return original(*args,**kwargs)
+    with project_memory.verification_context(project),patch.object(task_context,'record_step_check',side_effect=raced):
+        result=native_agent.execute_tool(folder,'task_steps',{'action':'complete','step_id':active['id']})
+    assert result.startswith('Tool error:')
+    assert task_context.step_status(folder)['done']==0

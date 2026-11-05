@@ -878,9 +878,15 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                     raise ValueError("Task control or user instructions changed during automatic acceptance; no step advanced.")
                 if structured:
                     task_context.record_action(folder, kind, checked, check_args, request_hash=request_hash)
+                checked_helper=(json.loads(checked).get('helper') if kind=='check_expression_helper'
+                                and checked.startswith('{') else None)
                 def helper_commit_allowed():
                     return (read_state({'folder':str(folder)}).get('status') not in {'paused','stopped','done'}
                             and project_memory._helper_request_identity(folder)==helper_basis
+                            and isinstance(checked_helper,dict)
+                            and project_memory.expression_helper_basis(folder,check_args['helper_id'])==checked_helper
+                            and project_memory._helper_request_identity(folder)==helper_basis
+                            and read_state({'folder':str(folder)}).get('status') not in {'paused','stopped','done'}
                             and (before_step_commit is None or before_step_commit()))
                 value = task_context.record_step_check(folder, active["id"], request_hash, status_result,
                     unchanged=step_source_fingerprint(folder, structured) == before, expected_check=expected_check,
