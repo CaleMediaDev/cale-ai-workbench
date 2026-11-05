@@ -27,6 +27,7 @@ class ChatActivity:
         self.pending_reports = {}
         self.titles = {}
         self.resources = {}
+        self.github_failures = {}
         self.pending = {}
         self.last_progress = float("-inf")
 
@@ -91,7 +92,17 @@ class ChatActivity:
                         self.pending_reports.pop(next(iter(self.pending_reports)))
                     self.pending.pop(run, None)
                 continue
-            key = (run, phase, self.resources.get(run))
+            failure = event.get("github_failure")
+            if (phase == "waiting" and isinstance(failure, dict)
+                    and isinstance(failure.get("stage"), str) and failure["stage"] in donation._GITHUB_STAGES
+                    and isinstance(failure.get("kind"), str) and failure["kind"] in donation._GITHUB_KINDS
+                    and (failure.get("status") is None or type(failure.get("status")) is int and 400 <= failure["status"] <= 599)):
+                self.github_failures[run] = donation.github_failure_message(failure["stage"], failure.get("status"), failure["kind"])
+                while len(self.github_failures) > 512:
+                    self.github_failures.pop(next(iter(self.github_failures)))
+            else:
+                self.github_failures.pop(run, None)
+            key = (run, phase, self.resources.get(run), self.github_failures.get(run))
             if key in self.seen:
                 continue
             self.remember(self.seen, key)
@@ -143,6 +154,12 @@ class ChatActivity:
                     line += " · " + areas if areas else ""
                 else:
                     line = descriptions[phase] + (" · " + areas if areas else "")
+                if phase == "waiting":
+                    failures = list(dict.fromkeys(self.github_failures[run] for run in runs if run in self.github_failures))
+                    if failures:
+                        line = " ".join(failures[:2])
+                        if any(run not in self.github_failures for run in runs):
+                            line += " " + descriptions[phase]
                 names = {"local": "local AI", "free_cloud": "free cloud AI", "chatgpt": "ChatGPT", "cpu": "local CPU"}
                 sources = list(dict.fromkeys(self.resources[run] for run in runs if self.resources.get(run) in names))
                 if sources:

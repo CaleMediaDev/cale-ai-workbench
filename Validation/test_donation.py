@@ -179,7 +179,7 @@ def test_draft_submission_writes_only_new_branch_and_never_main_or_merge():
         if endpoint.endswith("/forks"):
             return {"full_name": "donor/cale-ai-workbench", "fork": True}
         if endpoint == "repos/donor/cale-ai-workbench":
-            return {"parent": {"full_name": donation.UPSTREAM}}
+            return {"full_name": "donor/cale-ai-workbench", "fork": True, "parent": {"full_name": donation.UPSTREAM}}
         if endpoint.endswith("/git/trees") or endpoint.endswith("/git/commits"):
             return {"sha": "c" * 40}
         if endpoint.endswith("/pulls"):
@@ -2082,7 +2082,7 @@ def test_github_fork_readiness_preserves_typed_failure_instead_of_generic_fallba
         with pytest.raises(donation.GitHubRequestError) as raised:
             donation.open_proposal("donor", "a"*32, JOB, COMMIT, PROPOSAL, {}, lambda: None)
     assert raised.value.stage == "repository" and raised.value.status == 404
-    assert len(calls) == 16
+    assert len(calls) == 17  # Initial existing-fork lookup, creation, then15polls.
 
 
 def test_advisory_old_review_and_scope_404_do_not_pause_current_donation(tmp_path):
@@ -2397,6 +2397,8 @@ class PublicationRemote:
         self.refs, self.commits = {}, {}
         self.prs = []
         self.fork_failures = 0
+        self.fork_failure_status = 404
+        self.fork_created = False
         self.pr_failure = ""
         self.ref_lost = False
         self.revision = COMMIT["sha"]
@@ -2422,10 +2424,13 @@ class PublicationRemote:
         if endpoint.endswith("/forks"):
             if self.fork_failures:
                 self.fork_failures -= 1
-                raise donation.GitHubRequestError("fork-create", 404, "http")
+                raise donation.GitHubRequestError("fork-create", self.fork_failure_status, "http")
+            self.fork_created = True
             return {"full_name": "donor/cale-ai-workbench", "fork": True}
         if endpoint == "repos/donor/cale-ai-workbench":
-            return {"fork": True, "parent": {"full_name": donation.UPSTREAM}}
+            if not self.fork_created:
+                raise donation.GitHubRequestError("repository", 404, "http")
+            return {"full_name": "donor/cale-ai-workbench", "fork": True, "parent": {"full_name": donation.UPSTREAM}}
         if endpoint.endswith("/git/trees"):
             return {"sha": "c"*40}
         if endpoint.endswith("/git/commits"):
@@ -3011,3 +3016,75 @@ def test_slow_owned_edited_title_proposal_blocks_before_model(outbox_host):
     service=donation.Service(host.root);service.last_activity=time.monotonic()-301
     with patch.object(donation,'gh_api',side_effect=api):service._run(threading.Event())
     assert not host.calls and 'waiting for maintainer review' in service.status_message()
+
+
+def test_existing_verified_fork_never_requests_creation():
+    calls=[]
+    def api(endpoint,data=None):
+        calls.append((endpoint,data))
+        assert data is None
+        return {'full_name':'DONOR/cale-ai-workbench','fork':True,'parent':{'full_name':donation.UPSTREAM}}
+    assert donation._proposal_target('donor',lambda:None,api)=='donor/cale-ai-workbench'
+    assert calls==[('repos/donor/cale-ai-workbench',None)]
+
+
+@pytest.mark.parametrize('metadata',[None,[],{},
+    {'full_name':'donor/cale-ai-workbench','fork':False,'parent':{'full_name':donation.UPSTREAM}},
+    {'full_name':'other/cale-ai-workbench','fork':True,'parent':{'full_name':donation.UPSTREAM}},
+    {'full_name':'donor/cale-ai-workbench','fork':True,'parent':{'full_name':'other/repository'}},
+    {'full_name':[],'fork':True,'parent':{'full_name':donation.UPSTREAM}},
+    {'full_name':'donor/cale-ai-workbench','fork':True,'parent':{'full_name':[]}}])
+def test_fork_lookup_rejects_unverified_or_malformed_destination_without_writes(metadata):
+    calls=[]
+    def api(endpoint,data=None):
+        calls.append((endpoint,data));return metadata
+    with pytest.raises(donation.GitHubRequestError) as error:
+        donation._proposal_target('donor',lambda:None,api)
+    assert error.value.kind=='response_invalid'
+    assert len(calls)==1 and calls[0][1] is None
+
+
+@pytest.mark.parametrize('status',[401,403,429,500])
+def test_unknown_fork_lookup_does_not_attempt_creation(status):
+    calls=[]
+    def api(endpoint,data=None):
+        calls.append((endpoint,data));raise donation.GitHubRequestError('repository',status,'http')
+    with pytest.raises(donation.GitHubRequestError) as error:
+        donation._proposal_target('donor',lambda:None,api)
+    assert error.value.status==status and len(calls)==1
+
+
+def test_fork403_saved_draft_recovers_to_existing_fork_without_new_ai(outbox_host):
+    import donation_ui
+    host=outbox_host;host.remote.fork_failures=1;host.remote.fork_failure_status=403
+    first=host.tick();messages=[]
+    donation_ui.ChatActivity(first,messages.append).poll()
+    assert len(host.calls)==1 and donation.total_tokens(host.root)==50
+    assert any('GitHub HTTP 403 during fork creation' in message for message in messages)
+    with closing(donation.connection(host.root)) as db:
+        original=db.execute('SELECT id FROM runs').fetchone()[0]
+        assert db.execute('SELECT length(payload) FROM publication_outbox').fetchone()[0]>0
+    # Simulate a now-visible existing fork. Creation remains forbidden: a
+    # successful retry must use GET metadata and retain the same saved work.
+    host.remote.fork_created=True;host.remote.fork_failures=100
+    before=len(host.remote.calls)
+    with patch.object(donation.time,'time',return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls)==1 and donation.total_tokens(host.root)==50 and len(host.remote.prs)==1
+    assert not any(endpoint.endswith('/forks') for endpoint,_ in host.remote.calls[before:])
+    with closing(donation.connection(host.root)) as db:
+        assert db.execute('SELECT id,status FROM runs').fetchall()==[(original,'submitted')]
+
+
+@pytest.mark.parametrize('failure',[
+    {'stage':[], 'status':403, 'kind':'http'},
+    {'stage':'fork-create','status':True,'kind':'http'},
+    {'stage':'fork-create','status':403,'kind':'SECRET https://private.invalid'},
+])
+def test_wait_chat_ignores_untrusted_github_diagnostics(failure):
+    import donation_ui
+    messages=[]
+    service=SimpleNamespace(drain_events=lambda:[{'run_id':'run','phase':'waiting','github_failure':failure}])
+    donation_ui.ChatActivity(service,messages.append).poll()
+    assert len(messages)==1 and 'SECRET' not in messages[0] and 'private.invalid' not in messages[0]
+    assert 'GitHub HTTP' not in messages[0]

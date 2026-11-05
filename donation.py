@@ -723,6 +723,25 @@ def _proposal_target(login, check_cancel, api=None):
     if login.casefold() == UPSTREAM.split("/")[0].casefold():
         target = UPSTREAM  # The owner cannot fork their own repository.
     else:
+        # Reuse the donor's verified fork. Repeated creation requests are
+        # unnecessary and may be denied even when the existing fork is usable.
+        target = f"{login}/cale-ai-workbench"
+        try:
+            metadata = api(f"repos/{target}")
+        except GitHubRequestError as error:
+            if error.status != 404:
+                raise
+        else:
+            if (not isinstance(metadata, dict) or metadata.get("fork") is not True
+                    or not isinstance(metadata.get("full_name"), str)
+                    or metadata["full_name"].casefold() != target.casefold()
+                    or not isinstance(metadata.get("parent"), dict)
+                    or not isinstance(metadata["parent"].get("full_name"), str)
+                    or metadata["parent"]["full_name"].casefold() != UPSTREAM.casefold()):
+                raise GitHubRequestError("repository", kind="response_invalid")
+            check_cancel()
+            return target
+        check_cancel()
         fork = api(f"repos/{UPSTREAM}/forks", {"default_branch_only": True})
         target = fork.get("full_name", "")
         if (target.casefold() != f"{login}/cale-ai-workbench".casefold()
@@ -1452,7 +1471,7 @@ class Service:
         self.message = (("Continuous donation work is enabled." if self.continuous else "Waiting for Cale to be idle.")
                         if consent["enabled"] else "Off · help improve Cale when you choose.")
 
-    def _emit_event(self, phase, run_id="", resource="", *, job_title="", pr_url=""):
+    def _emit_event(self, phase, run_id="", resource="", *, job_title="", pr_url="", github_failure=None):
         """Nonblocking bounded notifications from actual host stages, never model prose.
 
         Progress is discarded before terminal PR notifications under pressure.
@@ -1466,6 +1485,13 @@ class Service:
         if resource in {*SOURCES, "cpu"}:event["resource"] = resource
         if job_title:event["job_title"] = re.sub(r"[\x00-\x1f\x7f]", " ", str(job_title))[:160]
         if phase == "submitted":event["pr_url"] = pr_url
+        if phase == "waiting" and isinstance(github_failure, dict):
+            # Only typed host metadata crosses into chat, never CLI bodies,
+            # endpoint text, credentials or arbitrary exception messages.
+            stage, kind = github_failure.get("stage"), github_failure.get("kind")
+            failure = GitHubRequestError(stage if isinstance(stage, str) else None,
+                github_failure.get("status"), kind if isinstance(kind, str) else None)
+            event["github_failure"] = {"stage": failure.stage, "status": failure.status, "kind": failure.kind}
         with self._events["lock"]:
             queue = self._events["queue"]
             if len(queue) >= 256:
@@ -1868,7 +1894,7 @@ class Service:
                 diagnostic = {**diagnostic, "database_unavailable": True}
             diagnostic = self._publish_github_diagnostic(diagnostic, fresh=True)
             self.next_attempt = time.monotonic() + max(1, diagnostic.get("until", time.time()+60)-time.time())
-            self._emit_event("waiting", run_id, resource)
+            self._emit_event("waiting", run_id, resource, github_failure=diagnostic)
             self.message = self._github_diagnostic_message(diagnostic)
         except HTTPError as error:
             if run_id:

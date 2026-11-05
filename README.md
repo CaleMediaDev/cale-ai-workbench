@@ -2,7 +2,9 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
-Release0.5.526 corrects a misleading donation chat update: one waiting attempt does not mean every source or GitHub is disconnected. Open Donate AI power for current status. [Validation and limits](benchmarks/results/donation-wait-chat-526-20261105.json).
+Release 0.5.527 reuses verified contribution forks and puts exact GitHub failures in the main chat. Saved drafts recover without generating the same proposal again. GitHub permission refusals still cannot be overridden. [Validation and limits](benchmarks/results/donation-fork-recovery-527-20261105.json).
+
+Release 0.5.526 corrects a misleading donation chat update: one waiting attempt does not mean every source or GitHub is disconnected. Open Donate AI power for current status. [Validation and limits](benchmarks/results/donation-wait-chat-526-20261105.json).
 
 Release 0.5.525 fixes automatic updates for connected accounts and makes recovered task context explicit about saved progress and unavailable database facts. It retains the 0.5.524 proposal-search fix. Connected users stuck on 0.5.523/524 can run the Windows installer once to receive the update-guard correction. [Validation and limits](benchmarks/results/runtime-context-updater-525-20261105.json).
 
