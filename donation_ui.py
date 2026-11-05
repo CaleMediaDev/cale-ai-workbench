@@ -123,7 +123,7 @@ class ChatActivity:
                 "training": "I'm training a small specialist on reviewed public data",
                 "trained": "I recorded a local specialist experiment; it is not activated",
                 "no_change": "I finished a review without a reliable code change; nothing was sent",
-                "waiting": "I'm waiting for an enabled AI source or GitHub to become available",
+                "waiting": "A contribution attempt is waiting to retry; other available reviews can continue. Open Donate AI power for the current status",
                 "error": "I paused after a contribution error; no successful report is confirmed",
             }
             lines = []

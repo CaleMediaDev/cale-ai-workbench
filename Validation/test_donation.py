@@ -1855,6 +1855,9 @@ def test_donation_chat_shows_real_chatgpt_wait_then_local_review_without_jargon(
     events.append({'run_id':'same','phase':'waiting','resource':'chatgpt'})
     consumer.poll()
     assert 'waiting' in messages[-1] and 'ChatGPT' in messages[-1]
+    assert 'other available reviews can continue' in messages[-1]
+    assert 'Open Donate AI power' in messages[-1]
+    assert 'enabled AI source or GitHub to become available' not in messages[-1]
     clock[0]+=21
     events.append({'run_id':'same','phase':'reviewing','resource':'local'})
     consumer.poll()
