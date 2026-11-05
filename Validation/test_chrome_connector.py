@@ -134,6 +134,21 @@ def test_installed_version_accepts_directive_before_indented_mapping(
     assert chrome_connector.installed_version() == "0.2.6"
 
 
+def test_installed_version_accepts_tag_directive_before_indented_mapping(
+    tmp_path, monkeypatch
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text(
+        "%TAG !local! tag:example.org,2026:\n"
+        "---\n  name: hermes-connector\n  version: 0.2.6\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    assert chrome_connector.installed_version() == "0.2.6"
+
+
 def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()

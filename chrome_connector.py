@@ -26,6 +26,7 @@ def installed_version() -> str:
         line for line in contents.splitlines()
         if not line.lstrip().startswith("#")
         and not re.fullmatch(r"%YAML[ \t]+1\.[12](?:[ \t]+#[^\r\n]*)?[ \t]*", line)
+        and not re.fullmatch(r"%TAG[ \t]+!(?:[0-9A-Za-z_-]+!)?!?[ \t]+[^ \t\r\n]+(?:[ \t]+#[^\r\n]*)?[ \t]*", line)
         and not re.fullmatch(r"(?:---|\.\.\.)(?:[ \t]+#[^\r\n]*)?[ \t]*", line)
     )
     match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]+(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", dedent(mapping_lines), re.M)
