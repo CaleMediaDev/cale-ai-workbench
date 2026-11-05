@@ -976,10 +976,12 @@ def native_forced_choice_supported(payload):
 
 
 def native_chat_request(payload, capacity, thinking=None, *, allow_forced_choice=False):
-    """Translate only losslessly representable text requests to Ollama's native API.
+    """Translate conservatively supported text requests to Ollama's native API.
 
     The configured context remains a ceiling, not a reservation. Unknown features
-    use the existing OpenAI transport; never silently remove a requested feature.
+    use the existing OpenAI transport. Ollama 0.40.13 uses the same typed tool
+    schema representation on both endpoints and drops some JSON Schema keywords;
+    valid_completion therefore checks replies against the original host schema.
     """
     allowed = {"model", "messages", "tools", "tool_choice", "stream", "max_tokens",
                "max_completion_tokens", "temperature", "top_p", "seed", "stop",

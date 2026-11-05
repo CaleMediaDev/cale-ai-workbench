@@ -119,6 +119,7 @@ extras = [
     "benchmarks/results/document-auto-20261103.json",
     "benchmarks/native_worker_smoke.py",
     "benchmarks/README.md",
+    "benchmarks/results/routing-camera-514-20261105.json",
     "benchmarks/game_model_compare.py",
     "benchmarks/results/game-code-probes-20261103.json",
     "benchmarks/game-review-20261103.md",
