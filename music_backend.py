@@ -1264,12 +1264,17 @@ def _cpu_vae_compatibility_source(source: bytes) -> bytes:
          '                vae_device = None\n                vae_dtype = None\n'),
         ('                        vae_device = next(self.vae.parameters()).device\n'
          '                        self.vae = self.vae.cpu()\n'
-         '                        pred_latents_for_decode = pred_latents_for_decode.cpu()\n',
+         '                        pred_latents_for_decode = pred_latents_for_decode.cpu()\n'
+         '                        self._empty_cache()\n'
+         '                try:\n',
          '                        vae_parameter = next(self.vae.parameters())\n'
          '                        vae_device, vae_dtype = vae_parameter.device, vae_parameter.dtype\n'
          '                        cpu_dtype = self._get_vae_dtype("cpu")\n'
+         '                try:\n'
+         '                    if vae_cpu:\n'
          '                        self.vae = self.vae.to(device="cpu", dtype=cpu_dtype)\n'
-         '                        pred_latents_for_decode = pred_latents_for_decode.to(device="cpu", dtype=cpu_dtype)\n'),
+         '                        pred_latents_for_decode = pred_latents_for_decode.to(device="cpu", dtype=cpu_dtype)\n'
+         '                        self._empty_cache()\n'),
         ('                        self.vae = self.vae.to(vae_device)\n',
          '                        self.vae = self.vae.to(device=vae_device, dtype=vae_dtype)\n')]
     for old,new in replacements:

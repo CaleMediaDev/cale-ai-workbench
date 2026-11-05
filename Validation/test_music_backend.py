@@ -1686,3 +1686,34 @@ def test_cpu_vae_preparation_declines_unknown_source_without_overwrite(tmp_path,
     with patch.object(music_backend.subprocess,'run',return_value=subprocess.CompletedProcess([],0,revision+'\n','')):
         with pytest.raises(ValueError):music_backend.prepare_cpu_vae_compatibility_patch(root/'Recovery/candidate')
     assert source.read_bytes()==raw and not (root/'Recovery/candidate').exists()
+
+@pytest.mark.parametrize('failure',['latent_conversion','partial_model_conversion'])
+def test_cpu_vae_patch_restores_after_handoff_conversion_failure(monkeypatch,failure):
+    import types
+    method,context,Tensor=cpu_decode_method(music_backend._cpu_vae_compatibility_source(ace_cpu_source_fixture()))
+    actual_to=Tensor.to
+    def latent_to(self,*args,**kwargs):
+        if kwargs.get('device')=='cpu' and kwargs.get('dtype')=='float32':
+            raise RuntimeError('latent conversion failed')
+        return actual_to(self,*args,**kwargs)
+    monkeypatch.setattr(Tensor,'to',latent_to)
+    transitions=[]
+    class Vae:
+        def __init__(self):self.parameter=Tensor()
+        @property
+        def dtype(self):return self.parameter.dtype
+        def parameters(self):return iter([self.parameter])
+        def to(self,*args,device=None,dtype=None):
+            device=device or args[0];dtype=dtype or self.parameter.dtype
+            self.parameter=Tensor(device,dtype);transitions.append((device,dtype))
+            if device=='cpu' and failure=='partial_model_conversion':
+                raise RuntimeError('model conversion partly mutated then failed')
+            return self
+        def decode(self,*args):raise AssertionError('Decode must not run after handoff failure')
+    vae=Vae();host=types.SimpleNamespace(vae=vae,use_mlx_vae=False,mlx_vae=None,device='cuda',
+        current_offload_cost=0,_empty_cache=lambda:None,_memory_allocated=lambda:0,_max_memory_allocated=lambda:0,
+        _load_model_context=lambda *a:nullcontext(),_get_vae_dtype=lambda device:'float32' if device=='cpu' else 'bfloat16')
+    with pytest.raises(RuntimeError,match='conversion'):
+        method(host,pred_latents=Tensor(),progress=None,use_tiled_decode=False,time_costs={'total_time_cost':0})
+    assert transitions==[('cpu','float32'),('cuda:0','bfloat16')]
+    assert (vae.parameter.device,vae.parameter.dtype)==('cuda:0','bfloat16')
