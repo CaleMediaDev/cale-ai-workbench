@@ -1,0 +1,105 @@
+{
+  "release": "0.5.517",
+  "public_base": "efa2c261418cdc112d351ec4967916450b3f992c",
+  "implementation_source": "2d08a1a",
+  "scope": "Examples-qualified, project-local restricted JSON expression helpers; actual saved consuming steps can run and yield without inference. Existing task SQLite owns progress.",
+  "root_validation": [
+    {
+      "source": "a275ab6ba94015a35cc7c8d6744228a3a012b881",
+      "modules": [
+        "test_native_agent",
+        "test_project_memory",
+        "test_quick_calculator",
+        "test_toolbox_mcp",
+        "test_context_window"
+      ],
+      "passed": 726,
+      "skipped": 6,
+      "subtests": 30,
+      "seconds": 808.93,
+      "note": "Before the final helper-only prepublication identity recheck."
+    },
+    {
+      "source": "2d08a1a",
+      "module": "test_native_agent",
+      "selector": "helper or compact or oversized or excerpt or fresh_context",
+      "passed": 38,
+      "deselected": 488,
+      "seconds": 31.56,
+      "note": "After the final helper-only identity recheck; no claim that the earlier full suite ran on this revision."
+    },
+    {
+      "modules": [
+        "test_project_memory",
+        "test_quick_calculator"
+      ],
+      "passed": 93,
+      "skipped": 5,
+      "subtests": 8,
+      "seconds": 34.01
+    }
+  ],
+  "independent_validation": {
+    "native_final": {
+      "passed": 39,
+      "seconds": 25.87
+    },
+    "store_adversarial": {
+      "passed": 5,
+      "seconds": 4.43
+    },
+    "store_crash_and_freshness": {
+      "passed": 13,
+      "seconds": 10.31
+    },
+    "ordinary_tools_identical_to_pre_helper": true,
+    "ordinary_tools_sha256": "53ac430a7386e2413f12764a172a7755e61bc006596355aad0d244d17fd561d4"
+  },
+  "actual_worker_proof": {
+    "registered_project_database": true,
+    "fresh_process": true,
+    "saved_steps_before": {
+      "done": 0,
+      "total": 2
+    },
+    "saved_steps_after": {
+      "done": 1,
+      "total": 2
+    },
+    "next_step": "Implement display",
+    "inference_calls_inside_worker": 0,
+    "process_calls_inside_worker": 0,
+    "network_calls_inside_worker": 0,
+    "turns_preserved": 7,
+    "whole_task_complete": false,
+    "legacy_unsuccessful_repair_counter_preserved": 5
+  },
+  "reproduced_failures": [
+    "Fraction values prematurely rounded inside intermediate containers",
+    "Integral computed array indexes and rounding digits refused",
+    "Original brief changed during calculation or provenance rebuild",
+    "Stop/Pause before or after SQL publication, including explicit completion without external callback",
+    "Saved helper corrupted between checker result and SQL publication",
+    "Global helper schemas overflowed ordinary 6000-token compaction budget",
+    "Old prototype shared-memory hardlink escaped helper database containment"
+  ],
+  "storage": {
+    "authority": ".local-ai/expression-helpers/v1/records",
+    "immutable_no_replace": true,
+    "record_bytes": 100000,
+    "records_max": 128,
+    "staging_entries_max": 128,
+    "depth_before_decode_max": 16,
+    "examples_recomputed_on_reuse": true,
+    "existing_project_memory_and_recovery_files_opened_by_helper_apis": false,
+    "unknown_bytes_silently_deleted": false
+  },
+  "limits": [
+    "Only supplied examples are qualified, not general correctness or full app completion.",
+    "Actual process-crash recovery was tested; no power-loss or storage-controller durability claim.",
+    "Windows-only registry ownership handles; expression interpreter portable.",
+    "The tested Stop/Pause interleavings are protected, not a fully linearizable cross-file control plane.",
+    "Retained records and staging files are bounded; excessive retained artifacts can require explicit archive.",
+    "No global shared skills, trained specialist, original app completion, runtime migration, new model, or GPU/camera change."
+  ]
+}
