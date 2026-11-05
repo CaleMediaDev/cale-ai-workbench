@@ -1,0 +1,35 @@
+{
+  "release": "0.5.521",
+  "status": "qualified scoped changes",
+  "sha256": {
+    "self_diagnostics.py": "12c41b012d29535c617ab2a8f52717d40427c73d1048d9e191a194e47a1de8f0",
+    "Validation/test_self_diagnostics.py": "a3d75ebac559d68de064c47a4364f310b63b22aff1a83f2978e3ad0b8a9c6260",
+    "chrome_connector.py": "b6a6c3c41ce44aa40f936e22bf33fe699fc644dcebf1b0d74a5b6e19171b4e4c",
+    "Validation/test_chrome_connector.py": "8d81b84189f0f74b8e3cd4df937f932b8096867fb1fc465659e41227616e0603"
+  },
+  "selfcheck_validation": {
+    "passed": 59,
+    "skipped": 1,
+    "subtests": 2,
+    "seconds": 63.0,
+    "root_independent_passed": 4,
+    "root_seconds": 26.43
+  },
+  "chrome_validation": {
+    "passed": 28,
+    "seconds": 0.25,
+    "reviewed_pr": 713
+  },
+  "changes": [
+    "Brief typed SQLite BUSY/LOCKED errors pause the same owned pytest process at a test boundary for at most 15 seconds; fresh idle activity resumes it.",
+    "Unknown/nontransient activity still yields; interrupted or deferred runs have a cooldown. No cross-process pass reuse, skipped bodies or deselection.",
+    "Passing requires actual exit zero, all collected nodes finalized, unconfigure seal, matching source/runtime and ownership; collection errors remain failures.",
+    "Valid YAML directives before a Chrome manifest version are accepted; malformed and nested variants remain rejected."
+  ],
+  "limits": [
+    "The full installed suite and fresh PC installation were not requalified by these scoped tests.",
+    "A test-boundary pause does not suspend arbitrary fixture background work; persistent activity uncertainty aborts the owned check.",
+    "No autonomous app-completion improvement is claimed: the private expense app still fails reload persistence and remains four of eight steps complete.",
+    "No existing Python migration, camera, voice or music change is included."
+  ]
+}
