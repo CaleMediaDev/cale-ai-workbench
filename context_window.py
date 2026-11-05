@@ -126,13 +126,14 @@ def sync(root, model):
         original,
     )
     match = re.search(
-        r"(?m)^  context_length: \d+[ \t]*$", model_section.group("body")
+        r"(?m)^  context_length: (?P<value>\d+)[ \t]*(?:#[^\n]*)?$",
+        model_section.group("body"),
     ) if model_section else None
     if not match:
         raise ValueError("Main model context setting is missing")
-    start = model_section.start("body") + match.start()
-    end = model_section.start("body") + match.end()
-    updated = original[:start] + f"  context_length: {target}" + original[end:]
+    start = model_section.start("body") + match.start("value")
+    end = model_section.start("body") + match.end("value")
+    updated = original[:start] + str(target) + original[end:]
     if updated != original:
         path.write_text(updated, encoding="utf-8")
     return target
