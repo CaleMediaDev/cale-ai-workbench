@@ -140,6 +140,7 @@ def connection(root: Path):
     conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_scan (id INTEGER PRIMARY KEY, token TEXT, anchor TEXT)")
     conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_pending (number INTEGER PRIMARY KEY, author INTEGER NOT NULL, login TEXT NOT NULL, merged TEXT NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS cooldowns(resource TEXT PRIMARY KEY, until REAL NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS github_diagnostic(id INTEGER PRIMARY KEY CHECK(id=1), stage TEXT NOT NULL, status INTEGER, kind TEXT NOT NULL, until REAL NOT NULL)")
     conn.commit()
     return conn
 
@@ -503,23 +504,111 @@ def refresh_pending_reviews(root: Path, fetch=None, check_cancel=lambda: None) -
                          (state, time.time(), run_id, url))
 
 
-def gh_api(endpoint: str, data: dict | None = None):
-    """Use GitHub CLI's existing credential store; never read or print tokens."""
-    import github_account
+_GITHUB_STAGES = {
+    "request": "request", "proposal-search": "proposal search", "revision": "public revision lookup",
+    "source": "public source lookup", "tree": "public tree lookup", "fork-create": "fork creation",
+    "repository": "repository access", "tree-create": "draft tree creation",
+    "commit-create": "draft commit creation", "branch-create": "draft branch creation",
+    "proposal-create": "draft submission", "proposal-review": "review lookup",
+}
+_GITHUB_KINDS = {"http", "transport", "timeout", "tools", "response", "response_invalid"}
 
-    gh = github_account.executable()
-    if not gh:
-        raise RuntimeError("Connect GitHub after its tools finish installing.")
-    command = [gh, "api", endpoint, "-H", "Accept: application/vnd.github+json"]
-    if data is not None:
-        command += ["--method", "POST", "--input", "-"]
-    result = subprocess.run(command, input=json.dumps(data) if data is not None else None,
-                            text=True, encoding="utf-8", errors="replace", capture_output=True,
-                            timeout=45, creationflags=0x08000000 if os.name == "nt" else 0)
-    if result.returncode:
-        # CLI diagnostics can contain account details. Keep them out of UI/logs.
-        raise RuntimeError("GitHub request did not finish. Check your connection and repository access.")
-    return json.loads(result.stdout)
+
+class GitHubRequestError(RuntimeError):
+    """Typed public diagnostics only; never retain endpoint, stderr or account data."""
+    def __init__(self, stage="request", status=None, kind="response"):
+        self.stage = stage if stage in _GITHUB_STAGES else "request"
+        self.status = status if type(status) is int and 400 <= status <= 599 else None
+        self.kind = kind if kind in _GITHUB_KINDS else "response"
+        super().__init__(github_failure_message(self.stage, self.status, self.kind))
+
+
+def github_failure_message(stage, status, kind):
+    label = _GITHUB_STAGES.get(stage, "request")
+    detail = (f"HTTP {status}" if type(status) is int and 400 <= status <= 599
+              else {"transport": "connection unavailable", "timeout": "request timed out",
+                    "tools": "GitHub tools unavailable", "response_invalid": "invalid response"}.get(kind, "request unavailable"))
+    return f"GitHub {detail} during {label} · check GitHub access or account limits; retrying automatically."
+
+
+def _github_stage(endpoint, data):
+    # Endpoint content is used only for classification, never copied into evidence.
+    path = endpoint.split("?", 1)[0]
+    if path == "search/issues": return "proposal-search"
+    if path.endswith("/forks"): return "fork-create"
+    if "/contents/" in path: return "source"
+    if "/git/trees" in path: return "tree-create" if data is not None else "tree"
+    if "/git/commits" in path: return "commit-create"
+    if "/git/refs" in path: return "branch-create"
+    if "/commits/" in path: return "revision"
+    if path.endswith("/pulls") and data is not None: return "proposal-create"
+    if "/pulls/" in path: return "proposal-review"
+    if re.fullmatch(r"repos/[^/]+/[^/]+", path): return "repository"
+    return "request"
+
+
+def _github_status(stdout):
+    if not isinstance(stdout, str) or len(stdout) > 16384:
+        return None
+    try:
+        value = json.loads(stdout)
+    except (ValueError, RecursionError):
+        return None
+    status = value.get("status") if isinstance(value, dict) else None
+    if isinstance(status, str) and re.fullmatch(r"[45][0-9]{2}", status):
+        status = int(status)
+    return status if type(status) is int and 400 <= status <= 599 else None
+
+
+def github_diagnostic(root, error=None):
+    """One bounded typed record shared across lanes/restarts, never provider quota."""
+    with closing(connection(root)) as conn, conn:
+        if error is not None:
+            seconds = 300 if error.status in {403, 404, 429} else 60
+            until = time.time() + seconds
+            conn.execute("INSERT INTO cooldowns VALUES('github',?) ON CONFLICT(resource) DO UPDATE SET until=MAX(until,excluded.until)", (until,))
+            until = conn.execute("SELECT until FROM cooldowns WHERE resource='github'").fetchone()[0]
+            conn.execute("INSERT OR REPLACE INTO github_diagnostic VALUES(1,?,?,?,?)",
+                         (error.stage, error.status, error.kind, until))
+        row = conn.execute("SELECT substr(stage,1,40),status,substr(kind,1,16),until FROM github_diagnostic WHERE id=1").fetchone()
+    if (not row or row[0] not in _GITHUB_STAGES or row[2] not in _GITHUB_KINDS
+            or row[1] is not None and (type(row[1]) is not int or not 400 <= row[1] <= 599)
+            or type(row[3]) not in (int, float) or not time.time() < row[3] <= time.time()+86400):
+        return {}
+    return {"stage": row[0], "status": row[1], "kind": row[2], "until": row[3]}
+
+
+def gh_api(endpoint: str, data: dict | None = None):
+    """Use existing CLI credentials; errors expose only bounded typed metadata."""
+    import github_account
+    stage = _github_stage(endpoint, data)
+    failure = None
+    try:
+        gh = github_account.executable()
+        if not gh:
+            failure = GitHubRequestError(stage, kind="tools")
+        else:
+            command = [gh, "api", endpoint, "-H", "Accept: application/vnd.github+json"]
+            if data is not None:
+                command += ["--method", "POST", "--input", "-"]
+            result = subprocess.run(command, input=json.dumps(data) if data is not None else None,
+                                    text=True, encoding="utf-8", errors="replace", capture_output=True,
+                                    timeout=45, creationflags=0x08000000 if os.name == "nt" else 0)
+            if result.returncode:
+                failure = GitHubRequestError(stage, _github_status(result.stdout), "http")
+            else:
+                try:
+                    return json.loads(result.stdout)
+                except (ValueError, RecursionError):
+                    failure = GitHubRequestError(stage, kind="response_invalid")
+    except subprocess.TimeoutExpired:
+        failure = GitHubRequestError(stage, kind="timeout")
+    except InterruptedError:
+        raise
+    except OSError:
+        failure = GitHubRequestError(stage, kind="transport")
+    # Raise outside exception handlers so private CLI payloads are not chained.
+    raise failure
 
 
 def public_file(path: str, revision: str) -> str:
@@ -599,17 +688,25 @@ def open_proposal(login: str, run_id: str, job: dict, commit: dict,
             raise RuntimeError("GitHub did not return your contribution fork.")
         # Fork creation is asynchronous. Wait only for this fork's metadata.
         ready = False
+        last_github_error = None
         for _ in range(15):
             check_cancel()
             try:
                 metadata = gh_api(f"repos/{target}")
                 ready = metadata.get("parent", {}).get("full_name", "").casefold() == UPSTREAM.casefold()
+            except GitHubRequestError as error:
+                if error.status != 404:
+                    raise
+                last_github_error = error
+                ready = False
             except RuntimeError:
                 ready = False
             if ready:
                 break
             time.sleep(1)
         if not ready:
+            if last_github_error is not None:
+                raise last_github_error
             raise RuntimeError("Your GitHub fork is still preparing; try another day.")
     check_cancel()
     tree = gh_api(f"repos/{target}/git/trees", {
@@ -863,7 +960,11 @@ class Service:
 
     def status_message(self):
         active = sum(bool(worker.thread and worker.thread.is_alive()) for worker in [self, *self.children])
-        return (f"{active} review{'s' if active != 1 else ''} running · " if active else "") + self.message
+        with self._events["lock"]:
+            diagnostic = dict(self._events.get("github_diagnostic", {}))
+        message = (github_failure_message(diagnostic["stage"], diagnostic["status"], diagnostic["kind"])
+                   if diagnostic.get("until", 0) > time.time() else self.message)
+        return (f"{active} review{'s' if active != 1 else ''} running · " if active else "") + message
 
     def allowed(self, busy=False) -> bool:
         """Honor consent/privacy and setup holds; continuous modes permit foreground work."""
@@ -923,10 +1024,14 @@ class Service:
                 raise InterruptedError("Foreground activity paused donation work")
         try:
             check_cancel()
+            diagnostic = github_diagnostic(self.root)
+            with self._events["lock"]:
+                self._events["github_diagnostic"] = diagnostic
             github_wait = resource_cooldown(self.root, "github")
             if github_wait:
                 self.next_attempt = time.monotonic() + github_wait
-                self.message = "GitHub is cooling down · preserving contribution work until it is available."
+                self.message = (github_failure_message(diagnostic["stage"], diagnostic["status"], diagnostic["kind"])
+                                if diagnostic else "GitHub is cooling down · preserving contribution work until it is available.")
                 return
             login = github_account.account()
             if not login:
@@ -1044,6 +1149,8 @@ class Service:
             if blobs is None:
                 try:
                     blobs = _tree_blobs(gh_api(f"repos/{UPSTREAM}/git/trees/{revision}?recursive=1"))
+                except GitHubRequestError:
+                    raise
                 except (OSError, RuntimeError, ValueError, TypeError):
                     blobs = {}
             index = (int(hashlib.sha256((login + str(int(time.time() // DAY_SECONDS))).encode()).hexdigest(), 16) + count) % len(jobs)
@@ -1107,6 +1214,18 @@ class Service:
                     if not history_recorded:
                         usage_history.record_completion(result, source)
                     usage_recorded.add(event)
+            # Another lane may have discovered a GitHub failure while this one
+            # was collecting public files. Do not begin new inference in that wait.
+            github_wait = resource_cooldown(self.root, "github")
+            if github_wait:
+                finish(self.root, run_id, "interrupted")
+                diagnostic = github_diagnostic(self.root)
+                with self._events["lock"]:
+                    self._events["github_diagnostic"] = diagnostic
+                self.next_attempt = time.monotonic() + github_wait
+                self.message = (github_failure_message(diagnostic["stage"], diagnostic["status"], diagnostic["kind"])
+                                if diagnostic else "GitHub is cooling down · retrying automatically.")
+                return
             try:
                 result = complete_donation(payload, resource, consent["intensity"], cancel.is_set, account_usage)
             except (InterruptedError, sqlite3.Error):
@@ -1168,6 +1287,15 @@ class Service:
                 finish(self.root, run_id, "interrupted")
             self.message = "Paused · your own work comes first."
             self.next_attempt = time.monotonic() + PROFILES[settings(self.root)["intensity"]]["idle"]
+        except GitHubRequestError as error:
+            if run_id:
+                finish(self.root, run_id, "failed")
+            diagnostic = github_diagnostic(self.root, error)
+            with self._events["lock"]:
+                self._events["github_diagnostic"] = diagnostic
+            self.next_attempt = time.monotonic() + max(1, diagnostic.get("until", time.time()+60)-time.time())
+            self._emit_event("waiting", run_id, resource)
+            self.message = str(error)
         except HTTPError as error:
             if run_id:
                 finish(self.root, run_id, "failed")

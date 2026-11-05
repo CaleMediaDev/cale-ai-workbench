@@ -1908,3 +1908,204 @@ def test_proposal_cooldown_is_bound_to_resource_job_and_full_source_scope(tmp_pa
 def test_non_text_proposal_is_rejected_as_validation_without_an_attribute_error():
     with pytest.raises(ValueError,match='JSON text'):
         donation.validate_proposal({'changes':[]},SOURCES)
+
+
+@pytest.mark.parametrize("endpoint,data,status,stage", [
+    ("repos/private-owner/private-repo/forks", {}, "404", "fork-create"),
+    ("repos/private-owner/private-repo/git/refs", {}, 403, "branch-create"),
+    ("search/issues?q=PRIVATE", None, "429", "proposal-search"),
+])
+def test_github_cli_failures_have_safe_stage_and_http_status(endpoint, data, status, stage):
+    result = SimpleNamespace(returncode=1,
+        stdout=json.dumps({"status": status, "message": "PRIVATE_SERVER_MESSAGE", "key": "PRIVATE_KEY"}),
+        stderr="PRIVATE_STDERR_ACCOUNT_TOKEN")
+    with patch("github_account.executable", return_value="gh-fixture"), patch.object(
+            donation.subprocess, "run", return_value=result):
+        with pytest.raises(donation.GitHubRequestError) as raised:
+            donation.gh_api(endpoint, data)
+    error = raised.value
+    assert error.stage == stage and error.status == int(status) and error.kind == "http"
+    assert error.__context__ is None
+    assert "PRIVATE" not in str(error) + repr(error.__dict__)
+    assert "private-owner" not in str(error) + repr(error.__dict__)
+
+
+@pytest.mark.parametrize("failure,kind", [
+    (OSError("PRIVATE_OS_PATH"), "transport"),
+    (donation.subprocess.TimeoutExpired(["PRIVATE_COMMAND"], 45, output="PRIVATE_OUTPUT"), "timeout"),
+])
+def test_github_transport_failures_are_typed_without_private_exception_chain(failure, kind):
+    with patch("github_account.executable", return_value="gh-fixture"), patch.object(
+            donation.subprocess, "run", side_effect=failure):
+        with pytest.raises(donation.GitHubRequestError) as raised:
+            donation.gh_api("repos/PRIVATE/PRIVATE")
+    assert raised.value.kind == kind and raised.value.stage == "repository"
+    assert raised.value.__context__ is None
+    assert "PRIVATE" not in str(raised.value) + repr(raised.value.__dict__)
+
+
+@pytest.mark.parametrize("stdout", ["PRIVATE_BAD_JSON", "["*2000, '{bad' + " "*20000])
+def test_github_success_with_invalid_json_is_safe_typed_response_failure(stdout):
+    with patch("github_account.executable", return_value="gh-fixture"), patch.object(
+            donation.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout=stdout)):
+        with pytest.raises(donation.GitHubRequestError) as raised:
+            donation.gh_api("repos/PRIVATE/PRIVATE/contents/code.py")
+    assert raised.value.kind == "response_invalid" and raised.value.stage == "source"
+    assert "PRIVATE" not in str(raised.value) + repr(raised.value.__dict__)
+
+
+@pytest.mark.parametrize("status", [True, 404.0, "404 PRIVATE", "999", "200", None, {}, []])
+def test_github_http_status_never_accepts_untyped_or_embedded_details(status):
+    assert donation._github_status(json.dumps({"status": status})) is None
+    assert donation._github_status('{"status":"404"}' + " "*17000) is None
+
+
+def test_typed_github_failure_is_shared_across_lanes_restart_and_expires(tmp_path):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+        github_account="donor", sources=["chatgpt"], intensity="full_blast")
+    service = donation.Service(tmp_path)
+    failure = donation.GitHubRequestError("fork-create", 404, "http")
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch("chatgpt_auth.status", return_value={"sharing": True}), \
+         patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT), \
+         patch.object(donation, "gh_api", side_effect=failure) as github, \
+         patch.object(donation, "complete_donation") as inference, \
+         patch.object(donation.threading, "Thread", DonationInlineThread):
+        service.tick()
+        assert github.call_count == 1
+        assert "HTTP 404" in service.status_message() and "fork creation" in service.status_message()
+        restarted = donation.Service(tmp_path)
+        restarted.tick()
+        assert github.call_count == 1
+        assert "HTTP 404" in restarted.status_message()
+        with patch.object(donation, "connection", side_effect=AssertionError("Tk must do no I/O")):
+            assert "fork creation" in restarted.status_message()
+        inference.assert_not_called()
+        assert donation.resource_cooldown(tmp_path, "github") > 250
+        assert donation.resource_cooldown(tmp_path, "chatgpt") == 0
+        with closing(donation.connection(tmp_path)) as connection, connection:
+            connection.execute("UPDATE cooldowns SET until=0 WHERE resource='github'")
+            connection.execute("UPDATE github_diagnostic SET until=0")
+            assert connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+            row = connection.execute("SELECT stage,status,kind FROM github_diagnostic").fetchone()
+            assert row == ("fork-create", 404, "http")
+        github.side_effect = InterruptedError("fixture end after permitted retry")
+        expired = donation.Service(tmp_path)
+        expired.tick()
+        assert github.call_count > 1
+        assert "HTTP 404" not in expired.status_message()
+        inference.assert_not_called()
+    assert donation.total_tokens(tmp_path) == 0
+    assert donation.settings(tmp_path)["sources"] == ["chatgpt"]
+
+
+def test_github_submission_failure_keeps_real_usage_and_never_claims_pr_success(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    service = donation.Service(tmp_path)
+    def public(path, revision):
+        return json.dumps([JOB]) if path == "donation-tasks.json" else SOURCES[path]
+    def complete(payload, resource, intensity, cancel, receipt):
+        receipt(RESULT, "ollama", "main", False)
+        return RESULT
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kw: jobs), \
+         patch.object(donation, "public_file", side_effect=public), \
+         patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT), \
+         patch.object(donation, "complete_donation", side_effect=complete), \
+         patch("usage_history.record_completion"), \
+         patch.object(donation, "open_proposal", side_effect=donation.GitHubRequestError("fork-create", 403, "http")):
+        service._run(threading.Event())
+    assert donation.total_tokens(tmp_path) == 50
+    assert donation.resource_cooldown(tmp_path, "local") == 0
+    assert "HTTP 403" in service.status_message()
+    with closing(donation.connection(tmp_path)) as connection:
+        assert connection.execute("SELECT status,tokens,url FROM runs").fetchone() == ("failed", 50, "")
+        assert connection.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] == 1
+    assert not any(event["phase"] == "submitted" for event in service.drain_events())
+
+
+def test_github_wait_created_during_source_collection_prevents_new_inference(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    service = donation.Service(tmp_path)
+    def public(path, revision):
+        if path == "donation-tasks.json":
+            return json.dumps([JOB])
+        donation.github_diagnostic(tmp_path, donation.GitHubRequestError("repository", 404, "http"))
+        return SOURCES[path]
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kw: jobs), \
+         patch.object(donation, "public_file", side_effect=public), \
+         patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT), \
+         patch.object(donation, "complete_donation") as inference:
+        service._run(threading.Event())
+    inference.assert_not_called()
+    assert "HTTP 404" in service.status_message()
+    assert donation.total_tokens(tmp_path) == 0
+
+
+def test_github_fork_readiness_preserves_typed_failure_instead_of_generic_fallback():
+    calls = []
+    def api(endpoint, data=None):
+        calls.append(endpoint)
+        if endpoint.endswith("/forks"):
+            return {"full_name": "donor/cale-ai-workbench", "fork": True}
+        raise donation.GitHubRequestError("repository", 404, "http")
+    with patch.object(donation, "gh_api", side_effect=api), patch.object(donation.time, "sleep"):
+        with pytest.raises(donation.GitHubRequestError) as raised:
+            donation.open_proposal("donor", "a"*32, JOB, COMMIT, PROPOSAL, {}, lambda: None)
+    assert raised.value.stage == "repository" and raised.value.status == 404
+    assert len(calls) == 16
+
+
+def test_advisory_old_review_and_scope_404_do_not_pause_current_donation(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    pending = donation.claim_run(tmp_path, "old-other-job", "local", "medium", "c"*40)
+    donation.finish(tmp_path, pending, "submitted", "https://github.com/CaleMediaDev/cale-ai-workbench/pull/1")
+    historical = donation.claim_run(tmp_path, JOB["id"], "local", "medium", "d"*40)
+    donation.finish(tmp_path, historical, "reviewed")
+    with closing(donation.connection(tmp_path)) as connection, connection:
+        connection.execute("UPDATE runs SET review_state='closed_unmerged' WHERE id=?", (historical,))
+    advisory = []
+    def public(path, revision):
+        if revision == "d"*40:
+            advisory.append("old-scope")
+            raise donation.GitHubRequestError("source", 404, "http")
+        return json.dumps([JOB]) if path == "donation-tasks.json" else SOURCES[path]
+    def api(endpoint):
+        if "/pulls/1" in endpoint:
+            advisory.append("old-review")
+            raise donation.GitHubRequestError("proposal-review", 404, "http")
+        return {"total_count": 0} if "search/" in endpoint else COMMIT
+    def complete(payload, resource, intensity, cancel, receipt):
+        receipt(RESULT, "ollama", "main", False)
+        return RESULT
+    service = donation.Service(tmp_path)
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kw: jobs), \
+         patch.object(donation, "public_file", side_effect=public), patch.object(donation, "gh_api", side_effect=api), \
+         patch.object(donation, "complete_donation", side_effect=complete) as inference, \
+         patch("usage_history.record_completion"), \
+         patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/2") as submit:
+        service._run(threading.Event())
+    assert set(advisory) == {"old-review", "old-scope"}
+    inference.assert_called_once()
+    submit.assert_called_once()
+    assert donation.total_tokens(tmp_path) == 50
+    assert donation.resource_cooldown(tmp_path, "github") == 0
+    assert donation.github_diagnostic(tmp_path) == {}
+
+
+@pytest.mark.parametrize("failure", [InterruptedError("fixture cancelled"), sqlite3.OperationalError("fixture ledger")])
+def test_github_boundary_preserves_cancellation_and_non_github_ledger_errors(failure):
+    with patch("github_account.executable", return_value="gh-fixture"), patch.object(
+            donation.subprocess, "run", side_effect=failure):
+        with pytest.raises(type(failure)) as raised:
+            donation.gh_api("repos/PRIVATE/PRIVATE")
+    assert raised.value is failure
+    assert not isinstance(raised.value, donation.GitHubRequestError)
