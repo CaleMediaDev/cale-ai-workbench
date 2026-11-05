@@ -3807,6 +3807,17 @@ def gui():
             x=max(0, (event.width - content_width) // 2), y=0,
             width=content_width, height=event.height,
         )
+        navigation = getattr(window, "workspace_navigation", None)
+        if navigation is not None:
+            # Wide displays keep navigation in the brand bar. A short second
+            # row on narrow PCs preserves every account/donation control.
+            navigation.pack_forget()
+            if content_width >= 1200:
+                window.workspace_hint.pack_forget()
+                navigation.pack(in_=header, side="left", padx=(8, 0))
+            else:
+                navigation.pack(in_=outer, fill="x", pady=(2, 10), after=header_status)
+                window.workspace_hint.pack(side="right")
 
     window.bind("<Configure>", fit_content, add="+")
     outer.place(x=0, y=0, width=1120, height=window.winfo_height())
@@ -4001,6 +4012,23 @@ def gui():
     )
 
     music_shell = ttk.Frame(outer)
+    music_canvas = tk.Canvas(music_shell, background=bg, borderwidth=0, highlightthickness=0)
+    music_scroll = ttk.Scrollbar(music_shell, orient="vertical", command=music_canvas.yview)
+    music_canvas.pack(side="left", fill="both", expand=True)
+    music_page = ttk.Frame(music_canvas)
+    music_window = music_canvas.create_window((0, 0), window=music_page, anchor="nw")
+
+    def update_music_scroll(first, last):
+        music_scroll.set(first, last)
+        if float(first) > .001 or float(last) < .999:
+            if not music_scroll.winfo_manager():
+                music_scroll.pack(side="right", fill="y", before=music_canvas)
+        else:
+            music_scroll.pack_forget()
+
+    music_canvas.configure(yscrollcommand=update_music_scroll)
+    music_page.bind("<Configure>", lambda _: music_canvas.configure(scrollregion=music_canvas.bbox("all")))
+    music_canvas.bind("<Configure>", lambda event: music_canvas.itemconfigure(music_window, width=event.width))
     create_shell = ttk.Frame(outer)
     workspace = tk.StringVar(value="home")
     workspace_buttons = {}
@@ -4036,10 +4064,13 @@ def gui():
         button = ttk.Button(workspace_nav, text=label,
             command=lambda selected=key: show_workspace(selected),
             style="SelectedMode.TButton" if key == "home" else "Mode.TButton")
-        button.pack(side="left", padx=(0, 8), ipadx=18, ipady=7)
+        button.pack(side="left", padx=(0, 8), ipadx=12, ipady=7)
         workspace_buttons[key] = button
-    ttk.Label(workspace_nav, text="CHAT  /  MUSIC  /  GAMES, APPS & WEBSITES",
-              style="Muted.TLabel", font=("Segoe UI", 9)).pack(side="right")
+    workspace_hint = ttk.Label(workspace_nav, text="CHAT  /  MUSIC  /  GAMES, APPS & WEBSITES",
+              style="Muted.TLabel", font=("Segoe UI", 9))
+    workspace_hint.pack(side="right")
+    window.workspace_navigation = workspace_nav
+    window.workspace_hint = workspace_hint
 
     rocket = ttk.Button(
         header, text="Supercharge my AI", command=show_super, style="Coral.TButton"
@@ -5720,6 +5751,7 @@ def gui():
 
     def submit_chat_text(value=None, *, use_attachments=True, intent=None):
         nonlocal pending_followup
+        from_home_composer = value is None
         donation_service.activity()
         ready, explanation = first_launch_readiness(STATE)
         if not ready:
@@ -5740,7 +5772,7 @@ def gui():
                 conversation_events.put("I couldn't save those files to long-term memory yet.")
             index_requests.put(selected_paths)
         value = chat_assistant.attach_request(raw_value, selected_paths)
-        if raw_value == chat_input.get("1.0", "end-1c").strip():
+        if from_home_composer and raw_value == chat_input.get("1.0", "end-1c").strip():
             chat_input.delete("1.0", "end")
         if use_attachments:
             attachments.clear()
@@ -5926,7 +5958,7 @@ def gui():
         return submit_chat_text("Make a song: " + prompt, use_attachments=False, intent="music") is True
 
     studio_controls = radio_station.Controls(
-        music_shell, window, radio_service, on_make_song=make_studio_song)
+        music_page, window, radio_service, on_make_song=make_studio_song)
 
     # Creation has a dedicated canvas-sized live preview instead of opening a
     # second window over the conversation. It uses the existing preview capture
@@ -6269,6 +6301,24 @@ def gui():
         return None
 
     window.bind_all("<MouseWheel>", scroll_super, add="+")
+
+    def scroll_music(event):
+        if not music_shell.winfo_ismapped():
+            return None
+        widget = window.winfo_containing(window.winfo_pointerx(), window.winfo_pointery())
+        while widget is not None:
+            if isinstance(widget, (tk.Text, tk.Scale, ttk.Scale, ttk.Combobox)):
+                return None
+            if widget is music_page or widget is music_canvas:
+                lines = (-3 if event.delta > 0 else 3) if hasattr(event, "delta") and event.delta else (-3 if event.num == 4 else 3)
+                music_canvas.yview_scroll(lines, "units")
+                return "break"
+            widget = widget.master
+        return None
+
+    window.bind_all("<MouseWheel>", scroll_music, add="+")
+    window.bind_all("<Button-4>", scroll_music, add="+")
+    window.bind_all("<Button-5>", scroll_music, add="+")
 
     sharing_songs = set()
 
@@ -7060,6 +7110,10 @@ def gui():
         pid = project["id"]
         if pid != preview_task_id:
             preview_image_signature = None
+            if preview_label is not None and preview_label.winfo_exists():
+                preview_label.configure(image="", text="Waiting for the first visual update…", fg=muted)
+                if preview_window is not None:
+                    preview_window.picture = None
             if preview_dismissed_id != pid:
                 preview_dismissed_id = None
             preview_task_id = pid
@@ -7111,10 +7165,16 @@ def gui():
                     picture.thumbnail((max(400, create_preview_host.winfo_width() - 60),
                                        max(300, create_preview_host.winfo_height() - 100)), Image.Resampling.LANCZOS)
                     preview_window.picture = ImageTk.PhotoImage(picture)
-                    preview_label.configure(image=preview_window.picture)
+                    preview_label.configure(image=preview_window.picture, text="")
                     preview_image_signature = signature
                 except (OSError, ValueError):
-                    pass
+                    preview_label.configure(image="", text="This preview could not be loaded. Open preview to view the project.", fg=muted)
+                    preview_window.picture = None
+                    preview_image_signature = None
+        else:
+            preview_label.configure(image="", text="Waiting for the first visual update…", fg=muted)
+            preview_window.picture = None
+            preview_image_signature = None
         preview_caption.configure(
             text=(
                 "Chrome · "
@@ -7123,11 +7183,9 @@ def gui():
             )
             + project["title"] + " · Click the preview to open and interact"
         )
-        page = (
-            project_preview.source(folder)
-            if project_preview.wants_preview(project)
-            else ""
-        )
+        # Finished projects can be reopened from the picker too. Capture only
+        # while Create is visible, so idle Home does not run preview browsers.
+        page = project_preview.source(folder) if workspace.get() == "create" else ""
         now = time.monotonic()
         if (
             page

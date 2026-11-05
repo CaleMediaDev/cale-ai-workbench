@@ -3497,3 +3497,82 @@ def test_create_failure_keeps_prompt_and_never_inherits_home_private_attachments
         assert attachments == [str(tmp_path / "private-tax-return.pdf")]
     finally:
         window.destroy()
+
+
+def test_embedded_preview_clears_other_project_image_and_captures_finished_projects(tmp_path):
+    import ast
+    import tkinter as tk
+    from tkinter import ttk
+    from types import SimpleNamespace
+    from PIL import Image, ImageTk
+    import project_preview
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        host = ttk.Frame(window)
+        host.pack()
+        empty = ttk.Frame(host)
+        empty.pack()
+        selected = tk.StringVar(master=window, value="Current project")
+        scope = tk.StringVar(master=window, value="home")
+        captures = []
+        class DeferredThread:
+            def __init__(self, target, **kwargs):
+                self.target = target
+            def start(self):
+                captures.append(self.target.__name__)
+        namespace = {"create_project_selection": selected, "create_project_choices": {},
+            "create_project_picker": ttk.Combobox(window), "create_preview_host": host,
+            "create_empty": empty, "create_status": tk.StringVar(master=window),
+            "create_phase": tk.StringVar(master=window), "create_open_button": ttk.Button(window),
+            "workspace": scope, "project_preview": project_preview, "music_job_id": lambda _: None,
+            "image_job_id": lambda _: None, "muted": "#a8b8c5", "bg": "#0b1017",
+            "tk": tk, "ttk": ttk, "Path": Path, "Image": Image, "ImageTk": ImageTk,
+            "time": time, "threading": SimpleNamespace(Thread=DeferredThread),
+            "open_create_preview": lambda: None}
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        update = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "update_side_preview")
+        factory = ast.parse("""def factory():
+ preview_window = preview_label = preview_caption = None
+ preview_task_id = preview_dismissed_id = preview_image_signature = None
+ preview_capture_running = set()
+ preview_capture_at = {}
+""").body[0]
+        factory.body.append(update)
+        factory.body.extend(ast.parse("""
+def inspect_preview():
+ return preview_label, preview_caption, preview_task_id
+return update_side_preview, inspect_preview
+""").body)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[factory], type_ignores=[])),
+                     "real-embedded-project-preview", "exec"), namespace)
+        update, inspect_preview = namespace["factory"]()
+        items = []
+        for index, title in enumerate(("First game", "Second website")):
+            folder = tmp_path / str(index)
+            (folder / ".local-ai").mkdir(parents=True)
+            (folder / "index.html").write_text("<!doctype html><title>Local project</title>", encoding="utf-8")
+            items.append({"id": str(index), "title": title, "brief": "Build an app",
+                          "status": "accepted", "detail": "Finished", "folder": str(folder)})
+        Image.new("RGB", (80, 60), "red").save(Path(items[0]["folder"]) / ".local-ai/preview.png")
+        update(items[:1])
+        label, _, identity = inspect_preview()
+        assert identity == "0" and label.cget("image")
+        assert captures == []  # Hidden Create never starts a preview browser.
+        update(items)
+        label, caption, identity = inspect_preview()
+        assert identity == "1" and not label.cget("image")
+        assert "Second website" in caption.cget("text")
+        scope.set("create")
+        update(items)
+        assert captures == ["capture"]  # Finished HTML also gets a fresh preview.
+        bad = Path(items[1]["folder"]) / ".local-ai/preview.png"
+        bad.write_bytes(b"not an image")
+        update(items)
+        assert not label.cget("image") and "could not be loaded" in label.cget("text")
+    finally:
+        window.destroy()
