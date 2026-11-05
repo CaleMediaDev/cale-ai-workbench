@@ -117,6 +117,26 @@ class ProjectMemoryContributionTests(unittest.TestCase):
         self.assertFalse(memory.search(self.folder, "budget"))
 
 
+    def test_full_scan_preserves_explicitly_indexed_file_in_skipped_directory(self):
+        notes = self.folder / ".local-ai"
+        notes.mkdir()
+        source = notes / "research.md"
+        source.write_text("Quasar research findings.", encoding="utf-8")
+        saved = memory.index_file(self.folder, source)
+
+        result = memory.index(self.folder, include_code=True)
+
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["removed"], 0)
+        self.assertEqual(
+            [row["id"] for row in memory.search(self.folder, "quasar", kind="file")],
+            [saved["id"]],
+        )
+        source.unlink()
+        self.assertEqual(memory.index(self.folder, include_code=True)["removed"], 1)
+        self.assertEqual(memory.search(self.folder, "quasar", kind="file"), [])
+
+
     def test_recalled_code_file_refreshes_after_edit_and_deletion(self):
         source = self.folder / "app.py"
         source.write_text("def old_recipe(): return 1", encoding="utf-8")
