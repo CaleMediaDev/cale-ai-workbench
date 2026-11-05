@@ -76,9 +76,9 @@ def _installer_running(progress: dict) -> bool:
                         if not started and (not updated or created > updated + 10):
                             continue
                     return True
-            except (OSError, TypeError, ValueError, psutil.Error):
+            except (OSError, TypeError, ValueError, OverflowError, psutil.Error):
                 continue
-    except (OSError, TypeError, ValueError, psutil.Error):
+    except (OSError, TypeError, ValueError, OverflowError, psutil.Error):
         pass
     if installer_pid:
         # A replacement may still be initializing and have not published its

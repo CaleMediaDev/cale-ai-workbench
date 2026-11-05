@@ -48,6 +48,28 @@ def test_extracted_installer_pid_is_recognized_without_duplicate_repair(tmp_path
         assert not setup_recovery._installer_running(progress)
 
 
+def test_overflowing_installer_identity_does_not_crash_stall_detection(tmp_path, monkeypatch):
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery.time, "time", lambda: 10000)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    worker = MagicMock()
+    worker.cmdline.return_value = [
+        "powershell.exe", "-File", str(tmp_path / "Install-Backend.ps1"),
+        "-Destination", str(tmp_path),
+    ]
+    worker.create_time.return_value = 1
+    with patch("psutil.Process", return_value=worker), patch(
+        "psutil.process_iter", return_value=[]
+    ):
+        for identity in (
+            {"pid": float("inf")},
+            {"pid": 4321, "installer_started": 10 ** 400},
+        ):
+            progress = {"status": "working", "updated": 1, **identity}
+            assert setup_recovery._installer_running(progress) is False
+            assert setup_recovery._stalled(progress) is True
+
+
 def test_replacement_installer_is_detected_before_it_updates_progress(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
