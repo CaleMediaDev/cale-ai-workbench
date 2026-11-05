@@ -1581,35 +1581,59 @@ def _game_cache_save(game, catalog, files, info):
 
 
 def _game_publish(destination, files):
-    """Reserve a new folder exclusively. Roll back only bytes this import wrote."""
+    """Publish small sources through the same held-handle writer as large imports.
+
+    Static path checks are insufficient on Windows: a directory can become a
+    junction between a check and open. Hold the complete ancestor chain, the
+    owned new root and each output parent until writing/rollback has finished.
+    """
+    import io,uuid
     destination = _game_plain_path(destination)
     if not destination.parent.is_dir():
         raise ValueError("Choose a new game folder inside an existing parent folder.")
-    destination.mkdir()  # Never replace even an existing empty/concurrently created folder.
-    created, directories = [], [destination]
-    try:
-        for name,raw in files.items():
-            relative=_game_rel(name)
-            target=_game_plain_path(destination/relative)
-            if not target.is_relative_to(destination): raise ValueError("Game output escaped its new folder.")
-            needed=[];parent=target.parent
-            while parent != destination and not parent.exists(): needed.append(parent);parent=parent.parent
-            for parent in reversed(needed):
-                _game_plain_path(parent);parent.mkdir();directories.append(parent)
-            _game_plain_path(target)
-            with target.open("xb") as stream: stream.write(raw)
-            created.append((target,hashlib.sha256(raw).hexdigest()))
-    except Exception:
-        for path,digest in reversed(created):
-            try:
-                _game_plain_path(path)
-                with path.open("rb") as stream: value=stream.read(_GAME_MAX_FILE+1024*1024+1)
-                if hashlib.sha256(value).hexdigest()==digest: path.unlink()
-            except (OSError,ValueError): pass
-        for path in reversed(directories):
-            try: _game_plain_path(path);path.rmdir()
-            except (OSError,ValueError): pass
-        raise
+    created,directories=[],[]
+    nonce=uuid.uuid4().hex
+    # In particular, protect ancestors above destination.parent from renaming.
+    with _game_directory_guard(Path(destination.anchor),destination.parent):
+        destination.mkdir()  # Never replace an existing/concurrently created folder.
+        directories.append(destination)
+        try:
+            with _game_directory_guard(destination):
+                try:
+                    for name,raw in files.items():
+                        relative=_game_rel(name);target=destination/relative
+                        current=destination
+                        for component in target.relative_to(destination).parts[:-1]:
+                            with _game_directory_guard(destination,current):
+                                following=current/component
+                                _game_plain_path(following)
+                                try:following.mkdir()
+                                except FileExistsError:_game_plain_path(following)
+                                else:directories.append(following)
+                                current=following
+                        with _game_directory_guard(destination,target.parent):
+                            _game_plain_path(target)
+                            expected={"size":len(raw),"sha":hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()}
+                            digest=_game_copy_verified(io.BytesIO(raw),destination,relative,expected,nonce)
+                            created.append((target,digest))
+                except Exception:
+                    # Only delete unchanged files this attempt actually created.
+                    # Keep parent handles held while checking and removing them.
+                    for path,digest in reversed(created):
+                        try:
+                            with _game_directory_guard(destination,path.parent):
+                                _game_plain_path(path)
+                                with path.open("rb") as stream:value=stream.read(_GAME_MAX_FILE+1024*1024+1)
+                                if hashlib.sha256(value).hexdigest()==digest:path.unlink()
+                        except (OSError,ValueError):pass
+                    raise
+        except Exception:
+            # File handles have closed; plain, empty owned directories may now
+            # be removed. Concurrent/user-modified files keep their directory.
+            for path in reversed(directories):
+                try:_game_plain_path(path);path.rmdir()
+                except (OSError,ValueError):pass
+            raise
     return destination
 
 
@@ -1784,7 +1808,10 @@ def _game_directory_guard(root, parent=None, *, rename=False):
                 if str(target) in owned:
                     handle=owned[str(target)]
                     continue
-                handle=api.CreateFileW(_game_win_path(target),0x80|(0x10000 if rename and target==root else 0),3,None,3,0x02200000,None)
+                # Metadata-only access does not participate in Windows sharing
+                # exclusion. GENERIC_READ makes no-delete-sharing effective
+                # before the first child file is opened, not only afterwards.
+                handle=api.CreateFileW(_game_win_path(target),0x80000000|(0x10000 if rename and target==root else 0),3,None,3,0x02200000,None)
                 if handle==ctypes.c_void_p(-1).value: raise ctypes.WinError(ctypes.get_last_error())
                 held.append(handle)
                 owned[str(target)]=handle

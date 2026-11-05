@@ -760,13 +760,13 @@ def test_game_import_cleanup_preserves_concurrent_files_and_never_overwrites(tmp
     import design_tools as tools
     from pathlib import Path
     destination=tmp_path/"copy"
-    actual=Path.open
-    def failing(path, mode="r", *args, **kwargs):
-        if path.name=="second.js" and mode=="xb":
+    actual=tools._game_copy_verified
+    def failing(stream,stage,relative,*args,**kwargs):
+        if relative=="second.js":
             (destination/"user.txt").write_text("concurrent user file")
             raise OSError("simulated output failure")
-        return actual(path,mode,*args,**kwargs)
-    monkeypatch.setattr(Path,"open",failing)
+        return actual(stream,stage,relative,*args,**kwargs)
+    monkeypatch.setattr(tools,"_game_copy_verified",failing)
     with pytest.raises(OSError): tools._game_publish(destination,{"first.js":b"first", "second.js":b"second"})
     assert (destination/"user.txt").read_text()=="concurrent user file"
     assert not (destination/"first.js").exists()
@@ -777,11 +777,11 @@ def test_game_import_cleanup_preserves_concurrent_files_and_never_overwrites(tmp
 def test_game_import_cleanup_removes_its_new_folder_on_write_failure(tmp_path,monkeypatch):
     import design_tools as tools
     from pathlib import Path
-    actual=Path.open
-    def failing(path, mode="r", *args, **kwargs):
-        if path.name=="second.js" and mode=="xb": raise OSError("disk failure")
-        return actual(path,mode,*args,**kwargs)
-    monkeypatch.setattr(Path,"open",failing)
+    actual=tools._game_copy_verified
+    def failing(stream,stage,relative,*args,**kwargs):
+        if relative=="second.js":raise OSError("disk failure")
+        return actual(stream,stage,relative,*args,**kwargs)
+    monkeypatch.setattr(tools,"_game_copy_verified",failing)
     with pytest.raises(OSError): tools._game_publish(tmp_path/"copy",{"first.js":b"first", "second.js":b"second"})
     assert not (tmp_path/"copy").exists()
 
@@ -1189,3 +1189,61 @@ def test_game_stream_changed_staged_file_is_preserved_not_replaced(tmp_path,monk
     with pytest.raises(FileExistsError,match="not overwritten|preserved"):
         tools.import_game_example(game["id"],str(destination))
     assert (stage/"index.html").read_text()=="User edited this source" and not destination.exists()
+
+
+def test_game_small_publish_holds_windows_parent_during_last_path_check(tmp_path,monkeypatch):
+    """A real junction swap at the old check/open gap must never receive bytes."""
+    import os,subprocess
+    import design_tools as tools
+    if os.name!="nt":pytest.skip("Windows junction race")
+    destination=tmp_path/"game";outside=tmp_path/"outside";outside.mkdir()
+    original=tools._game_plain_path;attempts=[]
+    def checked(path):
+        result=original(path)
+        if result==destination/"src/main.js" and result.parent.exists() and not attempts:
+            try:result.parent.rename(tmp_path/"moved")
+            except OSError:attempts.append("blocked")
+            else:
+                subprocess.run(["cmd","/c","mklink","/J",str(result.parent),str(outside)],check=True,capture_output=True)
+                attempts.append("swapped")
+        return result
+    monkeypatch.setattr(tools,"_game_plain_path",checked)
+    tools._game_publish(destination,{"src/main.js":b"public source fixture"})
+    assert attempts==["blocked"]
+    assert not (outside/"main.js").exists()
+    assert (destination/"src/main.js").read_bytes()==b"public source fixture"
+
+
+def test_game_directory_guard_blocks_windows_rename_before_any_child_open(tmp_path):
+    import os
+    from pathlib import Path
+    import design_tools as tools
+    if os.name!="nt":pytest.skip("Windows directory sharing proof")
+    stage=tmp_path/"stage";stage.mkdir();child=stage/"src";child.mkdir()
+    with tools._game_directory_guard(Path(stage.anchor),child):
+        for path in (child,stage,tmp_path):
+            with pytest.raises(OSError):path.rename(path.with_name(path.name+"-moved"))
+    child.rename(stage/"renamed")
+
+
+def test_game_small_publish_rollback_preserves_user_modified_imported_bytes(tmp_path,monkeypatch):
+    import design_tools as tools
+    destination=tmp_path/"copy";original=tools._game_copy_verified
+    def copied(stream,stage,relative,*args,**kwargs):
+        if relative=="second.js":
+            (stage/"first.js").write_bytes(b"user edited this import")
+            raise OSError("simulated write failure")
+        return original(stream,stage,relative,*args,**kwargs)
+    monkeypatch.setattr(tools,"_game_copy_verified",copied)
+    with pytest.raises(OSError):tools._game_publish(destination,{"first.js":b"initial","second.js":b"second"})
+    assert (destination/"first.js").read_bytes()==b"user edited this import"
+
+
+def test_game_small_publish_keeps_nested_assets_licenses_and_existing_target(tmp_path):
+    import design_tools as tools
+    destination=tmp_path/"copy"
+    expected={"index.html":b"<script src='src/main.js'></script>","src/main.js":b"game()", "assets/sound.wav":b"wave", "LICENSE":b"original terms", "assets/NOTICE.txt":b"asset rights"}
+    tools._game_publish(destination,expected)
+    assert {name:(destination/name).read_bytes() for name in expected}==expected
+    with pytest.raises(FileExistsError):tools._game_publish(destination,{"index.html":b"replacement"})
+    assert (destination/"LICENSE").read_bytes()==b"original terms"
