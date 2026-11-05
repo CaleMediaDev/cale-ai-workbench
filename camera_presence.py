@@ -9,6 +9,8 @@ import queue
 import sys
 import threading
 import time
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import psutil
@@ -44,6 +46,53 @@ def watch_owner(pid, started):
         time.sleep(0.5)
     os._exit(0)
 
+
+
+def start_launcher_guard():
+    """A Windows venv redirector can be a separate parent of the real worker."""
+    try:
+        parent=psutil.Process(os.getpid()).parent()
+        if parent is None:raise RuntimeError("The camera launcher already closed.")
+        threading.Thread(target=watch_owner,args=(parent.pid,parent.create_time()),daemon=True).start()
+    except (psutil.Error,OSError) as error:
+        raise RuntimeError("The camera launcher could not be verified.") from error
+
+
+def stop_owned_avatar_process_tree(process, timeout=3, root=None):
+    """Reap the exact spawned family, including a venv redirector's real child.
+
+    No name matching or system-wide process scan is used. PID/start identities
+    are captured while the Popen launcher is alive, before any termination.
+    """
+    import subprocess
+    children=[];identities=[]
+    if process is None:return identities
+    if process.poll() is None:
+        try:
+            owner=psutil.Process(process.pid)
+            identities.append((process.pid,owner.create_time()))
+            children=owner.children(recursive=True) if hasattr(owner,"children") else []
+            identities.extend((child.pid,child.create_time()) for child in children)
+        except (psutil.Error,TypeError,ValueError):pass
+        for child in reversed(children):
+            try:child.terminate()
+            except psutil.NoSuchProcess:pass
+        try:process.terminate()
+        except OSError:
+            if process.poll() is None:raise
+        try:process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:process.kill();process.wait(timeout=timeout)
+        if children:
+            _,remaining=psutil.wait_procs(children,timeout=timeout)
+            for child in remaining:
+                try:child.kill()
+                except psutil.NoSuchProcess:pass
+            if remaining:
+                _,remaining=psutil.wait_procs(remaining,timeout=timeout)
+                if remaining:raise RuntimeError("The owned camera worker did not exit; a replacement was not started.")
+    else:process.wait(timeout=timeout)
+    for pid,started in identities:remove_avatar_lease_records(root or ROOT,pid,started)
+    return identities
 
 class VisitorState:
     """Require a stable face, then an empty room before greeting again."""
@@ -244,11 +293,74 @@ class LatestFrameWorker:
 
 
 
+
+def _avatar_read_lease(path):
+    try:
+        with path.open("rb") as stream:raw=stream.read(4097)
+        value=json.loads(raw) if len(raw)<=4096 else None
+        return value if isinstance(value,dict) else {}
+    except (OSError,ValueError):return {}
+
+
+def _avatar_atomic_lease(path,value):
+    temporary=path.with_name(path.name+"-"+uuid.uuid4().hex+".tmp")
+    try:
+        temporary.write_text(json.dumps(value),encoding="utf-8")
+        for attempt in range(5):
+            try:os.replace(temporary,path);break
+            except PermissionError:
+                if attempt==4:raise
+                time.sleep(.01)  # A bounded reader can briefly hold the Windows target.
+    finally:temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _avatar_canonical_lock(directory):
+    """Serialize canonical replace/compare/delete across probe/camera owners."""
+    with (directory/"avatar-gpu-current.lock").open("a+b") as stream:
+        stream.seek(0,os.SEEK_END)
+        if stream.tell()==0:stream.write(b"0");stream.flush()
+        deadline=time.monotonic()+.5
+        while True:
+            stream.seek(0)
+            try:
+                if os.name=="nt":
+                    import msvcrt
+                    msvcrt.locking(stream.fileno(),msvcrt.LK_NBLCK,1)
+                else:
+                    import fcntl
+                    fcntl.flock(stream.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic()>=deadline:raise
+                time.sleep(.01)
+        try:yield
+        finally:
+            stream.seek(0)
+            if os.name=="nt":msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
+            else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
+
+
+def remove_avatar_lease_records(root,pid,started):
+    """Remove only one reaped owner's accounting; never another live session."""
+    directory=Path(root)/"LongTasks"
+    if not directory.is_dir() or started is None:return
+    path=directory/f"avatar-gpu-active-{pid}.json"
+    try:
+        value=_avatar_read_lease(path)
+        if value.get("pid")==pid and value.get("started")==started:path.unlink()
+        with _avatar_canonical_lock(directory):
+            canonical=directory/"avatar-gpu-current.json"
+            value=_avatar_read_lease(canonical)
+            if value.get("pid")==pid and value.get("started")==started:canonical.unlink()
+    except OSError:pass
+
 class AvatarGpuLease:
     """Account for this camera process's measured GPU allocation, not a lock."""
     def __init__(self):
         self.started=psutil.Process(os.getpid()).create_time()
         self.path=ROOT/"LongTasks"/f"avatar-gpu-active-{os.getpid()}.json"
+        self.canonical=self.path.with_name("avatar-gpu-current.json")
         self.phase="starting";self.reserved=2*1024**3
         self.stopped=threading.Event();self.lock=threading.Lock()
         self._write()
@@ -256,15 +368,16 @@ class AvatarGpuLease:
 
     def _write(self):
         self.path.parent.mkdir(parents=True,exist_ok=True)
-        # Heartbeat and measured-allocation updates share the same atomic file.
-        # Keep the lock through publication so neither can regress the phase.
         with self.lock:
             value={"pid":os.getpid(),"started":self.started,"reserved_bytes":self.reserved,"updated":time.time(),"phase":self.phase}
-            temporary=self.path.with_name(self.path.name+".tmp")
-            try:
-                temporary.write_text(json.dumps(value),encoding="utf-8")
-                os.replace(temporary,self.path)
-            finally:temporary.unlink(missing_ok=True)
+            _avatar_atomic_lease(self.path,value)
+            with _avatar_canonical_lock(self.path.parent):
+                current=_avatar_read_lease(self.canonical)
+                try:
+                    newer=current.get("started",0)>self.started and owner_alive(current.get("pid"),current.get("started"))
+                except TypeError:newer=False
+                # A delayed old heartbeat must not displace a newer live owner.
+                if not newer:_avatar_atomic_lease(self.canonical,value)
 
     def _heartbeat(self):
         while not self.stopped.wait(.5):
@@ -280,10 +393,7 @@ class AvatarGpuLease:
 
     def close(self):
         self.stopped.set();self.thread.join(timeout=2)
-        try:
-            value=json.loads(self.path.read_text(encoding="utf-8"))
-            if value.get("pid")==os.getpid() and value.get("started")==self.started:self.path.unlink()
-        except (OSError,ValueError):pass
+        remove_avatar_lease_records(ROOT,os.getpid(),self.started)
 
 
 def avatar_heavy_work_active():
@@ -415,7 +525,7 @@ class AvatarVirtualOutput:
     def _stop_process(self):
         process=self.process
         if process is not None:
-            try:process.terminate();process.wait(timeout=2)
+            try:stop_owned_avatar_process_tree(process,timeout=2)
             except Exception:
                 try:process.kill();process.wait(timeout=2)
                 except Exception:pass
@@ -587,6 +697,7 @@ if __name__ == "__main__":
     parser.add_argument("--parent-pid", type=int)
     parser.add_argument("--parent-started", type=float)
     options = parser.parse_args()
+    start_launcher_guard()
     sys.exit(watch(parent_pid=options.parent_pid,
                    parent_started=options.parent_started,avatar=options.avatar,
                    virtual_output=options.virtual_output and options.avatar))

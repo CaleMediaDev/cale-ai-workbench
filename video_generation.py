@@ -666,8 +666,9 @@ def avatar_profile_probe_worker(profile, parent_pid, parent_started):
     # Isolated Python excludes caller cwd; only the actual app directory is
     # added, after this script's standard-library imports have completed.
     sys.path.insert(0,str(root))
-    from camera_presence import AvatarGpuLease,owner_alive,watch_owner
+    from camera_presence import AvatarGpuLease,owner_alive,watch_owner,start_launcher_guard
     if not owner_alive(parent_pid,parent_started):raise RuntimeError("Avatar setup owner closed.")
+    start_launcher_guard()
     threading.Thread(target=watch_owner,args=(parent_pid,parent_started),daemon=True).start()
     engine=None;lease=AvatarGpuLease()
     try:
@@ -714,19 +715,12 @@ def probe_avatar_profile(profile, root=None, cancelled=None):
             result=json.loads(raw.decode("utf-8").strip().splitlines()[-1])
             if result.get("ok") is not True:raise RuntimeError("Live Cale inference probe did not pass.")
         finally:
-            if process.poll() is None:
-                process.terminate()
-                try:process.wait(timeout=3)
-                except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
-            else:process.wait()
+            from camera_presence import stop_owned_avatar_process_tree
+            stop_owned_avatar_process_tree(process,timeout=3,root=root)
             # Forced termination does not run child finally blocks. Remove only
             # the exact reaped process's marker; PID alone is not ownership.
-            marker=root/"LongTasks"/f"avatar-gpu-active-{process.pid}.json"
-            try:
-                with marker.open("rb") as stream:record=stream.read(4097)
-                value=json.loads(record) if len(record)<=4096 else {}
-                if started is not None and value.get("pid")==process.pid and value.get("started")==started:marker.unlink()
-            except (OSError,ValueError):pass
+            from camera_presence import remove_avatar_lease_records
+            remove_avatar_lease_records(root,process.pid,started)
     return result
 
 
@@ -815,8 +809,9 @@ def virtual_avatar_sender(stream=None, parent_pid=None, parent_started=None):
     stream=stream or sys.stdin.buffer
     if parent_pid is not None:
         import threading
-        from camera_presence import owner_alive,watch_owner
+        from camera_presence import owner_alive,watch_owner,start_launcher_guard
         if not owner_alive(parent_pid,parent_started):return 0
+        start_launcher_guard()
         threading.Thread(target=watch_owner,args=(parent_pid,parent_started),daemon=True).start()
     with pyvirtualcam.Camera(width=1920,height=1080,fps=15,backend="obs",fmt=pyvirtualcam.PixelFormat.RGB) as camera:
         while True:

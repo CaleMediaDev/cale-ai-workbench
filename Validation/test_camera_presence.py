@@ -972,3 +972,108 @@ def test_camera_transport_accepts_hq_avatar_with_strict_upper_bound():
     assert ns['camera_frames'].get_nowait()==(1,'H'*300000)
     ns['offer_camera_frame']('X'*2800001,1)
     assert ns['camera_frames'].empty()
+
+
+def test_avatar_canonical_lease_is_atomic_measured_and_owner_scoped(tmp_path,monkeypatch):
+    import camera_presence as camera
+    monkeypatch.setattr(camera,'ROOT',tmp_path)
+    lease=camera.AvatarGpuLease()
+    try:
+        assert json.loads(lease.canonical.read_text())==json.loads(lease.path.read_text())
+        lease.measured({'ok':True,'gpu_allocation_bytes':456})
+        record=json.loads(lease.canonical.read_text())
+        assert record['phase']=='active' and record['reserved_bytes']==456+512*1024**2
+        newer={**record,'pid':987654,'started':record['started']+10}
+        lease.canonical.write_text(json.dumps(newer))
+        camera.remove_avatar_lease_records(tmp_path,record['pid'],record['started'])
+        assert json.loads(lease.canonical.read_text())==newer
+    finally:lease.close()
+    assert json.loads(lease.canonical.read_text())['pid']==987654
+
+
+def test_old_avatar_owner_cannot_displace_or_remove_new_cpu_process_lease(tmp_path,monkeypatch):
+    """Real processes/file locks; no camera, Torch, inference or GPU APIs."""
+    import camera_presence as camera,subprocess,sys,time
+    monkeypatch.setattr(camera,'ROOT',tmp_path)
+    old=camera.AvatarGpuLease();child=None
+    source=Path(camera.__file__).parent
+    script=("import sys;from pathlib import Path;import camera_presence as c;"
+            "c.ROOT=Path(sys.argv[1]);lease=c.AvatarGpuLease();"
+            "(c.ROOT/'child-ready').write_text(str(__import__('os').getpid()));"
+            "sys.stdin.buffer.read(1);lease.close()")
+    try:
+        child=subprocess.Popen([sys.executable,'-B','-c',script,str(tmp_path)],cwd=source,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        deadline=time.monotonic()+5
+        while not (tmp_path/'child-ready').exists() and time.monotonic()<deadline and child.poll() is None:time.sleep(.02)
+        assert (tmp_path/'child-ready').exists()
+        actual_pid=int((tmp_path/'child-ready').read_text());record=json.loads(old.canonical.read_text());assert record['pid']==actual_pid
+        old._write()  # A delayed heartbeat must not replace the newer live owner.
+        assert json.loads(old.canonical.read_text())['pid']==actual_pid
+        old.close()
+        assert json.loads(old.canonical.read_text())['pid']==actual_pid
+        child.communicate(b'x',timeout=5);assert child.returncode==0
+        assert not old.canonical.exists()
+    finally:
+        old.close()
+        if child is not None and child.poll() is None:child.kill();child.communicate(timeout=5)
+
+
+def test_owned_venv_launcher_stop_reaps_actual_cpu_child_and_canonical_lease(tmp_path,monkeypatch):
+    import camera_presence as camera,subprocess,sys,time
+    monkeypatch.setattr(camera,'ROOT',tmp_path)
+    script=("import sys;from pathlib import Path;import camera_presence as c;"
+            "c.ROOT=Path(sys.argv[1]);lease=c.AvatarGpuLease();"
+            "(c.ROOT/'ready').write_text(str(__import__('os').getpid()));sys.stdin.buffer.read(1)")
+    child=subprocess.Popen([sys.executable,'-B','-c',script,str(tmp_path)],cwd=Path(camera.__file__).parent,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    try:
+        deadline=time.monotonic()+5
+        while not (tmp_path/'ready').exists() and time.monotonic()<deadline and child.poll() is None:time.sleep(.02)
+        assert (tmp_path/'ready').exists()
+        actual_pid=int((tmp_path/'ready').read_text());started=psutil.Process(actual_pid).create_time()
+        identities=camera.stop_owned_avatar_process_tree(child,root=tmp_path)
+        assert (actual_pid,started) in identities
+        assert child.poll() is not None and not psutil.pid_exists(actual_pid)
+        assert not (tmp_path/'LongTasks/avatar-gpu-current.json').exists()
+        assert not list((tmp_path/'LongTasks').glob('avatar-gpu-active-*.json'))
+    finally:
+        if child.poll() is None:camera.stop_owned_avatar_process_tree(child,root=tmp_path)
+
+
+def test_avatar_cli_refuses_a_missing_launcher_before_capture(monkeypatch):
+    import camera_presence as camera
+    monkeypatch.setattr(camera.psutil,'Process',lambda *_:SimpleNamespace(parent=lambda:None))
+    with unittest.TestCase().assertRaisesRegex(RuntimeError,'launcher already closed'):camera.start_launcher_guard()
+
+
+def test_unreaped_avatar_child_blocks_replacement_and_keeps_accounting(tmp_path,monkeypatch):
+    import camera_presence as camera
+    process=Mock();process.pid=123;process.poll.return_value=None
+    child=Mock();child.pid=456;child.create_time.return_value=2
+    owner=SimpleNamespace(create_time=lambda:1,children=lambda **_: [child])
+    monkeypatch.setattr(camera.psutil,'Process',lambda _:owner)
+    monkeypatch.setattr(camera.psutil,'wait_procs',lambda *_args,**_kwargs:([],[child]))
+    cleanup=Mock();monkeypatch.setattr(camera,'remove_avatar_lease_records',cleanup)
+    with unittest.TestCase().assertRaisesRegex(RuntimeError,'did not exit'):camera.stop_owned_avatar_process_tree(process,root=tmp_path)
+    child.terminate.assert_called_once();child.kill.assert_called_once();cleanup.assert_not_called()
+
+
+def test_camera_switch_wrapper_reaps_real_venv_child_not_only_launcher(tmp_path,monkeypatch):
+    import camera_presence as camera,long_tasks,subprocess,sys,time
+    monkeypatch.setattr(camera,'ROOT',tmp_path);monkeypatch.setattr(long_tasks,'ROOT',tmp_path)
+    script=("import sys;from pathlib import Path;import camera_presence as c;"
+            "c.ROOT=Path(sys.argv[1]);lease=c.AvatarGpuLease();"
+            "(c.ROOT/'ready').write_text(str(__import__('os').getpid()));sys.stdin.buffer.read(1)")
+    process=subprocess.Popen([sys.executable,'-B','-c',script,str(tmp_path)],cwd=Path(camera.__file__).parent,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    actual_pid=None
+    try:
+        deadline=time.monotonic()+5
+        while not (tmp_path/'ready').exists() and time.monotonic()<deadline and process.poll() is None:time.sleep(.02)
+        assert (tmp_path/'ready').exists();actual_pid=int((tmp_path/'ready').read_text())
+        long_tasks.stop_owned_camera_process(process)
+        assert not psutil.pid_exists(actual_pid), 'Stopping only the venv launcher left the real camera child running'
+        assert not (tmp_path/'LongTasks/avatar-gpu-current.json').exists()
+    finally:
+        if process.poll() is None:camera.stop_owned_avatar_process_tree(process,root=tmp_path)
+        if actual_pid is not None and psutil.pid_exists(actual_pid):
+            owned=psutil.Process(actual_pid);owned.terminate();owned.wait(timeout=3)
+        if process.stdin is not None:process.stdin.close()

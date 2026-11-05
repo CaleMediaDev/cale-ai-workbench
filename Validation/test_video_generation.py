@@ -787,7 +787,7 @@ def test_avatar_probe_cli_lease_precedes_engine_and_closes_after_it(tmp_path,mon
         def __init__(self,_):assert events==['lease starting'];events.append('engine')
         def probe(self):events.append('probe');return {'ok':True,'gpu_allocation_bytes':123}
         def close(self):events.append('engine close')
-    monkeypatch.setitem(sys.modules,'camera_presence',types.SimpleNamespace(AvatarGpuLease=Lease,owner_alive=lambda *_:True,watch_owner=Mock()))
+    monkeypatch.setitem(sys.modules,'camera_presence',types.SimpleNamespace(AvatarGpuLease=Lease,owner_alive=lambda *_:True,watch_owner=Mock(),start_launcher_guard=Mock()))
     monkeypatch.setitem(sys.modules,'torch',types.SimpleNamespace(__file__=str(tmp_path/'Media/python/Lib/site-packages/torch/__init__.py'),__version__='2.9.1+cu128',version=types.SimpleNamespace(cuda='12.8'),cuda=types.SimpleNamespace(is_available=lambda:True),backends=types.SimpleNamespace(cudnn=types.SimpleNamespace(version=lambda:90100))))
     monkeypatch.setitem(sys.modules,'onnxruntime',types.SimpleNamespace(__file__=str(profile/'python/Lib/site-packages/onnxruntime/__init__.py'),__version__='1.26.0'))
     monkeypatch.setitem(sys.modules,'avatar_video',types.SimpleNamespace(CaleAvatar=Engine))

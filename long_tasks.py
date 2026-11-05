@@ -3719,6 +3719,10 @@ def monitor_restart_needed(now=None, tasks_active=None):
 def stop_owned_camera_process(process, timeout=3):
     """Reap the exact child Popen before another process may open its camera."""
     if process is None:return
+    if isinstance(getattr(process,"pid",None),int):
+        from camera_presence import stop_owned_avatar_process_tree
+        stop_owned_avatar_process_tree(process,timeout=timeout,root=ROOT)
+        return
     if process.poll() is None:
         process.terminate()
         try:process.wait(timeout=timeout)
