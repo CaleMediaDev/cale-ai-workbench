@@ -7941,9 +7941,13 @@ def test_persistence_scope_diagnostic_reports_bounded_reason_without_another_cap
     assert str(folder) not in issue and len(captures)==1
 
 
-def helper_workflow_fixture(folder):
+def helper_workflow_fixture(folder,monkeypatch):
     folder.mkdir();project={'id':'b'*12,'folder':str(folder),
         'brief':'Calculate invoice totals with a verified pure helper, then implement the display function.'}
+    monkeypatch.setattr(long_tasks,'STATE',folder.parent/'helper-supervisor')
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
     with project_memory.verification_context(project):
         helper=project_memory.register_expression_helper(folder,'invoice_total',{'amounts':'numbers','tax':'number'},
             'round(sum(amounts)*(1+tax),2)',[{'inputs':{'amounts':[10,5],'tax':.06},'expected':15.9}])
@@ -7961,7 +7965,7 @@ def helper_workflow_fixture(folder):
 
 def test_saved_helper_unit_resumes_real_worker_zero_inference_process_or_network(tmp_path,monkeypatch):
     import socket,urllib.request
-    project,helper,original,next_step=helper_workflow_fixture(tmp_path/'project')
+    project,helper,original,next_step=helper_workflow_fixture(tmp_path/'project',monkeypatch)
     before=task_context.step_status(project['folder']);state_before=native_agent.read_state(project)
     monkeypatch.setattr(long_tasks,'STATE',tmp_path/'supervisor')
     with long_tasks.database() as conn:
@@ -7989,7 +7993,7 @@ def test_saved_helper_unit_resumes_real_worker_zero_inference_process_or_network
 
 
 def test_helper_wrong_saved_outcome_does_not_commit_sql_step(tmp_path,monkeypatch):
-    project,helper,step,_=helper_workflow_fixture(tmp_path/'project')
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
     monkeypatch.setattr(long_tasks,'projects',lambda:[project])
     step['check_arguments']['cases'][0]['expected']=999
     task_context.revise_step(project['folder'],task_context.step_status(project['folder'])['active']['id'],[step])
@@ -8020,7 +8024,7 @@ def test_helper_tools_auto_join_existing_capability_catalog_without_private_valu
 
 def test_saved_helper_pass_cannot_advance_after_pause_during_computation(tmp_path,monkeypatch):
     import quick_calculator
-    project,helper,_,_=helper_workflow_fixture(tmp_path/'project')
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
     monkeypatch.setattr(long_tasks,'projects',lambda:[project])
     actual=quick_calculator.run_helper
     def paused(*args):
@@ -8037,7 +8041,7 @@ def test_saved_helper_pass_cannot_advance_after_pause_during_computation(tmp_pat
 @pytest.mark.parametrize('mutation',['source','acceptance'])
 def test_helper_output_does_not_override_source_or_check_commit_guards(tmp_path,monkeypatch,mutation):
     import quick_calculator
-    project,helper,step,_=helper_workflow_fixture(tmp_path/'project')
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
     monkeypatch.setattr(long_tasks,'projects',lambda:[project])
     active=task_context.step_status(project['folder'])['active'];actual=quick_calculator.run_helper;changed=[]
     def raced(*args):
@@ -8059,7 +8063,7 @@ def test_helper_output_does_not_override_source_or_check_commit_guards(tmp_path,
 
 
 def test_saved_helper_worker_reuse_survives_fresh_process_restart(tmp_path,monkeypatch):
-    project,helper,_,_=helper_workflow_fixture(tmp_path/'project')
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
     state=tmp_path/'supervisor';monkeypatch.setattr(long_tasks,'STATE',state)
     with long_tasks.database() as conn:
         conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
@@ -8077,3 +8081,119 @@ print(json.dumps({'status':state['status'],'done':task_context.step_status(proje
                           capture_output=True,text=True,timeout=20,check=True)
     assert json.loads(result.stdout)=={'status':'continue','done':1,'helper_reuse':1,'turns':7}
     assert task_context.step_status(project['folder'])['active']['title']=='Implement display'
+
+
+def test_independent_helper_original_brief_change_during_computation_blocks_step(tmp_path,monkeypatch):
+    import quick_calculator
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    monkeypatch.setattr(long_tasks,'STATE',tmp_path/'supervisor')
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
+    actual=quick_calculator.run_helper
+    def changed(*args):
+        result=actual(*args)
+        with long_tasks.database() as conn:
+            conn.execute('UPDATE projects SET brief=? WHERE id=?',('Changed original required calculation',project['id']))
+        return result
+    with patch.object(quick_calculator,'run_helper',side_effect=changed),patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')):
+        native_agent.run_slice(project)
+    assert task_context.step_status(project['folder'])['done']==0
+
+
+def test_independent_helper_stop_at_sql_publication_blocks_step(tmp_path,monkeypatch):
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    monkeypatch.setattr(long_tasks,'projects',lambda:[project])
+    original=task_context.record_step_check
+    def stopped(*args,**kwargs):
+        state=native_agent.read_state(project);state['status']='stopped';native_agent.save_state(project,state)
+        return original(*args,**kwargs)
+    with patch.object(task_context,'record_step_check',side_effect=stopped),patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')):
+        state=native_agent.run_slice(project)
+    assert state['status']=='stopped'
+    assert task_context.step_status(project['folder'])['done']==0
+
+
+@pytest.mark.parametrize('control',['stopped','paused'])
+def test_independent_helper_checkpoint_retains_control_after_sql_commit(tmp_path,monkeypatch,control):
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    monkeypatch.setattr(long_tasks,'STATE',tmp_path/'supervisor')
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
+    original=task_context.record_action
+    injected=[]
+    def controlled(*args,**kwargs):
+        result=original(*args,**kwargs)
+        if args[1]=='task_steps' and task_context.step_status(project['folder'])['done']==1:
+            state=native_agent.read_state(project);state['status']=control;native_agent.save_state(project,state)
+            injected.append(True)
+        return result
+    with patch.object(task_context,'record_action',side_effect=controlled),patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')):
+        state=native_agent.run_slice(project)
+    assert injected==[True]
+    assert task_context.step_status(project['folder'])['done']==1
+    assert state['status']==control
+    assert native_agent.read_state(project)['status']==control
+
+
+
+def test_helper_offer_schema_does_not_mutate_global_catalog(tmp_path,monkeypatch):
+    from jsonschema import validate
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    before=copy.deepcopy(native_agent.TOOLS)
+    assert 'check_expression_helper' not in {t['function']['name'] for t in before}
+    ordinary=next(t['function']['parameters'] for t in before if t['function']['name']=='task_steps')
+    assert not any(b['properties'].get('check_tool',{}).get('enum')==['check_expression_helper']
+                   for b in ordinary['properties']['steps']['items']['anyOf'])
+    offered=native_agent.expression_helper_tools(project,native_agent.TOOLS)
+    assert offered is not native_agent.TOOLS and native_agent.TOOLS==before
+    assert 'check_expression_helper' in {t['function']['name'] for t in offered}
+    schema=next(t['function']['parameters'] for t in offered if t['function']['name']=='task_steps')
+    validate({'action':'plan','steps':[step]},schema)
+    validate(step['check_arguments'],native_agent.checker_tool_schema('check_expression_helper'))
+    compact=native_agent.compact_messages([
+        {'role':'system','content':'A real task brief'},
+        {'role':'user','content':'Old material '*20000},
+        {'role':'user','content':'LATEST_REQUIREMENT keep current task scope'}],Path(project['folder']),6000,tools=offered)
+    assert cloud_ai.estimated_input_tokens({'messages':compact,'tools':offered})<=4500
+    assert 'LATEST_REQUIREMENT' in json.dumps(compact)
+    assert native_agent.TOOLS==before
+
+
+def test_helper_worker_compacts_actual_copied_offer(tmp_path,monkeypatch):
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    step['check_arguments']['cases'][0]['expected']=999
+    task_context.revise_step(project['folder'],task_context.step_status(project['folder'])['active']['id'],[step])
+    monkeypatch.setattr(native_agent,'MAX_TURNS_PER_SLICE',1)
+    seen=[];compactions=[];actual=native_agent.compact_messages
+    def compact(*args,**kwargs):
+        compactions.append(copy.deepcopy(kwargs.get('tools')))
+        return actual(*args,**kwargs)
+    def reply(payload):
+        seen.append(copy.deepcopy(payload))
+        return {'choices':[{'message':{'role':'assistant','content':'Need to inspect the incorrect saved helper expectation.'}}]}
+    with patch.object(native_agent,'compact_messages',side_effect=compact):
+        state=native_agent.run_slice(project,complete=reply)
+    assert len(seen)==1 and any('check_expression_helper'==t['function']['name'] for t in seen[0]['tools'])
+    assert compactions[-1]==seen[0]['tools']
+    assert state['status']!='done' and task_context.step_status(project['folder'])['done']==0
+
+
+@pytest.mark.parametrize('control',['stopped','paused'])
+def test_helper_sql_callback_rechecks_after_update_and_rolls_back(tmp_path,monkeypatch,control):
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    active=task_context.step_status(project['folder'])['active'];calls=[]
+    def allowed():
+        calls.append(True)
+        if len(calls)==2:
+            state=native_agent.read_state(project);state['status']=control;native_agent.save_state(project,state)
+            return False
+        return True
+    with pytest.raises(ValueError,match='before publication'):
+        task_context.record_step_check(project['folder'],active['id'],task_context.request_identity(project['folder']),
+            'Exit code: 0\nActual helper checked',unchanged=True,
+            expected_check=task_context.step_check_identity(active),before_commit=allowed)
+    queue=task_context.step_status(project['folder'])
+    assert queue['done']==0 and queue['active']['attempts']==0
+    assert native_agent.read_state(project)['status']==control and len(calls)==2

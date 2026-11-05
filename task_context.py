@@ -303,7 +303,7 @@ def validate_repeatable_check(tool: str, arguments: dict, *, folder: str | Path 
         from native_agent import TOOLS
 
         command = str(arguments.get("command", "")).strip().strip("'\"`").removesuffix("()").strip().casefold()
-        if command in {item["function"]["name"].casefold() for item in TOOLS}:
+        if command in {item["function"]["name"].casefold() for item in TOOLS} | {"check_expression_helper"}:
             raise ValueError(f"check_command names the Cale tool '{command}', not a shell acceptance check. "
                 "Use that tool to implement changes. Revise this step with check_tool/check_arguments "
                 "(check_webapp for HTML, or run_verifier for an existing verifier), or a real read-only shell command.")
@@ -374,9 +374,9 @@ def _validate_steps(steps: list, folder: str | Path | None = None) -> list[tuple
             # requiring a source file which an earlier step has yet to build.
             from jsonschema import ValidationError, validate
 
-            from native_agent import TOOLS
+            from native_agent import checker_tool_schema
 
-            schema = next(item["function"]["parameters"] for item in TOOLS if item["function"]["name"] == tool)
+            schema = checker_tool_schema(tool)
             try:
                 validate(arguments, schema)
             except ValidationError as error:
@@ -452,11 +452,13 @@ def step_check_identity(step: dict) -> str:
 
 
 def record_step_check(folder: str | Path, step_id: int, request_hash: str,
-                      result: str, *, unchanged: bool, expected_check: str | None = None) -> dict:
+                      result: str, *, unchanged: bool, expected_check: str | None = None, before_commit=None) -> dict:
     """Commit an actual command result only to the same request and active step.
 
     A short successful check proves only the selected step's acceptance test;
     it never bypasses the whole project's independent completion requirements.
+    Optional helper authority/control checks run inside the SQL transaction and
+    again after updates, so rejection rolls back both unit and successor state.
     """
     if request_identity(folder) != request_hash:
         raise ValueError("User instructions changed during the check. Replan against the new request.")
@@ -464,6 +466,8 @@ def record_step_check(folder: str | Path, step_id: int, request_hash: str,
         _schema(conn)
         conn.commit()
         conn.execute("BEGIN IMMEDIATE")
+        if before_commit is not None and not before_commit():
+            raise ValueError('Task control or helper instructions changed; no step advanced.')
         current = _step_status(conn, request_hash)
         if not current["active"] or current["active"]["id"] != step_id:
             raise ValueError("That step is no longer active; no progress was advanced.")
@@ -488,6 +492,8 @@ def record_step_check(folder: str | Path, step_id: int, request_hash: str,
             if next_row:
                 conn.execute("UPDATE task_steps SET status='active',updated=? WHERE id=?",
                              (time.time(), next_row["id"]))
+        if before_commit is not None and not before_commit():
+            raise ValueError('Task control or helper instructions changed before publication; no step advanced.')
         return {"passed": passed, **_step_status(conn, request_hash)}
 
 

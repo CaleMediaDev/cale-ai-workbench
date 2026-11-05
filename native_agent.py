@@ -40,6 +40,14 @@ _BROWSER_REVISION_BINDINGS = {}
 _INVALID_ACCEPTANCE_CONTEXT_FORMAT = "invalid_acceptance_context_v2"
 _GENERIC_ASSERTION_SCOPE_FORMAT = "generic_assertion_scope_v2"
 
+EXPRESSION_HELPER_TOOL = {"type":"function","function":{"name":"check_expression_helper",
+        "description":"Test supplied examples with one current project helper, without inference/processes. Never completes the whole task or changes its definition.",
+        "parameters":{"type":"object","properties":{
+            "helper_id":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+            "cases":{"type":"array","minItems":1,"maxItems":24,"items":{"type":"object","properties":{
+                "inputs":{"type":"object"},"expected":{}},"required":["inputs","expected"],"additionalProperties":False}}},
+            "required":["helper_id","cases"],"additionalProperties":False}}}
+
 TOOLS = [
     {"type": "function", "function": {
         "name": "create_game_starter",
@@ -48,13 +56,6 @@ TOOLS = [
             "title": {"type": "string", "minLength": 1, "maxLength": 80},
             "accent": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}},
             "required": ["path"], "additionalProperties": False}}},
-    {"type":"function","function":{"name":"check_expression_helper",
-        "description":"Run concrete input/expected tests using one exact registered project-local expression helper, with zero inference or processes. This tests only supplied examples, never completes the whole task, and cannot change the helper definition.",
-        "parameters":{"type":"object","properties":{
-            "helper_id":{"type":"string","pattern":"^[a-f0-9]{64}$"},
-            "cases":{"type":"array","minItems":1,"maxItems":24,"items":{"type":"object","properties":{
-                "inputs":{"type":"object"},"expected":{}},"required":["inputs","expected"],"additionalProperties":False}}},
-            "required":["helper_id","cases"],"additionalProperties":False}}},
     {"type": "function", "function": {
         "name": "check_game_starter",
         "description": "Verify the current HTML space-shooter starter's DEFAULT contract in real offline browsers: 600x800 logical field, 120 px/s player, requested numeric starting lives (default 3), 10 points per enemy, timing, collisions, waves, HUD, physical controls and reset. Saves and runs a request-bound verifier. Not for other genres or deliberately changed physics; those need appropriate custom integration tests. Never repairs or overwrites game source. Preserves custom verifiers.",
@@ -254,7 +255,7 @@ def bind_step_checker_schemas(tools: list) -> None:
     command["required"] = ["phase", "title", "check_command"]
     command["properties"]["check_command"]["not"] = {"enum": sorted(by_name)}
     alternatives = [command]
-    for kind in ("check_python_function", "check_javascript_function", "check_webapp", "check_expression_helper", "run_verifier"):
+    for kind in ("check_python_function", "check_javascript_function", "check_webapp", "run_verifier"):
         branch = copy.deepcopy(base)
         for name in ("check_command", "shell"):
             branch["properties"].pop(name)
@@ -287,6 +288,35 @@ def bind_step_checker_schemas(tools: list) -> None:
 
 
 bind_step_checker_schemas(TOOLS)
+
+
+def checker_tool_schema(kind):
+    """Return backend contracts without growing every ordinary model offer."""
+    if kind=='check_expression_helper':
+        return copy.deepcopy(EXPRESSION_HELPER_TOOL['function']['parameters'])
+    return next(tool['function']['parameters'] for tool in TOOLS if tool['function']['name']==kind)
+
+
+def expression_helper_tools(project, available):
+    """Add the helper only to a copied offer for a project with saved helpers."""
+    import task_context
+    folder=Path(project['folder'])
+    active=task_context.step_status(folder).get('active')
+    records=folder/'.local-ai/expression-helpers/v1/records'
+    if not ((active or {}).get('check_tool')=='check_expression_helper' or records.is_dir()):
+        return available
+    tools=copy.deepcopy(available)
+    if not any(t['function']['name']=='check_expression_helper' for t in tools):
+        tools.append(copy.deepcopy(EXPRESSION_HELPER_TOOL))
+    for tool in tools:
+        if tool['function']['name']!='task_steps':continue
+        variants=tool['function']['parameters']['properties']['steps']['items']['anyOf']
+        if any(v['properties'].get('check_tool',{}).get('enum')==['check_expression_helper'] for v in variants):continue
+        branch=copy.deepcopy(next(v for v in variants if v['properties'].get('check_tool',{}).get('enum')==['check_python_function']))
+        branch['properties']['check_tool']={'type':'string','enum':['check_expression_helper']}
+        branch['properties']['check_arguments']=checker_tool_schema('check_expression_helper')
+        variants.append(branch)
+    return tools
 
 
 def state_file(project: dict) -> Path:
@@ -812,6 +842,10 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                 # steps. Reject their replay before any checker mutates a suite.
                 task_context.validate_repeatable_check(kind, check_args)
                 structured = kind in {"check_python_function", "check_javascript_function", "check_webapp", "check_expression_helper"}
+                helper_basis=None
+                if kind=='check_expression_helper':
+                    import project_memory
+                    helper_basis=project_memory._helper_request_identity(folder)
                 before = step_source_fingerprint(folder, structured)
                 if arguments.get("_automatic_game") is True:
                     if kind != "run_verifier" or not owned_game_verifier(folder):
@@ -844,8 +878,12 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                     raise ValueError("Task control or user instructions changed during automatic acceptance; no step advanced.")
                 if structured:
                     task_context.record_action(folder, kind, checked, check_args, request_hash=request_hash)
+                def helper_commit_allowed():
+                    return (project_memory._helper_request_identity(folder)==helper_basis
+                            and (before_step_commit is None or before_step_commit()))
                 value = task_context.record_step_check(folder, active["id"], request_hash, status_result,
-                    unchanged=step_source_fingerprint(folder, structured) == before, expected_check=expected_check)
+                    unchanged=step_source_fingerprint(folder, structured) == before, expected_check=expected_check,
+                    **({'before_commit':helper_commit_allowed} if kind=='check_expression_helper' else {}))
                 value["checked_step_id"] = active["id"]
                 value["check_sha256"] = expected_check
                 if not structured:
@@ -2153,16 +2191,17 @@ def configured_context(root: Path = ROOT) -> int:
     return 65536
 
 
-def compact_messages(messages: list, folder: Path, context_limit: int | None = None) -> list:
+def compact_messages(messages: list, folder: Path, context_limit: int | None = None, *, tools=None) -> list:
     """Fit recent complete tool batches even when one result exceeds the window."""
     from cloud_ai import estimated_input_tokens
 
+    tools = TOOLS if tools is None else tools
     limit = context_limit or configured_context()
     reserve = min(8192, max(1024, limit // 4))
     budget = max(1024, limit - reserve)
     def estimate(items, tools):
         return estimated_input_tokens({"messages": items, "tools": tools})
-    if estimate(messages, TOOLS) <= budget:
+    if estimate(messages, tools) <= budget:
         return messages
     checkpoint = next((item for item in messages[1:]
                        if item.get("role") == "system" and
@@ -2196,16 +2235,16 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
     # A growing tool catalog must not reserve so much exchange space that a
     # short durable plan is erased. Retain a bounded briefing when it fits.
     minimum = [base[0], {**base[1], "content": clip(str(base[1]["content"]), 512)}]
-    target_base = min(budget, max(target_base, estimate(minimum, TOOLS)))
+    target_base = min(budget, max(target_base, estimate(minimum, tools)))
     def shrink_checkpoint(target):
-        if estimate(base, TOOLS) <= target:
+        if estimate(base, tools) <= target:
             return
         original = str(base[1]["content"])
         low, high = 0, len(original)
         while low < high:
             middle = (low + high + 1) // 2
             base[1]["content"] = clip(original, middle)
-            if estimate(base, TOOLS) <= target:
+            if estimate(base, tools) <= target:
                 low = middle
             else:
                 high = middle - 1
@@ -2226,7 +2265,7 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
         current = [item]
     if current:
         groups.append(current)
-    total = estimate(base, TOOLS)
+    total = estimate(base, tools)
     chosen = []
     for group in reversed(groups):
         cost = estimate(group, [])
@@ -2263,9 +2302,9 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
                 for item in minimum_group:
                     if isinstance(item.get("content"), str):
                         item["content"] = clip(item["content"], 128)
-                retained_cost = total - estimate(base, TOOLS)
+                retained_cost = total - estimate(base, tools)
                 shrink_checkpoint(budget - retained_cost - estimate(minimum_group, []))
-                total = estimate(base, TOOLS) + retained_cost
+                total = estimate(base, tools) + retained_cost
                 available = budget - total
             contents = [(item, str(item["content"])) for item in candidate
                         if isinstance(item.get("content"), str)]
@@ -5281,7 +5320,8 @@ def automatic_step_basis(folder: Path, active: dict) -> dict:
         helper=project_memory.expression_helper_basis(folder,active["check_arguments"]["helper_id"])
         return {"request":task_context.request_identity(folder),"step":task_context.step_check_identity(active),
                 "checker":checker_fingerprint(active["check_tool"]),"source":step_source_fingerprint(folder,True),
-                "suite":hashlib.sha256(json.dumps(helper,sort_keys=True).encode()).hexdigest()}
+                "suite":hashlib.sha256(json.dumps(helper,sort_keys=True).encode()).hexdigest(),
+                "helper_request":project_memory._helper_request_identity(folder)}
     path = project_path(folder, ".local-ai/" + suite[active["check_tool"]])
     return {"request": task_context.request_identity(folder), "step": task_context.step_check_identity(active),
             "checker": checker_fingerprint(active["check_tool"]),
@@ -5297,7 +5337,7 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
     from a component pass and never invents acceptance cases or shell commands.
     Return False when external control superseded this worker's local state.
     """
-    import task_context
+    import task_context,project_memory
 
     folder = Path(project["folder"])
     stamp = user_request_stamp(folder)
@@ -5326,6 +5366,8 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
             try:
                 return (read_state(project).get("status") not in {"paused", "stopped", "done"}
                         and user_request_stamp(folder) == stamp
+                        and (active['check_tool']!='check_expression_helper'
+                             or project_memory._helper_request_identity(folder)==basis['helper_request'])
                         and any(item.get("id") == project["id"] and item.get("folder")
                                 and Path(item["folder"]).resolve() == folder.resolve() for item in long_tasks.projects()))
             except (OSError, ValueError, TypeError, sqlite3.Error):
@@ -5336,6 +5378,7 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
         recovery_before=capability_recovery_before(project,'task_steps',arguments,active)
         result = execute_tool(folder, "task_steps", arguments, before_step_commit=allowed)
         if not allowed():
+            if active['check_tool']=='check_expression_helper':state['_helper_reuse_superseded']=True
             return False
         # Checker-owned suite saves are expected. Source mutations are not:
         # retain the original source identity so a later read-only retry runs.
@@ -5349,6 +5392,9 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
         task_context.record_action(folder, "task_steps", result, arguments, request_hash=basis["request"])
         capability_recovery_observe(project,state,'task_steps',arguments,result,
             task_context.action_outcome('task_steps',result),recovery_before)
+        if active['check_tool']=='check_expression_helper' and not allowed():
+            state['_helper_reuse_superseded']=True
+            return False
         try:
             verdict = json.loads(result)
         except ValueError:
@@ -5374,6 +5420,9 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
         state["messages"] = messages
         state["current"] = "Saved acceptance " + ("passed: " if verdict.get("passed") is True else "needs repair: ") + active["title"]
         if active["check_tool"]=="check_expression_helper" and verdict.get("passed") is True:
+            if not allowed():
+                state['_helper_reuse_superseded']=True
+                return False
             state["helper_reuse_checkpoints"]=int(state.get("helper_reuse_checkpoints",0))+1
             save_state(project,state)
             return True  # Yield this real pure-computation unit before inference.
@@ -5473,8 +5522,14 @@ def _run_slice(project: dict, complete=None) -> dict:
             latest = read_state(project)
             if latest.get("status") in {"paused", "stopped", "done"}:
                 return latest
+            if state.pop('_helper_reuse_superseded',False):
+                state.update(status='continue',current='Helper task ownership or instructions changed; reload before acting')
+                save_state(project,state)
+                return state
             continue  # Rebuild against the new user instruction on the next iteration.
         if int(state.get("helper_reuse_checkpoints",0))>helper_checkpoint:
+            latest=read_state(project)
+            if latest.get('status') in {'paused','stopped','done'}:return latest
             state.update(status="continue",current="Tested helper reused; next saved step is ready")
             save_state(project,state)
             return state
@@ -5506,14 +5561,15 @@ def _run_slice(project: dict, complete=None) -> dict:
         if needs_initial_plan and messages and messages[0].get("role") == "system":
             messages[0] = {"role": "system", "content": prompt(project)}
         messages = fresh_messages(messages, folder, state, project)
-        messages = compact_messages(messages, folder, context_limit)
         if needs_initial_plan and planning_basis(project) != plan_basis:
             continue  # Rebuild the prompt and its identity together, without inference or mutation.
         focus = None if planning else focused_browser_check(project, state, planned_request_hash)
         available_tools = step_tools(project, state, repair_tools(project, state))
+        available_tools = expression_helper_tools(project, available_tools)
         available_tools = acceptance_repair_tools(project, state, available_tools)
         if planning:
             available_tools = initial_plan_tools(project, available_tools)
+        messages = compact_messages(messages, folder, context_limit, tools=available_tools)
         # Prefer an already diagnosed narrow checker repair before reserving a
         # generic recovery turn. A missing module has no such browser specialist.
         decision = active_step_repair_notice(project, state) if not focus and not planning else None
@@ -6212,7 +6268,7 @@ def check_expression_helper(folder, arguments):
     """Measure the unchanged saved cases through the restricted interpreter."""
     import project_memory,quick_calculator
     from jsonschema import validate
-    schema=next(t['function']['parameters'] for t in TOOLS if t['function']['name']=='check_expression_helper')
+    schema=checker_tool_schema('check_expression_helper')
     validate(arguments,schema)
     identity=project_memory.expression_helper_basis(folder,arguments['helper_id'])
     cases=[]
