@@ -1441,7 +1441,7 @@ def _game_filtered(files):
     return kept, excluded
 
 
-def _game_source_files(game, catalog):
+def _game_source_files(game, catalog, prepared=None):
     source = game["source"]
     if source["kind"] == "catalog_work":
         prefix = source["path"]+"/"
@@ -1451,11 +1451,11 @@ def _game_source_files(game, catalog):
         files["CATALOG-LICENSE.txt"] = _game_raw(source["repo"],source["commit"],"LICENSE",license_entry)
         info = {**source, "source_url": game["source_url"], "catalog_license_only": True}
     else:
-        info = _game_github_source(source["url"])
+        info = prepared[0] if prepared is not None else _game_github_source(source["url"])
         repo, commit, path = info["repo"], info["commit"], info["path"]
         if info["kind"] == "blob":
             files = {Path(path).name:_game_raw(repo,commit,path)}
-            tree = _game_json(f"https://api.github.com/repos/{repo}/git/trees/{commit}?recursive=1")
+            tree = prepared[1] if prepared is not None else _game_json(f"https://api.github.com/repos/{repo}/git/trees/{commit}?recursive=1")
             if not isinstance(tree,dict) or tree.get("truncated") or not isinstance(tree.get("tree"),list):
                 raise ValueError("Cannot verify the source license inventory from a partial tree.")
             parents = {"", *[str(parent).replace("\\","/") for parent in Path(path).parents if str(parent) != "."]}
@@ -1613,8 +1613,7 @@ def _game_publish(destination, files):
     return destination
 
 
-@server.tool()
-def import_game_example(game_id: str, project_path: str) -> dict:
+def _import_game_example(game_id: str, project_path: str) -> dict:
     """Import published source into a NEW editable folder; never run or install it.
 
     First use downloads public source at an immutable commit. Subsequent copies
@@ -1631,6 +1630,9 @@ def import_game_example(game_id: str, project_path: str) -> dict:
     destination=_game_plain_path(project_path)
     if destination.exists(): raise FileExistsError("Choose a new game folder; existing files and folders are never overwritten.")
     if not destination.parent.is_dir(): raise ValueError("Choose a new game folder inside an existing parent folder.")
+    streamed = _game_stream_manifest(game,catalog) if game["source"]["kind"]=="github" else None
+    if streamed is not None:
+        return _game_stream_import(game,catalog,destination,cached=streamed)
     cached=False
     try:
         source=_game_cached(game,catalog)
@@ -1642,7 +1644,17 @@ def import_game_example(game_id: str, project_path: str) -> dict:
         import time
         token = _GAME_DEADLINE.set(time.monotonic()+180)
         try:
-            files,info=_game_source_files(game,catalog)
+            prepared = None
+            if game["source"]["kind"]=="github":
+                info = _game_github_source(game["source"]["url"])
+                tree = _game_json(f"https://api.github.com/repos/{info['repo']}/git/trees/{info['commit']}?recursive=1")
+                if info["kind"] in ("repo","tree"):
+                    plan = _game_tree_plan(game,info,tree)
+                    if _game_stream_needed(plan):
+                        return _game_stream_import(game,catalog,destination,prepared=(info,tree,plan))
+                prepared = (info,tree)
+            files,info=_game_source_files(game,catalog,prepared)
+            _game_progress("copying_source",bytes_total=sum(map(len,files.values())),files_total=len(files),commit=info["commit"],force=True)
             entrypoint=_game_entrypoint(files)
             _game_cache_save(game,catalog,files,info)
         finally:
@@ -1667,9 +1679,614 @@ def import_game_example(game_id: str, project_path: str) -> dict:
           f"License summary: {game['license_summary']}\n\nSee CALE-IMPORT.json for content hashes, provenance and excluded operational files.\n")
     output={**files,"CALE-SOURCE.md":note.encode(),"CALE-IMPORT.json":json.dumps(receipt,ensure_ascii=False,indent=2).encode()}
     _game_publish(destination,output)
+    _game_progress("source_ready",bytes_done=sum(map(len,files.values())),bytes_total=sum(map(len,files.values())),
+                   files_done=len(files),files_total=len(files),commit=info["commit"],force=True)
     return {"folder":str(destination),"entrypoint":entrypoint,"game":game,"source_receipt":receipt,
             "receipt_path":str(destination/"CALE-IMPORT.json"),"requires_build":requires_build,
             "from_cache":cached,"files":len(files),"code_executed":False}
+
+
+# Large source imports use disk-backed immutable archives, not GB-sized bytes dictionaries.
+_GAME_PROGRESS = _game_contextvars.ContextVar("game_import_progress", default=None)
+_GAME_PROGRESS_ID = _game_contextvars.ContextVar("game_import_identity", default=None)
+_GAME_DIR_HANDLES = _game_contextvars.ContextVar("game_import_directory_handles", default=None)
+
+
+from contextlib import contextmanager as _game_contextmanager
+
+
+@_game_contextmanager
+def game_import_progress(callback):
+    """Private Python progress hook; never a model-supplied tool argument."""
+    token = _GAME_PROGRESS.set(callback if callable(callback) else None)
+    try:
+        yield
+    finally:
+        _GAME_PROGRESS.reset(token)
+
+
+def _game_progress(phase, *, bytes_done=0, bytes_total=0, files_done=0, files_total=0, commit=None, force=False):
+    import time
+    context = _GAME_PROGRESS_ID.get()
+    callback = _GAME_PROGRESS.get()
+    if context is None or callback is None:
+        return
+    now = time.monotonic()
+    if not force and phase == context.get("last_phase") and now-context.get("last_emit",0) < .2:
+        return
+    if commit is not None: context["source_commit"] = commit
+    context.update(last_emit=now,last_phase=phase)
+    value={"game_id":context["game_id"],"source_commit":context.get("source_commit"),"phase":phase,
+           "bytes_done":max(0,int(bytes_done)),"bytes_total":max(0,int(bytes_total)),
+           "files_done":max(0,int(files_done)),"files_total":max(0,int(files_total)),
+           "gameplay_tested":False,"whole_task_complete":False}
+    try:
+        callback(value)
+    except Exception:
+        pass  # Optional display/storage failures cannot change the source-import verdict.
+
+
+from functools import lru_cache as _game_lru_cache
+
+
+@_game_lru_cache(maxsize=1)
+def _game_win_api():
+    import ctypes
+    from ctypes import wintypes
+    api=ctypes.WinDLL("kernel32",use_last_error=True)
+    api.CreateFileW.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE]
+    api.CreateFileW.restype=wintypes.HANDLE
+    api.CloseHandle.argtypes=[wintypes.HANDLE]
+    api.GetFinalPathNameByHandleW.argtypes=[wintypes.HANDLE,wintypes.LPWSTR,wintypes.DWORD,wintypes.DWORD]
+    api.GetFinalPathNameByHandleW.restype=wintypes.DWORD
+    api.SetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
+    api.SetFileInformationByHandle.restype=wintypes.BOOL
+    api.GetFileInformationByHandleEx.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
+    api.GetFileInformationByHandleEx.restype=wintypes.BOOL
+    return api
+
+
+def _game_win_path(path):
+    value=str(Path(path).absolute())
+    if value.startswith("\\\\?\\"): return value
+    return "\\\\?\\UNC\\"+value[2:] if value.startswith("\\\\") else "\\\\?\\"+value
+
+
+def _game_win_final(api,handle):
+    import ctypes
+    buffer=ctypes.create_unicode_buffer(32768)
+    size=api.GetFinalPathNameByHandleW(handle,buffer,len(buffer),0)
+    if not size or size>=len(buffer): raise ctypes.WinError(ctypes.get_last_error())
+    value=buffer.value
+    value="\\\\"+value[8:] if value.startswith("\\\\?\\UNC\\") else value.removeprefix("\\\\?\\")
+    return os.path.normcase(value)
+
+
+@_game_contextmanager
+def _game_directory_guard(root, parent=None, *, rename=False):
+    """Keep Windows directories from being replaced by junctions during writes.
+
+    Each opened component is checked by handle, and held without delete sharing.
+    POSIX uses O_NOFOLLOW directory descriptors; no repository code is executed.
+    """
+    root=_game_plain_path(root);parent=_game_plain_path(parent or root)
+    if not parent.is_relative_to(root): raise ValueError("Game writer left its owned folder.")
+    held=[]
+    inherited=_GAME_DIR_HANDLES.get() or {}
+    owned=dict(inherited)
+    token=_GAME_DIR_HANDLES.set(owned)
+    try:
+        if os.name=="nt":
+            import ctypes
+            api=_game_win_api()
+            for target in (root,*[root.joinpath(*parent.relative_to(root).parts[:i]) for i in range(1,len(parent.relative_to(root).parts)+1)]):
+                _game_plain_path(target)
+                if str(target) in owned:
+                    handle=owned[str(target)]
+                    continue
+                handle=api.CreateFileW(_game_win_path(target),0x80|(0x10000 if rename and target==root else 0),3,None,3,0x02200000,None)
+                if handle==ctypes.c_void_p(-1).value: raise ctypes.WinError(ctypes.get_last_error())
+                held.append(handle)
+                owned[str(target)]=handle
+                attributes=(ctypes.c_uint32*2)()
+                if not api.GetFileInformationByHandleEx(handle,9,ctypes.byref(attributes),ctypes.sizeof(attributes)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if attributes[0]&0x400 or not attributes[0]&0x10:
+                    raise ValueError("Game directory handle is not a plain directory.")
+                if _game_win_final(api,handle)!=os.path.normcase(str(target)):
+                    raise ValueError("Game directory handle escaped its expected path.")
+            yield handle
+        else:
+            import stat
+            handle=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);held.append(handle)
+            for component in parent.relative_to(root).parts:
+                handle=os.open(component,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=handle);held.append(handle)
+            yield held[-1]
+    finally:
+        _GAME_DIR_HANDLES.reset(token)
+        for handle in reversed(held):
+            if os.name=="nt": _game_win_api().CloseHandle(handle)
+            else: os.close(handle)
+
+
+def _game_rename_handle(handle,destination):
+    import ctypes
+    from ctypes import wintypes
+    class Rename(ctypes.Structure):
+        _fields_=[("Flags",wintypes.DWORD),("RootDirectory",wintypes.HANDLE),
+                  ("FileNameLength",wintypes.DWORD),("FileName",wintypes.WCHAR*1)]
+    raw=_game_win_path(destination).encode("utf-16-le")
+    buffer=ctypes.create_string_buffer(Rename.FileName.offset+len(raw)+2)
+    header=ctypes.cast(buffer,ctypes.POINTER(Rename)).contents
+    header.Flags=0;header.RootDirectory=None;header.FileNameLength=len(raw)
+    ctypes.memmove(ctypes.addressof(buffer)+Rename.FileName.offset,raw,len(raw))
+    api=_game_win_api()
+    if not api.SetFileInformationByHandle(handle,3,buffer,len(buffer)):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _game_rename_new(source,destination,handle=None):
+    """Atomic no-replace publication, including an already open Windows directory."""
+    source=_game_plain_path(source);destination=_game_plain_path(destination)
+    if os.name=="nt" and handle is not None:
+        _game_rename_handle(handle,destination)
+    elif os.name=="nt":
+        os.rename(source,destination)  # Windows never replaces an existing directory.
+    else:
+        import ctypes
+        libc=ctypes.CDLL(None,use_errno=True)
+        operation=getattr(libc,"renameat2",None)
+        if operation is None: raise RuntimeError("Atomic non-overwriting source publication is unavailable on this platform.")
+        operation.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint]
+        if operation(-100,os.fsencode(source),-100,os.fsencode(destination),1):
+            error=ctypes.get_errno();raise OSError(error,os.strerror(error),str(destination))
+
+
+def _game_delete_open(handle):
+    import ctypes
+    flag=ctypes.c_ubyte(1)
+    api=_game_win_api()
+    if not api.SetFileInformationByHandle(handle,4,ctypes.byref(flag),1):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _game_copy_verified(stream,stage,relative,expected,nonce,on_bytes=None):
+    """Write through an exclusive temp handle; promote only complete Git-hashed bytes."""
+    import uuid
+    target=stage/_game_rel(relative)
+    current=stage
+    for component in target.relative_to(stage).parts[:-1]:
+        with _game_directory_guard(stage,current):
+            following=current/component
+            _game_plain_path(following)
+            following.mkdir(exist_ok=True)
+            current=following
+    _game_plain_path(target.parent)
+    temporary=target.parent/(".cale-copy-"+nonce+"-"+uuid.uuid4().hex)
+    size=0;digest=hashlib.sha256();git=hashlib.sha1(b"blob "+str(expected["size"]).encode()+b"\0")
+    with _game_directory_guard(stage,target.parent):
+        if os.name=="nt":
+            import ctypes,msvcrt
+            api=_game_win_api()
+            handle=api.CreateFileW(_game_win_path(temporary),0x40000000|0x10000,1,None,1,0x00200080,None)
+            if handle==ctypes.c_void_p(-1).value: raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                if _game_win_final(api,handle)!=os.path.normcase(str(temporary)):
+                    raise ValueError("Game output file escaped its owned staging folder.")
+                fd=msvcrt.open_osfhandle(handle,os.O_WRONLY|os.O_BINARY);handle=None
+            finally:
+                if handle is not None: api.CloseHandle(handle)
+            with os.fdopen(fd,"wb") as output:
+                native=msvcrt.get_osfhandle(output.fileno())
+                try:
+                    while True:
+                        chunk=stream.read(min(1024*1024,expected["size"]-size+1))
+                        if not chunk: break
+                        size+=len(chunk)
+                        if size>expected["size"]: raise ValueError("Game archive file exceeds its immutable tree size.")
+                        output.write(chunk);digest.update(chunk);git.update(chunk)
+                        if on_bytes: on_bytes(len(chunk))
+                    output.flush()
+                    if size!=expected["size"] or git.hexdigest()!=expected["sha"]:
+                        raise ValueError("Game archive file does not match its immutable Git blob.")
+                    _game_rename_handle(native,target)
+                except Exception:
+                    _game_delete_open(native)
+                    raise
+        else:
+            with temporary.open("xb") as output:
+                try:
+                    while True:
+                        chunk=stream.read(min(1024*1024,expected["size"]-size+1))
+                        if not chunk: break
+                        size+=len(chunk)
+                        if size>expected["size"]: raise ValueError("Game archive file exceeds its immutable tree size.")
+                        output.write(chunk);digest.update(chunk);git.update(chunk)
+                        if on_bytes: on_bytes(len(chunk))
+                    output.flush()
+                    if size!=expected["size"] or git.hexdigest()!=expected["sha"]: raise ValueError("Game Git blob changed.")
+                except Exception:
+                    temporary.unlink(missing_ok=True);raise
+            _game_rename_new(temporary,target)
+    return digest.hexdigest()
+
+
+def _game_tree_plan(game, info, tree):
+    if not isinstance(tree,dict) or tree.get("truncated") or not isinstance(tree.get("tree"),list):
+        raise ValueError("A complete immutable GitHub tree is required for large source imports.")
+    all_files={};seen=set();prefix=info.get("path","")
+    for item in tree["tree"]:
+        name=_game_rel(item.get("path",""))
+        if name.casefold() in seen: raise ValueError("GitHub tree contains colliding paths.")
+        seen.add(name.casefold())
+        if item.get("type")=="commit": raise ValueError("Published source uses a submodule; its assets need an explicitly pinned additional source.")
+        if item.get("type")!="blob": continue
+        if (item.get("mode") not in ("100644","100755") or type(item.get("size")) is not int or item["size"]<0
+                or not re.fullmatch("[a-f0-9]{40}",item.get("sha",""))):
+            raise ValueError("GitHub source tree contains links or invalid file metadata.")
+        all_files[name]={"path":name,"size":item["size"],"sha":item["sha"]}
+    selected={name[len(prefix)+1:] if prefix else name:item for name,item in all_files.items()
+              if not prefix or name.startswith(prefix+"/")}
+    if prefix:
+        for name,item in all_files.items():
+            if re.match(r"(?i)^(license|copying|notice)",Path(name).name) and (
+                    "/" not in name or prefix.startswith(str(Path(name).parent).replace("\\","/")+"/")):
+                selected["UPSTREAM-LICENSES/"+name.replace("/","__")]=item
+    selected,excluded=_game_filtered(selected)
+    if not selected: raise ValueError("Published game source tree is empty.")
+    if any(name.casefold() in {"cale-import.json","cale-source.md",".cale-source-owner.json"} for name in selected):
+        raise ValueError("Game source collides with Cale's ownership/receipt files.")
+    return {"all_files":all_files,"selected":selected,"excluded":excluded,"tree_sha":tree.get("sha"),
+            "repo_bytes":sum(item["size"] for item in all_files.values()),
+            "source_bytes":sum(item["size"] for item in selected.values()),"tree_entries":len(tree["tree"])}
+
+
+def _game_stream_needed(plan):
+    return (plan["repo_bytes"]>_GAME_MAX_DOWNLOAD or plan["source_bytes"]>_GAME_MAX_TOTAL
+            or len(plan["selected"])>_GAME_MAX_FILES
+            or any(item["size"]>_GAME_MAX_FILE for item in plan["selected"].values()))
+
+
+def _game_write_json(path,value):
+    import tempfile
+    path=_game_plain_path(path)
+    with _game_directory_guard(path.parent):
+        handle,temporary=tempfile.mkstemp(prefix=".cale-state-",dir=path.parent)
+        try:
+            with os.fdopen(handle,"w",encoding="utf-8",newline="\n") as stream:
+                json.dump(value,stream,ensure_ascii=False,separators=(',',':'))
+            _game_plain_path(path)
+            os.replace(temporary,path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+
+
+def _game_stream_disk_check(cache,destination,plan,download_bytes):
+    margin=max(64*1024*1024,plan["source_bytes"]//10)
+    cache_free=shutil.disk_usage(cache).free;destination_free=shutil.disk_usage(destination.parent).free
+    same=os.stat(cache).st_dev==os.stat(destination.parent).st_dev
+    required=download_bytes+plan["source_bytes"]+margin if same else download_bytes+margin
+    if cache_free<required or destination_free<plan["source_bytes"]+margin:
+        raise OSError(f"Not enough free disk space for complete source and cache. Need approximately {required:,} free bytes on the cache drive; no game assets will be silently omitted.")
+
+
+@_game_contextmanager
+def _game_open_partial(path):
+    """Open only an owned regular cache leaf, never a reparse/hardlink target."""
+    if os.name=="nt":
+        import ctypes,msvcrt
+        api=_game_win_api()
+        handle=api.CreateFileW(_game_win_path(path),0xc0000000|0x10000,1,None,
+                               3 if path.exists() else 1,0x00200080,None)
+        if handle==ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            attributes=(ctypes.c_uint32*2)()
+            if not api.GetFileInformationByHandleEx(handle,9,ctypes.byref(attributes),ctypes.sizeof(attributes)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if attributes[0]&0x410 or _game_win_final(api,handle)!=os.path.normcase(str(path)):
+                raise ValueError("Source partial is not a plain owned cache file.")
+            fd=msvcrt.open_osfhandle(handle,os.O_RDWR|os.O_BINARY);handle=None
+        finally:
+            if handle is not None:api.CloseHandle(handle)
+    else:
+        flags=os.O_RDWR|os.O_NOFOLLOW
+        if not path.exists():flags|=os.O_CREAT|os.O_EXCL
+        fd=os.open(path,flags,0o600)
+    with os.fdopen(fd,"r+b") as stream:
+        if os.fstat(stream.fileno()).st_nlink!=1:
+            raise ValueError("Source cache partial must not be a hardlink.")
+        yield stream
+
+
+def _game_stream_download(game,catalog,info,plan,cache):
+    """Stream a finite tree-sized archive. Range resume requires a strong ETag."""
+    import pc_offline,time,uuid
+    from urllib.request import Request,HTTPRedirectHandler,build_opener
+    from urllib.error import HTTPError
+    if pc_offline.offline(): raise RuntimeError("This large game has not been cached; first import needs internet.")
+    key=_game_cache_key(game,catalog)+"-"+info["commit"][:12]
+    part=_game_plain_path(cache/(key+".download-part"))
+    owner_path=_game_plain_path(cache/(key+".download.json"))
+    url=f"https://codeload.github.com/{info['repo']}/zip/{info['commit']}"
+    budget=plan["repo_bytes"]+max(16*1024*1024,plan["tree_entries"]*2048)
+    owner={"version":1,"game_id":game["id"],"source_commit":info["commit"],"url":url,"nonce":uuid.uuid4().hex,"etag":None}
+    if part.exists() or owner_path.exists():
+        with owner_path.open("rb") as stream:raw=stream.read(8193)
+        previous=json.loads(raw) if len(raw)<=8192 else None
+        if not isinstance(previous,dict) or any(previous.get(key)!=owner[key] for key in ("version","game_id","source_commit","url")):
+            raise ValueError("Existing source-download partial is not owned by this pinned import.")
+        owner=previous
+    else:
+        _game_write_json(owner_path,owner)
+    offset=part.stat().st_size if part.exists() else 0
+    if offset>budget:raise ValueError("Saved source-download partial exceeds its immutable size budget.")
+    headers={"User-Agent":"Cale-AI-Workbench-GameLibrary"}
+    if offset and isinstance(owner.get("etag"),str) and not owner["etag"].startswith("W/"):
+        headers.update(Range=f"bytes={offset}-",**{"If-Range":owner["etag"]})
+    class Redirect(HTTPRedirectHandler):
+        def redirect_request(self,request,fp,code,message,response_headers,destination):
+            if not _game_url_allowed(destination):raise ValueError("Game archive redirected outside GitHub.")
+            return super().redirect_request(request,fp,code,message,response_headers,destination)
+    request=Request(url,headers=headers)
+    try:
+        response=build_opener(Redirect()).open(request,timeout=20)
+    except HTTPError as error:
+        if error.code in (403,429):raise RuntimeError("GitHub source download quota/access limit reached. The owned partial remains resumable.") from error
+        raise
+    digest=hashlib.sha256();written=0
+    with response:
+        if not _game_url_allowed(response.geturl()):raise ValueError("Unexpected game archive host.")
+        code=response.getcode()
+        if code==206:
+            content=response.headers.get("Content-Range","")
+            match=re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)",content)
+            if not offset or "Range" not in headers or not match or int(match.group(1))!=offset or int(match.group(3))>budget:
+                raise ValueError("Source download resume range is inconsistent.")
+        elif code==200:
+            offset=0  # Server declined range resume; restart this owned cache partial.
+        else:raise ValueError("Unexpected source download response.")
+        length=response.headers.get("Content-Length")
+        expected_total=offset+int(length) if length and length.isdigit() else budget
+        if expected_total>budget:raise ValueError("Source archive is larger than its complete immutable tree budget.")
+        owner["etag"]=response.headers.get("ETag")
+        _game_write_json(owner_path,owner)
+        with _game_directory_guard(cache):
+            _game_plain_path(part)
+            # Partial files are app-owned cache objects with a matching immutable
+            # owner record. No user destination or existing project is truncated.
+            with _game_open_partial(part) as output:
+                if offset:
+                    while True:
+                        chunk=output.read(1024*1024)
+                        if not chunk:break
+                        digest.update(chunk)
+                    if output.tell()!=offset:raise ValueError("Source partial size changed while resuming.")
+                else:
+                    output.seek(0);output.truncate()
+                written=offset
+                _game_progress("downloading",bytes_done=written,bytes_total=expected_total,files_total=len(plan["selected"]),commit=info["commit"],force=True)
+                reader=getattr(response,"read1",None) or response.read
+                while True:
+                    if pc_offline.offline():raise RuntimeError("Offline mode enabled; source download paused with owned cache partial retained.")
+                    chunk=reader(1024*1024)
+                    if not chunk:break
+                    written+=len(chunk)
+                    if written>budget:raise ValueError("Source archive exceeded its tree-derived download budget.")
+                    output.write(chunk);digest.update(chunk)
+                    _game_progress("downloading",bytes_done=written,bytes_total=expected_total,files_total=len(plan["selected"]))
+                output.flush()
+        if length and length.isdigit() and written!=expected_total:
+            raise ValueError("Source download ended early; the owned partial is retained for retry.")
+    checksum=digest.hexdigest();archive_path=_game_plain_path(cache/(checksum+".source.zip"))
+    if archive_path.exists():
+        with archive_path.open("rb") as stream:
+            existing=hashlib.file_digest(stream,"sha256").hexdigest()
+        if existing!=checksum:raise ValueError("Source partial changed before cache publication.")
+        part.unlink()
+    else:
+        _game_rename_new(part,archive_path)
+    owner_path.unlink(missing_ok=True)
+    return archive_path,checksum,written
+
+
+def _game_stream_members(archive,plan):
+    """Validate the entire central directory before creating project output."""
+    import stat
+    entries=archive.infolist()
+    if len(entries)>plan["tree_entries"]+1:
+        raise ValueError("Archive has more entries than its immutable Git tree.")
+    roots=set();seen=set();members={}
+    for item in entries:
+        original=_game_rel(item.orig_filename)
+        key=original.casefold()
+        if key in seen:raise ValueError("Large game archive contains colliding paths.")
+        seen.add(key);parts=original.split("/");roots.add(parts[0])
+        if len(roots)!=1:raise ValueError("Large archive has an unexpected root layout.")
+        mode=stat.S_IFMT(item.external_attr>>16)
+        if mode not in (0,stat.S_IFREG,stat.S_IFDIR) or item.external_attr&0x400 or item.flag_bits&1:
+            raise ValueError("Large game archive contains a link, special file or encryption.")
+        name="/".join(parts[1:])
+        if item.is_dir():continue
+        expected=plan["all_files"].get(name)
+        if expected is None or item.file_size!=expected["size"]:
+            raise ValueError("Large archive differs from its complete immutable Git tree.")
+        members[name]=item
+    if set(members)!=set(plan["all_files"]):raise ValueError("Large archive is missing declared source files or assets.")
+    return members
+
+
+def _game_stream_manifest(game,catalog):
+    cache=_game_plain_path(_GAME_CACHE)
+    path=cache/(_game_cache_key(game,catalog)+".stream.json")
+    if not path.exists():return None
+    _game_plain_path(path)
+    with path.open("rb") as stream:raw=stream.read(16*1024*1024+1)
+    if len(raw)>16*1024*1024:raise ValueError("Streamed source cache manifest exceeds its bound.")
+    record=json.loads(raw)
+    if (not isinstance(record,dict) or record.get("version")!=1 or record.get("game_id")!=game["id"]
+            or record.get("catalog_commit")!=catalog["catalog_commit"] or record.get("source_spec")!=game["source"]
+            or not re.fullmatch("[a-f0-9]{64}",record.get("archive_sha256",""))):
+        raise ValueError("Streamed source cache provenance changed.")
+    info=record.get("info",{})
+    if not isinstance(info,dict) or not re.fullmatch("[a-f0-9]{40}",info.get("commit","")) or info.get("source_url")!=game["source_url"]:
+        raise ValueError("Streamed source identity is invalid.")
+    from urllib.parse import urlsplit
+    repo="/".join(urlsplit(game["source"]["url"]).path.strip("/").split("/")[:2])
+    if info.get("repo")!=repo:raise ValueError("Streamed source repository changed.")
+    plan=_game_tree_plan(game,info,record["tree"])
+    archive=_game_plain_path(cache/(record["archive_sha256"]+".source.zip"))
+    if archive.stat().st_size!=record.get("archive_bytes"):raise ValueError("Streamed source cache size changed.")
+    _game_progress("checking_cache",bytes_total=record["archive_bytes"],files_total=len(plan["selected"]),commit=info["commit"],force=True)
+    digest=hashlib.sha256();read=0
+    with archive.open("rb") as stream:
+        while True:
+            chunk=stream.read(1024*1024)
+            if not chunk:break
+            read+=len(chunk);digest.update(chunk)
+            _game_progress("checking_cache",bytes_done=read,bytes_total=record["archive_bytes"],files_total=len(plan["selected"]))
+    if digest.hexdigest()!=record["archive_sha256"]:raise ValueError("Streamed source archive failed its integrity check.")
+    return info,record["tree"],plan,archive,record["archive_sha256"]
+
+
+def _game_stream_import(game,catalog,destination,prepared=None,cached=None):
+    import zipfile,uuid,io
+    cache=_game_plain_path(_GAME_CACHE);cache.mkdir(parents=True,exist_ok=True);_game_plain_path(cache)
+    if cached is not None:
+        info,tree,plan,archive_path,archive_hash=cached
+        _game_stream_disk_check(cache,destination,plan,0)
+    else:
+        info,tree,plan=prepared
+        budget=plan["repo_bytes"]+max(16*1024*1024,plan["tree_entries"]*2048)
+        _game_stream_disk_check(cache,destination,plan,budget)
+        archive_path,archive_hash,archive_bytes=_game_stream_download(game,catalog,info,plan,cache)
+    _game_disk_zip_header(archive_path,plan)
+    with zipfile.ZipFile(archive_path) as archive:
+        members=_game_stream_members(archive,plan)
+        if cached is None:
+            # The archive itself is now cached and tree-checked. Individual
+            # files still require Git-blob verification before source_ready.
+            _game_write_json(cache/(_game_cache_key(game,catalog)+".stream.json"),{
+                "version":1,"game_id":game["id"],"catalog_commit":catalog["catalog_commit"],"source_spec":game["source"],
+                "info":info,"tree":tree,"archive_sha256":archive_hash,"archive_bytes":archive_path.stat().st_size})
+            _game_progress("archive_cached",bytes_done=archive_path.stat().st_size,bytes_total=archive_path.stat().st_size,
+                           files_total=len(plan["selected"]),commit=info["commit"],force=True)
+        # A stage is private application state, identified by immutable source,
+        # requested destination and an unguessable temp-file ownership nonce.
+        identity=hashlib.sha256((str(destination)+game["id"]+info["commit"]).encode()).hexdigest()[:20]
+        stage=_game_plain_path(destination.parent/(".cale-game-"+identity))
+        marker=stage/".cale-source-owner.json"
+        owner={"version":1,"game_id":game["id"],"destination_sha256":hashlib.sha256(str(destination).encode()).hexdigest(),"source_commit":info["commit"],"archive_sha256":archive_hash}
+        if stage.exists():
+            _game_plain_path(marker)
+            with marker.open("rb") as stream:raw=stream.read(8193)
+            prior=json.loads(raw) if len(raw)<=8192 else None
+            if not isinstance(prior,dict) or any(prior.get(key)!=value for key,value in owner.items()):
+                raise FileExistsError("Existing staging folder is not owned by this exact source import.")
+            owner=prior
+        else:
+            stage.mkdir();owner["nonce"]=uuid.uuid4().hex;_game_write_json(marker,owner)
+        hashes={};done=0;total=plan["source_bytes"];count=len(plan["selected"])
+        with _game_directory_guard(destination.parent),_game_directory_guard(stage,rename=True) as stage_handle:
+            for relative,expected in plan["selected"].items():
+                target=_game_plain_path(stage/relative)
+                if target.exists():
+                    if not target.is_file() or target.stat().st_size!=expected["size"]:
+                        raise FileExistsError("Existing staged source differs; it was not overwritten.")
+                    git=hashlib.sha1(b"blob "+str(expected["size"]).encode()+b"\0");digest=hashlib.sha256()
+                    with target.open("rb") as stream:
+                        while True:
+                            chunk=stream.read(1024*1024)
+                            if not chunk:break
+                            git.update(chunk);digest.update(chunk)
+                    if git.hexdigest()!=expected["sha"]:raise FileExistsError("Changed staged source was preserved; it was not overwritten.")
+                    hashes[relative]=digest.hexdigest();done+=expected["size"]
+                else:
+                    def moved(size):
+                        nonlocal done
+                        done+=size
+                        _game_progress("copying_source",bytes_done=done,bytes_total=total,files_done=len(hashes),files_total=count,commit=info["commit"])
+                    with archive.open(members[expected["path"]]) as stream:
+                        hashes[relative]=_game_copy_verified(stream,stage,relative,expected,owner["nonce"],moved)
+                _game_progress("copying_source",bytes_done=done,bytes_total=total,files_done=len(hashes),files_total=count,commit=info["commit"])
+            samples={name:b"" for name in plan["selected"]}
+            for name in samples:
+                if name.lower().endswith(".html") or name=="package.json":
+                    with (stage/name).open("rb") as stream:samples[name]=stream.read(1024*1024)
+            entrypoint=_game_entrypoint(samples);requires_build=_game_requires_build(samples,entrypoint)
+            receipt={"version":2,"game_id":game["id"],"title":game["title"],"creator":game["creator"],
+                "catalog_commit":catalog["catalog_commit"],"catalog_license":catalog["license"],"license_summary":game["license_summary"],
+                "source":{**info,"archive_sha256":archive_hash,"excluded_operational_paths":plan["excluded"][:50],"excluded_count":len(plan["excluded"])},
+                "files":hashes,"source_verified":True,"gameplay_tested":False,"code_executed":False,
+                "entrypoint":entrypoint,"requires_build":requires_build,"source_bytes":total,
+                "note":"Complete declared published source/assets except explicitly excluded operational state. No scripts, packages or game code executed; source license files remain authoritative."}
+            for name,raw in {"CALE-IMPORT.json":json.dumps(receipt,ensure_ascii=False,indent=2).encode(),
+                             "CALE-SOURCE.md":(f"# {game['title']} — editable source\n\nCreator: {game['creator']['name']} {game['creator']['url']}\nSource: {game['source_url']}\nPinned commit: {info['commit']}\n\nNo game/build/install scripts were executed. All source and assets in the pinned tree were retained except the operational paths recorded in CALE-IMPORT.json. Review original LICENSE/README and dependency notices before publishing; catalog CC0 does not change game or asset rights.\n").encode()}.items():
+                expected={"size":len(raw),"sha":hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()}
+                target=stage/name
+                if target.exists():
+                    # Receipts from a resumed stage must be identical, not replaced.
+                    if target.read_bytes()!=raw:raise FileExistsError("Changed staged import receipt was preserved.")
+                else:_game_copy_verified(io.BytesIO(raw),stage,name,expected,owner["nonce"])
+            owner["source_ready"]=True
+            owner["gameplay_tested"]=False
+            _game_write_json(marker,owner)
+            # Keep the inert ownership receipt (no private destination path) in
+            # the resulting project. No marker-removal/rename crash gap exists.
+            _game_rename_new(stage,destination,stage_handle if os.name=="nt" else None)
+        _game_progress("source_ready",bytes_done=total,bytes_total=total,files_done=count,files_total=count,commit=info["commit"],force=True)
+        return {"folder":str(destination),"entrypoint":entrypoint,"game":game,"source_receipt":receipt,
+                "receipt_path":str(destination/"CALE-IMPORT.json"),"requires_build":requires_build,
+                "from_cache":cached is not None,"files":count,"code_executed":False}
+
+
+def _game_disk_zip_header(path,plan):
+    """Bound central-directory allocation before ZipFile constructs member objects."""
+    import struct,ctypes
+    length=path.stat().st_size
+    with path.open("rb") as stream:
+        stream.seek(max(0,length-65557));tail=stream.read(65557)
+        end=tail.rfind(b"PK\x05\x06")
+        if end<0 or end+22>len(tail):raise ValueError("Invalid complete source archive.")
+        record=struct.unpack_from("<4s4H2LH",tail,end)
+        if record[1] or record[2] or end+22+record[7]!=len(tail):raise ValueError("Unsupported source archive layout.")
+        count,central_bytes,offset=record[4],record[5],record[6]
+        if count==65535 or central_bytes==0xffffffff or offset==0xffffffff:
+            position=length-len(tail)+end-20
+            stream.seek(position);locator=stream.read(20)
+            if len(locator)!=20 or locator[:4]!=b"PK\x06\x07":raise ValueError("Invalid source ZIP64 locator.")
+            _,disk,location,disks=struct.unpack("<4sLQL",locator)
+            if disk or disks!=1 or location>length-56:raise ValueError("Invalid source ZIP64 bounds.")
+            stream.seek(location);extended=stream.read(56)
+            values=struct.unpack("<4sQ2H2L4Q",extended)
+            if values[0]!=b"PK\x06\x06" or values[4] or values[5]:raise ValueError("Invalid source ZIP64 directory.")
+            count,central_bytes,offset=values[7],values[8],values[9]
+        if count>plan["tree_entries"]+1 or central_bytes>max(1024*1024,(plan["tree_entries"]+1)*4096) or offset+central_bytes>length:
+            raise ValueError("Source archive directory exceeds its immutable tree bounds.")
+    if os.name=="nt":
+        class Memory(ctypes.Structure):
+            _fields_=[("length",ctypes.c_ulong),("load",ctypes.c_ulong),
+                *[(name,ctypes.c_ulonglong) for name in ("total","available","total_page","available_page","total_virtual","available_virtual","extended")]]
+        memory=Memory();memory.length=ctypes.sizeof(memory)
+        api=ctypes.WinDLL("kernel32",use_last_error=True)
+        if api.GlobalMemoryStatusEx(ctypes.byref(memory)) and memory.available<max(128*1024*1024,central_bytes*20):
+            raise OSError("Available RAM is too low to safely inspect this source archive; the verified cache is retained for retry.")
+
+
+
+@server.tool()
+def import_game_example(game_id: str, project_path: str) -> dict:
+    """Copy a published game's pinned source/assets into a NEW editable folder.
+
+    Cached copies work offline. Large sources stream to disk with private Python
+    progress callbacks; no scripts, packages or game code are executed. Demo-only
+    entries cannot be imported. Existing destinations are never overwritten.
+    """
+    token = _GAME_PROGRESS_ID.set({"game_id":str(game_id)[:100],"source_commit":None})
+    try:
+        _game_progress("resolving",force=True)
+        return _import_game_example(game_id,project_path)
+    finally:
+        _GAME_PROGRESS_ID.reset(token)
 
 
 if __name__ == "__main__":

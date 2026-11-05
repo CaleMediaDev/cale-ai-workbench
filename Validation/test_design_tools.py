@@ -965,3 +965,227 @@ def test_game_source_invalid_ref_422_falls_back_but_other_validation_errors_do_n
     monkeypatch.setattr(tools,"_game_json",abused)
     with pytest.raises(HTTPError):
         tools._game_github_source("https://github.com/creator/game/blob/main/mosswing/game.html")
+
+
+@pytest.fixture
+def streamed_game_fixture(tmp_path,monkeypatch):
+    import hashlib,design_tools as tools,pc_offline
+    monkeypatch.setattr(pc_offline,"offline",lambda:False)
+    monkeypatch.setattr(tools,"_GAME_CACHE",tmp_path/"stream-cache")
+    game=next(g for g in tools.game_library_search()["games"] if g["id"].startswith("within-"))
+    info={"repo":"fatasia/within","commit":"c"*40,"path":"","kind":"repo","source_url":game["source_url"]}
+    files={"index.html":b"<canvas></canvas><script>game()</script>","LICENSE":b"MIT unchanged", "public/assets/data.bin":b"asset"*500}
+    tree={"sha":"d"*40,"truncated":False,"tree":[{"path":name,"type":"blob","mode":"100644","size":len(raw),
+        "sha":hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()} for name,raw in files.items()]}
+    tree["tree"].extend({"path":path,"type":"tree","mode":"040000","sha":"e"*40} for path in ("public","public/assets"))
+    monkeypatch.setattr(tools,"_game_github_source",lambda *_args:dict(info))
+    monkeypatch.setattr(tools,"_game_json",lambda *_args:tree)
+    monkeypatch.setattr(tools,"_game_stream_needed",lambda *_args:True)
+    def download(game,catalog,source,plan,cache):
+        data=_game_zip([("repo-commit/"+name,raw) for name,raw in files.items()])
+        digest=hashlib.sha256(data).hexdigest();path=cache/(digest+".source.zip");path.write_bytes(data)
+        return path,digest,len(data)
+    monkeypatch.setattr(tools,"_game_stream_download",download)
+    return tools,game,info,tree,files
+
+
+def test_game_stream_import_verifies_all_assets_and_offline_copy_with_real_progress(tmp_path,monkeypatch,streamed_game_fixture):
+    import pc_offline
+    tools,game,info,tree,files=streamed_game_fixture
+    progress=[]
+    with tools.game_import_progress(progress.append):
+        first=tools.import_game_example(game["id"],str(tmp_path/"first-stream"))
+    assert first["files"]==3 and not first["code_executed"]
+    assert (tmp_path/"first-stream/public/assets/data.bin").read_bytes()==files["public/assets/data.bin"]
+    assert first["source_receipt"]["source_bytes"]==sum(map(len,files.values()))
+    assert progress[-1]["phase"]=="source_ready" and progress[-1]["files_done"]==3
+    assert progress[-1]["bytes_done"]==progress[-1]["bytes_total"]==sum(map(len,files.values()))
+    assert all(not event["gameplay_tested"] and not event["whole_task_complete"] for event in progress)
+    assert all(event["game_id"]==game["id"] for event in progress)
+    monkeypatch.setattr(pc_offline,"offline",lambda:True)
+    monkeypatch.setattr(tools,"_game_stream_download",lambda *_args:pytest.fail("Offline source used network"))
+    copied=tools.import_game_example(game["id"],str(tmp_path/"offline-stream"))
+    assert copied["from_cache"] and copied["source_receipt"]["files"]==first["source_receipt"]["files"]
+    owner=json.loads((tmp_path/"offline-stream/.cale-source-owner.json").read_text())
+    assert owner["source_ready"] and "destination" not in owner
+
+
+def test_game_stream_callback_failure_does_not_break_success(tmp_path,streamed_game_fixture):
+    tools,game,*_=streamed_game_fixture
+    def failed(_event):raise OSError("optional display failure")
+    with tools.game_import_progress(failed):
+        result=tools.import_game_example(game["id"],str(tmp_path/"copy"))
+    assert result["source_receipt"]["source_verified"] and not result["source_receipt"]["gameplay_tested"]
+
+
+def test_game_stream_disk_failure_prevents_download_and_project_creation(tmp_path,monkeypatch,streamed_game_fixture):
+    from types import SimpleNamespace
+    tools,game,*_=streamed_game_fixture
+    monkeypatch.setattr(tools.shutil,"disk_usage",lambda *_args:SimpleNamespace(free=1))
+    monkeypatch.setattr(tools,"_game_stream_download",lambda *_args:pytest.fail("Insufficient disk still downloaded"))
+    with pytest.raises(OSError,match="free disk"):
+        tools.import_game_example(game["id"],str(tmp_path/"copy"))
+    assert not (tmp_path/"copy").exists()
+
+
+def test_game_stream_missing_asset_or_git_mismatch_never_publishes(tmp_path,monkeypatch,streamed_game_fixture):
+    import hashlib
+    tools,game,info,tree,files=streamed_game_fixture
+    def missing(game,catalog,source,plan,cache):
+        data=_game_zip([("repo/"+name,raw) for name,raw in files.items() if name!="public/assets/data.bin"])
+        digest=hashlib.sha256(data).hexdigest();path=cache/(digest+".source.zip");path.write_bytes(data)
+        return path,digest,len(data)
+    monkeypatch.setattr(tools,"_game_stream_download",missing)
+    with pytest.raises(ValueError,match="missing declared"):
+        tools.import_game_example(game["id"],str(tmp_path/"missing"))
+    assert not (tmp_path/"missing").exists()
+    def corrupt(game,catalog,source,plan,cache):
+        data=_game_zip([("repo/"+name,(b"x"*len(raw)) if name=="index.html" else raw) for name,raw in files.items()])
+        digest=hashlib.sha256(data).hexdigest();path=cache/(digest+".source.zip");path.write_bytes(data)
+        return path,digest,len(data)
+    monkeypatch.setattr(tools,"_game_stream_download",corrupt)
+    with pytest.raises(ValueError,match="immutable Git blob"):
+        tools.import_game_example(game["id"],str(tmp_path/"corrupt"))
+    assert not (tmp_path/"corrupt").exists()
+    assert not list(tmp_path.glob(".cale-game-*/**/.cale-copy-*"))
+
+
+def test_game_stream_concurrent_destination_is_preserved_atomically(tmp_path,streamed_game_fixture):
+    tools,game,*_=streamed_game_fixture
+    destination=tmp_path/"copy"
+    def arrived(event):
+        if event["phase"]=="copying_source" and not destination.exists():
+            destination.mkdir();(destination/"user.txt").write_text("concurrent user")
+    with tools.game_import_progress(arrived),pytest.raises(OSError):
+        tools.import_game_example(game["id"],str(destination))
+    assert (destination/"user.txt").read_text()=="concurrent user"
+    assert not (destination/"index.html").exists()
+
+
+def test_game_stream_windows_directory_lock_prevents_path_swap(tmp_path):
+    import os,hashlib,io
+    import design_tools as tools
+    if os.name!="nt":pytest.skip("Windows handle-sharing path-race proof")
+    stage=tmp_path/"stage";stage.mkdir();outside=tmp_path/"outside";outside.mkdir()
+    data=b"game source"*1000
+    expected={"size":len(data),"sha":hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()}
+    denied=[]
+    def raced(_count):
+        try:os.rename(stage/"src",stage/"replaced")
+        except OSError:denied.append(True)
+        else:pytest.fail("Writer allowed its parent to be swapped")
+    with tools._game_directory_guard(stage,rename=True):
+        tools._game_copy_verified(io.BytesIO(data),stage,"src/main.js",expected,"owned",raced)
+    assert denied and (stage/"src/main.js").read_bytes()==data and not list(outside.iterdir())
+    os.rename(stage/"src",stage/"replaced")  # The fixture permits rename after handles close.
+
+
+def test_game_stream_cache_partial_rejects_hardlinks_without_modifying_target(tmp_path):
+    import os
+    import design_tools as tools
+    original=tmp_path/"user.txt";original.write_text("keep user bytes")
+    linked=tmp_path/"partial"
+    try:os.link(original,linked)
+    except OSError:pytest.skip("Hardlinks unavailable")
+    with tools._game_directory_guard(tmp_path),pytest.raises(ValueError,match="hardlink"):
+        with tools._game_open_partial(linked) as stream:
+            stream.truncate(0)
+    assert original.read_text()=="keep user bytes"
+
+
+def test_game_stream_download_chunk_limits_and_strong_etag_range_resume(tmp_path,monkeypatch):
+    import hashlib,urllib.request,pc_offline
+    from types import SimpleNamespace
+    import design_tools as tools
+    monkeypatch.setattr(pc_offline,"offline",lambda:False)
+    catalog=tools._game_catalog();game=next(g for g in catalog["entries"] if g["id"].startswith("within-"))
+    info={"repo":"fatasia/within","commit":"f"*40}
+    plan={"repo_bytes":10000,"source_bytes":10000,"tree_entries":3,"selected":{"index.html":{}}}
+    cache=tmp_path/"cache";cache.mkdir()
+    data=b"pinned archive bytes"*100;split=len(data)//2;requests=[]
+    class Response:
+        def __init__(self,resume):
+            self.resume=resume;self.calls=0
+            self.headers={"Content-Length":str(len(data)-split if resume else len(data)),"ETag":'"immutable-archive"'}
+            if resume:self.headers["Content-Range"]=f"bytes {split}-{len(data)-1}/{len(data)}"
+        def __enter__(self):return self
+        def __exit__(self,*_args):pass
+        def geturl(self):return f"https://codeload.github.com/{info['repo']}/zip/{info['commit']}"
+        def getcode(self):return 206 if self.resume else 200
+        def read1(self,count):
+            assert count==1024*1024
+            self.calls+=1
+            if not self.resume:
+                if self.calls==1:return data[:split]
+                raise TimeoutError("simulated stalled socket")
+            return data[split:] if self.calls==1 else b""
+    def opened(request,timeout):
+        assert timeout==20
+        requests.append(request)
+        return Response(len(requests)>1)
+    monkeypatch.setattr(urllib.request,"build_opener",lambda *_args:SimpleNamespace(open=opened))
+    with pytest.raises(TimeoutError):tools._game_stream_download(game,catalog,info,plan,cache)
+    partial=next(cache.glob("*.download-part"));assert partial.read_bytes()==data[:split]
+    archive,digest,size=tools._game_stream_download(game,catalog,info,plan,cache)
+    assert requests[1].get_header("Range")==f"bytes={split}-"
+    assert requests[1].get_header("If-range")=='"immutable-archive"'
+    assert size==len(data) and digest==hashlib.sha256(data).hexdigest() and archive.read_bytes()==data
+    assert not partial.exists()
+
+
+def test_game_stream_wrong_resume_range_preserves_owned_partial(tmp_path,monkeypatch):
+    import urllib.request,pc_offline
+    from types import SimpleNamespace
+    import design_tools as tools
+    monkeypatch.setattr(pc_offline,"offline",lambda:False)
+    catalog=tools._game_catalog();game=next(g for g in catalog["entries"] if g["id"].startswith("within-"))
+    info={"repo":"fatasia/within","commit":"e"*40};cache=tmp_path/"cache";cache.mkdir()
+    key=tools._game_cache_key(game,catalog)+"-"+info["commit"][:12]
+    part=cache/(key+".download-part");part.write_bytes(b"owned prefix")
+    (cache/(key+".download.json")).write_text(json.dumps({"version":1,"game_id":game["id"],"source_commit":info["commit"],
+        "url":f"https://codeload.github.com/{info['repo']}/zip/{info['commit']}","nonce":"owned","etag":'"strong"'}))
+    class Response:
+        headers={"Content-Range":"bytes 0-19/20","Content-Length":"20"}
+        def __enter__(self):return self
+        def __exit__(self,*_args):pass
+        def geturl(self):return f"https://codeload.github.com/{info['repo']}/zip/{info['commit']}"
+        def getcode(self):return 206
+    monkeypatch.setattr(urllib.request,"build_opener",lambda *_args:SimpleNamespace(open=lambda *_args,**_kw:Response()))
+    with pytest.raises(ValueError,match="range is inconsistent"):
+        tools._game_stream_download(game,catalog,info,{"repo_bytes":20,"tree_entries":1,"selected":{}},cache)
+    assert part.read_bytes()==b"owned prefix"
+
+
+def test_game_stream_copy_resumes_verified_stage_after_interruption(tmp_path,monkeypatch,streamed_game_fixture):
+    tools,game,info,tree,files=streamed_game_fixture
+    actual=tools._game_copy_verified;calls=[]
+    def interrupted(stream,stage,relative,*args,**kwargs):
+        calls.append(relative)
+        if relative=="public/assets/data.bin":raise TimeoutError("copy interrupted")
+        return actual(stream,stage,relative,*args,**kwargs)
+    monkeypatch.setattr(tools,"_game_copy_verified",interrupted)
+    destination=tmp_path/"copy"
+    with pytest.raises(TimeoutError):tools.import_game_example(game["id"],str(destination))
+    assert not destination.exists()
+    assert (next(tmp_path.glob(".cale-game-*"))/"index.html").exists()
+    monkeypatch.setattr(tools,"_game_copy_verified",actual)
+    monkeypatch.setattr(tools,"_game_stream_download",lambda *_args:pytest.fail("Completed archive should already be cached"))
+    result=tools.import_game_example(game["id"],str(destination))
+    assert result["from_cache"] and result["source_receipt"]["source_verified"]
+    assert (destination/"public/assets/data.bin").read_bytes()==files["public/assets/data.bin"]
+
+
+def test_game_stream_changed_staged_file_is_preserved_not_replaced(tmp_path,monkeypatch,streamed_game_fixture):
+    tools,game,info,tree,files=streamed_game_fixture
+    actual=tools._game_copy_verified
+    def interrupted(stream,stage,relative,*args,**kwargs):
+        if relative=="public/assets/data.bin":raise TimeoutError("copy interrupted")
+        return actual(stream,stage,relative,*args,**kwargs)
+    monkeypatch.setattr(tools,"_game_copy_verified",interrupted)
+    destination=tmp_path/"copy"
+    with pytest.raises(TimeoutError):tools.import_game_example(game["id"],str(destination))
+    stage=next(tmp_path.glob(".cale-game-*"));(stage/"index.html").write_text("User edited this source")
+    monkeypatch.setattr(tools,"_game_copy_verified",actual)
+    with pytest.raises(FileExistsError,match="not overwritten|preserved"):
+        tools.import_game_example(game["id"],str(destination))
+    assert (stage/"index.html").read_text()=="User edited this source" and not destination.exists()
