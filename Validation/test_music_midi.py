@@ -108,8 +108,14 @@ def test_failed_staged_publication_rolls_back_only_owned_midi(tmp_path):
 
 
 @pytest.mark.parametrize("copy_fails", [False, True])
-def test_publication_without_hard_links_supports_copy_and_rollback(tmp_path, copy_fails):
+@pytest.mark.parametrize("winerror", [None, 1, 50])
+def test_publication_without_hard_links_supports_copy_and_rollback(tmp_path, copy_fails, winerror):
     import errno
+
+    link_error = OSError(errno.EOPNOTSUPP, "no hard links")
+    if winerror is not None:
+        link_error = OSError(errno.EINVAL, "Windows filesystem does not support hard links")
+        link_error.winerror = winerror
 
     source = tmp_path / "guitar.wav"
     source.write_bytes(b"original audio")
@@ -131,7 +137,7 @@ def test_publication_without_hard_links_supports_copy_and_rollback(tmp_path, cop
     with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
          patch.object(music_midi, "install", return_value=Path("python.exe")), \
          patch.object(music_midi.subprocess, "run", side_effect=render), \
-         patch.object(music_midi.os, "link", side_effect=OSError(errno.EOPNOTSUPP, "no hard links")), \
+         patch.object(music_midi.os, "link", side_effect=link_error), \
          patch.object(music_midi.shutil, "copyfileobj", side_effect=copy):
         if copy_fails:
             with pytest.raises(OSError, match="copy failed"):

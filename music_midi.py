@@ -142,7 +142,10 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
                 try:
                     os.link(path, destination)
                 except OSError as error:
-                    if error.errno not in {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS}:
+                    if (
+                        error.errno not in {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS}
+                        and getattr(error, "winerror", None) not in {1, 50}
+                    ):
                         raise
                     with destination.open("xb") as output:
                         published.append((os.fstat(output.fileno()), destination))
