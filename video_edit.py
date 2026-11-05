@@ -59,8 +59,12 @@ def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
         raise
     if result.returncode or not output.is_file() or not output.stat().st_size:
         overwrite_refused = f"File '{output}' already exists. Exiting." in result.stderr
-        if not output_existed and output.is_file() and not overwrite_refused:
-            output.unlink(missing_ok=True)
+        try:
+            if not output_existed and output.is_file() and not overwrite_refused:
+                output.unlink(missing_ok=True)
+        except OSError:
+            # Cleanup is best-effort; preserve the FFmpeg failure diagnostic.
+            pass
         raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Video edit failed.")
     return {"path": str(output), "bytes": output.stat().st_size}
 

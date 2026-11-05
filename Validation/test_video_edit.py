@@ -238,6 +238,31 @@ def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeyp
     assert video_edit._destination(str(output), []) == output
 
 
+def test_run_preserves_ffmpeg_failure_when_cleanup_is_denied(tmp_path, monkeypatch):
+    output = tmp_path / "edited.mp4"
+    cleanup_attempts = []
+
+    def failed_process(command, **kwargs):
+        assert command[-1] == str(output)
+        output.write_bytes(b"partial video")
+        return subprocess.CompletedProcess(
+            command, 1, stdout="", stderr="Error initializing output stream")
+
+    def cannot_delete(path, **kwargs):
+        cleanup_attempts.append(path)
+        raise PermissionError("Output is locked")
+
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", failed_process)
+    monkeypatch.setattr(type(output), "unlink", cannot_delete)
+
+    with pytest.raises(RuntimeError, match="Error initializing output stream"):
+        video_edit._run([], output)
+
+    assert cleanup_attempts == [output]
+    assert output.read_bytes() == b"partial video"
+
+
 def test_run_removes_empty_output_after_successful_process(tmp_path, monkeypatch):
     output = tmp_path / "edited.mp4"
 
