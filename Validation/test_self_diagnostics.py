@@ -78,6 +78,21 @@ def test_scheduler_preserves_bounded_sanitized_previous_attempt_evidence(tmp_pat
     assert private not in raw and len(raw) < 8192
 
 
+def test_deeply_nested_report_does_not_prevent_validation_launch(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    report_path = state / "self-check.json"
+    report_path.write_text("[" * 10000 + "0" + "]" * 10000, encoding="utf-8")
+    assert diagnostics._read(report_path) == {}
+    with patch.object(diagnostics, "active_projects", return_value=False), patch.object(
+            diagnostics.subprocess, "Popen", return_value=SimpleNamespace(pid=123)) as launch, patch("psutil.Process") as proc:
+        proc.return_value.create_time.return_value = 100
+        assert diagnostics.schedule(root, state, now=100)
+    launch.assert_called_once()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "running"
+    assert report["version"] == diagnostics.version(root)
+
+
 def test_optional_history_write_failure_does_not_prevent_launch(tmp_path):
     root, state = diagnostic_install(tmp_path)
     (state / "self-check.json").write_text(json.dumps({
