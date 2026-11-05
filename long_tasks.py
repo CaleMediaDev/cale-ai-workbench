@@ -3715,6 +3715,25 @@ def monitor_restart_needed(now=None, tasks_active=None):
     return True
 
 
+
+def stop_owned_camera_process(process, timeout=3):
+    """Reap the exact child Popen before another process may open its camera."""
+    if process is None:return
+    if process.poll() is None:
+        process.terminate()
+        try:process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill();process.wait(timeout=timeout)
+    else:process.wait(timeout=timeout)
+
+
+def camera_worker_command(root, python, parent_pid, parent_started, animated=False, virtual_output=False):
+    command=[str(python),"-u",str(Path(root)/"camera_presence.py"),
+             "--parent-pid",str(parent_pid),"--parent-started",str(parent_started)]
+    if animated:command.append("--avatar")
+    if animated and virtual_output:command.append("--virtual-output")
+    return command
+
 def gui():
     """Show the desktop shell; the monitor and model workers run separately."""
     import base64
@@ -4690,7 +4709,7 @@ def gui():
             text="Ask a question or describe something you'd like me to make.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(3, 0))
-    companion_caption = ttk.Frame(cale_scene)
+    companion_caption = ttk.Frame(beach_scene)
     companion_caption.pack(fill="x", pady=(3, 0))
     ttk.Label(companion_caption, text="CALE  •  BEACH SIDE", style="Muted.TLabel").pack(side="left")
     camera_scene = ttk.Frame(beach_scene)
@@ -4703,7 +4722,10 @@ def gui():
         fg="#d8e8f5", font=("Segoe UI", 10), borderwidth=0,
     )
     camera_preview.pack(fill="both", expand=True)
-    ttk.Label(camera_scene, text="YOU  •  LOCAL WEBCAM", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+    camera_scene_caption=ttk.Label(camera_scene, text="YOU  •  LOCAL WEBCAM", style="Muted.TLabel")
+    camera_scene_caption.pack(anchor="w",pady=(3,0))
+    camera_options=ttk.Frame(beach_scene)
+    camera_options.pack(fill="x",pady=(3,0))
     companion_controls = ttk.Frame(title_copy)
     companion_controls.pack(fill="x", pady=(8, 0))
     speech_status = tk.StringVar(value="Preparing your voice · Cale is quiet")
@@ -4780,8 +4802,11 @@ def gui():
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
     camera_frames = queue.Queue(maxsize=1)
+    camera_generation = [0]
 
-    def offer_camera_frame(value):
+    def offer_camera_frame(value, generation=None):
+        if generation is not None and generation != camera_generation[0]:
+            return
         if len(value) > 200_000:
             return
         try:
@@ -4789,13 +4814,14 @@ def gui():
         except queue.Empty:
             pass
         try:
-            camera_frames.put_nowait(value)
+            camera_frames.put_nowait((camera_generation[0],value))
         except queue.Full:
             pass
 
     def camera_preview_poll():
         try:
-            show_camera_preview(camera_frames.get_nowait())
+            generation,payload=camera_frames.get_nowait()
+            if generation==camera_generation[0]:show_camera_preview(payload)
         except queue.Empty:
             pass
         window.after(33, camera_preview_poll)
@@ -5422,49 +5448,101 @@ def gui():
     greeting_until = [float(read_task_status(greeting_config).get("until", 0))]
     visitor_awaiting_intro_until = [0.0]
 
-    def start_camera_greeting():
-        """Run local face detection in the media runtime, off the UI thread."""
-        if greeting_until[0] <= time.time():
-            return
-        if greeting_process[0] is not None and greeting_process[0].poll() is None:
-            return
-        media_python = ROOT / "Media/python/Scripts/python.exe"
-        if not media_python.is_file():
-            voice_events.put(("camera_error", "Camera tools are still installing."))
-            return
+    camera_start_lock = threading.Lock()
+    avatar_config = ROOT/"Media/camera-avatar.json"
+    avatar_selected = tk.BooleanVar(value=bool(read_task_status(avatar_config).get("enabled",True)))
+    virtual_selected = tk.BooleanVar(value=False)  # Sharing to other apps is explicit each session.
 
-        def monitor():
+    def update_camera_layout():
+        # The live Cale replaces his static portrait, rather than stacking two
+        # copies and pushing essential chat/microphone controls off the window.
+        animated=avatar_selected.get() and greeting_until[0]>time.time()
+        if animated:cale_scene.pack_forget()
+        elif not cale_scene.winfo_manager():cale_scene.pack(anchor="w",padx=(0,8),before=companion_caption)
+        camera_scene_caption.configure(text="Your Cale avatar" if animated else "YOU  •  LOCAL WEBCAM")
+
+    def start_camera_greeting(restart=False):
+        """Setup runs off Tk; old camera owner is reaped before any new launch."""
+        if greeting_until[0] <= time.time():return
+        if not restart and greeting_process[0] is not None and greeting_process[0].poll() is None:return
+        camera_generation[0]+=1
+        generation=camera_generation[0]
+        animated=avatar_selected.get();sharing=bool(animated and virtual_selected.get())
+        update_camera_layout()
+        try:
+            import video_generation
+            video_generation.save_avatar_camera_mode(ROOT,animated)
+        except OSError as error:
+            clear_camera_preview()
+            voice_events.put(("camera_session",(generation,"camera_error","Camera mode could not be saved; camera stopped.")))
+            return
+        clear_camera_preview()
+        camera_preview.configure(text="Preparing animated Cale…\nYour real camera stays hidden" if animated else "Opening your camera…")
+        if animated:
             try:
-                import psutil
-
-                process = subprocess.Popen(
-                    [str(media_python), "-u", str(ROOT / "camera_presence.py"),
-                     "--parent-pid", str(os.getpid()), "--parent-started",
-                     str(psutil.Process(os.getpid()).create_time())],
-                    cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                    text=True, encoding="utf-8", errors="replace",
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-                greeting_process[0] = process
+                from PIL import ImageOps
+                picture=ImageOps.fit(Image.fromarray(avatar_video.neutral_camera_avatar()),(320,132))
+                photo=ImageTk.PhotoImage(picture)
+                camera_preview.configure(image=photo,text="")
+                camera_preview.cale_photo=photo
+            except (AttributeError,OSError,ValueError):pass
+        def current():return generation==camera_generation[0] and greeting_until[0]>time.time()
+        def monitor():
+            process=None
+            try:
+                import psutil,video_generation
+                with camera_start_lock:
+                    if not current():return
+                    previous=greeting_process[0]
+                    stop_owned_camera_process(previous)
+                    if greeting_process[0] is previous:greeting_process[0]=None
+                    if not current():return
+                    media_python=ROOT/"Media/python/Scripts/python.exe"
+                    if animated:
+                        def progress(value):
+                            if current():voice_events.put(("camera_session",(generation,"camera_setup",str(value.get("detail","Preparing Live Cale")))))
+                        media_python=video_generation.ensure_avatar_profile(ROOT,progress=progress,cancelled=lambda:not current(),virtual_output=sharing)
+                    if not media_python.is_file():raise RuntimeError("Camera tools are still installing.")
+                    if not current():return
+                    command=camera_worker_command(ROOT,media_python,os.getpid(),psutil.Process(os.getpid()).create_time(),animated,sharing)
+                    process=subprocess.Popen(command,cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+                        text=True,encoding="utf-8",errors="replace",creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0),
+                        env=video_generation._avatar_environment() if animated else None)
+                    greeting_process[0]=process
                 for line in process.stdout:
-                    try:
-                        event = json.loads(line)
-                    except ValueError:
-                        continue
-                    if event.get("event") == "frame":
-                        offer_camera_frame(str(event.get("message", "")))
-                    else:
-                        voice_events.put(("camera_" + str(event.get("event", "error")),
-                                          str(event.get("message", ""))))
-                process.wait()
-                if process.returncode and greeting_until[0] > time.time():
-                    voice_events.put(("camera_error", "Camera greeting stopped. Check the camera connection and try again."))
-            except OSError as exc:
-                voice_events.put(("camera_error", "Could not start webcam: " + str(exc)))
+                    if not current():break
+                    if len(line)>220000:continue
+                    try:event=json.loads(line)
+                    except ValueError:continue
+                    if event.get("event")=="frame":offer_camera_frame(str(event.get("message","")),generation)
+                    else:voice_events.put(("camera_session",(generation,"camera_"+str(event.get("event","error")),str(event.get("message","")))))
+                if not current():stop_owned_camera_process(process)
+                else:
+                    process.wait()
+                    if process.returncode:voice_events.put(("camera_session",(generation,"camera_error","Camera stopped. Your real image is not used as an animated fallback.")))
+            except Exception as error:
+                if current():voice_events.put(("camera_session",(generation,"camera_error",str(error)[:220])))
             finally:
-                greeting_process[0] = None
+                if process is not None:
+                    try:stop_owned_camera_process(process)
+                    except (OSError,subprocess.TimeoutExpired):pass
+                    if greeting_process[0] is process:greeting_process[0]=None
+        threading.Thread(target=monitor,daemon=True).start()
 
-        threading.Thread(target=monitor, daemon=True).start()
+    def change_camera_view():
+        try:
+            import video_generation
+            video_generation.save_avatar_camera_mode(ROOT,avatar_selected.get())
+        except OSError:
+            avatar_selected.set(bool(read_task_status(avatar_config).get("enabled",True)))
+            status.set("Camera mode could not be saved. The previous camera mode remains selected.")
+            return
+        share_camera_button.configure(state="normal" if avatar_selected.get() else "disabled")
+        if not avatar_selected.get():virtual_selected.set(False)
+        if greeting_until[0]>time.time():start_camera_greeting(restart=True)
+        else:
+            camera_generation[0]+=1
+            clear_camera_preview()
 
     def toggle_camera_greeting():
         """The visible one-hour switch also gates all other camera tools."""
@@ -5475,10 +5553,12 @@ def gui():
         greeting_config.write_text(json.dumps({"until": until}), encoding="utf-8")
         camera_consent.write_text(json.dumps({"until": until}), encoding="utf-8")
         camera_button.configure(text="📷  Camera On" if enabled else "📷  Camera Off")
+        update_camera_layout()
         if enabled:
-            camera_scene.pack(anchor="w", pady=(8, 0))
+            camera_scene.pack(anchor="w", pady=(8, 0),before=camera_options)
             start_camera_greeting()
         else:
+            camera_generation[0]+=1
             camera_scene.pack_forget()
             clear_camera_preview()
             process = greeting_process[0]
@@ -5491,8 +5571,19 @@ def gui():
         else "📷 Camera Off", command=toggle_camera_greeting, style="Tiny.TButton",
     )
     camera_button.pack(side="right")
+    style.configure("Camera.TRadiobutton",background=bg,foreground=text,font=("Segoe UI",9),indicatorcolor=field)
+    style.configure("Camera.TCheckbutton",background=bg,foreground=muted,font=("Segoe UI",9),indicatorcolor=field)
+    style.map("Camera.TRadiobutton",background=[("active",field)])
+    style.map("Camera.TCheckbutton",background=[("active",field)])
+    camera_modes=ttk.Frame(camera_options)
+    camera_modes.pack(fill="x",pady=(4,0))
+    ttk.Radiobutton(camera_modes,text="Raw camera",variable=avatar_selected,value=False,command=change_camera_view,style="Camera.TRadiobutton").pack(side="left")
+    ttk.Radiobutton(camera_modes,text="Animated Cale",variable=avatar_selected,value=True,command=change_camera_view,style="Camera.TRadiobutton").pack(side="left",padx=(6,0))
+    share_camera_button=ttk.Checkbutton(camera_options,text="Share animated Cale to other apps (OBS)",variable=virtual_selected,command=change_camera_view,style="Camera.TCheckbutton",
+        state="normal" if avatar_selected.get() else "disabled")
+    share_camera_button.pack(anchor="w",pady=(3,0))
     if greeting_until[0] > time.time():
-        camera_scene.pack(anchor="w", pady=(8, 0))
+        camera_scene.pack(anchor="w", pady=(8, 0),before=camera_options)
         start_camera_greeting()
     window.bind("<Control-Alt-space>", lambda _: record_voice())
     ttk.Label(title_copy, textvariable=voice_label, style="Muted.TLabel",
@@ -7406,6 +7497,9 @@ def gui():
         try:
             while True:
                 event, value = voice_events.get_nowait()
+                if event=="camera_session":
+                    generation,event,value=value
+                    if generation!=camera_generation[0]:continue
                 if event in ("heard", "heard_handsfree"):
                     try:
                         runtime_diagnostics.resolve(STATE, "microphone")
@@ -7464,8 +7558,10 @@ def gui():
                     if event == "camera_error":
                         report_runtime_issue("camera", value)
                         camera_button.configure(text="📷  Camera Off")
+                        camera_scene.pack_forget()
                         clear_camera_preview()
                         greeting_until[0] = 0
+                        update_camera_layout()
                         greeting_config.write_text(json.dumps({"until": 0}), encoding="utf-8")
                         camera_consent.write_text(json.dumps({"until": 0}), encoding="utf-8")
                 elif event in ("replay_done", "replay_error"):

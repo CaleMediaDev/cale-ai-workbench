@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 import pytest
 
@@ -565,3 +565,125 @@ def test_video_resource_lock_waits_for_another_worker(tmp_path, lock_name):
         assert time.monotonic() - started >= 1.5
     finally:
         first.wait(timeout=10)
+
+
+@pytest.fixture
+def avatar_profile_fixture(tmp_path,monkeypatch):
+    import contextlib
+    module=video_generation;profile=module.avatar_profile_root(tmp_path)
+    profile.mkdir(parents=True)
+    media=tmp_path/"Media/python/Scripts/python.exe";media.parent.mkdir(parents=True);media.write_bytes(b"test interpreter")
+    python=profile/"python/Scripts/python.exe";python.parent.mkdir(parents=True);python.write_bytes(b"test interpreter")
+    site=profile/"python/Lib/site-packages";site.mkdir(parents=True)
+    (site/"cale-media-libraries.pth").write_text(str((tmp_path/"Media/python/Lib/site-packages").resolve())+"\n",encoding="utf-8")
+    (profile/"packages.json").write_text(json.dumps(list(module.AVATAR_ORT_PACKAGES)),encoding="utf-8")
+    monkeypatch.setattr(module,'_process_lock',lambda *_:contextlib.nullcontext())
+    monkeypatch.setattr(module,'_avatar_assets',lambda:[])
+    monkeypatch.setattr('pc_offline.offline',lambda:True)
+    return module,profile,python
+
+
+def test_avatar_profile_never_ready_until_inference_probe_passes(tmp_path,monkeypatch,avatar_profile_fixture):
+    module,profile,python=avatar_profile_fixture
+    monkeypatch.setattr(module,'probe_avatar_profile',Mock(side_effect=RuntimeError('CUDA engine failed')))
+    with pytest.raises(RuntimeError,match='CUDA engine failed'):module.ensure_avatar_profile(tmp_path)
+    assert module.avatar_profile_status(tmp_path)['ready'] is False
+    monkeypatch.setattr(module,'probe_avatar_profile',lambda *_,**__:{'ok':True,'probe':{'ok':True,'provider':'CUDAExecutionProvider','frames':4,'finite':True}})
+    assert module.ensure_avatar_profile(tmp_path)==python
+    assert module.avatar_profile_status(tmp_path)['ready'] is True
+
+
+def test_avatar_profile_cancel_and_pth_tampering_prevent_execution(tmp_path,monkeypatch,avatar_profile_fixture):
+    module,profile,_=avatar_profile_fixture
+    probe=Mock();monkeypatch.setattr(module,'probe_avatar_profile',probe)
+    with pytest.raises(RuntimeError,match='cancelled'):module.ensure_avatar_profile(tmp_path,cancelled=lambda:True)
+    (profile/'python/Lib/site-packages/cale-media-libraries.pth').write_text('import malicious\n',encoding='utf-8')
+    with pytest.raises(RuntimeError,match='path changed'):module.ensure_avatar_profile(tmp_path)
+    probe.assert_not_called()
+
+
+def test_avatar_partial_environment_retries_only_isolated_packages(tmp_path,monkeypatch,avatar_profile_fixture):
+    module,profile,python=avatar_profile_fixture
+    (profile/'packages.json').unlink()
+    monkeypatch.setattr('pc_offline.offline',lambda:False)
+    monkeypatch.setattr('music_backend._tool',lambda _: 'managed-uv')
+    commands=[]
+    monkeypatch.setattr(module.subprocess,'run',lambda command,**kwargs:commands.append(command))
+    monkeypatch.setattr(module,'probe_avatar_profile',lambda *_,**__:{'ok':True})
+    module.ensure_avatar_profile(tmp_path)
+    assert len(commands)==1 and commands[0][:3]==['managed-uv','pip','install']
+    assert commands[0][commands[0].index('--python')+1]==str(python)
+    assert 'onnxruntime-gpu==1.26.0' in commands[0] and not any('1.31' in x for x in commands[0])
+    assert not any('venv' in command for command in commands)
+
+
+def test_avatar_download_hash_size_and_guarded_cache(tmp_path,monkeypatch):
+    import io,urllib.request
+    module=video_generation;data=b'pinned fixture bytes';profile=tmp_path/'profile';profile.mkdir()
+    record={'size':len(data),'hash_kind':'sha256','sha256':hashlib.sha256(data).hexdigest(),'url':'https://raw.githubusercontent.com/owner/repo/pinned/file'}
+    monkeypatch.setattr('pc_offline.offline',lambda:False)
+    monkeypatch.setattr(urllib.request,'build_opener',lambda *_:SimpleNamespace(open=lambda *_args,**_kwargs:io.BytesIO(data)))
+    module._avatar_download(profile,'models/model.bin',record)
+    assert (profile/'models/model.bin').read_bytes()==data
+    assert module._avatar_verified(profile/'models/model.bin',record)
+    bad={**record,'sha256':'0'*64}
+    with pytest.raises(ValueError,match='checksum'):module._avatar_download(profile,'models/bad.bin',bad)
+    assert not (profile/'models/bad.bin').exists()
+    with pytest.raises(ValueError):module._avatar_download(profile,'../outside.bin',record)
+
+
+def test_avatar_virtual_sender_bounded_only_processed_frames(monkeypatch):
+    import io,struct,numpy as np
+    from PIL import Image
+    import types
+    sent=[];closed=[]
+    class Camera:
+        def __init__(self,**kwargs):assert kwargs['backend']=='obs';assert kwargs['width']==512
+        def __enter__(self):return self
+        def __exit__(self,*_):closed.append(True)
+        def send(self,frame):sent.append(frame)
+    monkeypatch.setitem(sys.modules,'pyvirtualcam',types.SimpleNamespace(Camera=Camera,PixelFormat=types.SimpleNamespace(RGB='RGB')))
+    buffer=io.BytesIO();Image.fromarray(np.full((512,512,3),22,dtype=np.uint8)).save(buffer,format='JPEG');raw=buffer.getvalue()
+    assert video_generation.virtual_avatar_sender(io.BytesIO(struct.pack('!I',len(raw))+raw))==0
+    assert len(sent)==1 and sent[0].shape==(512,512,3) and closed==[True]
+    with pytest.raises(ValueError,match='bound'):video_generation.virtual_avatar_sender(io.BytesIO(struct.pack('!I',3*1024*1024)))
+    assert len(sent)==1
+
+
+def test_avatar_mode_save_is_atomic_and_keeps_prior_choice_on_failure(tmp_path,monkeypatch):
+    video_generation.save_avatar_camera_mode(tmp_path,False)
+    actual=video_generation.os.replace
+    def failed(source,destination):raise OSError('simulated save failure')
+    monkeypatch.setattr(video_generation.os,'replace',failed)
+    with pytest.raises(OSError):video_generation.save_avatar_camera_mode(tmp_path,True)
+    assert json.loads((tmp_path/'Media/camera-avatar.json').read_text())=={'enabled':False}
+    assert not list((tmp_path/'Media').glob('camera-avatar-*.tmp'))
+
+
+def test_avatar_virtual_sender_rejects_dead_parent_without_opening_driver(monkeypatch):
+    import io,types,camera_presence
+    opened=Mock()
+    monkeypatch.setitem(sys.modules,'pyvirtualcam',types.SimpleNamespace(Camera=opened,PixelFormat=types.SimpleNamespace(RGB='RGB')))
+    monkeypatch.setattr(camera_presence,'owner_alive',lambda *_:False)
+    assert video_generation.virtual_avatar_sender(io.BytesIO(),parent_pid=123,parent_started=456)==0
+    opened.assert_not_called()
+
+
+def test_avatar_environment_never_creates_unpinned_bytecode(monkeypatch):
+    monkeypatch.setenv('PYTHONPATH','untrusted inherited directory');monkeypatch.setenv('PYTHONHOME','other Python')
+    env=video_generation._avatar_environment()
+    assert env['PYTHONNOUSERSITE']=='1' and env['PYTHONDONTWRITEBYTECODE']=='1'
+    assert 'PYTHONPATH' not in env and 'PYTHONHOME' not in env
+
+
+def test_avatar_setup_probe_cancel_reaps_owned_child(tmp_path,monkeypatch):
+    process=Mock();alive=[True]
+    process.poll.side_effect=lambda:None if alive[0] else 0
+    process.terminate.side_effect=lambda:alive.__setitem__(0,False)
+    launched=[]
+    def popen(command,**kwargs):launched.append((command,kwargs));return process
+    monkeypatch.setattr(video_generation.subprocess,'Popen',popen)
+    with pytest.raises(RuntimeError,match='cancelled'):
+        video_generation.probe_avatar_profile(tmp_path,tmp_path,cancelled=lambda:True)
+    process.terminate.assert_called_once();process.wait.assert_called_once_with(timeout=3)
+    assert '-B' in launched[0][0] and launched[0][1]['env']['PYTHONDONTWRITEBYTECODE']=='1'

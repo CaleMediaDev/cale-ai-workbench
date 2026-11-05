@@ -242,7 +242,185 @@ class LatestFrameWorker:
         self.thread.join(timeout=2)
 
 
-def watch(device=0, parent_pid=None, parent_started=None):
+
+
+class AvatarGpuLease:
+    """Account for this camera process's measured GPU allocation, not a lock."""
+    def __init__(self):
+        self.started=psutil.Process(os.getpid()).create_time()
+        self.path=ROOT/"LongTasks"/f"avatar-gpu-active-{os.getpid()}.json"
+        self.phase="starting";self.reserved=2*1024**3
+        self.stopped=threading.Event();self.lock=threading.Lock()
+        self._write()
+        self.thread=threading.Thread(target=self._heartbeat,daemon=True);self.thread.start()
+
+    def _write(self):
+        self.path.parent.mkdir(parents=True,exist_ok=True)
+        # Heartbeat and measured-allocation updates share the same atomic file.
+        # Keep the lock through publication so neither can regress the phase.
+        with self.lock:
+            value={"pid":os.getpid(),"started":self.started,"reserved_bytes":self.reserved,"updated":time.time(),"phase":self.phase}
+            temporary=self.path.with_name(self.path.name+".tmp")
+            try:
+                temporary.write_text(json.dumps(value),encoding="utf-8")
+                os.replace(temporary,self.path)
+            finally:temporary.unlink(missing_ok=True)
+
+    def _heartbeat(self):
+        while not self.stopped.wait(.5):
+            try:self._write()
+            except OSError:pass
+
+    def measured(self,probe):
+        size=probe.get("gpu_allocation_bytes")
+        if probe.get("ok") is not True or isinstance(size,bool) or not isinstance(size,int) or size<0:
+            raise RuntimeError("Avatar GPU allocation probe did not pass.")
+        with self.lock:self.phase="active";self.reserved=size+512*1024**2
+        self._write()
+
+    def close(self):
+        self.stopped.set();self.thread.join(timeout=2)
+        try:
+            value=json.loads(self.path.read_text(encoding="utf-8"))
+            if value.get("pid")==os.getpid() and value.get("started")==self.started:self.path.unlink()
+        except (OSError,ValueError):pass
+
+
+def avatar_heavy_work_active():
+    from readiness_checklist import _heavy_gpu_active
+    return _heavy_gpu_active(ROOT)
+
+class AvatarFrameWorker:
+    """Latest-only neural consumer. Its public output never contains raw frames.
+
+    The camera owner keeps reading while this worker loads/renders. Permission
+    is checked again after inference so a late frame cannot outlive consent.
+    """
+    def __init__(self, profile, parent_pid=None, parent_started=None, virtual_output=False):
+        self.profile=Path(profile);self.parent_pid=parent_pid;self.parent_started=parent_started
+        self.pending=queue.Queue(maxsize=1);self.stopped=threading.Event()
+        self.virtual_output=virtual_output;self.sender=None;self.sender_worker=None
+        self.thread=threading.Thread(target=self._run,daemon=True);self.thread.start()
+
+    def authorized(self):
+        return not self.stopped.is_set() and allowed() and owner_alive(self.parent_pid,self.parent_started)
+
+    def submit(self,frame):
+        if not self.authorized():return
+        try:self.pending.get_nowait()
+        except queue.Empty:pass
+        try:self.pending.put_nowait((frame,time.monotonic()))
+        except queue.Full:pass
+
+    def _publish(self, rgb):
+        if not self.authorized():return
+        import cv2
+        # Restrict output to a genuine rendered/neutral RGB array. Never use the
+        # input camera object as a fallback when setup or rendering fails.
+        if rgb is None or getattr(rgb,"ndim",0)!=3 or rgb.shape[2]!=3:return
+        if rgb.dtype.name!="uint8" or max(rgb.shape[:2])>2048:return
+        small=cv2.resize(rgb,(512,512))
+        ok,encoded=cv2.imencode(".jpg",small[:,:,::-1],[cv2.IMWRITE_JPEG_QUALITY,82])
+        if not ok:return
+        payload=encoded.tobytes()
+        if len(payload)>140000:return
+        if self.authorized():emit("frame",base64.b64encode(payload).decode("ascii"))
+        if self.sender_worker and self.authorized():self.sender_worker.submit(payload)
+
+    def _run(self):
+        engine=None;lease=None;sequence=0;last_neutral=0;last_error_notice=0;paused=False
+        try:
+            import avatar_video
+            neutral=avatar_video.neutral_camera_avatar()
+            self._publish(neutral)
+            if not self.authorized():return
+            emit("setup","Loading the local animated Cale camera. Your real camera image is not displayed.")
+            if self.virtual_output and self.authorized():
+                self.sender_worker=AvatarVirtualOutput()
+            while self.authorized():
+                if avatar_heavy_work_active():
+                    if engine is not None:engine.close();engine=None
+                    if lease is not None:lease.close();lease=None
+                    if not paused:emit("notice","Animated Cale paused for local music/image GPU work. Your real camera stays hidden.")
+                    paused=True
+                    if time.monotonic()-last_neutral>=.5:self._publish(neutral);last_neutral=time.monotonic()
+                    self.stopped.wait(.1);continue
+                if engine is None:
+                    lease=AvatarGpuLease()
+                    engine=avatar_video.CaleAvatar(self.profile)
+                    if not self.authorized():break
+                    lease.measured(engine.probe())
+                    paused=False
+                try:frame,captured_at=self.pending.get(timeout=.1)
+                except queue.Empty:continue
+                sequence+=1
+                try:rendered=engine.render(frame,sequence=sequence,captured_at=captured_at)
+                except Exception:
+                    rendered=None
+                    if time.monotonic()-last_error_notice>=5:
+                        emit("notice","Animated Cale could not process this frame. Your real camera stays hidden.")
+                        last_error_notice=time.monotonic()
+                if not self.authorized():break
+                if rendered is not None:self._publish(rendered)
+                elif time.monotonic()-last_neutral>=.5:
+                    self._publish(neutral);last_neutral=time.monotonic()
+        except Exception:
+            emit("error","Animated Cale is unavailable. Your real camera stays hidden; switch to Raw camera only if you want to show it.")
+        finally:
+            if self.sender_worker:self.sender_worker.close()
+            try:
+                if engine is not None:engine.close()
+            finally:
+                if lease is not None:lease.close()
+
+    def close(self):
+        self.stopped.set()
+        try:self.pending.get_nowait()
+        except queue.Empty:pass
+        self.thread.join(timeout=2)
+        # The process owner reaps this process on stop if inference is blocked;
+        # never close a CUDA session concurrently with an outstanding render.
+
+
+class AvatarVirtualOutput:
+    """A separate optional GPL bridge receives only already-rendered JPEGs."""
+    def __init__(self):
+        self.pending=queue.Queue(maxsize=1);self.stopped=threading.Event();self.process=None
+        self.thread=threading.Thread(target=self._run,daemon=True);self.thread.start()
+
+    def submit(self,payload):
+        try:self.pending.get_nowait()
+        except queue.Empty:pass
+        try:self.pending.put_nowait(payload)
+        except queue.Full:pass
+
+    def _run(self):
+        import subprocess,struct
+        try:
+            self.process=subprocess.Popen([sys.executable,"-u",str(ROOT/"video_generation.py"),"avatar-virtual-sender",
+                "--parent-pid",str(os.getpid()),"--parent-started",str(psutil.Process(os.getpid()).create_time())],stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+            while not self.stopped.is_set():
+                try:payload=self.pending.get(timeout=.1)
+                except queue.Empty:continue
+                if self.stopped.is_set():break
+                self.process.stdin.write(struct.pack("!I",len(payload))+payload);self.process.stdin.flush()
+        except (OSError,ValueError):
+            emit("notice","Sharing animated Cale stopped. Install/close the existing OBS virtual camera; your real camera was not shared.")
+        finally:self._stop_process()
+
+    def _stop_process(self):
+        process=self.process
+        if process is not None:
+            try:process.terminate();process.wait(timeout=2)
+            except Exception:
+                try:process.kill();process.wait(timeout=2)
+                except Exception:pass
+
+    def close(self):
+        self.stopped.set();self._stop_process();self.thread.join(timeout=2)
+
+def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_output=False):
     """Detect faces on-device; release the webcam immediately when permission ends."""
     if not allowed() or not owner_alive(parent_pid, parent_started):
         emit("error", "Camera greeting is off. Turn it on in the app first.")
@@ -344,6 +522,7 @@ def watch(device=0, parent_pid=None, parent_started=None):
             emit("visitor", greeting_line([None]))
     negotiated = negotiate_capture(camera, cv2, isinstance(source, int))
     worker = LatestFrameWorker(recognize)
+    avatar_worker = AvatarFrameWorker(ROOT/"Media/avatar/v1",parent_pid,parent_started,virtual_output) if avatar else None
     dimensions = (f"{int(negotiated['width'])}×{int(negotiated['height'])}" if negotiated['width'] and negotiated['height'] else "resolution unreported")
     fps = f"{negotiated['fps']:g} driver-reported fps" if negotiated['fps'] else "fps unreported"
     mode = "Native 4K requested; device fallback is shown" if isinstance(source, int) else "Network camera native format"
@@ -379,7 +558,9 @@ def watch(device=0, parent_pid=None, parent_started=None):
             if not measured_reported and elapsed >= 2:
                 measured_reported = True
                 emit("notice", f"Camera capture measured {captured_frames / elapsed:.1f} frames/s at {frame.shape[1]}×{frame.shape[0]}; no video saved.")
-            if preview_now - last_preview >= 1 / 15:
+            if avatar_worker is not None:
+                avatar_worker.submit(frame)
+            if not avatar and preview_now - last_preview >= 1 / 15:
                 payload = preview_frame(frame, cv2)
                 if payload:
                     emit("frame", payload)
@@ -391,14 +572,18 @@ def watch(device=0, parent_pid=None, parent_started=None):
         recognition_stopped.set()
         camera.release()
         worker.close()
+        if avatar_worker is not None:avatar_worker.close()
     emit("stopped", "Camera greeting is off.")
     return 0
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--avatar",action="store_true")
+    parser.add_argument("--virtual-output",action="store_true")
     parser.add_argument("--parent-pid", type=int)
     parser.add_argument("--parent-started", type=float)
     options = parser.parse_args()
     sys.exit(watch(parent_pid=options.parent_pid,
-                   parent_started=options.parent_started))
+                   parent_started=options.parent_started,avatar=options.avatar,
+                   virtual_output=options.virtual_output and options.avatar))

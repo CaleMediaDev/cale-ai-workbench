@@ -514,7 +514,281 @@ def _render_job(job_id: str, data: dict) -> None:
             server.wait()
 
 
+
+# Live Cale has an isolated ORT environment. The existing Media Torch runtime is
+# reused read-only; installing/upgrading avatar packages must never mutate it.
+AVATAR_ORT_PACKAGES = ("onnxruntime-gpu==1.26.0", "numpy==2.2.6",
+                       "flatbuffers==25.12.19", "packaging==26.3", "protobuf==6.33.0")
+AVATAR_GRAPH = {"sha256":"d3713a0ac98a248460604852844f44a692d174e337bdb5cda13264ad45328357",
+                "size":202085302,
+                "url":"https://github.com/CaleMediaDev/cale-ai-workbench/releases/download/v0.5.511/Cale-Avatar-Decoder-v1.onnx"}
+
+
+
+def save_avatar_camera_mode(root, enabled):
+    """Persist the privacy choice atomically before changing the camera owner."""
+    if not isinstance(enabled,bool):raise ValueError("Camera mode must be boolean.")
+    path=Path(root)/"Media/camera-avatar.json";path.parent.mkdir(parents=True,exist_ok=True)
+    temporary=path.with_name("camera-avatar-"+uuid.uuid4().hex+".tmp")
+    try:
+        temporary.write_text(json.dumps({"enabled":enabled}),encoding="utf-8")
+        os.replace(temporary,path)
+    finally:temporary.unlink(missing_ok=True)
+
+def avatar_profile_root(root=None):
+    return Path(root or ROOT) / "Media/avatar/v1"
+
+
+def _avatar_write_status(profile, **value):
+    """Only bounded setup facts are persisted; never camera frames or faces."""
+    profile.mkdir(parents=True, exist_ok=True)
+    value.update(updated_at=time.time())
+    temporary=profile/("status-"+uuid.uuid4().hex+".tmp")
+    try:
+        temporary.write_text(json.dumps(value),encoding="utf-8")
+        os.replace(temporary,profile/"status.json")
+    finally:temporary.unlink(missing_ok=True)
+    return value
+
+
+def avatar_profile_status(root=None):
+    profile=avatar_profile_root(root)
+    try:
+        with (profile/"status.json").open("rb") as stream:raw=stream.read(16385)
+        value=json.loads(raw) if len(raw)<=16384 else {}
+        return value if isinstance(value,dict) else {}
+    except (OSError,ValueError):return {}
+
+
+def _avatar_assets():
+    import avatar_video
+    sources=getattr(avatar_video,"AVATAR_SOURCE_FILES",None)
+    models=getattr(avatar_video,"AVATAR_MODEL_FILES",None)
+    if not isinstance(sources,dict) or not isinstance(models,dict):
+        raise RuntimeError("Live Cale engine is not included in this release yet.")
+    source_commit=avatar_video.AVATAR_SOURCE_COMMIT
+    assets=[]
+    for relative,record in sources.items():
+        assets.append(("source/"+relative,{**record,"url":f"https://raw.githubusercontent.com/KwaiVGI/LivePortrait/{source_commit}/{relative}","hash_kind":"git"}))
+    for relative,record in models.items():assets.append(("models/"+relative,{**record,"hash_kind":"sha256"}))
+    if "cale-warp-decoder-opset20-baked.onnx" not in models:
+        assets.append(("models/cale-warp-decoder-opset20-baked.onnx",{**AVATAR_GRAPH,"hash_kind":"sha256"}))
+    return assets
+
+
+def _avatar_verified(path, record):
+    """Streaming verification also applies to previously cached source/models."""
+    if not path.is_file() or path.stat().st_size!=record["size"]:return False
+    digest=hashlib.sha1(b"blob "+str(record["size"]).encode()+b"\0") if record["hash_kind"]=="git" else hashlib.sha256()
+    with path.open("rb") as stream:
+        while True:
+            part=stream.read(1024*1024)
+            if not part:break
+            digest.update(part)
+    return digest.hexdigest()==record.get("blob",record.get("sha256"))
+
+
+def _avatar_download(profile, relative, record, progress=None):
+    """Pinned, byte-bounded downloads use the guarded Windows source writer."""
+    import design_tools
+    from urllib.parse import urlsplit
+    from urllib.request import HTTPRedirectHandler,build_opener
+    from urllib.error import HTTPError
+    relative=design_tools._game_rel(relative)
+    target=design_tools._game_plain_path(profile/relative)
+    if _avatar_verified(target,record):return
+    import pc_offline
+    if pc_offline.offline():raise RuntimeError("Live Cale setup needs one internet download before offline use.")
+    allowed={"raw.githubusercontent.com","github.com","release-assets.githubusercontent.com","huggingface.co","cdn-lfs.huggingface.co","cdn-lfs-us-1.hf.co","cas-bridge.xethub.hf.co"}
+    def valid(url):
+        parsed=urlsplit(url)
+        return parsed.scheme=="https" and parsed.hostname in allowed and not parsed.username and not parsed.password
+    if not valid(record["url"]):raise ValueError("Unrecognized Live Cale asset host.")
+    class Redirect(HTTPRedirectHandler):
+        def redirect_request(self,request,fp,code,message,headers,url):
+            if not valid(url):raise ValueError("Live Cale download left its verified asset hosts.")
+            return super().redirect_request(request,fp,code,message,headers,url)
+    try:response=build_opener(Redirect()).open(Request(record["url"],headers={"User-Agent":"Cale-Live-Avatar"}),timeout=30)
+    except HTTPError as error:
+        if error.code==404:raise RuntimeError("The verified Live Cale asset has not been published yet; camera stays private.") from error
+        raise
+    # Download to a private app cache first, then promote only verified bytes.
+    with response, tempfile.TemporaryFile() as spool:
+        count=0
+        while True:
+            data=response.read(min(1024*1024,record["size"]-count+1))
+            if not data:break
+            count+=len(data)
+            if count>record["size"]:raise ValueError("Live Cale asset exceeded its pinned byte size.")
+            spool.write(data)
+            if progress:progress(count,record["size"])
+        if count!=record["size"]:raise ValueError("Live Cale asset download was incomplete.")
+        spool.seek(0)
+        digest=hashlib.sha1(b"blob "+str(count).encode()+b"\0") if record["hash_kind"]=="git" else hashlib.sha256()
+        while True:
+            data=spool.read(1024*1024)
+            if not data:break
+            digest.update(data)
+        if digest.hexdigest()!=record.get("blob",record.get("sha256")):raise ValueError("Live Cale asset checksum failed.")
+        # Source writer accepts Git-blob hashes; derive that hash from verified
+        # disk bytes for SHA256 model assets without buffering model-sized data.
+        spool.seek(0);git=hashlib.sha1(b"blob "+str(count).encode()+b"\0")
+        while True:
+            data=spool.read(1024*1024)
+            if not data:break
+            git.update(data)
+        spool.seek(0)
+        with design_tools._game_directory_guard(Path(profile.anchor),profile):
+            if target.exists():raise RuntimeError("A changed Live Cale asset was preserved. Remove its optional profile to repair it.")
+            design_tools._game_copy_verified(spool,profile,relative,{"size":count,"sha":git.hexdigest()},uuid.uuid4().hex)
+
+
+def _avatar_environment():
+    env=os.environ.copy();env["PYTHONNOUSERSITE"]="1";env["PYTHONDONTWRITEBYTECODE"]="1";env.pop("PYTHONPATH",None);env.pop("PYTHONHOME",None)
+    return env
+
+
+def probe_avatar_profile(profile, root=None, cancelled=None):
+    """Run actual imports/origin/CUDA checks and engine inference in its process."""
+    root=Path(root or ROOT);profile=Path(profile)
+    python=profile/"python/Scripts/python.exe"
+    script=("import json,sys,pathlib; "
+            "sys.path.insert(0,sys.argv[2]); "
+            "import torch,onnxruntime as ort,avatar_video; "
+            "p=pathlib.Path(sys.argv[1]).resolve(); m=pathlib.Path(sys.argv[2]).resolve()/'Media/python'; "
+            "assert pathlib.Path(ort.__file__).resolve().is_relative_to(p/'python'); "
+            "assert pathlib.Path(torch.__file__).resolve().is_relative_to(m); "
+            "assert ort.__version__=='1.26.0' and torch.__version__=='2.9.1+cu128'; "
+            "assert torch.version.cuda=='12.8' and torch.cuda.is_available(); "
+            "engine=avatar_video.CaleAvatar(p); "
+            "result=engine.probe(); engine.close(); "
+            "assert isinstance(result,dict) and result.get('ok') is True; "
+            "print(json.dumps({'ok':True,'ort':ort.__version__,'torch':torch.__version__,'cuda':torch.version.cuda,'cudnn':torch.backends.cudnn.version(),'probe':result}))")
+    # File-backed bounded output avoids a pipe deadlock or unbounded RAM capture.
+    # Cancellation also reaps a setup probe when the user turns the camera off.
+    with tempfile.TemporaryFile() as output,tempfile.TemporaryFile() as errors:
+        process=subprocess.Popen([str(python),"-B","-c",script,str(profile),str(root)],stdout=output,stderr=errors,
+                                 env=_avatar_environment(),creationflags=HIDE)
+        deadline=time.monotonic()+120
+        try:
+            while process.poll() is None:
+                if cancelled and cancelled():raise RuntimeError("Live Cale setup cancelled.")
+                if time.monotonic()>deadline:raise TimeoutError("Live Cale inference qualification timed out.")
+                if output.tell()>16384 or errors.tell()>65536:raise RuntimeError("Live Cale probe output exceeded its bound.")
+                time.sleep(.05)
+            if process.returncode:raise RuntimeError("Live Cale CUDA/inference qualification failed; camera stays private.")
+            output.seek(0);raw=output.read(16385)
+            if len(raw)>16384:raise RuntimeError("Live Cale probe response exceeded its bound.")
+            result=json.loads(raw.decode("utf-8").strip().splitlines()[-1])
+            if result.get("ok") is not True:raise RuntimeError("Live Cale inference probe did not pass.")
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:process.wait(timeout=3)
+                except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
+
+    return result
+
+
+def ensure_avatar_profile(root=None, progress=None, cancelled=None, virtual_output=False):
+    """Install optional verified assets, then qualify real inference before ready.
+
+    Call only on a background thread. Cancelling or setup failure cannot turn on
+    a raw camera fallback. No camera is opened by installation or qualification.
+    """
+    root=Path(root or ROOT);profile=avatar_profile_root(root)
+    def report(phase,detail,**extra):
+        if cancelled and cancelled():raise RuntimeError("Live Cale setup cancelled.")
+        value=_avatar_write_status(profile,phase=phase,ready=False,detail=detail,**extra)
+        if progress:progress(value)
+    with _process_lock("avatar-profile-install.lock",1800):
+        try:
+            import music_backend,pc_offline
+            assets=_avatar_assets();profile.mkdir(parents=True,exist_ok=True)
+            if shutil.disk_usage(profile).free<2*1024**3:raise RuntimeError("Live Cale setup needs at least2GB free disk space.")
+            report("checking","Checking verified Live Cale files")
+            for index,(relative,record) in enumerate(assets):
+                report("downloading","Preparing Live Cale models",files_done=index,files_total=len(assets))
+                _avatar_download(profile,relative,record,lambda done,total:report("downloading","Downloading Live Cale model",bytes_done=done,bytes_total=total,files_done=index,files_total=len(assets)))
+            python=profile/"python/Scripts/python.exe";media=root/"Media/python/Scripts/python.exe"
+            if not media.is_file():raise RuntimeError("The base Media Python runtime is still installing.")
+            package_marker=profile/"packages.json"
+            try:
+                with package_marker.open("rb") as stream:package_bytes=stream.read(4097)
+                packages_ok=len(package_bytes)<=4096 and json.loads(package_bytes)==list(AVATAR_ORT_PACKAGES)
+            except (OSError,ValueError):packages_ok=False
+            if not python.is_file() or not packages_ok:
+                if pc_offline.offline():raise RuntimeError("Live Cale Python needs first-time internet setup.")
+                report("installing","Installing isolated Live Cale runtime")
+                uv=music_backend._tool("uv")
+                if not python.is_file():
+                    subprocess.run([uv,"venv",str(profile/"python"),"--python",str(media)],check=True,timeout=120,env=_avatar_environment(),creationflags=HIDE)
+                subprocess.run([uv,"pip","install","--python",str(python),"--only-binary",":all:","--no-deps",*AVATAR_ORT_PACKAGES],check=True,timeout=600,env=_avatar_environment(),creationflags=HIDE,capture_output=True)
+                site=profile/"python/Lib/site-packages";site.mkdir(parents=True,exist_ok=True)
+                (site/"cale-media-libraries.pth").write_text(str((root/"Media/python/Lib/site-packages").resolve())+"\n",encoding="utf-8")
+                package_marker.write_text(json.dumps(list(AVATAR_ORT_PACKAGES)),encoding="utf-8")
+            expected_pth=str((root/"Media/python/Lib/site-packages").resolve())+"\n"
+            with (profile/"python/Lib/site-packages/cale-media-libraries.pth").open("rb") as stream:pth=stream.read(4097)
+            if len(pth)>4096 or pth.decode("utf-8").replace("\r\n","\n")!=expected_pth:
+                raise RuntimeError("Live Cale runtime path changed; optional profile must be repaired before it can run.")
+            if virtual_output:
+                if pc_offline.offline():
+                    completed=subprocess.run([str(python),"-c","import pyvirtualcam"],timeout=20,capture_output=True,creationflags=HIDE)
+                    if completed.returncode:raise RuntimeError("Optional virtual-camera package needs one online setup.")
+                else:
+                    report("installing","Preparing optional GPL virtual-camera bridge; existing OBS driver required")
+                    subprocess.run([music_backend._tool("uv"),"pip","install","--python",str(python),"--no-deps","pyvirtualcam==0.15.0"],check=True,timeout=120,capture_output=True,creationflags=HIDE,env=_avatar_environment())
+                    (profile/"virtual-camera-provenance.json").write_text(json.dumps({"package":"pyvirtualcam","version":"0.15.0","license":"GPL-2.0","source":"https://github.com/letmaik/pyvirtualcam","execution":"separate optional avatar-only frame sender","obs_driver":"existing Windows OBS installation required","virtual_output_tested":False}),encoding="utf-8")
+            report("testing","Testing Live Cale CUDA imports and actual avatar inference")
+            probe=probe_avatar_profile(profile,root,cancelled=cancelled)
+            value=_avatar_write_status(profile,phase="ready",ready=True,detail="Live Cale inference tested",probe=probe,virtual_output_requested=bool(virtual_output),virtual_output_tested=False)
+            if progress:progress(value)
+            return python
+        except Exception as error:
+            _avatar_write_status(profile,phase="failed",ready=False,detail=str(error)[:400],error_type=type(error).__name__)
+            raise
+
+
+def virtual_avatar_sender(stream=None, parent_pid=None, parent_started=None):
+    """Optional GPL bridge: bounded RGB frames only; never imports/opens capture.
+
+    Wire format is a fixed big-endian length followed by RGB JPEG bytes. The
+    caller supplies processed avatars only. EOF closes the existing OBS camera.
+    """
+    import struct,io
+    import numpy as np
+    from PIL import Image
+    import pyvirtualcam  # Optional GPL2 dependency stays in this child process.
+    stream=stream or sys.stdin.buffer
+    if parent_pid is not None:
+        import threading
+        from camera_presence import owner_alive,watch_owner
+        if not owner_alive(parent_pid,parent_started):return 0
+        threading.Thread(target=watch_owner,args=(parent_pid,parent_started),daemon=True).start()
+    with pyvirtualcam.Camera(width=512,height=512,fps=15,backend="obs",fmt=pyvirtualcam.PixelFormat.RGB) as camera:
+        while True:
+            header=stream.read(4)
+            if not header:return 0
+            if len(header)!=4:raise ValueError("Incomplete avatar frame header.")
+            size=struct.unpack("!I",header)[0]
+            if not 1<=size<=2*1024*1024:raise ValueError("Avatar virtual frame exceeds its bound.")
+            raw=stream.read(size)
+            if len(raw)!=size:raise ValueError("Incomplete avatar frame.")
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.size!=(512,512):raise ValueError("Avatar virtual output must be512x512.")
+                frame=np.asarray(image.convert("RGB"))
+            camera.send(frame)
+    return 0
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2]==["avatar-virtual-sender"]:
+        import argparse
+        parser=argparse.ArgumentParser()
+        parser.add_argument("--parent-pid",type=int,required=True)
+        parser.add_argument("--parent-started",type=float,required=True)
+        options=parser.parse_args(sys.argv[2:])
+        raise SystemExit(virtual_avatar_sender(parent_pid=options.parent_pid,parent_started=options.parent_started))
     if len(sys.argv) != 3 or sys.argv[1] != "worker":
         raise SystemExit("Run this module through start_video_job.")
     job = sys.argv[2]

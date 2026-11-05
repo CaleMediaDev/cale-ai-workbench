@@ -274,12 +274,28 @@ def camera_permission():
         return False
 
 
+
+def require_raw_camera_mode():
+    """A tool must not bypass the visible avatar-only camera choice."""
+    path=MEDIA/"camera-avatar.json"
+    try:
+        with path.open("rb") as stream:raw=stream.read(8193)
+    except FileNotFoundError:return  # Existing installs predate the mode switch.
+    except OSError:raise ValueError("Camera mode cannot be checked; raw capture is disabled.")
+    try:
+        value=json.loads(raw) if len(raw)<=8192 else None
+        if not isinstance(value,dict) or not isinstance(value.get("enabled"),bool):raise ValueError()
+    except (ValueError,TypeError):raise ValueError("Camera mode cannot be checked; raw capture is disabled.")
+    if value["enabled"]:
+        raise ValueError("Animated Cale is on. Physical camera capture is hidden; explicitly select Raw camera in the app before saving or analyzing raw frames.")
+
 def open_camera(device):
     """Open a USB camera index or a previously registered local stream."""
     import cv2
 
     from camera_network import camera_source
 
+    require_raw_camera_mode()
     source = camera_source(device)
     from camera_presence import negotiate_capture
     camera = (cv2.VideoCapture(source, cv2.CAP_DSHOW)
@@ -295,8 +311,10 @@ def capture_camera(output_path, device=0):
         raise ValueError(
             "Camera is off. Enable Camera in the desktop app before requesting a capture."
         )
+    require_raw_camera_mode()
     import cv2
 
+    require_raw_camera_mode()
     target = output_file(output_path, ".png")
     capture = open_camera(device)
     try:
@@ -314,6 +332,7 @@ def capture_camera(output_path, device=0):
                 break
         if frame is None:
             raise ValueError("No camera frame received.")
+        require_raw_camera_mode()
         if not cv2.imwrite(str(target), frame):
             raise RuntimeError("Camera image could not be saved.")
         return {
@@ -335,10 +354,12 @@ def watch_camera(
     """Observe a short, bounded set of frames while permission is active."""
     if not camera_permission():
         raise ValueError("Camera is off. Enable Camera in the desktop app first.")
+    require_raw_camera_mode()
     import tempfile
 
     import cv2
 
+    require_raw_camera_mode()
     seconds = min(max(int(seconds), 1), 30)
     max_frames = min(max(int(max_frames), 1), 4)
     (ROOT / "Temp").mkdir(exist_ok=True)
@@ -359,6 +380,7 @@ def watch_camera(
                 ok, frame = capture.read()
                 if not ok:
                     raise RuntimeError("The camera stopped returning frames.")
+                require_raw_camera_mode()
                 frame_path = Path(temp) / f"camera-{index}.jpg"
                 if not cv2.imwrite(str(frame_path), frame):
                     raise RuntimeError("Could not sample camera frame.")

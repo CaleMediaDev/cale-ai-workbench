@@ -546,7 +546,7 @@ def test_camera_preview_uses_latest_slot_independent_of_voice_fifo():
     tree=ast.parse(source.read_text(encoding='utf-8'))
     functions={node.name:node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef)}
     namespace={'queue':queue,'camera_frames':queue.Queue(maxsize=1),'voice_events':queue.Queue(),
-               'show_camera_preview':Mock(),'window':Mock()}
+               'show_camera_preview':Mock(),'window':Mock(),'camera_generation':[0]}
     for name in ['offer_camera_frame','camera_preview_poll']:
         exec(compile(ast.Module(body=[functions[name]],type_ignores=[]),str(source),'exec'),namespace)
     for n in range(100): namespace['offer_camera_frame'](str(n))
@@ -559,11 +559,11 @@ def test_camera_preview_uses_latest_slot_independent_of_voice_fifo():
     process.returncode=0
     namespace.update({'json':json,'os':os,'subprocess':SimpleNamespace(Popen=Mock(return_value=process),PIPE=-1,DEVNULL=-3),
         'ROOT':source.parent,'media_python':Path('test-only-python'),'greeting_process':[None],
-        'greeting_until':[0],'time':__import__('time')})
+        'greeting_until':[0],'time':__import__('time'),'current':lambda:True,'generation':0,'animated':False,'sharing':False,'camera_start_lock':__import__('threading').Lock(),'stop_owned_camera_process':Mock(),'camera_worker_command':Mock(return_value=['fake-camera-command'])})
     exec(compile(ast.Module(body=[camera_monitor],type_ignores=[]),str(source),'exec'),namespace)
-    namespace['monitor']()
-    assert namespace['camera_frames'].get_nowait()=='99'
-    assert namespace['voice_events'].get_nowait()==('camera_notice','native resolution')
+    with patch.object(Path,'is_file',return_value=True):namespace['monitor']()
+    assert namespace['camera_frames'].get_nowait()==(0,'99')
+    assert namespace['voice_events'].get_nowait()==('camera_session',(0,'camera_notice','native resolution'))
     assert namespace['voice_events'].empty()
 
 
@@ -676,3 +676,192 @@ def test_avatar_face_loss_returns_only_neutral_illustration_and_closed_returns_n
 def test_neutral_avatar_is_the_illustrated_asset_not_a_capture():
     pixels = avatar_video.neutral_camera_avatar()
     assert pixels.dtype == np.uint8 and pixels.shape == (360, 880, 3)
+
+def test_avatar_worker_keeps_latest_frame_and_never_raw_fallback(monkeypatch,tmp_path):
+    import threading,time
+    import camera_presence as camera
+    first=threading.Event();release=threading.Event();last=threading.Event();seen=[];published=[];closed=[]
+    neutral=np.zeros((8,8,3),dtype=np.uint8)
+    class Engine:
+        def __init__(self,*_args):pass
+        def render(self,frame,**_kwargs):
+            seen.append(int(frame[0,0,0]))
+            if len(seen)==1:first.set();assert release.wait(2);raise ValueError('synthetic render failure')
+            last.set();return None
+        def probe(self):return {'ok':True,'gpu_allocation_bytes':123}
+        def close(self):closed.append(True)
+    monkeypatch.setattr(camera,'ROOT',tmp_path)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    monkeypatch.setattr(camera,'allowed',lambda:True);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine,raising=False)
+    monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:neutral,raising=False)
+    monkeypatch.setattr(camera,'emit',Mock())
+    monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda self,rgb:published.append(rgb.copy()))
+    worker=camera.AvatarFrameWorker(tmp_path)
+    try:
+        worker.submit(np.full((8,8,3),1,dtype=np.uint8));assert first.wait(2)
+        for n in range(2,21):worker.submit(np.full((8,8,3),n,dtype=np.uint8))
+        assert worker.pending.qsize()==1
+        release.set();assert last.wait(2)
+    finally:release.set();worker.close()
+    assert seen==[1,20] and closed==[True]
+    assert published and all(np.array_equal(image,neutral) for image in published)
+
+
+def test_avatar_worker_drops_inference_result_after_consent_ends(monkeypatch,tmp_path):
+    import threading
+    import camera_presence as camera
+    entered=threading.Event();release=threading.Event();finished=threading.Event();permission=[True];published=[]
+    class Engine:
+        def __init__(self,*_args):pass
+        def render(self,*_args,**_kwargs):entered.set();assert release.wait(2);return np.ones((8,8,3),dtype=np.uint8)
+        def probe(self):return {'ok':True,'gpu_allocation_bytes':123}
+        def close(self):finished.set()
+    monkeypatch.setattr(camera,'ROOT',tmp_path)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine,raising=False)
+    monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8),raising=False)
+    monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda self,rgb:published.append(int(rgb[0,0,0])))
+    monkeypatch.setattr(camera,'emit',Mock())
+    worker=camera.AvatarFrameWorker(tmp_path)
+    worker.submit(np.full((8,8,3),99,dtype=np.uint8));assert entered.wait(2)
+    permission[0]=False;release.set();assert finished.wait(2);worker.close()
+    assert published==[0]  # Only the neutral avatar, never late render/raw input.
+
+
+def test_camera_launcher_reaps_before_replacement_and_never_shares_raw():
+    import subprocess,long_tasks
+    process=Mock();process.poll.return_value=None
+    process.wait.side_effect=[subprocess.TimeoutExpired('owned-camera',3),0]
+    long_tasks.stop_owned_camera_process(process)
+    assert process.method_calls==[unittest.mock.call.poll(),unittest.mock.call.terminate(),unittest.mock.call.wait(timeout=3),unittest.mock.call.kill(),unittest.mock.call.wait(timeout=3)]
+    raw=long_tasks.camera_worker_command(Path('app'),Path('python'),10,20,False,True)
+    animated=long_tasks.camera_worker_command(Path('app'),Path('python'),10,20,True,True)
+    assert '--avatar' not in raw and '--virtual-output' not in raw
+    assert '--avatar' in animated and '--virtual-output' in animated
+
+
+def test_avatar_mode_blocks_raw_camera_tools_before_capture_or_files(tmp_path,monkeypatch):
+    import media_worker
+    mode=tmp_path/'camera-avatar.json';mode.write_text(json.dumps({'enabled':True}),encoding='utf-8')
+    monkeypatch.setattr(media_worker,'MEDIA',tmp_path)
+    monkeypatch.setattr(media_worker,'camera_permission',lambda:True)
+    opener=Mock(side_effect=AssertionError('Physical capture must not open'))
+    monkeypatch.setattr(media_worker,'open_camera',opener)
+    for call in (lambda:media_worker.capture_camera(str(tmp_path/'raw.png')),lambda:media_worker.watch_camera()):
+        with unittest.TestCase().assertRaisesRegex(ValueError,'Animated Cale'):call()
+    opener.assert_not_called();assert not (tmp_path/'raw.png').exists()
+    mode.write_text(json.dumps({'enabled':False}),encoding='utf-8')
+    media_worker.require_raw_camera_mode()
+    mode.write_text('corrupt',encoding='utf-8')
+    with unittest.TestCase().assertRaisesRegex(ValueError,'cannot be checked'):media_worker.require_raw_camera_mode()
+
+
+def test_avatar_watch_has_one_capture_owner_and_no_raw_preview(monkeypatch,tmp_path):
+    import camera_presence as cam,sys
+    enabled=[True];frame=np.full((8,8,3),99,dtype=np.uint8);reads=[];received=[];closed=[]
+    def read():
+        reads.append(True)
+        if len(reads)>=3:enabled[0]=False
+        return True,frame
+    capture=Mock();capture.isOpened.return_value=True;capture.read.side_effect=read
+    cascade=Mock();cascade.empty.return_value=False
+    opener=Mock(return_value=capture)
+    cv2=SimpleNamespace(error=RuntimeError,data=SimpleNamespace(haarcascades='.'),CascadeClassifier=lambda *_:cascade,VideoCapture=opener,CAP_DSHOW=0)
+    class Consumer:
+        def __init__(self,*_args):pass
+        def submit(self,value):received.append(value)
+        def close(self):closed.append(True)
+    monkeypatch.setitem(sys.modules,'cv2',cv2)
+    monkeypatch.setitem(sys.modules,'camera_network',SimpleNamespace(camera_source=lambda _:0,greeting_camera=lambda:0))
+    monkeypatch.setattr(cam,'ROOT',tmp_path);monkeypatch.setattr(cam,'allowed',lambda:enabled[0])
+    monkeypatch.setattr(cam,'LatestFrameWorker',lambda *_:Mock())
+    monkeypatch.setattr(cam,'AvatarFrameWorker',Consumer)
+    monkeypatch.setattr(cam,'preview_frame',Mock(side_effect=AssertionError('Raw camera encoded')))
+    monkeypatch.setattr(cam,'emit',Mock())
+    assert cam.watch(avatar=True)==0
+    opener.assert_called_once();capture.release.assert_called_once();assert len(received)==2 and closed==[True]
+    cam.preview_frame.assert_not_called()
+
+
+def test_camera_coalescer_discards_stale_raw_session_after_avatar_switch():
+    import ast,queue
+    source=Path(__file__).parents[1]/'long_tasks.py';tree=ast.parse(source.read_text(encoding='utf-8'))
+    functions={node.name:node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef)}
+    ns={'queue':queue,'camera_frames':queue.Queue(maxsize=1),'camera_generation':[4],'show_camera_preview':Mock(),'window':Mock()}
+    for name in ('offer_camera_frame','camera_preview_poll'):exec(compile(ast.Module(body=[functions[name]],type_ignores=[]),str(source),'exec'),ns)
+    ns['offer_camera_frame']('old raw',4);ns['camera_generation'][0]=5
+    ns['camera_preview_poll']();ns['offer_camera_frame']('late raw',4)
+    assert ns['camera_frames'].empty();ns['show_camera_preview'].assert_not_called()
+    ns['offer_camera_frame']('current avatar',5);ns['camera_preview_poll']()
+    ns['show_camera_preview'].assert_called_once_with('current avatar')
+
+
+def test_avatar_launcher_reaps_old_owner_before_setup_and_new_capture(tmp_path,monkeypatch):
+    import ast,queue,threading,time,subprocess,video_generation
+    source=Path(__file__).parents[1]/'long_tasks.py';tree=ast.parse(source.read_text(encoding='utf-8'))
+    start=next(node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef) and node.name=='start_camera_greeting')
+    events=[];old=Mock();old.poll.return_value=None;old.terminate.side_effect=lambda:events.append('old terminate');old.wait.side_effect=lambda **_:events.append('old reaped')
+    child=Mock();child.stdout=[];child.returncode=0;child.poll.return_value=0
+    python=tmp_path/'profile/python.exe';python.parent.mkdir();python.write_bytes(b'fixture')
+    def setup(*_args,**_kwargs):
+        assert 'old reaped' in events;events.append('setup');return python
+    monkeypatch.setattr(video_generation,'ensure_avatar_profile',setup)
+    monkeypatch.setitem(__import__('sys').modules,'psutil',SimpleNamespace(Process=lambda _:SimpleNamespace(create_time=lambda:123)))
+    def spawned(*args,**kwargs):assert events[-1]=='setup';events.append('new capture');return child
+    scheduled=[]
+    fake_threading=SimpleNamespace(Thread=lambda **kwargs:SimpleNamespace(start=lambda:scheduled.append(kwargs['target'])))
+    import long_tasks
+    ns={'greeting_until':[time.time()+60],'greeting_process':[old],'camera_generation':[0],'avatar_selected':SimpleNamespace(get=lambda:True),'virtual_selected':SimpleNamespace(get=lambda:False),'ROOT':tmp_path,'time':time,'threading':fake_threading,'camera_start_lock':threading.Lock(),'clear_camera_preview':Mock(),'update_camera_layout':Mock(),'camera_preview':Mock(),'voice_events':queue.Queue(),'os':os,'stop_owned_camera_process':long_tasks.stop_owned_camera_process,'camera_worker_command':long_tasks.camera_worker_command,'avatar_video':SimpleNamespace(neutral_camera_avatar=lambda:np.zeros((8,8,3),dtype=np.uint8)),'Image':Image,'ImageTk':SimpleNamespace(PhotoImage=lambda _:object()),'offer_camera_frame':Mock(),'subprocess':SimpleNamespace(Popen=spawned,PIPE=-1,DEVNULL=-3,TimeoutExpired=subprocess.TimeoutExpired)}
+    exec(compile(ast.Module(body=[start],type_ignores=[]),str(source),'exec'),ns)
+    ns['start_camera_greeting'](restart=True)
+    assert len(scheduled)==1 and events==[]  # Setup/camera work stays off Tk.
+    scheduled[0]()
+    assert events==['old terminate','old reaped','setup','new capture']
+    assert json.loads((tmp_path/'Media/camera-avatar.json').read_text())=={'enabled':True}
+    ns['camera_preview'].configure.assert_called()  # Neutral shown before setup.
+
+
+def test_avatar_lease_tracks_measured_bytes_and_removes_only_its_owner(tmp_path,monkeypatch):
+    import camera_presence as camera,time
+    monkeypatch.setattr(camera,'ROOT',tmp_path)
+    lease=camera.AvatarGpuLease()
+    initial=json.loads(lease.path.read_text())
+    assert initial['phase']=='starting' and initial['reserved_bytes']==2*1024**3
+    lease.measured({'ok':True,'gpu_allocation_bytes':1455423488})
+    active=json.loads(lease.path.read_text())
+    assert active['phase']=='active' and active['reserved_bytes']==1455423488+512*1024**2
+    assert active['pid']==os.getpid() and active['started']==psutil.Process(os.getpid()).create_time()
+    assert active['updated']>=initial['updated']
+    lease.close();assert not lease.path.exists()
+    other=camera.AvatarGpuLease();other.stopped.set();other.thread.join(2)
+    foreign={**json.loads(other.path.read_text()),'started':0};other.path.write_text(json.dumps(foreign))
+    other.close();assert other.path.exists()
+
+
+def test_avatar_heavy_gpu_work_pauses_and_releases_before_resuming(monkeypatch,tmp_path):
+    import camera_presence as camera,threading,time
+    heavy=[False];permission=[True];first=threading.Event();paused=threading.Event();second=threading.Event();opened=[];closed=[]
+    class Engine:
+        def __init__(self,*_args):opened.append(True)
+        def probe(self):return {'ok':True,'gpu_allocation_bytes':123}
+        def render(self,*_args,**_kwargs):
+            if len(opened)==1:heavy[0]=True;first.set()
+            else:permission[0]=False;second.set()
+            return np.ones((8,8,3),dtype=np.uint8)
+        def close(self):closed.append(True);paused.set()
+    monkeypatch.setattr(camera,'ROOT',tmp_path);monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:heavy[0])
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine,raising=False);monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8),raising=False)
+    monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda *_:None);monkeypatch.setattr(camera,'emit',Mock())
+    worker=camera.AvatarFrameWorker(tmp_path)
+    try:
+        worker.submit(np.full((8,8,3),99,dtype=np.uint8));assert first.wait(2);assert paused.wait(2)
+        deadline=time.monotonic()+2
+        while list((tmp_path/'LongTasks').glob('avatar-gpu-active-*.json')) and time.monotonic()<deadline:time.sleep(.01)
+        assert not list((tmp_path/'LongTasks').glob('avatar-gpu-active-*.json'))
+        heavy[0]=False;worker.submit(np.full((8,8,3),99,dtype=np.uint8));assert second.wait(2)
+    finally:permission[0]=False;worker.close()
+    assert len(opened)==2 and len(closed)==2
+    assert not list((tmp_path/'LongTasks').glob('avatar-gpu-active-*.json'))
