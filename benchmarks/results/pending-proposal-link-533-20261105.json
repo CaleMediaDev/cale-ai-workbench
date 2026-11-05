@@ -1,0 +1,31 @@
+{
+  "release": "0.5.533",
+  "base": "97290998b4efe753c9ec26443413f4b1db8dadfb",
+  "sha256": {
+    "donation.py": "87974099bdb4e385a0bcfe669f6abbb59be4f83850aa4f6687c432d93675a486",
+    "donation_ui.py": "689e9715a51ee497f27b154f65792780c5172b53b63b4bbb0365c24ac392d8b3",
+    "Validation/test_donation.py": "bf4f324181658fa3d4f630580a3db5feb1f5bec36cfae7ff15125c33f3d02cf9",
+    "Validation/test_donation_regressions.py": "30e90602fa0d8c0b498f2f85f019ea8fd7aece94232aae2027e7a6238ce23e0e"
+  },
+  "validation": {
+    "affected_modules": {
+      "passed": 360,
+      "subtests": 111,
+      "seconds": 66.04,
+      "exit_code": 0,
+      "source_bytes_unchanged": true
+    }
+  },
+  "baseline": "New saved-proposal-link regression failed before the fix; three URL-rejection cases passed.",
+  "changes": [
+    "Show the saved canonical PR link as unconfirmed in donation chat and status when public confirmation fails.",
+    "Retain the diagnostic link during the in-process public visibility cooldown; share it across lanes.",
+    "Clear matching pending diagnostic state after confirmed delivery; never count an unconfirmed URL as submitted."
+  ],
+  "limits": [
+    "No remote account's visibility or permissions are changed, and a GitHub 404 is not declared fixed.",
+    "The current proposal link on the other PC is unknown; the earlier PR728 still returned404 to the owner.",
+    "Tests fake GitHub and inference. No remote client installation or successful contribution is claimed.",
+    "After the full source checks, an equivalent test expression was simplified to use its existing threading import; installer checks rerun the exact final files."
+  ]
+}

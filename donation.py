@@ -1860,7 +1860,11 @@ class Service:
             failure = GitHubRequestError(stage if isinstance(stage, str) else None,
                 github_failure.get("status"), kind if isinstance(kind, str) else None)
             event["github_failure"] = {"stage": failure.stage, "status": failure.status, "kind": failure.kind}
+            if failure.stage == "proposal-public" and valid_proposal_url(pr_url):
+                event["pending_pr_url"] = pr_url
         with self._events["lock"]:
+            if phase == "submitted" and self._events.get("pending_proposal_url") == pr_url:
+                self._events.pop("pending_proposal_url", None)
             queue = self._events["queue"]
             if len(queue) >= 256:
                 discard = next((index for index, old in enumerate(queue) if old["phase"] != "submitted"), None)
@@ -1911,8 +1915,11 @@ class Service:
         active = sum(bool(worker.thread and worker.thread.is_alive()) for worker in [self, *self.children])
         with self._events["lock"]:
             diagnostic = dict(self._events.get("github_diagnostic", {}))
+            pending_url = self._events.get("pending_proposal_url", "")
         message = (self._github_diagnostic_message(diagnostic)
                    if diagnostic.get("until", 0) > time.time() else self.message)
+        if valid_proposal_url(pending_url) and "delivery is not confirmed" in message.lower():
+            message += " Unconfirmed proposal: " + pending_url
         return (f"{active} review{'s' if active != 1 else ''} running · " if active else "") + message
 
     def allowed(self, busy=False) -> bool:
@@ -2247,7 +2254,13 @@ class Service:
             resource_cooldown(self.root, "public_visibility", error.retry_seconds)
             self.next_attempt = time.monotonic() + error.retry_seconds
             self.message = str(error)
-            self._emit_event("waiting", run_id, resource, github_failure={
+            # The authenticated write may have succeeded even when GitHub's
+            # public API cannot see it. Expose its exact canonical link as
+            # unconfirmed, not as a delivered contribution or accepted fix.
+            saved_url = publication.state.get("url", "") if publication is not None else ""
+            with self._events["lock"]:
+                self._events["pending_proposal_url"] = saved_url if valid_proposal_url(saved_url) else ""
+            self._emit_event("waiting", run_id, resource, pr_url=saved_url, github_failure={
                 "stage": "proposal-public", "status": error.status, "kind": error.kind})
         except PublicationPending as error:
             self.message = str(error)

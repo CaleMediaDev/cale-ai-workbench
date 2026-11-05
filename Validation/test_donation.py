@@ -3091,6 +3091,40 @@ def test_public_confirmation_keeps_existing_527_saved_payload_policy():
     assert donation._publication_policy()=='2f2342462a62b4057d69608630bc596a2ecdf9e3dc4c28d2d757104510578ced'
 
 
+def test_public404_exposes_saved_proposal_without_announcing_delivery(outbox_host):
+    import donation_ui
+    host = outbox_host
+    host.remote.public_visible = False
+    service = host.tick()
+    expected = f"https://github.com/{donation.UPSTREAM}/pull/1"
+    assert expected in service.status_message()
+    messages = []
+    activity = donation_ui.ChatActivity(service, messages.append)
+    activity.poll()
+    assert any(expected in message and 'not confirmed' in message for message in messages)
+    assert not any('just sent' in message for message in messages)
+    assert expected not in activity.urls
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1
+    # A cooldown tick must not erase the only diagnostic link.
+    service._run(threading.Event())
+    assert expected in service.status_message()
+
+
+@pytest.mark.parametrize('url', [
+    'https://evil.invalid/secret',
+    f'https://github.com/{donation.UPSTREAM}/pull/1?token=SECRET',
+    'https://github.com/other/repository/pull/1',
+])
+def test_waiting_diagnostic_does_not_expose_unvalidated_proposal_url(tmp_path, url):
+    import donation_ui
+    service = donation.Service(tmp_path)
+    service._emit_event('waiting', 'run', 'local', pr_url=url, github_failure={
+        'stage': 'proposal-public', 'status': 404, 'kind': 'http'})
+    messages = []
+    donation_ui.ChatActivity(service, messages.append).poll()
+    assert messages and all(url not in message and 'SECRET' not in message for message in messages)
+
+
 def test_donor_only_pr_is_pending_then_publicly_recovers_without_more_tokens_or_posts(outbox_host):
     import donation_ui
     host=outbox_host;host.remote.public_visible=False

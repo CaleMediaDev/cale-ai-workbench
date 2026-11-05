@@ -98,6 +98,9 @@ class ChatActivity:
                     and isinstance(failure.get("kind"), str) and failure["kind"] in donation._GITHUB_KINDS
                     and (failure.get("status") is None or type(failure.get("status")) is int and 400 <= failure["status"] <= 599)):
                 self.github_failures[run] = donation.github_failure_message(failure["stage"], failure.get("status"), failure["kind"])
+                pending_url = self.report_url(event.get("pending_pr_url"))
+                if failure["stage"] == "proposal-public" and pending_url:
+                    self.github_failures[run] += " Unconfirmed proposal: " + pending_url
                 while len(self.github_failures) > 512:
                     self.github_failures.pop(next(iter(self.github_failures)))
             else:
