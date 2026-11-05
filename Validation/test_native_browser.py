@@ -528,6 +528,10 @@ def test_snapshot_excludes_controls_hidden_by_css_visibility(tmp_path):
         assert page.locator("#hidden").evaluate("el => el.getClientRects().length > 0")
         snapshot = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
         assert [row["label"] for row in snapshot["controls"]] == ["Visible"]
+        targets = {row["id"]: row for row in snapshot["dom_contract"]["targets"]}
+        assert not targets["hidden"]["visible"]
+        assert not targets["collapsed"]["visible"]
+        assert targets["visible"]["visible"]
         assert page.locator("#hidden").get_attribute("data-cale-ref") is None
         assert page.locator("#collapsed").get_attribute("data-cale-ref") is None
         native_browser.execute(tmp_path, "click", {"ref": snapshot["controls"][0]["ref"]})
