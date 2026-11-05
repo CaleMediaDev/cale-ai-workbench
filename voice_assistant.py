@@ -484,9 +484,15 @@ def media_call(action, cancel=None, **arguments):
     options = dict(text=True, encoding="utf-8", errors="replace", cwd=ROOT,
                    creationflags=HIDE)
     if cancel is None:
-        result = subprocess.run(command, input=payload, capture_output=True,
-                                timeout=180, **options)
-        stdout, returncode = result.stdout, result.returncode
+        process = subprocess.Popen(command, stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   **options)
+        try:
+            stdout, _stderr = process.communicate(input=payload, timeout=180)
+            returncode = process.returncode
+        except (subprocess.TimeoutExpired, OSError):
+            _stop_media_process(process)
+            raise
     else:
         import cale_voice
 
