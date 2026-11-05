@@ -158,6 +158,37 @@ def test_guidance_uses_latest_reviewed_generation_not_latest_review_time(tmp_pat
     assert "Improve:" not in learned
 
 
+def test_retracting_latest_generation_does_not_revive_stale_feedback(tmp_path):
+    original = task("retracted-song", "Techno synth bass", title="Techno synth bass")
+    old_id = feedback_learning.record(
+        tmp_path, original, -1, "Use electronic drums"
+    )
+    latest_id = feedback_learning.record(tmp_path, dict(original, generation=1), 1)
+    assert "Similar task the user liked:" in feedback_learning.guidance(
+        tmp_path, "music", "Techno synth bass"
+    )
+
+    assert feedback_learning.forget(tmp_path, latest_id)
+    # Each public call reopens the database; suppression must survive reopening.
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    reviews = feedback_learning.for_task(tmp_path, "retracted-song")
+    assert [row["id"] for row in reviews] == [old_id]
+
+    # Refreshing an older review must not lower the generation high-water mark.
+    assert feedback_learning.record(
+        tmp_path, original, -1, "Use softer electronic drums"
+    ) == old_id
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+
+    # A new explicit review of the current generation is eligible again.
+    feedback_learning.record(
+        tmp_path, dict(original, generation=1), -1, "Use a slower tempo"
+    )
+    learned = feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    assert "Use a slower tempo" in learned
+    assert "electronic drums" not in learned
+
+
 def test_forgotten_feedback_id_cannot_delete_a_later_review(tmp_path):
     import sqlite3
 

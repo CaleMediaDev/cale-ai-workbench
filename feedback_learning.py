@@ -60,6 +60,15 @@ def _connect(root: str | Path):
                     FROM feedback_legacy""")
                 conn.execute("DROP TABLE feedback_legacy")
                 conn.execute("CREATE INDEX feedback_kind ON feedback(kind, created DESC)")
+        # Retraction must not make a superseded generation current again.
+        # Keep only generation metadata here, never review text.
+        conn.execute("""CREATE TABLE IF NOT EXISTS feedback_latest_generation (
+            task_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
+        )""")
+        conn.execute("""INSERT INTO feedback_latest_generation (task_id,generation)
+            SELECT task_id,MAX(generation) FROM feedback GROUP BY task_id
+            ON CONFLICT(task_id) DO UPDATE SET generation=excluded.generation
+            WHERE excluded.generation>feedback_latest_generation.generation""")
         yield conn
         conn.commit()
     finally:
@@ -111,6 +120,12 @@ def record(root: str | Path, task: dict, rating: int, note: str = "") -> int:
              str(task.get("title", ""))[:200], str(task.get("brief", ""))[:4000],
              note, time.time()),
         )
+        conn.execute("""INSERT INTO feedback_latest_generation (task_id,generation)
+            VALUES (?,?) ON CONFLICT(task_id) DO UPDATE SET
+            generation=excluded.generation
+            WHERE excluded.generation>feedback_latest_generation.generation""",
+            (str(task["id"]), int(task.get("generation", 0))),
+        )
         return int(conn.execute("""SELECT id FROM feedback WHERE
             task_id=? AND generation=? AND rating=?""",
             (str(task["id"]), int(task.get("generation", 0)), rating)).fetchone()[0])
@@ -151,7 +166,7 @@ def guidance(root: str | Path, kind: str, request: str,
         rows = [dict(row) for row in conn.execute(
             "SELECT task_id,rating,title,brief,note,created FROM feedback AS candidate "
             "WHERE kind=? AND task_id!=? AND NOT EXISTS ("
-            "SELECT 1 FROM feedback AS newer "
+            "SELECT 1 FROM feedback_latest_generation AS newer "
             "WHERE newer.task_id=candidate.task_id "
             "AND newer.generation>candidate.generation) "
             "ORDER BY created DESC LIMIT 300",
