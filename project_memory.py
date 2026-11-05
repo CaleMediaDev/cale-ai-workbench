@@ -520,7 +520,7 @@ def verification_source_state(folder):
     import stat
     root = _artifact_project_root(folder)
     started=time.monotonic()
-    entries=[]; pending=[root]; directories=[]; total=consumed=visited=path_bytes=0
+    entries=[]; pending=[root]; directories=[]; files=[]; total=consumed=visited=path_bytes=0
     omitted=0; reasons=set(); exhausted=False; excluded_roots=[]; excluded_path_bytes=0
     excluded={'.git','__pycache__'}
     runtime={'.venv','venv','node_modules','Toolbox'}
@@ -604,6 +604,7 @@ def verification_source_state(folder):
                             limited('changed_file');continue
                         if complete:
                             total+=size;entries.append([relative,digest.hexdigest()])
+                            files.append((path,_verification_file_identity(after)))
                     except (OSError,ValueError):
                         limited('unavailable_path')
             after_directory=directory.stat(follow_symlinks=False)
@@ -621,6 +622,18 @@ def verification_source_state(folder):
             if unsafe(current) or _verification_file_identity(current)!=identity:
                 limited('changed_directory')
         except (OSError,ValueError):limited('unavailable_directory')
+    # Content edits do not change the parent directory's identity. Recheck each
+    # included file after all reads, so an early file edited while a later large
+    # asset streams cannot retain a complete-scope claim. This bounded metadata
+    # pass does not read content again and shares the original elapsed budget.
+    for path,identity in files:
+        if expired():limited('elapsed_budget');break
+        try:
+            current=path.stat(follow_symlinks=False)
+            if unsafe(current) or _verification_file_identity(current)!=identity:
+                limited('changed_file')
+        except (OSError,ValueError):limited('unavailable_path')
+    if expired():limited('elapsed_budget')
     if pending:omitted+=len(pending);reasons.add('unvisited_directories')
     # Name intentional runtime exclusions in the content identity. This scope
     # can be used only with a complete actual local dependency observation;

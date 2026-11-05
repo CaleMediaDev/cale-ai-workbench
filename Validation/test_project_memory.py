@@ -692,3 +692,93 @@ def test_application_source_exclusion_metadata_overflow_is_limited(tmp_path):
     observed=memory.verification_source_state(tmp_path)
     assert observed['scope']=='limited_dependency_manifest'
     assert 'excluded_runtime_budget' in observed['limitations']
+
+
+@pytest.mark.parametrize('runtime_excluded', [False, True])
+def test_verification_rechecks_earlier_file_after_later_asset_streams(tmp_path, monkeypatch, runtime_excluded):
+    """A normal content edit does not change its parent's directory identity."""
+    early = tmp_path / 'a.js'
+    later = tmp_path / 'z.bin'
+    early.write_bytes(b'const value=1;')
+    later.write_bytes(b'x' * (2 * 1024 * 1024))
+    if runtime_excluded:
+        (tmp_path / 'node_modules').mkdir()
+    baseline = memory.verification_source_state(tmp_path)
+    assert baseline['scope'] == ('application_source' if runtime_excluded else 'full_project_source')
+    parent_before = memory._verification_file_identity(tmp_path.stat())
+    source_before = early.stat()
+    original_open = Path.open
+    original_scandir = os.scandir
+    changed = []
+
+    class OrderedScan:
+        def __init__(self, path):
+            self.scan = original_scandir(path)
+        def __enter__(self):
+            return iter(sorted(self.scan, key=lambda item: item.name))
+        def __exit__(self, *args):
+            self.scan.close()
+
+    class Reader:
+        def __init__(self, stream):
+            self.stream = stream
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+        def fileno(self):
+            return self.stream.fileno()
+        def read(self, size):
+            data = self.stream.read(size)
+            if data and not changed:
+                changed.append(True)
+                with original_open(early, 'r+b') as writer:
+                    writer.write(b'const value=2;')
+                os.utime(early, ns=(source_before.st_atime_ns, source_before.st_mtime_ns + 1_000_000_000))
+            return data
+
+    def opened(path, mode='r', *args, **kwargs):
+        stream = original_open(path, mode, *args, **kwargs)
+        return Reader(stream) if path == later and mode == 'rb' else stream
+
+    monkeypatch.setattr(os, 'scandir', OrderedScan)
+    monkeypatch.setattr(Path, 'open', opened)
+    observed = memory.verification_source_state(tmp_path)
+    assert changed and memory._verification_file_identity(tmp_path.stat()) == parent_before
+    assert observed['sha256'] == baseline['sha256'], 'The streamed early bytes were the old snapshot'
+    assert observed['scope'] == 'limited_dependency_manifest', observed
+    assert 'changed_file' in observed['limitations']
+
+
+@pytest.mark.parametrize('failure', ['unavailable', 'elapsed'])
+def test_verification_final_file_recheck_fails_closed_without_reading_again(tmp_path, monkeypatch, failure):
+    from types import SimpleNamespace
+    source = tmp_path / 'source.js'
+    source.write_bytes(b'const value=1;')
+    original_stat = Path.stat
+    original_open = Path.open
+    stats = []
+    reads = []
+    clock = [0.0]
+
+    def stated(path, *args, **kwargs):
+        if path == source:
+            stats.append(path)
+            if len(stats) == 3:
+                if failure == 'unavailable':
+                    raise PermissionError('File became unavailable after hashing')
+                clock[0] = 61.0
+        return original_stat(path, *args, **kwargs)
+
+    def opened(path, mode='r', *args, **kwargs):
+        if path == source and mode == 'rb':
+            reads.append(path)
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'stat', stated)
+    monkeypatch.setattr(Path, 'open', opened)
+    monkeypatch.setattr(memory, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    observed = memory.verification_source_state(tmp_path)
+    assert len(stats) == 3 and reads == [source]
+    assert observed['scope'] == 'limited_dependency_manifest'
+    assert ('unavailable_path' if failure == 'unavailable' else 'elapsed_budget') in observed['limitations']
