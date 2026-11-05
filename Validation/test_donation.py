@@ -1999,9 +1999,15 @@ def test_typed_github_failure_is_shared_across_lanes_restart_and_expires(tmp_pat
     assert donation.settings(tmp_path)["sources"] == ["chatgpt"]
 
 
-def test_github_submission_failure_keeps_real_usage_and_never_claims_pr_success(tmp_path):
+@pytest.mark.parametrize("ledger_fails", [False, True])
+def test_github_submission_failure_keeps_real_usage_and_never_claims_pr_success(tmp_path, ledger_fails):
     donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
     service = donation.Service(tmp_path)
+    original_finish = donation.finish
+    def finish(root, run_id, status, *args):
+        if ledger_fails and status == "failed":
+            raise sqlite3.OperationalError("PRIVATE_FAILED_RECEIPT")
+        return original_finish(root, run_id, status, *args)
     def public(path, revision):
         return json.dumps([JOB]) if path == "donation-tasks.json" else SOURCES[path]
     def complete(payload, resource, intensity, cancel, receipt):
@@ -2014,14 +2020,15 @@ def test_github_submission_failure_keeps_real_usage_and_never_claims_pr_success(
          patch.object(donation, "public_file", side_effect=public), \
          patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT), \
          patch.object(donation, "complete_donation", side_effect=complete), \
-         patch("usage_history.record_completion"), \
+         patch("usage_history.record_completion"), patch.object(donation, "finish", side_effect=finish), \
          patch.object(donation, "open_proposal", side_effect=donation.GitHubRequestError("fork-create", 403, "http")):
         service._run(threading.Event())
     assert donation.total_tokens(tmp_path) == 50
     assert donation.resource_cooldown(tmp_path, "local") == 0
     assert "HTTP 403" in service.status_message()
+    assert ("database unavailable" in service.status_message()) is ledger_fails
     with closing(donation.connection(tmp_path)) as connection:
-        assert connection.execute("SELECT status,tokens,url FROM runs").fetchone() == ("failed", 50, "")
+        assert connection.execute("SELECT status,tokens,url FROM runs").fetchone() == ("received" if ledger_fails else "failed", 50, "")
         assert connection.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] == 1
     assert not any(event["phase"] == "submitted" for event in service.drain_events())
 
@@ -2136,3 +2143,71 @@ def test_non_github_service_errors_have_safe_static_category_without_account_coo
     assert donation.resource_cooldown(tmp_path, "chatgpt") == 0
     assert donation.github_diagnostic(tmp_path) == {}
     assert service.next_attempt > time.monotonic()
+
+
+def test_delayed_empty_github_hydration_cannot_erase_nested_lane_fresh_diagnosis(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    parent = donation.Service(tmp_path)
+    child = donation.Service(tmp_path, _lane=True, _resource="local", _events=parent._events)
+    parent.children = [child]
+    original = donation.github_diagnostic
+    interleaved = []
+    def snapshot(root, error=None):
+        stale = original(root, error)
+        if error is None and not interleaved:
+            interleaved.append(True)
+            child._run(threading.Event())
+        return stale
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "gh_api", side_effect=donation.GitHubRequestError("repository", 404, "http")) as github, \
+         patch.object(donation, "github_diagnostic", side_effect=snapshot):
+        parent._run(threading.Event())
+    assert interleaved and github.call_count == 1
+    assert "HTTP 404" in parent.status_message() and "repository access" in parent.status_message()
+    assert parent._events["github_diagnostic"]["status"] == 404
+    assert original(tmp_path)["status"] == 404
+
+
+def test_github_cache_publication_retains_fresh_write_on_equal_expiry_and_clears_expired(tmp_path):
+    service = donation.Service(tmp_path)
+    first = {"stage": "source", "status": 403, "kind": "http", "until": time.time()+100}
+    latest = {**first, "stage": "fork-create", "status": 404}
+    service._publish_github_diagnostic(first)
+    service._publish_github_diagnostic(latest, fresh=True)
+    assert service._publish_github_diagnostic(first)["status"] == 404
+    assert service._publish_github_diagnostic({})["status"] == 404
+    assert service._publish_github_diagnostic({**first, "until": first["until"]-1})["status"] == 404
+    observed = service._publish_github_diagnostic(
+        {**first, "until": first["until"]-1, "database_unavailable": True}, fresh=True)
+    assert observed["status"] == 404 and observed["database_unavailable"] is True
+    with patch.object(donation.time, "time", return_value=first["until"]+1):
+        assert service._publish_github_diagnostic({}) == {}
+
+
+def test_typed_github_error_with_failed_diagnostic_sql_retains_safe_cause_and_memory_backoff(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    service = donation.Service(tmp_path)
+    child = donation.Service(tmp_path, _lane=True, _resource="local", _events=service._events)
+    original = donation.github_diagnostic
+    def failed_write(root, error=None):
+        if error is not None:
+            raise sqlite3.OperationalError("PRIVATE_DIAGNOSTIC_SQL_PATH")
+        return original(root)
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "gh_api", side_effect=donation.GitHubRequestError("repository", 404, "http")) as github, \
+         patch.object(donation, "github_diagnostic", side_effect=failed_write), \
+         patch.object(donation, "complete_donation") as inference:
+        service._run(threading.Event())
+        child._run(threading.Event())
+    assert github.call_count == 1
+    inference.assert_not_called()
+    assert "database unavailable" in service.status_message() and "HTTP 404" in service.status_message()
+    assert "PRIVATE" not in service.status_message()
+    assert service.next_attempt > time.monotonic()
+    assert donation.resource_cooldown(tmp_path, "github") == 0  # No durable cooldown claimed.
+    assert original(tmp_path) == {}
+    assert donation.total_tokens(tmp_path) == 0

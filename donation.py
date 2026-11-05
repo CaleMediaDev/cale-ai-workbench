@@ -972,11 +972,36 @@ class Service:
         if not self.continuous:
             self.cancel.set()
 
+    def _publish_github_diagnostic(self, diagnostic, *, fresh=False):
+        """Do not let a delayed database read erase a newer shared error."""
+        now = time.time()
+        with self._events["lock"]:
+            current = self._events.get("github_diagnostic", {})
+            current_until = current.get("until", 0)
+            incoming_until = diagnostic.get("until", 0)
+            if (current_until <= now or incoming_until > current_until
+                    or fresh and incoming_until == current_until):
+                current = dict(diagnostic) if incoming_until > now else {}
+                self._events["github_diagnostic"] = current
+            elif fresh and diagnostic.get("database_unavailable"):
+                # Preserve the newer GitHub cause, but do not hide a fresh local
+                # bookkeeping failure merely because its fallback wait is shorter.
+                current = {**current, "database_unavailable": True}
+                self._events["github_diagnostic"] = current
+            return dict(current)
+
+    @staticmethod
+    def _github_diagnostic_message(diagnostic):
+        message = github_failure_message(diagnostic["stage"], diagnostic["status"], diagnostic["kind"])
+        if diagnostic.get("database_unavailable"):
+            message = "Contribution database unavailable · " + message
+        return message
+
     def status_message(self):
         active = sum(bool(worker.thread and worker.thread.is_alive()) for worker in [self, *self.children])
         with self._events["lock"]:
             diagnostic = dict(self._events.get("github_diagnostic", {}))
-        message = (github_failure_message(diagnostic["stage"], diagnostic["status"], diagnostic["kind"])
+        message = (self._github_diagnostic_message(diagnostic)
                    if diagnostic.get("until", 0) > time.time() else self.message)
         return (f"{active} review{'s' if active != 1 else ''} running · " if active else "") + message
 
@@ -1038,13 +1063,12 @@ class Service:
                 raise InterruptedError("Foreground activity paused donation work")
         try:
             check_cancel()
-            diagnostic = github_diagnostic(self.root)
-            with self._events["lock"]:
-                self._events["github_diagnostic"] = diagnostic
-            github_wait = resource_cooldown(self.root, "github")
+            diagnostic = self._publish_github_diagnostic(github_diagnostic(self.root))
+            github_wait = max(resource_cooldown(self.root, "github"),
+                              diagnostic.get("until", 0) - time.time())
             if github_wait:
                 self.next_attempt = time.monotonic() + github_wait
-                self.message = (github_failure_message(diagnostic["stage"], diagnostic["status"], diagnostic["kind"])
+                self.message = (self._github_diagnostic_message(diagnostic)
                                 if diagnostic else "GitHub is cooling down · preserving contribution work until it is available.")
                 return
             login = github_account.account()
@@ -1230,14 +1254,13 @@ class Service:
                     usage_recorded.add(event)
             # Another lane may have discovered a GitHub failure while this one
             # was collecting public files. Do not begin new inference in that wait.
-            github_wait = resource_cooldown(self.root, "github")
+            diagnostic = self._publish_github_diagnostic(github_diagnostic(self.root))
+            github_wait = max(resource_cooldown(self.root, "github"),
+                              diagnostic.get("until", 0) - time.time())
             if github_wait:
                 finish(self.root, run_id, "interrupted")
-                diagnostic = github_diagnostic(self.root)
-                with self._events["lock"]:
-                    self._events["github_diagnostic"] = diagnostic
                 self.next_attempt = time.monotonic() + github_wait
-                self.message = (github_failure_message(diagnostic["stage"], diagnostic["status"], diagnostic["kind"])
+                self.message = (self._github_diagnostic_message(diagnostic)
                                 if diagnostic else "GitHub is cooling down · retrying automatically.")
                 return
             try:
@@ -1302,14 +1325,25 @@ class Service:
             self.message = "Paused · your own work comes first."
             self.next_attempt = time.monotonic() + PROFILES[settings(self.root)["intensity"]]["idle"]
         except GitHubRequestError as error:
+            bookkeeping_failed = False
             if run_id:
-                finish(self.root, run_id, "failed")
-            diagnostic = github_diagnostic(self.root, error)
-            with self._events["lock"]:
-                self._events["github_diagnostic"] = diagnostic
+                try:
+                    finish(self.root, run_id, "failed")
+                except sqlite3.Error:
+                    bookkeeping_failed = True  # Do not invent a failed receipt.
+            try:
+                diagnostic = github_diagnostic(self.root, error)
+            except sqlite3.Error:
+                bookkeeping_failed = True
+                # This backoff is in-memory only; persistence was not confirmed.
+                diagnostic = {"stage": error.stage, "status": error.status,
+                              "kind": error.kind, "until": time.time() + 60}
+            if bookkeeping_failed:
+                diagnostic = {**diagnostic, "database_unavailable": True}
+            diagnostic = self._publish_github_diagnostic(diagnostic, fresh=True)
             self.next_attempt = time.monotonic() + max(1, diagnostic.get("until", time.time()+60)-time.time())
             self._emit_event("waiting", run_id, resource)
-            self.message = str(error)
+            self.message = self._github_diagnostic_message(diagnostic)
         except HTTPError as error:
             if run_id:
                 finish(self.root, run_id, "failed")
