@@ -14,6 +14,8 @@ import psutil
 from PIL import Image
 
 import avatar_video
+
+
 from camera_network import _local_stream
 from camera_presence import (
     VisitorState,
@@ -621,3 +623,56 @@ def test_native_uhd_frames_only_reduce_for_recognition_and_compact_preview():
     assert cv2.imencode.call_args.args[2]==[1,80]
     tiny=np.zeros((1,1281,3),dtype=np.uint8)
     assert cam.recognition_frame(tiny,cv2).shape==(1,960,3)
+
+def test_avatar_profile_checks_exact_sources_models_and_extra_executable_files(tmp_path, monkeypatch):
+    import hashlib
+    import pytest
+
+    source = tmp_path / "source/src"
+    source.mkdir(parents=True)
+    body = b"raise RuntimeError('verifier must not execute source')\n"
+    (source / "safe.py").write_bytes(body)
+    model = tmp_path / "models/tensor.bin"
+    model.parent.mkdir()
+    model.write_bytes(b"verified model fixture")
+    monkeypatch.setattr(avatar_video, "AVATAR_SOURCE_FILES", {"src/safe.py": {
+        "size": len(body), "blob": hashlib.sha1(b"blob " + str(len(body)).encode() + b"\0" + body).hexdigest()}})
+    monkeypatch.setattr(avatar_video, "AVATAR_MODEL_FILES", {"tensor.bin": {
+        "size": model.stat().st_size, "sha256": hashlib.sha256(model.read_bytes()).hexdigest()}})
+    assert avatar_video.verify_avatar_profile(tmp_path) == tmp_path.resolve()
+    extra = source / "__init__.py"
+    extra.write_text("raise RuntimeError('unverified initializer')", encoding="utf-8")
+    with pytest.raises(ValueError, match="unverified"):
+        avatar_video.verify_avatar_profile(tmp_path)
+    extra.unlink()
+    model.write_bytes(b"corrupted model bytes!")
+    with pytest.raises(ValueError):
+        avatar_video.verify_avatar_profile(tmp_path)
+
+
+def test_avatar_face_loss_returns_only_neutral_illustration_and_closed_returns_none():
+    import pytest
+
+    engine = avatar_video.CaleAvatar.__new__(avatar_video.CaleAvatar)
+    camera_ops = SimpleNamespace(COLOR_BGR2GRAY=1,
+        resize=lambda image, size: np.zeros((size[1], size[0], 3), dtype=np.uint8),
+        cvtColor=lambda image, _format: image[..., 0])
+    engine.closed, engine.np, engine.cv2 = False, np, camera_ops
+    engine.portrait = np.full((360, 880, 3), [10, 50, 90], dtype=np.uint8)
+    engine.detector = SimpleNamespace(detectMultiScale=lambda *_args, **_kwargs: [])
+    engine.last_detection = float("-inf")
+    engine.last_seen = float("-inf")
+    engine.last_box = None
+    camera = np.full((480, 640, 3), [255, 0, 0], dtype=np.uint8)
+    output = engine.render(camera, sequence=12)
+    assert np.array_equal(output, engine.portrait)
+    assert not np.shares_memory(output, camera)
+    with pytest.raises(ValueError):
+        engine.render(camera.astype(np.float32))
+    engine.closed = True
+    assert engine.render(camera) is None
+
+
+def test_neutral_avatar_is_the_illustrated_asset_not_a_capture():
+    pixels = avatar_video.neutral_camera_avatar()
+    assert pixels.dtype == np.uint8 and pixels.shape == (360, 880, 3)
