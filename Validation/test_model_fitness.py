@@ -41,6 +41,15 @@ def test_avatar_headroom_requires_matching_live_process_and_preserves_physical_g
     process.create_time = lambda: 100.0
     process.cmdline = lambda: ["python.exe", str(tmp_path / "different.py"), "--avatar"]
     assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
+    process.cmdline = lambda: ["python.exe", "-I", "-B", str(tmp_path / "video_generation.py"), "avatar-profile-probe"]
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 2
+    process.cmdline = lambda: ["python.exe", "-c", "print('avatar-profile-probe')"]
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
+    process.cmdline = lambda: ["python.exe", "-I", "-B", str(tmp_path / "video_generation.py"), "avatar-profile-probe"]
+    canonical = {**record, "reserved_bytes": 3 * 1024 ** 3}
+    (state / "avatar-gpu-current.json").write_text(json.dumps(canonical), encoding="utf-8")
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 3
+    (state / "avatar-gpu-current.json").unlink()
     marker.write_text("[]", encoding="utf-8")
     assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
     record["started"] = float("nan")
