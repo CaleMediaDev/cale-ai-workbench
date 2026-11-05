@@ -160,6 +160,29 @@ def total_tokens(root: Path = ROOT) -> int:
         return conn.execute("SELECT COALESCE(SUM(tokens),0) FROM runs").fetchone()[0]
 
 
+def token_snapshot(root: Path = ROOT) -> dict | None:
+    """Read one UI snapshot without creating/migrating a ledger or waiting on writers.
+
+    Legacy runs without a resource column retain their original ChatGPT
+    attribution. None means unavailable, not a fabricated zero-token reading.
+    Worker accounting and schema migrations continue through connection().
+    """
+    path = Path(root) / "LongTasks/donations.db"
+    try:
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=.01)) as conn:
+            deadline = time.monotonic() + .1
+            conn.set_progress_handler(lambda: time.monotonic() >= deadline, 1000)
+            conn.execute("BEGIN")
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+            group = "resource" if "resource" in columns else "'chatgpt'"
+            rows = conn.execute("SELECT " + group + ",COALESCE(SUM(tokens),0) FROM runs GROUP BY " + group).fetchall()
+        if any(type(tokens) is not int or tokens < 0 for _, tokens in rows):
+            return None
+        return {"total": sum(tokens for _, tokens in rows), "sources": dict(rows)}
+    except (OSError, sqlite3.Error):
+        return None
+
+
 def claim_run(root: Path, job: str, resource="chatgpt", intensity="slow", revision="", scope_sha="") -> str:
     """Atomically reserve an attempt under the selected intensity's rolling cap."""
     if resource not in SOURCES or intensity not in PROFILES:

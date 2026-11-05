@@ -2211,3 +2211,163 @@ def test_typed_github_error_with_failed_diagnostic_sql_retains_safe_cause_and_me
     assert donation.resource_cooldown(tmp_path, "github") == 0  # No durable cooldown claimed.
     assert original(tmp_path) == {}
     assert donation.total_tokens(tmp_path) == 0
+
+
+# UI counters must not acquire the worker/migration write lock on Tk.
+def counter_control(root):
+    import donation_ui
+    import queue
+    ui = object.__new__(donation_ui.Controls)
+    ui.service = SimpleNamespace(root=root)
+    ui.popup = None
+    ui.last_counter = 0
+    ui._counter_results = queue.Queue(maxsize=1)
+    ui._counter_worker = None
+    ui._counter_snapshot = None
+    owner = threading.get_ident()
+    class Variable:
+        def __init__(self, value): self.value = value
+        def set(self, value):
+            assert threading.get_ident() == owner, "worker touched Tk variable"
+            self.value = value
+    ui.counter = Variable("Total tokens donated: —")
+    ui.breakdown = Variable("Local: — · Free cloud: — · ChatGPT: —")
+    return ui
+
+
+def counter_ledger(root):
+    for source,tokens in (("local",50),("free_cloud",25),("chatgpt",75)):
+        run = donation.claim_run(root,"counter-"+source,source,"medium")
+        reply = {"model":"reported-fixture","usage":{"total_tokens":tokens}}
+        donation.record_result(root,run,reply,"main",source)
+        donation.record_result(root,run,reply,"main",source)
+    return {"total":150,"sources":{"local":50,"free_cloud":25,"chatgpt":75}}
+
+
+def test_token_snapshot_reads_committed_grouped_totals_under_wal_writer(tmp_path):
+    expected = counter_ledger(tmp_path)
+    with closing(sqlite3.connect(tmp_path/"LongTasks/donations.db")) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("UPDATE runs SET tokens=tokens+1000")
+        start = time.monotonic()
+        assert donation.token_snapshot(tmp_path) == expected
+        assert time.monotonic()-start < .25
+    assert donation.total_tokens(tmp_path) == expected["total"]
+    assert donation.source_totals(tmp_path) == expected["sources"]
+
+
+def test_token_snapshot_legacy_attribution_without_migration_and_missing_unavailable(tmp_path):
+    legacy = tmp_path/"legacy"
+    database = legacy/"LongTasks/donations.db"
+    database.parent.mkdir(parents=True)
+    with closing(sqlite3.connect(database)) as connection,connection:
+        connection.execute("CREATE TABLE runs(id TEXT PRIMARY KEY,started REAL,status TEXT,tokens INTEGER,model TEXT,url TEXT,job TEXT)")
+        connection.execute("INSERT INTO runs VALUES('old',1,'submitted',75,'model','','job')")
+    before = database.read_bytes()
+    assert donation.token_snapshot(legacy) == {"total":75,"sources":{"chatgpt":75}}
+    assert database.read_bytes() == before
+    assert donation.total_tokens(legacy) == 75  # Existing writer migration remains legitimate.
+    assert donation.source_totals(legacy) == {"chatgpt":75}
+    missing = tmp_path/"missing"
+    assert donation.token_snapshot(missing) is None
+    assert not missing.exists()
+    malformed = tmp_path/"broken"/"LongTasks/donations.db"
+    malformed.parent.mkdir(parents=True);malformed.write_bytes(b"not SQLite")
+    original = malformed.read_bytes()
+    assert donation.token_snapshot(malformed.parent.parent) is None
+    assert malformed.read_bytes() == original
+
+
+def test_actual_refresh_returns_without_waiting_for_real_wal_writer(tmp_path):
+    counter_ledger(tmp_path)
+    ui = counter_control(tmp_path)
+    held = threading.Event()
+    errors = []
+    def write():
+        try:
+            with closing(sqlite3.connect(tmp_path/"LongTasks/donations.db")) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("UPDATE runs SET tokens=tokens+1000")
+                held.set();time.sleep(.5);connection.rollback()
+        except Exception as error: errors.append(type(error).__name__);held.set()
+    worker = threading.Thread(target=write)
+    worker.start();assert held.wait(2)
+    try:
+        start = time.monotonic();ui.refresh();elapsed=time.monotonic()-start
+        assert elapsed < .2
+        assert ui._counter_worker is not None
+        ui._counter_worker.join(2)
+        ui.refresh()
+        assert ui.counter.value == "Total tokens donated: 150"
+        assert ui._counter_snapshot["sources"] == {"local":50,"free_cloud":25,"chatgpt":75}
+    finally: worker.join(2)
+    assert not errors
+
+
+def test_counter_probe_is_single_bounded_background_task_and_never_touches_tk(tmp_path):
+    import donation_ui
+    ui = counter_control(tmp_path)
+    entered = threading.Event();release = threading.Event();calls=[]
+    def slow(root):
+        calls.append(threading.get_ident());entered.set();release.wait(2)
+        return {"total":150,"sources":{"local":50,"free_cloud":25,"chatgpt":75}}
+    with patch.object(donation,"token_snapshot",side_effect=slow,create=True):
+        try:
+            start=time.monotonic();ui.refresh()
+            assert time.monotonic()-start < .2 and entered.wait(1)
+            first=ui._counter_worker
+            for _ in range(12):
+                ui.last_counter=0;ui.refresh()
+            assert calls == [first.ident] and first.ident != threading.get_ident()
+            assert ui.counter.value == "Total tokens donated: —"
+            assert ui._counter_results.maxsize == 1
+        finally: release.set()
+        first.join(2);ui.refresh()
+    assert ui.counter.value == "Total tokens donated: 150"
+
+
+def test_counter_unavailable_or_exception_keeps_last_good_without_fabricated_zero(tmp_path):
+    ui=counter_control(tmp_path)
+    good={"total":150,"sources":{"local":50,"free_cloud":25,"chatgpt":75}}
+    with patch.object(donation,"token_snapshot",return_value=good,create=True):
+        ui.refresh();ui._counter_worker.join(2);ui.refresh()
+    visible=(ui.counter.value,ui.breakdown.value)
+    for result in (None,sqlite3.OperationalError("private lock")):
+        with patch.object(donation,"token_snapshot",side_effect=result if isinstance(result,Exception) else None,return_value=result,create=True):
+            ui.last_counter=0;ui.refresh();ui._counter_worker.join(2);ui.refresh()
+        assert (ui.counter.value,ui.breakdown.value)==visible
+        assert ui._counter_snapshot==good
+
+
+
+def test_token_snapshot_keeps_one_schema_and_totals_snapshot_across_writer_commit(tmp_path):
+    expected = counter_ledger(tmp_path)
+    actual_connect = sqlite3.connect
+    committed = []
+    class SchemaCursor:
+        def __init__(self, cursor): self.cursor = cursor
+        def __iter__(self):
+            rows = self.cursor.fetchall()
+            if not committed:
+                with closing(actual_connect(tmp_path/"LongTasks/donations.db")) as writer,writer:
+                    writer.execute("UPDATE runs SET tokens=tokens+1000")
+                committed.append(True)
+            return iter(rows)
+    class Reader:
+        def __init__(self, connection): self.connection = connection
+        def execute(self, sql, *args):
+            cursor = self.connection.execute(sql,*args)
+            return SchemaCursor(cursor) if sql.startswith("PRAGMA table_info") else cursor
+        def set_progress_handler(self, *args): self.connection.set_progress_handler(*args)
+        def close(self): self.connection.close()
+    with patch.object(donation.sqlite3,"connect",side_effect=lambda *a,**k: Reader(actual_connect(*a,**k))):
+        assert donation.token_snapshot(tmp_path) == expected
+    assert committed
+    updated = donation.token_snapshot(tmp_path)
+    assert updated["total"] == 3150
+    assert updated["sources"] == {"local":1050,"free_cloud":1025,"chatgpt":1075}
+
+
+def test_token_snapshot_existing_empty_ledger_is_real_zero(tmp_path):
+    with closing(donation.connection(tmp_path)): pass
+    assert donation.token_snapshot(tmp_path) == {"total":0,"sources":{}}
