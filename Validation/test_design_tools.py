@@ -324,6 +324,42 @@ def test_kit_install_missing_source_does_not_leave_empty_destination(tmp_path, m
     assert not (destination / "LICENSE").exists()
 
 
+def test_kit_partial_copy_failure_allows_retry(tmp_path, monkeypatch):
+    import design_tools
+
+    kit = tmp_path / "kit"
+    (kit / "src").mkdir(parents=True)
+    component = b"complete bundled component"
+    (kit / "src/Message.astro").write_bytes(component)
+    (kit / "LICENSE").write_text("fixture license", encoding="utf-8")
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", kit)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text(
+        json.dumps({"dependencies": {"astro": "^5"}}), encoding="utf-8"
+    )
+    destination = project / "src/vendor/ai-ui"
+    real_copy = design_tools.shutil.copyfileobj
+
+    def fail_after_partial_write(input_stream, output):
+        output.write(input_stream.read(4))
+        raise OSError("simulated copy failure")
+
+    monkeypatch.setattr(design_tools.shutil, "copyfileobj", fail_after_partial_write)
+    with pytest.raises(OSError, match="simulated copy failure"):
+        add_astro_ai_ui(str(project))
+
+    assert not (destination / "Message.astro").exists()
+    assert not (destination / "LICENSE").exists()
+
+    monkeypatch.setattr(design_tools.shutil, "copyfileobj", real_copy)
+    assert add_astro_ai_ui(str(project))["files_added"] == 2
+    assert (destination / "Message.astro").read_bytes() == component
+    assert (destination / "LICENSE").read_text(encoding="utf-8") == "fixture license"
+    assert add_astro_ai_ui(str(project))["files_added"] == 0
+
+
 def test_conflict_does_not_copy_other_files(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"devDependencies": {"astro": "^5"}}), encoding="utf-8")
     existing = tmp_path / "src/vendor/ai-ui/components/ai-ui/Message.astro"
@@ -1412,3 +1448,79 @@ def test_pinned_preview_offline_cache_verifies_git_blob_and_never_calls_network(
         cache.write_bytes(b"x" * len(raw))
         assert game_library_ui.load_catalog_preview(game) is None
         network.assert_not_called()
+
+
+import shutil
+
+
+@pytest.fixture(params=["nt", "posix"])
+def ai_ui_copy_case(tmp_path, monkeypatch, request):
+    import os
+    import design_tools
+    from types import SimpleNamespace
+
+    bundled = tmp_path / "kit"
+    (bundled / "src").mkdir(parents=True)
+    (bundled / "src/Message.astro").write_bytes(b"complete bundled component")
+    (bundled / "LICENSE").write_text("fixture")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text('{"dependencies":{"astro":"*"}}')
+    copies = SimpleNamespace(copyfileobj=shutil.copyfileobj, copystat=shutil.copystat)
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", bundled)
+    monkeypatch.setattr(design_tools, "shutil", copies)
+    monkeypatch.setattr(design_tools, "os", SimpleNamespace(name=request.param, link=os.link))
+    return design_tools.add_astro_ai_ui, copies, project, project / "src/vendor/ai-ui/Message.astro", bundled
+
+
+def test_ai_ui_partial_copy_failure_leaves_no_target_and_allows_retry(ai_ui_copy_case):
+    install, copies, project, target, bundled = ai_ui_copy_case
+
+    def fail(source, output):
+        output.write(b'partial')
+        raise OSError('copy failed')
+    copies.copyfileobj = fail
+    with pytest.raises(OSError, match='copy failed'):
+        install(str(project))
+    assert not target.exists() and (not list(target.parent.glob('.cale-ai-ui-*')))
+    copies.copyfileobj = shutil.copyfileobj
+    assert install(str(project))['files_added'] == 2
+    assert target.read_bytes() == b'complete bundled component'
+    assert install(str(project))['files_added'] == 0
+
+def test_ai_ui_user_target_created_during_failed_copy_is_preserved(ai_ui_copy_case):
+    install, copies, project, target, bundled = ai_ui_copy_case
+    failure = OSError('copy failed')
+
+    def fail(source, output):
+        output.write(b'partial')
+        target.write_bytes(b'user content')
+        raise failure
+    copies.copyfileobj = fail
+    with pytest.raises(OSError) as caught:
+        install(str(project))
+    assert caught.value is failure and target.read_bytes() == b'user content'
+    assert not list(target.parent.glob('.cale-ai-ui-*'))
+
+def test_ai_ui_user_target_created_before_publication_is_never_overwritten(ai_ui_copy_case):
+    install, copies, project, target, bundled = ai_ui_copy_case
+
+    def race(source, output):
+        shutil.copyfileobj(source, output)
+        target.write_bytes(b'user content')
+    copies.copyfileobj = race
+    with pytest.raises(FileExistsError):
+        install(str(project))
+    assert target.read_bytes() == b'user content' and (not (target.parent / 'LICENSE').exists())
+
+def test_ai_ui_failed_metadata_copy_never_publishes_a_target(ai_ui_copy_case):
+    install, copies, project, target, bundled = ai_ui_copy_case
+    failure = OSError('metadata failed')
+
+    def fail(*args):
+        raise failure
+    copies.copystat = fail
+    with pytest.raises(OSError) as caught:
+        install(str(project))
+    assert caught.value is failure and (not target.exists())
+    assert (bundled / 'src/Message.astro').read_bytes() == b'complete bundled component'
