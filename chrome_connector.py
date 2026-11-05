@@ -27,7 +27,7 @@ def installed_version() -> str:
         if not line.lstrip().startswith("#")
         and not re.fullmatch(r"(?:---|\.\.\.)(?:[ \t]+#[^\r\n]*)?[ \t]*", line)
     )
-    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]*(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", dedent(mapping_lines), re.M)
+    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]+(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", dedent(mapping_lines), re.M)
     return match.group(2) if match else ""
 
 

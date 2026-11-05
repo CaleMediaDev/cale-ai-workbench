@@ -635,7 +635,7 @@ def say(message, rate=0, cancel=None, require_clone=False):
                     if cached.is_file() and cached.stat().st_size > 1000:
                         try:
                             _play_file(cached, cancel)
-                        except (OSError, EOFError, wave.Error):
+                        except (OSError, EOFError, wave.Error, RuntimeError):
                             pass  # Regenerate an unusable cached acknowledgement.
                         else:
                             return {"path": str(cached), "engine": "Cale's local voice (cached)"}

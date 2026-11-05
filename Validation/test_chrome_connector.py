@@ -172,6 +172,23 @@ def test_installed_version_does_not_strip_attached_hash(tmp_path, monkeypatch):
     assert chrome_connector.installed_version() == ""
 
 
+@pytest.mark.parametrize("contents", [
+    "version:0.2.6\n",
+    'version:"0.2.6"\n',
+    "version:'0.2.6'\n",
+])
+def test_installed_version_rejects_scalar_without_mapping_separator(
+    tmp_path, monkeypatch, contents
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text(contents, encoding="utf-8")
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    # Without whitespace after the colon, this is a scalar, not a mapping.
+    assert chrome_connector.installed_version() == ""
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
