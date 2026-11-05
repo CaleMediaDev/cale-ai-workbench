@@ -203,6 +203,27 @@ def test_history_growth_is_bounded_at_read_and_oversized_bytes_are_not_decoded(t
     assert history.stat().st_size < 32000 and marker not in history.read_text()
 
 
+def test_overflowing_running_metadata_does_not_prevent_replacement_launch(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    report_path = state / "self-check.json"
+    for metadata in (
+            {"pid": float("inf"), "process_started": 100},
+            {"pid": 123, "process_started": 10 ** 1000}):
+        report_path.write_text(json.dumps({
+            "version": diagnostics.version(root), "status": "running",
+            **metadata}), encoding="utf-8")
+        with patch.object(diagnostics, "active_projects", return_value=False), patch.object(
+                diagnostics.subprocess, "Popen", return_value=SimpleNamespace(pid=456)) as launch, patch(
+                "psutil.Process") as process:
+            process.return_value.create_time.return_value = 100
+            assert diagnostics.schedule(root, state, now=100)
+        launch.assert_called_once()
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        assert report["status"] == "running"
+        assert report["pid"] == 456
+        assert report["process_started"] == 100
+
+
 class SelfDiagnosticsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

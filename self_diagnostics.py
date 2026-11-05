@@ -254,7 +254,7 @@ def _running(report: dict) -> bool:
         return (abs(process.create_time() - float(report["process_started"])) < 2
                 and Path(__file__).resolve() in
                 [Path(arg).resolve() for arg in process.cmdline()[1:] if arg.endswith("self_diagnostics.py")])
-    except (KeyError, TypeError, ValueError, OSError, psutil.Error):
+    except (KeyError, TypeError, ValueError, OverflowError, OSError, psutil.Error):
         return False
 
 
