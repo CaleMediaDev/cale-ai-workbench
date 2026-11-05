@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.524 removes GitHub author-search dependency from donation discovery, fixing the reproduced HTTP422 proposal-search failure. Complete pull listings retain duplicate-work checks and saved draft accounting. Chrome manifest recognition and the camera self-check fixture are also corrected. [Validation and limits](benchmarks/results/proposal-discovery-524-20261105.json).
+
 Release 0.5.523 saves finished donation drafts across connection failures and restarts, avoids duplicate submissions after uncertain responses, and keeps token counters responsive. The donation panel can stay open during automatic updates once account connections finish. [Validation and limits](benchmarks/results/durable-donation-523-20261105.json).
 
 Release 0.5.522 explains donation failures by GitHub step/status or local worker category, shares GitHub cooldowns across lanes, and fixes installed self-check fixture dependencies. The installer and installed checks share the actual connection callbacks. [Validation and limits](benchmarks/results/reliability-donation-522-20261105.json).
