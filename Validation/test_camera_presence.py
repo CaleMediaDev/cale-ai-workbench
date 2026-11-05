@@ -1099,6 +1099,42 @@ def test_avatar_mode_blocks_raw_camera_tools_before_capture_or_files(tmp_path,mo
     with unittest.TestCase().assertRaisesRegex(ValueError,'cannot be checked'):media_worker.require_raw_camera_mode()
 
 
+def test_avatar_startup_failure_releases_capture_and_recognition_worker(monkeypatch):
+    import camera_presence as camera
+    import sys
+
+    capture = Mock()
+    capture.isOpened.return_value = True
+    cascade = SimpleNamespace(empty=lambda: False)
+    cv2 = SimpleNamespace(
+        data=SimpleNamespace(haarcascades='.'),
+        CascadeClassifier=lambda *_: cascade,
+        VideoCapture=lambda *_: capture,
+        CAP_DSHOW=0,
+    )
+    monkeypatch.setitem(sys.modules, 'cv2', cv2)
+    monkeypatch.setitem(sys.modules, 'camera_network', SimpleNamespace(
+        camera_source=lambda value: value, greeting_camera=lambda: 0))
+    monkeypatch.setitem(sys.modules, 'face_identity', SimpleNamespace(
+        ENROLL_REQUEST=Mock(), FaceModel=Mock(), enroll=Mock()))
+    monkeypatch.setattr(camera, 'allowed', lambda: True)
+    monkeypatch.setattr(camera, 'owner_alive', lambda *_: True)
+    monkeypatch.setattr(camera, 'negotiate_capture', lambda *_: {
+        'width': 8, 'height': 8, 'fps': 30})
+    recognition = Mock()
+    monkeypatch.setattr(camera, 'LatestFrameWorker', lambda *_: recognition)
+    monkeypatch.setattr(camera, 'AvatarFrameWorker', Mock(
+        side_effect=RuntimeError('avatar thread startup failed')))
+    monkeypatch.setattr(camera, 'emit', Mock())
+
+    with pytest.raises(RuntimeError, match='avatar thread startup failed'):
+        camera.watch(avatar=True)
+
+    capture.release.assert_called_once_with()
+    recognition.close.assert_called_once_with()
+    capture.read.assert_not_called()
+
+
 def test_avatar_watch_has_one_capture_owner_and_no_raw_preview(monkeypatch,tmp_path):
     import camera_presence as cam,sys
     enabled=[True];frame=np.full((8,8,3),99,dtype=np.uint8);reads=[];received=[];closed=[]

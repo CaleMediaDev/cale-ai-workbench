@@ -756,12 +756,13 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
             emit("visitor", greeting_line([None]))
     negotiated = negotiate_capture(camera, cv2, isinstance(source, int))
     worker = LatestFrameWorker(recognize)
-    avatar_worker = AvatarFrameWorker(ROOT/"Media/avatar/v1",parent_pid,parent_started,virtual_output) if avatar else None
-    dimensions = (f"{int(negotiated['width'])}×{int(negotiated['height'])}" if negotiated['width'] and negotiated['height'] else "resolution unreported")
-    fps = f"{negotiated['fps']:g} driver-reported fps" if negotiated['fps'] else "fps unreported"
-    mode = "Native 4K requested; device fallback is shown" if isinstance(source, int) else "Network camera native format"
-    emit("ready", f"Camera on · {dimensions} · {fps}. {mode}. Local only; no video saved.")
+    avatar_worker = None
     try:
+        avatar_worker = AvatarFrameWorker(ROOT/"Media/avatar/v1",parent_pid,parent_started,virtual_output) if avatar else None
+        dimensions = (f"{int(negotiated['width'])}×{int(negotiated['height'])}" if negotiated['width'] and negotiated['height'] else "resolution unreported")
+        fps = f"{negotiated['fps']:g} driver-reported fps" if negotiated['fps'] else "fps unreported"
+        mode = "Native 4K requested; device fallback is shown" if isinstance(source, int) else "Network camera native format"
+        emit("ready", f"Camera on · {dimensions} · {fps}. {mode}. Local only; no video saved.")
         failed_reads = 0
         last_preview = 0.0
         first_frame = True
