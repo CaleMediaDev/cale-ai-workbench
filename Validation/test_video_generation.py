@@ -725,6 +725,41 @@ def test_avatar_setup_probe_cancel_reaps_owned_child(tmp_path,monkeypatch):
     assert '-B' in launched[0][0] and launched[0][1]['env']['PYTHONDONTWRITEBYTECODE']=='1'
 
 
+@pytest.mark.parametrize("chunk_size", [1, 3])
+def test_avatar_virtual_sender_accepts_fragmented_frames(monkeypatch, chunk_size):
+    import io, struct, types
+    from PIL import Image
+
+    sent = []
+    closed = []
+
+    class Camera:
+        def __init__(self, **kwargs):pass
+        def __enter__(self):return self
+        def __exit__(self, *_):closed.append(True)
+        def send(self, frame):sent.append(frame)
+
+    class FragmentedStream(io.BytesIO):
+        def read(self, size=-1):
+            return super().read(min(size, chunk_size))
+
+    monkeypatch.setitem(sys.modules, 'pyvirtualcam', types.SimpleNamespace(
+        Camera=Camera, PixelFormat=types.SimpleNamespace(RGB='RGB')))
+    encoded = io.BytesIO()
+    Image.new('RGB', (16, 16), (120, 80, 40)).save(encoded, format='JPEG')
+    raw = encoded.getvalue()
+    packet = struct.pack('!I', len(raw)) + raw
+
+    assert video_generation.virtual_avatar_sender(FragmentedStream(packet * 2)) == 0
+    assert len(sent) == 2
+    assert all(frame.shape == (1080, 1920, 3) for frame in sent)
+    assert closed == [True]
+    with pytest.raises(ValueError, match='Incomplete avatar frame header'):
+        video_generation.virtual_avatar_sender(FragmentedStream(packet[:3]))
+    with pytest.raises(ValueError, match='Incomplete avatar frame\\.'):
+        video_generation.virtual_avatar_sender(FragmentedStream(packet[:-1]))
+
+
 def test_avatar_virtual_sender_letterboxes_native_scene_without_stretch(monkeypatch):
     import io,struct,types,numpy as np
     from PIL import Image
