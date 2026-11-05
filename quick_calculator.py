@@ -243,7 +243,15 @@ def run_helper(definition: dict, inputs: dict):
         if operations > 512 or depth > 24:
             raise ValueError('Helper exceeds its operation/depth budget.')
         child = lambda value: evaluate(value, depth + 1)
-        if isinstance(node, ast.Constant): return node.value
+        if isinstance(node, ast.Constant):
+            if type(node.value) is float:
+                # Preserve the literal's decimal spelling, not Python's rounded float.
+                literal = Decimal(ast.get_source_segment(definition['expression'], node))
+                # Bound scaling before constructing a potentially huge Fraction.
+                if not literal.is_finite() or abs(literal.as_tuple().exponent) > 100:
+                    raise ValueError('Decimal literal exceeds the helper arithmetic limit.')
+                return _bounded(Fraction(literal))
+            return node.value
         if isinstance(node, ast.Name):
             if node.id not in environment: raise ValueError('Primitive names are only allowed in fixed calls.')
             return environment[node.id]
