@@ -113,10 +113,31 @@ try {
  Write-SetupStatus 25 'Installing tools and browser support'
  New-Item -ItemType Directory -Path $box -Force | Out-Null
  $toolPython=Join-Path $box 'python/Scripts/python.exe'
+$media=Join-Path $Destination 'Media'
+$mediaPython=Join-Path $media 'python/Scripts/python.exe'
+$needToolPython=-not (Test-CaleRunnable $toolPython @('-V'))
+$needMediaPython=-not (Test-CaleRunnable $mediaPython @('-V'))
+if ($needToolPython -or $needMediaPython) {
+  # Do this before opening the GUI, including resumed partial installations.
+  # A healthy old environment is not migrated here; that needs coordinated
+  # maintenance across all launchers and scheduled restarts.
+  Assert-CaleRuntimeCreationIdle $Destination
+  $ownedArchive=Download-Verified $pins.owned_python.url $pins.owned_python.sha256 'cale-python-3.13.18-20261026.tar.gz'
+  $ownedPython=Initialize-CaleOwnedPython $Destination $ownedArchive $runtime $pins.owned_python
+}
  if (-not (Test-CaleRunnable $toolPython @('-V'))) {
+  Assert-CaleRuntimeCreationIdle $Destination
    Reset-CaleManagedDirectory $Destination (Join-Path $box 'python')
-   & $runtime -m venv (Join-Path $box 'python')
+  & $ownedPython -I -m venv (Join-Path $box 'python')
    if ($LASTEXITCODE -ne 0) { throw 'Could not create the tool runtime.' }
+ }
+ # Both bases must exist before Setup.ps1 can open a pending connection at38%.
+ New-Item -ItemType Directory -Path $media -Force | Out-Null
+ if (-not (Test-CaleRunnable (Join-Path $media 'python/Scripts/python.exe') @('-V'))) {
+  Assert-CaleRuntimeCreationIdle $Destination
+   Reset-CaleManagedDirectory $Destination (Join-Path $media 'python')
+  & $ownedPython -I -m venv (Join-Path $media 'python')
+   if ($LASTEXITCODE -ne 0) { throw 'The media environment failed to initialize.' }
  }
  $python=Join-Path $box 'python/Scripts/python.exe'
  if (-not (Test-CaleRunnable $python @('-V'))) { throw 'The tool Python runtime did not start.' }
@@ -208,31 +229,15 @@ try {
  if ($LASTEXITCODE -ne 0) { throw 'Local Chrome companion installation failed.' }
  New-Item -ItemType Directory -Path (Join-Path $Destination 'Updates') -Force | Out-Null
  [IO.File]::WriteAllText((Join-Path $Destination 'Updates/features-0.5.16.done'),'Crawl4AI 0.9.5; Hermes Connector 0.2.6')
- if (-not $NoLaunch) {
-   Start-Process (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'long_tasks.py')+'"') -WindowStyle Normal
- }
  Write-SetupStatus 42 'Installing local image and voice tools'
  $env:GHIDRA_INSTALL_DIR=Join-Path $box 'ghidra_12.1.4_PUBLIC'; $env:JAVA_HOME=Join-Path $box 'jdk-21.0.13+9'
  $env:NODE_PATH=Join-Path $box 'node_modules'
  $env:PATH=(Join-Path $box 'node_modules/.bin')+';'+$env:PATH
- $media=Join-Path $Destination 'Media'
- New-Item -ItemType Directory -Path $media -Force | Out-Null
- if (-not (Test-CaleRunnable (Join-Path $media 'python/Scripts/python.exe') @('-V'))) {
-   Reset-CaleManagedDirectory $Destination (Join-Path $media 'python')
-   $uvArchive=Download-Verified $pins.uv.url $pins.uv.sha256 'uv-win64.zip'
-   $uvFolder=Join-Path $media 'uv'
-   New-Item -ItemType Directory -Path $uvFolder -Force | Out-Null
-   Expand-Archive -LiteralPath $uvArchive -DestinationPath $uvFolder -Force
-   $uv=Join-Path $uvFolder 'uv.exe'
-   $env:UV_PYTHON_INSTALL_DIR=Join-Path $media 'runtime'
-   $env:UV_CACHE_DIR=Join-Path $media 'uv-cache'
-   & $uv python install '3.13'
-   if ($LASTEXITCODE -ne 0) { throw 'The media Python runtime failed to install.' }
-   & $uv venv --python '3.13' --seed (Join-Path $media 'python')
-   if ($LASTEXITCODE -ne 0) { throw 'The media environment failed to initialize.' }
- }
  $mediaPython=Join-Path $media 'python/Scripts/python.exe'
  if (-not (Test-CaleRunnable $mediaPython @('-V'))) { throw 'The media Python runtime did not start.' }
+if (-not $NoLaunch) {
+  Start-Process (Join-Path $box 'python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $Destination 'long_tasks.py')+'"') -WindowStyle Normal
+}
  Write-Output 'Installing local image, voice, vision, video and training tools...'
  & $mediaPython -m pip install --disable-pip-version-check --extra-index-url https://download.pytorch.org/whl/cu128 -r (Join-Path $Destination 'media-requirements.txt')
  if ($LASTEXITCODE -ne 0) { throw 'Media tool installation failed.' }
