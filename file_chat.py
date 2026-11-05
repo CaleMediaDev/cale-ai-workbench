@@ -55,7 +55,7 @@ def select_excerpt(text: str, question: str, limit: int = 12000, subject: str = 
         hints.append(max(0, len(chunks) - 2))
     if re.search(r"\b(start|beginning|first|intro)\b", question, re.I):
         hints.append(min(1, len(chunks) - 1))
-    if summary or not any(scores):
+    if summary or not any(scores) or not hints:
         priority = [*hints, 0, len(chunks) - 1, len(chunks) // 3,
                     2 * len(chunks) // 3]
     else:
