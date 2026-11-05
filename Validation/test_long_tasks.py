@@ -3576,3 +3576,62 @@ return update_side_preview, inspect_preview
         assert not label.cget("image") and "could not be loaded" in label.cget("text")
     finally:
         window.destroy()
+
+
+def test_compact_task_cards_reflow_and_keep_original_action_routes(tmp_path):
+    import ast
+    import tkinter as tk
+    from tkinter import ttk
+    from unittest.mock import Mock
+    tree=ast.parse((ROOT/'long_tasks.py').read_text(encoding='utf-8'))
+    wanted={'layout_task_cards','create_task_card','update_task_controls','update_progress_card','set_text'}
+    nodes={n.name:n for n in ast.walk(tree) if isinstance(n,ast.FunctionDef) and n.name in wanted}
+    root=tk.Tk();root.geometry('1440x900');grid=ttk.Frame(root);grid.pack(fill='both',expand=True)
+    items=[{'id':str(i),'title':'A deliberately long task title '*8,'brief':'camera' if i==0 else '',
+            'detail':'Private detail remains in the existing dialog','status':status,'music':i==1}
+           for i,status in enumerate(['working','accepted','needs_input'])]
+    actions=[];details=[]
+    namespace={'tk':tk,'ttk':ttk,'card':'#151d26','text':'#eef7ff','task_grid':grid,
+       'task_cards':{},'task_order':[p['id'] for p in items],'window':root,
+       'main_canvas':Mock(winfo_width=lambda:root.winfo_width()-80),'ROOT':tmp_path,'time':time,
+       'read_task_status':lambda _: {},'task_controls_for':task_module.task_controls_for,
+       'music_job_id':lambda p:p.get('music'),'standalone_audio_project':lambda _:False,
+       'task_action':lambda pid,action:actions.append((pid,action)),'task_details':lambda p:details.append(p['id']),
+       'projects':lambda:items}
+    try:
+        for name in wanted:exec(compile(ast.Module(body=[nodes[name]],type_ignores=[]),str(ROOT/'long_tasks.py'),'exec'),namespace)
+        for item in items:
+            info=namespace['create_task_card'](item['title']);namespace['task_cards'][item['id']]=info
+            namespace['update_progress_card'](info,37,'A very long current step '*50,item['status'])
+            namespace['update_task_controls'](info,item)
+        for width,columns in [(1440,3),(1050,2),(760,1)]:
+            root.geometry(f'{width}x900');root.update()
+            namespace['layout_task_cards']();root.update()
+            entries=list(namespace['task_cards'].values())
+            assert len({entry['panel'].grid_info()['column'] for entry in entries})==columns
+            assert len({entry['panel'].winfo_height() for entry in entries})==1
+            assert all(entry['panel'].winfo_height()<220 for entry in entries)
+        working=namespace['task_cards']['0'];finished=namespace['task_cards']['1'];needs=namespace['task_cards']['2']
+        for button in working['controls'].winfo_children():button.invoke()
+        assert actions==[('0','stop'),('0','pause'),('0','delete')]
+        for button in finished['controls'].winfo_children():button.invoke()
+        assert actions[-2:]==[('1','reuse'),('1','delete')]
+        for entry in [working,finished,needs]:
+            menu=entry['menu'];labels=[menu.entrycget(i,'label') for i in range(menu.index('end')+1)]
+            menu.invoke(labels.index('Open files'));menu.invoke(labels.index('Details'))
+            assert actions[-1][1]=='open'
+        assert details==['0','1','2']
+        labels=[finished['menu'].entrycget(i,'label') for i in range(finished['menu'].index('end')+1)]
+        assert 'Play song' in labels and 'Share to Facebook' in labels
+        labels=[needs['menu'].entrycget(i,'label') for i in range(needs['menu'].index('end')+1)]
+        assert 'Delete' in labels
+    finally:root.destroy()
+
+
+def test_task_card_missing_legacy_time_never_looks_like_decades_of_work():
+    for value in (None,0,-1,'not a timestamp',float('inf')):
+        assert task_module.task_card_elapsed({'created':value})=='Time unavailable'
+    with patch.object(task_module.task_eta,'total_time',return_value='2m 10s') as actual:
+        item={'created':time.time()-130,'updated':time.time(),'status':'accepted','finished':time.time()}
+        assert task_module.task_card_elapsed(item)=='2m 10s'
+        actual.assert_called_once_with(item['created'],item['updated'],item['status'],finished=item['finished'])
