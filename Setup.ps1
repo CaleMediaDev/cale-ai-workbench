@@ -83,28 +83,6 @@ $connectionHint=New-Object Windows.Forms.Label
 $connectionHint.Text='Use your own accounts. Cale also works with local AI.'
 $connectionHint.ForeColor=$muted
 $connectionHint.SetBounds(26,402,708,40); $form.Controls.Add($connectionHint)
-function Open-CaleAiConnection([string]$Provider) {
-    if($Provider -notin @('chatgpt','claude','grok','openrouter')) { return }
-    if($Preview) { $connectionHint.Text='Your browser sign-in will open here.'; return }
-    $script:pendingConnection=$Provider
-    if(-not $script:connectionReady) {
-        $connectionHint.Text='Selected '+$Provider+'. Start Install; we will open its connection as soon as the account screen is ready.'
-        return
-    }
-    try {
-        $stateFolder=Join-Path $path.Text 'LongTasks'
-        [IO.Directory]::CreateDirectory($stateFolder) | Out-Null
-        $requestPath=Join-Path $stateFolder 'open-supercharge'
-        $requestTemp=$requestPath+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
-        [IO.File]::WriteAllText($requestTemp,$Provider)
-        Move-Item -LiteralPath $requestTemp -Destination $requestPath -Force
-        Start-Process -FilePath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $path.Text 'long_tasks.py')+'"') -WindowStyle Normal
-        $script:pendingConnection=''
-        $connectionHint.Text='Finish the connection in Cale. Installation keeps running here.'
-    } catch {
-        $connectionHint.Text='The account screen is not ready yet. We will try again while setup continues.'
-    }
-}
 $connectionButtons=@()
 $connectionProviders=@('chatgpt','claude','grok','openrouter')
 $connectionLabels=@('Connect ChatGPT','Connect Claude','Connect Grok','Connect OpenRouter')
@@ -152,11 +130,7 @@ $timer.Add_Tick({
                 $percent.Text=[string]$bar.Value+'%'
                 if($state.status -eq 'working'){$stage.Text=[string]$state.current}
                 else {$stage.Text='Finishing setup and checking everything'}
-                if([int]$state.percent -ge 38 -and (Test-Path -LiteralPath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe'))){
-                    $script:connectionReady=$true
-                    if($script:pendingConnection){Open-CaleAiConnection $script:pendingConnection}
-                    $notice.Text='While downloads continue, you can connect ChatGPT, Claude, Grok or OpenRouter. This is optional; Cale also works locally.'
-                }
+                Update-CaleAiConnectionReadiness ([int]$state.percent)
             }
         } catch { } # The next timer tick retries a temporarily busy status file.
     }
@@ -178,9 +152,7 @@ $install.Add_Click({
     $install.Text='Installing...'; $install.Enabled=$false
     if($Preview){
         $stage.Text='Downloading your AI models';$percent.Text='42%';$bar.Value=42
-        $script:connectionReady=$true
-                    if($script:pendingConnection){Open-CaleAiConnection $script:pendingConnection}
-        $notice.Text='While downloads continue, you can connect ChatGPT, Claude, Grok or OpenRouter. This is optional; Cale also works locally.'
+        Update-CaleAiConnectionReadiness 42
         return
     }
     $install.Enabled=$false; $open.Enabled=$false

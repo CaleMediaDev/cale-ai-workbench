@@ -269,3 +269,43 @@ function Confirm-CaleOwnedEnvironmentCreation([string]$Destination,[string]$Rela
     $environment=Get-CalePlainOwnedPath $Destination $Relative
     [IO.File]::Move((Join-Path $environment '.cale-owned-runtime.pending'),(Join-Path $environment '.cale-owned-runtime.qualified'))
 }
+
+# Setup's connection actions also live in the installed helper so the shipped
+# self-check exercises exactly the same callback as the optional installer UI.
+# These functions use Setup's existing path/hint/notice objects and script state.
+function Open-CaleAiConnection([string]$Provider) {
+    if($Provider -notin @('chatgpt','claude','grok','openrouter')) { return }
+    if($Preview) { $connectionHint.Text='Your browser sign-in will open here.'; return }
+    $script:pendingConnection=$Provider
+    if(-not $script:connectionReady) {
+        $connectionHint.Text='Selected '+$Provider+'. Start Install; we will open its connection as soon as the account screen is ready.'
+        return
+    }
+    try {
+        $stateFolder=Join-Path $path.Text 'LongTasks'
+        [IO.Directory]::CreateDirectory($stateFolder) | Out-Null
+        $requestPath=Join-Path $stateFolder 'open-supercharge'
+        $requestTemp=$requestPath+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
+        [IO.File]::WriteAllText($requestTemp,$Provider)
+        Move-Item -LiteralPath $requestTemp -Destination $requestPath -Force
+        Start-Process -FilePath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe') -ArgumentList ('"'+(Join-Path $path.Text 'long_tasks.py')+'"') -WindowStyle Normal
+        $script:pendingConnection=''
+        $connectionHint.Text='Finish the connection in Cale. Installation keeps running here.'
+    } catch {
+        $connectionHint.Text='The account screen is not ready yet. We will try again while setup continues.'
+    }
+}
+
+function Update-CaleAiConnectionReadiness([int]$Percent) {
+    if($Percent -lt 38) { return }
+    if(-not $Preview) {
+        foreach($relative in @('Toolbox/python/Scripts/python.exe',
+                               'Toolbox/python/Scripts/pythonw.exe',
+                               'Media/python/Scripts/python.exe')) {
+            if(-not(Test-Path -LiteralPath (Join-Path $path.Text $relative) -PathType Leaf)) { return }
+        }
+    }
+    $script:connectionReady=$true
+    if($script:pendingConnection) { Open-CaleAiConnection $script:pendingConnection }
+    $notice.Text='While downloads continue, you can connect ChatGPT, Claude, Grok or OpenRouter. This is optional; Cale also works locally.'
+}

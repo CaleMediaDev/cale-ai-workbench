@@ -279,9 +279,6 @@ $failed=$false;try {$null=Initialize-CaleOwnedPython $env:CALE_OWNED_ROOT $env:C
         # Bootstrap/download/venv/probe/idle operations use TEMP fixtures; the
         # Start-Process stub checks readiness without opening a real GUI.
         prefix=prefix.replace("& $ownedPython -I -m venv", "New-TestVenv")
-        setup=(ROOT/"Setup.ps1").read_text(encoding="utf-8")
-        opener=setup[setup.index("function Open-CaleAiConnection("):setup.index("$connectionButtons=@()")]
-        ready=setup[setup.index("                if([int]$state.percent -ge 38"):setup.index("\n            }",setup.index("                if([int]$state.percent -ge 38"))]
         for partial in [False,True]:
             with self.subTest(partial=partial),tempfile.TemporaryDirectory() as temp:
                 root=Path(temp)/"Cale";root.mkdir()
@@ -305,9 +302,8 @@ function Start-Process {param($FilePath,$ArgumentList,$WindowStyle)
  if(-not(Test-Path -LiteralPath (Join-Path $Destination 'Toolbox/python/Scripts/python.exe')) -or -not(Test-Path -LiteralPath (Join-Path $Destination 'Media/python/Scripts/python.exe'))){throw 'Pending connection launched before both venvs existed'}
  $script:launched=$true
 }
-"""+opener+r"""
-$state=[pscustomobject]@{percent=38}
-"""+ready+r"""
+Update-CaleAiConnectionReadiness 38
+
 @{launched=$script:launched;pending=$script:pendingConnection;ready=$script:connectionReady}|ConvertTo-Json -Compress
 """
                 got=self.run_ps(body,root)
@@ -463,6 +459,79 @@ $folder=Start-CaleOwnedEnvironmentCreation $env:CALE_OWNED_ROOT 'Toolbox/python'
         self.assertNotIn("uv python install '3.13'",source)
 
 
+
+
+    def test_shared_connection_readiness_preserves_threshold_and_both_runtime_gates(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "Cale"
+            root.mkdir()
+            got = self.run_ps(r"""
+$Preview=$false;$path=[pscustomobject]@{Text=$env:CALE_OWNED_ROOT}
+$connectionHint=[pscustomobject]@{Text=''};$notice=[pscustomobject]@{Text=''}
+$script:connectionReady=$false;$script:pendingConnection='';$script:launches=0
+function Start-Process {param($FilePath,$ArgumentList,$WindowStyle) $script:launches++}
+Open-CaleAiConnection 'claude';Open-CaleAiConnection 'chatgpt'
+foreach($relative in @('Toolbox/python/Scripts/python.exe','Toolbox/python/Scripts/pythonw.exe')) {
+ $file=Join-Path $path.Text $relative;[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($file))|Out-Null;[IO.File]::WriteAllText($file,'fixture')
+}
+Update-CaleAiConnectionReadiness 37
+$below=(-not $script:connectionReady -and $script:launches -eq 0 -and $script:pendingConnection -eq 'chatgpt')
+Update-CaleAiConnectionReadiness 38
+$missingMedia=(-not $script:connectionReady -and $script:launches -eq 0)
+$media=Join-Path $path.Text 'Media/python/Scripts/python.exe'
+[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($media))|Out-Null;[IO.File]::WriteAllText($media,'fixture')
+$script:pendingConnection='';Update-CaleAiConnectionReadiness 38
+$noProvider=($script:connectionReady -and $script:launches -eq 0 -and -not(Test-Path (Join-Path $path.Text 'LongTasks/open-supercharge')))
+$script:connectionReady=$false;$script:pendingConnection='grok'
+Remove-Item -LiteralPath (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe')
+Update-CaleAiConnectionReadiness 38
+$missingLauncher=(-not $script:connectionReady -and $script:launches -eq 0 -and $script:pendingConnection -eq 'grok')
+@{below=$below;missingMedia=$missingMedia;noProvider=$noProvider;missingLauncher=$missingLauncher}|ConvertTo-Json -Compress
+""", root)
+            self.assertEqual(got, {"below": True, "missingMedia": True,
+                                   "noProvider": True, "missingLauncher": True})
+
+    def test_shared_connection_preview_and_invalid_provider_never_launch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "Cale"
+            root.mkdir()
+            got = self.run_ps(r"""
+$Preview=$true;$path=[pscustomobject]@{Text=$env:CALE_OWNED_ROOT}
+$connectionHint=[pscustomobject]@{Text=''};$notice=[pscustomobject]@{Text=''}
+$script:connectionReady=$false;$script:pendingConnection='';$script:launches=0
+function Start-Process {param($FilePath,$ArgumentList,$WindowStyle) $script:launches++}
+Open-CaleAiConnection 'chatgpt'
+$previewHint=($connectionHint.Text -eq 'Your browser sign-in will open here.')
+Update-CaleAiConnectionReadiness 42
+$previewOutcome=($script:connectionReady -and $script:launches -eq 0 -and $script:pendingConnection -eq '')
+$Preview=$false;$connectionHint.Text='unchanged';Open-CaleAiConnection 'invalid'
+@{preview=$previewOutcome;previewHint=$previewHint;invalid=($connectionHint.Text -eq 'unchanged' -and $script:pendingConnection -eq '' -and $script:launches -eq 0);unchanged=(@(Get-ChildItem $path.Text -Force).Count -eq 0)}|ConvertTo-Json -Compress
+""", root)
+            self.assertEqual(got, {"preview": True, "previewHint": True,
+                                   "invalid": True, "unchanged": True})
+
+    def test_shared_connection_failed_launch_keeps_pending_then_timer_retries(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "Cale"
+            root.mkdir()
+            got = self.run_ps(r"""
+$Preview=$false;$path=[pscustomobject]@{Text=$env:CALE_OWNED_ROOT}
+$connectionHint=[pscustomobject]@{Text=''};$notice=[pscustomobject]@{Text=''}
+$script:connectionReady=$false;$script:pendingConnection='grok';$script:launches=0
+foreach($relative in @('Toolbox/python/Scripts/python.exe','Toolbox/python/Scripts/pythonw.exe','Media/python/Scripts/python.exe')) {
+ $file=Join-Path $path.Text $relative;[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($file))|Out-Null;[IO.File]::WriteAllText($file,'fixture')
+}
+function Start-Process {param($FilePath,$ArgumentList,$WindowStyle)
+ $script:launches++;if($script:launches -eq 1){throw 'Owned fixture launch not ready'}
+ if($WindowStyle -ne 'Normal' -or $FilePath -ne (Join-Path $path.Text 'Toolbox/python/Scripts/pythonw.exe')){throw 'Wrong UI launcher'}
+}
+Update-CaleAiConnectionReadiness 38
+$retained=($script:pendingConnection -eq 'grok' -and $connectionHint.Text -like '*try again*' -and $script:launches -eq 1)
+Update-CaleAiConnectionReadiness 38
+$request=[IO.File]::ReadAllText((Join-Path $path.Text 'LongTasks/open-supercharge'))
+@{retained=$retained;retried=($script:launches -eq 2 -and $script:pendingConnection -eq '' -and $script:connectionReady);request=$request}|ConvertTo-Json -Compress
+""", root)
+            self.assertEqual(got, {"retained": True, "retried": True, "request": "grok"})
 
 
 if __name__ == "__main__":
