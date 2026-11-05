@@ -283,7 +283,7 @@ class Player:
             try:
                 failed.stop()
             finally:
-                self.active.set_volume(self.volume)
+                self.active.set_volume(self.volume*self.deck_levels[self.active.channel]/100)
             raise
         return True
 
