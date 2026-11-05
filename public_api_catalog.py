@@ -8,6 +8,7 @@ before calling an endpoint or relying on its data.
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 import time
 from os import fstat
@@ -25,6 +26,13 @@ def _reject_json_constant(value: str):
     raise ValueError(f"Invalid JSON numeric constant: {value}")
 
 
+def _parse_finite_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"Non-finite JSON number: {value}")
+    return number
+
+
 def _catalog() -> tuple[list[dict], bool]:
     """Refresh daily; keep the last good snapshot when the PC is offline."""
     data = None
@@ -35,7 +43,8 @@ def _catalog() -> tuple[list[dict], bool]:
             cache_mtime = fstat(handle.fileno()).st_mtime
         if len(raw) > MAX_BYTES:
             raise ValueError("Public API catalog exceeded its cache limit.")
-        cached = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
+        cached = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant,
+                            parse_float=_parse_finite_float)
         if not isinstance(cached, list) or not all(isinstance(entry, dict) for entry in cached):
             raise ValueError("Unexpected public API catalog format.")
         data = cached
@@ -49,7 +58,8 @@ def _catalog() -> tuple[list[dict], bool]:
                 raw = response.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:
                 raise ValueError("Public API catalog exceeded its download limit.")
-            parsed = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
+            parsed = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant,
+                                parse_float=_parse_finite_float)
             if not isinstance(parsed, list) or not all(isinstance(entry, dict) for entry in parsed):
                 raise ValueError("Unexpected public API catalog format.")
             data = parsed
