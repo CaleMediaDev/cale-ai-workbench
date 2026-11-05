@@ -795,6 +795,12 @@ def test_camera_preview_uses_latest_slot_independent_of_voice_fifo():
 def test_media_camera_reuses_native_negotiation_and_returns_actual_dimensions(monkeypatch,tmp_path):
     import camera_presence as cam
     import media_worker
+    # Exercise the real raw-mode guard with owned test settings. An installed
+    # user's animated-camera choice must not decide this mocked capture test.
+    media = tmp_path / 'Media'
+    media.mkdir()
+    (media / 'camera-avatar.json').write_text(json.dumps({'enabled': False}), encoding='utf-8')
+    monkeypatch.setattr(media_worker, 'MEDIA', media)
     frame=np.zeros((1080,1920,3),dtype=np.uint8)
     camera=Mock(); camera.isOpened.return_value=True; camera.read.return_value=(True,frame)
     cv2=SimpleNamespace(VideoCapture=Mock(return_value=camera),CAP_DSHOW=0,imwrite=Mock(return_value=True))
