@@ -4618,6 +4618,34 @@ def test_repair_and_step_focus_share_the_same_unrestricted_escape_turn(tmp_path)
             assert available is native_agent.TOOLS
 
 
+@pytest.mark.parametrize('repair_count', range(5))
+@pytest.mark.parametrize('step_count', range(5))
+def test_persisted_misaligned_focus_cycles_reach_true_baseline_within_five_turns(tmp_path,repair_count,step_count):
+    item=project(tmp_path/'misaligned-focus')
+    folder=Path(item['folder'])
+    (folder/'index.html').write_text('<p id="total">wrong</p>')
+    task_context.plan_steps(folder,[{'phase':'Repair','title':'Fix total',
+        'check_tool':'check_webapp','check_arguments':{'path':'index.html','cases':[{'expect':{'total':'10'}}]}}])
+    task_context.record_action(folder,'check_webapp','{"passed":false}',{'path':'index.html'})
+    original_queue=task_context.step_status(folder)
+    original_request=task_context.request_identity(folder)
+    native_agent.save_state(item,{'status':'continue','messages':[],
+        'repair_focus_turns':repair_count,'step_focus_turns':step_count,
+        'step_repair_focus':{'count':2},'automatic_check_count':5})
+    offers=[]
+    for _ in range(10):
+        # A restart must preserve the cycle rather than relying on RAM alignment.
+        state=native_agent.read_state(item)
+        available=native_agent.step_tools(item,state,native_agent.repair_tools(item,state))
+        available=native_agent.acceptance_repair_tools(item,state,available)
+        offers.append(available is native_agent.TOOLS)
+        assert state['step_repair_focus']=={'count':2} and state['automatic_check_count']==5
+        native_agent.save_state(item,state)
+    assert all(any(offers[start:start+5]) for start in range(6)),offers
+    assert task_context.step_status(folder)==original_queue
+    assert task_context.request_identity(folder)==original_request
+
+
 def test_large_active_html_excerpt_reaches_live_handlers_and_failed_ids_without_document_values(tmp_path):
     item = project(tmp_path / "large-live-html-excerpt")
     folder = Path(item["folder"])

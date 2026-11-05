@@ -2536,7 +2536,11 @@ def step_tools(project: dict, state: dict, available: list) -> list:
     count = int(state.get("step_focus_turns", 0))
     if count >= 4:
         state["step_focus_turns"] = 0
-        return available
+        # The outer step cycle owns this declared unrestricted turn. Its input
+        # may already be filtered by repair_tools with a different persisted
+        # counter; returning that list can hide discovery forever after restart.
+        # Restore the true baseline without renewing any acceptance/repair cap.
+        return TOOLS
     state["step_focus_turns"] = count + 1
     core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text", "check_python_function", "check_javascript_function", "create_game_starter", "check_game_starter", "game_library_search", "import_game_example",
             "run_command", "run_verifier", "check_webapp", "check_document_report",
