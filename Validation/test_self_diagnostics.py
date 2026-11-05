@@ -68,7 +68,7 @@ def test_scheduler_preserves_bounded_sanitized_previous_attempt_evidence(tmp_pat
                 "summary": private, "deferred_reason": "project_db_unavailable",
                 "activity_error_type": "OperationalError", "duration_seconds": 12.5}))
             (state / "self-check.log").write_text(private * 1000 + "\n" + progress + "\n" + footer + "\n")
-            assert diagnostics.schedule(root, state, now=100 + checked)
+            assert diagnostics.schedule(root, state, now=100 + checked + diagnostics.FAILURE_RETRY)
     history = state / "self-check-history.json"
     assert history.is_file()
     raw = history.read_text()
@@ -91,7 +91,7 @@ def test_optional_history_write_failure_does_not_prevent_launch(tmp_path):
             diagnostics, "_write", side_effect=write), patch.object(diagnostics.subprocess, "Popen",
             return_value=SimpleNamespace(pid=123)) as launch, patch("psutil.Process") as proc:
         proc.return_value.create_time.return_value = 100
-        assert diagnostics.schedule(root, state, now=100)
+        assert diagnostics.schedule(root, state, now=100 + diagnostics.FAILURE_RETRY)
     launch.assert_called_once()
     assert json.loads((state / "self-check.json").read_text())["status"] == "running"
 
@@ -103,9 +103,10 @@ def test_running_check_records_database_deferral_and_preserves_cancellation(tmp_
     actual_connect = sqlite3.connect
     calls = []
     def connect(*args, **kwargs):
-        calls.append(True)
-        if len(calls) > 1:
-            raise sqlite3.OperationalError("PRIVATE DATABASE DETAILS")
+        if "projects.db" in str(args[0]):
+            calls.append(True)
+            if len(calls) > 1:
+                raise sqlite3.OperationalError("PRIVATE DATABASE DETAILS")
         return actual_connect(*args, **kwargs)
     process = SimpleNamespace(pid=123, poll=lambda: None)
     with patch.object(diagnostics.sqlite3, "connect", side_effect=connect), patch.object(
@@ -132,7 +133,7 @@ def test_malformed_optional_history_never_prevents_validation_launch(tmp_path):
         with patch.object(diagnostics, "active_projects", return_value=False), patch.object(
                 diagnostics.subprocess, "Popen", return_value=SimpleNamespace(pid=123)) as launch, patch("psutil.Process") as proc:
             proc.return_value.create_time.return_value = 100
-            assert diagnostics.schedule(root, state, now=100)
+            assert diagnostics.schedule(root, state, now=100 + diagnostics.FAILURE_RETRY)
         launch.assert_called_once()
         assert json.loads((state / "self-check.json").read_text())["status"] == "running"
         retained = (state / "self-check-history.json").read_text()
@@ -180,7 +181,7 @@ def test_history_growth_is_bounded_at_read_and_oversized_bytes_are_not_decoded(t
             diagnostics, "active_projects", return_value=False), patch.object(diagnostics.subprocess,
             "Popen", return_value=SimpleNamespace(pid=123)) as launch, patch("psutil.Process") as proc:
         proc.return_value.create_time.return_value = 100
-        assert diagnostics.schedule(root, state, now=100)
+        assert diagnostics.schedule(root, state, now=100 + diagnostics.FAILURE_RETRY)
     launch.assert_called_once()
     assert not decoded_oversized
     assert read_sizes == [32001]
@@ -313,15 +314,18 @@ class SelfDiagnosticsTests(unittest.TestCase):
         def launch(*_args, **kwargs):
             kwargs["stdout"].write(b"1 failed\ndetails\n")
             kwargs["stdout"].flush()
-            return SimpleNamespace(poll=lambda: 1)
+            return SimpleNamespace(pid=123, poll=lambda: 1)
 
-        with patch.object(diagnostics.subprocess, "Popen", side_effect=launch) as run:
+        with patch.object(diagnostics.subprocess, "Popen", side_effect=launch) as run, patch.object(
+                diagnostics, "_read_live_progress", side_effect=lambda context: {"complete": True, "finished": True,
+                    "session_exitstatus": 1, "child_pid": 123, "failed": 1, "binding_unchanged": True,
+                    "unconfigured": True, "owner": context["owner"]}):
             report = diagnostics.run(self.root, self.state)
         self.assertEqual(report["status"], "failed")
         self.assertEqual(report["failures"], 1)
         self.assertIn("1 failed", report["summary"])
         self.assertIn("details", (self.state / "self-check.log").read_text())
-        self.assertEqual(run.call_args.args[0][1:], ["-m", "pytest", "-q", "Validation"])
+        self.assertEqual(run.call_args.args[0][1:], ["-B", "-m", "pytest", "-q", "-p", "self_diagnostics", "Validation"])
         self.assertEqual(run.call_args.kwargs["creationflags"],
                          diagnostics.HIDE | diagnostics.LOW_PRIORITY)
 
@@ -334,11 +338,12 @@ class SelfDiagnosticsTests(unittest.TestCase):
             kwargs["stdout"].flush()
             return process
 
-        with patch.object(diagnostics.subprocess, "Popen", side_effect=launch):
+        with patch.object(diagnostics.subprocess, "Popen", side_effect=launch), patch.object(diagnostics, "_stop_check") as stopped:
             report = diagnostics.run(self.root, self.state)
 
-        self.assertEqual(report["status"], "failed")
-        self.assertEqual(report["failures"], 1)
+        stopped.assert_called_once_with(process)
+        self.assertEqual(report["status"], "interrupted")
+        self.assertEqual(report["failures"], 0)
         output = (self.state / "self-check.log").read_text()
         self.assertIn("failure details before monitoring error", output)
         self.assertIn("Self-check could not finish: OSError: monitoring failed", output)
@@ -351,9 +356,11 @@ class SelfDiagnosticsTests(unittest.TestCase):
         def launch(*_args, **kwargs):
             kwargs["stdout"].write(b"527 passed\n")
             kwargs["stdout"].flush()
-            return SimpleNamespace(poll=lambda: 0)
+            return SimpleNamespace(pid=123, poll=lambda: 0)
 
-        with patch.object(diagnostics.subprocess, "Popen", side_effect=launch):
+        with patch.object(diagnostics.subprocess, "Popen", side_effect=launch), patch.object(
+                diagnostics, "_read_live_progress", side_effect=lambda context: {"complete": True, "finished": True,
+                    "session_exitstatus": 0, "child_pid": 123, "failed": 0, "owner": context["owner"]}):
             report = diagnostics.run(self.root, self.state)
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["failures"], 0)
@@ -511,7 +518,8 @@ class SelfDiagnosticsTests(unittest.TestCase):
               patch.object(diagnostics.subprocess, "Popen", return_value=process),
               patch("psutil.Process") as running):
             running.return_value.create_time.return_value = 100
-            self.assertTrue(diagnostics.schedule(self.root, self.state, now=100))
+            self.assertFalse(diagnostics.schedule(self.root, self.state, now=report["checked_at"] + 1))
+            self.assertTrue(diagnostics.schedule(self.root, self.state, now=report["checked_at"] + diagnostics.FAILURE_RETRY + 1))
 
     def test_only_repeated_failure_on_current_version_notifies(self):
         current = diagnostics.version(self.root)
@@ -538,3 +546,462 @@ def test_optional_history_limits_release_string_before_regex_and_write(tmp_path)
     history=json.loads(target.read_bytes())
     assert history['attempts'][-1]['version']=='Cale AI Workbench 0.5.500'
     assert len(target.read_bytes())<diagnostics.HISTORY_READ_BYTES
+
+
+# These real subprocess cases use ONLY owned TEMP installs and tiny CPU tests.
+def live_install(tmp_path, source):
+    import shutil
+    root = tmp_path / "live-install"
+    state = root / "LongTasks"
+    state.mkdir(parents=True)
+    (root / "Validation").mkdir()
+    shutil.copyfile(diagnostics.__file__, root / "self_diagnostics.py")
+    (root / ".cale-ai-install").write_text("Cale AI Workbench 0.5.521", encoding="utf-8")
+    (root / "Validation/test_case.py").write_text(source, encoding="utf-8")
+    with closing(sqlite3.connect(state / "projects.db")) as database, database:
+        database.execute("CREATE TABLE projects(status TEXT)")
+    return root, state
+
+
+def run_live(root, state, monkeypatch):
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    with patch.object(diagnostics, "_check_python", return_value=Path(sys.executable)):
+        return diagnostics.run(root, state)
+
+
+_LIVE_CASE = """from pathlib import Path
+import os,time,pytest
+root=Path.cwd()
+@pytest.fixture(scope='session')
+def state():
+    shared={'dirty':False}
+    yield shared
+    FINALIZER
+
+def test_a(state):
+    target=root/'counter.txt'
+    target.write_text(str(int(target.read_text())+1) if target.exists() else '1')
+    state['dirty']=True
+    (root/'a-pid.txt').write_text(str(os.getpid()))
+    (root/'ready.txt').write_text('ready')
+    until=time.monotonic()+10
+    while not (root/'locked.txt').exists():
+        assert time.monotonic()<until
+        time.sleep(.02)
+
+def test_b():
+    assert (root/'released.txt').exists()
+    (root/'b-pid.txt').write_text(str(os.getpid()))
+"""
+
+
+def transient_run(tmp_path, monkeypatch, finalizer="pass", change_source=False):
+    root, state = live_install(tmp_path, _LIVE_CASE.replace("FINALIZER", finalizer))
+    actual = diagnostics.active_projects
+    held = []
+    timers = []
+    observed = {"busy": 0, "at_boundary": False}
+    def release(database):
+        import time
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            try:
+                with closing(sqlite3.connect((state / "self-check-progress.sqlite3").resolve().as_uri()+"?mode=ro", uri=True)) as progress_db:
+                    row = progress_db.execute("SELECT value FROM live_session WHERE slot=1").fetchone()
+                if row and json.loads(row[0]).get("waiting_at_boundary") and observed["busy"] >= 1:
+                    observed["at_boundary"] = True
+                    break
+            except sqlite3.Error:
+                pass
+            time.sleep(.02)
+        if change_source:
+            with (root / "Validation/test_case.py").open("a", encoding="utf-8") as stream:
+                stream.write("\n# Changed while the same child was paused\n")
+        (root / "released.txt").write_text("released", encoding="utf-8")
+        database.rollback()
+        database.close()
+    def activity(directory, *, details=None):
+        if (root / "ready.txt").exists() and not held:
+            database = sqlite3.connect(state / "projects.db", check_same_thread=False)
+            database.execute("BEGIN EXCLUSIVE")
+            held.append(database)
+            timer = threading.Timer(.05, release, args=(database,))
+            timer.start()
+            timers.append(timer)
+            (root / "locked.txt").write_text("locked", encoding="utf-8")
+        result = actual(directory, details=details)
+        if result:
+            observed["busy"] += 1
+        progress = state / "self-check-progress.sqlite3"
+        if progress.is_file():
+            try:
+                with closing(sqlite3.connect(progress.resolve().as_uri()+"?mode=ro", uri=True)) as database:
+                    row = database.execute("SELECT value FROM live_session WHERE slot=1").fetchone()
+                observed["at_boundary"] |= bool(row and json.loads(row[0]).get("waiting_at_boundary"))
+            except sqlite3.Error:
+                pass
+        return result
+    try:
+        with patch.object(diagnostics, "active_projects", side_effect=activity), patch.object(diagnostics, "_stop_check", wraps=diagnostics._stop_check) as stopped:
+            report = run_live(root, state, monkeypatch)
+        assert stopped.call_count == 0
+    finally:
+        for timer in timers:
+            timer.join(8)
+    return root, state, report, observed
+
+
+def test_real_transient_sqlite_busy_resumes_same_child_without_replaying_a(tmp_path, monkeypatch):
+    root, state, report, observed = transient_run(tmp_path, monkeypatch)
+    assert observed["busy"] >= 1 and observed["at_boundary"]
+    assert report["status"] == "passed" and report["progress"]["complete"] is True
+    assert report["progress"]["collected"] == report["progress"]["completed"] == 2
+    assert report["progress"]["boundary_waits"] >= 1
+    assert (root / "counter.txt").read_text() == "1"
+    assert (root / "a-pid.txt").read_text() == (root / "b-pid.txt").read_text()
+
+
+import pytest
+
+@pytest.mark.parametrize("finalizer", ["raise RuntimeError('late session fixture failure')", "if shared['dirty']: raise RuntimeError('body state retained')"])
+def test_same_child_pause_preserves_late_session_finalizer_failures(tmp_path, monkeypatch, finalizer):
+    root, state, report, observed = transient_run(tmp_path, monkeypatch, finalizer)
+    assert observed["busy"] >= 1 and observed["at_boundary"]
+    assert report["status"] == "failed" and report["progress"]["failed"] >= 1
+    assert (root / "counter.txt").read_text() == "1"
+    assert (root / "a-pid.txt").read_text() == (root / "b-pid.txt").read_text()
+
+
+def test_source_change_during_pause_cannot_publish_old_session_pass(tmp_path, monkeypatch):
+    root, state, report, observed = transient_run(tmp_path, monkeypatch, change_source=True)
+    assert report["status"] == "interrupted"
+    assert report["progress"]["complete"] is False
+    assert (root / "counter.txt").read_text() == "1"
+
+
+@pytest.mark.parametrize("body", ["__import__('os')._exit(0)", "pytest.exit('early zero', returncode=0)"])
+def test_real_early_zero_exit_is_incomplete_not_pass_or_test_failure(tmp_path, monkeypatch, body):
+    root, state = live_install(tmp_path, "import pytest\ndef test_a():\n    " + body + "\n\ndef test_b():\n    assert True\n")
+    report = run_live(root, state, monkeypatch)
+    assert report["status"] == "interrupted" and report["failures"] == 0
+    assert report["progress"]["complete"] is False
+    assert "no full-suite result" in report["summary"]
+
+
+def test_real_runtime_environment_change_cannot_borrow_complete_pass(tmp_path, monkeypatch):
+    root, state = live_install(tmp_path, "def test_a():\n    __import__('os').environ['OLLAMA_HOST']='changed-test-only'\n")
+    report = run_live(root, state, monkeypatch)
+    assert report["status"] == "interrupted" and report["progress"]["complete"] is False
+
+
+def test_normal_pytest_plugin_flag_without_owned_context_writes_no_progress(tmp_path, monkeypatch):
+    import subprocess
+    root, state = live_install(tmp_path, "def test_a():\n    assert True\n")
+    monkeypatch.delenv(diagnostics._LIVE_ENV, raising=False)
+    environment = {**diagnostics.os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-q", "-p", "self_diagnostics", "Validation"],
+        cwd=root, env=environment, capture_output=True, timeout=20)
+    assert result.returncode == 0
+    assert not (state / "self-check-progress.sqlite3").exists()
+
+
+def test_diagnostics_preserve_only_safe_sqlite_code_and_name(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    with closing(sqlite3.connect(state / "projects.db")) as database, database:
+        database.execute("CREATE TABLE unrelated(value TEXT)")
+    report = diagnostics.run(root, state)
+    assert report["status"] == "deferred"
+    assert report["sqlite_errorcode"] == sqlite3.SQLITE_ERROR
+    assert report["sqlite_errorname"] == "SQLITE_ERROR"
+    assert "no such table" not in json.dumps(report)
+    diagnostics._retain_previous_attempt(state, report)
+    history = json.loads((state / "self-check-history.json").read_text())
+    assert history["attempts"][-1]["sqlite_errorcode"] == sqlite3.SQLITE_ERROR
+    assert history["attempts"][-1]["sqlite_errorname"] == "SQLITE_ERROR"
+
+
+def test_real_windows_reader_retry_only_repeats_metadata_write(tmp_path):
+    if diagnostics.os.name != "nt":
+        pytest.skip("Windows sharing semantics")
+    path = tmp_path / "control.json"
+    path.write_text("{}", encoding="utf-8")
+    acquired = threading.Event()
+    released = threading.Event()
+    def hold():
+        with path.open("rb"):
+            acquired.set()
+            released.wait(2)
+    reader = threading.Thread(target=hold)
+    reader.start()
+    assert acquired.wait(2)
+    timer = threading.Timer(.08, released.set)
+    timer.start()
+    try:
+        diagnostics._write(path, {"phase": "paused"})
+    finally:
+        released.set()
+        reader.join(2)
+        timer.join(2)
+    assert json.loads(path.read_text()) == {"phase": "paused"}
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+
+def test_real_known_user_activity_stops_only_owned_pytest_child(tmp_path, monkeypatch):
+    source = """from pathlib import Path
+import os,time
+root=Path.cwd()
+def test_a():
+    (root/'child-pid.txt').write_text(str(os.getpid()))
+    (root/'ready.txt').write_text('ready')
+    time.sleep(20)
+"""
+    root, state = live_install(tmp_path, source)
+    actual = diagnostics.active_projects
+    inserted = []
+    def activity(directory, *, details=None):
+        if (root / "ready.txt").exists() and not inserted:
+            with closing(sqlite3.connect(state / "projects.db")) as database, database:
+                database.execute("INSERT INTO projects VALUES ('working')")
+            inserted.append(True)
+        return actual(directory, details=details)
+    with patch.object(diagnostics, "active_projects", side_effect=activity), patch.object(
+            diagnostics, "_stop_check", wraps=diagnostics._stop_check) as stopped:
+        report = run_live(root, state, monkeypatch)
+    assert report["status"] == "deferred" and report["deferred_reason"] == "active_projects"
+    assert stopped.call_count == 1
+    import psutil
+    assert not psutil.pid_exists(int((root / "child-pid.txt").read_text()))
+    assert psutil.Process().is_running()
+
+
+def test_real_persistent_sqlite_busy_exhausts_bounded_grace_and_keeps_partial_counts(tmp_path, monkeypatch):
+    source = """from pathlib import Path
+import time
+root=Path.cwd()
+def test_a():
+    (root/'ready.txt').write_text('ready')
+    until=time.monotonic()+10
+    while not (root/'locked.txt').exists():
+        assert time.monotonic()<until
+        time.sleep(.02)
+def test_b():
+    (root/'must-not-start.txt').write_text('bad')
+"""
+    root, state = live_install(tmp_path, source)
+    actual = diagnostics.active_projects
+    held = []
+    def activity(directory, *, details=None):
+        if (root / "ready.txt").exists() and not held:
+            database = sqlite3.connect(state / "projects.db")
+            database.execute("BEGIN EXCLUSIVE")
+            held.append(database)
+            (root / "locked.txt").write_text("locked", encoding="utf-8")
+        return actual(directory, details=details)
+    try:
+        with patch.object(diagnostics, "UNKNOWN_GRACE", .3), patch.object(
+                diagnostics, "active_projects", side_effect=activity), patch.object(
+                diagnostics, "_stop_check", wraps=diagnostics._stop_check) as stopped:
+            report = run_live(root, state, monkeypatch)
+    finally:
+        for database in held:
+            database.rollback()
+            database.close()
+    assert stopped.call_count == 1
+    assert report["status"] == "deferred" and report["sqlite_errorcode"] & 255 == sqlite3.SQLITE_BUSY
+    assert report["progress"]["completed"] == 1 and report["progress"]["complete"] is False
+    assert not (root / "must-not-start.txt").exists()
+
+
+@pytest.mark.parametrize("code", [None, sqlite3.SQLITE_ERROR, sqlite3.SQLITE_CANTOPEN])
+def test_untyped_or_nontransient_activity_errors_keep_immediate_defer(tmp_path, code):
+    root, state = diagnostic_install(tmp_path)
+    process = SimpleNamespace(pid=123, poll=lambda: None)
+    calls = []
+    def activity(directory, *, details=None):
+        calls.append(True)
+        if len(calls) == 1:
+            return False
+        details.update(reason="project_db_unavailable", error_type="OperationalError")
+        if code is not None:
+            details["sqlite_errorcode"] = code
+        return True
+    with patch.object(diagnostics, "active_projects", side_effect=activity), patch.object(
+            diagnostics.subprocess, "Popen", return_value=process), patch.object(
+            diagnostics, "_stop_check") as stopped, patch.object(diagnostics.time, "sleep") as sleep:
+        report = diagnostics.run(root, state)
+    stopped.assert_called_once_with(process)
+    sleep.assert_not_called()
+    assert report["status"] == "deferred"
+
+
+def test_separate_new_process_never_reuses_passes_or_skips(tmp_path, monkeypatch):
+    source = """from pathlib import Path
+import pytest
+root=Path.cwd()
+def test_a():
+    path=root/'counter.txt'
+    path.write_text(str(int(path.read_text())+1) if path.exists() else '1')
+def test_b():
+    pytest.skip('fixture skip')
+"""
+    root, state = live_install(tmp_path, source)
+    first = run_live(root, state, monkeypatch)
+    second = run_live(root, state, monkeypatch)
+    assert first["status"] == second["status"] == "passed"
+    assert first["progress"]["nonce"] != second["progress"]["nonce"]
+    assert first["progress"]["skipped"] == second["progress"]["skipped"] == 1
+    assert (root / "counter.txt").read_text() == "2"
+
+
+def test_safe_progress_history_keeps_observed_failures_without_claiming_complete(tmp_path):
+    report = {"version": "Cale AI Workbench 0.5.521", "status": "deferred", "checked_at": 1,
+        "progress": {"completed": 4, "failed": 1, "passed": 3, "skipped": 0,
+                     "complete": True, "nodeids": ["PRIVATE-NODE"]}}
+    diagnostics._retain_previous_attempt(tmp_path, report)
+    raw = (tmp_path / "self-check-history.json").read_text()
+    item = json.loads(raw)["attempts"][-1]
+    assert item["progress"]["failed"] == 1
+    assert "complete" not in item["progress"] and "PRIVATE" not in raw
+
+
+@pytest.mark.parametrize("code", [sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_BUSY | (2 << 8), sqlite3.SQLITE_LOCKED | (1 << 8)])
+def test_only_typed_busy_and_locked_base_codes_qualify_for_grace(code):
+    assert diagnostics._transient_database_busy({"reason": "project_db_unavailable", "sqlite_errorcode": code})
+    for bad in (True, "5", None, -1, 2**100, sqlite3.SQLITE_CANTOPEN):
+        assert not diagnostics._transient_database_busy({"reason": "project_db_unavailable", "sqlite_errorcode": bad})
+
+
+@pytest.mark.parametrize("invalid", ["[]", "{", '{"complete":true}' + " "*100000])
+def test_corrupt_or_oversized_progress_is_not_pass_evidence(tmp_path, invalid):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    context = {"state": str(state), "nonce": "owned", "basis": "unchanged"}
+    with diagnostics._live_progress_db(state) as database:
+        database.execute("INSERT INTO live_session VALUES (1,?)", (invalid,))
+    assert diagnostics._read_live_progress(context) == {"complete": False}
+
+
+@pytest.mark.parametrize("fault", ["missing-node", "replaced-node", "unconfigure-missing"])
+def test_partial_or_substituted_completion_receipt_never_becomes_green(tmp_path, fault):
+    import hashlib
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    context = {"state": str(state), "nonce": "owned", "basis": "source-runtime"}
+    node = "Validation/test_case.py::test_a"
+    data = {"nonce": "owned", "basis": "source-runtime", "collected": 1, "completed": 1,
+        "passed": 1, "failed": 0, "skipped": 0, "complete": True, "finished": True,
+        "all_nodes_finalized": True, "binding_unchanged": True, "unconfigured": True,
+        "node_set_sha256": hashlib.sha256(json.dumps([node]).encode()).hexdigest()}
+    with diagnostics._live_progress_db(state) as database:
+        if fault == "unconfigure-missing":
+            data.pop("unconfigured")
+        database.execute("INSERT INTO live_session VALUES (1,?)", (json.dumps(data),))
+        if fault != "missing-node":
+            database.execute("INSERT INTO live_results VALUES (?,?)", ("different-node" if fault == "replaced-node" else node, "passed"))
+    assert diagnostics._read_live_progress(context)["complete"] is False
+
+
+
+def test_control_metadata_failure_stops_owned_check_once_and_keeps_incomplete_status(tmp_path):
+    root, state = diagnostic_install(tmp_path)
+    process = SimpleNamespace(pid=123, poll=lambda: None)
+    writes = []
+    def control(*args, **kwargs):
+        writes.append(True)
+        if len(writes) > 1:
+            raise PermissionError("Control publication failed")
+    with patch.object(diagnostics, "active_projects", return_value=False), patch.object(
+            diagnostics, "_write_control", side_effect=control), patch.object(
+            diagnostics.subprocess, "Popen", return_value=process), patch.object(
+            diagnostics, "_stop_check") as stopped:
+        report = diagnostics.run(root, state)
+    stopped.assert_called_once_with(process)
+    assert report["status"] == "interrupted" and report["failures"] == 0
+
+
+@pytest.mark.parametrize("source", ["def invalid syntax(\n", "import definitely_missing_selfcheck_fixture_module\n"])
+def test_real_collection_failure_is_failed_and_not_silent_interruption(tmp_path, monkeypatch, source):
+    root, state = live_install(tmp_path, source)
+    report = run_live(root, state, monkeypatch)
+    assert report["status"] == "failed" and report["failures"] == 1
+    assert report["progress"]["collection_failed"] >= 1
+    assert report["progress"]["complete"] is False
+    assert report["progress"]["unconfigured"] is True
+
+
+def test_declared_nested_runtime_code_change_invalidates_live_result(tmp_path, monkeypatch):
+    root, state = live_install(tmp_path, "from pathlib import Path\ndef test_a():\n    Path('nested/runtime.py').write_text('changed')\n")
+    nested = root / "nested/runtime.py"
+    nested.parent.mkdir()
+    nested.write_text("original", encoding="utf-8")
+    (root / "install-files.json").write_text(json.dumps(["self_diagnostics.py", "Validation/test_case.py", "nested/runtime.py"]), encoding="utf-8")
+    report = run_live(root, state, monkeypatch)
+    assert report["status"] == "interrupted" and report["progress"]["complete"] is False
+    assert report["progress"]["binding_unchanged"] is False
+
+
+def test_missing_declared_runtime_file_cannot_launch_or_borrow_pass(tmp_path, monkeypatch):
+    root, state = live_install(tmp_path, "def test_a():\n    assert True\n")
+    (root / "install-files.json").write_text(json.dumps(["missing/nested.py"]), encoding="utf-8")
+    with patch.object(diagnostics.subprocess, "Popen") as launch:
+        report = run_live(root, state, monkeypatch)
+    launch.assert_not_called()
+    assert report["status"] == "interrupted"
+
+
+def test_progress_read_has_one_snapshot_across_interleaved_writer_commit(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    context = {"state": str(state), "nonce": "owned", "basis": "source"}
+    initial = {"nonce": "owned", "basis": "source", "collected": 1, "completed": 0,
+               "passed": 0, "failed": 0, "skipped": 0, "complete": False, "plugin_active": True}
+    diagnostics._save_live_progress(context, initial, initialize=True)
+    actual_connect = sqlite3.connect
+    raced = []
+    class HeaderCursor:
+        def __init__(self, cursor): self.cursor = cursor
+        def fetchone(self):
+            row = self.cursor.fetchone()
+            if not raced:
+                raced.append(True)
+                updated = {**initial, "completed": 1, "passed": 1}
+                with closing(actual_connect(state / "self-check-progress.sqlite3")) as writer, writer:
+                    writer.execute("UPDATE live_session SET value=? WHERE slot=1", (json.dumps(updated),))
+                    writer.execute("INSERT INTO live_results VALUES ('test_a','passed')")
+            return row
+    class Reader:
+        def __init__(self, connection): self.connection = connection
+        def execute(self, sql, *args):
+            cursor = self.connection.execute(sql, *args)
+            return HeaderCursor(cursor) if sql.startswith("SELECT substr(value") else cursor
+        def close(self): self.connection.close()
+    def connect(*args, **kwargs):
+        return Reader(actual_connect(*args, **kwargs))
+    with monkeypatch.context() as patched:
+        patched.setattr(diagnostics.sqlite3, "connect", connect)
+        snapshot = diagnostics._read_live_progress(context)
+    assert raced and snapshot["plugin_active"] is True and snapshot["completed"] == 0
+    assert diagnostics._read_live_progress(context)["completed"] == 1
+
+
+def test_parent_source_replacement_after_child_failure_is_incomplete_not_current_failure(tmp_path, monkeypatch):
+    root, state = live_install(tmp_path, "def test_a():\n    assert False, 'real observed failure'\n")
+    runtime = root / "runtime.py"
+    runtime.write_text("original = True\n", encoding="utf-8")
+    original_basis = diagnostics._live_basis
+    observations = []
+    def current_basis(folder, python):
+        observations.append(True)
+        if len(observations) == 2:
+            # The real child has exited and sealed its old-source failure. The
+            # parent must not attribute that failure to this replacement source.
+            runtime.write_text("replacement = True\n", encoding="utf-8")
+        return original_basis(folder, python)
+    monkeypatch.setattr(diagnostics, "_live_basis", current_basis)
+    report = run_live(root, state, monkeypatch)
+    assert len(observations) == 2
+    assert report["status"] == "interrupted" and report["failures"] == 0
+    assert report["progress"]["failed"] == 1
+    assert report["progress"]["binding_unchanged"] is False
+    assert report["progress"]["invalidated"] == "source_runtime_changed"
