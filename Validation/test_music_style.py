@@ -161,7 +161,7 @@ def test_negated_lead_vocals_preserve_vocal_texture():
 
 def test_negated_rap_does_not_turn_vocal_chops_into_a_lead_request():
     for negation in ("no", "without any", "avoid", "don't want"):
-        for sound in ("rap", "rapping"):
+        for sound in ("rap", "rapping", "rapped verses"):
             exclusion = negation + " " + sound
             request = "Heavy dubstep with vocal chops, " + exclusion
             assert not music_style.explicit_lead_vocals(request)
