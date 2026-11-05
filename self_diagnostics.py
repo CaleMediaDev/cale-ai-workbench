@@ -26,7 +26,9 @@ LOG = STATE / "self-check.log"
 INTERVAL = 7 * 24 * 60 * 60
 FAILURE_RETRY = 60 * 60
 MAX_FAILURES = 3
-MAX_SECONDS = 20 * 60
+# The growing shipped suite needs margin beyond the observed 20-minute cap.
+# Active user work still yields immediately; unknown SQLite activity gets 15s.
+MAX_SECONDS = 30 * 60
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 LOW_PRIORITY = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
 HISTORY_LIMIT = 3

@@ -1005,3 +1005,35 @@ def test_parent_source_replacement_after_child_failure_is_incomplete_not_current
     assert report["progress"]["failed"] == 1
     assert report["progress"]["binding_unchanged"] is False
     assert report["progress"]["invalidated"] == "source_runtime_changed"
+
+
+def test_real_wall_timeout_stops_owned_child_once_without_accepting_partial_failures(tmp_path, monkeypatch):
+    source = """from pathlib import Path
+import os,time
+root=Path.cwd()
+
+def test_a():
+    assert False, 'observed failure before timeout'
+
+def test_b():
+    (root/'child-pid.txt').write_text(str(os.getpid()))
+    time.sleep(20)
+
+def test_c():
+    (root/'must-not-start.txt').write_text('bad')
+"""
+    root, state = live_install(tmp_path, source)
+    (state / "self-check.json").write_text(json.dumps({
+        "version": diagnostics.version(root), "status": "failed", "failures": 2}), encoding="utf-8")
+    with patch.object(diagnostics, "MAX_SECONDS", 1), patch.object(
+            diagnostics, "_stop_check", wraps=diagnostics._stop_check) as stopped:
+        report = run_live(root, state, monkeypatch)
+    stopped.assert_called_once()
+    assert report["status"] == "interrupted" and report["failures"] == 2
+    assert report["progress"]["completed"] == 1 and report["progress"]["failed"] == 1
+    assert report["progress"]["complete"] is False
+    assert "exceeded its time limit" in (state / "self-check.log").read_text(encoding="utf-8")
+    assert not (root / "must-not-start.txt").exists()
+    import psutil
+    assert not psutil.pid_exists(int((root / "child-pid.txt").read_text()))
+    assert psutil.Process().is_running()
