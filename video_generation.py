@@ -673,7 +673,7 @@ def avatar_profile_probe_worker(profile, parent_pid, parent_started):
     engine=None;lease=AvatarGpuLease()
     try:
         import torch,onnxruntime as ort,avatar_video
-        media=root/"Media/python"
+        media=(root/"Media/python").resolve()
         if not Path(ort.__file__).resolve().is_relative_to(profile/"python"):raise RuntimeError("Wrong avatar ORT origin.")
         if not Path(torch.__file__).resolve().is_relative_to(media):raise RuntimeError("Wrong Media Torch origin.")
         if ort.__version__!="1.26.0" or torch.__version__!="2.9.1+cu128":raise RuntimeError("Avatar runtime versions changed.")

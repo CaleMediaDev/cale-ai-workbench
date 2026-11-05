@@ -795,3 +795,33 @@ def test_avatar_probe_cli_lease_precedes_engine_and_closes_after_it(tmp_path,mon
     video_generation.avatar_profile_probe_worker(profile,5,10)
     assert events==['lease starting','engine','probe','lease measured','engine close','lease close']
     assert json.loads(capsys.readouterr().out)['ok'] is True
+
+
+def test_avatar_probe_accepts_canonical_shared_media_but_rejects_unrelated_origin(tmp_path,monkeypatch,capsys):
+    import types,threading
+    if os.name!='nt':pytest.skip('Windows shared Media junction fixture')
+    app=tmp_path/'app';(app/'Media/avatar/v1').mkdir(parents=True)
+    shared=tmp_path/'shared-media';(shared/'Lib/site-packages/torch').mkdir(parents=True)
+    linked=app/'Media/python'
+    subprocess.run(['cmd','/c','mklink','/J',str(linked),str(shared)],check=True,capture_output=True)
+    profile=app/'Media/avatar/v1'
+    monkeypatch.setattr(video_generation,'__file__',str(app/'video_generation.py'))
+    class Lease:
+        def measured(self,_):pass
+        def close(self):pass
+    class Engine:
+        def __init__(self,_):pass
+        def probe(self):return {'ok':True,'gpu_allocation_bytes':123}
+        def close(self):pass
+    monkeypatch.setitem(sys.modules,'camera_presence',types.SimpleNamespace(AvatarGpuLease=Lease,owner_alive=lambda *_:True,watch_owner=Mock(),start_launcher_guard=Mock()))
+    torch=types.SimpleNamespace(__file__=str(shared/'Lib/site-packages/torch/__init__.py'),__version__='2.9.1+cu128',version=types.SimpleNamespace(cuda='12.8'),cuda=types.SimpleNamespace(is_available=lambda:True),backends=types.SimpleNamespace(cudnn=types.SimpleNamespace(version=lambda:90100)))
+    monkeypatch.setitem(sys.modules,'torch',torch)
+    monkeypatch.setitem(sys.modules,'onnxruntime',types.SimpleNamespace(__file__=str(profile/'python/Lib/site-packages/onnxruntime/__init__.py'),__version__='1.26.0'))
+    monkeypatch.setitem(sys.modules,'avatar_video',types.SimpleNamespace(CaleAvatar=Engine))
+    monkeypatch.setattr(threading.Thread,'start',lambda *_:None)
+    try:
+        video_generation.avatar_profile_probe_worker(profile,5,10)
+        assert json.loads(capsys.readouterr().out)['ok'] is True
+        torch.__file__=str(tmp_path/'unrelated/torch/__init__.py')
+        with pytest.raises(RuntimeError,match='Wrong Media Torch origin'):video_generation.avatar_profile_probe_worker(profile,5,10)
+    finally:linked.rmdir()  # Remove only this fixture junction, never the shared target.
