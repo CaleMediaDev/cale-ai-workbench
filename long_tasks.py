@@ -654,6 +654,18 @@ def task_progress(p):
     return percent, step[:180]
 
 
+
+def task_card_elapsed(item):
+    """Do not turn an absent legacy creation time into decades of task work."""
+    try:
+        created = float(item.get("created") or 0)
+        if not 0 < created <= time.time() + 86400:
+            return "Time unavailable"
+    except (ValueError, TypeError, OverflowError):
+        return "Time unavailable"
+    return task_eta.total_time(item['created'], item['updated'], item['status'],
+                               finished=item.get('finished'))
+
 def task_controls_for(state):
     """Keep finished cards simple; chat can still request a revision."""
     if state in ("queued", "waiting_for_setup", "working", "checking"):
@@ -3920,9 +3932,10 @@ def gui():
                   text="" if detail else " ", style="CardMuted.TLabel",
                   font=("Segoe UI", 10), anchor="center").pack(fill="x")
         detail = drive_rate_text if gauge_name == "drive" else ""
-        ttk.Label(holder, textvariable=detail if detail else None,
-                  text="" if detail else " ", style="CardMuted.TLabel",
-                  font=("Segoe UI", 10), anchor="center").pack(fill="x")
+        if gauge_name != "net":
+            ttk.Label(holder, textvariable=detail if detail else None,
+                      text="" if detail else " ", style="CardMuted.TLabel",
+                      font=("Segoe UI", 10), anchor="center").pack(fill="x")
         gauge_widgets[gauge_name] = (gauge_canvas, segments, value)
         if gauge_name == "net":
             offline_button = ttk.Button(
@@ -4659,7 +4672,7 @@ def gui():
 
     voice_speaking = threading.Event()
     talk_chat_row = ttk.Frame(main_page)
-    talk_chat_row.pack(fill="x", pady=(4, 16))
+    talk_chat_row.pack(fill="x", pady=(4, 8))
     title_row = ttk.Frame(talk_chat_row)
     title_row.pack(side="left", anchor="n", padx=(0, 14))
     title_copy = ttk.Frame(title_row)
@@ -4677,7 +4690,9 @@ def gui():
             text="Ask a question or describe something you'd like me to make.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(3, 0))
-    ttk.Label(cale_scene, text="CALE  •  BEACH SIDE", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+    companion_caption = ttk.Frame(cale_scene)
+    companion_caption.pack(fill="x", pady=(3, 0))
+    ttk.Label(companion_caption, text="CALE  •  BEACH SIDE", style="Muted.TLabel").pack(side="left")
     camera_scene = ttk.Frame(beach_scene)
     # Camera preview is visible only while the camera is enabled.
     camera_frame = tk.Frame(camera_scene, width=320, height=132, bg=bg)
@@ -4764,6 +4779,26 @@ def gui():
 
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
+    camera_frames = queue.Queue(maxsize=1)
+
+    def offer_camera_frame(value):
+        if len(value) > 200_000:
+            return
+        try:
+            camera_frames.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            camera_frames.put_nowait(value)
+        except queue.Full:
+            pass
+
+    def camera_preview_poll():
+        try:
+            show_camera_preview(camera_frames.get_nowait())
+        except queue.Empty:
+            pass
+        window.after(33, camera_preview_poll)
     voice_busy = threading.Event()
     mute_marker = STATE / "voice-muted"
     voice_muted = threading.Event()
@@ -5406,7 +5441,7 @@ def gui():
                     [str(media_python), "-u", str(ROOT / "camera_presence.py"),
                      "--parent-pid", str(os.getpid()), "--parent-started",
                      str(psutil.Process(os.getpid()).create_time())],
-                    cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     text=True, encoding="utf-8", errors="replace",
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
@@ -5416,8 +5451,11 @@ def gui():
                         event = json.loads(line)
                     except ValueError:
                         continue
-                    voice_events.put(("camera_" + str(event.get("event", "error")),
-                                      str(event.get("message", ""))))
+                    if event.get("event") == "frame":
+                        offer_camera_frame(str(event.get("message", "")))
+                    else:
+                        voice_events.put(("camera_" + str(event.get("event", "error")),
+                                          str(event.get("message", ""))))
                 process.wait()
                 if process.returncode and greeting_until[0] > time.time():
                     voice_events.put(("camera_error", "Camera greeting stopped. Check the camera connection and try again."))
@@ -5449,10 +5487,10 @@ def gui():
             status.set("Camera greeting turned off.")
 
     camera_button = ttk.Button(
-        companion_controls, text="📷  Camera On" if greeting_until[0] > time.time()
-        else "📷  Camera Off", command=toggle_camera_greeting,
+        companion_caption, text="📷 Camera On" if greeting_until[0] > time.time()
+        else "📷 Camera Off", command=toggle_camera_greeting, style="Tiny.TButton",
     )
-    camera_button.grid(row=1, column=0, columnspan=2, pady=(8, 0), sticky="w")
+    camera_button.pack(side="right")
     if greeting_until[0] > time.time():
         camera_scene.pack(anchor="w", pady=(8, 0))
         start_camera_greeting()
@@ -5461,11 +5499,11 @@ def gui():
               wraplength=310).pack(
         anchor="w", pady=(8, 2)
     )
-    chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=18)
+    chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=12)
     chat_panel.pack(side="left", fill="both", expand=True)
     chat_heading = ttk.Frame(chat_panel, style="Card.TFrame")
     chat_heading.pack(fill="x", pady=(0, 5))
-    ttk.Label(chat_heading, text="What are we making?", style="Card.TLabel",
+    ttk.Label(chat_heading, text="Chat with Cale", style="Card.TLabel",
               font=("Segoe UI", 18, "bold")).pack(side="left")
     readiness_text = tk.StringVar(value="")
     readiness_label = ttk.Label(
@@ -5504,11 +5542,11 @@ def gui():
         )
         button.pack(side="left", padx=(4, 0))
         mode_buttons[mode] = button
-    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=210)
+    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=130)
     conversation_frame.pack(fill="both", expand=True)
     conversation_frame.pack_propagate(False)
     conversation = tk.Text(
-        conversation_frame, height=1, wrap="word", state="disabled", background=card,
+        conversation_frame, width=1, height=1, wrap="word", state="disabled", background=card,
         foreground=text, insertbackground=text, relief="flat", padx=10, pady=6,
         font=("Segoe UI", 11), highlightthickness=0,
     )
@@ -5528,16 +5566,33 @@ def gui():
     conversation.pack(side="left", fill="both", expand=True)
     conversation.tag_configure("user", foreground="#a6c9ff", spacing1=8)
     conversation.tag_configure("assistant", foreground=text, spacing1=8)
-    entry_row = ttk.Frame(main_shell, style="Card.TFrame", padding=(12, 10))
-    # Claim the composer first so it remains reachable while task/history
-    # content scrolls on short displays. It never adds another scroll region.
-    entry_row.pack(side="bottom", fill="x", pady=(10, 0), before=main_scroll)
+    entry_row = ttk.Frame(chat_panel, style="Card.TFrame", padding=(0, 8))
+    # Chat history and its composer stay together above the task grid.
+    entry_row.pack(side="bottom", fill="x", pady=(6, 0), before=conversation_frame)
     chat_input = tk.Text(
         entry_row, background=field, foreground=text, insertbackground=text,
         relief="flat", font=("Segoe UI", 12), highlightthickness=0,
-        height=2, wrap="word", padx=8, pady=6,
+        width=1, height=2, wrap="word", padx=8, pady=6,
     )
     chat_input.pack(side="left", fill="both", expand=True, padx=(0, 8))
+    def size_home_chat(event=None):
+        if event is not None and event.widget is not window:
+            return
+        compact = window.winfo_height() < 880
+        for canvas, _segments, value in gauge_widgets.values():
+            factor = 0.8 if compact else 1.0
+            previous = getattr(canvas, "home_scale", 1.0)
+            if factor != previous:
+                canvas.scale("all", 46, 0, factor/previous, factor/previous)
+                canvas.home_scale = factor
+            canvas.configure(height=round(68*factor) + 8)
+            canvas.itemconfigure(value, font=("Segoe UI", 11 if compact else 13, "bold"))
+        conversation_frame.configure(height=88 if compact else 150)
+        chat_input.configure(height=1 if compact else 2)
+        mode_row.pack_forget()
+        mode_row.pack(side="bottom" if window.winfo_width() < 1100 else "right", anchor="w")
+    window.bind("<Configure>", size_home_chat, add="+")
+    size_home_chat()
     attachments = []
     attachment_text = tk.StringVar(value="")
     attachment_label = ttk.Label(
@@ -6112,8 +6167,8 @@ def gui():
                 "field": field, "text": text, "muted": muted})
 
     task_heading = ttk.Frame(main_page)
-    task_heading.pack(fill="x", pady=(0, 12))
-    ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 20, "bold")).pack(side="left")
+    task_heading.pack(fill="x", pady=(0, 8))
+    ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 17, "bold")).pack(side="left")
     chatgpt_usage = ttk.Label(task_heading, text="", style="Muted.TLabel")
     chatgpt_usage.pack(side="right", padx=(0, 12))
     usage_window = tk.Toplevel(window)
@@ -6715,8 +6770,84 @@ def gui():
     preview_capture_at = {}
     # Keep a layout anchor for task cards without showing model installation
     # details on the main screen. The separate model worker owns downloads.
+    task_order = []
+    task_grid = ttk.Frame(cards)
+    task_grid.pack(fill="x")
     models_section = ttk.Frame(cards)
     models_section.pack(fill="x")
+
+    def layout_task_cards(_event=None):
+        width = max(1, min(main_canvas.winfo_width(), window.winfo_width() - 80))
+        columns = 3 if width >= 1180 else 2 if width >= 700 else 1
+        for column in range(3):
+            task_grid.columnconfigure(column, weight=1 if column < columns else 0,
+                                      uniform="task-cards" if column < columns else "")
+        for index, pid in enumerate(task_order):
+            entry = task_cards.get(pid)
+            if not entry:
+                continue
+            entry["panel"].grid(row=index // columns, column=index % columns,
+                                 sticky="nsew", padx=(0, 10 if index % columns < columns-1 else 0), pady=(0, 10))
+            entry["name"].configure(wraplength=0)
+            entry["current_label"].configure(wraplength=0)
+    task_grid.bind("<Configure>", layout_task_cards)
+
+    def create_task_card(title):
+        panel = tk.Frame(task_grid, bg=card, padx=14, pady=12,
+                         highlightthickness=1, highlightbackground="#284052")
+        header = ttk.Frame(panel, style="Card.TFrame")
+        header.pack(fill="x")
+        gauge = tk.Canvas(header, width=48, height=48, background=card, highlightthickness=0)
+        gauge.pack(side="left", padx=(0, 10))
+        copy = ttk.Frame(header, style="Card.TFrame")
+        copy.pack(side="left", fill="x", expand=True)
+        title_var = tk.StringVar(value=title)
+        name = ttk.Label(copy, textvariable=title_var, style="Card.TLabel",
+                         font=("Segoe UI", 12, "bold"), width=1)
+        name.pack(anchor="w", fill="x")
+        state_var = tk.StringVar(value="")
+        ttk.Label(copy, textvariable=state_var, style="CardMuted.TLabel",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(3, 0))
+        menu_button = tk.Menubutton(header, text="⋯", bg=card, fg="#8ea9bb",
+                                   activebackground="#25384b", activeforeground=text,
+                                   relief="flat", font=("Segoe UI", 16, "bold"), cursor="hand2")
+        menu_button.pack(side="right", anchor="n")
+        menu = tk.Menu(menu_button, tearoff=False, bg=card, fg=text)
+        menu_button.configure(menu=menu)
+        current_var, eta_var = tk.StringVar(), tk.StringVar()
+        current_label = ttk.Label(panel, textvariable=current_var, style="CardMuted.TLabel", width=1)
+        current_label.pack(fill="x", pady=(9, 0))
+        eta_label = ttk.Label(panel, textvariable=eta_var, style="CardMuted.TLabel", wraplength=300)
+        percent_var = tk.StringVar(value="0%")
+        bar = tk.Canvas(panel, height=6, background=card, highlightthickness=0, borderwidth=0)
+        bar.pack(fill="x", pady=(10, 6))
+        metrics = tk.StringVar(value="0 tokens · 0s")
+        ttk.Label(panel, textvariable=metrics, style="CardMuted.TLabel",
+                  font=("Segoe UI", 9)).pack(anchor="w")
+        controls = ttk.Frame(panel, style="Card.TFrame")
+        controls.pack(fill="x", pady=(10, 0))
+        gauge.percent, gauge.task_state = 0, ""
+        def draw_gauge(_event=None):
+            gauge.delete("all")
+            shade = ("#ff7a8c" if gauge.task_state in {"failed", "stopped", "needs_input"}
+                     else "#e9b55a" if gauge.task_state == "paused" else "#23d5c5")
+            gauge.create_oval(4, 4, 44, 44, outline="#2b3b50", width=4)
+            if gauge.percent:
+                gauge.create_arc(4, 4, 44, 44, start=90, extent=-359.9*gauge.percent/100,
+                                 style="arc", outline=shade, width=4)
+            gauge.create_text(24, 24, text=f"{gauge.percent}%", fill=text, font=("Segoe UI", 9, "bold"))
+            bar.delete("all")
+            width = max(1, bar.winfo_width())
+            bar.create_rectangle(0, 1, width, 5, fill="#2b3b50", outline="")
+            bar.create_rectangle(0, 1, width*gauge.percent/100, 5, fill=shade, outline="")
+        bar.bind("<Configure>", draw_gauge)
+        draw_gauge()
+        return {"panel":panel, "name":name, "title":title_var, "percent":percent_var,
+                "state":state_var, "gauge":gauge, "draw_gauge":draw_gauge,
+                "current":current_var, "eta":eta_var, "current_label":current_label,
+                "eta_label":eta_label, "tokens":metrics, "sources":tk.StringVar(),
+                "controls":controls, "menu":menu, "compact":True}
+
 
     def set_text(variable, value):
         if variable.get() != value:
@@ -6825,7 +6956,9 @@ def gui():
         percent = max(0, min(100, int(percent)))
         set_text(card_info["percent"], f"{percent}%")
         set_text(card_info["current"], current)
-        if state.lower().replace(" ", "_") in ("accepted", "ready_for_review", "finished", "complete"):
+        if card_info.get("compact"):
+            pass  # The fixed-size arc keeps finished and active cards aligned.
+        elif state.lower().replace(" ", "_") in ("accepted", "ready_for_review", "finished", "complete"):
             card_info["gauge"].configure(height=12)
         else:
             card_info["gauge"].configure(height=34)
@@ -6847,6 +6980,30 @@ def gui():
         controls = card_info["controls"]
         for child in controls.winfo_children():
             child.destroy()
+        if card_info.get("compact"):
+            menu = card_info["menu"]
+            menu.delete(0, "end")
+            menu.add_command(label="Details", command=lambda pid=item["id"]: task_details(next(p for p in projects() if p["id"] == pid)))
+            menu.add_command(label="Open files", command=lambda pid=item["id"]: task_action(pid, "open"))
+            for index, (label, kind) in enumerate(task_controls_for(item["status"])):
+                if index < 3:
+                    button = ttk.Button(controls, text="Add note" if kind == "note" else label,
+                        style="Danger.TButton" if kind == "stop" else "TButton",
+                        width=1,
+                        command=lambda pid=item["id"], action=kind: task_action(pid, action))
+                    button.grid(row=0, column=index, sticky="ew", padx=(0, 5))
+                    controls.columnconfigure(index, weight=1)
+                else:
+                    menu.add_command(label=label, command=lambda pid=item["id"], action=kind: task_action(pid, action))
+            if direct_music and item["status"] in ("ready_for_review", "accepted"):
+                menu.add_command(label="Play song", command=lambda pid=item["id"]: task_action(pid, "play_music"))
+            if (direct_music or standalone_audio_project(item)) and item["status"] in ("ready_for_review", "accepted"):
+                menu.add_command(label="Share to Facebook", command=lambda pid=item["id"]: task_action(pid, "share_facebook"))
+            if camera:
+                menu.add_command(label="Turn camera off" if allowed else "Allow camera (1 hour)",
+                    command=lambda pid=item["id"], action="camera_off" if allowed else "camera_on": task_action(pid, action))
+            card_info["controls_signature"] = signature
+            return
         controls_to_show = task_controls_for(item["status"])
         for label, kind in controls_to_show:
             ttk.Button(
@@ -6885,9 +7042,7 @@ def gui():
         setup = read_task_status(STATE / "install-progress.json")
         if setup and not setup_card_dismissed.is_file():
             if setup_card is None:
-                first = next(
-                    (entry["panel"] for entry in task_cards.values()), models_section
-                )
+                first = task_grid
                 setup_card = create_progress_card("Set up your AI", first)
                 controls = ttk.Frame(setup_card["panel"], style="Card.TFrame")
                 controls.pack(fill="x", pady=(9, 0))
@@ -7017,6 +7172,7 @@ def gui():
             ollama_card = None
 
         all_tasks = list(reversed(projects()))
+        task_order[:] = [item["id"] for item in all_tasks]
         tokens_by_task = usage_history.task_totals()
         sources_by_task = usage_history.task_sources()
         live_ids = {item["id"] for item in all_tasks}
@@ -7036,57 +7192,28 @@ def gui():
             empty_label.destroy()
             empty_label = None
 
-        # Create oldest first, then insert each newer task above it. Existing
-        # widgets stay in place, which preserves the exact scroll position.
-        for item in reversed(all_tasks):
+        for item in all_tasks:
             pid = item["id"]
             if pid not in task_cards:
-                first = next(
-                    (
-                        task_cards[p["id"]]["panel"]
-                        for p in all_tasks
-                        if p["id"] in task_cards
-                    ),
-                    models_section,
-                )
-                card_info = create_progress_card(item["title"], first)
+                card_info = create_task_card(item["title"])
                 card_info["name"].configure(cursor="hand2")
-                card_info["name"].bind(
-                    "<Button-1>",
-                    lambda _, task_id=pid: task_details(
-                        next(p for p in projects() if p["id"] == task_id)
-                    ),
-                )
-                controls = ttk.Frame(card_info["panel"], style="Card.TFrame")
-                controls.pack(fill="x", pady=(9, 0))
-                card_info["controls"] = controls
-                token_var = tk.StringVar(value="Tokens: 0    Total time: 0s")
-                ttk.Label(card_info["panel"], textvariable=token_var,
-                          style="CardMuted.TLabel").pack(anchor="w", before=controls,
-                                                          pady=(3, 0))
-                card_info["tokens"] = token_var
-                source_var = tk.StringVar(value="AI used: waiting for first response")
-                ttk.Label(card_info["panel"], textvariable=source_var,
-                          style="CardMuted.TLabel", wraplength=900).pack(
-                              anchor="w", before=controls, pady=(2, 0))
-                card_info["sources"] = source_var
+                card_info["name"].bind("<Button-1>", lambda _, task_id=pid: task_details(next(p for p in projects() if p["id"] == task_id)))
                 task_cards[pid] = card_info
             card_info = task_cards[pid]
-            set_text(card_info["title"], item["title"])
+            set_text(card_info["title"], item["title"][:42] + ("…" if len(item["title"]) > 42 else ""))
             source_totals = sources_by_task.get(pid, [])
             token_label, source_label = task_usage_labels(
                 item, tokens_by_task.get(pid, 0), source_totals)
             set_text(
                 card_info["tokens"],
-                token_label + "    Total time: " + task_eta.total_time(
-                    item['created'], item['updated'], item['status'], finished=item['finished']),
+                token_label[:64] + " · " + task_card_elapsed(item),
             )
             set_text(card_info["sources"], source_label)
             percent, current = task_progress(item)
             finished = item["status"] in ("ready_for_review", "accepted")
             state = "Finished" if finished else item["status"].replace("_", " ").capitalize()
             update_progress_card(
-                card_info, percent, "" if finished else "Current step: " + current, state
+                card_info, percent, "Ready to open" if finished else current[:72] + ("…" if len(current) > 72 else ""), state
             )
             set_text(
                 card_info["eta"],
@@ -7096,14 +7223,9 @@ def gui():
                 if image_job_id(item) and item["status"] == "working"
                 else task_eta.countdown(STATE / "projects.db", pid, percent, item["status"]),
             )
-            for key in ("current", "eta"):
-                label = card_info[key + "_label"]
-                if card_info[key].get():
-                    if not label.winfo_manager():
-                        label.pack(anchor="w", before=card_info["controls"], pady=(3, 0))
-                elif label.winfo_manager():
-                    label.pack_forget()
+            # Longer current-step, ETA and model details stay in Details.
             update_task_controls(card_info, item)
+        layout_task_cards()
 
     def update_side_preview(all_projects):
         """Keep the selected project's existing capture inside Create's preview."""
@@ -7328,8 +7450,6 @@ def gui():
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
                     report_runtime_issue("speech", value)
-                elif event == "camera_frame":
-                    show_camera_preview(value)
                 elif event in ("camera_visitor", "camera_enrolled"):
                     if event == "camera_visitor" and "Who are you?" in value:
                         visitor_awaiting_intro_until[0] = time.monotonic() + 45
@@ -7719,6 +7839,7 @@ def gui():
     # request is ignored until all of its speech has finished. The greeting
     # remains queued and plays once the initial listening clip is complete.
     toggle_listening(interrupt_speech=True)
+    camera_preview_poll()
     voice_poll()
     poll()
 

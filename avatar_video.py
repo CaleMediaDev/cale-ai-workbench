@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageOps
 
 SIZE = (320, 132)
-CAMERA_SIZE = (200, 132)
+CAMERA_SIZE = (320, 132)
 
 
 def camera_frame(jpeg: bytes) -> Image.Image:
