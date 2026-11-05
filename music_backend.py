@@ -1393,7 +1393,31 @@ def _ace_function_from_source(source, module, name, class_name=None):
     code = compile(selected, str(module.__file__), 'exec', dont_inherit=True)
     temporary = {}
     exec(code, module.__dict__, temporary)
-    return temporary[name]
+    function = temporary[name]
+    # Python 3.11 optimizes calls differently when names are known imports in
+    # the surrounding module. Compile that entire VERIFIED module, but never
+    # execute it, so expected and replacement code retain its symbol table.
+    import types
+
+    module_code = compile(source, str(module.__file__), 'exec', dont_inherit=True)
+    scope = module_code
+    if class_name:
+        classes = [
+            value for value in scope.co_consts
+            if isinstance(value, types.CodeType) and value.co_name == class_name
+        ]
+        if len(classes) != 1:
+            raise ValueError('Verified ACE class code could not be selected uniquely.')
+        scope = classes[0]
+    functions = [
+        value for value in scope.co_consts
+        if isinstance(value, types.CodeType) and value.co_name == name
+    ]
+    if len(functions) != 1 or functions[0].co_freevars or function.__closure__:
+        raise ValueError('Verified ACE function code needs unsupported closure context.')
+    function.__code__ = functions[0]
+    return function
+
 
 
 def _ace_code_matches(actual, expected):
