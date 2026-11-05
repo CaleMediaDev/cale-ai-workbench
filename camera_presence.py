@@ -318,12 +318,15 @@ class AvatarFrameWorker:
         # Restrict output to a genuine rendered/neutral RGB array. Never use the
         # input camera object as a fallback when setup or rendering fails.
         if rgb is None or getattr(rgb,"ndim",0)!=3 or rgb.shape[2]!=3:return
-        if rgb.dtype.name!="uint8" or max(rgb.shape[:2])>2048:return
-        small=cv2.resize(rgb,(512,512))
-        ok,encoded=cv2.imencode(".jpg",small[:,:,::-1],[cv2.IMWRITE_JPEG_QUALITY,82])
+        height,width=rgb.shape[:2]
+        if rgb.dtype.name!="uint8" or not (1<=width<=1920 and 1<=height<=1080):return
+        # Keep the illustrated scene's native aspect and pixels. Only the Tk
+        # preview is fitted to its small widget; the bridge receives this same
+        # complete scene, rather than a distorted square proxy.
+        ok,encoded=cv2.imencode(".jpg",rgb[:,:,::-1],[cv2.IMWRITE_JPEG_QUALITY,92])
         if not ok:return
         payload=encoded.tobytes()
-        if len(payload)>140000:return
+        if len(payload)>2*1024*1024:return
         if self.authorized():emit("frame",base64.b64encode(payload).decode("ascii"))
         if self.sender_worker and self.authorized():self.sender_worker.submit(payload)
 

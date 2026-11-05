@@ -865,3 +865,110 @@ def test_avatar_heavy_gpu_work_pauses_and_releases_before_resuming(monkeypatch,t
     finally:permission[0]=False;worker.close()
     assert len(opened)==2 and len(closed)==2
     assert not list((tmp_path/'LongTasks').glob('avatar-gpu-active-*.json'))
+
+
+def test_avatar_publish_preserves_native_scene_for_ui_and_virtual_bridge(monkeypatch):
+    import camera_presence as camera,sys
+    scene=np.zeros((360,880,3),dtype=np.uint8);scene[:,:,0]=120;scene[:,440:,1]=240
+    def resize(image,size):return np.array(Image.fromarray(image).resize(size))
+    def encode(_suffix,bgr,_params):
+        stream=io.BytesIO();Image.fromarray(bgr[:,:,::-1]).save(stream,format='JPEG',quality=92)
+        return True,SimpleNamespace(tobytes=lambda:stream.getvalue())
+    monkeypatch.setitem(sys.modules,'cv2',SimpleNamespace(resize=resize,imencode=encode,IMWRITE_JPEG_QUALITY=1))
+    frames=[];monkeypatch.setattr(camera,'emit',lambda kind,payload:frames.append((kind,payload)))
+    worker=camera.AvatarFrameWorker.__new__(camera.AvatarFrameWorker)
+    worker.authorized=lambda:True;worker.sender_worker=Mock()
+    worker._publish(scene)
+    assert len(frames)==1 and frames[0][0]=='frame'
+    encoded=base64.b64decode(frames[0][1],validate=True)
+    with Image.open(io.BytesIO(encoded)) as image:assert image.size==(880,360)
+    worker.sender_worker.submit.assert_called_once_with(encoded)
+
+
+def test_actual_tk_camera_off_stays_visible_outside_hidden_static_portrait(tmp_path):
+    """Execute real GUI declarations/callback, not an assumed widget ancestry."""
+    import ast,time,tkinter as tk
+    from tkinter import ttk
+    source=Path(__file__).parents[1]/'long_tasks.py';tree=ast.parse(source.read_text(encoding='utf-8'))
+    gui=next(node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name=='gui')
+    assignments={target.id:node for node in ast.walk(gui) if isinstance(node,ast.Assign) for target in node.targets if isinstance(target,ast.Name)}
+    functions={node.name:node for node in ast.walk(gui) if isinstance(node,ast.FunctionDef)}
+    try:window=tk.Tk()
+    except tk.TclError:raise unittest.SkipTest('Tk display unavailable')
+    try:
+        title_copy=ttk.Frame(window);title_copy.pack(anchor='nw',padx=20,pady=20)
+        namespace={'tk':tk,'ttk':ttk,'title_copy':title_copy,'time':time,'json':json,'bg':'#0b1017',
+            'greeting_until':[time.time()+3600],'avatar_selected':tk.BooleanVar(window,value=True),'camera_generation':[1],
+            'greeting_process':[None],'greeting_config':tmp_path/'camera-greeting.json','camera_consent':tmp_path/'camera-consent.json',
+            'status':tk.StringVar(window),'start_camera_greeting':Mock(),'clear_camera_preview':Mock()}
+        def execute(node):exec(compile(ast.Module(body=[node],type_ignores=[]),str(source),'exec'),namespace)
+        for name in ('beach_scene','cale_scene','companion_caption','camera_scene','camera_options'):execute(assignments[name])
+        ns=namespace
+        ns['beach_scene'].pack(anchor='w');ns['cale_scene'].pack(anchor='w')
+        ttk.Label(ns['cale_scene'],text='Static assistant portrait',width=42).pack()
+        ns['companion_caption'].pack(fill='x');ns['camera_options'].pack(fill='x')
+        execute(assignments['camera_scene_caption']);ns['camera_scene_caption'].pack()
+        execute(functions['update_camera_layout']);execute(functions['toggle_camera_greeting'])
+        execute(assignments['camera_button']);ns['camera_button'].pack(side='right')
+        for width,height in ((1050,740),(1440,1024)):
+            window.geometry(f'{width}x{height}+10+10')
+            ns['greeting_until'][0]=time.time()+3600
+            ns['camera_button'].configure(text='Camera On')
+            ns['camera_scene'].pack(anchor='w',before=ns['camera_options'])
+            ns['update_camera_layout']();window.update_idletasks();window.update()
+            assert not ns['cale_scene'].winfo_ismapped()
+            ancestors=[];parent=ns['camera_button'].master
+            while parent is not None:ancestors.append(parent);parent=getattr(parent,'master',None)
+            assert ns['cale_scene'] not in ancestors
+            assert ns['camera_button'].winfo_ismapped()
+            assert ns['camera_button'].winfo_rooty()+ns['camera_button'].winfo_height()<=window.winfo_rooty()+height
+            ns['camera_button'].invoke();window.update_idletasks();window.update()
+            assert ns['greeting_until'][0]==0 and ns['cale_scene'].winfo_ismapped()
+            assert ns['camera_button'].winfo_ismapped() and 'Off' in ns['camera_button'].cget('text')
+            assert json.loads((tmp_path/'camera-consent.json').read_text())=={'until':0}
+    finally:window.destroy()
+
+
+def test_raw_camera_permission_revoked_during_read_cannot_save(tmp_path,monkeypatch):
+    import media_worker,sys
+    permission=[True];frame=np.zeros((8,8,3),dtype=np.uint8)
+    camera=Mock();camera.isOpened.return_value=True
+    def read():permission[0]=False;return True,frame
+    camera.read.side_effect=read
+    cv2=SimpleNamespace(imwrite=Mock(return_value=True))
+    monkeypatch.setitem(sys.modules,'cv2',cv2)
+    monkeypatch.setattr(media_worker,'camera_permission',lambda:permission[0])
+    monkeypatch.setattr(media_worker,'require_raw_camera_mode',lambda:None)
+    monkeypatch.setattr(media_worker,'open_camera',lambda _:camera)
+    monkeypatch.setattr(media_worker,'output_file',lambda *_:tmp_path/'raw.png')
+    with unittest.TestCase().assertRaisesRegex(ValueError,'turned off'):media_worker.capture_camera(str(tmp_path/'raw.png'))
+    cv2.imwrite.assert_not_called();camera.release.assert_called_once();assert not (tmp_path/'raw.png').exists()
+
+
+def test_raw_watch_checks_permission_again_before_analysis(tmp_path,monkeypatch):
+    import media_worker,sys
+    permission=[True];frame=np.zeros((8,8,3),dtype=np.uint8)
+    camera=Mock();camera.isOpened.return_value=True;camera.read.return_value=(True,frame)
+    def write(path,_frame):Path(path).write_bytes(b'owned synthetic frame');permission[0]=False;return True
+    monkeypatch.setitem(sys.modules,'cv2',SimpleNamespace(imwrite=write))
+    monkeypatch.setattr(media_worker,'ROOT',tmp_path)
+    monkeypatch.setattr(media_worker,'camera_permission',lambda:permission[0])
+    monkeypatch.setattr(media_worker,'require_raw_camera_mode',lambda:None)
+    monkeypatch.setattr(media_worker,'open_camera',lambda _:camera)
+    analyze=Mock(side_effect=AssertionError('Revoked camera must not be analyzed'))
+    monkeypatch.setattr(media_worker,'recognize_image',analyze)
+    with unittest.TestCase().assertRaisesRegex(ValueError,'turned off'):media_worker.watch_camera(seconds=1,max_frames=1)
+    analyze.assert_not_called();camera.release.assert_called_once()
+    assert not list((tmp_path/'Temp').rglob('camera-*.jpg'))
+
+
+def test_camera_transport_accepts_hq_avatar_with_strict_upper_bound():
+    import ast,queue
+    source=Path(__file__).parents[1]/'long_tasks.py';tree=ast.parse(source.read_text(encoding='utf-8'))
+    function=next(node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef) and node.name=='offer_camera_frame')
+    ns={'queue':queue,'camera_frames':queue.Queue(maxsize=1),'camera_generation':[1]}
+    exec(compile(ast.Module(body=[function],type_ignores=[]),str(source),'exec'),ns)
+    ns['offer_camera_frame']('H'*300000,1)
+    assert ns['camera_frames'].get_nowait()==(1,'H'*300000)
+    ns['offer_camera_frame']('X'*2800001,1)
+    assert ns['camera_frames'].empty()

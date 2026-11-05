@@ -638,14 +638,14 @@ def test_avatar_virtual_sender_bounded_only_processed_frames(monkeypatch):
     import types
     sent=[];closed=[]
     class Camera:
-        def __init__(self,**kwargs):assert kwargs['backend']=='obs';assert kwargs['width']==512
+        def __init__(self,**kwargs):assert kwargs['backend']=='obs';assert kwargs['width']==1920 and kwargs['height']==1080
         def __enter__(self):return self
         def __exit__(self,*_):closed.append(True)
         def send(self,frame):sent.append(frame)
     monkeypatch.setitem(sys.modules,'pyvirtualcam',types.SimpleNamespace(Camera=Camera,PixelFormat=types.SimpleNamespace(RGB='RGB')))
     buffer=io.BytesIO();Image.fromarray(np.full((512,512,3),22,dtype=np.uint8)).save(buffer,format='JPEG');raw=buffer.getvalue()
     assert video_generation.virtual_avatar_sender(io.BytesIO(struct.pack('!I',len(raw))+raw))==0
-    assert len(sent)==1 and sent[0].shape==(512,512,3) and closed==[True]
+    assert len(sent)==1 and sent[0].shape==(1080,1920,3) and closed==[True]
     with pytest.raises(ValueError,match='bound'):video_generation.virtual_avatar_sender(io.BytesIO(struct.pack('!I',3*1024*1024)))
     assert len(sent)==1
 
@@ -687,3 +687,111 @@ def test_avatar_setup_probe_cancel_reaps_owned_child(tmp_path,monkeypatch):
         video_generation.probe_avatar_profile(tmp_path,tmp_path,cancelled=lambda:True)
     process.terminate.assert_called_once();process.wait.assert_called_once_with(timeout=3)
     assert '-B' in launched[0][0] and launched[0][1]['env']['PYTHONDONTWRITEBYTECODE']=='1'
+
+
+def test_avatar_virtual_sender_letterboxes_native_scene_without_stretch(monkeypatch):
+    import io,struct,types,numpy as np
+    from PIL import Image
+    sent=[]
+    class Camera:
+        def __init__(self,**kwargs):assert (kwargs['width'],kwargs['height'])==(1920,1080)
+        def __enter__(self):return self
+        def __exit__(self,*_):pass
+        def send(self,frame):sent.append(frame)
+    monkeypatch.setitem(sys.modules,'pyvirtualcam',types.SimpleNamespace(Camera=Camera,PixelFormat=types.SimpleNamespace(RGB='RGB')))
+    stream=io.BytesIO();Image.new('RGB',(880,360),(120,80,40)).save(stream,format='JPEG');raw=stream.getvalue()
+    assert video_generation.virtual_avatar_sender(io.BytesIO(struct.pack('!I',len(raw))+raw))==0
+    assert len(sent)==1 and sent[0].shape==(1080,1920,3)
+    ys,xs=np.where(sent[0].max(axis=2)>20)
+    assert xs.min()==0 and xs.max()==1919
+    assert abs((ys.max()-ys.min()+1)-360*1920/880)<2
+    assert np.all(sent[0][0]==0) and np.all(sent[0][-1]==0)
+
+
+def test_avatar_probe_ignores_untrusted_cwd_before_any_gpu_import(tmp_path,monkeypatch):
+    import subprocess,sys
+    caller=tmp_path/'untrusted-caller';caller.mkdir()
+    trusted=tmp_path/'trusted-app';trusted.mkdir()
+    executed=caller/'cwd-code-executed';reached=trusted/'before-gpu-import'
+    (caller/'json.py').write_text(f"from pathlib import Path\nPath({str(executed)!r}).write_text('untrusted cwd executed')\nraise RuntimeError('cwd json shadow')\n",encoding='utf-8')
+    # Fail before importing any real GPU library. The tripwire is reached only
+    # after the probe imports canonical JSON and inserts the explicit app root.
+    (trusted/'video_generation.py').write_text(Path(video_generation.__file__).read_text(encoding='utf-8'),encoding='utf-8')
+    import camera_presence
+    (trusted/'camera_presence.py').write_text(Path(camera_presence.__file__).read_text(encoding='utf-8'),encoding='utf-8')
+    (trusted/'Media/avatar/v1').mkdir(parents=True)
+    (trusted/'torch.py').write_text(f"from pathlib import Path\nPath({str(reached)!r}).write_text('trusted stage reached')\nraise RuntimeError('test stops before real GPU imports')\n",encoding='utf-8')
+    actual=subprocess.Popen;commands=[]
+    def launch(command,**kwargs):
+        commands.append((command,kwargs))
+        return actual([sys.executable,*command[1:]],**kwargs)
+    monkeypatch.setattr(video_generation.subprocess,'Popen',launch)
+    monkeypatch.chdir(caller)
+    with pytest.raises(RuntimeError,match='qualification failed'):
+        video_generation.probe_avatar_profile(trusted/'Media/avatar/v1',trusted)
+    assert not executed.exists(), 'Untrusted caller json.py ran before GPU validation'
+    assert reached.read_text()=='trusted stage reached'
+    assert '-I' in commands[0][0] and commands[0][1]['cwd']==trusted
+
+
+def test_avatar_setup_waits_for_heavy_gpu_then_qualifies_once(tmp_path,monkeypatch,avatar_profile_fixture):
+    module,profile,python=avatar_profile_fixture
+    states=iter((True,True,False));busy=[];notices=[]
+    def active(_root):value=next(states,False);busy.append(value);return value
+    monkeypatch.setattr(module,'_avatar_gpu_busy',active)
+    monkeypatch.setattr(module.time,'sleep',lambda *_:None)
+    def probe(*_args,**_kwargs):assert busy==[True,True,False];return {'ok':True}
+    called=Mock(side_effect=probe);monkeypatch.setattr(module,'probe_avatar_profile',called)
+    assert module.ensure_avatar_profile(tmp_path,progress=lambda value:notices.append(value['phase']))==python
+    called.assert_called_once();assert notices.count('waiting_gpu')==1
+    assert module.avatar_profile_status(tmp_path)['ready'] is True
+
+
+def test_avatar_setup_waiting_gpu_is_cancellable_without_probe(tmp_path,monkeypatch,avatar_profile_fixture):
+    module,profile,_=avatar_profile_fixture;cancelled=[False]
+    monkeypatch.setattr(module,'_avatar_gpu_busy',lambda _:True)
+    monkeypatch.setattr(module.time,'sleep',lambda *_:cancelled.__setitem__(0,True))
+    probe=Mock();monkeypatch.setattr(module,'probe_avatar_profile',probe)
+    with pytest.raises(RuntimeError,match='cancelled'):module.ensure_avatar_profile(tmp_path,cancelled=lambda:cancelled[0])
+    probe.assert_not_called();assert module.avatar_profile_status(tmp_path)['ready'] is False
+
+
+def test_avatar_busy_work_reaps_probe_and_cleans_exact_child_lease(tmp_path,monkeypatch):
+    import psutil
+    process=Mock();process.pid=123456;alive=[True]
+    process.poll.side_effect=lambda:None if alive[0] else 0
+    process.terminate.side_effect=lambda:alive.__setitem__(0,False)
+    monkeypatch.setattr(psutil,'Process',lambda *_:SimpleNamespace(create_time=lambda:42.5))
+    busy=iter((False,True));monkeypatch.setattr(video_generation,'_avatar_gpu_busy',lambda _:next(busy,True))
+    marker=tmp_path/'LongTasks/avatar-gpu-active-123456.json';marker.parent.mkdir()
+    def launch(command,**kwargs):
+        assert command[1:3]==['-I','-B'] and command[4]=='avatar-profile-probe'
+        assert kwargs['cwd']==tmp_path
+        marker.write_text(json.dumps({'pid':123456,'started':42.5,'reserved_bytes':2*1024**3}))
+        return process
+    monkeypatch.setattr(video_generation.subprocess,'Popen',launch)
+    with pytest.raises(video_generation._AvatarProbeDeferred):video_generation.probe_avatar_profile(tmp_path/'Media/avatar/v1',tmp_path)
+    process.terminate.assert_called_once();process.wait.assert_called_once_with(timeout=3)
+    assert not marker.exists()
+
+
+def test_avatar_probe_cli_lease_precedes_engine_and_closes_after_it(tmp_path,monkeypatch,capsys):
+    import types,threading
+    events=[];profile=tmp_path/'Media/avatar/v1';profile.mkdir(parents=True)
+    monkeypatch.setattr(video_generation,'__file__',str(tmp_path/'video_generation.py'))
+    class Lease:
+        def __init__(self):events.append('lease starting')
+        def measured(self,value):assert value['ok'];events.append('lease measured')
+        def close(self):events.append('lease close')
+    class Engine:
+        def __init__(self,_):assert events==['lease starting'];events.append('engine')
+        def probe(self):events.append('probe');return {'ok':True,'gpu_allocation_bytes':123}
+        def close(self):events.append('engine close')
+    monkeypatch.setitem(sys.modules,'camera_presence',types.SimpleNamespace(AvatarGpuLease=Lease,owner_alive=lambda *_:True,watch_owner=Mock()))
+    monkeypatch.setitem(sys.modules,'torch',types.SimpleNamespace(__file__=str(tmp_path/'Media/python/Lib/site-packages/torch/__init__.py'),__version__='2.9.1+cu128',version=types.SimpleNamespace(cuda='12.8'),cuda=types.SimpleNamespace(is_available=lambda:True),backends=types.SimpleNamespace(cudnn=types.SimpleNamespace(version=lambda:90100))))
+    monkeypatch.setitem(sys.modules,'onnxruntime',types.SimpleNamespace(__file__=str(profile/'python/Lib/site-packages/onnxruntime/__init__.py'),__version__='1.26.0'))
+    monkeypatch.setitem(sys.modules,'avatar_video',types.SimpleNamespace(CaleAvatar=Engine))
+    monkeypatch.setattr(threading.Thread,'start',lambda *_:None)
+    video_generation.avatar_profile_probe_worker(profile,5,10)
+    assert events==['lease starting','engine','probe','lease measured','engine close','lease close']
+    assert json.loads(capsys.readouterr().out)['ok'] is True

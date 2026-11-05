@@ -4737,7 +4737,7 @@ def gui():
         camera_preview.cale_photo = None
 
     def show_camera_preview(payload):
-        if greeting_until[0] <= time.time() or len(payload) > 200_000:
+        if greeting_until[0] <= time.time() or len(payload) > 2_800_000:
             return
         try:
             photo = ImageTk.PhotoImage(
@@ -4807,7 +4807,7 @@ def gui():
     def offer_camera_frame(value, generation=None):
         if generation is not None and generation != camera_generation[0]:
             return
-        if len(value) > 200_000:
+        if len(value) > 2_800_000:
             return
         try:
             camera_frames.get_nowait()
@@ -5511,7 +5511,7 @@ def gui():
                     greeting_process[0]=process
                 for line in process.stdout:
                     if not current():break
-                    if len(line)>220000:continue
+                    if len(line)>2_800_256:continue
                     try:event=json.loads(line)
                     except ValueError:continue
                     if event.get("event")=="frame":offer_camera_frame(str(event.get("message","")),generation)

@@ -648,31 +648,63 @@ def _avatar_environment():
     return env
 
 
+class _AvatarProbeDeferred(RuntimeError):
+    """A foreground GPU job superseded qualification; retry after it finishes."""
+
+
+def _avatar_gpu_busy(root):
+    from readiness_checklist import _heavy_gpu_active
+    return _heavy_gpu_active(Path(root))
+
+
+def avatar_profile_probe_worker(profile, parent_pid, parent_started):
+    """Explicit trusted CLI role, with a visible live-process GPU lease."""
+    import threading
+    root=Path(__file__).resolve().parent
+    profile=Path(profile).resolve()
+    if profile!=avatar_profile_root(root).resolve():raise ValueError("Avatar probe profile is not owned by this app.")
+    # Isolated Python excludes caller cwd; only the actual app directory is
+    # added, after this script's standard-library imports have completed.
+    sys.path.insert(0,str(root))
+    from camera_presence import AvatarGpuLease,owner_alive,watch_owner
+    if not owner_alive(parent_pid,parent_started):raise RuntimeError("Avatar setup owner closed.")
+    threading.Thread(target=watch_owner,args=(parent_pid,parent_started),daemon=True).start()
+    engine=None;lease=AvatarGpuLease()
+    try:
+        import torch,onnxruntime as ort,avatar_video
+        media=root/"Media/python"
+        if not Path(ort.__file__).resolve().is_relative_to(profile/"python"):raise RuntimeError("Wrong avatar ORT origin.")
+        if not Path(torch.__file__).resolve().is_relative_to(media):raise RuntimeError("Wrong Media Torch origin.")
+        if ort.__version__!="1.26.0" or torch.__version__!="2.9.1+cu128":raise RuntimeError("Avatar runtime versions changed.")
+        if torch.version.cuda!="12.8" or not torch.cuda.is_available():raise RuntimeError("Avatar CUDA is unavailable.")
+        engine=avatar_video.CaleAvatar(profile)
+        result=engine.probe();lease.measured(result)
+        if not isinstance(result,dict) or result.get("ok") is not True:raise RuntimeError("Avatar inference failed.")
+        print(json.dumps({"ok":True,"ort":ort.__version__,"torch":torch.__version__,"cuda":torch.version.cuda,
+            "cudnn":torch.backends.cudnn.version(),"probe":result}),flush=True)
+    finally:
+        try:
+            if engine is not None:engine.close()
+        finally:lease.close()
+
+
 def probe_avatar_profile(profile, root=None, cancelled=None):
-    """Run actual imports/origin/CUDA checks and engine inference in its process."""
+    """Qualify in an isolated child; defer/reap it when foreground GPU work wins."""
+    import psutil
     root=Path(root or ROOT);profile=Path(profile)
+    if _avatar_gpu_busy(root):raise _AvatarProbeDeferred("Waiting for music/image GPU work.")
     python=profile/"python/Scripts/python.exe"
-    script=("import json,sys,pathlib; "
-            "sys.path.insert(0,sys.argv[2]); "
-            "import torch,onnxruntime as ort,avatar_video; "
-            "p=pathlib.Path(sys.argv[1]).resolve(); m=pathlib.Path(sys.argv[2]).resolve()/'Media/python'; "
-            "assert pathlib.Path(ort.__file__).resolve().is_relative_to(p/'python'); "
-            "assert pathlib.Path(torch.__file__).resolve().is_relative_to(m); "
-            "assert ort.__version__=='1.26.0' and torch.__version__=='2.9.1+cu128'; "
-            "assert torch.version.cuda=='12.8' and torch.cuda.is_available(); "
-            "engine=avatar_video.CaleAvatar(p); "
-            "result=engine.probe(); engine.close(); "
-            "assert isinstance(result,dict) and result.get('ok') is True; "
-            "print(json.dumps({'ok':True,'ort':ort.__version__,'torch':torch.__version__,'cuda':torch.version.cuda,'cudnn':torch.backends.cudnn.version(),'probe':result}))")
-    # File-backed bounded output avoids a pipe deadlock or unbounded RAM capture.
-    # Cancellation also reaps a setup probe when the user turns the camera off.
+    command=[str(python),"-I","-B",str(root/"video_generation.py"),"avatar-profile-probe","--profile-root",str(profile),
+             "--parent-pid",str(os.getpid()),"--parent-started",str(psutil.Process(os.getpid()).create_time())]
     with tempfile.TemporaryFile() as output,tempfile.TemporaryFile() as errors:
-        process=subprocess.Popen([str(python),"-B","-c",script,str(profile),str(root)],stdout=output,stderr=errors,
-                                 env=_avatar_environment(),creationflags=HIDE)
+        process=subprocess.Popen(command,stdout=output,stderr=errors,env=_avatar_environment(),creationflags=HIDE,cwd=root)
+        try:started=psutil.Process(process.pid).create_time()
+        except (psutil.Error,TypeError,ValueError):started=None
         deadline=time.monotonic()+120
         try:
             while process.poll() is None:
                 if cancelled and cancelled():raise RuntimeError("Live Cale setup cancelled.")
+                if _avatar_gpu_busy(root):raise _AvatarProbeDeferred("Foreground GPU work started; qualification paused.")
                 if time.monotonic()>deadline:raise TimeoutError("Live Cale inference qualification timed out.")
                 if output.tell()>16384 or errors.tell()>65536:raise RuntimeError("Live Cale probe output exceeded its bound.")
                 time.sleep(.05)
@@ -686,7 +718,15 @@ def probe_avatar_profile(profile, root=None, cancelled=None):
                 process.terminate()
                 try:process.wait(timeout=3)
                 except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
-
+            else:process.wait()
+            # Forced termination does not run child finally blocks. Remove only
+            # the exact reaped process's marker; PID alone is not ownership.
+            marker=root/"LongTasks"/f"avatar-gpu-active-{process.pid}.json"
+            try:
+                with marker.open("rb") as stream:record=stream.read(4097)
+                value=json.loads(record) if len(record)<=4096 else {}
+                if started is not None and value.get("pid")==process.pid and value.get("started")==started:marker.unlink()
+            except (OSError,ValueError):pass
     return result
 
 
@@ -733,14 +773,27 @@ def ensure_avatar_profile(root=None, progress=None, cancelled=None, virtual_outp
                 raise RuntimeError("Live Cale runtime path changed; optional profile must be repaired before it can run.")
             if virtual_output:
                 if pc_offline.offline():
-                    completed=subprocess.run([str(python),"-c","import pyvirtualcam"],timeout=20,capture_output=True,creationflags=HIDE)
+                    completed=subprocess.run([str(python),"-I","-B","-c","import pyvirtualcam"],timeout=20,capture_output=True,creationflags=HIDE,cwd=root,env=_avatar_environment())
                     if completed.returncode:raise RuntimeError("Optional virtual-camera package needs one online setup.")
                 else:
                     report("installing","Preparing optional GPL virtual-camera bridge; existing OBS driver required")
                     subprocess.run([music_backend._tool("uv"),"pip","install","--python",str(python),"--no-deps","pyvirtualcam==0.15.0"],check=True,timeout=120,capture_output=True,creationflags=HIDE,env=_avatar_environment())
                     (profile/"virtual-camera-provenance.json").write_text(json.dumps({"package":"pyvirtualcam","version":"0.15.0","license":"GPL-2.0","source":"https://github.com/letmaik/pyvirtualcam","execution":"separate optional avatar-only frame sender","obs_driver":"existing Windows OBS installation required","virtual_output_tested":False}),encoding="utf-8")
             report("testing","Testing Live Cale CUDA imports and actual avatar inference")
-            probe=probe_avatar_profile(profile,root,cancelled=cancelled)
+            waiting=False
+            while True:
+                if cancelled and cancelled():raise RuntimeError("Live Cale setup cancelled.")
+                if _avatar_gpu_busy(root):
+                    if not waiting:report("waiting_gpu","Animated Cale setup paused for local music/image work; your camera stays private.")
+                    waiting=True;time.sleep(.1);continue
+                if waiting:report("testing","Foreground GPU work finished; testing Live Cale inference")
+                waiting=False
+                try:
+                    probe=probe_avatar_profile(profile,root,cancelled=cancelled)
+                    break
+                except _AvatarProbeDeferred:
+                    report("waiting_gpu","Animated Cale qualification paused for foreground GPU work.")
+                    waiting=True
             value=_avatar_write_status(profile,phase="ready",ready=True,detail="Live Cale inference tested",probe=probe,virtual_output_requested=bool(virtual_output),virtual_output_tested=False)
             if progress:progress(value)
             return python
@@ -757,7 +810,7 @@ def virtual_avatar_sender(stream=None, parent_pid=None, parent_started=None):
     """
     import struct,io
     import numpy as np
-    from PIL import Image
+    from PIL import Image,ImageOps
     import pyvirtualcam  # Optional GPL2 dependency stays in this child process.
     stream=stream or sys.stdin.buffer
     if parent_pid is not None:
@@ -765,7 +818,7 @@ def virtual_avatar_sender(stream=None, parent_pid=None, parent_started=None):
         from camera_presence import owner_alive,watch_owner
         if not owner_alive(parent_pid,parent_started):return 0
         threading.Thread(target=watch_owner,args=(parent_pid,parent_started),daemon=True).start()
-    with pyvirtualcam.Camera(width=512,height=512,fps=15,backend="obs",fmt=pyvirtualcam.PixelFormat.RGB) as camera:
+    with pyvirtualcam.Camera(width=1920,height=1080,fps=15,backend="obs",fmt=pyvirtualcam.PixelFormat.RGB) as camera:
         while True:
             header=stream.read(4)
             if not header:return 0
@@ -775,13 +828,28 @@ def virtual_avatar_sender(stream=None, parent_pid=None, parent_started=None):
             raw=stream.read(size)
             if len(raw)!=size:raise ValueError("Incomplete avatar frame.")
             with Image.open(io.BytesIO(raw)) as image:
-                if image.size!=(512,512):raise ValueError("Avatar virtual output must be512x512.")
-                frame=np.asarray(image.convert("RGB"))
+                width,height=image.size
+                if not (1<=width<=1920 and 1<=height<=1080):raise ValueError("Avatar virtual pixels exceed their bound.")
+                # Preserve the native scene's aspect ratio. A 1920x1080 virtual
+                # device gets a letterbox, never a stretched face or cropped art.
+                fitted=ImageOps.contain(image.convert("RGB"),(1920,1080),Image.Resampling.LANCZOS)
+                canvas=Image.new("RGB",(1920,1080),(0,0,0))
+                canvas.paste(fitted,((1920-fitted.width)//2,(1080-fitted.height)//2))
+                frame=np.asarray(canvas)
             camera.send(frame)
     return 0
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2]==["avatar-profile-probe"]:
+        import argparse
+        parser=argparse.ArgumentParser()
+        parser.add_argument("--profile-root",required=True)
+        parser.add_argument("--parent-pid",type=int,required=True)
+        parser.add_argument("--parent-started",type=float,required=True)
+        options=parser.parse_args(sys.argv[2:])
+        avatar_profile_probe_worker(options.profile_root,options.parent_pid,options.parent_started)
+        raise SystemExit(0)
     if sys.argv[1:2]==["avatar-virtual-sender"]:
         import argparse
         parser=argparse.ArgumentParser()

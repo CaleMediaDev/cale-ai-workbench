@@ -332,6 +332,7 @@ def capture_camera(output_path, device=0):
                 break
         if frame is None:
             raise ValueError("No camera frame received.")
+        if not camera_permission():raise ValueError("Camera was turned off.")
         require_raw_camera_mode()
         if not cv2.imwrite(str(target), frame):
             raise RuntimeError("Camera image could not be saved.")
@@ -380,10 +381,13 @@ def watch_camera(
                 ok, frame = capture.read()
                 if not ok:
                     raise RuntimeError("The camera stopped returning frames.")
+                if not camera_permission():raise ValueError("Camera was turned off.")
                 require_raw_camera_mode()
                 frame_path = Path(temp) / f"camera-{index}.jpg"
                 if not cv2.imwrite(str(frame_path), frame):
                     raise RuntimeError("Could not sample camera frame.")
+                if not camera_permission():raise ValueError("Camera was turned off.")
+                require_raw_camera_mode()
                 description = recognize_image(frame_path, question)["description"]
                 observations.append(
                     {
