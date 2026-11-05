@@ -115,8 +115,10 @@ try {
  $toolPython=Join-Path $box 'python/Scripts/python.exe'
 $media=Join-Path $Destination 'Media'
 $mediaPython=Join-Path $media 'python/Scripts/python.exe'
-$needToolPython=-not (Test-CaleRunnable $toolPython @('-V'))
-$needMediaPython=-not (Test-CaleRunnable $mediaPython @('-V'))
+$toolPending=Test-CaleOwnedEnvironmentPending $Destination 'Toolbox/python' $pins.owned_python
+$needToolPython=$toolPending -or -not (Test-CaleRunnable $toolPython @('-V'))
+$mediaPending=Test-CaleOwnedEnvironmentPending $Destination 'Media/python' $pins.owned_python
+$needMediaPython=$mediaPending -or -not (Test-CaleRunnable $mediaPython @('-V'))
 if ($needToolPython -or $needMediaPython) {
   # Do this before opening the GUI, including resumed partial installations.
   # A healthy old environment is not migrated here; that needs coordinated
@@ -125,21 +127,19 @@ if ($needToolPython -or $needMediaPython) {
   $ownedArchive=Download-Verified $pins.owned_python.url $pins.owned_python.sha256 'cale-python-3.13.18-20261026.tar.gz'
   $ownedPython=Initialize-CaleOwnedPython $Destination $ownedArchive $runtime $pins.owned_python
 }
- if (-not (Test-CaleRunnable $toolPython @('-V'))) {
-  Assert-CaleRuntimeCreationIdle $Destination
-   Reset-CaleManagedDirectory $Destination (Join-Path $box 'python')
-  & $ownedPython -I -m venv (Join-Path $box 'python')
+ if ($needToolPython) {
+  $toolFolder=Start-CaleOwnedEnvironmentCreation $Destination 'Toolbox/python' $pins.owned_python
+  & $ownedPython -I -m venv $toolFolder
    if ($LASTEXITCODE -ne 0) { throw 'Could not create the tool runtime.' }
-   if (-not (Test-CaleOwnedEnvironment $Destination 'Toolbox/python' $pins.owned_python)) { throw 'New tool runtime failed Python/SQLite origin and integrity checks.' }
+   Confirm-CaleOwnedEnvironmentCreation $Destination 'Toolbox/python' $pins.owned_python
  }
  # Both bases must exist before Setup.ps1 can open a pending connection at38%.
  New-Item -ItemType Directory -Path $media -Force | Out-Null
- if (-not (Test-CaleRunnable (Join-Path $media 'python/Scripts/python.exe') @('-V'))) {
-  Assert-CaleRuntimeCreationIdle $Destination
-   Reset-CaleManagedDirectory $Destination (Join-Path $media 'python')
-  & $ownedPython -I -m venv (Join-Path $media 'python')
+ if ($needMediaPython) {
+  $mediaFolder=Start-CaleOwnedEnvironmentCreation $Destination 'Media/python' $pins.owned_python
+  & $ownedPython -I -m venv $mediaFolder
    if ($LASTEXITCODE -ne 0) { throw 'The media environment failed to initialize.' }
-   if (-not (Test-CaleOwnedEnvironment $Destination 'Media/python' $pins.owned_python)) { throw 'New media runtime failed Python/SQLite origin and integrity checks.' }
+   Confirm-CaleOwnedEnvironmentCreation $Destination 'Media/python' $pins.owned_python
  }
  $python=Join-Path $box 'python/Scripts/python.exe'
  if (-not (Test-CaleRunnable $python @('-V'))) { throw 'The tool Python runtime did not start.' }

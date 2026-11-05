@@ -220,3 +220,52 @@ function Assert-CaleRuntimeCreationIdle([string]$Destination) {
         }
     }
 }
+
+# Creation intent belongs to a NEW environment, not a global upgrade journal.
+# Publishing it before venv runs makes a runnable but unqualified retry strict.
+function Get-CaleOwnedPendingBytes([string]$Relative,$Pin) {
+    if ($Relative -cnotin @('Toolbox/python','Media/python')) { throw 'Unowned Python environment.' }
+    return [Text.Encoding]::UTF8.GetBytes("cale-owned-python-pending-v1`n$Relative`n$($Pin.id)`n$($Pin.sha256)`n")
+}
+
+function Test-CaleOwnedEnvironmentPending([string]$Destination,[string]$Relative,$Pin) {
+    $pending=Get-CalePlainOwnedPath $Destination ($Relative+'/.cale-owned-runtime.pending')
+    if (-not (Test-Path -LiteralPath $pending)) { return $false }
+    if (-not (Test-Path -LiteralPath $pending -PathType Leaf)) { throw 'Unknown runtime creation intent preserved.' }
+    $stream=[IO.File]::Open($pending,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try {
+        $bytes=New-Object byte[] 2049;$count=0
+        while ($count -lt $bytes.Length) {
+            $read=$stream.Read($bytes,$count,$bytes.Length-$count)
+            if ($read -eq 0) { break };$count+=$read
+        }
+        $expected=Get-CaleOwnedPendingBytes $Relative $Pin
+        if ($count -ne $expected.Length -or [Convert]::ToBase64String($bytes,0,$count) -cne [Convert]::ToBase64String($expected)) { throw 'Unknown runtime creation intent preserved; inspect this incomplete environment.' }
+    } finally { $stream.Dispose() }
+    return $true
+}
+
+function Start-CaleOwnedEnvironmentCreation([string]$Destination,[string]$Relative,$Pin) {
+    Assert-CaleRuntimeCreationIdle $Destination
+    $null=Test-CaleOwnedEnvironmentPending $Destination $Relative $Pin
+    $environment=Get-CalePlainOwnedPath $Destination $Relative
+    if (Test-Path -LiteralPath $environment) {
+        if (-not (Test-Path -LiteralPath $environment -PathType Container)) { throw 'Incomplete runtime is not a plain directory; existing bytes preserved.' }
+        $quarantine=Get-CalePlainOwnedPath $Destination ($Relative+'.incomplete-'+[Guid]::NewGuid().ToString('N'))
+        [IO.Directory]::Move($environment,$quarantine)
+    }
+    New-Item -ItemType Directory -Path $environment -Force | Out-Null
+    $pending=Join-Path $environment '.cale-owned-runtime.pending'
+    $temporary=$pending+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
+    $stream=[IO.File]::Open($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+    try {$bytes=Get-CaleOwnedPendingBytes $Relative $Pin;$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)} finally {$stream.Dispose()}
+    [IO.File]::Move($temporary,$pending) # No overwrite; no venv command before intent.
+    return $environment
+}
+
+function Confirm-CaleOwnedEnvironmentCreation([string]$Destination,[string]$Relative,$Pin) {
+    if (-not (Test-CaleOwnedEnvironmentPending $Destination $Relative $Pin)) { throw 'New runtime creation intent is missing; no qualification was recorded.' }
+    if (-not (Test-CaleOwnedEnvironment $Destination $Relative $Pin)) { throw 'New runtime failed Python/SQLite origin and integrity checks; creation intent retained for retry.' }
+    $environment=Get-CalePlainOwnedPath $Destination $Relative
+    [IO.File]::Move((Join-Path $environment '.cale-owned-runtime.pending'),(Join-Path $environment '.cale-owned-runtime.qualified'))
+}

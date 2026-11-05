@@ -206,7 +206,7 @@ class OwnedFirstInstallRuntimeTests(unittest.TestCase):
         script = root.parent / "owned-probe.ps1"
         script.write_text("$ErrorActionPreference='Stop'\n. $env:CALE_INSTALL_HELPER\nInitialize-CalePowerShellEnvironment\n" + body, encoding="utf-8")
         env = os.environ.copy()
-        env.update(CALE_INSTALL_HELPER=str(ROOT / "Install-Environment.ps1"), CALE_OWNED_ROOT=str(root), **extra)
+        env.update(CALE_INSTALL_HELPER=str(ROOT / "Install-Environment.ps1"), CALE_OWNED_ROOT=str(root), CALE_TEST_PINS=str(ROOT / "downloads.json"), **extra)
         result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
                                 env=env, capture_output=True, text=True, timeout=35)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -382,12 +382,84 @@ function Test-CaleOwnedEnvironment {throw 'must not requalify existing as newly 
             self.assertEqual(got,{"unchanged":True})
             for name in ["Toolbox/python","Media/python"]:self.assertEqual((root/name/"Scripts/python.exe").read_bytes(),b"healthy old runtime")
 
+    def test_creation_intent_retries_failed_gate_and_real_child_crash_cutpoints(self):
+        backend=(ROOT/"Install-Backend.ps1").read_text(encoding="utf-8")
+        prefix=backend[backend.index("$box=Join-Path $Destination 'Toolbox'"):backend.index(" $python=Join-Path $box 'python/Scripts/python.exe'")].replace("& $ownedPython -I -m venv","New-TestVenv")
+        for phase in ["before_venv","after_venv","failed_gate","after_gate","tool_qualified","dependencies"]:
+            with self.subTest(phase=phase),tempfile.TemporaryDirectory() as temp:
+                root=Path(temp)/"Cale";root.mkdir();script=Path(temp)/"retry.ps1"
+                script.write_text(r"""$ErrorActionPreference='Stop'
+. $env:CALE_INSTALL_HELPER
+Initialize-CalePowerShellEnvironment
+$Destination=$env:CALE_OWNED_ROOT;$runtime='healthy Hermes';$LASTEXITCODE=0
+$pins=Get-Content -LiteralPath $env:CALE_TEST_PINS -Raw|ConvertFrom-Json
+$script:qualified=@()
+function Write-SetupStatus {}
+function Test-CaleRunnable {param($file,$arguments) return(Test-Path -LiteralPath $file)}
+function Download-Verified {return 'archive'}
+function Initialize-CaleOwnedPython {return 'base'}
+function Assert-CaleRuntimeCreationIdle {}
+function New-TestVenv {param($folder)
+ if(-not(Test-Path -LiteralPath (Join-Path $folder '.cale-owned-runtime.pending'))){throw 'Intent missing before venv'}
+ if($folder.EndsWith('Toolbox\python') -and $env:CALE_TEST_PHASE -eq 'before_venv'){[Environment]::Exit(73)}
+ if($folder.EndsWith('Media\python') -and $env:CALE_TEST_PHASE -eq 'tool_qualified'){[Environment]::Exit(73)}
+ $scripts=Join-Path $folder 'Scripts';New-Item -ItemType Directory -Path $scripts -Force|Out-Null
+ foreach($exe in @('python.exe','pythonw.exe')){[IO.File]::WriteAllText((Join-Path $scripts $exe),$env:CALE_TEST_PHASE)}
+ if($folder.EndsWith('Toolbox\python') -and $env:CALE_TEST_PHASE -eq 'after_venv'){[Environment]::Exit(73)}
+}
+function Test-CaleOwnedEnvironment {param($destination,$relative,$pin)
+ $script:qualified+=$relative
+ if($relative -eq 'Toolbox/python' -and $env:CALE_TEST_PHASE -eq 'after_gate'){[Environment]::Exit(73)}
+ return(-not($relative -eq 'Toolbox/python' -and $env:CALE_TEST_PHASE -eq 'failed_gate'))
+}
+$blocked=$false;try {
+"""+prefix+r"""
+} catch {$blocked=$true}
+if($env:CALE_TEST_PHASE -eq 'dependencies'){[Environment]::Exit(73)}
+@{blocked=$blocked;qualified=$script:qualified}|ConvertTo-Json -Compress
+""",encoding="utf-8")
+                env=os.environ.copy();env.update(CALE_INSTALL_HELPER=str(ROOT/"Install-Environment.ps1"),CALE_OWNED_ROOT=str(root),CALE_TEST_PINS=str(ROOT/"downloads.json"),CALE_TEST_PHASE=phase)
+                command=["powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-File",str(script)]
+                first=subprocess.run(command,env=env,capture_output=True,text=True,timeout=35)
+                if phase=="failed_gate":self.assertEqual(first.returncode,0,first.stderr);self.assertTrue(json.loads(first.stdout)["blocked"])
+                else:self.assertEqual(first.returncode,73,first.stderr)
+                env["CALE_TEST_PHASE"]="retry"
+                second=subprocess.run(command,env=env,capture_output=True,text=True,timeout=35)
+                self.assertEqual(second.returncode,0,second.stderr);result=json.loads(second.stdout);self.assertFalse(result["blocked"])
+                expected=[] if phase=="dependencies" else ["Media/python"] if phase=="tool_qualified" else ["Toolbox/python","Media/python"]
+                self.assertEqual(result["qualified"],expected)
+                tool=root/"Toolbox/python"
+                self.assertTrue((tool/".cale-owned-runtime.qualified").is_file());self.assertFalse((tool/".cale-owned-runtime.pending").exists())
+                if phase in ["after_venv","failed_gate","after_gate"]:
+                    copies=list((root/"Toolbox").glob("python.incomplete-*/Scripts/python.exe"));self.assertEqual(len(copies),1);self.assertEqual(copies[0].read_text(),phase)
+
+    def test_unknown_pending_marker_and_partial_intent_bytes_are_preserved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/"Cale";environment=root/"Toolbox/python";environment.mkdir(parents=True)
+            marker=environment/".cale-owned-runtime.pending";marker.write_bytes(b"unknown user bytes"*200)
+            got=self.run_ps(r"""
+$p=(Get-Content -LiteralPath $env:CALE_TEST_PINS -Raw|ConvertFrom-Json).owned_python
+$failed=$false;try {$null=Start-CaleOwnedEnvironmentCreation $env:CALE_OWNED_ROOT 'Toolbox/python' $p} catch {$failed=$true}
+@{failed=$failed}|ConvertTo-Json -Compress
+""",root)
+            self.assertTrue(got["failed"]);self.assertEqual(marker.read_bytes(),b"unknown user bytes"*200)
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/"Cale";environment=root/"Toolbox/python";environment.mkdir(parents=True)
+            partial=environment/".cale-owned-runtime.pending.partial.tmp";partial.write_bytes(b"interrupted intent publication")
+            got=self.run_ps(r"""
+function Assert-CaleRuntimeCreationIdle {}
+$p=(Get-Content -LiteralPath $env:CALE_TEST_PINS -Raw|ConvertFrom-Json).owned_python
+$folder=Start-CaleOwnedEnvironmentCreation $env:CALE_OWNED_ROOT 'Toolbox/python' $p
+@{pending=(Test-CaleOwnedEnvironmentPending $env:CALE_OWNED_ROOT 'Toolbox/python' $p)}|ConvertTo-Json -Compress
+""",root)
+            self.assertTrue(got["pending"]);copies=list((root/"Toolbox").glob("python.incomplete-*/.cale-owned-runtime.pending.partial.tmp"));self.assertEqual(len(copies),1);self.assertEqual(copies[0].read_bytes(),b"interrupted intent publication")
+
     def test_first_install_uses_owned_base_for_both_venvs_before_gui_launch(self):
         source=(ROOT/"Install-Backend.ps1").read_text(encoding="utf-8")
-        self.assertIn("& $ownedPython -I -m venv (Join-Path $box 'python')",source)
-        self.assertIn("& $ownedPython -I -m venv (Join-Path $media 'python')",source)
+        self.assertIn("& $ownedPython -I -m venv $toolFolder",source)
+        self.assertIn("& $ownedPython -I -m venv $mediaFolder",source)
         launch=source.index("Start-Process (Join-Path $box 'python/Scripts/pythonw.exe')")
-        self.assertLess(source.index("& $ownedPython -I -m venv (Join-Path $media 'python')"),launch)
+        self.assertLess(source.index("& $ownedPython -I -m venv $mediaFolder"),launch)
         self.assertNotIn("uv python install '3.13'",source)
 
 
