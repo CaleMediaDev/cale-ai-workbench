@@ -483,6 +483,41 @@ def test_vision_readiness_requires_a_nonempty_text_description(tmp_path, descrip
     assert saved["vision"]["ok"] is expected_ok
 
 
+@pytest.mark.parametrize("text, expected_ok", [
+    (None, False),
+    ([], False),
+    ({}, False),
+    (123, False),
+    (False, False),
+    ("", False),
+    (" \n\t", False),
+    ("Cale is ready.", True),
+])
+def test_voice_readiness_requires_a_nonempty_text_transcription(tmp_path, text, expected_ok):
+    sample = tmp_path / "assets/cale-wake-ack.wav"
+    sample.parent.mkdir()
+    sample.write_bytes(b"bundled speech sample")
+
+    def media_probe(_root, action, **kwargs):
+        if action == "transcribe_audio":
+            assert kwargs["path"] == str(sample)
+            return {"ok": True, "data": {"text": text}}
+        if action == "speak":
+            Path(kwargs["output_path"]).write_bytes(b"x" * 1001)
+        return {"ok": True}
+
+    with patch.object(readiness_checklist, "_media_probe", side_effect=media_probe):
+        result = readiness_checklist.run_optional_checks(tmp_path)
+
+    assert result["voice"]["microphone"] is True
+    assert result["voice"]["speech"] is True
+    assert result["voice"]["recognition"] is expected_ok
+    assert result["voice"]["ok"] is expected_ok
+    saved = json.loads((tmp_path / "LongTasks/readiness-probes.json").read_text(
+        encoding="utf-8"))
+    assert saved["voice"] == result["voice"]
+
+
 def test_safe_repair_is_queued_automatically_once_without_browser_pairing(tmp_path):
     rows = {"rows": [
         {"label": "Fast file search", "state": "attention"},
