@@ -567,3 +567,10 @@ def test_common_pair_survives_high_ranked_rare_single_term_hits(tmp_path):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+@pytest.mark.parametrize("word", ["cafe\u0301marker", "caf\u00e9marker", "x\u0301marker", "na\u00efvemarker"])
+def test_memory_query_preserves_combining_mark_words(tmp_path, word):
+    note = memory.save(tmp_path, "note", "Unicode source", word)
+    assert [row["id"] for row in memory.search(tmp_path, word, kind="note")] == [note["id"]]
+    assert memory._query_words("\u0301 " + word + " other_word") == [word, "other", "word"]

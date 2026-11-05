@@ -392,6 +392,24 @@ def _refresh_file_record(root: Path, row, checked_documents: dict | None = None)
     return True
 
 
+def _query_words(query: str) -> list[str]:
+    """Keep a combining mark with its base word before SQLite tokenization.
+
+    Splitting cafe followed by an accent into two AND terms cannot match the
+    single unicode61 token stored in the index. Quotes/operators remain data.
+    """
+    words, current = [], []
+    for character in query:
+        if character.isalnum() or current and unicodedata.category(character).startswith("M"):
+            current.append(character)
+        elif current:
+            words.append("".join(current))
+            current = []
+    if current:
+        words.append("".join(current))
+    return words
+
+
 def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> list[dict]:
     """Return ranked snippets, not entire files, from the local FTS5 index."""
     if kind and kind not in KINDS:
@@ -401,7 +419,7 @@ def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> li
     # unicode61 does not expand characters such as ß into multiple letters.
     # Full casefolding would turn an exact source term into a different token.
     words = list(dict.fromkeys(
-        word.lower() for word in WORD.findall(query)
+        word.lower() for word in _query_words(query)
         if word.lower() not in SEARCH_STOPWORDS
     ))[:12]
     limit = max(1, min(int(limit), 20))
