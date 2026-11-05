@@ -1744,7 +1744,10 @@ class Router:
             local = dict(payload)
             local.update(model=selected_model, stream=False)
             local.pop("stream_options", None)
-            if local.get("tools") or size_hint == "quick":
+            # Catalog/probe settings are defaults, not permission to replace
+            # an explicit caller request. Preserve even unsupported non-null
+            # values for the existing codec/compatibility validation path.
+            if (local.get("tools") or size_hint == "quick") and local.get("reasoning_effort") is None:
                 item = next(
                     (
                         entry

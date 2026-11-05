@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+import pytest
 
 
 from datetime import datetime, timedelta, timezone
@@ -2909,3 +2910,115 @@ def test_native_forced_choice_recognizer_rejects_unknown_or_malformed_contracts(
     for tools in ([], None, [valid["tools"][0], valid["tools"][0]],
                   [{"type": "function", "function": {"name": "save_plan", "parameters": {"type": "not_a_json_type"}}}]):
         assert not cloud.native_forced_choice_supported({**valid, "tools": tools})
+
+
+@pytest.mark.parametrize("effort", ["high", "medium", "low", "none"])
+@pytest.mark.parametrize("boolean_control", [True, False])
+@pytest.mark.parametrize("tool_turn", [True, False])
+def test_explicit_effort_survives_catalog_and_quick_defaults(effort, boolean_control, tool_turn):
+    """Mock only transport: inspect the actual Router -> native request body."""
+    import usage_history
+    case = CloudTests("test_candidate_tool_calls_use_verified_reasoning_setting")
+    case.setUp()
+    try:
+        request = {**REQUEST, "max_tokens": 100, "reasoning_effort": effort}
+        if tool_turn:
+            request["tools"] = [{"type": "function", "function": {"name": "multiply",
+                "parameters": {"type": "object", "properties": {"a": {"type": "integer"}},
+                               "required": ["a"]}}}]
+            request["tool_choice"] = "required"
+        original = json.loads(json.dumps(request))
+        router = cloud.Router()
+        router.model_native_contexts = {"qualified": 65536}
+        router.model_thinking_controls = {"qualified": (
+            {"values": [False, True], "default": True} if boolean_control else
+            {"values": ["low", "medium", "high"], "default": "medium"})}
+        router.native_version_ready = True
+        router.native_version = (0, 40, 13)
+        router.native_version_until = time.monotonic() + 60
+        reply = {"model": "qualified", "done": True, "message": {"role": "assistant", "content": "checked"}}
+        if tool_turn:
+            reply["message"]["tool_calls"] = [{"function": {"name": "multiply", "arguments": {"a": 1}}}]
+        with (patch.object(usage_history, "DATABASE", Path(case.temp.name) / "usage.db"),
+              patch.object(cloud, "CATALOG", {"qualified": {"alias": "qualified", "tool_reasoning_effort": "none"}}),
+              patch.object(router, "local_candidates", return_value=["qualified"]),
+              patch.object(cloud, "urlopen", side_effect=AssertionError("No actual network")),
+              patch.object(cloud, "post", return_value=reply) as upstream):
+            router.complete(request, size_hint=None if tool_turn else "quick")
+        assert upstream.call_count == 1
+        assert upstream.call_args.args[0].endswith("/api/chat")
+        expected = False if effort == "none" else True if boolean_control else effort
+        assert upstream.call_args.args[1]["think"] == expected
+        assert request == original
+    finally:
+        case.doCleanups()
+
+
+@pytest.mark.parametrize("source", ["catalog", "shared_weights", "advertised"])
+@pytest.mark.parametrize("effort", ["omitted", None, "high", "unsupported"])
+def test_effort_precedence_keeps_defaults_and_existing_compatibility(source, effort):
+    import usage_history
+    case = CloudTests("test_candidate_tool_calls_use_verified_reasoning_setting")
+    case.setUp()
+    try:
+        request = {**REQUEST, "max_tokens": 100}
+        if effort != "omitted":
+            request["reasoning_effort"] = effort
+        original = json.loads(json.dumps(request))
+        router = cloud.Router()
+        router.model_native_contexts = {"selected": 65536}
+        router.model_thinking_controls = {"selected": {"values": [False, True], "default": True}}
+        router.model_thinking = {"selected"}
+        router.model_weights = {"selected": "same", "peer": "same"}
+        router.native_version_ready = True
+        router.native_version = (0, 40, 13)
+        router.native_version_until = time.monotonic() + 60
+        catalog = ({"selected": {"alias": "selected", "tool_reasoning_effort": "none"}}
+                   if source == "catalog" else
+                   {"peer": {"alias": "peer", "tool_reasoning_effort": "none"}}
+                   if source == "shared_weights" else {})
+        native = {"model": "selected", "done": True, "message": {"role": "assistant", "content": "checked"}}
+        with (patch.object(usage_history, "DATABASE", Path(case.temp.name) / "usage.db"),
+              patch.object(cloud, "CATALOG", catalog),
+              patch.object(router, "local_candidates", return_value=["selected"]),
+              patch.object(cloud, "urlopen", side_effect=AssertionError("No actual network")),
+              patch.object(cloud, "post", side_effect=lambda url, *args, **kwargs:
+                           native if url.endswith("/api/chat") else ANSWER) as upstream):
+            router.complete(request, size_hint="quick")
+        assert upstream.call_count == 1
+        url, body = upstream.call_args.args
+        if effort == "unsupported":
+            assert url.endswith("/v1/chat/completions")
+            assert body["reasoning_effort"] == "unsupported"
+        else:
+            assert url.endswith("/api/chat")
+            assert body["think"] is (effort == "high")
+        assert request == original
+    finally:
+        case.doCleanups()
+
+
+def test_explicit_effort_does_not_relax_original_required_tool_contract():
+    import usage_history
+    case = CloudTests("test_candidate_tool_calls_use_verified_reasoning_setting")
+    case.setUp()
+    try:
+        request = {**ARGUMENT_REQUEST, "reasoning_effort": "high", "tool_choice": "required"}
+        router = cloud.Router()
+        router.model_native_contexts = {"qualified": 65536}
+        router.model_thinking_controls = {"qualified": {"values": [False, True], "default": True}}
+        router.native_version_ready = True
+        router.native_version = (0, 40, 13)
+        router.native_version_until = time.monotonic() + 60
+        with (patch.object(usage_history, "DATABASE", Path(case.temp.name) / "usage.db"),
+              patch.object(cloud, "CATALOG", {"qualified": {"alias": "qualified", "tool_reasoning_effort": "none"}}),
+              patch.object(router, "local_candidates", return_value=["qualified"]),
+              patch.object(cloud, "urlopen", side_effect=AssertionError("No actual network")),
+              patch.object(cloud, "post", return_value={"model": "qualified", "done": True,
+                    "message": {"role": "assistant", "content": "unsupported success claim"}}) as upstream):
+            with pytest.raises(ValueError):
+                router.complete(request)
+        assert upstream.call_count == 1
+        assert upstream.call_args.args[1]["think"] is True
+    finally:
+        case.doCleanups()
