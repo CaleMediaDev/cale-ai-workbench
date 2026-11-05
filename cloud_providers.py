@@ -324,10 +324,15 @@ def run_subscription_task(provider, folder, prompt, timeout=300):
     started = time.monotonic()
     code, output, _ = _agent_process(command, cwd=folder, timeout=timeout,
         cancel=lambda: blocked() or not subscription_agent_status(provider)["enabled"], provider=provider, subscription_task=True)
-    if code != 0: raise RuntimeError("Official agent could not finish this task; sign-in, plan limits, or permissions may need attention.")
     try: result = json.loads(output)
-    except ValueError: raise ValueError("Official agent did not return its documented JSON result.") from None
-    if not isinstance(result, dict): raise ValueError("Official agent returned an invalid task result.")
+    except ValueError:
+        if code == 0:
+            raise ValueError("Official agent did not return its documented JSON result.") from None
+        result = {}
+    if not isinstance(result, dict):
+        if code == 0:
+            raise ValueError("Official agent returned an invalid task result.")
+        result = {}
     # Record only reported counts, never estimated plan quota or inferred cost.
     # Claude cache read/write input is separate from its uncached input count.
     usage = _subscription_usage(provider, result)
@@ -343,6 +348,10 @@ def run_subscription_task(provider, folder, prompt, timeout=300):
         else:
             usage_history.record_completion({"model": result.get("model", SUBSCRIPTION_AGENTS[provider]["name"] + " (model unreported)"),
                                              "usage": usage}, provider + "_subscription", time.monotonic() - started)
+    # A failed run (for example, reaching the turn limit) can still report
+    # consumed tokens. Preserve that usage before surfacing the task failure.
+    if code != 0:
+        raise RuntimeError("Official agent could not finish this task; sign-in, plan limits, or permissions may need attention.")
     return {"provider": provider, "status": "agent_error" if result.get("is_error") else "finished",
             "exit_code": code, "output": result, "errors": [], "usage": usage,
             "verification": "agent_report_only"}
