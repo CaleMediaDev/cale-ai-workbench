@@ -1637,6 +1637,7 @@ class Router:
                    else "http://127.0.0.1:11434/v1/chat/completions")
             if native is None and native_started:
                 raise RuntimeError("Native local inference failed; legacy transport was not attempted because it may truncate history.") from last_error
+            check_cancel()
             transport = native if native is not None else body
             native_started = native_started or native is not None
             started = time.monotonic()

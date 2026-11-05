@@ -1149,6 +1149,19 @@ class CloudTests(unittest.TestCase):
                 self.assertIn(alias, router.model_thinking)
                 self.assertNotIn(alias, router.model_native_contexts)
 
+    def test_native_version_probe_cancellation_prevents_inference(self):
+        router = cloud.Router()
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+        cancelled = False
+        def version(*args, **kwargs):
+            nonlocal cancelled
+            cancelled = True
+            return io.BytesIO(b'{"version":"0.40.13"}')
+        with patch.object(cloud, "urlopen", side_effect=version), patch.object(cloud, "post") as inference:
+            with self.assertRaises(InterruptedError):
+                router.complete({**REQUEST, "max_tokens": 80}, cancel=lambda: cancelled)
+        inference.assert_not_called()
+
     def test_native_32k_candidate_only_serves_requests_that_fit(self):
         self.candidates.stop()
         alias = "cale-code7"
