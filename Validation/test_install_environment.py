@@ -295,6 +295,7 @@ function Write-SetupStatus {param($percent,$text)}
 function Test-CaleRunnable {param($file,$arguments) return (Test-Path -LiteralPath $file)}
 function Download-Verified {param($url,$sha,$name) return 'fixture-archive'}
 function Initialize-CaleOwnedPython {param($destination,$archive,$bootstrap,$pin) return 'fixture-base'}
+function Test-CaleOwnedEnvironment {param($destination,$relative,$pin) return $true}
 function Assert-CaleRuntimeCreationIdle {param($destination)}
 function New-TestVenv {param($folder) $scripts=Join-Path $folder 'Scripts';New-Item -ItemType Directory -Path $scripts -Force|Out-Null;[IO.File]::WriteAllText((Join-Path $scripts 'python.exe'),'fixture');[IO.File]::WriteAllText((Join-Path $scripts 'pythonw.exe'),'fixture')}
 """+prefix+r"""
@@ -312,6 +313,74 @@ $state=[pscustomobject]@{percent=38}
                 got=self.run_ps(body,root)
                 self.assertEqual(got,{"launched":True,"pending":"","ready":True})
 
+
+    def test_new_environment_requires_prefix_base_sqlite_and_copied_launcher_origins(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/"Cale";env=root/"Toolbox/python";scripts=env/"Scripts";scripts.mkdir(parents=True)
+            for name in ["python.exe","pythonw.exe"]:(scripts/name).write_bytes(b"fixture launcher")
+            digest=hashlib.sha256(b"fixture launcher").hexdigest()
+            pin={"id":"fixture-base","python":"3.13.18","sqlite":"3.53.1","sqlite_source_id":"known","critical_files":{"Lib/venv/scripts/nt/venvlauncher.exe":digest,"Lib/venv/scripts/nt/venvwlauncher.exe":digest}}
+            path=Path(temp)/"pin.json";path.write_text(json.dumps(pin))
+            got=self.run_ps(r"""
+$p=Get-Content -LiteralPath $env:CALE_TEST_PIN -Raw|ConvertFrom-Json
+$environment=Join-Path $env:CALE_OWNED_ROOT 'Toolbox/python';$base=Join-Path $env:CALE_OWNED_ROOT 'Runtimes/fixture-base/python'
+function Test-CaleOwnedPython {return $true}
+$script:facts=[pscustomobject]@{python='3.13.18';sqlite='3.53.1';source='known';prefix=$environment;executable=(Join-Path $environment 'Scripts/python.exe');base=$base;stdlib=(Join-Path $base 'Lib/sqlite3/__init__.py');extension=(Join-Path $base 'DLLs/_sqlite3.pyd');dll=(Join-Path $base 'DLLs/sqlite3.dll')}
+function Get-CaleOwnedPythonFacts {return $script:facts}
+$valid=Test-CaleOwnedEnvironment $env:CALE_OWNED_ROOT 'Toolbox/python' $p
+$rejected=@()
+foreach($key in @('prefix','executable','base','stdlib','extension','dll','sqlite','source')) {
+ $old=$script:facts.$key;$script:facts.$key='wrong origin or version'
+ $rejected+=(-not(Test-CaleOwnedEnvironment $env:CALE_OWNED_ROOT 'Toolbox/python' $p));$script:facts.$key=$old
+}
+[IO.File]::WriteAllText((Join-Path $environment 'Scripts/pythonw.exe'),'changed copied launcher')
+$tampered=-not(Test-CaleOwnedEnvironment $env:CALE_OWNED_ROOT 'Toolbox/python' $p)
+@{valid=$valid;rejected=$rejected;tampered=$tampered}|ConvertTo-Json -Compress
+""",root,CALE_TEST_PIN=str(path))
+            self.assertEqual(got,{"valid":True,"rejected":[True]*8,"tampered":True})
+
+    def test_new_media_origin_failure_stops_before_dependency_or_connection_phase(self):
+        source=(ROOT/"Install-Backend.ps1").read_text(encoding="utf-8")
+        prefix=source[source.index("$box=Join-Path $Destination 'Toolbox'"):source.index(" $python=Join-Path $box 'python/Scripts/python.exe'")]
+        prefix=prefix.replace("& $ownedPython -I -m venv","New-TestVenv")
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/"Cale";root.mkdir()
+            got=self.run_ps(r"""
+$Destination=$env:CALE_OWNED_ROOT;$runtime='bootstrap';$LASTEXITCODE=0;$script:qualification=@()
+$pins=[pscustomobject]@{owned_python=[pscustomobject]@{url='fixture';sha256='fixture'}}
+function Write-SetupStatus {param($percent,$text)}
+function Test-CaleRunnable {param($file,$arguments) return (Test-Path -LiteralPath $file)}
+function Download-Verified {return 'archive'}
+function Initialize-CaleOwnedPython {return 'base'}
+function Assert-CaleRuntimeCreationIdle {}
+function New-TestVenv {param($folder) New-Item -ItemType Directory -Path (Join-Path $folder 'Scripts') -Force|Out-Null;[IO.File]::WriteAllText((Join-Path $folder 'Scripts/python.exe'),'fixture')}
+function Test-CaleOwnedEnvironment {param($destination,$relative,$pin) $script:qualification+=$relative;return ($relative -ne 'Media/python')}
+$blocked=$false;try {
+"""+prefix+r"""
+} catch {$blocked=$true}
+@{blocked=$blocked;qualified=$script:qualification}|ConvertTo-Json -Compress
+""",root)
+            self.assertEqual(got,{"blocked":True,"qualified":["Toolbox/python","Media/python"]})
+
+    def test_healthy_existing_environments_are_not_replaced_or_requalified_as_new(self):
+        source=(ROOT/"Install-Backend.ps1").read_text(encoding="utf-8")
+        prefix=source[source.index("$box=Join-Path $Destination 'Toolbox'"):source.index(" $python=Join-Path $box 'python/Scripts/python.exe'")]
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/"Cale"
+            for name in ["Toolbox/python","Media/python"]:
+                p=root/name/"Scripts";p.mkdir(parents=True);(p/"python.exe").write_bytes(b"healthy old runtime")
+            got=self.run_ps(r"""
+$Destination=$env:CALE_OWNED_ROOT;$runtime='healthy Hermes';$pins=[pscustomobject]@{owned_python=$null}
+function Write-SetupStatus {}
+function Test-CaleRunnable {return $true}
+function Initialize-CaleOwnedPython {throw 'must not prepare or replace existing runtime'}
+function Test-CaleOwnedEnvironment {throw 'must not requalify existing as newly created'}
+"""+prefix+r"""
+@{unchanged=$true}|ConvertTo-Json -Compress
+""",root)
+            self.assertEqual(got,{"unchanged":True})
+            for name in ["Toolbox/python","Media/python"]:self.assertEqual((root/name/"Scripts/python.exe").read_bytes(),b"healthy old runtime")
 
     def test_first_install_uses_owned_base_for_both_venvs_before_gui_launch(self):
         source=(ROOT/"Install-Backend.ps1").read_text(encoding="utf-8")

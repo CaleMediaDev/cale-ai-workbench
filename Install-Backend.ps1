@@ -130,6 +130,7 @@ if ($needToolPython -or $needMediaPython) {
    Reset-CaleManagedDirectory $Destination (Join-Path $box 'python')
   & $ownedPython -I -m venv (Join-Path $box 'python')
    if ($LASTEXITCODE -ne 0) { throw 'Could not create the tool runtime.' }
+   if (-not (Test-CaleOwnedEnvironment $Destination 'Toolbox/python' $pins.owned_python)) { throw 'New tool runtime failed Python/SQLite origin and integrity checks.' }
  }
  # Both bases must exist before Setup.ps1 can open a pending connection at38%.
  New-Item -ItemType Directory -Path $media -Force | Out-Null
@@ -138,6 +139,7 @@ if ($needToolPython -or $needMediaPython) {
    Reset-CaleManagedDirectory $Destination (Join-Path $media 'python')
   & $ownedPython -I -m venv (Join-Path $media 'python')
    if ($LASTEXITCODE -ne 0) { throw 'The media environment failed to initialize.' }
+   if (-not (Test-CaleOwnedEnvironment $Destination 'Media/python' $pins.owned_python)) { throw 'New media runtime failed Python/SQLite origin and integrity checks.' }
  }
  $python=Join-Path $box 'python/Scripts/python.exe'
  if (-not (Test-CaleRunnable $python @('-V'))) { throw 'The tool Python runtime did not start.' }

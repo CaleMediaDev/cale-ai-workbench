@@ -43,7 +43,12 @@
       "DLLs/_sqlite3.pyd": "b7af56950ead96bdeab99e23138547850c0b402f54f6047627edd6152b6396d1",
       "DLLs/sqlite3.dll": "4a257018abdcbe04a7137d6949cce7bf279a69681c491c73e2104599ac41f26b",
       "Lib/sqlite3/dbapi2.py": "7c5c8d98df1f2c50c4062a3be2c0f0499190c179fa4fc281507a1ef763a98f28",
-      "Lib/sqlite3/__init__.py": "6e956d2166e24ccf36fef21ad63d06a5dd8f7b674aca6c81ea91eacca6b85b01"
+      "Lib/sqlite3/__init__.py": "6e956d2166e24ccf36fef21ad63d06a5dd8f7b674aca6c81ea91eacca6b85b01",
+      "pythonw.exe": "be83751913db86d46a8ec9ff76a4d80fa6d57bfe5688a3fa9e2948b638e22fac",
+      "Lib/venv/__init__.py": "6bb44af4e52578bb575ead2e65f825e3b7d286452ee59b6041703057e84db5ef",
+      "Lib/venv/__main__.py": "ac861a02c7483fa4a67449a61b79d82723d94676860173b3580d9a9322807153",
+      "Lib/venv/scripts/nt/venvlauncher.exe": "66df37d54f3ec77735a68fc72f56bfb85d83e964e6964c587fdb75a4646e38d1",
+      "Lib/venv/scripts/nt/venvwlauncher.exe": "a9855eff8ce7552da647dba2e8aedbd9dde9e6e5953479ecee821027165e1181"
     }
   }
 }

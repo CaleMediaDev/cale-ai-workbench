@@ -126,7 +126,7 @@ if not h or not k.GetModuleFileNameW(h,s,len(s)):raise RuntimeError('SQLite DLL 
 c=sqlite3.connect(':memory:')
 try:source=c.execute('select sqlite_source_id()').fetchone()[0]
 finally:c.close()
-print(json.dumps(dict(python='.'.join(map(str,sys.version_info[:3])),sqlite=sqlite3.sqlite_version,source=source,base=str(Path(sys.base_prefix).resolve()),stdlib=str(Path(sqlite3.__file__).resolve()),extension=str(Path(_sqlite3.__file__).resolve()),dll=str(Path(s.value).resolve()))))
+print(json.dumps(dict(prefix=str(Path(sys.prefix).resolve()),executable=str(Path(sys.executable).resolve()),python='.'.join(map(str,sys.version_info[:3])),sqlite=sqlite3.sqlite_version,source=source,base=str(Path(sys.base_prefix).resolve()),stdlib=str(Path(sqlite3.__file__).resolve()),extension=str(Path(_sqlite3.__file__).resolve()),dll=str(Path(s.value).resolve()))))
 '@
     $output=& $Python -I -B -c $probe
     if ($LASTEXITCODE -ne 0) { throw 'The owned Python/SQLite origin probe failed.' }
@@ -146,6 +146,28 @@ function Test-CaleOwnedPython([string]$Destination,$Pin) {
         $facts=Get-CaleOwnedPythonFacts (Join-Path $ownedBase 'python.exe')
         return ($facts.python -eq $Pin.python -and $facts.sqlite -eq $Pin.sqlite -and $facts.source -eq $Pin.sqlite_source_id -and
             $facts.base -eq $ownedBase -and $facts.stdlib -eq (Join-Path $ownedBase 'Lib/sqlite3/__init__.py') -and
+            $facts.extension -eq (Join-Path $ownedBase 'DLLs/_sqlite3.pyd') -and $facts.dll -eq (Join-Path $ownedBase 'DLLs/sqlite3.dll'))
+    } catch { return $false }
+}
+
+function Test-CaleOwnedEnvironment([string]$Destination,[string]$Relative,$Pin) {
+    if ($Relative -cnotin @('Toolbox/python','Media/python')) { return $false }
+    if (-not (Test-CaleOwnedPython $Destination $Pin)) { return $false }
+    $environment=Get-CalePlainOwnedPath $Destination $Relative
+    $ownedBase=Get-CalePlainOwnedPath $Destination ('Runtimes/'+$Pin.id+'/python')
+    $launchers=@{'Scripts/python.exe'='Lib/venv/scripts/nt/venvlauncher.exe';'Scripts/pythonw.exe'='Lib/venv/scripts/nt/venvwlauncher.exe'}
+    foreach ($entry in $launchers.GetEnumerator()) {
+        $file=Get-CalePlainOwnedPath $Destination ($Relative+'/'+$entry.Key)
+        $expected=$Pin.critical_files.PSObject.Properties[$entry.Value].Value
+        if (-not $expected -or -not (Test-Path -LiteralPath $file -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower() -ne $expected) { return $false }
+    }
+    try {
+        $python=Join-Path $environment 'Scripts/python.exe'
+        $facts=Get-CaleOwnedPythonFacts $python
+        return ($facts.python -eq $Pin.python -and $facts.sqlite -eq $Pin.sqlite -and $facts.source -eq $Pin.sqlite_source_id -and
+            $facts.prefix -eq $environment -and $facts.executable -eq $python -and $facts.base -eq $ownedBase -and
+            $facts.stdlib -eq (Join-Path $ownedBase 'Lib/sqlite3/__init__.py') -and
             $facts.extension -eq (Join-Path $ownedBase 'DLLs/_sqlite3.pyd') -and $facts.dll -eq (Join-Path $ownedBase 'DLLs/sqlite3.dll'))
     } catch { return $false }
 }
