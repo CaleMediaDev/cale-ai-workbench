@@ -145,6 +145,7 @@ def start_background(root: Path = ROOT) -> None:
     except Exception:
         with _attempt_lock:
             _repairing_roots.discard(resolved_root)
+            _last_attempts.pop(resolved_root, None)
         raise
 
 
