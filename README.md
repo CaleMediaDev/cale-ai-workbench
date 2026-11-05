@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.529 gives scheduled trained-model donations a durable upload journal, verified fork reuse and public delivery checks. Qualified cached uploads retry after one minute without retraining; the original hourly training limit and trainer bytes remain unchanged. SQLite creates the new table automatically. [Validation and limits](benchmarks/results/model-upload-journal-529-20261105.json).
+
 Release 0.5.528 confirms durable code proposals through the public GitHub API before announcing delivery. Hidden or unavailable results keep their saved work and retry without more AI generation or duplicate PRs. Existing cached proposal policy stays compatible. This does not bypass GitHub restrictions or cover the separate model-experiment publisher. [Validation and limits](benchmarks/results/public-code-delivery-528-20261105.json).
 
 Release 0.5.527 reuses verified contribution forks and puts exact GitHub failures in the main chat. Saved drafts recover without generating the same proposal again. GitHub permission refusals still cannot be overridden. [Validation and limits](benchmarks/results/donation-fork-recovery-527-20261105.json).

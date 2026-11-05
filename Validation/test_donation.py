@@ -1425,30 +1425,27 @@ def test_scheduler_records_weak_candidate_and_resumes_without_cloud(enabled, mon
     assert donation.total_tokens(enabled) == 0
 
 
-def test_screened_candidate_uses_reviewed_artifacts_and_draft_boundary(enabled, monkeypatch):
+def test_screened_candidate_scheduler_uses_model_publication_boundary(enabled, monkeypatch):
     import github_account
     folder = enabled/"candidate"
     fingerprint = artifacts(folder)
     monkeypatch.setattr(github_account, "account", lambda: "TestDonor")
     monkeypatch.setattr(donation.Service, "allowed", lambda *a, **k: True)
     monkeypatch.setattr(models, "run_job", lambda *a, **k: {"qualified": True, "seconds": 2, "folder": str(folder)})
-    monkeypatch.setattr(donation, "gh_api", lambda path, *a, **k:
-                        [] if "pulls?" in path or "matching-refs" in path else
-                        {"full_name": "TestDonor/cale-ai-workbench", "fork": True} if path.endswith("forks") else
-                        {"parent": {"full_name": donation.UPSTREAM}} if path == "repos/TestDonor/cale-ai-workbench" else {"sha": "a"*40})
     submitted = []
-    def proposal(login, run, job, commit, description, paths, guard, **kwargs):
+    def publish(root, experiment, trained, login, guard):
         guard()
-        assert job["id"] == models.JOB_ID
-        assert set(paths) == {f"ModelContributions/{fingerprint}/{name}" for name in models.ARTIFACTS}
-        assert "No inference tokens" in kwargs["validation_summary"]
-        submitted.append(run)
+        assert root == enabled and login == "TestDonor"
+        assert experiment["fingerprint"] == fingerprint
+        assert set(models.review_artifacts(trained["folder"], fingerprint)) == set(models.ARTIFACTS)
+        submitted.append(experiment["run_id"])
         return "https://github.com/CaleMediaDev/cale-ai-workbench/pull/1"
-    monkeypatch.setattr(donation, "open_proposal", proposal)
+    # Isolate the scheduler boundary here; model upload tests below exercise
+    # the actual journal, exact artifact delta, fork reuse and public delivery.
+    monkeypatch.setattr(donation, "publish_model_candidate", publish)
     service = donation.Service(enabled)
     service._run(threading.Event())
-    assert len(submitted) == 1
-    assert donation.total_tokens(enabled) == 0
+    assert len(submitted) == 1 and donation.total_tokens(enabled) == 0
     with models._connection(enabled) as conn:
         assert conn.execute("SELECT state FROM model_experiments").fetchone()[0] == "submitted"
 
@@ -1482,33 +1479,24 @@ def test_uninitialized_summary_does_not_create_database(tmp_path):
     assert not (tmp_path/"LongTasks").exists()
 
 
-def test_pending_publication_resumes_same_run_without_training(enabled, monkeypatch):
-    import github_account
-    folder = enabled/"candidate"
-    fingerprint = artifacts(folder)
-    claimed = models.claim(enabled)
-    models.complete(enabled, claimed, {"folder": str(folder), "seconds": 2, "qualified": True}, "ready")
-    with models._connection(enabled) as conn:
+def test_pending_publication_resumes_same_run_without_training(model_upload_host, monkeypatch):
+    host = model_upload_host
+    host.publish()
+    # A pre-journal client already uploaded this exact candidate. Its training
+    # receipt remains unchanged; the new transport must reconcile the same PR.
+    with closing(donation.connection(host.root)) as conn, conn:
+        conn.execute("DELETE FROM model_publication_journal")
+    models.complete(host.root, host.claimed, host.trained, "ready")
+    with models._connection(host.root) as conn:
         conn.execute("UPDATE model_experiments SET publication_checked=0")
-    monkeypatch.setattr(github_account, "account", lambda: "TestDonor")
-    monkeypatch.setattr(donation.Service, "allowed", lambda *a, **k: True)
     monkeypatch.setattr(models, "run_job", lambda *a, **k: pytest.fail("Never retrain pending publication"))
-    branch = "cale-donation-" + claimed["run_id"][:16]
-    writes = []
-    def gh(path, data=None):
-        if data:
-            writes.append(data)
-        return [{"head": {"ref": branch, "repo": {"owner": {"login": "TestDonor"}}},
-                 "base": {"repo": {"full_name": donation.UPSTREAM}},
-                 "body": "<!-- cale-model-experiment:" + fingerprint + " -->",
-                 "html_url": "https://github.com/" + donation.UPSTREAM + "/pull/1"}]
-    monkeypatch.setattr(donation, "gh_api", gh)
-    service = donation.Service(enabled)
+    writes = sum(body is not None for _, body in host.remote.calls)
+    service = donation.Service(host.root)
     service._run(threading.Event())
     assert service.message == "Model candidate submitted for owner review."
-    assert not writes
-    assert models.summary(enabled)["worker_seconds"] == 2
-    assert donation.total_tokens(enabled) == 0
+    assert sum(body is not None for _, body in host.remote.calls) == writes
+    assert models.summary(host.root)["worker_seconds"] == 2
+    assert donation.total_tokens(host.root) == 0
 
 
 def test_old_ready_candidate_is_preserved_but_does_not_block_new_policy(enabled, monkeypatch):
@@ -3198,3 +3186,273 @@ def test_public_pull_errors_keep_typed_status_and_bounded_backoff_without_remote
 def test_public_pull_interruption_remains_cancellation():
     with patch.object(donation,'build_opener',return_value=SimpleNamespace(open=lambda *a,**k:(_ for _ in ()).throw(InterruptedError()))):
         with pytest.raises(InterruptedError):donation.public_pull_request(728)
+
+
+class ModelPublicationRemote(PublicationRemote):
+    """Extend the real-shaped fake GitHub with captured model tree/ancestry."""
+    def __init__(self):
+        super().__init__()
+        self.tree_files = []
+        self.wrong_ancestry = False
+        self.wrong_blob = False
+
+    def api(self, endpoint, data=None):
+        if "/git/matching-refs/heads/" in endpoint:
+            self.calls.append((endpoint,data))
+            branch=endpoint.split('/git/matching-refs/heads/')[1]
+            return [{'ref':'refs/heads/'+branch,'object':{'sha':self.refs[branch]}}] if branch in self.refs else []
+        if "/compare/" in endpoint:
+            self.calls.append((endpoint,data))
+            parent,head=endpoint.split('/compare/')[1].split('...')
+            if endpoint.startswith('repos/'+donation.UPSTREAM+'/'):
+                return {'status':'identical' if parent==head else 'ahead',
+                    'merge_base_commit':{'sha':'f'*40 if self.wrong_ancestry else parent}}
+            files=json.loads(json.dumps(self.tree_files))
+            if self.wrong_blob:files[0]['sha']='f'*40
+            return {'total_commits':1,'files':files}
+        if endpoint.endswith('/git/trees') and data is not None:
+            self.tree_files=[{'filename':item['path'],'status':'added','sha':donation._public_blob(item['content'])}
+                for item in data['tree']]
+        return super().api(endpoint,data)
+
+
+@pytest.fixture
+def model_upload_host(enabled,monkeypatch):
+    import github_account
+    donation.set_enabled(True,enabled,sources=['local'],github_account='donor',intensity='medium',model_training=True)
+    folder=enabled/'model-candidate'
+    fingerprint=artifacts(folder)
+    claimed=models.claim(enabled)
+    assert claimed['fingerprint']==fingerprint
+    trained={'folder':str(folder),'qualified':True,'seconds':2}
+    remote=ModelPublicationRemote()
+    monkeypatch.setattr(github_account,'account',lambda:'donor')
+    monkeypatch.setattr(donation.Service,'allowed',lambda *a,**k:True)
+    monkeypatch.setattr(donation,'gh_api',remote.api)
+    def public(number):
+        if not remote.public_visible:raise donation.PublicVisibilityPending(404,'http')
+        found=next((pr for pr in remote.prs if pr['number']==number),None)
+        if found is None:raise donation.PublicVisibilityPending(404,'http')
+        return json.loads(json.dumps(found))
+    monkeypatch.setattr(donation,'public_pull_request',public)
+    return SimpleNamespace(root=enabled,claimed=claimed,trained=trained,remote=remote,
+        publish=lambda:donation.publish_model_candidate(enabled,claimed,trained,'donor',lambda:None))
+
+
+def test_model_upload_preserves_trainer_identity_and_uses_only_reviewed_json(model_upload_host):
+    host=model_upload_host
+    before=models.identity()
+    assert host.publish().endswith('/pull/1')
+    assert models.identity()==before
+    assert hashlib.sha256(__import__('pathlib').Path(models.__file__).read_bytes()).hexdigest()=='55e0cea16b25c834ae1629d194a3d2c0637eabba168f01427417de4be275f67f'
+    assert len(host.remote.prs)==1 and host.remote.prs[0]['draft'] is True
+    assert {file['filename'] for file in host.remote.tree_files}=={
+        f'ModelContributions/{host.claimed["fingerprint"]}/{name}' for name in models.ARTIFACTS}
+    assert donation.total_tokens(host.root)==0
+
+
+def test_model_upload_reuses_existing_fork_even_if_creation_is_forbidden(model_upload_host):
+    host=model_upload_host;host.remote.fork_created=True;host.remote.fork_failures=100;host.remote.fork_failure_status=403
+    assert host.publish().endswith('/pull/1')
+    assert not any(endpoint.endswith('/forks') for endpoint,_ in host.remote.calls)
+
+
+@pytest.mark.parametrize('failure',['applied-lost','unknown-absent','rejected'])
+def test_model_upload_journals_pr_intent_and_never_duplicates_ambiguous_post(model_upload_host,failure):
+    host=model_upload_host;host.remote.pr_failure=failure
+    with pytest.raises(donation.GitHubRequestError):host.publish()
+    with closing(donation.connection(host.root)) as db:
+        state,owner=db.execute('SELECT state,owner FROM model_publication_journal').fetchone()
+    assert owner=='' and json.loads(state)['pr_attempted']==(failure!='rejected')
+    if failure=='unknown-absent':
+        with pytest.raises(donation.PublicationPending,match='no replacement'):host.publish()
+        assert not host.remote.prs
+    else:
+        assert host.publish().endswith('/pull/1') and len(host.remote.prs)==1
+    assert sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)==(2 if failure=='rejected' else 1)
+
+
+def test_model_upload_public_visibility_wait_keeps_same_candidate_and_pr(model_upload_host):
+    host=model_upload_host;host.remote.public_visible=False
+    with pytest.raises(donation.PublicVisibilityPending):host.publish()
+    host.remote.public_visible=True
+    assert host.publish().endswith('/pull/1')
+    assert len(host.remote.prs)==1
+    assert sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)==1
+    assert donation.total_tokens(host.root)==0
+
+
+@pytest.mark.parametrize('fault',['wrong_blob','wrong_ancestry'])
+def test_model_upload_rejects_unreviewed_delta_or_foreign_base(model_upload_host,fault):
+    host=model_upload_host;host.remote.ref_lost=True
+    with pytest.raises(donation.GitHubRequestError):host.publish()
+    setattr(host.remote,fault,True)
+    with pytest.raises(donation.PublicationPending):host.publish()
+    assert not host.remote.prs
+
+
+def test_model_upload_recovers_applied_ref_and_new_main_without_recreating_objects(model_upload_host):
+    host=model_upload_host;host.remote.ref_lost=True
+    with pytest.raises(donation.GitHubRequestError):host.publish()
+    commits=len(host.remote.commits)
+    host.remote.revision='d'*40
+    assert host.publish().endswith('/pull/1')
+    assert len(host.remote.commits)==commits and len(host.remote.refs)==1 and len(host.remote.prs)==1
+
+
+def test_model_upload_lease_is_exclusive_while_owner_thread_lives(model_upload_host):
+    host=model_upload_host
+    bodies=models.review_artifacts(host.trained['folder'],host.claimed['fingerprint'])
+    owner=donation.ModelPublicationJournal(host.root,host.claimed,'donor',bodies,lambda:None)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future=pool.submit(host.publish)
+            with pytest.raises(donation.PublicationPending,match='live worker'):future.result()
+        assert not host.remote.calls
+    finally:owner.close()
+    assert host.publish().endswith('/pull/1')
+
+
+@pytest.mark.parametrize('bad_state',['[]','{"pr_attempted":"true"}','x'*8193])
+def test_model_upload_corrupt_journal_never_authorizes_another_post(model_upload_host,bad_state):
+    host=model_upload_host;host.remote.pr_failure='unknown-absent'
+    with pytest.raises(donation.GitHubRequestError):host.publish()
+    before=len(host.remote.calls)
+    with closing(donation.connection(host.root)) as db,db:
+        db.execute('UPDATE model_publication_journal SET state=?',(bad_state,))
+    with pytest.raises(donation.PublicationPending):host.publish()
+    assert len(host.remote.calls)==before
+
+
+def test_model_upload_opt_out_prevents_all_remote_work(model_upload_host):
+    host=model_upload_host;donation.set_enabled(False,host.root)
+    with pytest.raises(InterruptedError):host.publish()
+    assert not host.remote.calls
+
+
+def test_model_upload_every_write_has_durable_artifact_binding_and_intent(model_upload_host,monkeypatch):
+    host=model_upload_host;actual=host.remote.api;writes=[]
+    def api(endpoint,data=None):
+        if data is not None:
+            with closing(donation.connection(host.root)) as db:
+                raw,owner=db.execute('SELECT state,owner FROM model_publication_journal').fetchone()
+            state=json.loads(raw)
+            assert owner and set(state['artifacts'])==set(models.ARTIFACTS)
+            assert state['intent']==donation._github_stage(endpoint,data)
+            if endpoint.endswith('/pulls'):assert state['pr_attempted'] is True
+            writes.append(endpoint)
+        return actual(endpoint,data)
+    monkeypatch.setattr(donation,'gh_api',api)
+    assert host.publish().endswith('/pull/1') and writes
+
+
+def test_model_scheduler_hidden_pr_recovers_without_retraining_or_double_compute(model_upload_host,monkeypatch):
+    host=model_upload_host
+    models.complete(host.root,host.claimed,host.trained,'ready')
+    with models._connection(host.root) as db:
+        db.execute('UPDATE model_experiments SET publication_checked=0')
+    monkeypatch.setattr(models,'run_job',lambda *a,**k:pytest.fail('Cached candidate must not be retrained'))
+    monkeypatch.setattr(donation,'complete_donation',lambda *a,**k:pytest.fail('No inference for a model upload'))
+    host.remote.public_visible=False
+    first=donation.Service(host.root);first._run(threading.Event())
+    assert 'not confirmed' in first.message and len(host.remote.prs)==1
+    with models._connection(host.root) as db:
+        assert db.execute('SELECT run_id,state FROM model_experiments').fetchall()==[(host.claimed['run_id'],'ready')]
+    host.remote.public_visible=True
+    with patch.object(donation.time,'time',return_value=outbox_expire(host.root)):
+        second=donation.Service(host.root);second._run(threading.Event())
+    assert 'submitted for owner review' in second.message
+    with models._connection(host.root) as db:
+        assert db.execute('SELECT run_id,state FROM model_experiments').fetchall()==[(host.claimed['run_id'],'submitted')]
+    assert models.summary(host.root)['worker_seconds']==2 and donation.total_tokens(host.root)==0
+    assert len(host.remote.prs)==1 and sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)==1
+
+
+def test_model_upload_cancel_after_pr_intent_sends_no_post_and_can_retry(model_upload_host):
+    host=model_upload_host;cancelled=[False]
+    def cancel():
+        with closing(donation.connection(host.root)) as db:
+            row=db.execute('SELECT state FROM model_publication_journal').fetchone()
+        if row:
+            state=json.loads(row[0])
+            if not cancelled[0] and state.get('intent')=='proposal-create' and state['pr_attempted']:
+                cancelled[0]=True
+                raise InterruptedError()
+    with pytest.raises(InterruptedError):
+        donation.publish_model_candidate(host.root,host.claimed,host.trained,'donor',cancel)
+    assert not host.remote.prs and not any(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)
+    assert host.publish().endswith('/pull/1')
+
+
+def test_model_upload_requires_approval_for_the_actual_github_account(model_upload_host,monkeypatch):
+    host=model_upload_host
+    monkeypatch.setattr('github_account.account',lambda:'other')
+    with pytest.raises(InterruptedError):
+        donation.publish_model_candidate(host.root,host.claimed,host.trained,'other',lambda:None)
+    assert not host.remote.calls
+
+
+def test_cached_model_upload_retry_claim_is_atomic_across_threads(model_upload_host):
+    host=model_upload_host
+    models.complete(host.root,host.claimed,host.trained,'ready')
+    with models._connection(host.root) as db:
+        db.execute('UPDATE model_experiments SET publication_checked=0')
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        claimed=list(pool.map(lambda _:donation.claim_model_publication(host.root,'donor'),range(8)))
+    successful=[value for value in claimed if value]
+    assert len(successful)==1 and successful[0]['run_id']==host.claimed['run_id']
+    assert successful[0]['resume']==host.trained
+    assert not host.remote.calls and donation.total_tokens(host.root)==0
+
+
+def test_cached_model_upload_retry_yields_to_a_live_upload_owner(model_upload_host):
+    host=model_upload_host
+    models.complete(host.root,host.claimed,host.trained,'ready')
+    with models._connection(host.root) as db:
+        db.execute('UPDATE model_experiments SET publication_checked=0')
+    bodies=models.review_artifacts(host.trained['folder'],host.claimed['fingerprint'])
+    owner=donation.ModelPublicationJournal(host.root,host.claimed,'donor',bodies,lambda:None)
+    try:
+        assert donation.claim_model_publication(host.root,'donor') is None
+        with models._connection(host.root) as db:
+            assert db.execute('SELECT publication_checked FROM model_experiments').fetchone()[0]==0
+    finally:owner.close()
+    assert donation.claim_model_publication(host.root,'donor')['run_id']==host.claimed['run_id']
+
+
+def test_model_upload_account_switch_keeps_independent_journals_and_revokes_old_owner(model_upload_host,monkeypatch):
+    host=model_upload_host;bodies=models.review_artifacts(host.trained['folder'],host.claimed['fingerprint'])
+    old=donation.ModelPublicationJournal(host.root,host.claimed,'donor',bodies,lambda:None)
+    donation.set_enabled(True,host.root,sources=['local'],github_account='other',intensity='medium',model_training=True)
+    monkeypatch.setattr('github_account.account',lambda:'other')
+    new=donation.ModelPublicationJournal(host.root,host.claimed,'other',bodies,lambda:None)
+    try:
+        with pytest.raises(InterruptedError):old.guard()
+        new.guard()
+        old.close()
+        with closing(donation.connection(host.root)) as db:
+            assert db.execute('SELECT COUNT(*) FROM model_publication_journal').fetchone()[0]==2
+            assert db.execute('SELECT owner FROM model_publication_journal WHERE account=?',(new.account,)).fetchone()[0]==new.owner
+    finally:
+        old.close();new.close()
+    assert not host.remote.calls
+
+
+@pytest.mark.parametrize('fault',['boolean_commit_count','unknown_file_without_sha','wrong_commit_identity','changed_ref'])
+def test_model_transport_uncertainty_blocks_pr_before_dispatch(model_upload_host,monkeypatch,fault):
+    host=model_upload_host;original=host.remote.api
+    def api(endpoint,data=None):
+        result=original(endpoint,data)
+        if fault=='changed_ref' and endpoint.endswith('/git/refs') and data is not None:
+            host.remote.refs[data['ref'].removeprefix('refs/heads/')]='f'*40
+        if fault=='wrong_commit_identity' and '/git/commits/' in endpoint:
+            result={**result,'sha':'f'*40}
+        if '/compare/' in endpoint and endpoint.startswith('repos/donor/'):
+            if fault=='boolean_commit_count':result={**result,'total_commits':True}
+            if fault=='unknown_file_without_sha':
+                result={**result,'files':[*result['files'][:-1],{'filename':'unreviewed.py','status':'added'}]}
+        return result
+    monkeypatch.setattr(donation,'gh_api',api)
+    with pytest.raises(donation.PublicationPending):host.publish()
+    assert not host.remote.prs
+    assert not any(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)
