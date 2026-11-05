@@ -266,8 +266,15 @@ def run_probe() -> dict:
                             return report
                         if time.monotonic() >= deadline:
                             raise TimeoutError("Clone capability probe timed out")
-                        time.sleep(0.2)
-                    stdout, _ = process.communicate(timeout=3)
+                        # Drain stdout while waiting: a full pipe can prevent
+                        # the worker from exiting even after rendering finishes.
+                        try:
+                            stdout, _ = process.communicate(timeout=0.2)
+                            break
+                        except subprocess.TimeoutExpired:
+                            pass
+                    else:
+                        stdout, _ = process.communicate(timeout=3)
                 if process.returncode or len(stdout) > 8192:
                     raise RuntimeError("The clone capability worker failed")
                 answer = json.loads(stdout)
