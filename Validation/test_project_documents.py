@@ -43,6 +43,37 @@ def test_snapshot_upgrade_ignores_v2_cache_and_rebuilds_only_derived_chunks(tmp_
     assert source.read_bytes() == b"stable original PDF bytes"
 
 
+def test_inspector_rebuilds_malformed_or_oversized_cache(tmp_path):
+    for name, damaged in (("invalid-utf8", b"\xff"), ("oversized", b"x" * 33)):
+        root = tmp_path / name
+        root.mkdir()
+        source = root / "notes.pdf"
+        original = b"unchanged PDF source"
+        source.write_bytes(original)
+        text = "recovered document text"
+
+        with patch.object(file_chat, "ROOT", root), patch.object(
+            project_documents, "MAX_EXTRACTED_CHARS", 32,
+        ), patch.object(file_chat, "document_text", return_value=text) as extract, patch.object(
+            project_memory, "index_document_text",
+        ) as index:
+            first = project_documents.inspect(root, "notes.pdf")
+            assert first["text"] == text and not first["cached"]
+            cache = next((root / ".local-ai/document-cache").glob("*.txt"))
+            cache.write_bytes(damaged)
+
+            recovered = project_documents.inspect(root, "notes.pdf")
+            reused = project_documents.inspect(root, "notes.pdf")
+
+        assert recovered["text"] == reused["text"] == text
+        assert not recovered["cached"] and reused["cached"]
+        assert extract.call_count == 2
+        assert all(call.args[2] == text for call in index.call_args_list)
+        assert cache.read_bytes() == text.encode("utf-8")
+        assert source.read_bytes() == original
+        assert not list(cache.parent.glob("*.tmp"))
+
+
 def test_inspector_reads_real_pdf_and_reuses_the_extraction(tmp_path):
     source = tmp_path / "research.pdf"
     stream = b"BT /F1 12 Tf 72 720 Td (The release date is November second.) Tj ET"
