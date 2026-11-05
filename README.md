@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.522 explains donation failures by GitHub step/status or local worker category, shares GitHub cooldowns across lanes, and fixes installed self-check fixture dependencies. The installer and installed checks share the actual connection callbacks. [Validation and limits](benchmarks/results/reliability-donation-522-20261105.json).
+
 Release 0.5.521 preserves a live self-check through brief database contention, keeps incomplete runs from passing, and fixes valid Chrome manifest directives. Scoped checks passed 59 self-check tests and 28 Chrome tests, plus four independent pause/source-change checks. [Evidence and limits](benchmarks/results/selfcheck-chrome-521-20261105.json).
 
 Release 0.5.520 gives clearer tool-argument errors without changing validation or permissions. It keeps the requested operation when choosing an error explanation and handles boolean and numeric alternatives correctly. A reviewed donation also keeps invalid public API catalog numbers from replacing the last good snapshot. The affected cloud suite passed 217 tests with 57 subtests; the catalog suite passed 35 tests. Whole-app autonomy remains under qualification. [Checks and limits](benchmarks/results/diagnostics-catalog-520-20261105.json).
