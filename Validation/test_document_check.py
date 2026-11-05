@@ -164,6 +164,28 @@ def test_document_check_uses_exact_arithmetic_for_large_amounts(tmp_path, exact_
         "Calculation 1: report amount differs from source arithmetic"])
 
 
+@pytest.mark.parametrize("report_amount,passed", [("-$8", True), ("$12", False)])
+@pytest.mark.parametrize("source_amount", ["-$10", "$-10"])
+def test_document_check_handles_negative_dollar_amounts(tmp_path, report_amount, passed,
+                                                       source_amount):
+    folder = _project(tmp_path)
+    source_text = f"Base fee: {source_amount}\nExtra fee: $2\n"
+    (folder / "terms.txt").write_text(source_text, encoding="utf-8")
+    (folder / "summary.md").write_text(
+        f"Total payable: {report_amount}\n", encoding="utf-8")
+    spec = {"source_path": "terms.txt", "report_path": "summary.md",
+            "calculations": [{"operation": "add",
+                              "source_texts": [f"Base fee: {source_amount}",
+                                               "Extra fee: $2"],
+                              "report_text": f"Total payable: {report_amount}"}]}
+    with patch.object(document_check.project_documents, "inspect",
+                      return_value={"text": source_text}):
+        result = document_check.check(folder, spec)
+    assert result["passed"] is passed
+    assert result["errors"] == ([] if passed else [
+        "Calculation 1: report amount differs from source arithmetic"])
+
+
 def test_document_check_rejects_source_change_during_extraction(tmp_path):
     folder = _project(tmp_path)
     original_inspect = document_check.project_documents.inspect

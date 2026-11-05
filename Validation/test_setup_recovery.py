@@ -395,7 +395,7 @@ def test_invalid_failure_timestamp_does_not_crash_recovery(tmp_path, monkeypatch
     assert not (state / "base-install-repair.json").exists()
 
 
-def test_nonfinite_retry_timestamps_do_not_launch_repair(tmp_path, monkeypatch):
+def test_nonfinite_or_overflowing_retry_timestamps_do_not_launch_repair(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
     (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
@@ -418,7 +418,7 @@ def test_nonfinite_retry_timestamps_do_not_launch_repair(tmp_path, monkeypatch):
         setup_recovery.subprocess, "Popen"
     ) as launch:
         for field in ("updated", "started"):
-            for value in ("NaN", "-Infinity", "Infinity"):
+            for value in ("NaN", "-Infinity", "Infinity", 10 ** 400):
                 progress = dict(valid_progress)
                 record = dict(valid_record)
                 (progress if field == "updated" else record)[field] = value
@@ -433,7 +433,7 @@ def test_nonfinite_retry_timestamps_do_not_launch_repair(tmp_path, monkeypatch):
                 assert json.loads(progress_path.read_text(encoding="utf-8")) == progress
                 assert json.loads(record_path.read_text(encoding="utf-8")) == record
         launch.assert_not_called()
-    assert locking.locking.call_count == 12
+    assert locking.locking.call_count == 16
     assert locking.locking.call_args.args[1:] == (locking.LK_UNLCK, 1)
 
 

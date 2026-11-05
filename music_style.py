@@ -25,7 +25,7 @@ NEGATED_SINGER = re.compile(
     r"\s+(?:lead\s+)?(?:voice|vocals?|singer)\b", re.I,
 )
 NEGATED_LEAD_VOCALS = re.compile(
-    rf"\b{NEGATION}\s+(?:any\s+)?lead\s+vocals?\b", re.I,
+    rf"\b{NEGATION}\s+(?:any\s+)?(?:lead\s+vocals?|rap|rapping|rapper|rapped)\b", re.I,
 )
 VOCAL_TEXTURE = re.compile(
     r"\b(?:vocal chops?|chopped vocals?|wordless vocals?|"
@@ -37,7 +37,7 @@ SPARSE_VOCAL_STYLE = re.compile(
     r"vocal hooks?|very little (?:conventional )?singing)\b", re.I,
 )
 LEAD_VOCALS = re.compile(
-    r"\b(?:lead vocals?|sung verses?|singing|singer|rap|rapped)\b", re.I,
+    r"\b(?:lead vocals?|sung verses?|singing|singer|rap|rapping|rapper|rapped)\b", re.I,
 )
 EXPLICIT_LEAD = re.compile(
     r"\b(?:singer|rapper|singing|rapping|sung|rapped|"
@@ -158,7 +158,7 @@ def enhance(prompt: str, instrumental: bool = False) -> str:
     # Chops can accompany a requested lead; they do not cancel that lead.
     # Inspect only the cleaned current request, not exclusions or old feedback.
     current = cleaned.split("Past user feedback", 1)[0]
-    sparse = sparse_vocal_style(cleaned) and not re.search(r"\blead\s+vocals?\b", current, re.I)
+    sparse = sparse_vocal_style(current) and not re.search(r"\blead\s+vocals?\b", current, re.I)
     if sustained and intent == "female":
         cue = ("Distinct short female vocal hooks and chopped phrases between instrumental drops"
                if sparse else

@@ -611,14 +611,13 @@ def say(message, rate=0, cancel=None, require_clone=False):
         # can finish its first, comparatively slow synthesis call.
         reference = ROOT / "assets" / "cale-voice-reference.wav"
         bundled = ROOT / "assets" / bundled_name
-        if (reference.is_file() and bundled.is_file() and bundled.stat().st_size > 1000
-                and hashlib.sha256(reference.read_bytes()).hexdigest() == WAKE_REFERENCE_SHA256):
-            try:
+        try:
+            if (reference.is_file() and bundled.is_file() and bundled.stat().st_size > 1000
+                    and hashlib.sha256(reference.read_bytes()).hexdigest() == WAKE_REFERENCE_SHA256):
                 _play_file(bundled, cancel)
-            except (OSError, EOFError, wave.Error):
-                pass  # An unusable bundled WAV must not prevent synthesized speech.
-            else:
                 return {"path": str(bundled), "engine": "Cale's local voice (bundled)"}
+        except (OSError, EOFError, wave.Error, RuntimeError):
+            pass  # Unreadable or unusable bundled assets must not prevent synthesis.
     temp = ROOT / "Temp"
     temp.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=temp) as folder:
@@ -636,7 +635,7 @@ def say(message, rate=0, cancel=None, require_clone=False):
                     if cached.is_file() and cached.stat().st_size > 1000:
                         try:
                             _play_file(cached, cancel)
-                        except (OSError, EOFError, wave.Error):
+                        except (OSError, EOFError, wave.Error, RuntimeError):
                             pass  # Regenerate an unusable cached acknowledgement.
                         else:
                             return {"path": str(cached), "engine": "Cale's local voice (cached)"}

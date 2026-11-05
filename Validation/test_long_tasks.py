@@ -3143,3 +3143,759 @@ def test_paused_install_hold_donation_resumes_without_changing_consent(tmp_path)
         service.thread.join(2)
         run.assert_called_once()
         assert donation.settings(tmp_path) == consent
+
+
+def test_donation_activity_reaches_real_tk_chat_history_voice_and_link(tmp_path):
+    import ast
+    import re
+    import uuid
+    import tkinter as tk
+    import donation_ui
+    import pytest
+    from types import SimpleNamespace
+    try:
+        window=tk.Tk()
+    except tk.TclError as error:
+        pytest.skip('Tk display unavailable: '+str(error))
+    window.withdraw()
+    try:
+        conversation=tk.Text(window)
+        conversation.pack()
+        conversation.insert('end',''.join(f'Older chat line {n}\n' for n in range(100)))
+        window.update_idletasks()
+        conversation.yview_moveto(0)
+        first_visible=conversation.index('@0,0')
+        assert conversation.yview()[1]<0.98
+        spoken=[]
+        tree=ast.parse((ROOT/'long_tasks.py').read_text(encoding='utf-8-sig'))
+        definitions=[next(node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef) and node.name==name)
+                     for name in ('show_chat','assistant_reply')]
+        mirror=tk.Text(window)
+        mirror.pack()
+        namespace={'conversation':conversation,'chat_mirrors':[mirror],'re':re,'uuid':uuid,'webbrowser':SimpleNamespace(open=lambda link:None),
+                   'speak_update':spoken.append,'save_chat':task_module.save_chat}
+        exec(compile(ast.Module(body=definitions,type_ignores=[]),'actual-desktop-chat','exec'),namespace)
+        # Exercise the actual wiring expression too: this is the same callback
+        # passed to Controls by the desktop, not a separate UI-only message sink.
+        call=next(node for node in ast.walk(tree) if isinstance(node,ast.Call)
+                  and isinstance(node.func,ast.Attribute) and node.func.attr=='Controls'
+                  and isinstance(node.func.value,ast.Name) and node.func.value.id=='donation_ui')
+        callback=next(arg.value for arg in call.keywords if arg.arg=='on_activity')
+        reply=eval(compile(ast.Expression(callback),'actual-donation-callback','eval'),namespace)
+        events=[{'run_id':'example','phase':'submitted','pr_url':'https://github.com/CaleMediaDev/cale-ai-workbench/pull/42'}]
+        service=SimpleNamespace(root=tmp_path,drain_events=lambda:[events.pop()] if events else [])
+        header=tk.Frame(window)
+        control=donation_ui.Controls(header,window,service,lambda:None,lambda:None,on_activity=reply)
+        control.last_counter=time.monotonic()
+        with patch.object(task_module,'STATE',tmp_path):
+            window.after(0,control.refresh)
+            window.update()
+            history=task_module.chat_history()
+        assert len(history)==1 and history[0]['role']=='assistant' and history[0]['private']
+        assert 'I just sent a proposed improvement' in conversation.get('1.0','end')
+        assert spoken==[history[0]['content']]
+        assert history[0]['content'] in mirror.get('1.0','end')
+        assert conversation.index('@0,0')==first_visible  # Background updates never steal older history.
+        links=[tag for tag in conversation.tag_names() if tag.startswith('link-')]
+        assert len(links)==1 and conversation.tk.call(conversation._w,'tag','bind',links[0],'<Button-1>')
+        assert conversation.get(*conversation.tag_ranges(links[0]))=='https://github.com/CaleMediaDev/cale-ai-workbench/pull/42'
+        assert control.popup is None  # Main chat updates while donation dialog is closed.
+    finally:
+        window.destroy()
+
+
+def test_first_install_requests_select_only_four_known_connection_flows(tmp_path):
+    for provider in ("chatgpt", "claude", "grok", "openrouter"):
+        marker = tmp_path / "open-supercharge"
+        marker.write_text(provider, encoding="utf-8-sig")
+        assert task_module.take_ai_connection_request(tmp_path) == provider
+        assert not marker.exists()
+    for unknown in ("setup", "https://evil.example/sign-in", "powershell -EncodedCommand bad", "x" * 100):
+        (tmp_path / "open-supercharge").write_text(unknown, encoding="utf-8")
+        assert task_module.take_ai_connection_request(tmp_path) == "setup"
+    assert task_module.take_ai_connection_request(tmp_path) is None
+
+
+def test_four_connection_dispatch_uses_existing_account_flows_and_official_agents():
+    import ast
+    tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+    node = next(item for item in ast.walk(tree) if isinstance(item, ast.FunctionDef) and item.name == "open_ai_connection")
+    calls = []
+    namespace = {"show_super": lambda: calls.append("show"), "connect_chatgpt": lambda: calls.append("chatgpt"),
+        "connect": lambda: calls.append("openrouter"), "connect_subscription": lambda code: calls.append(code)}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "real-connection-dispatch", "exec"), namespace)
+    for provider in ("chatgpt", "claude", "grok", "openrouter"):
+        namespace["open_ai_connection"](provider)
+        assert calls[-2:] == ["show", provider]
+    namespace["open_ai_connection"]("https://evil.example")
+    assert calls[-1] == "show"
+
+
+def test_subscription_connection_real_tk_requires_user_action_and_success_before_enabling():
+    import ast
+    import queue
+    import tkinter as tk
+    from tkinter import ttk
+    from types import SimpleNamespace
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+    node = next(item for item in ast.walk(tree) if isinstance(item, ast.FunctionDef) and item.name == "connect_subscription")
+    calls = []
+    class InlineThread:
+        def __init__(self, target, **kwargs): self.target = target
+        def start(self): self.target()
+    try:
+        for provider, connected in (("claude", True), ("grok", False)):
+            def connect(code, on_progress):
+                calls.append(("login", code))
+                on_progress("Official app is signing in")
+                return {"connected": connected, "detail": "Signed in" if connected else "Sign-in incomplete"}
+            namespace = {"window": window, "tk": tk, "ttk": ttk, "queue": queue,
+                "threading": SimpleNamespace(Thread=InlineThread),
+                "cloud_providers": SimpleNamespace(connect_subscription_agent=connect,
+                    enable_subscription_agent=lambda code, value: calls.append(("enable", code, value)))}
+            exec(compile(ast.Module(body=[node], type_ignores=[]), "real-subscription-dialog", "exec"), namespace)
+            before = list(calls)
+            namespace["connect_subscription"](provider)
+            assert calls == before  # Merely showing setup never spends/enables a plan.
+            panel = next(child for child in window.winfo_children() if isinstance(child, tk.Toplevel))
+            body = panel.winfo_children()[0]
+            button = next(child for child in body.winfo_children()
+                          if isinstance(child, ttk.Button) and child.cget("text").startswith("Connect and use my"))
+            button.invoke()
+            window.after(350, window.quit)
+            window.mainloop()
+            assert ("login", provider) in calls
+            assert (("enable", provider, True) in calls) is connected
+            panel.destroy()
+    finally:
+        window.destroy()
+
+
+def test_github_code_appears_in_real_cale_widgets_with_copy_and_no_terminal():
+    import ast
+    import re
+    import tkinter as tk
+    from tkinter import ttk
+    from types import SimpleNamespace
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        code = tk.StringVar(master=window)
+        status = tk.StringVar(master=window)
+        row = ttk.Frame(window)
+        field = ttk.Entry(row, textvariable=code, state="readonly")
+        field.pack()
+        copied = []
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        definitions = [next(item for item in ast.walk(tree) if isinstance(item, ast.FunctionDef) and item.name == name)
+                       for name in ("copy_github_code", "show_github_code")]
+        namespace = {"window": SimpleNamespace(clipboard_clear=lambda: copied.clear(), clipboard_append=copied.append),
+                     "github_code": code, "github_text": status, "github_code_row": row, "tk": tk, "re": re}
+        exec(compile(ast.Module(body=definitions, type_ignores=[]), "actual-github-code-ui", "exec"), namespace)
+        assert namespace["show_github_code"]("ABCD-1234")
+        assert field.get() == "ABCD-1234" and row.winfo_manager() == "pack"
+        assert copied == ["ABCD-1234"] and "browser" in status.get()
+        assert not namespace["show_github_code"]("ghp_private_token")
+        assert field.get() == "ABCD-1234" and copied == ["ABCD-1234"]
+    finally:
+        window.destroy()
+
+
+def test_github_login_from_closed_connections_opens_cale_panel_instead_of_terminal():
+    import ast
+    import queue
+    import tkinter as tk
+    from tkinter import ttk
+    from types import SimpleNamespace
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        code = tk.StringVar(master=window)
+        status = tk.StringVar(master=window)
+        events = queue.Queue()
+        calls = []
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        node = next(item for item in ast.walk(tree) if isinstance(item, ast.FunctionDef) and item.name == "connect_github")
+        namespace = {"window": window, "tk": tk, "ttk": ttk, "github_code": code, "github_text": status,
+                     "github_login_events": events, "copy_github_code": lambda: None,
+                     "webbrowser": SimpleNamespace(open=lambda url: calls.append(url)),
+                     "github_account": SimpleNamespace(connect=lambda on_code: on_code("ABCD-1234"))}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "actual-github-login-panel", "exec"), namespace)
+        namespace["connect_github"]()
+        panel = window.github_login_panel
+        assert isinstance(panel, tk.Toplevel) and panel.title() == "Connect GitHub"
+        assert events.get_nowait() == ("ABCD-1234", 1) and "browser" in status.get()
+        body = panel.winfo_children()[0]
+        browser_button = next(child for child in body.winfo_children() if isinstance(child, ttk.Button) and child.cget("text").startswith("Open GitHub"))
+        browser_button.invoke()
+        assert calls == ["https://github.com/login/device"]
+    finally:
+        window.destroy()
+
+
+def test_old_github_account_probe_cannot_finish_new_pending_login():
+    from types import SimpleNamespace
+    pending = SimpleNamespace(poll=lambda: None)
+    finished = SimpleNamespace(poll=lambda: 0)
+    failed = SimpleNamespace(poll=lambda: 1)
+    assert not task_module.github_account_refresh_allowed(pending, pending)
+    assert not task_module.github_account_refresh_allowed(pending, None)
+    assert not task_module.github_account_refresh_allowed(finished, False)
+    assert not task_module.github_account_refresh_allowed(finished, pending)
+    assert not task_module.github_account_refresh_allowed(failed, failed)
+    assert task_module.github_account_refresh_allowed(finished, finished)
+    assert task_module.github_account_refresh_allowed(None, None)
+
+
+def test_workspace_navigation_preserves_pages_and_gauges_without_starting_work():
+    import ast
+    import tkinter as tk
+    from tkinter import ttk
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        shells = {name: ttk.Frame(window) for name in ("home", "music", "create", "supercharge")}
+        gauges = ttk.Frame(window)
+        buttons = {name: ttk.Button(window) for name in ("home", "music", "create")}
+        selected = tk.StringVar(master=window, value="home")
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "show_workspace")
+        namespace = {"window": window, "projects": lambda: [], "update_side_preview": lambda _: None,
+                     "workspace_shells": shells, "gauge_row": gauges, "workspace": selected,
+                     "workspace_buttons": buttons, "main_shell": shells["home"]}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "real-workspace-navigation", "exec"), namespace)
+        for name in ("home", "music", "create", "supercharge", "home"):
+            namespace["show_workspace"](name)
+            assert selected.get() == name
+            assert shells[name].winfo_manager() == "pack"
+            assert all(not shell.winfo_manager() for key, shell in shells.items() if key != name)
+            assert bool(gauges.winfo_manager()) is (name == "home")
+        namespace["show_workspace"]("unknown")
+        assert selected.get() == "home"  # Unknown commands cannot blank the app.
+        assert all(shell.winfo_exists() for shell in shells.values())
+    finally:
+        window.destroy()
+
+
+def test_create_page_routes_selected_kind_and_keeps_prompt_until_setup_ready():
+    import ast
+    import tkinter as tk
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        prompt = tk.Text(window)
+        prompt.insert("1.0", "A booking page for my business")
+        kind = tk.StringVar(master=window, value="Website")
+        status = tk.StringVar(master=window)
+        sent = []
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "submit_creation")
+        namespace = {"create_prompt": prompt, "create_kind": kind, "create_status": status,
+                     "STATE": Path("unused"), "first_launch_readiness": lambda _: (False, "Downloading tools"),
+                     "submit_chat_text": lambda value, **options: (sent.append((value, options)) or True)}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "real-create-submit", "exec"), namespace)
+        namespace["submit_creation"]()
+        assert not sent and "booking" in prompt.get("1.0", "end")
+        assert status.get() == "Downloading tools"
+        namespace["first_launch_readiness"] = lambda _: (True, "")
+        namespace["submit_creation"]()
+        assert sent == [("Build a website: A booking page for my business",
+                         {"use_attachments": False, "intent": "task"})]
+        assert prompt.get("1.0", "end-1c") == ""
+        namespace["submit_creation"]()
+        assert len(sent) == 1
+    finally:
+        window.destroy()
+
+
+def test_create_failure_keeps_prompt_and_never_inherits_home_private_attachments(tmp_path):
+    import ast
+    import re
+    import tkinter as tk
+    from types import SimpleNamespace
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        home = tk.Text(window)
+        home.insert("1.0", "My unsent Home question")
+        prompt = tk.Text(window)
+        prompt.insert("1.0", "A booking website")
+        attachments = [str(tmp_path / "private-tax-return.pdf")]
+        attached = []
+        errors = []
+        add_calls = []
+        def add_project(*args, **kwargs):
+            add_calls.append(args)
+            raise OSError("disk full")
+        namespace = {"STATE": tmp_path, "Path": Path,
+            "donation_service": SimpleNamespace(activity=lambda: None),
+            "first_launch_readiness": lambda _: (True, ""),
+            "chat_input": home, "attachments": attachments, "readiness_text": tk.StringVar(master=window),
+            "show_attachments": lambda: None, "assistant_reply": errors.append,
+            "chat_context": lambda _: [], "projects": lambda: [],
+            "save_chat": lambda *args, **kwargs: None, "show_chat": lambda *args: None,
+            "chat_history": lambda *_: [], "read_task_status": lambda _: {},
+            "setup_blocks_tasks": lambda _: False, "add_project": add_project,
+            "render_cards": lambda: None,
+            "create_prompt": prompt, "create_kind": tk.StringVar(master=window, value="Website"),
+            "create_status": tk.StringVar(master=window),
+            "chat_assistant": SimpleNamespace(
+                attach_request=lambda value, paths: (attached.append(list(paths)) or value),
+                FILE_MEMORY_REFERENCE=re.compile(r"(?!)"), PERSONAL_CONTACT=re.compile(r"(?!)"),
+                private_history_for=lambda *args: False, spoken_replay_target=lambda *args: None,
+                followup_tasks=lambda *args: []),
+        }
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "submit_chat_text")
+        factory = ast.parse("def factory():\n pending_followup = None\n").body[0]
+        factory.body.extend([node, ast.Return(value=ast.Name(id="submit_chat_text", ctx=ast.Load()))])
+        module = ast.fix_missing_locations(ast.Module(body=[factory], type_ignores=[]))
+        exec(compile(module, "real-chat-submit-factory", "exec"), namespace)
+        namespace["submit_chat_text"] = namespace["factory"]()
+        creation = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "submit_creation")
+        exec(compile(ast.Module(body=[creation], type_ignores=[]), "real-create-handoff", "exec"), namespace)
+        namespace["submit_creation"]()
+        assert len(add_calls) == 1 and attached == [[]]
+        assert attachments == [str(tmp_path / "private-tax-return.pdf")]
+        assert prompt.get("1.0", "end-1c") == "A booking website"
+        assert home.get("1.0", "end-1c") == "My unsent Home question"
+        assert any("disk full" in error for error in errors)
+        assert "could not start" in namespace["create_status"].get()
+        # A setup-state change between the visible button and shared task
+        # pipeline must also retain the prompt and unsent Home selection.
+        readiness = iter([(True, ""), (False, "Installing runtime")])
+        namespace["first_launch_readiness"] = lambda _: next(readiness)
+        namespace["submit_creation"]()
+        assert len(add_calls) == 1 and len(attached) == 1
+        assert prompt.get("1.0", "end-1c") == "A booking website"
+        assert attachments == [str(tmp_path / "private-tax-return.pdf")]
+    finally:
+        window.destroy()
+
+
+def test_embedded_preview_clears_other_project_image_and_captures_finished_projects(tmp_path):
+    import ast
+    import tkinter as tk
+    from tkinter import ttk
+    from types import SimpleNamespace
+    from PIL import Image, ImageTk
+    import project_preview
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        host = ttk.Frame(window)
+        host.pack()
+        empty = ttk.Frame(host)
+        empty.pack()
+        selected = tk.StringVar(master=window, value="Current project")
+        scope = tk.StringVar(master=window, value="home")
+        captures = []
+        class DeferredThread:
+            def __init__(self, target, **kwargs):
+                self.target = target
+            def start(self):
+                captures.append(self.target.__name__)
+        namespace = {"create_project_selection": selected, "create_project_choices": {},
+            "create_project_picker": ttk.Combobox(window), "create_preview_host": host,
+            "create_empty": empty, "create_status": tk.StringVar(master=window),
+            "create_phase": tk.StringVar(master=window), "create_open_button": ttk.Button(window),
+            "workspace": scope, "project_preview": project_preview, "music_job_id": lambda _: None,
+            "image_job_id": lambda _: None, "muted": "#a8b8c5", "bg": "#0b1017",
+            "tk": tk, "ttk": ttk, "Path": Path, "Image": Image, "ImageTk": ImageTk,
+            "time": time, "threading": SimpleNamespace(Thread=DeferredThread),
+            "open_create_preview": lambda: None}
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        update = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "update_side_preview")
+        factory = ast.parse("""def factory():
+ preview_window = preview_label = preview_caption = None
+ preview_task_id = preview_dismissed_id = preview_image_signature = None
+ preview_capture_running = set()
+ preview_capture_at = {}
+""").body[0]
+        factory.body.append(update)
+        factory.body.extend(ast.parse("""
+def inspect_preview():
+ return preview_label, preview_caption, preview_task_id
+return update_side_preview, inspect_preview
+""").body)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[factory], type_ignores=[])),
+                     "real-embedded-project-preview", "exec"), namespace)
+        update, inspect_preview = namespace["factory"]()
+        items = []
+        for index, title in enumerate(("First game", "Second website")):
+            folder = tmp_path / str(index)
+            (folder / ".local-ai").mkdir(parents=True)
+            (folder / "index.html").write_text("<!doctype html><title>Local project</title>", encoding="utf-8")
+            items.append({"id": str(index), "title": title, "brief": "Build an app",
+                          "status": "accepted", "detail": "Finished", "folder": str(folder)})
+        Image.new("RGB", (80, 60), "red").save(Path(items[0]["folder"]) / ".local-ai/preview.png")
+        update(items[:1])
+        label, _, identity = inspect_preview()
+        assert identity == "0" and label.cget("image")
+        assert captures == []  # Hidden Create never starts a preview browser.
+        update(items)
+        label, caption, identity = inspect_preview()
+        assert identity == "1" and not label.cget("image")
+        assert "Second website" in caption.cget("text")
+        scope.set("create")
+        update(items)
+        assert captures == ["capture"]  # Finished HTML also gets a fresh preview.
+        bad = Path(items[1]["folder"]) / ".local-ai/preview.png"
+        bad.write_bytes(b"not an image")
+        update(items)
+        assert not label.cget("image") and "could not be loaded" in label.cget("text")
+    finally:
+        window.destroy()
+
+
+def test_compact_task_cards_reflow_and_keep_original_action_routes(tmp_path):
+    import ast
+    import tkinter as tk
+    from tkinter import ttk
+    from unittest.mock import Mock
+    tree=ast.parse((ROOT/'long_tasks.py').read_text(encoding='utf-8'))
+    wanted={'layout_task_cards','create_task_card','update_task_controls','update_progress_card','set_text'}
+    nodes={n.name:n for n in ast.walk(tree) if isinstance(n,ast.FunctionDef) and n.name in wanted}
+    root=tk.Tk();root.geometry('1440x900');grid=ttk.Frame(root);grid.pack(fill='both',expand=True)
+    items=[{'id':str(i),'title':'A deliberately long task title '*8,'brief':'camera' if i==0 else '',
+            'detail':'Private detail remains in the existing dialog','status':status,'music':i==1}
+           for i,status in enumerate(['working','accepted','needs_input'])]
+    actions=[];details=[]
+    namespace={'tk':tk,'ttk':ttk,'card':'#151d26','text':'#eef7ff','task_grid':grid,
+       'task_cards':{},'task_order':[p['id'] for p in items],'window':root,
+       'main_canvas':Mock(winfo_width=lambda:root.winfo_width()-80),'ROOT':tmp_path,'time':time,
+       'read_task_status':lambda _: {},'task_controls_for':task_module.task_controls_for,
+       'music_job_id':lambda p:p.get('music'),'standalone_audio_project':lambda _:False,
+       'task_action':lambda pid,action:actions.append((pid,action)),'task_details':lambda p:details.append(p['id']),
+       'projects':lambda:items}
+    try:
+        for name in wanted:exec(compile(ast.Module(body=[nodes[name]],type_ignores=[]),str(ROOT/'long_tasks.py'),'exec'),namespace)
+        for item in items:
+            info=namespace['create_task_card'](item['title']);namespace['task_cards'][item['id']]=info
+            namespace['update_progress_card'](info,37,'A very long current step '*50,item['status'])
+            namespace['update_task_controls'](info,item)
+        for width,columns in [(1440,3),(1050,2),(760,1)]:
+            root.geometry(f'{width}x900');root.update()
+            namespace['layout_task_cards']();root.update()
+            entries=list(namespace['task_cards'].values())
+            assert len({entry['panel'].grid_info()['column'] for entry in entries})==columns
+            assert len({entry['panel'].winfo_height() for entry in entries})==1
+            assert all(entry['panel'].winfo_height()<220 for entry in entries)
+        working=namespace['task_cards']['0'];finished=namespace['task_cards']['1'];needs=namespace['task_cards']['2']
+        for button in working['controls'].winfo_children():button.invoke()
+        assert actions==[('0','stop'),('0','pause'),('0','delete')]
+        for button in finished['controls'].winfo_children():button.invoke()
+        assert actions[-2:]==[('1','reuse'),('1','delete')]
+        for entry in [working,finished,needs]:
+            menu=entry['menu'];labels=[menu.entrycget(i,'label') for i in range(menu.index('end')+1)]
+            menu.invoke(labels.index('Open files'));menu.invoke(labels.index('Details'))
+            assert actions[-1][1]=='open'
+        assert details==['0','1','2']
+        labels=[finished['menu'].entrycget(i,'label') for i in range(finished['menu'].index('end')+1)]
+        assert 'Play song' in labels and 'Share to Facebook' in labels
+        labels=[needs['menu'].entrycget(i,'label') for i in range(needs['menu'].index('end')+1)]
+        assert 'Delete' in labels
+    finally:root.destroy()
+
+
+def test_task_card_missing_legacy_time_never_looks_like_decades_of_work():
+    for value in (None,0,-1,'not a timestamp',float('inf')):
+        assert task_module.task_card_elapsed({'created':value})=='Time unavailable'
+    with patch.object(task_module.task_eta,'total_time',return_value='2m 10s') as actual:
+        item={'created':time.time()-130,'updated':time.time(),'status':'accepted','finished':time.time()}
+        assert task_module.task_card_elapsed(item)=='2m 10s'
+        actual.assert_called_once_with(item['created'],item['updated'],item['status'],finished=item['finished'])
+
+
+
+def update_dialog_poll_call(children, donation_popup, *, chat=False, cloud=False, github=None,
+                            chat_control=None, cloud_control=None, chat_event=None, cloud_event=None):
+    """Execute the exact production poll call, not a copied update predicate."""
+    import ast
+    from types import SimpleNamespace
+    tree = ast.parse((ROOT/"long_tasks.py").read_text(encoding="utf-8-sig"))
+    calls = [node for node in ast.walk(tree) if isinstance(node,ast.Call)
+             and isinstance(node.func,ast.Name) and node.func.id=="update_dialog_open"]
+    assert len(calls)==1
+    class Button:
+        def __init__(self, value): self.value=value
+        def instate(self, states):
+            assert states==["disabled"]
+            if isinstance(self.value,Exception): raise self.value
+            return self.value
+    class Pending:
+        def __init__(self,value):self.value=value
+        def is_set(self):
+            if isinstance(self.value,Exception):raise self.value
+            return self.value
+    window=SimpleNamespace(winfo_children=lambda:children,github_login_process=github)
+    expression=ast.Expression(body=calls[0]);ast.fix_missing_locations(expression)
+    return eval(compile(expression,"actual-update-poll-call","eval"),{
+        "update_dialog_open":task_module.update_dialog_open,"window":window,
+        "preview_window":None,"usage_window":None,"readiness_popup":[None],
+        "donation_controls":SimpleNamespace(popup=donation_popup),
+        "chat_button":chat_control or Button(chat),"connect_button":cloud_control or Button(cloud),
+        "chat_connection_pending":chat_event if chat_event is not None else Pending(chat),
+        "cloud_connection_pending":cloud_event if cloud_event is not None else Pending(cloud)})
+
+
+class UpdatePanel:
+    def __init__(self,visible=True): self.visible=visible
+    def winfo_class(self): return "Toplevel"
+    def winfo_viewable(self): return self.visible
+
+
+def test_update_poll_ignores_visible_saved_donation_controls_but_not_input_dialog():
+    popup=UpdatePanel()
+    assert update_dialog_poll_call([popup],popup) is False
+    assert update_dialog_poll_call([popup,UpdatePanel()],popup) is True
+    hidden=UpdatePanel(False)
+    assert update_dialog_poll_call([hidden],hidden) is False
+
+
+def test_update_poll_preserves_browser_auth_even_without_visible_dialog():
+    from types import SimpleNamespace
+    popup=UpdatePanel(False)
+    assert update_dialog_poll_call([popup],popup,chat=True) is True
+    assert update_dialog_poll_call([popup],popup,cloud=True) is True
+    assert update_dialog_poll_call([popup],popup,github=SimpleNamespace(poll=lambda:None)) is True
+    assert update_dialog_poll_call([popup],popup,github=SimpleNamespace(poll=lambda:0)) is False
+
+
+def test_update_poll_unknown_auth_state_defers_instead_of_failing_open():
+    from types import SimpleNamespace
+    popup=UpdatePanel(False)
+    assert update_dialog_poll_call([popup],popup,chat=RuntimeError("unknown connection event")) is True
+    def unavailable():raise OSError("unknown child status")
+    assert update_dialog_poll_call([popup],popup,github=SimpleNamespace(poll=unavailable)) is True
+    assert update_dialog_poll_call([popup],popup,cloud=None) is True
+
+
+
+class ConnectionFixtureControl:
+    def __init__(self,text='Connect',state='normal'):
+        self.values={'text':text,'state':state};self.managed=False
+    def configure(self,**values):self.values.update(values)
+    def cget(self,name):return self.values[name]
+    def instate(self,states):return self.values['state']=='disabled'
+    def winfo_manager(self):return 'pack' if self.managed else ''
+    def pack(self,**kwargs):self.managed=True
+    def pack_forget(self):self.managed=False
+    def get(self):return self.values['text']
+    def set(self,value):self.values['text']=value
+
+
+def actual_connection_ui_function(name,namespace):
+    import ast
+    tree=ast.parse((ROOT/'long_tasks.py').read_text(encoding='utf-8-sig'))
+    functions=[node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef) and node.name==name]
+    assert len(functions)==1
+    module=ast.Module(body=[functions[0]],type_ignores=[]);ast.fix_missing_locations(module)
+    exec(compile(module,'actual-connection-callback','exec'),namespace)
+    return namespace[name]
+
+
+def test_connected_idle_buttons_from_actual_refresh_and_poll_do_not_block_update():
+    import ast
+    from types import SimpleNamespace
+    chat=ConnectionFixtureControl();cloud=ConnectionFixtureControl()
+    namespace={'chatgpt_auth':SimpleNamespace(status=lambda:{'connected':True,'sharing':True,'enabled':True,'email':'fixture@example.invalid'}),
+        'chat_button':chat,'use_chat_button':ConnectionFixtureControl(),'chat_disconnect_button':ConnectionFixtureControl(),
+        'chat_text':ConnectionFixtureControl('Connected'),'cloud_status':lambda:{'connected':True},
+        'connect_button':cloud,'cloud_text':ConnectionFixtureControl('Connected'),'disconnect_button':ConnectionFixtureControl(),'router_note':object()}
+    actual_connection_ui_function('refresh_chatgpt',namespace)()
+    # Execute the provider-status assignment and its actual following branch
+    # from poll, so this regression uses the real connected-button behavior.
+    tree=ast.parse((ROOT/'long_tasks.py').read_text(encoding='utf-8-sig'))
+    polls=[node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef)
+           and any(isinstance(item,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='connected' for t in item.targets)
+                   for item in node.body)]
+    assert len(polls)==1
+    statements=polls[0].body
+    index=next(index for index,item in enumerate(statements) if isinstance(item,ast.Assign)
+        and any(isinstance(t,ast.Name) and t.id=='connected' for t in item.targets))
+    assert isinstance(statements[index+1],ast.If)
+    module=ast.Module(body=statements[index:index+2],type_ignores=[]);ast.fix_missing_locations(module)
+    exec(compile(module,'actual-openrouter-poll-refresh','exec'),namespace)
+    assert chat.cget('text')=='ChatGPT connected' and cloud.cget('text')=='OpenRouter connected'
+    assert chat.instate(['disabled']) and cloud.instate(['disabled'])
+    assert update_dialog_poll_call([],None,chat_control=chat,cloud_control=cloud) is False
+
+
+
+import pytest
+
+
+@pytest.mark.parametrize('name',['connect_chatgpt','disconnect_chatgpt','connect'])
+@pytest.mark.parametrize('outcome',['success','failure','cancel'])
+def test_actual_connection_callback_owns_pending_event_until_worker_finally(name,outcome):
+    import queue
+    from types import SimpleNamespace
+    chat_pending=threading.Event();cloud_pending=threading.Event()
+    pending=cloud_pending if name=='connect' else chat_pending
+    started=threading.Event();release=threading.Event();workers=[]
+    def operation():
+        assert pending.is_set()  # Set before the real worker can start auth.
+        started.set()
+        if not release.wait(3):raise AssertionError('Owned test release was not signaled')
+        if outcome=='failure':raise RuntimeError('Owned auth fixture failure')
+        if outcome=='cancel':raise InterruptedError('Owned auth fixture cancellation')
+        return {'email':'fixture@example.invalid','sharing':True}
+    def launch(event,worker):
+        thread=task_module.start_connection_worker(event,worker)
+        if thread is not None:workers.append(thread)
+        return thread
+    namespace={'chat_button':ConnectionFixtureControl(),'chat_text':ConnectionFixtureControl(),
+        'connect_button':ConnectionFixtureControl(),'cloud_text':ConnectionFixtureControl(),
+        'chat_connection_pending':chat_pending,'cloud_connection_pending':cloud_pending,
+        'chat_events':queue.Queue(),'cloud_events':queue.Queue(),
+        'chatgpt_auth':SimpleNamespace(connect=operation,disconnect=operation),
+        'ensure_router':lambda:None,'connect_account':operation,'start_connection_worker':launch}
+    callback=actual_connection_ui_function(name,namespace)
+    try:
+        callback();assert started.wait(2)
+        assert update_dialog_poll_call([],None,chat_event=chat_pending,cloud_event=cloud_pending) is True
+        callback()  # A second provider operation cannot clear the first lease.
+        assert len(workers)==1 and pending.is_set()
+    finally:
+        release.set()
+        for worker in workers:worker.join(3)
+    assert workers and not any(worker.is_alive() for worker in workers)
+    assert not pending.is_set()
+    assert update_dialog_poll_call([],None,chat_event=chat_pending,cloud_event=cloud_pending) is False
+
+
+@pytest.mark.parametrize('failure',[False,True])
+def test_actual_openrouter_disconnect_clears_synchronous_operation(failure):
+    pending=threading.Event();observed=[]
+    def disconnect():
+        assert pending.is_set()
+        observed.append(update_dialog_poll_call([],None,cloud_event=pending))
+        if failure:raise RuntimeError('Owned disconnect fixture failure')
+    namespace={'cloud_connection_pending':pending,'disconnect':disconnect,'cloud_text':ConnectionFixtureControl()}
+    callback=actual_connection_ui_function('disconnect_cloud',namespace)
+    if failure:
+        with pytest.raises(RuntimeError):callback()
+    else:callback()
+    assert observed==[True] and not pending.is_set()
+    assert update_dialog_poll_call([],None,cloud_event=pending) is False
+
+
+@pytest.mark.parametrize('error_type',[RuntimeError,KeyboardInterrupt,SystemExit])
+def test_connection_worker_failed_start_cancels_late_target_before_new_owner(monkeypatch,error_type):
+    pending=threading.Event();targets=[];calls=[]
+    class FailedThread:
+        def __init__(self,**kwargs):
+            assert pending.is_set();targets.append(kwargs['target'])
+        def start(self):raise error_type('Owned start failure')
+        def is_alive(self):raise AssertionError('Startup cancellation must not guess OS thread state')
+    monkeypatch.setattr(threading,'Thread',FailedThread)
+    with pytest.raises(error_type):task_module.start_connection_worker(pending,lambda:calls.append(True))
+    assert not pending.is_set()
+    pending.set()  # A subsequent operation now owns this test event.
+    targets[0]()  # An abandoned old target must not dispatch or clear it.
+    assert not calls and pending.is_set()
+    pending.clear()
+
+
+def test_update_poll_missing_connection_event_is_unknown_not_idle():
+    assert update_dialog_poll_call([],None,chat_event=object()) is True
+
+
+
+@pytest.mark.parametrize('fault',[KeyboardInterrupt,RuntimeError])
+def test_startup_fault_gate_cancels_late_auth_without_clearing_later_owner(fault):
+    original_thread=threading.Thread
+    bootstrap=threading.Event();future_started=threading.Event();future_finish=threading.Event()
+    pending=threading.Event();old_workers=[];future_workers=[];old_calls=[];observed={}
+    class DelayedBootstrap(original_thread):
+        def __init__(self,**kwargs):super().__init__(**kwargs);old_workers.append(self)
+        def _bootstrap_inner(self):
+            bootstrap.wait(3)
+            super()._bootstrap_inner()
+        def start(self):
+            original_wait=self._started.wait
+            def interrupt(*args,**kwargs):raise fault('Owned synthetic start interruption')
+            self._started.wait=interrupt
+            try:super().start()
+            finally:self._started.wait=original_wait
+    def future_operation():
+        assert pending.is_set()
+        future_started.set();future_finish.wait(3)
+    try:
+        with patch.object(threading,'Thread',DelayedBootstrap):
+            with pytest.raises(fault):task_module.start_connection_worker(pending,lambda:old_calls.append(True))
+        assert not pending.is_set()
+        future=task_module.start_connection_worker(pending,future_operation)
+        future_workers.append(future);assert future_started.wait(2)
+        bootstrap.set()
+        for worker in old_workers:
+            assert worker._started.wait(2)
+            worker.join(3)
+        observed['old_calls']=len(old_calls)
+        observed['later_owner_still_pending']=pending.is_set()
+        observed['update_blocked']=task_module.update_dialog_open([],connection_events=(pending,))
+    finally:
+        bootstrap.set();future_finish.set()
+        for worker in old_workers+future_workers:
+            if worker is not None and worker._started.wait(3):worker.join(3)
+    assert not any(worker.is_alive() for worker in old_workers+future_workers)
+    assert observed=={'old_calls':0,'later_owner_still_pending':True,'update_blocked':True}
+    assert not pending.is_set()
+
+
+
+def test_start_permission_commit_interruption_preserves_running_operation_authority():
+    original_event=threading.Event;original_thread=threading.Thread
+    pending=original_event();started=original_event();release=original_event();workers=[];created=[]
+    class InterruptedPermit(original_event):
+        def set(self):
+            super().set()
+            raise KeyboardInterrupt('Owned interruption after permission commit')
+    def event():
+        result=InterruptedPermit() if not created else original_event()
+        created.append(result);return result
+    def thread(**kwargs):
+        worker=original_thread(**kwargs);workers.append(worker);return worker
+    def operation():
+        assert pending.is_set();started.set();release.wait(3)
+    try:
+        with patch.object(threading,'Event',side_effect=event),patch.object(threading,'Thread',side_effect=thread):
+            with pytest.raises(KeyboardInterrupt):task_module.start_connection_worker(pending,operation)
+        assert started.wait(2) and pending.is_set()
+        assert task_module.update_dialog_open([],connection_events=(pending,)) is True
+    finally:
+        release.set()
+        for worker in workers:worker.join(3)
+    assert workers and not any(worker.is_alive() for worker in workers)
+    assert not pending.is_set()

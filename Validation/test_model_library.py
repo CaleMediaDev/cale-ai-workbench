@@ -781,6 +781,20 @@ class AutoModelTests(unittest.TestCase):
         self.assertIs(request["think"], False)
         self.assertEqual(request["options"]["num_predict"], 512)
 
+    def test_non_object_messages_fail_the_candidate_probe(self):
+        for message in (None, [], "invalid", 42, True):
+            with self.subTest(message=message):
+                response = {
+                    "message": message,
+                    "eval_count": 64,
+                    "eval_duration": 2_000_000_000,
+                }
+                with patch.object(library, "post", return_value=response) as post:
+                    with self.assertRaisesRegex(library.CandidateModelError,
+                                                "tool-use check"):
+                        library.probe_tool_use("candidate-source")
+                post.assert_called_once()
+
     def test_null_tool_calls_fail_the_candidate_probe(self):
         response = {
             "message": {"content": "91", "tool_calls": None},
@@ -1094,3 +1108,39 @@ class AutoModelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_auto_retirement_uses_qualified_history_without_deleting_user_weights(tmp_path, monkeypatch):
+    import model_fitness
+    import usage_history
+    catalog = {"main": {"alias":"main"}, "candidate": {
+        "alias":"candidate", "source":"user:weights", "label":"Candidate",
+        "ram_gb":8, "download_gb":1}}
+    for name,tokens,seconds,should_delete in (("tiny",1,.5,False),("slow",128,64,True)):
+        folder=tmp_path/name
+        monkeypatch.setattr(usage_history,"DATABASE",folder/"usage.db")
+        for _ in range(3):
+            assert usage_history.record_completion({"model":"candidate","usage":{"completion_tokens":tokens}},
+                                                  "ollama",elapsed_seconds=seconds)
+        with (patch.object(library,"ROOT",folder),
+              patch.object(library,"CATALOG",catalog),
+              patch.object(library,"total_ram_gb",return_value=32),
+              patch("model_fitness.gpu_vram_gb",return_value=12),
+              patch("model_fitness.profile_allows",return_value=True),
+              patch("long_tasks.projects",return_value=[]),
+              patch.object(library,"ensure_main_standard",return_value=False),
+              patch.object(library,"repair_main_alias",return_value=False),
+              patch.object(library,"cleanup_retired_main_sources"),
+              patch.object(library,"alias_update_waits_for_tasks",return_value=False),
+              patch.object(library,"model_ready",return_value=True),
+              patch.object(library,"owned_sources",return_value=set()),
+              patch.object(library,"install") as install,
+              patch.object(library,"delete_model") as delete):
+            library.auto_install(folder,refresh=False)
+        if should_delete:
+            delete.assert_called_once_with("candidate")
+        else:
+            delete.assert_not_called()
+        install.assert_not_called()
+        status=json.loads((folder/"optional-model-candidate.json").read_text())
+        assert status["status"] == ("retired" if should_delete else "complete")

@@ -177,6 +177,80 @@ def test_background_repair_only_throttles_failures(tmp_path, repair_fails):
         assert thread.return_value.start.call_count == expected_attempts
 
 
+def test_observed_external_recovery_clears_failed_repair_cooldown(tmp_path):
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+            patch.object(ffmpeg_runtime, "_repairing_roots", set()), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", side_effect=[False, True, False]), \
+            patch.object(ffmpeg_runtime, "ensure") as ensure, \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        ensure.side_effect = [RuntimeError("repair failed"),
+                              ffmpeg_runtime.executable(tmp_path)]
+        thread.return_value.start.side_effect = (
+            lambda: thread.call_args.kwargs["target"]()
+        )
+
+        ffmpeg_runtime.start_background(tmp_path)
+        assert ffmpeg_runtime._last_attempts[tmp_path.resolve()] == 10.0
+        ensure.assert_called_once_with(tmp_path.resolve())
+
+        # An external repair makes the previous failure obsolete.
+        clock.return_value = 20.0
+        ffmpeg_runtime.start_background(tmp_path)
+        assert tmp_path.resolve() not in ffmpeg_runtime._last_attempts
+        assert ensure.call_count == 1
+
+        # A new deletion must be repaired, even inside the old cooldown.
+        clock.return_value = 30.0
+        ffmpeg_runtime.start_background(tmp_path)
+        assert ensure.call_count == 2
+        assert thread.return_value.start.call_count == 2
+        assert not ffmpeg_runtime._last_attempts
+        assert not ffmpeg_runtime._repairing_roots
+
+
+def test_active_background_repair_does_not_block_another_root(tmp_path):
+    from unittest.mock import MagicMock
+
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    workers = []
+
+    def make_thread(**kwargs):
+        worker = MagicMock()
+        worker.is_alive.return_value = True
+        workers.append((worker, kwargs["target"]))
+        return worker
+
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+            patch.object(ffmpeg_runtime, "_repairing_roots", set()), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", return_value=False), \
+            patch.object(ffmpeg_runtime, "ensure") as ensure, \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
+            patch.object(ffmpeg_runtime.threading, "Thread", side_effect=make_thread) as thread:
+        ffmpeg_runtime.start_background(first_root)
+        # Even after the cooldown, an in-flight repair must not be duplicated.
+        clock.return_value = 311.0
+        ffmpeg_runtime.start_background(first_root)
+        assert thread.call_count == 1
+
+        # Leave the first worker pending while another installation needs repair.
+        ffmpeg_runtime.start_background(second_root)
+        assert thread.call_count == 2
+        ensure.assert_not_called()
+        for worker, repair in workers:
+            worker.start.assert_called_once_with()
+            repair()
+
+        assert [call.args[0] for call in ensure.call_args_list] == [
+            first_root.resolve(), second_root.resolve(),
+        ]
+        assert not ffmpeg_runtime._repairing_roots
+        assert not ffmpeg_runtime._last_attempts
+
+
 def test_failed_background_repair_does_not_throttle_another_root(tmp_path):
     first_root = tmp_path / "first"
     second_root = tmp_path / "second"
@@ -230,6 +304,35 @@ def test_background_repair_preserves_relative_root_after_cwd_change(tmp_path, mo
 
         ensure.assert_called_once_with(expected_root)
         assert expected_root not in ffmpeg_runtime._last_attempts
+
+
+def test_failed_thread_start_allows_immediate_repair_retry(tmp_path):
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+            patch.object(ffmpeg_runtime, "_repairing_roots", set()), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", return_value=False), \
+            patch.object(ffmpeg_runtime, "ensure") as ensure, \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        thread.return_value.start.side_effect = RuntimeError("cannot start thread")
+
+        with pytest.raises(RuntimeError, match="cannot start thread"):
+            ffmpeg_runtime.start_background(tmp_path)
+
+        ensure.assert_not_called()
+        assert tmp_path.resolve() not in ffmpeg_runtime._repairing_roots
+        assert tmp_path.resolve() not in ffmpeg_runtime._last_attempts
+
+        clock.return_value = 20.0
+        thread.return_value.start.side_effect = (
+            lambda: thread.call_args.kwargs["target"]()
+        )
+        ffmpeg_runtime.start_background(tmp_path)
+
+        assert thread.call_count == 2
+        ensure.assert_called_once_with(tmp_path.resolve())
+        assert not ffmpeg_runtime._repairing_roots
+        assert not ffmpeg_runtime._last_attempts
 
 
 def test_first_background_repair_is_not_throttled_at_low_uptime(tmp_path):

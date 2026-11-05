@@ -42,6 +42,19 @@ class ContextWindowTests(unittest.TestCase):
             262144,
         )
 
+    def test_invalid_memory_operands_are_rejected_before_budgeting(self):
+        info = {"model_info": {"qwen.context_length": 262144}}
+        for operand in ("ram_bytes", "weight_bytes"):
+            for value in (-52 * 2**30, 0, True, False, 1.5, "9663676416", None):
+                with self.subTest(operand=operand, value=value):
+                    budget = {
+                        "ram_bytes": 24 * 2**30,
+                        "weight_bytes": 7 * 2**30,
+                    }
+                    budget[operand] = value
+                    with self.assertRaisesRegex(ValueError, operand):
+                        context_window.desired_context(info, **budget)
+
     def test_small_machine_stays_within_memory_budget(self):
         info = {"model_info": {"qwen.context_length": 262144}}
         self.assertEqual(

@@ -1,0 +1,75 @@
+{
+  "release": "0.5.522",
+  "status": "qualified scoped fixes; assembled-payload verification pending",
+  "code_commit_before_documentation": "e7e084bb467a410e4f2afad8238a9db9bda37272",
+  "sha256": {
+    "Validation/test_cloud_ai.py": "11b4a9c7ebac7d513314f5ac4554b1d38a4eb828df6c6200446983b08ab6fb69",
+    "Setup.ps1": "30a6a30592561b7c6982c01520ced658ccab3489c748cf47e8fbffde5535ca56",
+    "Install-Environment.ps1": "86b4821f7949e35de68daf120352032f327054cf9b5f19f3459a2c43f764015f",
+    "Validation/test_install_environment.py": "e804fde79082f9400ec72b9a40b5477286b796ce70c39d2632410d4aa00629e3",
+    "self_diagnostics.py": "1030e23ce8e7e0ceb2f69979148a5fa879d154c3b43bd88d833ed0af3c8e3514",
+    "Validation/test_self_diagnostics.py": "1a2f98c82a10ed02385777509c6dd941207b2573defa2c9e51cda0eba8887d94",
+    "donation.py": "c504cc809fe74bd09eb9cb76c90ad1e887f037570a469ce9bb2e2e14848c3388",
+    "Validation/test_donation.py": "ff4275b37368de1acb62dcbcafbd33d79a32aa4dc5f217cfa673c22cc0a7ad77",
+    "public_api_catalog.py": "4e54b58480c8456d59df2b412198e2558b1ad37682a8afebfb1253841944679c",
+    "Validation/test_public_api_catalog.py": "cc6646ddf4783449f84bbe91ced16455a0424e6354b2a8ec1ce42c1beb70dd74",
+    "cloud_ai.py": "2a1613daefa8ae89a8eda31e374e48ccae1bed00f2f99666790692cc64093fd3"
+  },
+  "changes": [
+    "Donation failures report safe GitHub request stages/statuses or static local worker categories; raw CLI output, endpoints, credentials and exception messages are excluded.",
+    "Required GitHub workflow failures share a cooldown across donation lanes. New inference checks the shared wait; real token receipts, consent and provider budgets retain their existing rules.",
+    "Installer UI and installed regression tests call the same shipped account-connection helpers; no source-only Setup.ps1 dependency remains in installed tests.",
+    "Mock cloud routing tests isolate real retirement history and use their own task-policy registry. Production retirement and fail-closed policy remain unchanged.",
+    "Public catalog parsing rejects float overflow on download and cache reads before replacing a valid snapshot (reviewed PR715).",
+    "The background full regression suite has a 30-minute cap after the actual 3419-node installed run exceeded 20 minutes. Active user work still yields and partial sessions cannot pass."
+  ],
+  "validation": {
+    "donation_account_modules": {
+      "passed": 236,
+      "seconds": 24.87
+    },
+    "cloud_poison_history": {
+      "passed": 217,
+      "subtests": 57,
+      "seconds": 26.38
+    },
+    "cloud_clean_source": {
+      "passed": 217,
+      "subtests": 57,
+      "seconds": 18.47
+    },
+    "installer_source": {
+      "passed": 21,
+      "subtests": 8,
+      "seconds": 39.91
+    },
+    "installer_runtime_manifest_only": {
+      "passed": 21,
+      "subtests": 8,
+      "seconds": 33.48
+    },
+    "selfcheck": {
+      "passed": 60,
+      "skipped": 1,
+      "subtests": 2,
+      "seconds": 76.38
+    },
+    "merged_catalog": {
+      "passed": 37,
+      "seconds": 1.21
+    },
+    "runtime_manifest_entries": 250
+  },
+  "reviewed_donation": {
+    "pr": 715,
+    "head": "c025e94f5043591e493f288d57f796a7ecd283b3",
+    "merge": "5d46bf47c43c2ff14972515216c048155f19753b"
+  },
+  "limits": [
+    "The other PC donation failure cause is not confirmed. This release exposes actionable diagnostics; it does not claim its account or repository access is repaired.",
+    "Already-running model inference is not reported as canceled or free when another donation lane discovers a GitHub failure.",
+    "The prior installed suite stopped at 3171/3419 nodes after 1203.6 seconds, with five observed test failures. No full installed-suite pass is claimed for the new cap before a real complete run.",
+    "Installer callback tests use real PowerShell with owned TEMP runtimes and stubbed launch/download operations. Physical fresh-PC installation and existing-runtime migration were not requalified.",
+    "Private assertion-repair contracts are not shipped. Autonomous expense-app completion remains unqualified at four of eight original steps and failed reload persistence."
+  ]
+}

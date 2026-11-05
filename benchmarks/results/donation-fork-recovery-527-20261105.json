@@ -1,0 +1,27 @@
+{
+  "release": "0.5.527",
+  "base": "58c62225ba7e865c7d43d3f4abb3e09ec3cfeb03",
+  "sha256": {
+    "donation.py": "6e6880970bb13a61fcce8f5d45ca73aa5fb921ba8fce0a94ef1c9e2d546e575d",
+    "donation_ui.py": "0cda1eb861a48008f85c9731520a1464b0195c40de19c345cc19e1ff8649e494",
+    "Validation/test_donation.py": "54d58d4a094f9f41c83b036643021132d99fcb7087ac83ecf1fa062b6ebad5f0"
+  },
+  "validation": {
+    "donation_module": {
+      "passed": 299,
+      "seconds": 70.33,
+      "exit_code": 0
+    }
+  },
+  "changes": [
+    "Verify an existing donor fork and reuse it before attempting fork creation. Unknown metadata or lookup failures other than404 block mutations.",
+    "Waiting chat events carry allowlisted GitHub stage/status/kind; the exact failure appears in main chat without copying CLI output, endpoints or credentials.",
+    "Regression: a saved fork403 draft retries against a now-visible valid fork with one original AI call,50reported tokens,one run andone confirmedPR. Existing consent, ambiguous-write, source freshness and durable-intent tests remain passing."
+  ],
+  "limits": [
+    "Actual other-PC403 remains unverified. This cannot override GitHub account permissions, restrictions or rate limits.",
+    "Fork creation remains after validated proposal and durable intent. Initial write permission cannot be proven by a read-only preflight. Failed saved work retries before generating new AI work; no claim of a complete write-permission preflight.",
+    "No actual donor account, fork creation orPR used in tests; remote boundaries are faked.",
+    "No full installed-suite or fresh-PC qualification. Prior525 Tk batch-init issue remains unchanged."
+  ]
+}

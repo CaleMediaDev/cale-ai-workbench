@@ -505,6 +505,37 @@ def test_snapshot_clears_refs_from_controls_that_become_hidden(tmp_path):
         native_browser.close()
 
 
+def test_snapshot_excludes_controls_hidden_by_css_visibility(tmp_path):
+    pytest.importorskip("playwright")
+    (tmp_path / "visibility.html").write_text(
+        '<!doctype html><title>Visibility refs</title><body>'
+        '<button id="hidden">Hidden</button>'
+        '<button id="collapsed">Collapsed</button>'
+        '<button id="visible" onclick="this.textContent=\'Clicked\'">Visible</button>'
+        '</body>', encoding="utf-8")
+    try:
+        opened = native_agent.execute_tool(
+            tmp_path, "browser_open_project", {"path": "visibility.html"})
+        if opened.startswith("Tool error:") and "Executable doesn't exist" in opened:
+            pytest.skip("Chromium runtime is not installed in this test environment")
+        assert json.loads(opened)["title"] == "Visibility refs"
+        initial = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        assert len(initial["controls"]) == 3
+        page = native_browser._page(tmp_path)
+        page.locator("#hidden").evaluate("el => el.style.visibility = 'hidden'")
+        page.locator("#collapsed").evaluate("el => el.style.visibility = 'collapse'")
+        # Both still have layout rectangles, unlike display:none controls.
+        assert page.locator("#hidden").evaluate("el => el.getClientRects().length > 0")
+        snapshot = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        assert [row["label"] for row in snapshot["controls"]] == ["Visible"]
+        assert page.locator("#hidden").get_attribute("data-cale-ref") is None
+        assert page.locator("#collapsed").get_attribute("data-cale-ref") is None
+        native_browser.execute(tmp_path, "click", {"ref": snapshot["controls"][0]["ref"]})
+        assert page.locator("#visible").inner_text() == "Clicked"
+    finally:
+        native_browser.close()
+
+
 def test_closed_project_context_is_replaced_on_next_open(tmp_path):
     pytest.importorskip("playwright")
     (tmp_path / "page.html").write_text(

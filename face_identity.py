@@ -63,6 +63,14 @@ class FaceModel:
 
     def features(self, frame):
         """Return one normalized embedding per visible face, up to eight."""
+        return [item['feature'] for item in self.observations(frame)]
+
+    def observations(self, frame):
+        """Keep valid embeddings aligned with optional, RAM-only normalized boxes.
+
+        Geometry is presentation-continuity evidence, never a name or an
+        enrollment label. Legacy features() callers still receive vectors only.
+        """
         import numpy as np
 
         height, width = frame.shape[:2]
@@ -79,7 +87,13 @@ class FaceModel:
             except (self.cv2.error, ValueError):
                 continue  # One blurred face must not disable the whole camera.
             if np.isfinite(norm) and norm > 0:
-                results.append((vector / norm).tolist())
+                box=None
+                if len(face)>=4 and width>0 and height>0 and np.isfinite(face[:4]).all():
+                    x,y,w,h=map(float,face[:4])
+                    left,top=max(0.,x/width),max(0.,y/height)
+                    right,bottom=min(1.,(x+w)/width),min(1.,(y+h)/height)
+                    if right>left and bottom>top:box=[left,top,right-left,bottom-top]
+                results.append({'feature':(vector / norm).tolist(),'box':box})
         return results
 
     def feature(self, frame):

@@ -1,0 +1,44 @@
+{
+  "release": "0.5.520",
+  "status": "qualified scoped fixes; packaging pending",
+  "code_commit_before_documentation": "09ec5336b5bc138590fb1a4e6101248367e14e6c",
+  "sha256": {
+    "cloud_ai.py": "2a1613daefa8ae89a8eda31e374e48ccae1bed00f2f99666790692cc64093fd3",
+    "Validation/test_cloud_ai.py": "07b2dce5dfd123394ccacca847ec0b6ca4569aebff276c9afe9fb0f42bafcff1",
+    "public_api_catalog.py": "df920d8bcec8eb120ff7a2b71b9a0b46fceec10a12f8e45dd800c0f289660edc",
+    "Validation/test_public_api_catalog.py": "229d596cebb59fbbdb79f682e1a8da620c47e00523376e0ddc4914b5c6adb724"
+  },
+  "changes": [
+    "Tool-union diagnostics retain the requested action/checker operation, then use other scalar discriminators and permitted property names to choose a relevant error.",
+    "Diagnostic matching distinguishes JSON booleans from numbers and leaves structured enum values outside scalar scoring. Validation and tool authorization are unchanged.",
+    "Public API catalog downloads and cached snapshots reject unquoted NaN, Infinity and -Infinity before accepting or replacing a valid catalog. Quoted words remain ordinary strings."
+  ],
+  "reviewed_pull_request": {
+    "number": 714,
+    "head": "4456e8fea5a5508d6cc9c15bdab5f7b678febb40",
+    "merge_commit": "518bf933309999e5ef902b127f89cf7e1b92d13d"
+  },
+  "validation": {
+    "public_cloud_suite": {
+      "passed": 217,
+      "subtests": 57,
+      "seconds": 19.36
+    },
+    "root_focused_union_checks": {
+      "passed": 11,
+      "seconds": 0.25
+    },
+    "public_catalog_suite": {
+      "passed": 35,
+      "root_seconds": 1.15
+    },
+    "baseline_failures": "Seven initial union-diagnostic failures and the donated catalog regressions reproduced before their fixes. Four additional diagnostic counterexamples caught an intermediate operation-priority/structured-enum regression before publication.",
+    "runtime_manifest_entries": 250
+  },
+  "limits": [
+    "This changes error explanations, not which arguments are authorized or whether a whole project is correct.",
+    "No end-to-end autonomous app success is claimed. The separate expense-app continuation remains incomplete at four of eight original steps, including failed reload persistence.",
+    "Experimental combined-field authoring and its request-local tool schema are not part of this public release; the public backend does not yet implement that API.",
+    "Existing Python migration, automatic engine-orphan recovery and other unfinished work remain separate."
+  ]
+}

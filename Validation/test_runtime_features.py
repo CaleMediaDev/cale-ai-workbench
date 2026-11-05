@@ -313,6 +313,28 @@ def test_installer_detection_handles_bundled_value_taking_options(monkeypatch, p
     assert runtime_features._installer_running(12345)
 
 
+@pytest.mark.parametrize("stderr, stdout, expected", [
+    (" \n", "Package installation failed\n", "Package installation failed"),
+    (" \n", "\t", "unknown error"),
+    ("Specific stderr error\n", "Other stdout error", "Specific stderr error"),
+    (" \n", "x" * 600, "x" * 500),
+])
+def test_run_preserves_useful_failure_details(monkeypatch, stderr, stdout, expected):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        runtime_features.subprocess, "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=1, stderr=stderr, stdout=stdout,
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as error:
+        runtime_features._run(["python", "-m", "pip", "--version"])
+
+    assert str(error.value) == expected
+
+
 def test_missing_pip_is_bootstrapped(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_features, "PROGRESS", tmp_path / "install-progress.json")
     calls = []

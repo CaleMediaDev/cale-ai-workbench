@@ -174,6 +174,30 @@ class SkillCatalogTests(unittest.TestCase):
             {self.root / "data/skills", self.root / "data/.cale-skill-files.json", staging},
         )
 
+    def test_skips_symlinked_bundle_root(self):
+        bundle = self.root / "vendor/agent-skills"
+        external = self.root / "external-bundle"
+        bundle.rename(external)
+        skill = external / "frontend-ui-engineering/SKILL.md"
+        reference = external / "references" / skill_catalog.SHARED_REFERENCES[0]
+        for source in (skill, reference):
+            source.write_text("Not reviewed bundle content", encoding="utf-8")
+        try:
+            bundle.symlink_to(external, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Symlinks unavailable: {exc}")
+
+        result = skill_catalog.sync(self.root)
+
+        self.assertEqual(result, {"installed": 0, "updated": 0, "preserved": 0})
+        self.assertEqual(list((self.root / "data/skills").iterdir()), [])
+        self.assertTrue(bundle.is_symlink())
+        self.assertEqual(bundle.readlink(), external)
+        for source in (skill, reference):
+            self.assertEqual(
+                source.read_text(encoding="utf-8"), "Not reviewed bundle content"
+            )
+
     def test_skips_symlinked_bundled_skill_directory(self):
         name = "frontend-ui-engineering"
         source = self.root / "vendor/agent-skills" / name
@@ -202,6 +226,35 @@ class SkillCatalogTests(unittest.TestCase):
             (external / "SKILL.md").read_text(encoding="utf-8"),
             "Not reviewed bundle content",
         )
+        self.assertTrue(
+            (self.root / "data/skills/software-development/context-engineering/SKILL.md").is_file()
+        )
+
+    def test_skips_symlinked_bundled_reference_directory(self):
+        references = self.root / "vendor/agent-skills/references"
+        external = self.root / "external-references"
+        references.rename(external)
+        for name in skill_catalog.SHARED_REFERENCES:
+            (external / name).write_text("Not reviewed bundle content", encoding="utf-8")
+        try:
+            references.symlink_to(external, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Symlinks unavailable: {exc}")
+
+        result = skill_catalog.sync(self.root)
+
+        self.assertEqual(result, {
+            "installed": len(skill_catalog.SKILLS),
+            "updated": 0,
+            "preserved": 0,
+        })
+        self.assertFalse((self.root / "data/skills/references").exists())
+        self.assertTrue(references.is_symlink())
+        for name in skill_catalog.SHARED_REFERENCES:
+            self.assertEqual(
+                (external / name).read_text(encoding="utf-8"),
+                "Not reviewed bundle content",
+            )
         self.assertTrue(
             (self.root / "data/skills/software-development/context-engineering/SKILL.md").is_file()
         )

@@ -35,6 +35,69 @@ def hardware_allows(weights_gb, ram_gb, vram_gb):
     return weights_gb <= max(8.0, vram_gb * 2.0)
 
 
+def avatar_reserved_vram_gb(root=None):
+    """Read headroom owned by a real live avatar process, not a stale marker.
+
+    The CUDA session itself allocates memory. This signal keeps automatic LLM
+    routing from spending the avatar's measured allocation and safety margin.
+    Physical hardware/download eligibility and benchmark identities stay intact.
+    """
+    import json
+    import math
+    from itertools import chain, islice
+    from pathlib import Path
+
+    import psutil
+
+    root = Path(root or Path(__file__).resolve().parent).resolve()
+    state = root / "LongTasks"
+    if not state.resolve().is_relative_to(root):
+        return 0.0
+    reservations = {}
+    current = state / "avatar-gpu-current.json"
+    paths = chain((current,), islice(state.glob("avatar-gpu-active-*.json"), 16))
+    for marker in paths:
+        try:
+            if marker.is_symlink() or marker.stat().st_size > 4096:
+                continue
+            record = json.loads(marker.read_text(encoding="utf-8"))
+            if not isinstance(record, dict):
+                continue
+            pid, reserved = record.get("pid"), record.get("reserved_bytes")
+            started = float(record["started"])
+            if (type(pid) is not int or pid <= 0 or type(reserved) is not int
+                    or not 0 < reserved <= 64 * 1024 ** 3
+                    or not math.isfinite(started) or started <= 0
+                    or record.get("phase") not in ("starting", "active")
+                    or (marker != current and marker.stem != "avatar-gpu-active-" + str(pid))):
+                continue
+            process = psutil.Process(pid)
+            command = process.cmdline()
+            camera_owner = ("--avatar" in command and any(
+                Path(value).resolve() == root / "camera_presence.py" for value in command[1:]))
+            profile_probe = any(
+                Path(value).resolve() == root / "video_generation.py"
+                and index + 1 < len(command) and command[index + 1] == "avatar-profile-probe"
+                for index, value in enumerate(command) if index > 0)
+            if (not process.is_running() or abs(process.create_time() - started) >= .01
+                    or not (camera_owner or profile_probe)):
+                continue
+            # A reused PID and duplicate files cannot multiply a reservation.
+            reservations[pid] = max(reservations.get(pid, 0), reserved)
+            if marker == current:
+                # One capture/probe owner is enforced by the launcher. A fixed
+                # live index avoids repeated scans through old crash markers.
+                return reserved / 1024 ** 3
+        except (OSError, ValueError, TypeError, KeyError, psutil.Error):
+            continue
+    return sum(reservations.values()) / 1024 ** 3
+
+
+def routing_vram_gb(root=None):
+    """Use transient avatar headroom for routing without changing hardware facts."""
+    return max(0.0, gpu_vram_gb() - avatar_reserved_vram_gb(root))
+
+
 def profile_allows(item, ram_gb, vram_gb):
     """Check profile-specific GPU headroom before downloading or routing."""
     return (
@@ -233,7 +296,7 @@ def probe_game_coding(source, root):
         try:
             document = json.loads(result.get("message", {}).get("content", ""))
             checks = grade_game_code(document.get("code"), root)
-        except (ValueError, AttributeError, RecursionError):
+        except (ValueError, TypeError, AttributeError, RecursionError):
             checks = {"valid_code": False}
         samples.append(
             {
@@ -267,7 +330,7 @@ def probe_game_coding(source, root):
     try:
         html = json.loads(built.get("message", {}).get("content", "")).get("html")
         build_checks = grade_game_html(html, root)
-    except (ValueError, AttributeError, RecursionError):
+    except (ValueError, TypeError, AttributeError, RecursionError):
         build_checks = {"valid_html": False}
     build_passed = len(build_checks) == 13 and all(
         v is True for v in build_checks.values()
@@ -425,14 +488,21 @@ def game_build_approved(item, root):
 
 
 def measured_speed(alias):
-    """Return an established median, or None until three real calls exist."""
+    """Return comparable end-to-end response speed after three timed calls."""
     import usage_history
 
-    return usage_history.recent_model_speed(alias)
+    return usage_history.recent_model_response_speed(alias)
+
+
+def retirement_speed(alias):
+    """Require sustained timing evidence before globally avoiding a local model."""
+    import usage_history
+
+    return usage_history.recent_model_retirement_speed(alias)
 
 
 def suitable(alias, weights_gb, ram_gb, vram_gb, min_tokens_per_second=5.0):
     if not hardware_allows(weights_gb, ram_gb, vram_gb):
         return False
-    speed = measured_speed(alias)
+    speed = retirement_speed(alias)
     return speed is None or speed >= min_tokens_per_second

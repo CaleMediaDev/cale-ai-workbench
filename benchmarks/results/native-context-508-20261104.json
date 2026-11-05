@@ -1,0 +1,49 @@
+{
+  "release": "0.5.508",
+  "candidate": "10508496329be372354b4442316ec8af92717be2",
+  "tests": {
+    "cloud_routing_identity_library_updater": {
+      "passed": 283,
+      "subtests": 100,
+      "seconds": 18.14
+    },
+    "author_cloud_auto_route_memory_modes_context_usage": {
+      "passed": 277,
+      "subtests": 109,
+      "seconds": 19.43
+    }
+  },
+  "actual_wire_qualification": {
+    "requests": 3,
+    "requested_and_observed_context": 2048,
+    "model_ceiling": 131072,
+    "known_tokens": 476,
+    "result": "JSON sum, tool arguments and tool-result history passed"
+  },
+  "actual_resumed_expense_app": {
+    "native_successful_requests": 8,
+    "requested_contexts": [
+      8192,
+      16384,
+      32768
+    ],
+    "known_prompt_tokens": 60967,
+    "known_completion_tokens": 1529,
+    "usage_incomplete": true,
+    "result": "Failed: original persistence and notes remain incomplete; SQL4/8, source unchanged. Final diagnostic used compatibility transport and timed out."
+  },
+  "preserved": [
+    "Approved context ceiling",
+    "Tool IDs/arguments/results",
+    "JSON output",
+    "Canonical reasoning effort",
+    "Actual upstream usage",
+    "Provider/offline/account policies"
+  ],
+  "limits": [
+    "Input sizing is an estimate; overflow fails rather than silently discarding history",
+    "Unsupported fields/forced tool choice keep compatibility transport",
+    "No causal A/B latency, universal GPU fit or whole-app success claim"
+  ],
+  "shared_keys_shipped": false
+}
