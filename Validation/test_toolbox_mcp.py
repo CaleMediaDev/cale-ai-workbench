@@ -111,8 +111,11 @@ def test_media_communication_error_stops_and_reaps_worker(tmp_path, already_exit
     class FakeProcess:
         returncode = 1 if already_exited else None
 
-        async def communicate(self, data):
-            raise failure
+        async def communicate(self, data=None):
+            if data is not None:
+                raise failure
+            await self.wait()
+            return b"", b""
 
         def kill(self):
             cleanup.append("kill")
@@ -147,7 +150,10 @@ def test_cancelled_media_call_stops_and_reaps_worker(tmp_path, already_exited):
         class FakeProcess:
             returncode = None
 
-            async def communicate(self, data):
+            async def communicate(self, data=None):
+                if data is None:
+                    await self.wait()
+                    return b"", b""
                 started.set()
                 await asyncio.Future()
 
@@ -190,7 +196,10 @@ def test_media_timeout_reaps_worker_and_preserves_timeout(tmp_path, exit_state):
     class FakeProcess:
         returncode = 0 if exit_state == "already_exited" else None
 
-        async def communicate(self, data):
+        async def communicate(self, data=None):
+            if data is None:
+                await self.wait()
+                return b"", b""
             await asyncio.Future()
 
         def kill(self):
@@ -212,6 +221,49 @@ def test_media_timeout_reaps_worker_and_preserves_timeout(tmp_path, exit_state):
             asyncio.run(toolbox_mcp.media_run("generate_image", timeout=0))
 
     assert cleanup == (["wait"] if exit_state == "already_exited" else ["kill", "wait"])
+
+
+def test_media_timeout_drains_full_pipes_before_reaping(tmp_path):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+
+    async def check():
+        drained = asyncio.Event()
+        cleanup = []
+
+        class FakeProcess:
+            returncode = None
+
+            async def communicate(self, data=None):
+                if data is not None:
+                    await asyncio.Future()
+                cleanup.append("drain")
+                drained.set()
+                await self.wait()
+                return b"buffered stdout", b"buffered stderr"
+
+            def kill(self):
+                cleanup.append("kill")
+
+            async def wait(self):
+                # Model pipe backpressure: process cleanup cannot finish
+                # until stdout/stderr consumption resumes.
+                await drained.wait()
+                cleanup.append("wait")
+                self.returncode = -1
+                return self.returncode
+
+        async def fake_spawn(*args, **kwargs):
+            return FakeProcess()
+
+        with (patch.object(toolbox_mcp, "ROOT", tmp_path),
+              patch.object(toolbox_mcp.asyncio, "create_subprocess_exec", fake_spawn)):
+            with pytest.raises(TimeoutError, match="Local generate_image exceeded 0 seconds"):
+                await toolbox_mcp.media_run("generate_image", timeout=0)
+        assert cleanup == ["kill", "drain", "wait"]
+
+    asyncio.run(asyncio.wait_for(check(), timeout=1))
 
 
 @pytest.mark.parametrize("response", [[], None, 42, "done", True, {"path": "image.png"}])

@@ -708,7 +708,9 @@ async def media_run(action: str, timeout: int = 900, **arguments) -> dict:
                 process.kill()
             except ProcessLookupError:
                 pass  # It may exit between the return-code check and kill.
-        await process.wait()
+        # Drain piped output as well as reaping: wait() alone can deadlock
+        # when a worker filled a pipe before communication was cancelled.
+        await process.communicate()
         raise
     except asyncio.TimeoutError:
         if process.returncode is None:
@@ -716,7 +718,7 @@ async def media_run(action: str, timeout: int = 900, **arguments) -> dict:
                 process.kill()
             except ProcessLookupError:
                 pass  # It may exit between the return-code check and kill.
-        await process.wait()
+        await process.communicate()
         raise TimeoutError(f"Local {action} exceeded {timeout} seconds.")
     except Exception:
         if process.returncode is None:
@@ -724,7 +726,7 @@ async def media_run(action: str, timeout: int = 900, **arguments) -> dict:
                 process.kill()
             except ProcessLookupError:
                 pass  # It may exit between the return-code check and kill.
-        await process.wait()
+        await process.communicate()
         raise
     lines = stdout.decode("utf-8", errors="replace").splitlines()
     try:
