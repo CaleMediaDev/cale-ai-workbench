@@ -79,6 +79,43 @@ def test_missing_ffmpeg_is_installed_and_validated(tmp_path):
         assert ffmpeg_runtime.working(tmp_path)
 
 
+def test_ensure_repairs_missing_binary_in_already_installed_package(tmp_path):
+    from unittest.mock import MagicMock
+
+    python = tmp_path / "Toolbox/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"mock Python runtime")
+    source = tmp_path / "installed-package/ffmpeg.exe"
+    source.parent.mkdir()
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        if args[1] == "-c":
+            if source.is_file():
+                return subprocess.CompletedProcess(args, 0, str(source) + "\n", "")
+            return subprocess.CompletedProcess(args, 1, "", "Bundled executable is missing")
+        assert args[1:4] == ["-m", "pip", "install"]
+        assert "imageio-ffmpeg==0.6.0" in args
+        # An ordinary pip install is a successful no-op for an installed version.
+        # Only a reinstall restores the missing package file.
+        if "--force-reinstall" in args:
+            source.write_bytes(b"restored FFmpeg executable")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    with patch.dict(sys.modules, {"msvcrt": MagicMock()}), \
+            patch.object(ffmpeg_runtime, "working", side_effect=[False, False, True]), \
+            patch.object(ffmpeg_runtime.shutil, "which", return_value=None), \
+            patch.object(ffmpeg_runtime.subprocess, "run", side_effect=run):
+        target = ffmpeg_runtime.ensure(tmp_path)
+
+    assert target == ffmpeg_runtime.executable(tmp_path)
+    assert target.read_bytes() == b"restored FFmpeg executable"
+    assert len(calls) == 3
+    assert calls[0] == calls[2]
+    assert "--force-reinstall" in calls[1]
+
+
 def test_ensure_resolves_discovered_ffmpeg_command_on_path(tmp_path):
     from unittest.mock import MagicMock
 
