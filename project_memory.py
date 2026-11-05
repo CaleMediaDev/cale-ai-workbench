@@ -124,7 +124,7 @@ def save(folder: str | Path, kind: str, title: str, body: str,
         raise ValueError("Choose requirement, decision, lesson, skill, component, app, or note.")
     title, body = title.strip(), body.strip()
     if not title or not body or len(title) > 200 or len(body) > 16000:
-        raise ValueError("Memory needs a title and 1–16,000 characters of content.")
+        raise ValueError("Memory needs a title and 1Ã¢â‚¬â€œ16,000 characters of content.")
     tags = ", ".join(dict.fromkeys(WORD.findall(tags.lower())[:12]))
     source = _source(root, source_path) if source_path else ""
     with connection(root) as conn:
@@ -409,7 +409,7 @@ def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> li
         raise ValueError("Unknown memory kind.")
     root = Path(folder).resolve(strict=True)
     index(root)
-    # unicode61 does not expand characters such as ß into multiple letters.
+    # unicode61 does not expand characters such as ÃƒÅ¸ into multiple letters.
     # Full casefolding would turn an exact source term into a different token.
     words = list(dict.fromkeys(
         word.lower() for word in WORD.findall(query)
@@ -422,7 +422,7 @@ def search(folder: str | Path, query: str, kind: str = "", limit: int = 8) -> li
                 def matches(expression):
                     return conn.execute("""SELECT m.id,m.kind,m.title,m.body,m.tags,m.source_path,
                     m.source_hash,m.updated,
-                    snippet(memory_fts, 2, '[', ']', ' … ', 24) AS excerpt
+                    snippet(memory_fts, 2, '[', ']', ' Ã¢â‚¬Â¦ ', 24) AS excerpt
                     FROM memory_fts JOIN memories AS m ON m.id=memory_fts.id
                     WHERE memory_fts MATCH ? AND (?='' OR m.kind=?)
                     ORDER BY bm25(memory_fts, 0.0, 4.0, 1.0, 2.0), m.updated DESC LIMIT ?""",
@@ -832,269 +832,299 @@ def _consume_host_check_permit(token, folder, checker, arguments, report, source
 
 
 def _helper_request_identity(root):
-    """Bind reuse to the whole registered request, not just its followups."""
-    basis=verification_basis(root)
-    if basis is None:
-        raise ValueError('Helper reuse needs the current registered project instructions.')
-    return _verification_digest(basis)
+    """Read the LIVE registered owner; a verification ContextVar is not authority."""
+    import long_tasks
+    from contextlib import closing
+    root=_artifact_project_root(root)
+    expected=_VERIFICATION_PROJECT.get()
+    database=Path(long_tasks.STATE)/'projects.db'
+    try:
+        with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro',uri=True,timeout=.2)) as conn:
+            if expected is not None:
+                if Path(expected['folder']).resolve()!=root:raise ValueError('Wrong helper project owner.')
+                rows=conn.execute('SELECT id,folder,brief FROM projects WHERE id=? LIMIT 2',(expected['id'],)).fetchall()
+            else:
+                rows=conn.execute('SELECT id,folder,brief FROM projects WHERE folder=? COLLATE NOCASE LIMIT 2',(str(root),)).fetchall()
+        if len(rows)!=1 or Path(rows[0][1]).resolve()!=root:raise ValueError('Helper reuse needs the current registered project instructions.')
+        basis=verification_basis(root,{'id':rows[0][0],'folder':rows[0][1],'brief':rows[0][2]})
+        return _verification_digest({'owner':rows[0][0],'basis':basis})
+    except (sqlite3.Error,OSError,KeyError,TypeError) as error:
+        raise ValueError('Helper reuse needs the current registered project instructions.') from error
+
+
+_HELPER_RECORD_BYTES=100000
+_HELPER_DEFINITION_BYTES=32000
+_HELPER_CASE_BYTES=64000
+_HELPER_RECORD_LIMIT=128
+_HELPER_RECORD_FORMAT='cale-project-expression-record-v1'
+
+
+def _helper_bytes(value):
+    import json
+    return json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False).encode('utf-8')
+
+
+def _helper_digest(value):
+    return hashlib.sha256(_helper_bytes(value)).hexdigest()
 
 
 @contextmanager
 def _helper_owned_state(folder):
-    """Hold Windows state paths while SQLite opens or writes the registry.
+    """Immutable files are authority; no SQLite main/WAL/SHM/journal is touched.
 
-    Static path checks cannot prevent a directory/DB swap between check and
-    open. Directory and file handles exclude deletion/renaming until all helper
-    reads, validation and writes have finished. No other memory API is changed.
+    The process mutex serializes the bounded collection check and publication.
+    Windows held directory handles prevent reparse/rename escapes. Abandoned
+    locks recover after a crash; partial staging files are never authoritative.
     """
-    root=_artifact_project_root(folder)
-    _helper_request_identity(root)  # No new state for an unknown task owner.
-    if os.name!='nt':
-        raise RuntimeError('Project helper registries require Windows ownership guards.')
     import ctypes,design_tools
-    with design_tools._game_directory_guard(root):
-        notes=root/'.local-ai'
-        notes.mkdir(exist_ok=True)
-        _artifact_project_root(root)
-        with design_tools._game_directory_guard(root,notes):
-            database=notes/'memory.sqlite3';api=design_tools._game_win_api()
-            # OPEN_ALWAYS preserves existing bytes. OPEN_REPARSE_POINT rejects
-            # a link itself instead of following it. No delete sharing permits
-            # SQLite read/write access while preventing a DB replacement.
-            handle=api.CreateFileW(design_tools._game_win_path(database),0xC0000000,3,None,4,0x00200080,None)
-            if handle==ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
-            try:
-                attributes=(ctypes.c_uint32*2)()
-                if not api.GetFileInformationByHandleEx(handle,9,ctypes.byref(attributes),ctypes.sizeof(attributes)):
-                    raise ctypes.WinError(ctypes.get_last_error())
-                if attributes[0]&(0x400|0x10) or design_tools._game_win_final(api,handle)!=os.path.normcase(str(database)):
-                    raise ValueError('Helper database must be a plain project-owned file.')
-                if database.stat().st_nlink!=1:
-                    raise ValueError('Helper database hard links are not project-owned state.')
-                _artifact_project_root(root)
-                yield root
-            finally:api.CloseHandle(handle)
+    from contextlib import ExitStack
+    root=_artifact_project_root(folder)
+    _helper_request_identity(root)
+    if os.name!='nt':raise RuntimeError('Project helper registries require Windows ownership guards.')
+    api=ctypes.WinDLL('kernel32',use_last_error=True)
+    api.CreateMutexW.argtypes=[ctypes.c_void_p,ctypes.c_int,ctypes.c_wchar_p];api.CreateMutexW.restype=ctypes.c_void_p
+    api.WaitForSingleObject.argtypes=[ctypes.c_void_p,ctypes.c_uint32];api.WaitForSingleObject.restype=ctypes.c_uint32
+    api.ReleaseMutex.argtypes=[ctypes.c_void_p];api.CloseHandle.argtypes=[ctypes.c_void_p]
+    mutex=api.CreateMutexW(None,False,'Local\\CaleExpression-'+hashlib.sha256(os.path.normcase(str(root)).encode()).hexdigest())
+    if not mutex:raise ctypes.WinError(ctypes.get_last_error())
+    acquired=False
+    try:
+        result=api.WaitForSingleObject(mutex,10000)
+        if result not in (0,0x80):raise ValueError('Helper registry is busy; retry without changing saved work.')
+        acquired=True
+        with ExitStack() as stack:
+            stack.enter_context(design_tools._game_directory_guard(root))
+            current=root
+            for name in ('.local-ai','expression-helpers','v1'):
+                following=current/name
+                following.mkdir(exist_ok=True)
+                stack.enter_context(design_tools._game_directory_guard(root,following))
+                current=following
+            for name in ('records','staging'):
+                following=current/name;following.mkdir(exist_ok=True)
+                stack.enter_context(design_tools._game_directory_guard(root,following))
+            yield root
+    finally:
+        if acquired:api.ReleaseMutex(mutex)
+        api.CloseHandle(mutex)
 
 
 def _guarded_helper_operation(function):
     from functools import wraps
     @wraps(function)
     def guarded(folder,*args,**kwargs):
-        with _helper_owned_state(folder) as root:
-            return function(root,*args,**kwargs)
+        with _helper_owned_state(folder) as root:return function(root,*args,**kwargs)
     return guarded
 
-def _expression_helpers(conn):
-    conn.execute("""CREATE TABLE IF NOT EXISTS expression_helpers (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, definition TEXT NOT NULL,
-        cases TEXT NOT NULL, source_hash TEXT NOT NULL, cases_hash TEXT NOT NULL,
-        runner_hash TEXT NOT NULL, request_hash TEXT NOT NULL, check_hash TEXT NOT NULL,
-        created REAL NOT NULL, uses INTEGER NOT NULL DEFAULT 0)""")
+
+def _helper_paths(root):
+    """Bound ALL directory entries, including unrecognized names; never delete them."""
+    from itertools import islice
+    directory=root/'.local-ai/expression-helpers/v1/records'
+    with os.scandir(directory) as stream:entries=list(islice(stream,_HELPER_RECORD_LIMIT+1))
+    if len(entries)>_HELPER_RECORD_LIMIT:raise ValueError('Helper record collection exceeds its bounded 128-entry scan.')
+    return [Path(item.path) for item in entries]
 
 
-def _helper_digest(value) -> str:
-    import json
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
-
-
-
-_HELPER_DEFINITION_BYTES=32000
-_HELPER_CASE_BYTES=64000
-_HELPER_ROW_COLUMNS="""substr(id,1,65) AS id,substr(name,1,65) AS name,
-    substr(definition,1,32001) AS definition,substr(cases,1,64001) AS cases,
-    length(CAST(definition AS BLOB)) AS definition_bytes,length(CAST(cases AS BLOB)) AS cases_bytes,
-    typeof(definition) AS definition_type,typeof(cases) AS cases_type,
-    substr(source_hash,1,65) AS source_hash,substr(cases_hash,1,65) AS cases_hash,
-    substr(runner_hash,1,65) AS runner_hash,substr(request_hash,1,65) AS request_hash,
-    substr(check_hash,1,65) AS check_hash,
-    CASE WHEN typeof(created) IN ('integer','real') THEN created ELSE NULL END AS created,
-    CASE WHEN typeof(uses)='integer' THEN uses ELSE NULL END AS uses"""
-
-
-def _validated_expression_record(root, row):
-    """Bound/validate stored data before decoding or exposing any metadata."""
-    import json,math
-    import quick_calculator
-    if row is None:
-        raise ValueError('Helper was not registered in this project.')
-    if (row['definition_type']!='text' or row['cases_type']!='text'
-            or type(row['definition_bytes']) is not int or not 0<row['definition_bytes']<=_HELPER_DEFINITION_BYTES
-            or type(row['cases_bytes']) is not int or not 0<row['cases_bytes']<=_HELPER_CASE_BYTES):
-        raise ValueError('Stored helper definition or cases exceed their size budget.')
-    for field in ('id','source_hash','cases_hash','runner_hash','request_hash','check_hash'):
-        value=row[field]
-        if not isinstance(value,str) or not (re.fullmatch(r'[a-f0-9]{64}',value)
-                or (field in {'request_hash','check_hash'} and value=='')):
-            raise ValueError('Stored helper provenance is invalid; reverify before reuse.')
-    if (not isinstance(row['name'],str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,63}',row['name'])
-            or type(row['uses']) is not int or row['uses']<0
-            or type(row['created']) not in (int,float) or not math.isfinite(row['created'])):
-        raise ValueError('Stored helper metadata is invalid.')
+def _helper_read(path):
+    """Read a plain, single-link file through its checked, non-replaceable handle."""
+    import ctypes,msvcrt,design_tools
+    api=design_tools._game_win_api()
+    handle=api.CreateFileW(design_tools._game_win_path(path),0x80000000,1,None,3,0x00200080,None)
+    if handle==ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
     try:
-        definition,cases=json.loads(row['definition']),json.loads(row['cases'])
-        if not isinstance(definition,dict):raise ValueError('Invalid definition')
+        attributes=(ctypes.c_uint32*2)()
+        if not api.GetFileInformationByHandleEx(handle,9,ctypes.byref(attributes),ctypes.sizeof(attributes)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if attributes[0]&(0x400|0x10) or design_tools._game_win_final(api,handle)!=os.path.normcase(str(path)):
+            raise ValueError('Helper records must be plain project-owned files.')
+        fd=msvcrt.open_osfhandle(handle,os.O_RDONLY|os.O_BINARY);handle=None
+        with os.fdopen(fd,'rb') as stream:
+            if os.fstat(stream.fileno()).st_nlink!=1:raise ValueError('Helper record hard links are not owned state.')
+            raw=stream.read(_HELPER_RECORD_BYTES+1)
+        if not 0<len(raw)<=_HELPER_RECORD_BYTES:raise ValueError('Stored helper record exceeds its byte budget.')
+        return raw
+    finally:
+        if handle is not None:api.CloseHandle(handle)
+
+
+def _helper_json_depth(raw):
+    # Check nesting before JSON decoding/recursive canonicalization. Quoted
+    # delimiters and escaped quotes do not contribute to structural depth.
+    quoted=escaped=False;depth=0
+    for byte in raw:
+        if quoted:
+            if escaped:escaped=False
+            elif byte==92:escaped=True
+            elif byte==34:quoted=False
+        elif byte==34:quoted=True
+        elif byte in (91,123):
+            depth+=1
+            if depth>16:raise ValueError('Stored helper record exceeds its nesting budget.')
+        elif byte in (93,125):depth-=1
+
+
+def _validated_expression_record(root,path):
+    import json,quick_calculator
+    raw=_helper_read(path);_helper_json_depth(raw)
+    try:
+        row=json.loads(raw)
+        fields={'format','id','name','definition','cases','source_hash','cases_hash','runner_hash','request_hash','created'}
+        if not isinstance(row,dict) or set(row)!=fields or row['format']!=_HELPER_RECORD_FORMAT:raise ValueError('Invalid record shape')
+        if _helper_bytes(row)!=raw:raise ValueError('Noncanonical record')
+        for key in ('id','source_hash','cases_hash','runner_hash','request_hash'):
+            if not isinstance(row[key],str) or not re.fullmatch('[a-f0-9]{64}',row[key]):raise ValueError('Invalid identity')
+        if path.name!=row['id']+'-'+hashlib.sha256(raw).hexdigest()+'.json':raise ValueError('Record filename mismatch')
+        if type(row['created']) not in (int,float) or not math.isfinite(row['created']) or row['created']<=0:raise ValueError('Invalid date')
+        definition=row['definition']
+        if not isinstance(definition,dict) or set(definition)!={'name','parameters','expression','format'}:raise ValueError('Invalid definition')
         normalized=quick_calculator.normalize_helper(definition['name'],definition['parameters'],definition['expression'])
-        if normalized!=definition or normalized['name']!=row['name']:
-            raise ValueError('Noncanonical definition')
-        if not isinstance(cases,list) or not 1<=len(cases)<=24:
-            raise ValueError('Invalid case count')
-        verified=[]
-        for case in cases:
-            if not isinstance(case,dict) or set(case)!={'inputs','expected'}:
-                raise ValueError('Invalid case shape')
-            verified.append({'inputs':quick_calculator.helper_inputs(normalized,case['inputs']),
-                             'expected':quick_calculator.helper_json(case['expected'])})
-        if (_helper_digest(definition)!=row['source_hash'] or _helper_digest(verified)!=row['cases_hash']
-                or _helper_digest([str(root),row['source_hash'],row['cases_hash'],row['runner_hash'],
-                                   row['request_hash'],row['check_hash']])!=row['id']):
-            raise ValueError('Changed hashes')
+        if normalized!=definition or normalized['name']!=row['name']:raise ValueError('Invalid definition')
+        cases=_helper_cases(normalized,row['cases'],verify=False)
+        if len(_helper_bytes(definition))>_HELPER_DEFINITION_BYTES or len(_helper_bytes(cases))>_HELPER_CASE_BYTES:raise ValueError('Record budgets')
+        if _helper_digest(definition)!=row['source_hash'] or _helper_digest(cases)!=row['cases_hash']:raise ValueError('Changed hashes')
+        if _helper_digest([str(root),row['source_hash'],row['cases_hash'],row['runner_hash'],row['request_hash']])!=row['id']:raise ValueError('Changed identity')
+        return row
     except (ValueError,TypeError,KeyError,RecursionError,OverflowError) as error:
         raise ValueError('Stored helper definition or verification cases changed; reverify before reuse.') from error
-    return normalized,verified
 
-@_guarded_helper_operation
-def register_expression_helper(folder: str | Path, name: str, parameters: dict,
-                               expression: str, cases: list) -> dict:
-    """Verify an immutable restricted expression, not an arbitrary script/model."""
-    import json
+
+def _helper_cases(definition,cases,*,verify):
     import quick_calculator
-    import task_context
-    root = _artifact_project_root(folder)
-    runner_hash = quick_calculator.helper_interpreter_identity()
-    request = _helper_request_identity(root)
-    active = task_context.step_status(root)['active']
-    check = task_context.step_check_identity(active) if active else ''
-    definition = quick_calculator.normalize_helper(name, parameters, expression)
-    if not isinstance(cases, list) or not 1 <= len(cases) <= 24:
-        raise ValueError('Verify 1 to 24 concrete inputs/expected output cases.')
-    verified = []
-    for index, case in enumerate(cases, 1):
-        if not isinstance(case, dict) or set(case) != {'inputs', 'expected'}:
-            raise ValueError('Each helper case needs exactly inputs and expected JSON.')
-        supplied = quick_calculator.helper_json(case['inputs'])
-        expected = quick_calculator.helper_json(case['expected'])
-        actual = quick_calculator.run_helper(definition, supplied)
-        # JSON number spelling may differ; bools remain distinct from numbers.
-        if not quick_calculator.helper_values_match(actual, expected):
-            return {'registered': False, 'passed': False, 'failed_case': index,
-                    'note': 'Computed output does not match the supplied case; no helper was registered.'}
-        verified.append({'inputs': supplied, 'expected': expected})
-    if len(json.dumps(verified).encode()) > 64000:
-        raise ValueError('Combined helper cases must be under 64 KB.')
-    if len(json.dumps(definition).encode())>_HELPER_DEFINITION_BYTES:
-        raise ValueError('Helper definition exceeds its size budget.')
-    source_hash, cases_hash = _helper_digest(definition), _helper_digest(verified)
-    if quick_calculator.helper_interpreter_identity()!=runner_hash:
-        raise ValueError('Helper interpreter changed during verification.')
-    identifier = _helper_digest([str(root), source_hash, cases_hash, runner_hash, request, check])
-    _artifact_project_root(root)
-    with connection(root) as conn:
-        _expression_helpers(conn)
-        conn.execute('BEGIN IMMEDIATE')
-        if quick_calculator.helper_interpreter_identity()!=runner_hash:
-            raise ValueError('Helper interpreter changed during verification.')
-        if _helper_request_identity(root) != request:
-            raise ValueError('Project instructions changed while verifying this helper.')
-        current = task_context.step_status(root)['active']
-        if (task_context.step_check_identity(current) if current else '') != check:
-            raise ValueError('Active acceptance changed while verifying this helper.')
-        count = conn.execute('SELECT count(*) FROM expression_helpers').fetchone()[0]
-        if count >= 128 and not conn.execute('SELECT 1 FROM expression_helpers WHERE id=?', (identifier,)).fetchone():
-            raise ValueError('This project already has 128 expression helpers; no existing records were overwritten.')
-        conn.execute('INSERT OR IGNORE INTO expression_helpers(id,name,definition,cases,source_hash,cases_hash,runner_hash,request_hash,check_hash,created) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                     (identifier, name, json.dumps(definition), json.dumps(verified), source_hash, cases_hash, runner_hash, request, check, time.time()))
-    return {'id': identifier, 'name': name, 'registered': True, 'passed': True,
-            'verified_cases': len(verified), 'source_sha256': source_hash,
-            'cases_sha256': cases_hash, 'runner_sha256': runner_hash,
-            'request_sha256': request, 'check_sha256': check,
-            'effect': 'restricted_json_expression',
-            'note': 'Passed only the supplied examples; no SQL step or task was completed.'}
+    if not isinstance(cases,list) or not 1<=len(cases)<=24:raise ValueError('Verify 1 to 24 concrete inputs/expected output cases.')
+    normalized=[]
+    for case in cases:
+        if not isinstance(case,dict) or set(case)!={'inputs','expected'}:raise ValueError('Each helper case needs exactly inputs and expected JSON.')
+        inputs=quick_calculator.helper_inputs(definition,case['inputs']);expected=quick_calculator.helper_json(case['expected'])
+        if verify and not quick_calculator.helper_values_match(quick_calculator.run_helper(definition,inputs),expected):
+            raise ValueError('Computed output does not match the supplied case; no helper was qualified.')
+        normalized.append({'inputs':inputs,'expected':expected})
+    if len(_helper_bytes(normalized))>_HELPER_CASE_BYTES:raise ValueError('Combined helper cases must be under 64 KB.')
+    return normalized
 
 
-@_guarded_helper_operation
-def find_expression_helpers(folder: str | Path, query: str = '', limit: int = 8) -> dict:
-    """Retrieve current/historical helper metadata; retrieval never executes code."""
-    import json
-    import task_context
+def _helper_current(root,row):
+    """Recompute examples; a persisted flag or hash alone never certifies reuse."""
     import quick_calculator
-    if not isinstance(query, str) or len(query) > 100 or type(limit) is not int:
-        raise ValueError('Use a short query and integer limit.')
-    root=_artifact_project_root(folder)
-    runner=quick_calculator.helper_interpreter_identity()
-    request = _helper_request_identity(root)
-    with connection(root) as conn:
-        _expression_helpers(conn)
-        # Bound the total collection before Python filtering. Case values and
-        # expression literals are not included in discovery results.
-        rows = conn.execute('SELECT '+_HELPER_ROW_COLUMNS+' FROM expression_helpers ORDER BY created DESC LIMIT 128').fetchall()
-    matches = []
-    for row in rows:
-        try:
-            definition,_=_validated_expression_record(root,row)
-        except ValueError:
-            continue  # Corrupt/private literals never become discovery metadata.
-        if query.casefold() not in row['name'].casefold(): continue
-        matches.append({'id': row['id'], 'name': row['name'],
-                        'parameters': definition['parameters'], 'source_sha256': row['source_hash'],
-                        'current_request': row['request_hash'] == request, 'current_interpreter':row['runner_hash']==runner, 'uses': row['uses'],
-                        'effect': 'restricted_json_expression'})
-        if len(matches) >= max(1, min(limit, 20)): break
-    _artifact_project_root(root)
-    if quick_calculator.helper_interpreter_identity()!=runner:
-        raise ValueError('Helper interpreter changed during discovery.')
-    return {'helpers': matches, 'note': 'Candidates only; invocation revalidates the stored definition and request.'}
-
-
-@_guarded_helper_operation
-def run_expression_helper(folder: str | Path, helper_id: str, inputs: dict) -> dict:
-    """Reuse a verified, hash-bound expression directly, with zero inference."""
-    import json
-    import quick_calculator
-    import task_context
-    if not isinstance(helper_id, str) or not re.fullmatch(r'[a-f0-9]{64}', helper_id):
-        raise ValueError('Choose an exact helper ID from this project.')
-    root = _artifact_project_root(folder)
-    runner_hash = quick_calculator.helper_interpreter_identity()
-    request = _helper_request_identity(root)
-    with connection(root) as conn:
-        _expression_helpers(conn)
-        row = conn.execute('SELECT '+_HELPER_ROW_COLUMNS+' FROM expression_helpers WHERE id=?', (helper_id,)).fetchone()
-    normalized,cases=_validated_expression_record(root,row)
-    if row['request_hash'] != request:
-        raise ValueError('Project instructions changed; reverify this helper for the current request.')
-    if runner_hash != row['runner_hash']:
-        raise ValueError('Helper definition, verification cases or interpreter changed; reverify before reuse.')
-    value = quick_calculator.run_helper(normalized, inputs)
-    if quick_calculator.helper_interpreter_identity()!=runner_hash:
-        raise ValueError('Helper interpreter changed during invocation; discard the result.')
-    _artifact_project_root(root)
-    with connection(root) as conn:
-        conn.execute('BEGIN IMMEDIATE')
-        current = conn.execute('SELECT '+_HELPER_ROW_COLUMNS+' FROM expression_helpers WHERE id=?', (helper_id,)).fetchone()
-        _validated_expression_record(root,current)
-        if (_helper_request_identity(root) != request or current is None
-                or any(current[field] != row[field] for field in ('definition', 'cases', 'source_hash', 'cases_hash', 'runner_hash', 'request_hash', 'check_hash'))
-                or quick_calculator.helper_interpreter_identity() != runner_hash):
-            raise ValueError('Helper or instructions changed during invocation; discard the result.')
-        conn.execute('UPDATE expression_helpers SET uses=uses+1 WHERE id=?', (helper_id,))
-    return {'helper_id': helper_id, 'value': value, 'source_sha256': row['source_hash'],
-            'verified_cases_sha256': row['cases_hash'], 'inference_calls': 0,
-            'effect': 'restricted_json_expression', 'task_completion': False}
-
-
-
-
-@_guarded_helper_operation
-def expression_helper_basis(folder, helper_id):
-    """Current immutable identity for a saved task unit, not a success verdict."""
-    import quick_calculator
-    if not isinstance(helper_id,str) or not re.fullmatch(r'[a-f0-9]{64}',helper_id):
-        raise ValueError('Choose an exact helper ID from this project.')
-    root=_artifact_project_root(folder)
-    with connection(root) as conn:
-        _expression_helpers(conn)
-        row=conn.execute('SELECT '+_HELPER_ROW_COLUMNS+' FROM expression_helpers WHERE id=?',(helper_id,)).fetchone()
-    _validated_expression_record(root,row)
-    if row['request_hash']!=_helper_request_identity(root) or row['runner_hash']!=quick_calculator.helper_interpreter_identity():
+    runner=quick_calculator.helper_interpreter_identity();request=_helper_request_identity(root)
+    if row['runner_hash']!=runner or row['request_hash']!=request:
         raise ValueError('Helper instructions or interpreter changed; reverify before reuse.')
+    _helper_cases(row['definition'],row['cases'],verify=True)
+    if quick_calculator.helper_interpreter_identity()!=runner or _helper_request_identity(root)!=request:
+        raise ValueError('Helper interpreter or project instructions changed during verification.')
+
+
+def _helper_selected(root,identifier):
+    if not isinstance(identifier,str) or not re.fullmatch('[a-f0-9]{64}',identifier):raise ValueError('Choose an exact helper ID from this project.')
+    for path in _helper_paths(root):
+        if path.name.startswith(identifier+'-'):
+            try:return _validated_expression_record(root,path)
+            except (OSError,ValueError):continue
+    raise ValueError('Helper was not registered in this project or its record changed; reverify before reuse.')
+
+
+def _helper_publish(root,row):
+    """Flush complete bytes, then rename the still-held file without replacement."""
+    import ctypes,msvcrt,design_tools
+    raw=_helper_bytes(row)
+    if len(raw)>_HELPER_RECORD_BYTES:raise ValueError('Stored helper record exceeds its byte budget.')
+    store=root/'.local-ai/expression-helpers/v1'
+    target=store/'records'/(row['id']+'-'+hashlib.sha256(raw).hexdigest()+'.json')
+    from itertools import islice
+    with os.scandir(store/'staging') as stream:
+        pending=list(islice(stream,_HELPER_RECORD_LIMIT+1))
+    if len(pending)>=_HELPER_RECORD_LIMIT:
+        raise ValueError('Helper staging contains 128 retained entries; inspect or archive them before publishing more. No existing bytes were deleted.')
+    temporary=store/'staging'/('pending-'+uuid.uuid4().hex)
+    api=design_tools._game_win_api()
+    handle=api.CreateFileW(design_tools._game_win_path(temporary),0x40000000|0x10000,1,None,1,0x00200080,None)
+    if handle==ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if design_tools._game_win_final(api,handle)!=os.path.normcase(str(temporary)):raise ValueError('Helper staging escaped its project.')
+        fd=msvcrt.open_osfhandle(handle,os.O_WRONLY|os.O_BINARY);handle=None
+        with os.fdopen(fd,'wb') as output:
+            output.write(raw);output.flush();os.fsync(output.fileno())
+            # The source handle and both destination directories remain held.
+            # No path-based close/rename window and no replacement of any file.
+            import quick_calculator
+            if (_helper_request_identity(root)!=row['request_hash'] or quick_calculator.helper_interpreter_identity()!=row['runner_hash']):
+                raise ValueError('Helper interpreter or project instructions changed during publication.')
+            design_tools._game_rename_handle(msvcrt.get_osfhandle(output.fileno()),target)
+    finally:
+        if handle is not None:api.CloseHandle(handle)
+    return target
+
+
+@_guarded_helper_operation
+def register_expression_helper(folder,name,parameters,expression,cases):
+    """Qualify supplied examples and publish an immutable project-local record."""
+    import quick_calculator
+    root=_artifact_project_root(folder);request=_helper_request_identity(root)
+    runner=quick_calculator.helper_interpreter_identity()
+    definition=quick_calculator.normalize_helper(name,parameters,expression)
+    try:verified=_helper_cases(definition,cases,verify=True)
+    except ValueError as error:
+        if str(error).startswith('Computed output does not match'):
+            return {'registered':False,'passed':False,'note':str(error)}
+        raise
+    if len(_helper_bytes(definition))>_HELPER_DEFINITION_BYTES:raise ValueError('Helper definition exceeds its size budget.')
+    row={'format':_HELPER_RECORD_FORMAT,'name':name,'definition':definition,'cases':verified,
+         'source_hash':_helper_digest(definition),'cases_hash':_helper_digest(verified),
+         'runner_hash':runner,'request_hash':request,'created':time.time()}
+    row['id']=_helper_digest([str(root),row['source_hash'],row['cases_hash'],runner,request])
+    _helper_current(root,row)
+    paths=_helper_paths(root)
+    try:
+        existing=_helper_selected(root,row['id']);_helper_current(root,existing)
+    except ValueError:
+        if len(paths)>=_HELPER_RECORD_LIMIT:raise ValueError('This project already has 128 records; no existing bytes were overwritten.')
+        _helper_publish(root,row)
+    if _helper_request_identity(root)!=request or quick_calculator.helper_interpreter_identity()!=runner:
+        raise ValueError('Helper interpreter or project instructions changed during publication; discard the result.')
+    return {'id':row['id'],'name':name,'registered':True,'passed':True,'verified_cases':len(verified),
+            'source_sha256':row['source_hash'],'cases_sha256':row['cases_hash'],'runner_sha256':runner,
+            'request_sha256':request,'effect':'restricted_json_expression',
+            'note':'Only supplied examples passed. No task or SQL step completed; no general correctness claim.'}
+
+
+@_guarded_helper_operation
+def find_expression_helpers(folder,query='',limit=8):
+    """Rebuild a bounded metadata index; never expose private expression/case text."""
+    import quick_calculator
+    if not isinstance(query,str) or len(query)>100 or type(limit) is not int:raise ValueError('Use a short query and integer limit.')
+    runner=quick_calculator.helper_interpreter_identity();request=_helper_request_identity(folder);matches=[];seen=set()
+    for path in _helper_paths(folder):
+        try:row=_validated_expression_record(folder,path)
+        except (OSError,ValueError):continue
+        if row['id'] in seen or query.casefold() not in row['name'].casefold():continue
+        seen.add(row['id']);current=row['request_hash']==request and row['runner_hash']==runner
+        if current:
+            try:_helper_current(folder,row)
+            except ValueError:continue
+        matches.append({'id':row['id'],'name':row['name'],'parameters':row['definition']['parameters'],
+                        'source_sha256':row['source_hash'],'current_request':row['request_hash']==request,
+                        'current_interpreter':row['runner_hash']==runner,'effect':'restricted_json_expression'})
+        if len(matches)>=max(1,min(limit,20)):break
+    if _helper_request_identity(folder)!=request or quick_calculator.helper_interpreter_identity()!=runner:
+        raise ValueError('Helper interpreter or project instructions changed during discovery.')
+    return {'helpers':matches,'note':'Project-local, examples-qualified candidates only. Bounded 128-entry rebuild; invocation revalidates.'}
+
+
+@_guarded_helper_operation
+def run_expression_helper(folder,helper_id,inputs):
+    import quick_calculator
+    row=_helper_selected(folder,helper_id);_helper_current(folder,row)
+    value=quick_calculator.run_helper(row['definition'],inputs)
+    current=_helper_selected(folder,helper_id)
+    if current!=row:raise ValueError('Helper record changed during invocation; discard the result.')
+    _helper_current(folder,current)
+    return {'helper_id':helper_id,'value':value,'source_sha256':row['source_hash'],
+            'verified_cases_sha256':row['cases_hash'],'inference_calls':0,
+            'effect':'restricted_json_expression','task_completion':False}
+
+
+@_guarded_helper_operation
+def expression_helper_basis(folder,helper_id):
+    """Current checked identity for a saved unit, not a completion verdict."""
+    row=_helper_selected(folder,helper_id);_helper_current(folder,row)
     return {key:row[key] for key in ('id','source_hash','cases_hash','runner_hash','request_hash')}

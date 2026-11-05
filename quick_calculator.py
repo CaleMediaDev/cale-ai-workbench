@@ -122,7 +122,7 @@ HELPER_TYPES = frozenset({'number', 'integer', 'string', 'boolean', 'numbers', '
 _HELPER_CALLS = frozenset({'abs', 'round', 'sum', 'min', 'max', 'len', 'get'})
 
 
-def helper_json(value):
+def helper_json(value, *, _preserve_fractions=False):
     """Copy finite plain JSON within fixed depth, node, scalar and byte limits."""
     import json
     import math
@@ -135,10 +135,10 @@ def helper_json(value):
         if item is None or type(item) is bool:
             return item
         if type(item) in (int, float, Fraction):
-            if isinstance(item, Fraction):
-                item = item.numerator if item.denominator == 1 else float(item)
             if abs(item) > 1e100 or not math.isfinite(item):
                 raise ValueError('Helper numbers must be finite and bounded.')
+            if isinstance(item,Fraction) and not _preserve_fractions:
+                item=item.numerator if item.denominator==1 else float(item)
             return item
         if type(item) is str and len(item) <= 1000:
             return item
@@ -148,7 +148,11 @@ def helper_json(value):
             return {key: visit(child, depth + 1) for key, child in item.items()}
         raise ValueError('Helpers accept only bounded plain JSON values.')
     result = visit(value, 0)
-    if len(json.dumps(result, allow_nan=False).encode('utf-8')) > 8000:
+    # Size the JSON representation without rounding internal rational values.
+    def encode_fraction(item):
+        if type(item) is Fraction:return item.numerator if item.denominator==1 else float(item)
+        raise ValueError('Helpers accept only bounded plain JSON values.')
+    if len(json.dumps(result, allow_nan=False, default=encode_fraction).encode('utf-8')) > 8000:
         raise ValueError('Helper JSON must be under 8 KB.')
     return result
 
@@ -220,6 +224,12 @@ def run_helper(definition: dict, inputs: dict):
         if type(value) is not bool:
             raise ValueError('Conditions need boolean values.')
         return value
+    def integer(value):
+        # Arithmetic produces exact Fractions. Structural integer positions
+        # accept an integral computed result, never bools or raw float inputs.
+        if type(value) is Fraction and value.denominator==1:return value.numerator
+        if type(value) is int:return value
+        raise ValueError('Use an integer index or round digit count.')
     def evaluate(node, depth=0):
         nonlocal operations
         operations += 1
@@ -230,12 +240,12 @@ def run_helper(definition: dict, inputs: dict):
         if isinstance(node, ast.Name):
             if node.id not in environment: raise ValueError('Primitive names are only allowed in fixed calls.')
             return environment[node.id]
-        if isinstance(node, ast.List): return helper_json([child(x) for x in node.elts])
-        if isinstance(node, ast.Dict): return helper_json({key.value: child(value) for key,value in zip(node.keys,node.values)})
+        if isinstance(node, ast.List): return helper_json([child(x) for x in node.elts],_preserve_fractions=True)
+        if isinstance(node, ast.Dict): return helper_json({key.value: child(value) for key,value in zip(node.keys,node.values)},_preserve_fractions=True)
         if isinstance(node, ast.Subscript):
             target, key = child(node.value), child(node.slice)
             if type(target) is dict and type(key) is str: return target[key]
-            if type(target) in (list, str) and type(key) is int: return target[key]
+            if type(target) in (list,str): return target[integer(key)]
             raise ValueError('Index only JSON arrays/strings by integers or objects by string keys.')
         if isinstance(node, ast.UnaryOp):
             value = child(node.operand)
@@ -285,8 +295,8 @@ def run_helper(definition: dict, inputs: dict):
             if name=='len' and len(args)==1 and type(args[0]) in (str,list,dict): return len(args[0])
             if name=='abs' and len(args)==1: return abs(number(args[0]))
             if name=='round' and len(args) in (1,2):
-                digits=args[1] if len(args)==2 else 0
-                if type(digits) is not int or not -8 <= digits <= 8: raise ValueError('Round digits must be an integer from -8 to 8.')
+                digits=integer(args[1]) if len(args)==2 else 0
+                if not -8 <= digits <= 8: raise ValueError('Round digits must be an integer from -8 to 8.')
                 return round(number(args[0]),digits)
             if name in {'sum','min','max'} and len(args)==1 and type(args[0]) is list:
                 operations += len(args[0])

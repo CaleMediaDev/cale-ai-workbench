@@ -89,3 +89,31 @@ def test_helper_import_attestation_rejects_stale_executing_module_against_new_di
     assert module._HELPER_IMPORTED_IMPLEMENTATION is None
     with pytest.raises(ValueError,match='interpreter changed'):
         module.helper_interpreter_identity()
+
+
+import pytest
+
+
+@pytest.mark.parametrize('expression,parameters,inputs,expected',[
+    ('sum([1/x,1/x,1/x])',{'x':'integer'},{'x':3},1),
+    ("get({'third':1/x},'third')*x",{'x':'integer'},{'x':3},1),
+    ('items[i+1]',{'items':'numbers','i':'integer'},{'items':[10,20,30],'i':1},30),
+    ('round(x,digits+1)',{'x':'number','digits':'integer'},{'x':1.2345,'digits':1},1.23),
+])
+def test_expression_composition_preserves_exact_intermediates(expression,parameters,inputs,expected):
+    import quick_calculator as calculator
+    definition=calculator.normalize_helper('composed',parameters,expression)
+    assert calculator.run_helper(definition,inputs)==expected
+
+@pytest.mark.parametrize('expression,parameters,inputs',[
+    ('items[i]',{'items':'numbers','i':'number'},{'items':[10,20],'i':1.0}),
+    ('items[i]',{'items':'numbers','i':'boolean'},{'items':[10,20],'i':True}),
+    ('items[i/2]',{'items':'numbers','i':'integer'},{'items':[10,20],'i':1}),
+    ('round(x,d)',{'x':'number','d':'number'},{'x':1.234,'d':2.0}),
+    ('round(x,d)',{'x':'number','d':'boolean'},{'x':1.234,'d':True}),
+    ('round(x,d/2)',{'x':'number','d':'integer'},{'x':1.234,'d':3}),
+    ('round(x,d+1)',{'x':'number','d':'integer'},{'x':1.234,'d':8}),
+])
+def test_expression_integral_composition_does_not_relax_structural_types(expression,parameters,inputs):
+    import quick_calculator as calculator
+    with pytest.raises(ValueError):calculator.run_helper(calculator.normalize_helper('bounded',parameters,expression),inputs)
