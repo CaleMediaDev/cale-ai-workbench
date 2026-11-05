@@ -23,9 +23,9 @@ import uuid
 from contextlib import closing
 from collections import deque
 from pathlib import Path, PurePosixPath
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
 
 ROOT = Path(__file__).resolve().parent
 UPSTREAM = "CaleMediaDev/cale-ai-workbench"
@@ -539,6 +539,7 @@ _GITHUB_STAGES = {
     "repository": "repository access", "tree-create": "draft tree creation",
     "commit-create": "draft commit creation", "branch-create": "draft branch creation",
     "proposal-create": "draft submission", "proposal-review": "review lookup",
+    "proposal-public": "public proposal confirmation",
 }
 _GITHUB_KINDS = {"http", "transport", "timeout", "tools", "response", "response_invalid"}
 
@@ -557,6 +558,8 @@ def github_failure_message(stage, status, kind):
     detail = (f"HTTP {status}" if type(status) is int and 400 <= status <= 599
               else {"transport": "connection unavailable", "timeout": "request timed out",
                     "tools": "GitHub tools unavailable", "response_invalid": "invalid response"}.get(kind, "request unavailable"))
+    if stage == "proposal-public":
+        return f"GitHub {detail} during {label} · saved proposal kept; delivery is not confirmed; retrying automatically."
     return f"GitHub {detail} during {label} · check GitHub access or account limits; retrying automatically."
 
 
@@ -873,6 +876,59 @@ _OUTBOX_TERMINAL = ("submitted", "discarded", "stale", "corrupt")
 
 class PublicationPending(RuntimeError):
     pass
+
+
+class PublicVisibilityPending(PublicationPending):
+    """Authentication can see a PR while public delivery remains unconfirmed."""
+
+    def __init__(self, status=None, kind="response_invalid", retry_seconds=60):
+        failure = GitHubRequestError("proposal-public", status, kind)
+        self.status, self.kind = failure.status, failure.kind
+        self.retry_seconds = max(60, min(3600, retry_seconds))
+        super().__init__(str(failure))
+
+
+def public_pull_request(number):
+    """Bounded credential-free read of the fixed public upstream API.
+
+    An authenticated donor-only response does not establish that maintainers
+    received the proposal. Unknown visibility is retried, never a new PR POST.
+    """
+    if type(number) is not int or not 1 <= number <= 2**31-1:
+        raise PublicVisibilityPending()
+    url = f"https://api.github.com/repos/{UPSTREAM}/pulls/{number}"
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    request = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "Cale-AI-Workbench"})
+    failure = None
+    try:
+        with build_opener(NoRedirect()).open(request, timeout=15) as response:
+            if response.status != 200 or response.geturl() != url:
+                raise PublicVisibilityPending()
+            raw = response.read(256*1024+1)
+        if len(raw) > 256*1024:
+            raise PublicVisibilityPending()
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise PublicVisibilityPending()
+        return value
+    except InterruptedError:
+        raise
+    except PublicVisibilityPending:
+        raise
+    except HTTPError as error:
+        retry = 3600 if error.code in {403, 429} else 60
+        supplied = error.headers.get("Retry-After", "") if error.headers else ""
+        if isinstance(supplied, str) and supplied.isascii() and supplied.isdigit() and len(supplied) <= 6:
+            retry = max(60, min(3600, int(supplied)))
+        failure = PublicVisibilityPending(error.code, "http", retry)
+    except (TimeoutError, URLError, OSError):
+        failure = PublicVisibilityPending(kind="transport")
+    except (ValueError, RecursionError):
+        failure = PublicVisibilityPending()
+    # Do not chain CLI/HTTP response objects, proxy text or remote bodies.
+    raise failure
 
 
 def _publication_account(consent, login, resource):
@@ -1269,6 +1325,39 @@ class DurablePublication:
         return self._confirm_result(matches[0], login, target) if matches else None
 
 
+    def confirm_public_delivery(self, url, login, check_cancel):
+        """Confirm the same proposal publicly before announcing delivery.
+
+        Keep this separate from the existing payload validation policy: old
+        valid cached drafts must not be discarded and regenerated after update.
+        """
+        self.guard(login, check_cancel)
+        if not valid_proposal_url(url) or self.state.get("url") != url:
+            raise PublicVisibilityPending()
+        result = public_pull_request(int(url.rsplit("/", 1)[1]))
+        self.guard(login, check_cancel)
+        if not isinstance(result, dict) or not isinstance(self.state.get("commit"), str):
+            raise PublicVisibilityPending()
+        def mapping(value):
+            return value if isinstance(value, dict) else {}
+        base, head, user = (mapping(result.get(key)) for key in ("base", "head", "user"))
+        base_repo, head_repo = mapping(base.get("repo")), mapping(head.get("repo"))
+        target = UPSTREAM if login.casefold() == UPSTREAM.split("/")[0].casefold() else login + "/cale-ai-workbench"
+        actual = [result.get("number"), result.get("html_url"), base_repo.get("full_name"), base.get("ref"),
+                  head_repo.get("full_name"), head.get("ref"), head.get("sha"), user.get("login")]
+        expected = [int(url.rsplit("/", 1)[1]), url, UPSTREAM, "main", target,
+                    "cale-donation-" + self.run_id[:16], self.state.get("commit"), login]
+        for index in (2, 4, 7):
+            if isinstance(actual[index], str):
+                actual[index] = actual[index].casefold()
+            expected[index] = expected[index].casefold()
+        body = result.get("body")
+        if (type(actual[0]) is not int or actual != expected or result.get("state") not in {"open", "closed"}
+                or not isinstance(body, str) or "<!-- cale-publication:" + self.run_id + " -->" not in body
+                or "<!-- cale-donation:" + self.data["job"]["id"] + " -->" not in body):
+            raise PublicVisibilityPending()
+
+
     def terminal(self, phase):
         if phase not in _OUTBOX_TERMINAL and phase != "corrupt_pending":
             raise ValueError("Invalid publication terminal phase")
@@ -1614,6 +1703,11 @@ class Service:
                 self.message = (self._github_diagnostic_message(diagnostic)
                                 if diagnostic else "GitHub is cooling down · preserving contribution work until it is available.")
                 return
+            public_wait = resource_cooldown(self.root, "public_visibility")
+            if public_wait:
+                self.next_attempt = time.monotonic() + public_wait
+                self.message = "Public GitHub delivery is not confirmed · saved work kept; retrying automatically."
+                return
             login = github_account.account()
             if not login:
                 self.message = "Connect GitHub to submit code for review."
@@ -1635,6 +1729,7 @@ class Service:
                                     publication.data["proposal"], {}, check_cancel, publication=publication)
                 if not valid_proposal_url(url):
                     raise ValueError("GitHub did not return a canonical contribution PR URL")
+                publication.confirm_public_delivery(url, login, check_cancel)
                 finish(self.root, run_id, "submitted", url)
                 publication.terminal("submitted")
                 self._emit_event("submitted", run_id, resource, job_title=publication.data["job"].get("title", ""), pr_url=url)
@@ -1861,6 +1956,7 @@ class Service:
             self._emit_event("submitting", run_id, resource, job_title=job.get("title", ""))
             url = open_proposal(login, run_id, job, commit, proposal, edited, check_cancel, publication=publication)
             if not valid_proposal_url(url):raise ValueError("GitHub did not return a canonical contribution PR URL")
+            publication.confirm_public_delivery(url, login, check_cancel)
             finish(self.root, run_id, "submitted", url)
             publication.terminal("submitted")
             self._emit_event("submitted", run_id, resource, job_title=job.get("title", ""), pr_url=url)
@@ -1868,6 +1964,12 @@ class Service:
             self.failures = 0
             if consent["intensity"] in {"medium", "full_blast"}:
                 self.next_attempt = 0
+        except PublicVisibilityPending as error:
+            resource_cooldown(self.root, "public_visibility", error.retry_seconds)
+            self.next_attempt = time.monotonic() + error.retry_seconds
+            self.message = str(error)
+            self._emit_event("waiting", run_id, resource, github_failure={
+                "stage": "proposal-public", "status": error.status, "kind": error.kind})
         except PublicationPending as error:
             self.message = str(error)
             self.next_attempt = 0 if settings(self.root)["intensity"] in {"medium", "full_blast"} else time.monotonic()+60

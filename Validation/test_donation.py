@@ -221,7 +221,7 @@ def test_background_flow_uses_only_public_source_and_keeps_usage_on_cancellation
           patch("usage_history.record_completion"),
           patch.object(donation, "public_file", side_effect=public),
           patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT),
-          patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/1") as publish):
+          patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/1") as publish):
         service._run(cancel)
     assert donation.total_tokens(tmp_path) == 50
     assert "PRIVATE DOCUMENT" not in json.dumps(payloads)
@@ -400,7 +400,7 @@ def test_local_background_flow_does_not_require_a_chatgpt_account(tmp_path):
           patch("chatgpt_auth.status", side_effect=AssertionError("ChatGPT should not be needed")),
           patch("usage_history.record_completion"), patch.object(donation, "public_file", side_effect=public),
           patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT),
-          patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/2") as publish):
+          patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/2") as publish):
         service._run(threading.Event())
     publish.assert_called_once()
     assert donation.source_totals(tmp_path) == {"local": 50}
@@ -626,7 +626,7 @@ def test_full_blast_keeps_inflight_work_on_activity_but_explicit_stop_cancels(tm
           patch.object(donation, "public_file", side_effect=public),
           patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT),
           patch.object(donation, "complete_donation", side_effect=complete),
-          patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/7") as publish):
+          patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/7") as publish):
         service._run(service.cancel)
     publish.assert_called_once()
     assert payloads and service.next_attempt == 0
@@ -1593,7 +1593,7 @@ def test_quota_exhausted_chatgpt_scheduler_immediately_uses_enabled_local(tmp_pa
          patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
          patch.object(donation,'gh_api',side_effect=lambda endpoint:[] if is_open_pull_list(endpoint) else COMMIT),\
-         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal',side_effect=lambda *args, **kwargs: drafts.append((args, kwargs)) or 'https://github.com/CaleMediaDev/cale-ai-workbench/pull/11'),\
+         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation,'open_proposal',side_effect=lambda *args, **kwargs: drafts.append((args, kwargs)) or 'https://github.com/CaleMediaDev/cale-ai-workbench/pull/11'),\
          patch.object(donation.threading,'Thread',DonationInlineThread):
         service.tick()
         assert resources==['chatgpt'] and service.next_attempt==0
@@ -1705,7 +1705,7 @@ def test_failed_proposal_syntax_check_never_reports_sent_pr_or_private_model_out
          patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
          patch.object(donation,'gh_api',side_effect=lambda endpoint:[] if is_open_pull_list(endpoint) else COMMIT),\
-         patch.object(donation,'complete_donation',return_value=result),patch.object(donation,'open_proposal') as publish:
+         patch.object(donation,'complete_donation',return_value=result),patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation,'open_proposal') as publish:
         service._run(threading.Event())
     publish.assert_not_called()
     events=service.drain_events()
@@ -1895,7 +1895,7 @@ def test_invalid_local_proposal_cools_only_job_scope_then_reviews_other_area(tmp
          patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
          patch.object(donation,'gh_api',side_effect=lambda endpoint:[] if is_open_pull_list(endpoint) else COMMIT),\
-         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal') as publish,\
+         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation,'open_proposal') as publish,\
          patch.object(donation.threading,'Thread',DonationInlineThread):
         service.tick()
         assert service.next_attempt==0 and service.failures==0
@@ -2038,7 +2038,7 @@ def test_github_submission_failure_keeps_real_usage_and_never_claims_pr_success(
          patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT), \
          patch.object(donation, "complete_donation", side_effect=complete), \
          patch("usage_history.record_completion"), patch.object(donation, "finish", side_effect=finish), \
-         patch.object(donation, "open_proposal", side_effect=donation.GitHubRequestError("fork-create", 403, "http")):
+         patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", side_effect=donation.GitHubRequestError("fork-create", 403, "http")):
         service._run(threading.Event())
     assert donation.total_tokens(tmp_path) == 50
     assert donation.resource_cooldown(tmp_path, "local") == 0
@@ -2115,7 +2115,7 @@ def test_advisory_old_review_and_scope_404_do_not_pause_current_donation(tmp_pat
          patch.object(donation, "public_file", side_effect=public), patch.object(donation, "gh_api", side_effect=api), \
          patch.object(donation, "complete_donation", side_effect=complete) as inference, \
          patch("usage_history.record_completion"), \
-         patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/2") as submit:
+         patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/2") as submit:
         service._run(threading.Event())
     assert set(advisory) == {"old-review", "old-scope"}
     inference.assert_called_once()
@@ -2399,6 +2399,7 @@ class PublicationRemote:
         self.fork_failures = 0
         self.fork_failure_status = 404
         self.fork_created = False
+        self.public_visible = True
         self.pr_failure = ""
         self.ref_lost = False
         self.revision = COMMIT["sha"]
@@ -2486,6 +2487,14 @@ def outbox_host(tmp_path, monkeypatch):
     monkeypatch.setattr(donation, "continuous_jobs", lambda jobs, revision, **kw: jobs)
     monkeypatch.setattr(donation, "public_file", remote.public)
     monkeypatch.setattr(donation, "gh_api", remote.api)
+    def public_pull(number):
+        if not remote.public_visible:
+            raise donation.PublicVisibilityPending(404, 'http')
+        found = next((pr for pr in remote.prs if pr['number'] == number), None)
+        if found is None:
+            raise donation.PublicVisibilityPending(404, 'http')
+        return json.loads(json.dumps(found))
+    monkeypatch.setattr(donation, 'public_pull_request', public_pull)
     monkeypatch.setattr("usage_history.record_completion", lambda *args: None)
     def complete(payload, resource, intensity, cancel, receipt):
         calls.append(payload)
@@ -3088,3 +3097,104 @@ def test_wait_chat_ignores_untrusted_github_diagnostics(failure):
     donation_ui.ChatActivity(service,messages.append).poll()
     assert len(messages)==1 and 'SECRET' not in messages[0] and 'private.invalid' not in messages[0]
     assert 'GitHub HTTP' not in messages[0]
+
+
+def test_public_confirmation_keeps_existing_527_saved_payload_policy():
+    assert donation._publication_policy()=='2f2342462a62b4057d69608630bc596a2ecdf9e3dc4c28d2d757104510578ced'
+
+
+def test_donor_only_pr_is_pending_then_publicly_recovers_without_more_tokens_or_posts(outbox_host):
+    import donation_ui
+    host=outbox_host;host.remote.public_visible=False
+    first=host.tick();messages=[]
+    donation_ui.ChatActivity(first,messages.append).poll()
+    assert len(host.calls)==1 and len(host.remote.prs)==1 and donation.total_tokens(host.root)==50
+    assert not any('just sent' in message for message in messages)
+    assert any('public proposal confirmation' in message and 'not confirmed' in message for message in messages)
+    with closing(donation.connection(host.root)) as db:
+        original=db.execute('SELECT id FROM runs').fetchone()[0]
+        assert db.execute('SELECT phase,length(payload) FROM publication_outbox').fetchone()[1]>0
+        assert db.execute('SELECT COUNT(*) FROM runs WHERE status=\'submitted\'').fetchone()[0]==0
+    calls=len(host.remote.calls)
+    host.tick()  # Shared cooldown persists across Service instances.
+    assert len(host.remote.calls)==calls and len(host.calls)==1
+    host.remote.public_visible=True
+    with patch.object(donation.time,'time',return_value=outbox_expire(host.root)):
+        second=host.tick()
+    assert len(host.calls)==1 and len(host.remote.prs)==1 and donation.total_tokens(host.root)==50
+    assert sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)==1
+    with closing(donation.connection(host.root)) as db:
+        assert db.execute('SELECT id,status FROM runs').fetchall()==[(original,'submitted')]
+        assert db.execute('SELECT phase,length(payload) FROM publication_outbox').fetchone()==('submitted',0)
+    messages=[];donation_ui.ChatActivity(second,messages.append).poll()
+    assert any('just sent' in message and '/pull/1' in message for message in messages)
+
+
+@pytest.mark.parametrize('field,value',[
+    ('number',True),('html_url','https://github.com/other/repo/pull/1'),
+    ('body','Unrelated public proposal'),('state','unknown'),('base',None),
+    ('user',{'login':'other'}),('head',{'sha':'f'*40}),
+])
+def test_public_result_must_match_the_exact_saved_proposal(outbox_host,field,value):
+    host=outbox_host;original=donation.public_pull_request
+    def public(number):
+        result=original(number);result[field]=value;return result
+    with patch.object(donation,'public_pull_request',side_effect=public):
+        service=host.tick()
+    assert len(host.calls)==1 and len(host.remote.prs)==1
+    assert 'not confirmed' in service.status_message()
+    with closing(donation.connection(host.root)) as db:
+        assert db.execute('SELECT COUNT(*) FROM runs WHERE status=\'submitted\'').fetchone()[0]==0
+        assert db.execute('SELECT length(payload) FROM publication_outbox').fetchone()[0]>0
+
+
+class PublicPullResponse:
+    status=200
+    def __init__(self,body=b'{}',url=None):
+        self.body=body;self.url=url or f'https://api.github.com/repos/{donation.UPSTREAM}/pulls/728'
+        self.read_limit=None
+    def __enter__(self):return self
+    def __exit__(self,*args):pass
+    def read(self,limit):self.read_limit=limit;return self.body[:limit]
+    def geturl(self):return self.url
+
+
+def test_public_pull_is_a_bounded_fixed_origin_read_without_account_headers():
+    response=PublicPullResponse(b'{"number":728}')
+    captured=[]
+    def open_request(request,timeout):
+        captured.append((request,timeout));return response
+    with patch.object(donation,'build_opener',return_value=SimpleNamespace(open=open_request)) as build:
+        assert donation.public_pull_request(728)=={'number':728}
+    request,timeout=captured[0]
+    assert request.full_url==f'https://api.github.com/repos/{donation.UPSTREAM}/pulls/728'
+    assert timeout==15 and request.data is None and request.get_method()=='GET'
+    assert {key.lower() for key,_ in request.header_items()}=={'accept','user-agent'}
+    assert response.read_limit==256*1024+1
+    redirect=build.call_args.args[0]
+    assert redirect.redirect_request(None,None,302,'',{},'https://other.invalid') is None
+
+
+@pytest.mark.parametrize('response',[
+    PublicPullResponse(b'x'*(256*1024+1)),PublicPullResponse(b'[]'),
+    PublicPullResponse(b'bad json'),PublicPullResponse(b'{}',url='https://other.invalid'),
+])
+def test_public_pull_unknown_response_never_counts_as_delivery(response):
+    with patch.object(donation,'build_opener',return_value=SimpleNamespace(open=lambda *a,**k:response)):
+        with pytest.raises(donation.PublicVisibilityPending):donation.public_pull_request(728)
+
+
+@pytest.mark.parametrize('status,retry,expected',[(404,'',60),(403,'',3600),(429,'120',120),(429,'NaN',3600)])
+def test_public_pull_errors_keep_typed_status_and_bounded_backoff_without_remote_text(status,retry,expected):
+    from urllib.error import HTTPError
+    error=HTTPError('https://private.invalid',status,'PRIVATE BODY',{'Retry-After':retry},None)
+    with patch.object(donation,'build_opener',return_value=SimpleNamespace(open=lambda *a,**k:(_ for _ in ()).throw(error))):
+        with pytest.raises(donation.PublicVisibilityPending) as raised:donation.public_pull_request(728)
+    assert raised.value.status==status and raised.value.retry_seconds==expected
+    assert raised.value.__context__ is None and raised.value.__cause__ is None
+    assert 'PRIVATE' not in str(raised.value) and 'private.invalid' not in str(raised.value)
+
+
+def test_public_pull_interruption_remains_cancellation():
+    with patch.object(donation,'build_opener',return_value=SimpleNamespace(open=lambda *a,**k:(_ for _ in ()).throw(InterruptedError()))):
+        with pytest.raises(InterruptedError):donation.public_pull_request(728)
