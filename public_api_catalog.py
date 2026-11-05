@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import tempfile
 import time
+from os import fstat
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -27,13 +28,14 @@ def _catalog() -> tuple[list[dict], bool]:
     try:
         with CACHE.open("rb") as handle:
             raw = handle.read(MAX_BYTES + 1)
+            cache_mtime = fstat(handle.fileno()).st_mtime
         if len(raw) > MAX_BYTES:
             raise ValueError("Public API catalog exceeded its cache limit.")
         cached = json.loads(raw.decode("utf-8"))
         if not isinstance(cached, list) or not all(isinstance(entry, dict) for entry in cached):
             raise ValueError("Unexpected public API catalog format.")
         data = cached
-        fresh = time.time() - CACHE.stat().st_mtime < MAX_AGE
+        fresh = time.time() - cache_mtime < MAX_AGE
     except (OSError, ValueError, RecursionError):
         pass
     if not fresh:
