@@ -4,6 +4,8 @@ import argparse
 import base64
 import json
 import os
+import math
+import queue
 import sys
 import threading
 import time
@@ -13,6 +15,7 @@ import psutil
 
 ROOT = Path(__file__).resolve().parent
 CONSENT = ROOT / "Media/camera-consent.json"
+_EMIT_LOCK = threading.Lock()
 
 
 def allowed(now=None):
@@ -151,19 +154,92 @@ def greeting_line(names):
 
 
 def emit(kind, message=""):
-    print(json.dumps({"event": kind, "message": message}), flush=True)
+    with _EMIT_LOCK:
+        print(json.dumps({"event": kind, "message": message}), flush=True)
 
 
 def preview_frame(frame, cv2):
     """Encode a small in-memory frame for the desktop's local beach scene."""
     try:
-        width = 200
+        width = 320
         height = max(1, min(160, round(frame.shape[0] * width / frame.shape[1])))
         small = cv2.resize(frame, (width, height))
-        ok, encoded = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 62])
+        ok, encoded = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 80])
         return base64.b64encode(encoded.tobytes()).decode("ascii") if ok else ""
     except Exception:
         return ""  # Preview failure must not stop local visitor detection.
+
+
+
+def negotiate_capture(camera, cv2, local=True):
+    """Request native UHD transport, report driver values rather than upscale."""
+    if local:
+        for name, value in (("CAP_PROP_FOURCC", getattr(cv2, "VideoWriter_fourcc", lambda *_: 0)(*"MJPG")),
+                            ("CAP_PROP_FRAME_WIDTH", 3840), ("CAP_PROP_FRAME_HEIGHT", 2160),
+                            ("CAP_PROP_FPS", 30), ("CAP_PROP_BUFFERSIZE", 1), ("CAP_PROP_READ_TIMEOUT_MSEC", 2000)):
+            try:
+                camera.set(getattr(cv2, name), value)
+            except Exception:
+                pass  # Unsupported properties are common; actual values win.
+    values = []
+    for name in ("CAP_PROP_FRAME_WIDTH", "CAP_PROP_FRAME_HEIGHT", "CAP_PROP_FPS"):
+        try:
+            value = float(camera.get(getattr(cv2, name)))
+            values.append(value if math.isfinite(value) and 0 < value <= 10000 else None)
+        except Exception:
+            values.append(None)
+    return dict(zip(("width", "height", "fps"), values))
+
+
+def recognition_frame(frame, cv2):
+    """Bound face-detector work independently of the native capture resolution."""
+    height, width = frame.shape[:2]
+    return (cv2.resize(frame, (960, max(1, round(height * 960 / width))))
+            if width > 960 else frame)
+
+
+class LatestFrameWorker:
+    """One recognition worker and one pending frame; previews never wait on it."""
+
+    def __init__(self, process):
+        self.process = process
+        self.pending = queue.Queue(maxsize=1)
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def submit(self, frame):
+        if self.stopped.is_set():
+            return
+        try:
+            self.pending.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            self.pending.put_nowait(frame)
+        except queue.Full:
+            pass
+
+    def _run(self):
+        while not self.stopped.is_set():
+            try:
+                frame = self.pending.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if not self.stopped.is_set():
+                try:
+                    self.process(frame)
+                except Exception:
+                    emit("notice", "Local face recognition could not process this frame.")
+                self.stopped.wait(0.35)
+
+    def close(self):
+        self.stopped.set()
+        try:
+            self.pending.get_nowait()
+        except queue.Empty:
+            pass
+        self.thread.join(timeout=2)
 
 
 def watch(device=0, parent_pid=None, parent_started=None):
@@ -185,11 +261,6 @@ def watch(device=0, parent_pid=None, parent_started=None):
     if cascade.empty():
         emit("error", "The local face detector is unavailable.")
         return 1
-    emit("setup", "Preparing local face recognition.")
-    try:
-        face_model = FaceModel()
-    except Exception:
-        face_model = None  # Face detection and generic greetings still work offline.
     source = camera_source(greeting_camera())
     camera = (cv2.VideoCapture(source, cv2.CAP_DSHOW)
               if isinstance(source, int) else cv2.VideoCapture(source))
@@ -197,19 +268,93 @@ def watch(device=0, parent_pid=None, parent_started=None):
         camera.release()
         emit("error", "Webcam unavailable. Check Windows camera access or close another camera app.")
         return 1
+    if not owner_alive(parent_pid, parent_started):
+        camera.release()
+        emit("stopped", "Camera greeting stopped because the app closed.")
+        return 0
     state = VisitorState()
     tracker = VisitorTracker()
     enrolling_name = None
     enrolling_features = []
     enrolling_started = 0.0
-    if not owner_alive(parent_pid, parent_started):
-        camera.release()
-        emit("stopped", "Camera greeting stopped because the app closed.")
-        return 0
-    emit("ready", "Camera greeting is on. Faces are checked locally; no video is saved.")
+    face_model = None
+    model_initialized = False
+    recognition_stopped = threading.Event()
+
+    def recognize(frame):
+        nonlocal face_model, model_initialized, enrolling_name, enrolling_features, enrolling_started
+        if recognition_stopped.is_set() or not allowed() or not owner_alive(parent_pid, parent_started):
+            return
+        if not model_initialized:
+            model_initialized = True
+            emit("setup", "Preparing local face recognition.")
+            try:
+                face_model = FaceModel()
+            except Exception:
+                face_model = None  # Face detection and generic greetings still work offline.
+        if recognition_stopped.is_set():
+            return
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        height, width = gray.shape[:2]
+        if width > 640:
+            gray = cv2.resize(gray, (640, max(1, round(height * 640 / width))))
+        try:
+            # Capture stays native; recognition has a separate bounded CPU cost.
+            face_frame = recognition_frame(frame, cv2) if face_model else frame
+            features = face_model.features(face_frame) if face_model else []
+        except Exception:
+            face_model = None
+            features = []
+            emit("notice", "Face recognition is unavailable; generic greetings still work.")
+        if face_model:
+            seen = bool(features)
+        else:
+            faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
+                                             minSize=(45, 45))
+            seen = len(faces) > 0
+        if recognition_stopped.is_set() or not allowed() or not owner_alive(parent_pid, parent_started):
+            return
+        feature = features[0] if len(features) == 1 else None
+        if face_model and ENROLL_REQUEST.is_file():
+            try:
+                enrolling_name = str(json.loads(ENROLL_REQUEST.read_text(encoding="utf-8"))["name"])
+                enrolling_features = []
+                enrolling_started = time.monotonic()
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+            try:
+                ENROLL_REQUEST.unlink(missing_ok=True)
+            except OSError:
+                emit("notice", "The face enrollment request could not be removed.")
+        if enrolling_name and time.monotonic() - enrolling_started > 12:
+            emit("notice", "I couldn't learn that face. Try introducing yourself while looking at the camera.")
+            enrolling_name = None
+        if enrolling_name and feature:
+            enrolling_features.append(feature)
+            if len(enrolling_features) >= 5:
+                if enroll(enrolling_name, enrolling_features):
+                    emit("enrolled", f"I learned {enrolling_name}'s face locally. I might still make mistakes, so please correct me if I do.")
+                enrolling_name = None
+        now = time.monotonic()
+        if face_model:
+            arrivals = tracker.observe(features, now)
+            if arrivals:
+                emit("visitor", greeting_line([face_model.identify(item) for item in arrivals]))
+        elif state.observe(seen, now):
+            emit("visitor", greeting_line([None]))
+    negotiated = negotiate_capture(camera, cv2, isinstance(source, int))
+    worker = LatestFrameWorker(recognize)
+    dimensions = (f"{int(negotiated['width'])}×{int(negotiated['height'])}" if negotiated['width'] and negotiated['height'] else "resolution unreported")
+    fps = f"{negotiated['fps']:g} driver-reported fps" if negotiated['fps'] else "fps unreported"
+    mode = "Native 4K requested; device fallback is shown" if isinstance(source, int) else "Network camera native format"
+    emit("ready", f"Camera on · {dimensions} · {fps}. {mode}. Local only; no video saved.")
     try:
         failed_reads = 0
         last_preview = 0.0
+        first_frame = True
+        capture_started = time.monotonic()
+        captured_frames = 0
+        measured_reported = False
         while allowed() and owner_alive(parent_pid, parent_started):
             try:
                 ok, frame = camera.read()
@@ -222,60 +367,30 @@ def watch(device=0, parent_pid=None, parent_started=None):
                     return 1
                 time.sleep(0.5)
                 continue
+            if not allowed() or not owner_alive(parent_pid, parent_started):
+                break  # Permission can expire during a device read.
             failed_reads = 0
+            if first_frame:
+                first_frame = False
+                emit("notice", f"Camera frames: {frame.shape[1]}×{frame.shape[0]} native pixels; preview is reduced for responsiveness.")
+            captured_frames += 1
             preview_now = time.monotonic()
-            if preview_now - last_preview >= 1:
+            elapsed = preview_now - capture_started
+            if not measured_reported and elapsed >= 2:
+                measured_reported = True
+                emit("notice", f"Camera capture measured {captured_frames / elapsed:.1f} frames/s at {frame.shape[1]}×{frame.shape[0]}; no video saved.")
+            if preview_now - last_preview >= 1 / 15:
                 payload = preview_frame(frame, cv2)
                 if payload:
                     emit("frame", payload)
                 last_preview = preview_now
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            height, width = gray.shape[:2]
-            if width > 640:
-                gray = cv2.resize(gray, (640, max(1, round(height * 640 / width))))
-            try:
-                features = face_model.features(frame) if face_model else []
-            except Exception:
-                face_model = None
-                features = []
-                emit("notice", "Face recognition is unavailable; generic greetings still work.")
-            if face_model:
-                seen = bool(features)
-            else:
-                faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
-                                                 minSize=(45, 45))
-                seen = len(faces) > 0
-            feature = features[0] if len(features) == 1 else None
-            if face_model and ENROLL_REQUEST.is_file():
-                try:
-                    enrolling_name = str(json.loads(ENROLL_REQUEST.read_text(encoding="utf-8"))["name"])
-                    enrolling_features = []
-                    enrolling_started = time.monotonic()
-                except (OSError, ValueError, KeyError, TypeError):
-                    pass
-                try:
-                    ENROLL_REQUEST.unlink(missing_ok=True)
-                except OSError:
-                    emit("notice", "The face enrollment request could not be removed.")
-            if enrolling_name and time.monotonic() - enrolling_started > 12:
-                emit("notice", "I couldn't learn that face. Try introducing yourself while looking at the camera.")
-                enrolling_name = None
-            if enrolling_name and feature:
-                enrolling_features.append(feature)
-                if len(enrolling_features) >= 5:
-                    if enroll(enrolling_name, enrolling_features):
-                        emit("enrolled", f"I learned {enrolling_name}'s face locally. I might still make mistakes, so please correct me if I do.")
-                    enrolling_name = None
-            now = time.monotonic()
-            if face_model:
-                arrivals = tracker.observe(features, now)
-                if arrivals:
-                    emit("visitor", greeting_line([face_model.identify(item) for item in arrivals]))
-            elif state.observe(seen, now):
-                emit("visitor", greeting_line([None]))
-            time.sleep(0.35)
+            worker.submit(frame)
+            # Drivers normally pace read(); cap a nonblocking backend too.
+            time.sleep(0.005)
     finally:
+        recognition_stopped.set()
         camera.release()
+        worker.close()
     emit("stopped", "Camera greeting is off.")
     return 0
 

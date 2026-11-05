@@ -4736,6 +4736,26 @@ def gui():
 
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
+    camera_frames = queue.Queue(maxsize=1)
+
+    def offer_camera_frame(value):
+        if len(value) > 200_000:
+            return
+        try:
+            camera_frames.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            camera_frames.put_nowait(value)
+        except queue.Full:
+            pass
+
+    def camera_preview_poll():
+        try:
+            show_camera_preview(camera_frames.get_nowait())
+        except queue.Empty:
+            pass
+        window.after(33, camera_preview_poll)
     voice_busy = threading.Event()
     mute_marker = STATE / "voice-muted"
     voice_muted = threading.Event()
@@ -5378,7 +5398,7 @@ def gui():
                     [str(media_python), "-u", str(ROOT / "camera_presence.py"),
                      "--parent-pid", str(os.getpid()), "--parent-started",
                      str(psutil.Process(os.getpid()).create_time())],
-                    cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     text=True, encoding="utf-8", errors="replace",
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
@@ -5388,8 +5408,11 @@ def gui():
                         event = json.loads(line)
                     except ValueError:
                         continue
-                    voice_events.put(("camera_" + str(event.get("event", "error")),
-                                      str(event.get("message", ""))))
+                    if event.get("event") == "frame":
+                        offer_camera_frame(str(event.get("message", "")))
+                    else:
+                        voice_events.put(("camera_" + str(event.get("event", "error")),
+                                          str(event.get("message", ""))))
                 process.wait()
                 if process.returncode and greeting_until[0] > time.time():
                     voice_events.put(("camera_error", "Camera greeting stopped. Check the camera connection and try again."))
@@ -7286,8 +7309,6 @@ def gui():
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
                     report_runtime_issue("speech", value)
-                elif event == "camera_frame":
-                    show_camera_preview(value)
                 elif event in ("camera_visitor", "camera_enrolled"):
                     if event == "camera_visitor" and "Who are you?" in value:
                         visitor_awaiting_intro_until[0] = time.monotonic() + 45
@@ -7677,6 +7698,7 @@ def gui():
     # request is ignored until all of its speech has finished. The greeting
     # remains queued and plays once the initial listening clip is complete.
     toggle_listening(interrupt_speech=True)
+    camera_preview_poll()
     voice_poll()
     poll()
 

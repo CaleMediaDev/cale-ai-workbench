@@ -281,9 +281,12 @@ def open_camera(device):
     from camera_network import camera_source
 
     source = camera_source(device)
-    if isinstance(source, int):
-        return cv2.VideoCapture(source, cv2.CAP_DSHOW)
-    return cv2.VideoCapture(source)
+    from camera_presence import negotiate_capture
+    camera = (cv2.VideoCapture(source, cv2.CAP_DSHOW)
+              if isinstance(source, int) else cv2.VideoCapture(source))
+    if camera.isOpened():
+        negotiate_capture(camera, cv2, isinstance(source, int))
+    return camera
 
 
 def capture_camera(output_path, device=0):
@@ -317,6 +320,7 @@ def capture_camera(output_path, device=0):
             "path": str(target),
             "device": device,
             "captured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "width": int(frame.shape[1]), "height": int(frame.shape[0]),
         }
     finally:
         capture.release()
