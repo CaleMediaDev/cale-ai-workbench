@@ -1581,12 +1581,13 @@ def test_quota_exhausted_chatgpt_scheduler_immediately_uses_enabled_local(tmp_pa
          patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
          patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
-         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal',side_effect=lambda *args: drafts.append(args) or 'https://github.com/CaleMediaDev/cale-ai-workbench/pull/11'),\
+         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal',side_effect=lambda *args, **kwargs: drafts.append((args, kwargs)) or 'https://github.com/CaleMediaDev/cale-ai-workbench/pull/11'),\
          patch.object(donation.threading,'Thread',DonationInlineThread):
         service.tick()
         assert resources==['chatgpt'] and service.next_attempt==0
         service.tick()
     assert resources==['chatgpt','local'] and len(drafts)==1
+    assert isinstance(drafts[0][1]['publication'], donation.DurablePublication)
     events=service.drain_events()
     assert [event['phase'] for event in events]==['reviewing','waiting','reviewing','checking','submitting','submitted']
     assert events[-1]['pr_url']=='https://github.com/'+donation.UPSTREAM+'/pull/11'
@@ -2371,3 +2372,519 @@ def test_token_snapshot_keeps_one_schema_and_totals_snapshot_across_writer_commi
 def test_token_snapshot_existing_empty_ledger_is_real_zero(tmp_path):
     with closing(donation.connection(tmp_path)): pass
     assert donation.token_snapshot(tmp_path) == {"total":0,"sources":{}}
+
+
+class PublicationRemote:
+    """Owned in-memory GitHub fixture, including applied-but-lost POST responses."""
+    def __init__(self):
+        self.calls = []
+        self.refs, self.commits = {}, {}
+        self.prs = []
+        self.fork_failures = 0
+        self.pr_failure = ""
+        self.ref_lost = False
+        self.revision = COMMIT["sha"]
+        self.source_changed = False
+        self.job_changed = False
+
+    def public(self, path, revision):
+        if path == "donation-tasks.json":
+            return json.dumps([{**JOB, "instructions": "changed"}] if self.job_changed else [JOB])
+        if self.source_changed and revision == self.revision:
+            return SOURCES[path] + "# external public change\n"
+        return SOURCES[path]
+
+    def api(self, endpoint, data=None):
+        from urllib.parse import parse_qs
+        self.calls.append((endpoint, data))
+        if endpoint.startswith("search/"):
+            return {"total_count": 0}
+        if endpoint.endswith("/commits/main"):
+            return {"sha": self.revision, "commit": {"tree": {"sha": "b"*40}}}
+        if "/git/trees/" in endpoint:
+            return {"tree": [{"path": path, "type": "blob", "sha": donation._public_blob(body)} for path, body in SOURCES.items()]}
+        if endpoint.endswith("/forks"):
+            if self.fork_failures:
+                self.fork_failures -= 1
+                raise donation.GitHubRequestError("fork-create", 404, "http")
+            return {"full_name": "donor/cale-ai-workbench", "fork": True}
+        if endpoint == "repos/donor/cale-ai-workbench":
+            return {"fork": True, "parent": {"full_name": donation.UPSTREAM}}
+        if endpoint.endswith("/git/trees"):
+            return {"sha": "c"*40}
+        if endpoint.endswith("/git/commits"):
+            sha = hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()
+            self.commits[sha] = {"sha": sha, "message": data["message"], "tree": {"sha": data["tree"]},
+                "parents": [{"sha": parent, "url": "fixture-parent-url"} for parent in data["parents"]]}
+            return {"sha": sha}
+        if "/git/commits/" in endpoint:
+            return self.commits[endpoint.rsplit("/", 1)[1]]
+        if "/git/ref/heads/" in endpoint:
+            branch = endpoint.split("/git/ref/heads/")[1]
+            if branch not in self.refs:
+                raise donation.GitHubRequestError("repository", 404, "http")
+            return {"object": {"sha": self.refs[branch]}}
+        if endpoint.endswith("/git/refs"):
+            branch = data["ref"].removeprefix("refs/heads/")
+            if branch in self.refs:
+                raise donation.GitHubRequestError("branch-create", 422, "http")
+            self.refs[branch] = data["sha"]
+            if self.ref_lost:
+                self.ref_lost = False
+                raise donation.GitHubRequestError("branch-create", kind="timeout")
+            return {"object": {"sha": data["sha"]}}
+        if "/pulls?" in endpoint:
+            head = parse_qs(endpoint.split("?", 1)[1])["head"][0]
+            return [pr for pr in self.prs if head == "donor:" + pr["head"]["ref"]]
+        if endpoint.endswith("/pulls"):
+            failure, self.pr_failure = self.pr_failure, ""
+            if failure == "rejected":
+                raise donation.GitHubRequestError("proposal-create", 403, "http")
+            if failure != "unknown-absent":
+                branch = data["head"].split(":", 1)[1]
+                pr = {"number": len(self.prs)+1, "html_url": f"https://github.com/{donation.UPSTREAM}/pull/{len(self.prs)+1}",
+                    "body": data["body"], "state": "open", "draft": True, "user": {"login": "donor"},
+                    "base": {"ref": "main", "repo": {"full_name": donation.UPSTREAM}},
+                    "head": {"ref": branch, "sha": self.refs[branch], "repo": {"full_name": "donor/cale-ai-workbench"}}}
+                self.prs.append(pr)
+            if failure in {"applied-lost", "unknown-absent"}:
+                raise donation.GitHubRequestError("proposal-create", kind="timeout")
+            return pr
+        raise AssertionError("Unexpected fixture endpoint: " + endpoint)
+
+
+@pytest.fixture
+def outbox_host(tmp_path, monkeypatch):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    remote = PublicationRemote()
+    calls = []
+    monkeypatch.setattr("pc_offline.offline", lambda: False)
+    monkeypatch.setattr("github_account.account", lambda: "donor")
+    monkeypatch.setattr(donation, "local_available", lambda: True)
+    monkeypatch.setattr("readiness_checklist._heavy_gpu_active", lambda root: False)
+    monkeypatch.setattr(donation, "continuous_jobs", lambda jobs, revision, **kw: jobs)
+    monkeypatch.setattr(donation, "public_file", remote.public)
+    monkeypatch.setattr(donation, "gh_api", remote.api)
+    monkeypatch.setattr("usage_history.record_completion", lambda *args: None)
+    def complete(payload, resource, intensity, cancel, receipt):
+        calls.append(payload)
+        receipt(RESULT, "ollama", "main", False)
+        return RESULT
+    monkeypatch.setattr(donation, "complete_donation", complete)
+    def tick():
+        service = donation.Service(tmp_path)
+        with patch.object(donation.threading, "Thread", DonationInlineThread):
+            service.tick()
+        return service
+    return SimpleNamespace(root=tmp_path, remote=remote, calls=calls, tick=tick)
+
+
+def outbox_expire(root):
+    # Test clock advancement, never production-counter/lease reset.
+    with closing(donation.connection(root)) as connection:
+        rows = connection.execute("SELECT until FROM cooldowns UNION ALL SELECT checked+61 FROM publication_outbox").fetchall()
+    return max([time.time(), *(row[0] for row in rows)]) + 1
+
+
+def test_valid_publication_404_restart_resumes_original_run_without_model_regeneration(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    first = host.tick()
+    with closing(donation.connection(host.root)) as connection:
+        before = connection.execute("SELECT id,status,tokens FROM runs").fetchall()
+        assert connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone()[1] > 0
+    assert len(host.calls) == 1 and before[0][2] == 50 and "HTTP 404" in first.status_message()
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        second = host.tick()
+    with closing(donation.connection(host.root)) as connection:
+        after = connection.execute("SELECT id,status,tokens FROM runs").fetchall()
+        assert connection.execute("SELECT phase,length(payload),owner FROM publication_outbox").fetchone() == ("submitted", 0, "")
+        assert connection.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] == 1
+    assert after == [(before[0][0], "submitted", 50)]
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1
+    assert donation.total_tokens(host.root) == 50
+    assert "confirmed" in second.status_message()
+
+
+@pytest.mark.parametrize("failure", ["applied-lost", "rejected"])
+def test_publication_pr_restart_reconciles_lost_or_rejected_post_without_reinference(outbox_host, failure):
+    host = outbox_host
+    host.remote.pr_failure = failure
+    host.tick()
+    assert len(host.calls) == 1
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 50
+    posts = [body for endpoint, body in host.remote.calls if endpoint.endswith("/pulls") and body is not None]
+    assert len(posts) == (1 if failure == "applied-lost" else 2)
+    assert len(host.remote.prs) == 1
+    assert any("/pulls?" in endpoint and "head=" in endpoint and "state=all" in endpoint for endpoint, _ in host.remote.calls)
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "submitted"
+
+
+def test_unknown_pr_post_absence_stays_reserved_not_blindly_reposted(outbox_host):
+    host = outbox_host
+    host.remote.pr_failure = "unknown-absent"
+    host.tick()
+    for _ in range(2):
+        with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+            waiting = host.tick()
+        assert "confirmation" in waiting.status_message()
+    assert len(host.calls) == 1 and not host.remote.prs
+    assert sum(endpoint.endswith("/pulls") and data is not None for endpoint, data in host.remote.calls) == 1
+    assert donation.claim_run(host.root, JOB["id"], "local", "medium", "f"*40) == ""
+
+
+def test_applied_ref_lost_response_reuses_exact_branch_without_force_push(outbox_host):
+    host = outbox_host
+    host.remote.ref_lost = True
+    host.tick()
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.refs) == 1 and len(host.remote.prs) == 1
+    assert sum(endpoint.endswith("/git/refs") for endpoint, _ in host.remote.calls) == 1
+
+
+def test_unrelated_main_merge_keeps_pinned_original_base_and_cached_work(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    host.remote.revision = "e"*40
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 50
+    commits = [body for endpoint, body in host.remote.calls if endpoint.endswith("/git/commits") and body]
+    assert commits[0]["parents"] == [COMMIT["sha"]]
+
+
+@pytest.mark.parametrize("changed", ["source", "job", "policy"])
+def test_changed_public_scope_or_validator_rejects_cached_upload_without_new_model(outbox_host, changed):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    mutations = sum(body is not None for _, body in host.remote.calls)
+    if changed == "source": host.remote.source_changed = True
+    if changed == "job": host.remote.job_changed = True
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        if changed == "policy":
+            with patch.object(donation, "_publication_policy", return_value="f"*64):
+                host.tick()
+        else:
+            host.tick()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 50
+    assert sum(body is not None for _, body in host.remote.calls) == mutations
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone() == ("stale", 0)
+
+
+@pytest.mark.parametrize("control", ["disabled", "account", "offline"])
+def test_saved_publication_respects_revoked_consent_account_and_offline_before_rpc(outbox_host, control):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    count = len(host.remote.calls)
+    if control == "disabled": donation.set_enabled(False, host.root)
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        if control == "account":
+            with patch("github_account.account", return_value="another-fixture-account"):
+                host.tick()
+        elif control == "offline":
+            with patch("pc_offline.offline", return_value=True): host.tick()
+        else: host.tick()
+    assert len(host.calls) == 1 and len(host.remote.calls) == count
+    assert not host.remote.prs
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT length(payload) FROM publication_outbox").fetchone()[0] > 0
+
+
+def test_cancel_after_durable_save_retries_same_cached_work_when_reenabled(outbox_host):
+    host = outbox_host
+    original = host.remote.api
+    cancelled = []
+    def api(endpoint, data=None):
+        result = original(endpoint, data)
+        if data is not None and not cancelled:
+            cancelled.append(True)
+            donation.set_enabled(False, host.root)
+        return result
+    with patch.object(donation, "gh_api", side_effect=api):
+        host.tick()
+    assert len(host.calls) == 1 and not host.remote.prs
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase,length(payload),owner FROM publication_outbox").fetchone()[1] > 0
+    donation.set_enabled(True, host.root, github_account="donor", sources=["local"], intensity="medium")
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1 and donation.total_tokens(host.root) == 50
+
+
+def test_every_remote_mutation_follows_validated_payload_and_durable_intent(outbox_host):
+    host = outbox_host
+    original = host.remote.api
+    phases = []
+    def api(endpoint, data=None):
+        if data is not None:
+            with closing(donation.connection(host.root)) as connection:
+                phase, size, owner = connection.execute("SELECT phase,length(payload),owner FROM publication_outbox").fetchone()
+            assert size > 0 and owner and phase.endswith("_intent")
+            phases.append(phase)
+        return original(endpoint, data)
+    with patch.object(donation, "gh_api", side_effect=api): host.tick()
+    assert set(phases) == {"fork_intent", "tree_intent", "commit_intent", "ref_intent", "pr_intent"}
+    assert len(host.remote.prs) == 1
+
+
+def test_wrong_existing_branch_is_not_overwritten_or_submitted(outbox_host):
+    host = outbox_host
+    original = host.remote.api
+    def api(endpoint, data=None):
+        if endpoint.endswith("/forks"):
+            with closing(donation.connection(host.root)) as connection:
+                run = connection.execute("SELECT run FROM publication_outbox").fetchone()[0]
+            host.remote.refs["cale-donation-"+run[:16]] = "f"*40
+        return original(endpoint, data)
+    with patch.object(donation, "gh_api", side_effect=api):
+        waiting = host.tick()
+    assert "not overwritten" in waiting.status_message()
+    assert not host.remote.prs
+    assert not any(endpoint.endswith("/git/refs") for endpoint, _ in host.remote.calls)
+    assert donation.total_tokens(host.root) == 50
+
+
+def test_unknown_post_confirmation_survives_later_source_change_without_duplicate(outbox_host):
+    host = outbox_host
+    host.remote.pr_failure = "applied-lost"
+    host.tick()
+    host.remote.source_changed = True
+    host.remote.revision = "e"*40
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1
+    assert sum(endpoint.endswith("/pulls") and body is not None for endpoint, body in host.remote.calls) == 1
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "submitted"
+
+
+def test_outbox_claim_is_exclusive_across_real_threads_and_release_allows_resume(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    held = threading.Event()
+    release = threading.Event()
+    acquired = []
+    def claim():
+        acquired.append(donation.claim_publication(host.root, donation.settings(host.root), "donor"))
+        held.set()
+        release.wait(3)
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        worker = threading.Thread(target=claim)
+        worker.start()
+        assert held.wait(3)
+        try:
+            assert acquired[0] is not None
+            assert donation.claim_publication(host.root, donation.settings(host.root), "donor") is None
+        finally:
+            release.set()
+            worker.join(3)
+        # A dead owner thread can be reconciled, never a merely expired live one.
+        with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+            reclaimed = donation.claim_publication(host.root, donation.settings(host.root), "donor")
+            assert reclaimed is not None
+            reclaimed.close()
+
+
+def test_outbox_payload_size_is_checked_before_decode_and_corrupt_work_cannot_upload(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    before = len(host.remote.calls)
+    with closing(donation.connection(host.root)) as connection, connection:
+        raw = b'{"PRIVATE_OVERSIZED":' + b' '*1000
+        connection.execute("UPDATE publication_outbox SET payload=?,payload_sha=?", (raw, hashlib.sha256(raw).hexdigest()))
+    actual_loads = donation.json.loads
+    def decode(raw, *args, **kwargs):
+        assert not isinstance(raw, bytes) or b"PRIVATE_OVERSIZED" not in raw
+        return actual_loads(raw, *args, **kwargs)
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)), \
+         patch.object(donation, "_OUTBOX_BYTES", 128), patch.object(donation.json, "loads", side_effect=decode):
+        host.tick()
+    assert len(host.remote.calls) == before and len(host.calls) == 1
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone() == ("corrupt", 0)
+
+
+def test_outbox_reservation_capacity_is_atomic_and_never_evicts_pending_work(tmp_path):
+    consent = {"intensity": "medium"}
+    publications = []
+    try:
+        for index in range(donation._OUTBOX_LIMIT):
+            run = donation.claim_run(tmp_path, "bounded-"+str(index), "local", "medium")
+            publications.append(donation.reserve_publication(tmp_path, run, "local", consent, "donor"))
+        extra = donation.claim_run(tmp_path, "bounded-extra", "local", "medium")
+        with pytest.raises(donation.PublicationPending):
+            donation.reserve_publication(tmp_path, extra, "local", consent, "donor")
+        with closing(donation.connection(tmp_path)) as connection:
+            assert connection.execute("SELECT COUNT(*) FROM publication_outbox").fetchone()[0] == donation._OUTBOX_LIMIT
+    finally:
+        for publication in publications: publication.close()
+
+
+@pytest.mark.parametrize("phase", ["validated", "pr_intent"])
+def test_actual_child_crash_retains_valid_proposal_or_ambiguous_intent_without_new_model(outbox_host, phase):
+    import os, sys, subprocess
+    from pathlib import Path
+    host = outbox_host
+    fixture = host.root / "public-crash-fixture.json"
+    fixture.write_text(json.dumps({"job": JOB, "commit": COMMIT, "proposal": PROPOSAL,
+        "sources": SOURCES, "result": RESULT, "phase": phase}), encoding="utf-8")
+    script = r"""
+import sys,json,os
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import donation as d
+root=Path(sys.argv[2]);value=json.loads(Path(sys.argv[3]).read_text())
+consent=d.settings(root);run=d.claim_run(root,value['job']['id'],'local','medium',value['commit']['sha'])
+d.record_result(root,run,value['result'],'main','ollama')
+publication=d.reserve_publication(root,run,'local',consent,'donor')
+proposal,edited=d.validate_proposal(json.dumps(value['proposal']),value['sources'])
+publication.prepare(value['job'],value['commit'],proposal,edited,value['sources'],consent,'donor')
+if value['phase']=='pr_intent':
+ publication.state={'fork_ready':True,'tree':'c'*40,'commit':'d'*40,'pr_attempted':True,'intent':'pr'}
+ publication._save('pr_intent')
+os._exit(23)
+"""
+    child = subprocess.run([sys.executable, "-I", "-B", "-c", script,
+        str(Path(donation.__file__).resolve().parent), str(host.root), str(fixture)],
+        cwd=host.root, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, timeout=15)
+    assert child.returncode == 23, child.stderr.decode(errors="replace")
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        service = host.tick()
+    assert len(host.calls) == 0 and donation.total_tokens(host.root) == 50
+    if phase == "validated":
+        assert len(host.remote.prs) == 1
+        with closing(donation.connection(host.root)) as connection:
+            assert connection.execute("SELECT status FROM runs").fetchone()[0] == "submitted"
+    else:
+        assert "confirmation" in service.status_message()
+        assert not host.remote.prs
+        assert not any(body is not None for _, body in host.remote.calls)
+
+
+def test_legacy_token_ledger_migrates_without_fabricating_cached_proposals(outbox_host):
+    host = outbox_host
+    database = host.root / "LongTasks/donations.db"
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute("CREATE TABLE runs(id TEXT PRIMARY KEY,started REAL,status TEXT,tokens INTEGER,model TEXT,url TEXT,job TEXT)")
+        connection.execute("INSERT INTO runs VALUES('legacy',1,'submitted',75,'historic','','legacy-other')")
+    host.tick()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 125
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT tokens,status FROM runs WHERE id='legacy'").fetchone() == (75, "submitted")
+        assert connection.execute("SELECT COUNT(*) FROM publication_outbox").fetchone()[0] == 1
+    assert donation.source_totals(host.root) == {"chatgpt": 75, "local": 50}
+
+
+def test_actual_loaded_validator_change_cannot_downgrade_saved_proposal_checks(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    before = len(host.remote.calls)
+    def weakened_validator(text, sources):
+        raise AssertionError("Changed validator must be detected before any reuse")
+    with patch.object(donation, "validate_proposal", weakened_validator), \
+         patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.calls) == before
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase FROM publication_outbox").fetchone()[0] == "stale"
+
+
+def test_publication_policy_uses_loaded_code_not_replaced_disk_source_text():
+    import inspect
+    expected = donation._publication_policy()
+    with patch.object(inspect, "getsource", return_value="private replaced disk text"):
+        assert donation._publication_policy() == expected
+
+
+def test_unresolved_publication_reserves_its_area_but_another_public_job_continues(outbox_host):
+    host = outbox_host
+    other_sources = {"other.py": SOURCE, "Validation/test_other.py": TEST}
+    other = {"id": "other-area", "title": "Independent area", "paths": list(other_sources)}
+    all_sources = {**SOURCES, **other_sources}
+    def public(path, revision):
+        return json.dumps([JOB, other]) if path == "donation-tasks.json" else all_sources[path]
+    def complete(payload, resource, intensity, cancel, receipt):
+        host.calls.append(payload)
+        task = json.loads(payload["messages"][-1]["content"])["task"]
+        result = json.loads(json.dumps(RESULT))
+        if task["id"] == other["id"]:
+            proposal = json.loads(json.dumps(PROPOSAL))
+            for change in proposal["changes"]:
+                change["path"] = change["path"].replace("example", "other")
+            result["choices"][0]["message"]["content"] = json.dumps(proposal)
+        receipt(result, "ollama", "main", False)
+        return result
+    host.remote.pr_failure = "unknown-absent"
+    with patch.object(donation, "public_file", side_effect=public), \
+         patch.object(donation, "complete_donation", side_effect=complete):
+        host.tick()
+        with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+            pending = host.tick()
+            assert "confirmation" in pending.status_message()
+            host.tick()  # Same clock: bounded reconciliation skips the just-checked outbox.
+    assert len(host.calls) == 2 and len(host.remote.prs) == 1
+    tasks = [json.loads(call["messages"][-1]["content"])["task"]["id"] for call in host.calls]
+    assert len(set(tasks)) == 2
+    assert sum(endpoint.endswith("/pulls") and body is not None for endpoint, body in host.remote.calls) == 2
+    assert donation.total_tokens(host.root) == 100
+    with closing(donation.connection(host.root)) as connection:
+        rows = connection.execute("SELECT phase FROM publication_outbox ORDER BY phase").fetchall()
+        assert rows == [("pr_intent",), ("submitted",)]
+
+
+@pytest.mark.parametrize("fault", ["nested_commit", "proposal_none", "empty_change", "state_tree", "state_intent"])
+def test_bounded_corrupt_saved_shapes_are_rejected_before_network_and_do_not_retry_forever(outbox_host, fault):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    before = len(host.remote.calls)
+    with closing(donation.connection(host.root)) as connection, connection:
+        raw, state = connection.execute("SELECT payload,state FROM publication_outbox").fetchone()
+        value, metadata = json.loads(raw), json.loads(state)
+        if fault == "nested_commit": value["commit"]["commit"] = 17
+        if fault == "proposal_none": value["proposal"] = None
+        if fault == "empty_change": value["proposal"]["changes"] = [{}]
+        if fault == "state_tree": metadata["tree"] = []
+        if fault == "state_intent": metadata["intent"] = []
+        raw = json.dumps(value).encode()
+        connection.execute("UPDATE publication_outbox SET payload=?,payload_sha=?,state=?",
+            (raw, hashlib.sha256(raw).hexdigest(), json.dumps(metadata)))
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        result = host.tick()
+    assert "data is unavailable" in result.status_message()
+    assert len(host.remote.calls) == before and len(host.calls) == 1
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone() == ("corrupt", 0)
+
+
+def test_corrupt_unknown_post_keeps_area_reserved_instead_of_regenerating_duplicate(outbox_host):
+    host = outbox_host
+    host.remote.pr_failure = "unknown-absent"
+    host.tick()
+    with closing(donation.connection(host.root)) as connection, connection:
+        raw = connection.execute("SELECT payload FROM publication_outbox").fetchone()[0]
+        value = json.loads(raw)
+        value["commit"]["commit"] = None
+        raw = json.dumps(value).encode()
+        connection.execute("UPDATE publication_outbox SET payload=?,payload_sha=?", (raw, hashlib.sha256(raw).hexdigest()))
+    before = len(host.remote.calls)
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.calls) >= before
+    assert sum(endpoint.endswith("/pulls") and body is not None for endpoint, body in host.remote.calls) == 1
+    with closing(donation.connection(host.root)) as connection:
+        phase, size = connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone()
+        assert phase == "corrupt_pending" and size > 0
+    assert donation.claim_run(host.root, JOB["id"], "local", "medium", "f"*40) == ""

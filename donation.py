@@ -141,6 +141,10 @@ def connection(root: Path):
     conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_pending (number INTEGER PRIMARY KEY, author INTEGER NOT NULL, login TEXT NOT NULL, merged TEXT NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS cooldowns(resource TEXT PRIMARY KEY, until REAL NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS github_diagnostic(id INTEGER PRIMARY KEY CHECK(id=1), stage TEXT NOT NULL, status INTEGER, kind TEXT NOT NULL, until REAL NOT NULL)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS publication_outbox (
+        run TEXT PRIMARY KEY, resource TEXT NOT NULL, account TEXT NOT NULL,
+        phase TEXT NOT NULL, payload BLOB NOT NULL, payload_sha TEXT NOT NULL,
+        state TEXT NOT NULL, owner TEXT NOT NULL, checked REAL NOT NULL)""")
     conn.commit()
     return conn
 
@@ -195,6 +199,8 @@ def claim_run(root: Path, job: str, resource="chatgpt", intensity="slow", revisi
             "SELECT 1 FROM runs WHERE job=? AND review_state='closed_unmerged' AND scope_sha=?",
             (job, scope_sha),
         ).fetchone():
+            return ""
+        if conn.execute("SELECT 1 FROM publication_outbox o JOIN runs r ON r.id=o.run WHERE r.job=? AND o.phase NOT IN ('submitted','discarded','stale','corrupt')", (job,)).fetchone():
             return ""
         if conn.execute("SELECT 1 FROM runs WHERE job=? AND " + RESERVED_RUN,
                         (job, time.time() - RESERVATION_SECONDS)).fetchone():
@@ -711,14 +717,13 @@ def validate_proposal(text: str, sources: dict[str, str]) -> tuple[dict, dict[st
     return proposal, edited
 
 
-def open_proposal(login: str, run_id: str, job: dict, commit: dict,
-                  proposal: dict, edited: dict, check_cancel, *, validation_summary=None) -> str:
-    """Write only a new contribution branch, then open a draft for owner review."""
+def _proposal_target(login, check_cancel, api=None):
+    api = gh_api if api is None else api
     check_cancel()
     if login.casefold() == UPSTREAM.split("/")[0].casefold():
         target = UPSTREAM  # The owner cannot fork their own repository.
     else:
-        fork = gh_api(f"repos/{UPSTREAM}/forks", {"default_branch_only": True})
+        fork = api(f"repos/{UPSTREAM}/forks", {"default_branch_only": True})
         target = fork.get("full_name", "")
         if (target.casefold() != f"{login}/cale-ai-workbench".casefold()
                 or not fork.get("fork")):
@@ -729,7 +734,7 @@ def open_proposal(login: str, run_id: str, job: dict, commit: dict,
         for _ in range(15):
             check_cancel()
             try:
-                metadata = gh_api(f"repos/{target}")
+                metadata = api(f"repos/{target}")
                 ready = metadata.get("parent", {}).get("full_name", "").casefold() == UPSTREAM.casefold()
             except GitHubRequestError as error:
                 if error.status != 404:
@@ -745,6 +750,24 @@ def open_proposal(login: str, run_id: str, job: dict, commit: dict,
             if last_github_error is not None:
                 raise last_github_error
             raise RuntimeError("Your GitHub fork is still preparing; try another day.")
+    return target
+
+
+def _proposal_body(job, commit, proposal, validation_summary=None):
+    return ("<!-- cale-donation:" + job["id"] + " -->\n"
+            "AI-generated contribution using the contributor's opted-in AI resources.\n\n"
+            + proposal["summary"] + "\n\nBase commit: `" + commit["sha"] + "`.\n\n"
+            + (validation_summary or "Validation: exact edits and Python syntax checked. Behavior tests were NOT run "
+            "on the donor's PC. Maintainer review and relevant tests are required before merging.") + "\n\n"
+            "This automation never approves, merges, or publishes a release.")
+
+
+def open_proposal(login: str, run_id: str, job: dict, commit: dict,
+                  proposal: dict, edited: dict, check_cancel, *, validation_summary=None, publication=None) -> str:
+    """Write only a new contribution branch, then open a draft for owner review."""
+    if publication is not None:
+        return publication.publish(login, check_cancel)
+    target = _proposal_target(login, check_cancel)
     check_cancel()
     tree = gh_api(f"repos/{target}/git/trees", {
         "base_tree": commit["commit"]["tree"]["sha"],
@@ -757,17 +780,429 @@ def open_proposal(login: str, run_id: str, job: dict, commit: dict,
     check_cancel()
     gh_api(f"repos/{target}/git/refs", {"ref": "refs/heads/" + branch, "sha": created["sha"]})
     check_cancel()
-    body = ("<!-- cale-donation:" + job["id"] + " -->\n"
-            "AI-generated contribution using the contributor's opted-in AI resources.\n\n"
-            + proposal["summary"] + "\n\nBase commit: `" + commit["sha"] + "`.\n\n"
-            + (validation_summary or "Validation: exact edits and Python syntax checked. Behavior tests were NOT run "
-            "on the donor's PC. Maintainer review and relevant tests are required before merging.") + "\n\n"
-            "This automation never approves, merges, or publishes a release.")
+    body = _proposal_body(job, commit, proposal, validation_summary)
     result = gh_api(f"repos/{UPSTREAM}/pulls", {
         "title": "[Donation] " + proposal["title"], "body": body,
         "head": f"{login}:{branch}", "base": "main", "draft": True,
         "maintainer_can_modify": False})
     return result["html_url"]
+
+
+# Validated public proposals only; this is not accepted-fix or test-pass evidence.
+_OUTBOX_LIMIT = 16
+_OUTBOX_BYTES = 8 * 1024 * 1024
+_OUTBOX_TERMINAL = ("submitted", "discarded", "stale", "corrupt")
+
+
+class PublicationPending(RuntimeError):
+    pass
+
+
+def _publication_account(consent, login, resource):
+    key = {"chatgpt": "chatgpt_account", "free_cloud": "free_account"}.get(resource)
+    body = [login.casefold(), resource, consent.get(key, "") if key else "local"]
+    return hashlib.sha256(json.dumps(body).encode()).hexdigest()
+
+
+def _publication_policy():
+    # Bind the implementations actually executing, not freshly read disk text
+    # which an updater could replace beneath an already imported worker.
+    import marshal
+    from types import CodeType
+    def binding(code):
+        constants = tuple(binding(value) if isinstance(value, CodeType) else value
+                          for value in code.co_consts)
+        return code.replace(co_consts=constants, co_filename="<publication-policy>",
+                            co_firstlineno=1, co_linetable=b"")
+    functions = (allowed_path, validate_proposal, scope_fingerprint,
+                 DurablePublication.fresh, DurablePublication.guard,
+                 DurablePublication.request, DurablePublication.publish,
+                 DurablePublication._confirm_result)
+    facts = tuple((binding(fn.__code__), fn.__defaults__, fn.__kwdefaults__) for fn in functions)
+    return hashlib.sha256(marshal.dumps(facts)).hexdigest()
+
+
+def _public_blob(text):
+    body = text.encode("utf-8")
+    return hashlib.sha1(b"blob " + str(len(body)).encode() + b"\0" + body).hexdigest()
+
+
+def _publication_owner():
+    import psutil
+    return json.dumps({"pid": os.getpid(), "started": psutil.Process().create_time(),
+        "thread": threading.get_native_id(), "token": uuid.uuid4().hex}, sort_keys=True)
+
+
+def _publication_owner_alive(raw):
+    import psutil
+    if not raw:
+        return False
+    try:
+        if len(raw) > 512:
+            return True  # Unknown ownership cannot authorize concurrent mutations.
+        owner = json.loads(raw)
+        process = psutil.Process(owner["pid"])
+        if abs(process.create_time() - owner["started"]) >= .02:
+            return False
+        return any(item.id == owner["thread"] for item in process.threads())
+    except psutil.NoSuchProcess:
+        return False
+    except (psutil.Error, ValueError, KeyError, TypeError):
+        return True
+
+
+def reserve_publication(root, run_id, resource, consent, login):
+    owner = _publication_owner()
+    account = _publication_account(consent, login, resource)
+    with closing(connection(root)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        count = conn.execute("SELECT COUNT(*) FROM publication_outbox WHERE phase NOT IN ('submitted','discarded','stale','corrupt')").fetchone()[0]
+        if count >= _OUTBOX_LIMIT:
+            raise PublicationPending("Saved drafts are awaiting publication; trying another eligible area later.")
+        conn.execute("INSERT INTO publication_outbox VALUES(?,?,?,'generating',X'','',?, ?,?)",
+                     (run_id, resource, account, "{}", owner, time.time()))
+    return DurablePublication(root, run_id, resource, account, owner)
+
+
+def claim_publication(root, consent, login, resource=None):
+    permitted = [value for value in permitted_sources(consent, root) if not resource or value == resource]
+    with closing(connection(root)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute("SELECT run,resource,account,phase,substr(owner,1,513),length(owner),checked FROM publication_outbox WHERE phase NOT IN ('submitted','discarded','stale','corrupt') ORDER BY checked,run LIMIT 16").fetchall()
+        for run_id, source, account, phase, owner, length, checked in rows:
+            if length > 512 or _publication_owner_alive(owner):
+                continue
+            if phase == "corrupt_pending":
+                continue  # Unknown prior POST cannot authorize a replacement draft.
+            if phase == "generating":
+                conn.execute("UPDATE publication_outbox SET phase='discarded',owner='' WHERE run=?", (run_id,))
+                continue  # No durable model payload existed at the crash boundary.
+            if (source not in permitted or checked > time.time()-60
+                    or account != _publication_account(consent, login, source)):
+                continue
+            claimed = _publication_owner()
+            conn.execute("UPDATE publication_outbox SET owner=?,checked=? WHERE run=? AND owner=?",
+                         (claimed, time.time(), run_id, owner))
+            return DurablePublication(root, run_id, source, account, claimed)
+    return None
+
+
+class DurablePublication:
+    """Original-run upload journal. Leases are never stolen from a live thread.
+
+    A remote PR POST has no client idempotency key: uncertain delivery remains
+    confirmation-pending rather than blindly posting again after an empty GET.
+    """
+    def __init__(self, root, run_id, resource, account, owner):
+        self.root, self.run_id, self.resource = root, run_id, resource
+        self.account, self.owner = account, owner
+        self.data, self.state = None, {}
+
+    def _save(self, phase):
+        state = json.dumps(self.state, sort_keys=True)
+        if len(state.encode()) > 8192:
+            raise ValueError("Publication state exceeds its bound")
+        with closing(connection(self.root)) as conn, conn:
+            changed = conn.execute("UPDATE publication_outbox SET phase=?,state=?,checked=? WHERE run=? AND owner=?",
+                (phase, state, time.time(), self.run_id, self.owner)).rowcount
+            if changed != 1:
+                raise InterruptedError("Publication ownership changed")
+
+    def prepare(self, job, commit, proposal, edited, sources, consent, login):
+        normalized = {key: proposal[key] for key in ("title", "summary", "changes")}
+        normalized["changes"] = [{key: change[key] for key in ("path", "before", "after")}
+                                  for change in normalized["changes"]]
+        _, checked = validate_proposal(json.dumps(normalized), sources)
+        if checked != edited or not edited:
+            raise ValueError("Publication edits are not the validated proposal")
+        if not all(re.fullmatch(r"[a-f0-9]{40}", value or "") for value in
+                   (commit.get("sha"), commit.get("commit", {}).get("tree", {}).get("sha"))):
+            raise ValueError("Publication base is not immutable")
+        task = {key: job[key] for key in ("id", "paths")}
+        task["instructions"] = job.get("instructions", "")
+        task["title"] = job.get("title", "")
+        blobs = {path: _public_blob(body) for path, body in sources.items()}
+        scope = scope_fingerprint(task, blobs)
+        if not scope or self.account != _publication_account(consent, login, self.resource):
+            raise ValueError("Publication source or account binding is unavailable")
+        data = {"version": 1, "job": task, "commit": {"sha": commit["sha"],
+                "commit": {"tree": {"sha": commit["commit"]["tree"]["sha"]}}}, "proposal": normalized,
+                "source_blobs": blobs, "scope": scope, "policy": _publication_policy(),
+                "edited_sha": {path: hashlib.sha256(body.encode()).hexdigest() for path, body in edited.items()},
+                "intensity": consent["intensity"]}
+        raw = json.dumps(data, sort_keys=True).encode()
+        if len(raw) > _OUTBOX_BYTES:
+            raise ValueError("Validated public proposal exceeds the durable payload bound")
+        with closing(connection(self.root)) as conn, conn:
+            changed = conn.execute("UPDATE publication_outbox SET payload=?,payload_sha=?,phase='validated',checked=? WHERE run=? AND owner=? AND phase='generating'",
+                (raw, hashlib.sha256(raw).hexdigest(), time.time(), self.run_id, self.owner)).rowcount
+            if changed != 1:
+                raise InterruptedError("Publication ownership changed")
+        self.data = data
+
+    def load(self):
+        with closing(connection(self.root)) as conn:
+            row = conn.execute("SELECT substr(payload,1,?),length(payload),payload_sha,substr(state,1,8193),length(state),phase FROM publication_outbox WHERE run=? AND owner=?",
+                               (_OUTBOX_BYTES+1, self.run_id, self.owner)).fetchone()
+        try:
+            if (not row or not 0 < row[1] <= _OUTBOX_BYTES or row[4] > 8192
+                    or hashlib.sha256(row[0]).hexdigest() != row[2]):
+                raise ValueError("Invalid publication payload")
+            data, state = json.loads(row[0]), json.loads(row[3])
+            if (not isinstance(data, dict) or data.get("version") != 1 or not isinstance(state, dict)
+                    or not isinstance(data.get("job"), dict) or not isinstance(data.get("source_blobs"), dict)):
+                raise ValueError("Invalid publication payload")
+            paths = data["job"].get("paths")
+            proposal = data.get("proposal")
+            if (set(data) != {"version", "job", "commit", "proposal", "source_blobs", "scope", "policy", "edited_sha", "intensity"}
+                    or not isinstance(proposal, dict) or set(proposal) != {"title", "summary", "changes"}
+                    or not isinstance(proposal["title"], str) or not 1 <= len(proposal["title"]) <= 100
+                    or not isinstance(proposal["summary"], str) or not 1 <= len(proposal["summary"]) <= 4000
+                    or not isinstance(proposal["changes"], list) or not 1 <= len(proposal["changes"]) <= 8
+                    or not isinstance(data.get("edited_sha"), dict) or not 1 <= len(data["edited_sha"]) <= 4
+                    or any(not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value) for value in data["edited_sha"].values())
+                    or not isinstance(data["job"].get("id"), str) or not re.fullmatch(r"[a-z0-9-]{1,60}", data["job"]["id"])
+                    or not isinstance(data["job"].get("instructions"), str)
+                    or not isinstance(data.get("scope"), str) or not re.fullmatch(r"[a-f0-9]{64}", data["scope"])):
+                raise ValueError("Invalid saved proposal shape")
+            for change in proposal["changes"]:
+                if (not isinstance(change, dict) or set(change) != {"path", "before", "after"}
+                        or not isinstance(change["path"], str) or change["path"] not in paths
+                        or not isinstance(change["before"], str) or not change["before"]
+                        or not isinstance(change["after"], str) or len(change["after"]) > 30000):
+                    raise ValueError("Invalid saved proposal edit")
+            if (type(data.get("version")) is not int or not isinstance(paths, list)
+                    or not 1 <= len(paths) <= 4 or not all(isinstance(path, str) and allowed_path(path) for path in paths)
+                    or len(set(paths)) != len(paths) or set(data["source_blobs"]) != set(paths)
+                    or any(not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{40}", value) for value in data["source_blobs"].values())
+                    or not isinstance(data.get("commit"), dict)
+                    or not all(isinstance(value, str) and re.fullmatch(r"[a-f0-9]{40}", value)
+                               for value in (data["commit"].get("sha"), data["commit"].get("commit", {}).get("tree", {}).get("sha")))
+                    or not isinstance(data.get("policy"), str) or not re.fullmatch(r"[a-f0-9]{64}", data["policy"])
+                    or data.get("intensity") not in PROFILES
+                    or state.get("pr_attempted") and not all(key in state for key in ("tree", "commit"))
+                    or any(key not in {"fork_ready", "tree", "commit", "intent", "pr_attempted", "url"} for key in state)
+                    or any(type(state[key]) is not bool for key in ("fork_ready", "pr_attempted") if key in state)
+                    or any(not isinstance(state[key], str) or not re.fullmatch(r"[a-f0-9]{40}", state[key]) for key in ("tree", "commit") if key in state)
+                    or "url" in state and not valid_proposal_url(state["url"])
+                    or "intent" in state and state["intent"] not in {"fork", "tree", "commit", "ref", "pr"}
+                    or not set(data["edited_sha"]).issubset(set(paths))):
+                raise ValueError("Invalid publication state")
+            self.data, self.state = data, state
+        except (ValueError, TypeError, AttributeError, KeyError, RecursionError):
+            safe = {"generating", "validated", "fork_intent", "fork_ready", "tree_intent", "tree_ready",
+                    "commit_intent", "commit_ready", "ref_intent", "ref_ready"}
+            uncertain = row is not None and row[5] not in safe
+            self.terminal("corrupt_pending" if uncertain else "corrupt")
+            raise PublicationPending("Saved draft data is unavailable; publication remains reserved for confirmation."
+                                     if uncertain else "Saved draft data is unavailable; no upload was attempted.") from None
+
+    def guard(self, login, check_cancel):
+        import github_account
+        import chatgpt_auth
+        check_cancel()
+        consent = settings(self.root)
+        actual = github_account.account()
+        if (not consent["enabled"] or self.resource not in permitted_sources(consent, self.root)
+                or actual.casefold() != login.casefold()
+                or consent["github_account"].casefold() != login.casefold()
+                or self.account != _publication_account(consent, login, self.resource)
+                or self.resource == "chatgpt" and (not chatgpt_auth.status().get("sharing")
+                    or chatgpt_auth.account_fingerprint() != consent["chatgpt_account"])
+                or self.resource == "free_cloud" and free_fingerprint() != consent["free_account"]):
+            raise InterruptedError("Publication consent or account changed")
+        with closing(connection(self.root)) as conn:
+            row = conn.execute("SELECT owner FROM publication_outbox WHERE run=?", (self.run_id,)).fetchone()
+        if not row or row[0] != self.owner:
+            raise InterruptedError("Publication ownership changed")
+
+    def request(self, login, check_cancel, endpoint, data=None, stage="read"):
+        self.guard(login, check_cancel)
+        attempted = self.state.get("pr_attempted", False)
+        if data is not None:
+            self.state["intent"] = stage
+            if stage == "pr":
+                self.state["pr_attempted"] = True
+            self._save(stage + "_intent")  # No mutation before its durable intent.
+            try:
+                self.guard(login, check_cancel)
+            except InterruptedError:
+                if stage == "pr":
+                    self.state["pr_attempted"] = attempted
+                    self._save("ref_ready")
+                raise
+        try:
+            result = gh_api(endpoint, data) if data is not None else gh_api(endpoint)
+        except GitHubRequestError as error:
+            if stage == "pr" and error.status in {400, 401, 403, 404, 410, 429}:
+                self.state["pr_attempted"] = False  # Definitive rejected request.
+                self._save("ref_ready")
+            raise
+        return result
+
+    def fresh(self, login, check_cancel):
+        if self.data is None:
+            self.load()
+        data = self.data
+        if data.get("policy") != _publication_policy():
+            self.terminal("stale")
+            raise PublicationPending("Saved draft validation policy changed; fresh review is required.")
+        current = self.request(login, check_cancel, f"repos/{UPSTREAM}/commits/main")
+        revision = current.get("sha")
+        if not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{40}", revision):
+            raise ValueError("Invalid current public source revision")
+        def source(path, revision):
+            self.guard(login, check_cancel)
+            body = public_file(path, revision)
+            self.guard(login, check_cancel)
+            return body
+        jobs = json.loads(source("donation-tasks.json", revision))
+        if not isinstance(jobs, list) or len(jobs) > 2000:
+            raise ValueError("Invalid current task catalog")
+        if data["intensity"] in {"medium", "full_blast"}:
+            budget = 160_000 if data["intensity"] == "full_blast" and self.resource == "chatgpt" else 40_000
+            self.guard(login, check_cancel)
+            jobs = continuous_jobs(jobs, revision, source_budget=budget)
+            self.guard(login, check_cancel)
+        job = next((item for item in jobs if isinstance(item, dict) and item.get("id") == data["job"].get("id")), None)
+        bodies = {}
+        paths = data["job"].get("paths")
+        if (not isinstance(paths, list) or not 1 <= len(paths) <= 4 or len(set(paths)) != len(paths)
+                or not all(allowed_path(path) for path in paths)):
+            raise ValueError("Invalid saved public paths")
+        for path in paths:
+            bodies[path] = source(path, revision)
+        blobs = {path: _public_blob(body) for path, body in bodies.items()}
+        if not job or scope_fingerprint(job, blobs) != data.get("scope"):
+            self.terminal("stale")
+            raise PublicationPending("Saved draft source or task changed; fresh review is required.")
+        # Re-read the immutable base too. Unrelated main commits may move while
+        # the approved public inputs remain identical; never silently rebase.
+        original = {path: source(path, data["commit"]["sha"]) for path in paths}
+        if {path: _public_blob(body) for path, body in original.items()} != data["source_blobs"]:
+            raise ValueError("Saved publication base changed")
+        _, edited = validate_proposal(json.dumps(data["proposal"]), original)
+        if {path: hashlib.sha256(body.encode()).hexdigest() for path, body in edited.items()} != data["edited_sha"]:
+            raise ValueError("Saved publication edits changed")
+        return edited
+
+    def publish(self, login, check_cancel):
+        if self.data is None:
+            self.load()
+        self.guard(login, check_cancel)
+        target = UPSTREAM if login.casefold() == UPSTREAM.split("/")[0].casefold() else login + "/cale-ai-workbench"
+        if self.state.get("pr_attempted"):
+            # Confirmation records an already-dispatched historical fact, not a
+            # new upload. Source changes must not cause a duplicate new draft.
+            url = self._reconcile(login, target, check_cancel)
+            if url:
+                return url
+            raise PublicationPending("Draft submission is awaiting GitHub confirmation; it will not be duplicated.")
+        edited = self.fresh(login, check_cancel)
+        data = self.data
+        def api(endpoint, body=None):
+            return self.request(login, check_cancel, endpoint, body, "fork")
+        if self.state.get("fork_ready"):
+            if target != UPSTREAM:
+                metadata = api(f"repos/{target}")
+                if metadata.get("parent", {}).get("full_name", "").casefold() != UPSTREAM.casefold() or not metadata.get("fork"):
+                    raise PublicationPending("Saved draft fork ownership cannot be confirmed.")
+        else:
+            if _proposal_target(login, check_cancel, api).casefold() != target.casefold():
+                raise ValueError("Unexpected contribution repository")
+            self.state["fork_ready"] = True
+            self._save("fork_ready")
+        if not self.state.get("tree"):
+            tree = self.request(login, check_cancel, f"repos/{target}/git/trees", {
+                "base_tree": data["commit"]["commit"]["tree"]["sha"],
+                "tree": [{"path": path, "mode": "100644", "type": "blob", "content": body}
+                         for path, body in edited.items()]}, "tree")
+            self.state["tree"] = tree.get("sha")
+            self._save("tree_ready")
+        marker = "<!-- cale-publication:" + self.run_id + " -->"
+        if not self.state.get("commit"):
+            created = self.request(login, check_cancel, f"repos/{target}/git/commits", {
+                "message": "[Donation] " + data["proposal"]["title"] + "\n\n" + marker,
+                "tree": self.state["tree"], "parents": [data["commit"]["sha"]]}, "commit")
+            self.state["commit"] = created.get("sha")
+            self._save("commit_ready")
+        if not all(isinstance(self.state.get(key), str) and re.fullmatch(r"[a-f0-9]{40}", self.state[key]) for key in ("tree", "commit")):
+            raise ValueError("GitHub returned invalid public object identities")
+        remote = self.request(login, check_cancel, f"repos/{target}/git/commits/{self.state['commit']}")
+        if (remote.get("sha") != self.state["commit"] or remote.get("tree", {}).get("sha") != self.state["tree"]
+                or not isinstance(remote.get("parents"), list) or len(remote["parents"]) != 1
+                or remote["parents"][0].get("sha") != data["commit"]["sha"]
+                or marker not in str(remote.get("message", ""))):
+            raise PublicationPending("Saved draft commit ownership cannot be confirmed.")
+        branch = "cale-donation-" + self.run_id[:16]
+        endpoint = f"repos/{target}/git/ref/heads/{branch}"
+        try:
+            reference = self.request(login, check_cancel, endpoint)
+        except GitHubRequestError as error:
+            if error.status != 404:
+                raise
+            try:
+                self.request(login, check_cancel, f"repos/{target}/git/refs", {
+                    "ref": "refs/heads/" + branch, "sha": self.state["commit"]}, "ref")
+            except GitHubRequestError as conflict:
+                if conflict.status not in {409, 422}:
+                    raise
+            reference = self.request(login, check_cancel, endpoint)
+        if reference.get("object", {}).get("sha") != self.state["commit"]:
+            raise PublicationPending("Contribution branch already has different work; it was not overwritten.")
+        self._save("ref_ready")
+        url = self._reconcile(login, target, check_cancel)
+        if url:
+            return url
+        # Recheck the current public scope immediately before the first PR POST.
+        self.fresh(login, check_cancel)
+        body = _proposal_body(data["job"], data["commit"], data["proposal"]) + "\n" + marker
+        result = self.request(login, check_cancel, f"repos/{UPSTREAM}/pulls", {
+            "title": "[Donation] " + data["proposal"]["title"], "body": body,
+            "head": login + ":" + branch, "base": "main", "draft": True,
+            "maintainer_can_modify": False}, "pr")
+        return self._confirm_result(result, login, target)
+
+    def _confirm_result(self, result, login, target):
+        branch = "cale-donation-" + self.run_id[:16]
+        marker = "<!-- cale-publication:" + self.run_id + " -->"
+        number = result.get("number") if isinstance(result, dict) else None
+        if (type(number) is not int or number <= 0 or result.get("html_url") != f"https://github.com/{UPSTREAM}/pull/{number}"
+                or result.get("base", {}).get("repo", {}).get("full_name", "").casefold() != UPSTREAM.casefold()
+                or result.get("base", {}).get("ref") != "main"
+                or result.get("head", {}).get("repo", {}).get("full_name", "").casefold() != target.casefold()
+                or result.get("head", {}).get("ref") != branch or result.get("head", {}).get("sha") != self.state["commit"]
+                or not isinstance(result.get("body"), str) or marker not in result["body"]
+                or "<!-- cale-donation:" + self.data["job"]["id"] + " -->" not in result["body"]
+                or result.get("state") not in {"open", "closed"}
+                or result.get("user", {}).get("login", "").casefold() != login.casefold()):
+            raise PublicationPending("Draft submission identity cannot yet be confirmed.")
+        self.state["url"] = result["html_url"]
+        self._save("confirmed")
+        return result["html_url"]
+
+    def _reconcile(self, login, target, check_cancel):
+        branch = "cale-donation-" + self.run_id[:16]
+        query = urlencode({"state": "all", "head": login + ":" + branch, "base": "main", "per_page": 100})
+        matches = self.request(login, check_cancel, f"repos/{UPSTREAM}/pulls?" + query)
+        if not isinstance(matches, list) or len(matches) >= 100:
+            raise PublicationPending("Draft publication lookup is incomplete; awaiting confirmation.")
+        if len(matches) > 1:
+            raise PublicationPending("Draft publication has ambiguous matching records.")
+        return self._confirm_result(matches[0], login, target) if matches else None
+
+
+    def terminal(self, phase):
+        if phase not in _OUTBOX_TERMINAL and phase != "corrupt_pending":
+            raise ValueError("Invalid publication terminal phase")
+        with closing(connection(self.root)) as conn, conn:
+            conn.execute("UPDATE publication_outbox SET phase=?,payload=CASE WHEN ?='corrupt_pending' THEN payload ELSE X'' END,owner='' WHERE run=? AND owner=?",
+                         (phase, phase, self.run_id, self.owner))
+
+    def close(self):
+        with closing(connection(self.root)) as conn, conn:
+            conn.execute("UPDATE publication_outbox SET phase=CASE WHEN phase='generating' THEN 'discarded' ELSE phase END,owner='' WHERE run=? AND owner=?",
+                         (self.run_id, self.owner))
 
 
 def intensity_description(intensity: str) -> str:
@@ -1078,6 +1513,7 @@ class Service:
 
         run_id = ""
         resource = ""
+        publication = None
         # A temporarily empty queue/disconnected source is polled at most once
         # a minute; successful work below removes this wait in Full Blast.
         self.next_attempt = max(self.next_attempt, time.monotonic() + 60)
@@ -1105,6 +1541,21 @@ class Service:
                     or ("free_cloud" in consent["sources"] and consent.get("free_account") != free_fingerprint())):
                 set_enabled(False, self.root)
                 self.message = "Accounts changed · choose Start donating again for these accounts."
+                return
+            publication = claim_publication(self.root, consent, login, self.resource)
+            if publication is not None:
+                run_id, resource = publication.run_id, publication.resource
+                publication.load()
+                self.message = "Resuming your saved public draft · no new AI tokens needed…"
+                url = open_proposal(login, run_id, publication.data["job"], publication.data["commit"],
+                                    publication.data["proposal"], {}, check_cancel, publication=publication)
+                if not valid_proposal_url(url):
+                    raise ValueError("GitHub did not return a canonical contribution PR URL")
+                finish(self.root, run_id, "submitted", url)
+                publication.terminal("submitted")
+                self._emit_event("submitted", run_id, resource, job_title=publication.data["job"].get("title", ""), pr_url=url)
+                self.message = "Your saved draft publication is confirmed."
+                self.next_attempt = 0
                 return
             with closing(connection(self.root)) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM runs WHERE started>?", (time.time() - DAY_SECONDS,)).fetchone()[0]
@@ -1220,6 +1671,8 @@ class Service:
             with closing(connection(self.root)) as conn:
                 pending_jobs.update(row[0] for row in conn.execute("SELECT job FROM runs WHERE " + RESERVED_RUN,
                     (time.time() - RESERVATION_SECONDS,)))
+                saved_jobs = {row[0] for row in conn.execute("SELECT r.job FROM publication_outbox o JOIN runs r ON r.id=o.run WHERE o.phase NOT IN ('submitted','discarded','stale','corrupt')")}
+                pending_jobs.update(saved_jobs)
             # Another lane may reserve a job after our pending snapshot. Try
             # the next area in this pass instead of idling and downloading the
             # same public source again on the next scheduler tick.
@@ -1246,8 +1699,10 @@ class Service:
                     job = candidate
                     break
             if job is None:
-                self.message = "Available task proposals are waiting for maintainer review."
+                self.message = ("Saved draft publication is pending · retrying confirmation automatically."
+                                if saved_jobs else "Available task proposals are waiting for maintainer review.")
                 return
+            publication = reserve_publication(self.root, run_id, resource, consent, login)
             paths = job.get("paths", [])
             sources = {}
             for path in paths:
@@ -1332,16 +1787,21 @@ class Service:
                     self.next_attempt = 0
                 return
             check_cancel()
-            self.message = "Submitting a draft for maintainer review…"
+            publication.prepare(job, commit, proposal, edited, sources, consent, login)
+            self.message = "Submitting a saved draft for maintainer review…"
             self._emit_event("submitting", run_id, resource, job_title=job.get("title", ""))
-            url = open_proposal(login, run_id, job, commit, proposal, edited, check_cancel)
+            url = open_proposal(login, run_id, job, commit, proposal, edited, check_cancel, publication=publication)
             if not valid_proposal_url(url):raise ValueError("GitHub did not return a canonical contribution PR URL")
             finish(self.root, run_id, "submitted", url)
+            publication.terminal("submitted")
             self._emit_event("submitted", run_id, resource, job_title=job.get("title", ""), pr_url=url)
             self.message = "Thank you · your draft is waiting for maintainer review."
             self.failures = 0
             if consent["intensity"] in {"medium", "full_blast"}:
                 self.next_attempt = 0
+        except PublicationPending as error:
+            self.message = str(error)
+            self.next_attempt = 0 if settings(self.root)["intensity"] in {"medium", "full_blast"} else time.monotonic()+60
         except InterruptedError:
             if run_id:
                 finish(self.root, run_id, "interrupted")
@@ -1394,3 +1854,10 @@ class Service:
                     # failed/successful receipt or blame GitHub/provider quota.
                     self.message = "Contribution database unavailable · retrying automatically."
             self._emit_event("error", run_id, resource)
+        finally:
+            if publication is not None:
+                try:
+                    publication.close()
+                except sqlite3.Error:
+                    self.message = "Contribution database unavailable · saved draft ownership will be checked after restart."
+                    self.next_attempt = max(self.next_attempt, time.monotonic()+60)
