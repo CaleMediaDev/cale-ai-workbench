@@ -42,15 +42,15 @@ def _sources(root: Path):
         if folder.is_symlink():
             continue
         for source in sorted(folder.rglob("*")):
-            if source.is_file() and not source.is_symlink():
+            if not source.is_symlink() and source.is_file():
                 relative = Path(category) / name / source.relative_to(folder)
                 yield source, relative
     for name in SHARED_REFERENCES:
         source = bundled / "references" / name
         if (
             not source.parent.is_symlink()
-            and source.is_file()
             and not source.is_symlink()
+            and source.is_file()
         ):
             yield source, Path("references") / name
 

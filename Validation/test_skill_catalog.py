@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import skill_catalog
@@ -285,6 +286,45 @@ class SkillCatalogTests(unittest.TestCase):
             (self.root / "data/skills/references" / other).read_text(encoding="utf-8"),
             "Shared reference",
         )
+
+    def test_skips_bundled_file_symlinks_without_probing_targets(self):
+        bundle = self.root / "vendor/agent-skills"
+        skill = bundle / "frontend-ui-engineering/SKILL.md"
+        reference = bundle / "references" / skill_catalog.SHARED_REFERENCES[0]
+        external = self.root / "external.md"
+        external.write_text("Not reviewed bundle content", encoding="utf-8")
+        for source in (skill, reference):
+            source.unlink()
+            try:
+                source.symlink_to(external)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"Symlinks unavailable: {exc}")
+
+        original_is_file = Path.is_file
+
+        def guarded_is_file(path):
+            if path in (skill, reference):
+                raise PermissionError("Symlink target is inaccessible")
+            return original_is_file(path)
+
+        with mock.patch.object(Path, "is_file", guarded_is_file):
+            result = skill_catalog.sync(self.root)
+
+        self.assertEqual(result, {
+            "installed": len(skill_catalog.SKILLS) + len(skill_catalog.SHARED_REFERENCES) - 2,
+            "updated": 0,
+            "preserved": 0,
+        })
+        self.assertFalse(
+            (self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md").exists()
+        )
+        self.assertFalse(
+            (self.root / "data/skills/references" / reference.name).exists()
+        )
+        self.assertTrue(
+            (self.root / "data/skills/software-development/context-engineering/SKILL.md").is_file()
+        )
+        self.assertEqual(external.read_text(encoding="utf-8"), "Not reviewed bundle content")
 
     def test_preserves_local_skill_edits(self):
         skill_catalog.sync(self.root)
