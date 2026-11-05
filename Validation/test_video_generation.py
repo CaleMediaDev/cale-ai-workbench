@@ -230,6 +230,33 @@ def test_concurrent_job_writes_use_independent_temporary_files(tmp_path):
     assert result["detail"] == "original writer"
 
 
+@pytest.mark.parametrize("terminal_state", ["complete", "failed"])
+def test_status_preserves_terminal_result_published_during_worker_check(tmp_path, terminal_state):
+    job_id = "a" * 32
+
+    def worker_exits_during_check(*args, **kwargs):
+        video_generation._write(
+            job_id, state=terminal_state, detail="Worker finished",
+            error="Render failed" if terminal_state == "failed" else None,
+        )
+        return subprocess.CompletedProcess(args[0], 0, "", "")
+
+    with patch.object(video_generation, "JOBS", tmp_path), patch.object(
+        video_generation, "os", SimpleNamespace(name="nt")
+    ), patch.object(
+        video_generation.subprocess, "run", side_effect=worker_exits_during_check
+    ):
+        video_generation._write(job_id, state="rendering", worker_pid=12345)
+        status = video_generation.video_job_status(job_id)
+        stored = json.loads((tmp_path / f"{job_id}.json").read_text(encoding="utf-8"))
+
+    assert status["state"] == terminal_state
+    assert stored["state"] == terminal_state
+    assert status["detail"] == "Worker finished"
+    assert status["error"] == ("Render failed" if terminal_state == "failed" else None)
+    assert status["progress_percent"] == (100 if terminal_state == "complete" else None)
+
+
 def test_video_status_reports_latest_sampler_progress(tmp_path):
     job_id = "a" * 32
     with patch.object(video_generation, "JOBS", tmp_path):
@@ -834,3 +861,120 @@ def test_avatar_probe_accepts_canonical_shared_media_but_rejects_unrelated_origi
         torch.__file__=str(tmp_path/'unrelated/torch/__init__.py')
         with pytest.raises(RuntimeError,match='Wrong Media Torch origin'):video_generation.avatar_profile_probe_worker(profile,5,10)
     finally:linked.rmdir()  # Remove only this fixture junction, never the shared target.
+
+
+def test_avatar_camera_preparation_defers_only_gpu_probe(tmp_path,monkeypatch,avatar_profile_fixture):
+    module,profile,python=avatar_profile_fixture
+    checked=[]
+    monkeypatch.setattr(module,'_avatar_assets',lambda:[('source/fixture.py',{'fixture':True})])
+    monkeypatch.setattr(module,'_avatar_download',lambda *args:checked.append(args[1]))
+    probe=Mock(side_effect=AssertionError('No duplicate setup GPU load'))
+    monkeypatch.setattr(module,'probe_avatar_profile',probe)
+    notices=[]
+    assert module.ensure_avatar_profile(tmp_path,progress=notices.append,defer_probe=True)==python
+    assert checked==['source/fixture.py']
+    assert notices[-1]['phase']=='prepared' and notices[-1]['ready'] is False
+    probe.assert_not_called()
+    # A prepared marker never qualifies the default setup path by itself.
+    probe.side_effect=None;probe.return_value={'ok':True,'probe':{'ok':True}}
+    assert module.ensure_avatar_profile(tmp_path)==python
+    probe.assert_called_once()
+    assert module.avatar_profile_status(tmp_path)['ready'] is True
+
+
+def test_avatar_deferred_first_install_still_prepares_packages(tmp_path,monkeypatch,avatar_profile_fixture):
+    module,profile,python=avatar_profile_fixture
+    (profile/'packages.json').unlink()
+    monkeypatch.setattr('pc_offline.offline',lambda:False)
+    monkeypatch.setattr('music_backend._tool',lambda _: 'managed-uv')
+    installer=Mock();monkeypatch.setattr(module.subprocess,'run',installer)
+    probe=Mock();monkeypatch.setattr(module,'probe_avatar_profile',probe)
+    assert module.ensure_avatar_profile(tmp_path,defer_probe=True)==python
+    installer.assert_called_once()
+    assert installer.call_args.args[0][:3]==['managed-uv','pip','install']
+    assert json.loads((profile/'packages.json').read_text())==list(module.AVATAR_ORT_PACKAGES)
+    assert module.avatar_profile_status(tmp_path)['ready'] is False
+    probe.assert_not_called()
+
+
+def test_avatar_deferred_preparation_keeps_pth_cancel_and_virtual_checks(tmp_path,monkeypatch,avatar_profile_fixture):
+    module,profile,_=avatar_profile_fixture
+    probe=Mock();monkeypatch.setattr(module,'probe_avatar_profile',probe)
+    with pytest.raises(RuntimeError,match='cancelled'):
+        module.ensure_avatar_profile(tmp_path,defer_probe=True,cancelled=lambda:True)
+    (profile/'python/Lib/site-packages/cale-media-libraries.pth').write_text('import malicious\n')
+    with pytest.raises(RuntimeError,match='path changed'):
+        module.ensure_avatar_profile(tmp_path,defer_probe=True)
+    (profile/'python/Lib/site-packages/cale-media-libraries.pth').write_text(str((tmp_path/'Media/python/Lib/site-packages').resolve())+'\n')
+    monkeypatch.setattr(module.subprocess,'run',lambda *_,**__:SimpleNamespace(returncode=1))
+    with pytest.raises(RuntimeError,match='virtual-camera package'):
+        module.ensure_avatar_profile(tmp_path,defer_probe=True,virtual_output=True)
+    assert module.avatar_profile_status(tmp_path)['ready'] is False
+    probe.assert_not_called()
+
+
+def test_avatar_deferred_new_environment_still_creates_runtime_before_camera(tmp_path,monkeypatch,avatar_profile_fixture):
+    module,profile,python=avatar_profile_fixture
+    python.unlink();(profile/'packages.json').unlink()
+    monkeypatch.setattr('pc_offline.offline',lambda:False)
+    monkeypatch.setattr('music_backend._tool',lambda _: 'managed-uv')
+    def install(command,**_):
+        if command[1]=='venv':python.write_bytes(b'new isolated interpreter fixture')
+    installer=Mock(side_effect=install);monkeypatch.setattr(module.subprocess,'run',installer)
+    probe=Mock();monkeypatch.setattr(module,'probe_avatar_profile',probe)
+    assert module.ensure_avatar_profile(tmp_path,defer_probe=True)==python
+    assert [call.args[0][1] for call in installer.call_args_list]==['venv','pip']
+    assert python.is_file() and module.avatar_profile_status(tmp_path)['phase']=='prepared'
+    probe.assert_not_called()
+
+
+def test_deferred_readiness_cannot_be_published_after_preparation_changes(tmp_path,avatar_profile_fixture):
+    module,profile,_=avatar_profile_fixture
+    module._avatar_write_status(profile,phase='prepared',ready=False)
+    def changed():
+        module._avatar_write_status(profile,phase='failed',ready=False,detail='Preparation superseded')
+        return False
+    assert not module._avatar_finish_deferred_probe(tmp_path,profile,{}, {'ok':True},changed)
+    assert module.avatar_profile_status(tmp_path)['detail']=='Preparation superseded'
+    assert module.avatar_profile_status(tmp_path)['ready'] is False
+    # An old prepared caller also cannot turn an existing failure into ready.
+    assert not module._avatar_finish_deferred_probe(tmp_path,profile,{}, {'ok':True},lambda:True)
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_avatar_full_startup_keeps_default_two_probes_but_gui_defer_loads_once(tmp_path,monkeypatch,avatar_profile_fixture,deferred):
+    """Run real preparation + real worker loop using a fake neural engine."""
+    import queue,camera_presence as camera,avatar_video
+    module,profile,python=avatar_profile_fixture
+    events=[];authorized=[True]
+    def setup_probe(*_,**__):
+        events.append('isolated setup probe')
+        return {'ok':True,'probe':{'ok':True}}
+    monkeypatch.setattr(module,'probe_avatar_profile',setup_probe)
+    # The default call deliberately omits the new keyword, preserving old API.
+    assert (module.ensure_avatar_profile(tmp_path,defer_probe=True) if deferred
+            else module.ensure_avatar_profile(tmp_path))==python
+    assert module.avatar_profile_status(tmp_path)['ready'] is (not deferred)
+    class Engine:
+        def __init__(self,*_):events.append('live load')
+        def probe(self):events.append('live probe');return {'ok':True,'frames':4}
+        def close(self):events.append('live close')
+    class Lease:
+        def measured(self,_):pass
+        def close(self):pass
+    class Pending:
+        def get(self,**_):authorized[0]=False;raise queue.Empty
+    monkeypatch.setattr(camera,'ROOT',tmp_path)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    monkeypatch.setattr(camera,'AvatarGpuLease',Lease)
+    monkeypatch.setattr(module,'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine)
+    monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:None)
+    monkeypatch.setattr(camera,'emit',Mock())
+    worker=camera.AvatarFrameWorker.__new__(camera.AvatarFrameWorker)
+    worker.profile=profile;worker.virtual_output=False;worker.sender_worker=None
+    worker.authorized=lambda:authorized[0];worker._publish=lambda _:None;worker.pending=Pending()
+    worker._run()
+    assert events==(['live load','live probe','live close'] if deferred else
+                    ['isolated setup probe','live load','live probe','live close'])
+    assert module.avatar_profile_status(tmp_path)['ready'] is True

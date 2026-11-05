@@ -8,6 +8,7 @@ before calling an endpoint or relying on its data.
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 import time
 from os import fstat
@@ -21,6 +22,17 @@ MAX_BYTES = 4_000_000
 MAX_AGE = 86400
 
 
+def _reject_json_constant(value: str):
+    raise ValueError(f"Invalid JSON numeric constant: {value}")
+
+
+def _parse_finite_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"Non-finite JSON number: {value}")
+    return number
+
+
 def _catalog() -> tuple[list[dict], bool]:
     """Refresh daily; keep the last good snapshot when the PC is offline."""
     data = None
@@ -31,7 +43,8 @@ def _catalog() -> tuple[list[dict], bool]:
             cache_mtime = fstat(handle.fileno()).st_mtime
         if len(raw) > MAX_BYTES:
             raise ValueError("Public API catalog exceeded its cache limit.")
-        cached = json.loads(raw.decode("utf-8"))
+        cached = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant,
+                            parse_float=_parse_finite_float)
         if not isinstance(cached, list) or not all(isinstance(entry, dict) for entry in cached):
             raise ValueError("Unexpected public API catalog format.")
         data = cached
@@ -45,7 +58,8 @@ def _catalog() -> tuple[list[dict], bool]:
                 raw = response.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:
                 raise ValueError("Public API catalog exceeded its download limit.")
-            parsed = json.loads(raw.decode("utf-8"))
+            parsed = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant,
+                                parse_float=_parse_finite_float)
             if not isinstance(parsed, list) or not all(isinstance(entry, dict) for entry in parsed):
                 raise ValueError("Unexpected public API catalog format.")
             data = parsed
@@ -65,8 +79,8 @@ def search_public_apis(query: str, max_results: int = 10) -> dict:
     """Search no-key candidates; return source URLs and verification caveats."""
     if not isinstance(query, str):
         raise ValueError("Describe the public data or API you need in 2 to 120 characters.")
-    terms = [word.casefold() for word in query.split() if len(word) > 1]
-    if not terms or len(query) > 120:
+    terms = [word.casefold() for word in query.split()]
+    if not any(len(word) > 1 for word in terms) or len(query) > 120:
         raise ValueError("Describe the public data or API you need in 2 to 120 characters.")
     if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 20:
         raise ValueError("Result count must be between 1 and 20.")

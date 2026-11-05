@@ -392,6 +392,55 @@ def test_stalled_preview_preserves_successful_browser_result(tmp_path, stalled_s
     asyncio.run(asyncio.wait_for(check(), timeout=1))
 
 
+@pytest.mark.parametrize('external_cancel', [False, True])
+def test_preview_cancellation_removes_partial_file_and_preserves_previous_image(tmp_path, external_cancel):
+    from pathlib import Path
+    original = {'isError': False, 'content': [{'type': 'text', 'text': 'done'}]}
+    image = tmp_path / '.local-ai/browser.png'
+    image.parent.mkdir()
+    image.write_bytes(b'previous completed screenshot')
+    partials = []
+    cancelled = []
+
+    async def check():
+        screenshot_started = asyncio.Event()
+
+        class FakeSession:
+            async def call_tool(self, name, arguments):
+                if name == 'navigate_page':
+                    return SimpleNamespace(is_error=False, model_dump=lambda **kwargs: original)
+                if name == 'list_pages':
+                    return SimpleNamespace(is_error=False, content=[SimpleNamespace(text='1: https://example.com [selected]')])
+                assert name == 'take_screenshot'
+                partial = Path(arguments['filePath'])
+                partial.write_bytes(b'incomplete screenshot')
+                partials.append(partial)
+                screenshot_started.set()
+                try:
+                    await asyncio.Future()
+                finally:
+                    cancelled.append(name)
+
+        with (patch.object(toolbox_mcp, 'PREVIEW_SECONDS', 10 if external_cancel else .01),
+              patch.dict(toolbox_mcp.CATALOG, {'devtools.navigate_page': {}}, clear=True),
+              patch.dict(toolbox_mcp.SESSIONS, {'devtools': FakeSession()}, clear=True),
+              patch.object(toolbox_mcp, 'registered_project', return_value=tmp_path)):
+            task = asyncio.create_task(toolbox_mcp.toolbox_call('devtools.navigate_page', '{}', project_folder=str(tmp_path)))
+            await screenshot_started.wait()
+            if external_cancel:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            else:
+                assert await task == original
+            assert task.done() and asyncio.all_tasks() == {asyncio.current_task()}
+        assert cancelled == ['take_screenshot']
+        assert len(partials) == 1 and not partials[0].exists()
+        assert image.read_bytes() == b'previous completed screenshot'
+
+    asyncio.run(asyncio.wait_for(check(), timeout=1))
+
+
 def test_preview_backend_errors_preserve_successful_browser_result(tmp_path):
     class PreviewBackendError(Exception):
         pass
@@ -1422,3 +1471,26 @@ def test_game_library_removed_task_during_download_prevents_project_publication(
     with pytest.raises(ValueError,match='exact folder'):
         asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
     assert list(project.iterdir())==[]
+
+
+def test_registered_helper_catalog_dispatch_reuses_current_task_without_model(tmp_path,monkeypatch):
+    import native_agent,project_memory,long_tasks,cloud_ai
+    root=tmp_path/'project';root.mkdir();app=tmp_path/'app';state=app/'LongTasks';state.mkdir(parents=True)
+    project={'id':'c'*12,'folder':str(root),'brief':'Compute tax totals using a local reusable helper.'}
+    with sqlite3.connect(state/'projects.db') as conn:
+        conn.execute('CREATE TABLE projects(id TEXT,folder TEXT,brief TEXT)')
+        conn.execute('INSERT INTO projects VALUES(?,?,?)',(project['id'],project['folder'],project['brief']))
+    monkeypatch.setattr(toolbox_mcp,'ROOT',app);monkeypatch.setattr(long_tasks,'STATE',state)
+    with patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No inference')) as model:
+        def call(name,args):
+            return json.loads(native_agent.execute_tool(root,'call_local_tool',{'tool':name,'arguments':args}))
+        registered=call('local.register_expression_helper',{'name':'tax_total','parameters':{'amount':'number','tax':'number'},
+            'expression':'round(amount*(1+tax),2)','cases':[{'inputs':{'amount':10,'tax':.06},'expected':10.6}]})
+        assert registered['registered']
+        discovered=call('local.find_expression_helpers',{'query':'tax'})
+        assert discovered['helpers'][0]['id']==registered['id']
+        assert 'expression' not in discovered['helpers'][0] and 'cases' not in discovered['helpers'][0]
+        result=call('local.run_expression_helper',{'helper_id':registered['id'],'inputs':{'amount':100,'tax':.1}})
+        assert result['value']==110 and result['inference_calls']==0
+        assert not result['task_completion']
+    model.assert_not_called()

@@ -3635,3 +3635,267 @@ def test_task_card_missing_legacy_time_never_looks_like_decades_of_work():
         item={'created':time.time()-130,'updated':time.time(),'status':'accepted','finished':time.time()}
         assert task_module.task_card_elapsed(item)=='2m 10s'
         actual.assert_called_once_with(item['created'],item['updated'],item['status'],finished=item['finished'])
+
+
+
+def update_dialog_poll_call(children, donation_popup, *, chat=False, cloud=False, github=None,
+                            chat_control=None, cloud_control=None, chat_event=None, cloud_event=None):
+    """Execute the exact production poll call, not a copied update predicate."""
+    import ast
+    from types import SimpleNamespace
+    tree = ast.parse((ROOT/"long_tasks.py").read_text(encoding="utf-8-sig"))
+    calls = [node for node in ast.walk(tree) if isinstance(node,ast.Call)
+             and isinstance(node.func,ast.Name) and node.func.id=="update_dialog_open"]
+    assert len(calls)==1
+    class Button:
+        def __init__(self, value): self.value=value
+        def instate(self, states):
+            assert states==["disabled"]
+            if isinstance(self.value,Exception): raise self.value
+            return self.value
+    class Pending:
+        def __init__(self,value):self.value=value
+        def is_set(self):
+            if isinstance(self.value,Exception):raise self.value
+            return self.value
+    window=SimpleNamespace(winfo_children=lambda:children,github_login_process=github)
+    expression=ast.Expression(body=calls[0]);ast.fix_missing_locations(expression)
+    return eval(compile(expression,"actual-update-poll-call","eval"),{
+        "update_dialog_open":task_module.update_dialog_open,"window":window,
+        "preview_window":None,"usage_window":None,"readiness_popup":[None],
+        "donation_controls":SimpleNamespace(popup=donation_popup),
+        "chat_button":chat_control or Button(chat),"connect_button":cloud_control or Button(cloud),
+        "chat_connection_pending":chat_event if chat_event is not None else Pending(chat),
+        "cloud_connection_pending":cloud_event if cloud_event is not None else Pending(cloud)})
+
+
+class UpdatePanel:
+    def __init__(self,visible=True): self.visible=visible
+    def winfo_class(self): return "Toplevel"
+    def winfo_viewable(self): return self.visible
+
+
+def test_update_poll_ignores_visible_saved_donation_controls_but_not_input_dialog():
+    popup=UpdatePanel()
+    assert update_dialog_poll_call([popup],popup) is False
+    assert update_dialog_poll_call([popup,UpdatePanel()],popup) is True
+    hidden=UpdatePanel(False)
+    assert update_dialog_poll_call([hidden],hidden) is False
+
+
+def test_update_poll_preserves_browser_auth_even_without_visible_dialog():
+    from types import SimpleNamespace
+    popup=UpdatePanel(False)
+    assert update_dialog_poll_call([popup],popup,chat=True) is True
+    assert update_dialog_poll_call([popup],popup,cloud=True) is True
+    assert update_dialog_poll_call([popup],popup,github=SimpleNamespace(poll=lambda:None)) is True
+    assert update_dialog_poll_call([popup],popup,github=SimpleNamespace(poll=lambda:0)) is False
+
+
+def test_update_poll_unknown_auth_state_defers_instead_of_failing_open():
+    from types import SimpleNamespace
+    popup=UpdatePanel(False)
+    assert update_dialog_poll_call([popup],popup,chat=RuntimeError("unknown connection event")) is True
+    def unavailable():raise OSError("unknown child status")
+    assert update_dialog_poll_call([popup],popup,github=SimpleNamespace(poll=unavailable)) is True
+    assert update_dialog_poll_call([popup],popup,cloud=None) is True
+
+
+
+class ConnectionFixtureControl:
+    def __init__(self,text='Connect',state='normal'):
+        self.values={'text':text,'state':state};self.managed=False
+    def configure(self,**values):self.values.update(values)
+    def cget(self,name):return self.values[name]
+    def instate(self,states):return self.values['state']=='disabled'
+    def winfo_manager(self):return 'pack' if self.managed else ''
+    def pack(self,**kwargs):self.managed=True
+    def pack_forget(self):self.managed=False
+    def get(self):return self.values['text']
+    def set(self,value):self.values['text']=value
+
+
+def actual_connection_ui_function(name,namespace):
+    import ast
+    tree=ast.parse((ROOT/'long_tasks.py').read_text(encoding='utf-8-sig'))
+    functions=[node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef) and node.name==name]
+    assert len(functions)==1
+    module=ast.Module(body=[functions[0]],type_ignores=[]);ast.fix_missing_locations(module)
+    exec(compile(module,'actual-connection-callback','exec'),namespace)
+    return namespace[name]
+
+
+def test_connected_idle_buttons_from_actual_refresh_and_poll_do_not_block_update():
+    import ast
+    from types import SimpleNamespace
+    chat=ConnectionFixtureControl();cloud=ConnectionFixtureControl()
+    namespace={'chatgpt_auth':SimpleNamespace(status=lambda:{'connected':True,'sharing':True,'enabled':True,'email':'fixture@example.invalid'}),
+        'chat_button':chat,'use_chat_button':ConnectionFixtureControl(),'chat_disconnect_button':ConnectionFixtureControl(),
+        'chat_text':ConnectionFixtureControl('Connected'),'cloud_status':lambda:{'connected':True},
+        'connect_button':cloud,'cloud_text':ConnectionFixtureControl('Connected'),'disconnect_button':ConnectionFixtureControl(),'router_note':object()}
+    actual_connection_ui_function('refresh_chatgpt',namespace)()
+    # Execute the provider-status assignment and its actual following branch
+    # from poll, so this regression uses the real connected-button behavior.
+    tree=ast.parse((ROOT/'long_tasks.py').read_text(encoding='utf-8-sig'))
+    polls=[node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef)
+           and any(isinstance(item,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='connected' for t in item.targets)
+                   for item in node.body)]
+    assert len(polls)==1
+    statements=polls[0].body
+    index=next(index for index,item in enumerate(statements) if isinstance(item,ast.Assign)
+        and any(isinstance(t,ast.Name) and t.id=='connected' for t in item.targets))
+    assert isinstance(statements[index+1],ast.If)
+    module=ast.Module(body=statements[index:index+2],type_ignores=[]);ast.fix_missing_locations(module)
+    exec(compile(module,'actual-openrouter-poll-refresh','exec'),namespace)
+    assert chat.cget('text')=='ChatGPT connected' and cloud.cget('text')=='OpenRouter connected'
+    assert chat.instate(['disabled']) and cloud.instate(['disabled'])
+    assert update_dialog_poll_call([],None,chat_control=chat,cloud_control=cloud) is False
+
+
+
+import pytest
+
+
+@pytest.mark.parametrize('name',['connect_chatgpt','disconnect_chatgpt','connect'])
+@pytest.mark.parametrize('outcome',['success','failure','cancel'])
+def test_actual_connection_callback_owns_pending_event_until_worker_finally(name,outcome):
+    import queue
+    from types import SimpleNamespace
+    chat_pending=threading.Event();cloud_pending=threading.Event()
+    pending=cloud_pending if name=='connect' else chat_pending
+    started=threading.Event();release=threading.Event();workers=[]
+    def operation():
+        assert pending.is_set()  # Set before the real worker can start auth.
+        started.set()
+        if not release.wait(3):raise AssertionError('Owned test release was not signaled')
+        if outcome=='failure':raise RuntimeError('Owned auth fixture failure')
+        if outcome=='cancel':raise InterruptedError('Owned auth fixture cancellation')
+        return {'email':'fixture@example.invalid','sharing':True}
+    def launch(event,worker):
+        thread=task_module.start_connection_worker(event,worker)
+        if thread is not None:workers.append(thread)
+        return thread
+    namespace={'chat_button':ConnectionFixtureControl(),'chat_text':ConnectionFixtureControl(),
+        'connect_button':ConnectionFixtureControl(),'cloud_text':ConnectionFixtureControl(),
+        'chat_connection_pending':chat_pending,'cloud_connection_pending':cloud_pending,
+        'chat_events':queue.Queue(),'cloud_events':queue.Queue(),
+        'chatgpt_auth':SimpleNamespace(connect=operation,disconnect=operation),
+        'ensure_router':lambda:None,'connect_account':operation,'start_connection_worker':launch}
+    callback=actual_connection_ui_function(name,namespace)
+    try:
+        callback();assert started.wait(2)
+        assert update_dialog_poll_call([],None,chat_event=chat_pending,cloud_event=cloud_pending) is True
+        callback()  # A second provider operation cannot clear the first lease.
+        assert len(workers)==1 and pending.is_set()
+    finally:
+        release.set()
+        for worker in workers:worker.join(3)
+    assert workers and not any(worker.is_alive() for worker in workers)
+    assert not pending.is_set()
+    assert update_dialog_poll_call([],None,chat_event=chat_pending,cloud_event=cloud_pending) is False
+
+
+@pytest.mark.parametrize('failure',[False,True])
+def test_actual_openrouter_disconnect_clears_synchronous_operation(failure):
+    pending=threading.Event();observed=[]
+    def disconnect():
+        assert pending.is_set()
+        observed.append(update_dialog_poll_call([],None,cloud_event=pending))
+        if failure:raise RuntimeError('Owned disconnect fixture failure')
+    namespace={'cloud_connection_pending':pending,'disconnect':disconnect,'cloud_text':ConnectionFixtureControl()}
+    callback=actual_connection_ui_function('disconnect_cloud',namespace)
+    if failure:
+        with pytest.raises(RuntimeError):callback()
+    else:callback()
+    assert observed==[True] and not pending.is_set()
+    assert update_dialog_poll_call([],None,cloud_event=pending) is False
+
+
+@pytest.mark.parametrize('error_type',[RuntimeError,KeyboardInterrupt,SystemExit])
+def test_connection_worker_failed_start_cancels_late_target_before_new_owner(monkeypatch,error_type):
+    pending=threading.Event();targets=[];calls=[]
+    class FailedThread:
+        def __init__(self,**kwargs):
+            assert pending.is_set();targets.append(kwargs['target'])
+        def start(self):raise error_type('Owned start failure')
+        def is_alive(self):raise AssertionError('Startup cancellation must not guess OS thread state')
+    monkeypatch.setattr(threading,'Thread',FailedThread)
+    with pytest.raises(error_type):task_module.start_connection_worker(pending,lambda:calls.append(True))
+    assert not pending.is_set()
+    pending.set()  # A subsequent operation now owns this test event.
+    targets[0]()  # An abandoned old target must not dispatch or clear it.
+    assert not calls and pending.is_set()
+    pending.clear()
+
+
+def test_update_poll_missing_connection_event_is_unknown_not_idle():
+    assert update_dialog_poll_call([],None,chat_event=object()) is True
+
+
+
+@pytest.mark.parametrize('fault',[KeyboardInterrupt,RuntimeError])
+def test_startup_fault_gate_cancels_late_auth_without_clearing_later_owner(fault):
+    original_thread=threading.Thread
+    bootstrap=threading.Event();future_started=threading.Event();future_finish=threading.Event()
+    pending=threading.Event();old_workers=[];future_workers=[];old_calls=[];observed={}
+    class DelayedBootstrap(original_thread):
+        def __init__(self,**kwargs):super().__init__(**kwargs);old_workers.append(self)
+        def _bootstrap_inner(self):
+            bootstrap.wait(3)
+            super()._bootstrap_inner()
+        def start(self):
+            original_wait=self._started.wait
+            def interrupt(*args,**kwargs):raise fault('Owned synthetic start interruption')
+            self._started.wait=interrupt
+            try:super().start()
+            finally:self._started.wait=original_wait
+    def future_operation():
+        assert pending.is_set()
+        future_started.set();future_finish.wait(3)
+    try:
+        with patch.object(threading,'Thread',DelayedBootstrap):
+            with pytest.raises(fault):task_module.start_connection_worker(pending,lambda:old_calls.append(True))
+        assert not pending.is_set()
+        future=task_module.start_connection_worker(pending,future_operation)
+        future_workers.append(future);assert future_started.wait(2)
+        bootstrap.set()
+        for worker in old_workers:
+            assert worker._started.wait(2)
+            worker.join(3)
+        observed['old_calls']=len(old_calls)
+        observed['later_owner_still_pending']=pending.is_set()
+        observed['update_blocked']=task_module.update_dialog_open([],connection_events=(pending,))
+    finally:
+        bootstrap.set();future_finish.set()
+        for worker in old_workers+future_workers:
+            if worker is not None and worker._started.wait(3):worker.join(3)
+    assert not any(worker.is_alive() for worker in old_workers+future_workers)
+    assert observed=={'old_calls':0,'later_owner_still_pending':True,'update_blocked':True}
+    assert not pending.is_set()
+
+
+
+def test_start_permission_commit_interruption_preserves_running_operation_authority():
+    original_event=threading.Event;original_thread=threading.Thread
+    pending=original_event();started=original_event();release=original_event();workers=[];created=[]
+    class InterruptedPermit(original_event):
+        def set(self):
+            super().set()
+            raise KeyboardInterrupt('Owned interruption after permission commit')
+    def event():
+        result=InterruptedPermit() if not created else original_event()
+        created.append(result);return result
+    def thread(**kwargs):
+        worker=original_thread(**kwargs);workers.append(worker);return worker
+    def operation():
+        assert pending.is_set();started.set();release.wait(3)
+    try:
+        with patch.object(threading,'Event',side_effect=event),patch.object(threading,'Thread',side_effect=thread):
+            with pytest.raises(KeyboardInterrupt):task_module.start_connection_worker(pending,operation)
+        assert started.wait(2) and pending.is_set()
+        assert task_module.update_dialog_open([],connection_events=(pending,)) is True
+    finally:
+        release.set()
+        for worker in workers:worker.join(3)
+    assert workers and not any(worker.is_alive() for worker in workers)
+    assert not pending.is_set()

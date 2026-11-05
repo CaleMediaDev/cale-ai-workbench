@@ -87,6 +87,9 @@ def desired_context(info, ram_bytes, weight_bytes):
     native = native_context(info)
     if native < MIN_AGENT_CONTEXT:
         raise ValueError("This model has less than the 64K Hermes minimum")
+    for name, value in (("ram_bytes", ram_bytes), ("weight_bytes", weight_bytes)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer byte count")
     reserve = max(8 * 2**30, ram_bytes // 8)
     available = max(0, ram_bytes - weight_bytes - reserve)
     affordable = available // (128 * 1024)

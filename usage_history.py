@@ -190,6 +190,59 @@ def recent_model_speed(model: str) -> float | None:
         return None
 
 
+
+def _response_speed(source, models=(), limit=12):
+    """Median completed-output productivity on one comparable timing basis.
+
+    This includes load, prefill, decode and transport latency. It is a routing
+    hint, not decode throughput, quality evidence or a model retirement signal.
+    Missing elapsed time never falls back to the stored mixed-basis TPS column.
+    """
+    aliases = tuple(dict.fromkeys(
+        alias for model in models
+        for alias in (model.removesuffix(":latest"), model.removesuffix(":latest") + ":latest")
+    ))
+    model_filter = f"AND model IN ({','.join('?' for _ in aliases)}) " if aliases else ""
+    now = time.time()
+    try:
+        with closing(_connection()) as conn:
+            rows = conn.execute(
+                "SELECT 1.0 * completion_tokens / elapsed_seconds FROM usage_events "
+                "WHERE source=? AND typeof(timestamp) IN ('integer','real') "
+                "AND timestamp>? AND timestamp<=? "
+                # SQLite's dynamic types otherwise admit arbitrary text as
+                # numeric comparisons. Reject malformed persisted metrics.
+                "AND typeof(completion_tokens) IN ('integer','real') "
+                "AND completion_tokens>0 AND completion_tokens<=1000000000 "
+                "AND completion_tokens=CAST(completion_tokens AS INTEGER) "
+                "AND typeof(elapsed_seconds) IN ('integer','real') "
+                "AND elapsed_seconds>0 AND elapsed_seconds<1e100 "
+                "AND 1.0 * completion_tokens / elapsed_seconds > 0 "
+                "AND 1.0 * completion_tokens / elapsed_seconds < 1e100 "
+                + model_filter + "ORDER BY id DESC LIMIT ?",
+                (source, now - 30 * 86400, now, *aliases, limit),
+            ).fetchall()
+        return statistics.median(row[0] for row in rows) if len(rows) >= 3 else None
+    except (OSError, sqlite3.Error):
+        return None
+
+
+def recent_model_response_speed(model: str) -> float | None:
+    """Recent local completion tokens per end-to-end second, or unknown."""
+    return _response_speed("ollama", (model,))
+
+
+def recent_local_response_speed(default: float = 35.0, models=None) -> float:
+    """Compare only the requested local tier; estimates are explicit defaults."""
+    speed = _response_speed("ollama", tuple(models or ()))
+    return default if speed is None else speed
+
+
+def recent_provider_response_speed(source: str, default: float) -> float:
+    """Compare cloud and local responses using the same end-to-end basis."""
+    speed = _response_speed(source, limit=8)
+    return default if speed is None else speed
+
 def recent_model_retirement_speed(model: str) -> float | None:
     """Use sustained local responses for exclusion/removal, not tiny replies.
 

@@ -316,7 +316,12 @@ def probe_tool_use(alias, reasoning_effort=None):
         request,
         timeout=240,
     )
-    for call in result.get("message", {}).get("tool_calls", []) or []:
+    message = result.get("message", {})
+    if not isinstance(message, dict):
+        raise CandidateModelError(
+            "Model downloaded, but it did not pass the local tool-use check."
+        )
+    for call in message.get("tool_calls", []) or []:
         if not isinstance(call, dict):
             continue
         function = call.get("function", {})
@@ -865,7 +870,7 @@ def repair_main_alias(ram=None, vram=None, *, alias=None):
                 # weights. Keep the strongest qualified model for demanding
                 # work even before it has accumulated three timed task calls.
                 # The router still uses the small alias for quick requests.
-                speed = model_fitness.measured_speed(alias)
+                speed = model_fitness.measured_speed(alias)  # End-to-end, not decode TPS.
                 info = post("/api/show", {"model": alias}, timeout=10) if current_usable else {}
                 candidates.append((weight, speed or 0, alias, item.get("source", ""),
                                    weight_blob(info), info))

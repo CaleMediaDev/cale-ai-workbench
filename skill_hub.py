@@ -62,9 +62,11 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
         identifier = str(row.get("identifier", ""))
         name = row.get("name", "")
         description = row.get("description", "")
-        name = name[:100] if isinstance(name, str) else ""
-        description = description[:500] if isinstance(description, str) else ""
+        name = name if isinstance(name, str) else ""
+        description = description if isinstance(description, str) else ""
         haystack = (name + " " + description).casefold()
+        name = name[:100]
+        description = description[:500]
         if (
             IDENTIFIER.fullmatch(identifier)
             and identifier.split("/", 1)[0] == source

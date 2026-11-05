@@ -47,7 +47,8 @@ def _run(args: list[str], env: dict | None = None, timeout: int = 600) -> None:
         creationflags=HIDE,
     )
     if result.returncode:
-        detail = (result.stderr or result.stdout or "unknown error").strip()[-500:]
+        detail = ((result.stderr or "").strip() or (result.stdout or "").strip()
+                  or "unknown error")[-500:]
         raise RuntimeError(detail)
 
 

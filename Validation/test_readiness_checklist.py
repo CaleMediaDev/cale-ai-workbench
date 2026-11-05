@@ -452,6 +452,37 @@ def test_image_recognition_check_uses_bundled_image_and_requires_answer(tmp_path
     assert rows["Image recognition"]["state"] == "ready"
 
 
+@pytest.mark.parametrize("description, expected_ok", [
+    (None, False),
+    ([], False),
+    ({}, False),
+    (123, False),
+    (False, False),
+    ("", False),
+    (" \n\t", False),
+    ("A colorful C logo", True),
+])
+def test_vision_readiness_requires_a_nonempty_text_description(tmp_path, description, expected_ok):
+    image = tmp_path / "assets/cale-logo.png"
+    image.parent.mkdir()
+    image.write_bytes(b"bundled image")
+
+    def media_probe(_root, action, **kwargs):
+        if action == "recognize_image":
+            return {"ok": True, "data": {"description": description}}
+        return {"ok": False}
+
+    with (patch.object(readiness_checklist, "urlopen", side_effect=OSError),
+          patch.object(readiness_checklist, "_heavy_gpu_active", return_value=False),
+          patch.object(readiness_checklist, "_media_probe", side_effect=media_probe)):
+        result = readiness_checklist.run_optional_checks(tmp_path, test_local=True)
+
+    assert result["vision"]["ok"] is expected_ok
+    saved = json.loads((tmp_path / "LongTasks/readiness-probes.json").read_text(
+        encoding="utf-8"))
+    assert saved["vision"]["ok"] is expected_ok
+
+
 def test_safe_repair_is_queued_automatically_once_without_browser_pairing(tmp_path):
     rows = {"rows": [
         {"label": "Fast file search", "state": "attention"},

@@ -201,6 +201,12 @@ def test_negated_rapper_and_rapped_verses_preserve_vocal_texture():
         assert music_style.requires_sustained_vocals(request)
 
 
+def test_positive_rap_aliases_override_chops_but_negations_do_not():
+    for alias in ("rap", "rapping", "rapper", "rapped verses"):
+        assert music_style.requires_sustained_vocals("Vocal chops and " + alias)
+        assert not music_style.requires_sustained_vocals("Vocal chops without any " + alias)
+
+
 def test_sparse_female_hook_does_not_get_full_verse_direction():
     request = ("Female singing voice, main vocal hook: waapy waaap. "
                "Very little conventional singing, with massive instrumental drops.")

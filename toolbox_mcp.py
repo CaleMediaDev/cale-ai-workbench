@@ -234,6 +234,33 @@ LOCAL_CATALOG = {
     },
 }
 
+LOCAL_CATALOG.update({
+    "local.register_expression_helper": {
+        "description": "Create and test a reusable project-local pure JSON/arithmetic expression. Define parameters with types number, integer, string, boolean, numbers, strings, array, object or json; supply concrete input/expected cases. Supports arithmetic, JSON, indexing, conditionals and abs/round/sum/min/max/len/get. No imports, attributes, eval, shell or network. Registers only if every supplied example passes; does not complete a task.",
+        "inputSchema": {"type": "object", "properties": {
+            "project_folder": {"type": "string"}, "name": {"type": "string", "maxLength": 64},
+            "parameters": {"type": "object", "minProperties": 1, "maxProperties": 16,
+                "additionalProperties": {"type": "string", "enum": ["number", "integer", "string", "boolean", "numbers", "strings", "array", "object", "json"]}},
+            "expression": {"type": "string", "maxLength": 2000},
+            "cases": {"type": "array", "minItems": 1, "maxItems": 24, "items": {"type": "object", "properties": {
+                "inputs": {"type": "object"}, "expected": {}}, "required": ["inputs", "expected"], "additionalProperties": False}},
+        }, "required": ["project_folder", "name", "parameters", "expression", "cases"], "additionalProperties": False},
+    },
+    "local.find_expression_helpers": {
+        "description": "Find already tested project-local expression helpers and their parameter types. Retrieval does not run them; stale-request records remain labeled historical. Use run_expression_helper with the exact ID to reuse a current helper without LLM inference.",
+        "inputSchema": {"type": "object", "properties": {"project_folder": {"type": "string"},
+            "query": {"type": "string", "maxLength": 100}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
+            "required": ["project_folder"], "additionalProperties": False},
+    },
+    "local.run_expression_helper": {
+        "description": "Run an exact tested expression helper directly with typed JSON inputs and zero LLM calls. Revalidates project/request, definition, cases and interpreter hashes; stale or tampered helpers must be reverified. Restricted expressions have no filesystem, network or shell access. This result is not task/acceptance completion.",
+        "inputSchema": {"type": "object", "properties": {"project_folder": {"type": "string"},
+            "helper_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "inputs": {"type": "object"}},
+            "required": ["project_folder", "helper_id", "inputs"], "additionalProperties": False},
+    },
+})
+
+
 
 async def project_roots(_context):
     """Limit file tools to the installation and folders owned by current tasks."""
@@ -470,6 +497,9 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
             "local.video_job_status": video_job_status,
             "local.train_table_model": train_table_model,
             "local.predict_table_model": predict_table_model,
+            "local.register_expression_helper": register_expression_helper,
+            "local.find_expression_helpers": find_expression_helpers,
+            "local.run_expression_helper": run_expression_helper,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -543,6 +573,25 @@ async def run_project_checks(project_folder: str, timeout_seconds: int = 1200) -
         "evidence": evidence,
         "verification_log": str(log) if log.is_file() and log.stat().st_mtime >= started - 1 else None,
     }
+
+
+@server.tool()
+def register_expression_helper(project_folder: str, name: str, parameters: dict,
+                               expression: str, cases: list) -> dict:
+    """Test and save a bounded expression, never arbitrary Python/JavaScript code."""
+    return project_memory.register_expression_helper(registered_project(project_folder), name, parameters, expression, cases)
+
+
+@server.tool()
+def find_expression_helpers(project_folder: str, query: str = "", limit: int = 8) -> dict:
+    """Discover project-local tested expression IDs; do not execute on retrieval."""
+    return project_memory.find_expression_helpers(registered_project(project_folder), query, limit)
+
+
+@server.tool()
+def run_expression_helper(project_folder: str, helper_id: str, inputs: dict) -> dict:
+    """Invoke a current hash-bound expression with no model or arbitrary code."""
+    return project_memory.run_expression_helper(registered_project(project_folder), helper_id, inputs)
 
 
 @server.tool()

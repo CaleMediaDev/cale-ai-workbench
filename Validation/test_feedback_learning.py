@@ -228,6 +228,29 @@ def test_duplicate_lessons_do_not_displace_distinct_feedback(tmp_path, monkeypat
         assert len(feedback_learning.for_task(tmp_path, identifier)) == 1
 
 
+def test_existing_opposite_ratings_use_only_latest_review(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(feedback_learning.time, "time", lambda: 10.0)
+    for latest_time in (20.0, 10.0):
+        root = tmp_path / str(latest_time)
+        reviewed = task("legacy-votes", "Techno synth bass", title="Techno synth bass")
+        feedback_learning.record(root, reviewed, -1, "Use electronic drums")
+        # Existing databases can contain both ratings under the unique constraint.
+        # An equal timestamp must still prefer the later inserted review.
+        with sqlite3.connect(root / "feedback-learning.sqlite3") as conn:
+            conn.execute("""INSERT INTO feedback
+                (task_id,generation,kind,rating,title,brief,note,created)
+                SELECT task_id,generation,kind,1,title,brief,'',?
+                FROM feedback WHERE task_id=?""", (latest_time, "legacy-votes"))
+
+        assert len(feedback_learning.for_task(root, "legacy-votes")) == 2
+        learned = feedback_learning.guidance(root, "music", "Techno synth bass")
+        assert "Similar task the user liked: Techno synth bass" in learned
+        assert "Use electronic drums" not in learned
+        assert "Improve:" not in learned
+
+
 def test_review_requires_comment_for_thumbs_down(tmp_path):
     import pytest
 

@@ -27,6 +27,7 @@ class ChatActivity:
         self.pending_reports = {}
         self.titles = {}
         self.resources = {}
+        self.github_failures = {}
         self.pending = {}
         self.last_progress = float("-inf")
 
@@ -91,7 +92,17 @@ class ChatActivity:
                         self.pending_reports.pop(next(iter(self.pending_reports)))
                     self.pending.pop(run, None)
                 continue
-            key = (run, phase, self.resources.get(run))
+            failure = event.get("github_failure")
+            if (phase == "waiting" and isinstance(failure, dict)
+                    and isinstance(failure.get("stage"), str) and failure["stage"] in donation._GITHUB_STAGES
+                    and isinstance(failure.get("kind"), str) and failure["kind"] in donation._GITHUB_KINDS
+                    and (failure.get("status") is None or type(failure.get("status")) is int and 400 <= failure["status"] <= 599)):
+                self.github_failures[run] = donation.github_failure_message(failure["stage"], failure.get("status"), failure["kind"])
+                while len(self.github_failures) > 512:
+                    self.github_failures.pop(next(iter(self.github_failures)))
+            else:
+                self.github_failures.pop(run, None)
+            key = (run, phase, self.resources.get(run), self.github_failures.get(run))
             if key in self.seen:
                 continue
             self.remember(self.seen, key)
@@ -123,7 +134,7 @@ class ChatActivity:
                 "training": "I'm training a small specialist on reviewed public data",
                 "trained": "I recorded a local specialist experiment; it is not activated",
                 "no_change": "I finished a review without a reliable code change; nothing was sent",
-                "waiting": "I'm waiting for an enabled AI source or GitHub to become available",
+                "waiting": "A contribution attempt is waiting to retry; other available reviews can continue. Open Donate AI power for the current status",
                 "error": "I paused after a contribution error; no successful report is confirmed",
             }
             lines = []
@@ -143,6 +154,12 @@ class ChatActivity:
                     line += " · " + areas if areas else ""
                 else:
                     line = descriptions[phase] + (" · " + areas if areas else "")
+                if phase == "waiting":
+                    failures = list(dict.fromkeys(self.github_failures[run] for run in runs if run in self.github_failures))
+                    if failures:
+                        line = " ".join(failures[:2])
+                        if any(run not in self.github_failures for run in runs):
+                            line += " " + descriptions[phase]
                 names = {"local": "local AI", "free_cloud": "free cloud AI", "chatgpt": "ChatGPT", "cpu": "local CPU"}
                 sources = list(dict.fromkeys(self.resources[run] for run in runs if self.resources.get(run) in names))
                 if sources:
@@ -172,6 +189,9 @@ class Controls:
         self.popup = None
         self.checked_at = 0
         self.last_counter = 0
+        self._counter_results = queue.Queue(maxsize=1)
+        self._counter_worker = None
+        self._counter_snapshot = None
         self.probing = False
         self.events = queue.Queue()
         self.login = ""
@@ -183,8 +203,8 @@ class Controls:
         frame = ttk.Frame(header)
         frame.pack(side="right", padx=(12, 10))
         ttk.Button(frame, text="Donate AI power", command=self.open).pack()
-        self.counter = tk.StringVar(value="Total tokens donated: 0")
-        self.breakdown = tk.StringVar(value="Local: 0 · Free cloud: 0 · ChatGPT: 0")
+        self.counter = tk.StringVar(value="Total tokens donated: —")
+        self.breakdown = tk.StringVar(value="Local: — · Free cloud: — · ChatGPT: —")
         ttk.Label(frame, textvariable=self.counter, style="Muted.TLabel").pack(pady=(3, 0))
 
     def refresh(self):
@@ -193,14 +213,7 @@ class Controls:
         if activity:
             activity.poll()
         now = time.monotonic()
-        if now - self.last_counter >= 5:
-            self.last_counter = now
-            try:
-                self.counter.set(f"Total tokens donated: {donation.total_tokens(self.service.root):,}")
-                totals = donation.source_totals(self.service.root)
-                self.breakdown.set(f"Local: {totals.get('local', 0):,} · Free cloud: {totals.get('free_cloud', 0):,} · ChatGPT: {totals.get('chatgpt', 0):,}")
-            except Exception:
-                self.counter.set("Total tokens donated: checking…")
+        self._refresh_counters(now)
         if not self.popup or not self.popup.winfo_exists():
             return
         try:
@@ -248,6 +261,33 @@ class Controls:
             self.free_row.pack(fill="x", before=self.power_row, pady=(3, 8))
         else:
             self.free_row.pack_forget()
+
+    def _refresh_counters(self, now):
+        """Tk drains one bounded result; the single probe never touches widgets."""
+        try:
+            snapshot = self._counter_results.get_nowait()
+        except queue.Empty:
+            snapshot = None
+        if snapshot is not None:
+            self._counter_snapshot = snapshot
+            self.counter.set(f"Total tokens donated: {snapshot['total']:,}")
+            totals = snapshot["sources"]
+            self.breakdown.set(f"Local: {totals.get('local', 0):,} · Free cloud: {totals.get('free_cloud', 0):,} · ChatGPT: {totals.get('chatgpt', 0):,}")
+        if now - self.last_counter < 5 or self._counter_worker is not None and self._counter_worker.is_alive():
+            return
+        self.last_counter = now
+        results, root = self._counter_results, self.service.root
+        def probe():
+            try:
+                snapshot = donation.token_snapshot(root)
+            except Exception:
+                snapshot = None  # Preserve the last good display; never invent zero.
+            try:
+                results.put_nowait(snapshot)
+            except queue.Full:
+                pass  # At most one pending result and one owned probe.
+        self._counter_worker = threading.Thread(target=probe, daemon=True)
+        self._counter_worker.start()
 
     def ready_to_start(self):
         """Require only the accounts/runtimes for the resources actually selected."""

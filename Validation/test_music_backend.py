@@ -132,7 +132,7 @@ def test_music_install_repairs_broken_environment_without_refetching_source(tmp_
 
 def test_music_server_allows_gpu_tier_to_load_planner(tmp_path):
     engine = tmp_path / "ACE-Step-1.5"
-    executable = engine / ".venv" / "Scripts" / "acestep-api.exe"
+    executable = engine / ".venv" / "Scripts" / "python.exe"
     executable.parent.mkdir(parents=True)
     executable.touch()
     (tmp_path / "Media" / "music").mkdir(parents=True)
@@ -1562,3 +1562,378 @@ def test_vocal_song_video_repair_does_not_recompose_or_retranscribe(tmp_path):
     assert done["status"] == "complete" and done["vocal_check"]["passed"]
     assert render.call_args.kwargs["expected_source_sha256"] == digest
     assert audio.read_bytes() == b"approved vocal audio"
+
+
+# Exact MIT upstream source fixture at ca1e85fe; no installed engine is required.
+_ACE_CPU_DECODE_FIXTURE = 'c-q}sTW{RD5q{ra!RkrMS<7~kQxw~704H&R1H_5p<D@NIL#8EamyK>EDchSMKz~GkVSh<yDC$n_ZrrpFCl9fgmzm)=_gOoR^O}Wu#18Lh!Xv79o{=?63MM3pb3txyRxD$JDi)-r<l)T?$wjzkQVD(7cN}Ln<7tr#MOI<`TQ2M06i?YK7I{k4rr_C%nDvuvGbgWksOIEDfs|-6CzoZBu!fvMPSxEcUzMV)@4}}Q6SHcIh9C?p{8do~VV=djVX<N=U~$Ys#qU@U3&w&wLDOJ$JDbhIgi1-?n#Y~t+bSf^_yf-tGXnqMZJ#Pw7^z{1NCN+7N)nnyB+^%iTC<e!Oy%UB-Z8)pUdu9>3t8cV#3B}xpb)H}f(3n0gNjTb6)d^>H2#w;iRaCyyi`T0<U)gX1^CYq!|V0{&tfJ5#6kuj0`SULf=RdmlC{TZs7jgyw^W7eK=LnaxL-y*52CWt@1oJpRh;Bhb@){{1ai$|wIF(Tv<dt}ny}usM-E<8n!eH+_AfP5^TETe7Y#AM@Kv59pvW3<o*@=m1$VWE1idE_k7Ga-jM!+&pEXoY#7ed_dywATNG9%h*eV9?T<?;CZb0^kfNd$tGc;jE1=v>45Wvh~2iSG#Piy3~Hp`C0cn-LfnbMvIR?So3FraBsUrWqLkJR)5f(HioC)C@$TkpaHzzE^t(Ljj4>QADGYxdPLDRQX};H}`865-OvtOOeKI4cvyi-d=CD<M4G(dY$JrN{<K)t1%OR&5{=s2Th(3XI-B#i+ToRP+{Z+}vQOf)FBctILIQ$p%a=Kud7?RES(G$S-kY3x+RwPv0N@lEuipWD;T~>?8>-Bm|3`&?F&Wn8-V@Vw`Bu(ecd(^T}Q3svj$^$r(66PhDZ2!js{FKG7izA6=Wj?>k;YxBGgstj+(*sqDGlaju&SEh4?+&8qe2m6ONl?orUJIoEI>!<iqJLZIgBBe>f_T^M(P(=9z8WOJRyPlEbThkW})9up3>0+BQenOh&76BlD#6@@%c>%HOif*kdgs|5u#qzWut!686AO{t;pS?-qw8eQY_LG90O?`-$gNP0OSJRhCz1eN7ffEnLv<Hd3mLB^-+0H7u6M+`)Gu!3j~mH<=25-|4nc{ZT$&AQ6cSVio%T<PpLa5LiwdVh>tJob&Qg)hk0?nhs)X~DkDNd$!mTlV+#+Bf1@c=QiKly|))P#G-K2kSDU`uHA%rHb&RGr+3;4Z+-k%@2p7<5IgAwVn!W+7C#gtLZA&bD04oU51`dvyJOvh^&u*S=)~E-w$+xDqAkM(3WNDdOlYSehhQ-==zxN<n=YLV(67cv2WYZ3=SEUA*3G22lzrv33ULr*@UY#v;3NHsob&3ysbK$TS-O?3!C8uy$Ck|vE|nWN>~64mR}oizInbg4i8X`r70#JT0&;j{vY!P$dR_QgdF?iU4C(LNF!P(25J_NApsK|I!K;Gu$Jnib_Z<-!uIcf{)-5v&mn46D8(w97#hBv(^H?kTC?zTk%M{;O*fEond)K)sR9QcZw$MzIV(wZM6J05&IzNEP4IZ;laHA!3v4mq5&tMDlmcJ0x({z@_?ZD3$VrI}5oM-JkbADy<lvy*F4P3==OF+2M`DsANmz{aC-f|k-Ju}^WbQ={^eXikm>_OKvx7<ytoF?b`ak>R4d$2Q-;*4W0511LTPZs@Ng?Mj@)p=5Sqb&+$*a>}FHg^d*Oz}iKdlnev!_GK*S${yYo%Uw<T`)L9RKeCva5Z@>*ea6QD$Yz5{LwtJamTcZqi%n8h<3q<uGMi_>SLi^GmG4nqtY~Kh7muL@6O-CL3^$2uoD7`Hu073=K`TV<LcMS@=_toyWa$n*0tP=N}=BevynD$NrHu3Fu03pZs`I6v?Ko4~G@@qN>#){&Xaoh$}{{=B)WVnZfo-_`8$-#KYcI?|FIp=EKEl^@_u$yMUy<w50Kc|2(!nuHpeXeQC+^<`$;*r7hd<pbB|@Y03Qh*7!~zzCr!o`}kyNE<g3m>i?^TlQ);A7r#X<2;Fh^ke_!7pw6VnjC2Nrp6<n|K~KMM>y1b{XX;4;&e57>NXO6>C2+rDzaY1Hp3E&xnthBkIhxsjP*V-j^dsQZU|ePrc|A4LGZWCE5<J{Ksp(^KJ|J#}ZA8~d*ydm9<_7vbOr4;ih^N=s)Avc%5H=%_dI<`fB*A3ezcEJl&ua!n2~;$=N<N*O)=!h`yi6i;%kWavC(~8JnHfId+5xUL<0d`ZG*hWgv%lZ;Bae+BQ8SPP6tJ{tjJ8!rH0Ev}OXz%UK(j*W9{GO&u)*P%PBV$none0tv3<TVoMBYe6M)+%qRSpV12EG9AOGu=>H3-}?Xgd0SqMA;lwl{K51OVQXA-(N#96Xp56X4!D094VeC(QJ5EkViAVc6(G+aZ?0(*nzVRRjPcVjsNDo_Jw60$UNkLTnm5Cf_Bs?1BQhE(oqu|dMB1sJozGPg@`bf9`SOAECLLJ$}cd_*o7tMMh89qTy7Vlo<ox8+z?K}@d1Nm-hUP0*~n-r@1l)8|i~JX`or<8N<Y?#LI03Vqm3X;;pz93RXvNRx*Ekgg|L7!B$rbSAx6FF?(h<w{RKM$};6*vlIVUA=YR6!=R!1#m>9-V<wK#iQkwOP^(T9NLF!o>mw4pr7Ew`v78t1E3x`o)1j{6HsMC@8vqjxT-|S@aKj}$FuS=5*c=OS^AYn^}Z!>(n31Z7j_o8yAAQ|{8!U3L3#U`7y4VMPZuX=RS7>~Nj;iwnemuIq^!)zo0HFsRdm3-p`QRA+sSy7yW`2u=tS>3EYRij7hA6PzeKYAqCpFyF}&T^%?HD;zWmx5iOn1L1JT&l0I5GgC-w7Ur!)qYdn&M5-wli%oDUf^h|XS@C!gQq`bWr{DnDQulm}>Mn7dnyceC+!o@hhECAjyLSMT)bUEfvQ)n1}<{RsSO%cMGY9D|m}UO&rk4UQS+=OzQTgA&*COoW-FQ{SqiITElZ>hDX~ot+)@Y>9VxMv2X0N;9Ks^pPt1sJ~hpRj{Bgcvcx2H!me!vF)nSFhIE}YfQV+xf3AS$+1K~aA$hkiqWK8HO)tfrp0>*S)s_O{-M7Ck+`;37TY_@Si0-8cYlFaMs&UhkEzz1`xV%KgR~Swp@Ztg<^@%FzPZE#_`eCO6(<pxufse3@>uwWO6ha(CB?5ZcgU0sZq2?wwf^{rJ^oR9JSgTF&L9^%BDMLOh$c#QD$&PAhzlm6jq1d4_^?80>NzxxajcKg-I!%T)p~odu*F|!XIjDSSN92;k7-s;^b39qy~?oR>lm)Bk7!J`Y9MjQT(!(*+;6v;uA#RSs;{mstuCXVdk3poKE**^#M9*!wzk(*O^u(i9`S6#R+8a&ftutCoQHegAt5=`viM;F-ss{y5(&({$H-QpA69>g)LGnifo0LQAw~DkCfbxV_{)ig#zAN5VI`q*MU%np?fXCNA;J&&BM;jM6_qj{O;UOj)&Bq>-N>i'
+
+def ace_cpu_source_fixture():
+    import base64,zlib
+    return zlib.decompress(base64.b85decode(_ACE_CPU_DECODE_FIXTURE))
+
+
+def cpu_decode_method(source):
+    """Execute the actual trusted upstream method with typed CPU/GPU doubles."""
+    import ast,gc,types,time
+    tree=ast.parse(source.decode())
+    node=next(n for c in tree.body if isinstance(c,ast.ClassDef) for n in c.body
+              if isinstance(n,ast.FunctionDef) and n.name=='_decode_generate_music_pred_latents')
+    code=ast.fix_missing_locations(ast.Module(body=[node],type_ignores=[]))
+    class Tensor:
+        def __init__(self,device='cuda:0',dtype='bfloat16'):self.device=device;self.dtype=dtype
+        def detach(self):return self
+        def cpu(self):return Tensor('cpu',self.dtype)
+        def transpose(self,*a):return self
+        def contiguous(self):return self
+        def to(self,*args,device=None,dtype=None):
+            if args:
+                if args[0] in ('bfloat16','float32'):dtype=args[0]
+                else:device=args[0]
+            return Tensor(device or self.device,dtype or self.dtype)
+        def float(self):return Tensor(self.device,'float32')
+        def abs(self):return self
+        def amax(self,**kw):return self
+        def __gt__(self,value):return False
+    torch=types.SimpleNamespace(Tensor=Tensor,inference_mode=nullcontext,float32='float32',any=lambda value:False)
+    context={'torch':torch,'gc':gc,'time':time,'os':types.SimpleNamespace(environ={}),
+             'logger':types.SimpleNamespace(info=lambda *a:None,debug=lambda *a:None,warning=lambda *a:None),
+             'get_effective_free_vram_gb':lambda:.1}
+    # The method annotations reference Optional/Callable/Dict/Any/Tuple.
+    import typing
+    context.update(vars(typing));exec(compile(code,'pinned_ace_decode_fixture.py','exec'),context)
+    return context['_decode_generate_music_pred_latents'],context,Tensor
+
+
+@pytest.mark.parametrize('manual',[False,True])
+@pytest.mark.parametrize('decode_error',[False,True])
+def test_cpu_vae_patch_uses_cpu_float32_then_restores_original_device_and_dtype(manual,decode_error):
+    import types
+    source=music_backend._cpu_vae_compatibility_source(ace_cpu_source_fixture())
+    method,context,Tensor=cpu_decode_method(source)
+    if manual:context['os'].environ['ACESTEP_VAE_ON_CPU']='1'
+    observed=[]
+    class Vae:
+        def __init__(self):self.parameter=Tensor()
+        @property
+        def dtype(self):return self.parameter.dtype
+        def parameters(self):return iter([self.parameter])
+        def cpu(self):self.parameter=self.parameter.cpu();return self
+        def to(self,*args,**kw):self.parameter=self.parameter.to(*args,**kw);return self
+        def decode(self,latents):
+            observed.append((self.parameter.device,self.parameter.dtype,latents.device,latents.dtype))
+            assert observed[-1]==('cpu','float32','cpu','float32')
+            if decode_error:raise RuntimeError('actual decode failure')
+            return types.SimpleNamespace(sample=Tensor('cpu','float32'))
+    vae=Vae();host=types.SimpleNamespace(vae=vae,use_mlx_vae=False,mlx_vae=None,device='cuda',
+        current_offload_cost=0,_empty_cache=lambda:None,_memory_allocated=lambda:0,_max_memory_allocated=lambda:0,
+        _load_model_context=lambda *a:nullcontext(),_get_vae_dtype=lambda device:'float32' if device=='cpu' else 'bfloat16')
+    arguments=dict(pred_latents=Tensor(),progress=None,use_tiled_decode=False,time_costs={'total_time_cost':0})
+    if decode_error:
+        with pytest.raises(RuntimeError,match='actual decode failure'):method(host,**arguments)
+    else:
+        wave,latents,cost=method(host,**arguments)
+        assert wave.dtype=='float32' and latents.device=='cpu'
+    assert observed and vae.parameter.device=='cuda:0' and vae.parameter.dtype=='bfloat16'
+
+
+def test_cpu_vae_patch_leaves_gpu_decode_and_dtype_policy_unchanged():
+    import types
+    method,context,Tensor=cpu_decode_method(music_backend._cpu_vae_compatibility_source(ace_cpu_source_fixture()))
+    context['get_effective_free_vram_gb']=lambda:4.0
+    class Vae:
+        dtype='bfloat16'
+        def decode(self,latents):
+            assert latents.device=='cuda:0' and latents.dtype=='bfloat16'
+            return types.SimpleNamespace(sample=Tensor('cuda:0','float32'))
+    host=types.SimpleNamespace(vae=Vae(),use_mlx_vae=False,mlx_vae=None,device='cuda',current_offload_cost=0,
+        _empty_cache=lambda:None,_memory_allocated=lambda:0,_max_memory_allocated=lambda:0,
+        _load_model_context=lambda *a:nullcontext(),_get_vae_dtype=lambda *a:(_ for _ in ()).throw(AssertionError('No CPU transition')))
+    wave,_,_=method(host,pred_latents=Tensor(),progress=None,use_tiled_decode=False,time_costs={'total_time_cost':0})
+    assert wave.device=='cuda:0'
+
+
+@pytest.mark.parametrize('newline',[b'\n',b'\r\n'])
+def test_cpu_vae_patch_exact_pin_guard_preserves_supported_checkout_newlines(newline):
+    import hashlib
+    source=ace_cpu_source_fixture().replace(b'\n',newline)
+    result=music_backend._cpu_vae_compatibility_source(source)
+    assert result!=source and (result.count(b'\r\n')>0)==(newline==b'\r\n')
+    with pytest.raises(ValueError,match='differs'):music_backend._cpu_vae_compatibility_source(source+b'# user change')
+
+
+def test_cpu_vae_preparation_preserves_engine_and_publishes_exclusive_backup_candidate(tmp_path,monkeypatch):
+    root=tmp_path/'app';engine=root/'Media/music/ACE-Step-1.5';engine.mkdir(parents=True);(root/'Recovery').mkdir()
+    source=engine/music_backend._ACE_VAE_DECODE_RELATIVE;source.parent.mkdir(parents=True);original=ace_cpu_source_fixture();source.write_bytes(original)
+    monkeypatch.setattr(music_backend,'ROOT',root);monkeypatch.setattr(music_backend,'ENGINE',engine)
+    monkeypatch.setattr(music_backend,'_tool',lambda name:'git')
+    with patch.object(music_backend.subprocess,'run',return_value=subprocess.CompletedProcess([],0,music_backend.REVISION+'\n','')):
+        target=root/'Recovery/candidate';result=music_backend.prepare_cpu_vae_compatibility_patch(target)
+        assert result['activated'] is False and source.read_bytes()==original
+        assert (target/'original.py').read_bytes()==original
+        assert (target/'candidate.py').read_bytes()==music_backend._cpu_vae_compatibility_source(original)
+        assert json.loads((target/'receipt.json').read_text())['candidate_sha256']==result['candidate_sha256']
+        with pytest.raises(FileExistsError):music_backend.prepare_cpu_vae_compatibility_patch(target)
+        assert source.read_bytes()==original
+
+
+@pytest.mark.parametrize('failure',['revision','source'])
+def test_cpu_vae_preparation_declines_unknown_source_without_overwrite(tmp_path,monkeypatch,failure):
+    root=tmp_path/'app';engine=root/'Media/music/ACE-Step-1.5';engine.mkdir(parents=True);(root/'Recovery').mkdir()
+    source=engine/music_backend._ACE_VAE_DECODE_RELATIVE;source.parent.mkdir(parents=True)
+    raw=ace_cpu_source_fixture()+(b'# local change' if failure=='source' else b'');source.write_bytes(raw)
+    monkeypatch.setattr(music_backend,'ROOT',root);monkeypatch.setattr(music_backend,'ENGINE',engine);monkeypatch.setattr(music_backend,'_tool',lambda name:'git')
+    revision='unknown' if failure=='revision' else music_backend.REVISION
+    with patch.object(music_backend.subprocess,'run',return_value=subprocess.CompletedProcess([],0,revision+'\n','')):
+        with pytest.raises(ValueError):music_backend.prepare_cpu_vae_compatibility_patch(root/'Recovery/candidate')
+    assert source.read_bytes()==raw and not (root/'Recovery/candidate').exists()
+
+@pytest.mark.parametrize('failure',['latent_conversion','partial_model_conversion'])
+def test_cpu_vae_patch_restores_after_handoff_conversion_failure(monkeypatch,failure):
+    import types
+    method,context,Tensor=cpu_decode_method(music_backend._cpu_vae_compatibility_source(ace_cpu_source_fixture()))
+    actual_to=Tensor.to
+    def latent_to(self,*args,**kwargs):
+        if kwargs.get('device')=='cpu' and kwargs.get('dtype')=='float32':
+            raise RuntimeError('latent conversion failed')
+        return actual_to(self,*args,**kwargs)
+    monkeypatch.setattr(Tensor,'to',latent_to)
+    transitions=[]
+    class Vae:
+        def __init__(self):self.parameter=Tensor()
+        @property
+        def dtype(self):return self.parameter.dtype
+        def parameters(self):return iter([self.parameter])
+        def to(self,*args,device=None,dtype=None):
+            device=device or args[0];dtype=dtype or self.parameter.dtype
+            self.parameter=Tensor(device,dtype);transitions.append((device,dtype))
+            if device=='cpu' and failure=='partial_model_conversion':
+                raise RuntimeError('model conversion partly mutated then failed')
+            return self
+        def decode(self,*args):raise AssertionError('Decode must not run after handoff failure')
+    vae=Vae();host=types.SimpleNamespace(vae=vae,use_mlx_vae=False,mlx_vae=None,device='cuda',
+        current_offload_cost=0,_empty_cache=lambda:None,_memory_allocated=lambda:0,_max_memory_allocated=lambda:0,
+        _load_model_context=lambda *a:nullcontext(),_get_vae_dtype=lambda device:'float32' if device=='cpu' else 'bfloat16')
+    with pytest.raises(RuntimeError,match='conversion'):
+        method(host,pred_latents=Tensor(),progress=None,use_tiled_decode=False,time_costs={'total_time_cost':0})
+    assert transitions==[('cpu','float32'),('cuda:0','bfloat16')]
+    assert (vae.parameter.device,vae.parameter.dtype)==('cuda:0','bfloat16')
+
+
+# Exact pinned source dependencies for process-local bootstrap, no live engine.
+_ACE_PROCESS_SOURCE_FIXTURES = {'acestep/core/generation/handler/memory_utils.py': 'c-qZbZExE+68`RAL1?jnlylVBd1+xZ1=7UH9&WP<lC;>pqEKmxwt3ZyPo$h=i|%jV8B#BlL_5hYaJYPNByxtsXP$W><v7kIOS1ft&@>_+Z%!`BlEo{QlZ44-76~%Xa<YWM7~VxJ%#u|mxa3*tJB~9LaCpuo$;4ouX9<yyE1oV$`Sxms6KPyelUW`v^~^Y16nRn2gr^0|2YQHxOh~r!7po!&vvkgDh3<gBUsyym5XA~#iC{L5Gb%?%Lp8QwGKjbgzz`OowqQl&vKeFZISVCU;~-<fI;Tmnm^I^zIGfQpXqMJPTm*R*CIMYj9@AOOh68Uf7({GN0vJ;kMQqJO=IWmb$!7n7l{~Whj?A(wo+v$l*$tCLo|5||01TK?q6G+#SStCP!@Hc#SuOxA@X8}O{cv_tPEwdFd*-#6AircO)9Udr*ZR+CESP#J^T*z(a)e)6EM#6<?Rh=|M~;t)gL~48v4@bY0Q@@`n&x?y56MjdwkFlnM;aIUf3LR^7d#b`rZqA{0_%B-Z{?=MD(2F4CeDzIyia?djpa4M2D|}JBlchenWwUgF#v3$N0cmbDdsF9vqu~FCd3xoP2l>Q-D@1<my2ol5C-08jr3i!qPYOGjyF4}o(ikz*&TN^%DP6C(=A4sBY(r)D=Nem+<HEj6oU7j%cZMKpE!oD7Az*0Qt4VbGy2?MQ<~oxX$NJ{dKe7C7&bt3GW;NUEH3#2Pisc0Cju!!Ql4UpOLW>4{C9k+v*)6qc~s_5;SZGf8C$UwQfZcwWhNww&R|sQ-X$ke=6qI2p!1h6dV62K_|?K%1%?6S8Np+Qs0tR(hlCap&n6{Z?pP|oA?<Y24u`wEV3>DOEr~R!(_xHT0p+shzkv@bboDYcj$I|~)0uER@|KL)?h#P4HZ#C9Djp$&CxHeD60EXV8CTVWPbzJHw%I8&Nn@f_5Cj#Fzj$9-UM1j`ojt;==z;-Sze8+5ZSp}EW^>oMJq@l;E~dflKmR>-yuL`70n;rqKmB&A1aCV+Dzd7jkOYmEwm}A(ZX>Z{%=gGE;*R#l2Rl3aJvO@yormP=w*04NPB$2h)iBTpws&oZHFYsriI@8AJ=E)6(10cS^7^)l4S35FDj9KeY#b5@0?2O(eIU?NH173Ut^`DvR8ZKNX55fCV3DJfM{C4~_b_Vc4nTKlyVF6V$B<qz1Z}=umuq*8;hw4b0et#v)OivA%CK0>fMSTOZx5DMqHkn+rTz&wH<CMK&wqWWUH<W88k|i}ug<2y<;kzX=}#Yi`Im|Zu<39#?(l*ZG7GTpi-4xfBK@j}+t7lWL<c{fF0%}Z3dK|@SiYvnDO{6iB}6G9iv2T+^)54lx@1m^5ZRjLIn-wzl`LKJ9GXwC&2>&rr?+?0>%iDjvmK{}Vx{F7tXN~H!D?7-DlxA&3v}v<@5o+Xhv5Y^%SM__6{==U{T8XHaVu%F(T9T;b8u?e;9!e@anxQa>639&BIxD4q$XvWNeeOC)7~AEgEw1oN_gsy4)>3S&33)*3daXeD}<oksL+@P#BWVAVeB^e2CUCXGU}Y6K;C@*a4jvaxy(zGPP67-YfK-rK<lhnxO3;zmJt6;rj@Bmooa6;<XfqF;*aOwp(^+5VYRk$kiWMv>)K%7tZH=hgsS~F2hUYCenQpw@aQ?58I9jqr)|;H<W{lFiZ}|gIhNBXxTos?yb!L6Cbjn3xHA@F9;{A|a6Bx<%iJ0fP@|5Gr`I3U!M$oy>72<IXH}@=Rg$?nKmYma<m@>qwcLF*=*QVT%b|io59c}~XxAMHZ7BXeGSOD}zs^^xrD)R0{&*uRn!|Kw09)$+>s(=t`i<oKYeE0qz~2h!3p*(j|0b$5M0f-XauyYU&y31&={5}*9-QhYHK?-P1gm{BpiVeJROD2d(rtdhKggeEej!*8CleL2FsOE?N3BiL31r+|ZJ=R;KH$`_BU5FT5y=-z*=>;xske~PtRdLUY06m@U1qGAdX4A<Iyl&<Zw<&TOH~0~u}m|pEpFWK9ow(p`f+UD3U2E?BxgA`@u;~L@i7@U)&_V10iLtbxealp&Ccppgjr{(=ypCecLbkF8<=CH^3YiI_*?V;cQnD-q8QC1F;BQ8-zrnTlU*Xd@|C)gjUH2)@K7@=T(a=1U7fcrYHe=r<*~n-!+Pm!dq&ts@-l7%!9p-Y#jM*7X%9Wzex<5`eJ-^4`mXF~&u<#46~HWLvWlx#%ReOlz-sTptRXy(4&mVCwyfDzD)2n1er=~-eYfKzP|)M@*sJ15z1U27&2M$v4YoK=FKn1J)yGsw0G>;b0G|jb$f(on^SiBBnbH;3eS<L(%X_CtRG0E4FZy@%t|8wR{ek@YGjR{zlQVwj5ru;QxS&S;@p|t^c#%UXN0KR=1v-Xk$8<rcR&8BBKE#1z*>~H$JCJ4l*B!Io!vXfy?fG406O;jRdVWFN@dLJB_jnbERf`F4qa}DVsO<>wJPaPkoLhqhu2ip|VIQ=$O$_Lk57I!s;Hl>4$UkffTy^3Oz)qbIF;dFV-R+5+M77C6dg>JXG9>~AcwO30ik)P5mBx=opD|K>hAxJ?M3qX+Vn$AeE_c)>xwTOrwNKHwuX?)}s-vMg=iB!5sts}b`n{v<t=UWb9URW<^4|j^q^a@?05yj^|Hrqs4c|-73rnGxJ8sVYTi|E4h?sT7^T~}J+^%;28DO_X22Z5w`i^N$Sr8%J%j8sj+^M@RA@i!|QvFo<fdoZbeboh%`l?CAPJO)uu@1{rjSME#3pgK1^J9;yWNKPaw@Bqbcvop}mb%S;OF<{2sIMZOZ-}lX>-+$bKyI#16NF)|PkDNIwWs?f2ev^GpmEM<1V=k2)ptV042w2>N9C%zwm-&iUZ9p1u^i&Ys-qq(cp04C{dPUA4{n~n=`hr(B+4+S`Z887)XR7FZ??8RppByU#I0?mX|QodcLEsG@igSv2WWODgXgbeRkE=?et{w3c0)>ddpEr`Lk52Wu1!mA', 'acestep/core/generation/handler/init_service_offload_context.py': 'c-p;IO^@3)5WVYH43vw7^{P4aWMG3d3p5Cj%?34kDhh#?Mm7<N6iC`wW3m6eLsH+CZMi9`gJDs_dGqxi8HVAb6b4@mluWQKD#)b*gJmTZQ%5Leh6NOoWn653k$GPKjl(bu0&dL=7+zwKD_KJ7ofUio^|yMZ_8xe%LT>kJ-<Z&w`xK-F(;B`AZq}#{JjG{^SBLn-U$|HWKu_4leeXSIy-1rdVS_t%;L_*x`2A04K3H3yfpzwA6r)|sFo(q2CeCkCn=CXI`O;%0f|a-eZB*ogsssCK5m+6Mk>tvz;_JG@rXavX*2c48=?`n_VibTc+_>->uRI4K4OsBF-jf)aq}9Gdw$G7ckquT9n!OT1-%}SnJUl??UPBko2}Z`vB#zJR0k&wEG3ul$OZX-QMuR;KGH~sHti{l)eT+JuF50JJij@Q@Y!{rP*e#(!r58~&xrs2HQS5sVn`7mZri{XA9Q*izjJe3=A`kzXn1jFJNgjv>@Y*H)W;^)m>gVC!U{O(UTpJW73Zt`lZcm~x-IMhJZOOd{pXd^LPMa5-%5{$gGL4BoQV3;IVky;eaefz-YsYl2qoL*niWHNA*&M>?e9c<a;TG!H#A<BhqL)+Dy-%lwFDX_A)<#xesNc+RDb9_F);Ch()?w}s^63y?$5UD-8zecvrZ@>fCw95q^tv-=3cq?azBYz`tk)}e?SNPD`}_@_KJ|xE8>Wcu+{%Je^w|C^q6^Y-U^rqCtt6ReSueGAbu@do&3)^obAp8)mH*#UX`V#h#E<`s551YN%74-$xbL+u7{F5@6d@#yq^D9FxO?b4b<W?x?+OuQk-3A20@HM6X+t-GEdtAlc~luEdo*I7$z)-LJe7Nz#tgXVoJPTIN@PdV1I(txpwgH4L7`oy2L=AxM!t%F&EGVHBll-0bpOGxx!4<4E$PTF3|sX+QG<G0?^^n`D7_w^9Dzeg$+=)fF*2E}DHn@)sgTd@&F`d`c2+JZ%m8A<|7(&nS9WGG-yQnPNm+8AMt6u)ZJCeK>!y9$E89%sUL|ke;SlN_{I=aH)Hb-{NM{e-sd)*Wa4SdJl%;eHy@T&Zv!l!A=STYgyoMdJie`_OBY$I#50atw|3Iv4N_I3@N)eNyP0RfC%g9U__}M9*Py{=~RtNgoO-jN4BL|)<{{V<y5)=', 'acestep/api/server_cli.py': 'c-o~`Yi}wy5dF@tm~KB@kl1ZfsShD-CGu#4F0klAR8<JA957&IvA4FDlvMY>-x=?N1rkKsM1t(YGv}O{Id(kHyY2VjNhxcrW+|+Bl5%ZesWc=klk>HZE3j)0-BAw=*ITY3)oRX-2|UkhG?rRzAdZ)r%`}f=5SvtK3rtF7nH5T!Mx(r^S1Hqmm)FYVtL-kOEXCbhmL%*c;cbXgTF;UyK(-ZgrDdbhSnwt2OvWq~agHk9Fd>@_z#lHRF;Yr8Rjlb0>9vVxGAqB_s|ab^sS-^SVJy8mn?VReC3(Bi0{=JnXU8o-&LiRgq#Ld_ZB)flN}-k9aEY`KjTQ@zkC<G5v1|`LXt*d{T$sl@#CwCEoJqO^PAUzV;R{y|q|CC!nxI;D2p;%9X(Hyr=?ugKnr`va4lFm;v;w#*Vt`d;6<w5|<d(xLQioN=0tB29ImcZ$k=$GhmpJsgxA*?o^0d|>UaJ--V2ee}iU7?Dz32ODWvth(?i36|Wr7vAs6mrrk0<w|7(>So(Rkvu!MpzPm*5J2uf5iOEj4cF-3Sz%qC&F>2Cl=7!vN}8g=rNKF2hWXSi_9H%R?dUDGR*We22*>`r?@UdUb^)-e%z%{(Tk{f>=<9j}gF;@t^tbm;(*SrIq-6{};lip*X=#J%G_&$FdBKLs~I+K5&K%#`_qDg?f>RVhi7>OwajQF7ve#*y!QZTW6~k8qJc?3h*{+!4orAsk=h3%9~vz!Cmy{upf2r;&Jr&<@UZ>eImw4^Cfx#&Y;T$C2YuHcSs>s>C$RL4Pl$ATZi}od4v?!Pm)bd7dFp_)mVi#ZFR=q7`)Pm_EdYr-X!k#2gvbvmYCCe_b`=UiFoCJuL0k331SI<j2>abH%jk77!cBA%O!df*<*9Vb}(mXO%O!`G$n5j{T96s(<pf2&Q`aA!7-GOz#kaymT5sQAACrpWaB$|{gm1Df1QT@ARa___x*U(ojgz@oHhZfl2;!~?TX*z!76COCoHl-+w^~WcqK4b!Ou6J_8xsWB?oyv##1WS5C6XxhLNkmyR9&O7HL71c+!^6Y`*<vDVE*!GQ5Z+q4Fl|b?4K2I2~vXOQF%VHUB$9Q7&(a0@I~EK^r!1YlUR)i$pU``Uq(!Y~?#3wlLia=zM{8w%@C<2Z}V)6HA=sJ7%@&FjP7GaX$R+Z1CoT@4~`Q&SyP#p(^`PyedelX-isqkA_N<R^D{tO8>qU=Bsxk4K-DaCUYKTWgrC4bG>#1$eYrhF?Q#MnKKbldP=@;a7l$+xVqQ8?Fde?iCu@qG|uNS9S&`!+d+gA)ecbR5|)!)Ds~XyL@%jg!hRlFIb#>9RZVvX2DR}TMiVz;`E=EXkfttop_7>_@qQ1z0i7<o!$}8A;TJZJFJ=4(XBl)Neo^|F{!th_j$N*6x3)ax;?cb3L50x;`@?#NrD@G`=)^{r>&7sktD3pcLC77Z+(WvmJ=C1YgwBxmcMEXgbvgUr0DLIy;{', 'acestep/api_server.py': 'c-plaYjfK+@;iS8M)?q_BQti~v^~x6?o?Yz)%bOm-1IJ!!O$dRGoeV858Jv-{`>7N01_lYIj_@9Y#G>H0E>MuG8hbA`gt+En6q4DcOqk}G-K1F+1{cM8}`S6`@(gcSrTs2C@J!Zv&SyZ7fbdm6S44f!3#hCz^cztCj3IMb(u#2yAg@V{31#dhENsiU!};lJQH~t7d7gyei7U<nj>%~0rCnhAlf|hlQ3QL++S~E!PqOgh+uMDExqwGe=Q1;<?Jr<*~!UiMF!5d_6r^*o6=bQC5<wm!9;TFCxKw`Hj9G%S>SKz2sNEovn6BC?hc-<(@?}YGe0L$4pi>^DE6;mdlJIL@yjqu8z}5Jy-(uQ51E`>MX{(bZiOEgx2*N~O^yb)BKY7qXXncqUd%k%TZ?rH`~xnQf)4XOy=HllW`gbgon>Xh%DX5?vxMD8K;S;jJ^+ur1J@Z029C4JfP<W`%A(8!=PX)p(hRwhqy=4M?l@}fCQh&Q_xE|4=<jK+zvbKNYZ0x5{$6Hr99_F`L%EO(25C}=hXO{c1@mnZsNuDr_%|Yxpv86*B{v#unrz4HI0}j}@qNtB>8ku#0>|l1nUxwC{z5WNk!>dqGLc}yv=GT%4daJg4msi>5SxO{X=avXX*OZ(NwowE#YQBdNP;a<Gf<hw&eB96H0)PQSag%X4Jh`mK;8UJq?c6MC+GY?<e+vg%)3SAM+t{-92GMHfm9enS}#hXBJ$(tzo3E$32fm&xDaD!)FlRDkh@Y26czq^dcDAbE--M4qtur*bd&(?IOfJw7cWao(9c{H<woPd9j>Aq6ec_f0pwjoX?b`MS6l%}t&R>eYdD}~pV3O>8$aOyjS^OGwqi{i#L5|d9jCzuWT0WOjE%IXd#H#95tNAA-Vf3MdEf}Nb01_a;LNcI%st2fV{;q~R2XZWXj4&3NNH#aO#n7KDL1r}Laa9&ZA}j9#<+b-ixeV@B*%-CCXLrj4hg?^Rw9?15RLaHOK-rg=d?`Vg8?Jt-q{8+nDcc6s%J;;&RR7A4wQj_DqiD0En=fi0d7Kpcj-ve*}iH5=V}hUSUyJcyJ-ydDga0ixRb_>fjQyVX&NgY%ReMnZbYF@k$|rwfaZ_{i|{t`A}iM-0Uai|)|dob`y0CMQVK-<r<^8(%|np~S+tQ-h!Fw7_RN`x$R#|liBOGMZ|b%v;7bW^s=*PkFJu}%h^?d#oQqal>sXO~5D7=h5N?1|1Rv46k{Qr&^2D&q;<j}kxql}>;>g+;DQOBF$TF^W0un{?S(79L%lK#RO+_7QTRQ$Z#kl8E9`bXjP=qA!A!{B{5xJl#c?dkx3eHy0))gzO!5RiGy$u0F)^lkqbt~cxhG~s0_#5=C9ODWpuo~K&kjwf-x{d;VpGCk+9B;z6XC;zUQ}ES!nq8-U7B-MNvl<EXxF4rEDN#@i(#(fwH;&ix;u=_%c`LJ|PKP>9Y*~of@KzueqioFK8qGzNL#YC*Kw$X)o6XJOPNQTcGLh6V2?WMgVDSIIO*9jYJs;0rPOnau{CK|P^RvbB^6F?gKR=U9TTU0R&Cx}NC7tDm${<Qr;FJSMVk&8n*@7HW34k6NIZsrOCnLfF+)5}`6j5RPUP2f@g!q>xR8FEDa1PO20302$Jf(Sz<eunE3QoS&2d8WRV{Qn6*iGhRps#`|5xULem60nUTyY2XId|2nt`PwM3(_i-yDp<R<gHo9fm2AA0Dkp7Mi5z=7Q+!{0$}@P5FC^laIzq84{>XnyJ(4A|2oItLrxQ%j|ez}&<;`u4HQNhx|w17Z<FQ-Bn>#?ea{cjJJNFX-Dx|QvjvLg>)F5g#pUef{7+!Z0Ir7P-S9g|i1|PR&HlWYU(Wbqc65Grya2$T*$?dbkMQHCefa}&fS*|ia^R3yFXyMT^Q)zSaro0dK^-s<jm-J|{8zqMo&(XNliBp_>H;)jIlKI0dV;VL^aX=J2P0{=2Qmb45BL&F+bM=av4sFUjVbxd4T`7JKl${Px!qrW`caaEJ>&97F-TD_3L(*v4v2CA0uMi;9Ar3-*|m^siO_LQPPta+<?Qrgb~#;MUCw~`zWd7ybN1-vE510Ip5WYbw=uOmzu*^y@;67x?R^IE2MGQKZdwe%Q~DE`?*(AYCU|Znv%f!PLgr>VF?$QL{Z6G|B<q+U;@}wZ-$}8DZ1)W;!1MwP7XYHDvq^}?U0Mkj(_%yPKRP-EA0WnHLWtvf6n6)s_{$ijEy6JUHpXQD1cqopCmQ14F8%;5{ed0q@9&RHDi4t90VJMG4uAT;DA(*k)>e*@Cn#5!vb3_G;qR|;i}~rr35e(U@eDL-ihnG?HC!6@=zSU`LyIjNBUfl!`2fD>5q>3qHyAlbS0MMN--9mJA)b?08H}`mQmBVHu?8GUk3y?Y(88kOXzU235epS>n<81u<Ox-QK*1DEDV8!xtDKWwkAb~~9jDp0lG19*V{hLzMmPY&XfLay6*IOEH{9GhgNReGK8C6=zW`H|w3%yepyn$7!Nq6{xv5+-osyzs&_XOOx%gwKsE#I;8dUWg{h>-$3UT33lNht7*;6nK38*2ML+@!>toD9+I>MM})kMY*G1;RkmW#JKT#Y&~`WUW^K*=E0P^wlmqhFDXK}B<+O@<1-8ob3)>w*G=ckHDPI}TZqQu(O5b#lfZ^=Up$*hle6vq~8vy&p0F7n#^=5TFx5w64MznxnFVx_@<f{CK*YPOKsc{Maqwo?Y3#3+14MaC)sNJ5HsXm;kHr)&u5&Og6O90Fz-3TFRz!xmceg&g2D4F@%Kd11=|p*el12@bA(H7`aJ<+r8_wL}##N6sP5EDBK&Dy@|jY-skKjy__;#dmB|ch++%=*s^Dtj<0M}3>3huAcCW<_g-JS(@_A^Y$0d6rmPlHSdA2{rJ*J`Xee@MP-DS<HMDqu>&%Cm&ZsHi#`Y_aF-t+tvj{GgZmTA1ztUw^3dg2U^-@L!_8NTWo>+nLC?-@yhNuY4BgD+OYr1Kqi~-RK6fJjauK77?jzwx<6l<K<<qA@aG350Hgg+U=JZxcumOAKA7M90Y?{+2l$f>{MrI<vNz^c3itcjFVRR*5uOf$o1ysFU-mGVEq1cSX6TZVNJh_RzURx5|(9pD5}mL^!#VRwEOVbU>D2{jc*<kf?W;8_RLquF9PyWl_*!(DK66f?D}EJO8M?crZnvnz@v7xVwjh$Y3)LbL&fJ``fL!AKH+bAI`HcFB*<ug;c_QIN0;q;LTE$b$vkC|I>u7gwMb5U#GV4j;<h&Clk``SgTO|9HhI@~vWBDplClX@TNOFWhRcIQwRPc6|P(f2TDJArmeklW9Ulz)FZL^pshQPVJT=gk~<L>=fiSpfuQw2r#ZkUqEUL#!08}luc$LhReSb?CSDF8y}^yn6A<y4GmSU11C&i(rv1F<mgI=11uIzo;`zj1+0>FHmB*wsgnm5p*A~a>&N}81Y0qbRwDOTVD=5Gqlm2rRm<!j2<d$^DSjGAF8|ZkE+VPNak>QE2LM^#Oti8Y2he3)Z&&kR*f=jx^5EaNF-V&0(a+`tb>#Tkf5?Hd*HDfopnrG6@5#e>wOBPl)D}5{VzE01B}l^D>yiB?a@#?89hYHUtlMYetHj&Ugle1#vS(E>;X#~x&GJ$c7RyT}Y+YHZ;c7Y2bt_Nbpsr*&7J3GhG1{i}yi4qP8|JVJb6CO1o)<}|Ny{9z!5-RS4~-xb`%9^L3_avjK()woqwO?AF^NL5Ib%?+zb4kYaVusrSU52%e6T*qy-WApU}OV{wjc{rRsT%Zv4)-CS~j>qs}-dQ+a)0ljJn$)57&U~P5&)+%i8GcZdGZ%lya})!`KQ4jP~H4eNtYDCx6*Ndaa2?xIOsZL#4%CuRZVxTFqk5GG<4vn@3)!k<{f9N(Dw3V1~phdhj|WxSfdNVFQV9Wd*IJIXi(bwS^|0!4+%Ut&>37OYvTRjowa0b^yIrFR=aTX~=oIJ9Ty{RhQ1|w(V?Kt>&U<?>4qSjY2*87E9&6{b^M45vNt!x8I%FBtRrv+n`e-5Gx;LEsP3v7V6M@I~y785B1#)?A)`oI&6s6`aW*mUit64%vKmm1UjQVh6eH-0H-2G7h=>j{r<flSzkSL&FN>E(w%1T5i{Crf_vX95L+I3&Cs=zme(0bsCTkU=Sz)>)wdc#(VFQJ=zVlSL>_sPVIkCgfMF7{J<s@BuklqL<D0xizx<D^u~*M)8n938aI7chk~*~WRnD+h8KnirUewFJarNYfo>Y342P&PcX17B2Dx;zqq@e4bnc+9V471>wA!-xKes1p(zS?Q%7Fl)Y{XI5Yim~fi&}U?XI_SE6B-!zd?^X)WHHqie=|eqz*y4hbc6jC=y<mqX*x|Qjk6&WczAZx96&a2Cn+MxS#9=kELJJkQKsxWYx^7Irqt#m10Wh`DGykwSCY959`is@xfSgeYoC+DkA}V6x4XS6`Fg6(DBd8pMl)-_!4}a=%hNr(MQnojm^$|NlZ8ZR&Ro?jOx<&JamuGwMwe!)Jx8pfjb%kcX*=x3+Yp5@g|Id~Eub2B>GOxNby5EK!A<xqNsS#AurGa2+>eL90V7o8$mM_4(&WkW(o(i*G&#N*O!_ka<tVUHK%NsQlQnCyIZDkHaV!Ds;Jp0SMimlyueqR6Mzi&z%z#nK_q=?4=aq#T#Ev#t4>W1fmA2*PyXBhUCz}9WN_S1|S^sx}_i$XI>h%hk#n^Rc>+dCO!t5tKxGx{{`I&Sv~pZD17z9x3_F`xIyGd~m8@}$q({ob!lq4Q?Zd+a%51KW5Z>Fszo*~z(W33s#S3`88qk)FrwU#XTBKGL_eU5`%YV5q?H(*Gcm|GlXG-$p8sqVB1q<HOd=|6$k8!J61eB}>XVJy+la%lTlUUNhrv9QFAheT>g8'}
+
+
+def loaded_ace_fixture_function(source,module,name,class_name=None):
+    """Model a real import's FULL-module code without executing its imports."""
+    import types
+    code=compile(source,str(module.__file__),'exec',dont_inherit=True)
+    if class_name:
+        code=next(item for item in code.co_consts if isinstance(item,types.CodeType) and item.co_name==class_name)
+    code=next(item for item in code.co_consts if isinstance(item,types.CodeType) and item.co_name==name)
+    defaults=(None,) if name in ('_get_vae_dtype','run_api_server_main') else None
+    return types.FunctionType(code,module.__dict__,name,defaults)
+
+
+def process_engine_fixture(tmp_path,monkeypatch,*,already_patched=False):
+    import base64,zlib,types,typing,argparse,importlib
+    root=tmp_path/'app';engine=root/'Media/music/ACE-Step-1.5';engine.mkdir(parents=True)
+    source=ace_cpu_source_fixture()
+    if already_patched:source=music_backend._cpu_vae_compatibility_source(source)
+    sources={music_backend._ACE_VAE_DECODE_RELATIVE:source,
+             **{k:zlib.decompress(base64.b85decode(v)) for k,v in _ACE_PROCESS_SOURCE_FIXTURES.items()}}
+    for relative,raw in sources.items():
+        path=engine/relative;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(raw)
+    monkeypatch.setattr(music_backend,'ROOT',root);monkeypatch.setattr(music_backend,'ENGINE',engine)
+    monkeypatch.setattr(music_backend,'_tool',lambda name:'git')
+    monkeypatch.setattr(music_backend.subprocess,'run',lambda *a,**k:subprocess.CompletedProcess([],0,music_backend.REVISION+'\n',''))
+    _,context,Tensor=cpu_decode_method(source);context['torch'].dtype=str
+    modules={};observed=[]
+    def module(name,relative,globals=None):
+        result=types.ModuleType(name);result.__file__=str(engine/relative)
+        if globals:result.__dict__.update(globals)
+        result.__dict__['__name__']=name;result.__dict__['__file__']=str(engine/relative)
+        modules[name]=result;return result
+    decode=module('acestep.core.generation.handler.generate_music_decode',music_backend._ACE_VAE_DECODE_RELATIVE,context)
+    decode.GenerateMusicDecodeMixin=type('GenerateMusicDecodeMixin',(),{})
+    method=loaded_ace_fixture_function(source,decode,'_decode_generate_music_pred_latents','GenerateMusicDecodeMixin')
+    decode.GenerateMusicDecodeMixin._decode_generate_music_pred_latents=method
+    policy_relative='acestep/core/generation/handler/memory_utils.py'
+    policy=module('acestep.core.generation.handler.memory_utils',policy_relative,context)
+    policy._is_cuda_device=lambda value:str(value).startswith('cuda')
+    policy.MemoryUtilsMixin=type('MemoryUtilsMixin',(),{})
+    policy.MemoryUtilsMixin._get_vae_dtype=loaded_ace_fixture_function(sources[policy_relative],policy,'_get_vae_dtype','MemoryUtilsMixin')
+    def uvicorn_run(*args,**kw):
+        assert args==('acestep.api_server:app',) and kw['workers']==1 and kw['reload'] is False
+        assert decode.GenerateMusicDecodeMixin._decode_generate_music_pred_latents.__globals__ is decode.__dict__
+        class Vae:
+            def __init__(self):self.parameter=Tensor()
+            @property
+            def dtype(self):return self.parameter.dtype
+            def parameters(self):return iter([self.parameter])
+            def to(self,*a,**k):self.parameter=self.parameter.to(*a,**k);return self
+            def cpu(self):self.parameter=self.parameter.cpu();return self
+            def decode(self,latents):
+                assert self.parameter.dtype==latents.dtype=='float32'
+                return types.SimpleNamespace(sample=Tensor('cpu','float32'))
+        class Host(decode.GenerateMusicDecodeMixin,policy.MemoryUtilsMixin):pass
+        host=Host();host.vae=Vae();host.use_mlx_vae=False;host.mlx_vae=None;host.device='cuda';host.current_offload_cost=0
+        host._empty_cache=lambda:None;host._memory_allocated=lambda:0;host._max_memory_allocated=lambda:0
+        host._load_model_context=lambda *a:nullcontext()
+        host._decode_generate_music_pred_latents(pred_latents=Tensor(),progress=None,use_tiled_decode=False,time_costs={'total_time_cost':0})
+        assert host.vae.parameter.dtype=='bfloat16' and host.vae.parameter.device=='cuda:0'
+        observed.append({'argv':list(music_backend.sys.argv),'uvicorn':kw})
+    cli_relative='acestep/api/server_cli.py'
+    cli=module('acestep.api.server_cli',cli_relative,{'argparse':argparse,'os':types.SimpleNamespace(environ={},getenv=lambda key,default=None:default),
+        'uvicorn':types.SimpleNamespace(run=uvicorn_run),**vars(typing)})
+    cli.run_api_server_main=loaded_ace_fixture_function(sources[cli_relative],cli,'run_api_server_main')
+    entry_relative='acestep/api_server.py'
+    entry=module('acestep.api_server',entry_relative,{'run_api_server_main':cli.run_api_server_main,'_env_bool':lambda name,default:default})
+    entry.main=loaded_ace_fixture_function(sources[entry_relative],entry,'main')
+    calls=[]
+    def imported(name):calls.append(name);return modules[name]
+    monkeypatch.setattr(importlib,'import_module',imported)
+    return engine,sources,modules,calls,observed
+
+
+@pytest.mark.parametrize('already_patched',[False,True])
+def test_process_cpu_wrapper_calls_exact_pinned_entrypoint_with_method_in_original_globals(tmp_path,monkeypatch,already_patched):
+    engine,sources,modules,calls,observed=process_engine_fixture(tmp_path,monkeypatch,already_patched=already_patched)
+    method=modules['acestep.core.generation.handler.generate_music_decode'].GenerateMusicDecodeMixin._decode_generate_music_pred_latents
+    argv_before=list(music_backend.sys.argv)
+    music_backend._run_engine(['--host','127.0.0.1','--port','8001'])
+    assert len(observed)==1 and '--run-engine' not in observed[0]['argv']
+    assert observed[0]['argv'][1:]==['--host','127.0.0.1','--port','8001']
+    assert music_backend.sys.argv==argv_before
+    assert all((engine/key).read_bytes()==raw for key,raw in sources.items())
+    current=modules['acestep.core.generation.handler.generate_music_decode'].GenerateMusicDecodeMixin._decode_generate_music_pred_latents
+    assert (current is method)==already_patched
+    # A second invocation verifies and reuses the already-qualified in-process method.
+    music_backend._run_engine([])
+    assert len(observed)==2
+
+
+@pytest.mark.parametrize('failure',['source','policy','origin','loaded_decode','loaded_policy','entry_binding','entry_defaults','revision'])
+def test_process_cpu_wrapper_refuses_unknown_before_upstream_main(tmp_path,monkeypatch,failure):
+    import types
+    engine,sources,modules,calls,observed=process_engine_fixture(tmp_path,monkeypatch)
+    decode=modules['acestep.core.generation.handler.generate_music_decode'];policy=modules['acestep.core.generation.handler.memory_utils']
+    if failure=='source':(engine/music_backend._ACE_VAE_DECODE_RELATIVE).write_bytes(b'unknown source')
+    if failure=='policy':(engine/'acestep/core/generation/handler/memory_utils.py').write_bytes(b'unknown policy')
+    if failure=='origin':decode.__file__=str(tmp_path/'foreign.py')
+    if failure=='loaded_decode':decode.GenerateMusicDecodeMixin._decode_generate_music_pred_latents=lambda *a,**k:None
+    if failure=='loaded_policy':policy.MemoryUtilsMixin._get_vae_dtype=lambda *a:None
+    if failure=='entry_binding':modules['acestep.api_server'].run_api_server_main=lambda *a,**k:None
+    if failure=='entry_defaults':modules['acestep.api.server_cli'].run_api_server_main.__defaults__=(['--host','0.0.0.0'],)
+    if failure=='revision':monkeypatch.setattr(music_backend.subprocess,'run',lambda *a,**k:subprocess.CompletedProcess([],0,'unknown\n',''))
+    with pytest.raises(ValueError):music_backend._run_engine([])
+    assert observed==[]
+    if failure in ('source','policy','revision'):assert calls==[]
+
+
+def test_healthy_existing_music_api_never_imports_patches_installs_or_launches():
+    with (patch.object(music_backend,'healthy',return_value=True),
+          patch.object(music_backend,'music_lm_ready',return_value=False),
+          patch.object(music_backend,'install',side_effect=AssertionError('No install')),
+          patch.object(music_backend,'_run_engine',side_effect=AssertionError('No in-parent patch')),
+          patch.object(music_backend,'_setup_lock',side_effect=AssertionError('No launch lock')),
+          patch.object(music_backend.subprocess,'Popen',side_effect=AssertionError('No child'))):
+        assert music_backend.start_server() is False
+
+
+def test_music_start_lock_covers_wrapper_launch_and_http_readiness_without_forcing_eager(tmp_path,monkeypatch):
+    from contextlib import contextmanager
+    root=tmp_path/'app';engine=root/'Media/music/ACE-Step-1.5';python=engine/'.venv/Scripts/python.exe';python.parent.mkdir(parents=True);python.touch();(python.parent/'acestep-api.exe').touch()
+    monkeypatch.setattr(music_backend,'ROOT',root);monkeypatch.setattr(music_backend,'ENGINE',engine)
+    monkeypatch.setenv('ACESTEP_NO_INIT','true')
+    held=[];polls=[];launched=[]
+    @contextmanager
+    def locked():
+        held.append(True)
+        try:yield
+        finally:held.clear()
+    def healthy():
+        polls.append(bool(held))
+        if len(polls)>=3:assert held
+        return len(polls)>=4
+    def launch(command,**kwargs):
+        assert held and command==[str(python),'-B',str(Path(music_backend.__file__).resolve()),'--run-engine']
+        assert kwargs['env']['ACESTEP_INIT_LLM']=='auto' and kwargs['env']['ACESTEP_NO_INIT']=='true'
+        launched.append(command);return types.SimpleNamespace(poll=lambda:None)
+    import types
+    with (patch.object(music_backend,'_setup_lock',locked),patch.object(music_backend,'healthy',healthy),
+          patch.object(music_backend,'music_lm_ready',return_value=False),patch.object(music_backend,'install'),
+          patch.object(music_backend.subprocess,'Popen',launch),patch.object(music_backend.time,'sleep')):
+        assert music_backend.start_server() is False
+    assert polls==[False,True,True,True] and len(launched)==1 and not held
+
+
+def test_music_start_actual_windows_setup_lock_prevents_duplicate_launch_while_first_readies(tmp_path):
+    import sys,time
+    root=tmp_path/'app';engine=root/'Media/music/ACE-Step-1.5';scripts=engine/'.venv/Scripts';scripts.mkdir(parents=True)
+    (scripts/'python.exe').touch();(scripts/'acestep-api.exe').touch()
+    driver=tmp_path/'startup.py'
+    driver.write_text('''import sys,json,time
+from pathlib import Path
+sys.path.insert(0,sys.argv[1]);import music_backend as m
+root=Path(sys.argv[2]);m.ROOT=root;m.ENGINE=root/'Media/music/ACE-Step-1.5'
+m.healthy=lambda:(root/'ready').is_file();m.music_lm_ready=lambda:False;m.install=lambda:None
+class Process:
+ def poll(self):return None
+def launched(*args,**kwargs):
+ with (root/'launches').open('a') as f:f.write('launch\\n')
+ (root/'launched').touch();return Process()
+m.subprocess.Popen=launched
+print(json.dumps({'result':m.start_server()}))
+''',encoding='utf-8')
+    args=[sys.executable,'-B',str(driver),str(Path(music_backend.__file__).parent),str(root)]
+    first=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    second=None
+    try:
+        deadline=time.monotonic()+8
+        while not (root/'launched').exists() and time.monotonic()<deadline:time.sleep(.05)
+        assert (root/'launched').exists()
+        second=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        time.sleep(.4)
+        assert (root/'launches').read_text()=='launch\n'
+        (root/'ready').touch()
+        one=first.communicate(timeout=12);two=second.communicate(timeout=12)
+        assert first.returncode==second.returncode==0,(one,two)
+        assert (root/'launches').read_text()=='launch\n'
+    finally:
+        for child in (first,second):
+            if child is not None and child.poll() is None:
+                child.terminate();child.communicate(timeout=10)
+
+
+def test_process_wrapper_compiles_real_module_context_on_python311(tmp_path):
+    import sys
+    base=Path(os.environ.get('LOCALAPPDATA',''))/'Programs/Python/Python311/python.exe'
+    if not base.is_file():pytest.skip('This host has no optional Python3.11 base for cross-version compiler proof')
+    music_site=Path(music_backend.ROOT)/'Media/music/ACE-Step-1.5/.venv/Lib/site-packages'
+    if not music_site.is_dir():
+        music_site=Path(music_backend.__file__).parent.parent/'Hermes-Agent/Media/music/ACE-Step-1.5/.venv/Lib/site-packages'
+    if not music_site.is_dir():pytest.skip('This host has no optional music package overlay for Python3.11 compiler proof')
+    source=tmp_path/'pinned_decode.py';source.write_bytes(ace_cpu_source_fixture())
+    script='''import sys,site,types,typing,ast,json,hashlib
+from pathlib import Path
+sys.path[:]=[p for p in sys.path if 'site-packages' not in p.lower()];site.addsitedir(sys.argv[1]);sys.path.insert(0,sys.argv[2])
+import music_backend as m
+path=Path(sys.argv[3]);source=path.read_bytes();tree=ast.parse(source)
+compiled=compile(source,str(path),'exec',dont_inherit=True)
+cls=next(c for c in compiled.co_consts if isinstance(c,types.CodeType) and c.co_name=='GenerateMusicDecodeMixin')
+code=next(c for c in cls.co_consts if isinstance(c,types.CodeType) and c.co_name=='_decode_generate_music_pred_latents')
+module=types.ModuleType('pinned_decode');module.__file__=str(path);module.__dict__.update({'torch':types.SimpleNamespace(Tensor=object),**vars(typing)})
+module.__dict__['__file__']=str(path)
+actual=types.FunctionType(code,module.__dict__)
+expected=m._ace_function_from_source(source,module,code.co_name,'GenerateMusicDecodeMixin')
+node=next(n for c in tree.body if isinstance(c,ast.ClassDef) for n in c.body if isinstance(n,ast.FunctionDef) and n.name==code.co_name)
+standalone=compile(ast.fix_missing_locations(ast.Module(body=[node],type_ignores=[])),str(path),'exec',dont_inherit=True)
+isolated=next(c for c in standalone.co_consts if isinstance(c,types.CodeType))
+print(json.dumps({'python':sys.version,'full_module_code_sha256':hashlib.sha256(code.co_code).hexdigest(),'isolated_ast_code_sha256':hashlib.sha256(isolated.co_code).hexdigest(),'isolated_ast_bytecode_differs':code.co_code!=isolated.co_code,'strict_expected_matches_actual':m._ace_code_matches(actual,expected)}))
+assert code.co_code!=isolated.co_code
+assert m._ace_code_matches(actual,expected)
+'''
+    child=subprocess.run([str(base),'-I','-B','-c',script,str(music_site),str(Path(music_backend.__file__).parent),str(source)],capture_output=True,text=True,timeout=15)
+    assert child.returncode==0,(child.stdout,child.stderr)
+    evidence=json.loads(child.stdout)
+    assert evidence['strict_expected_matches_actual'] and evidence['isolated_ast_bytecode_differs']

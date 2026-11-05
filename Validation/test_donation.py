@@ -19,6 +19,17 @@ import chatgpt_auth
 import donation
 import routing_mode
 
+def open_pull(number, *, author="donor", title="[Donation] Correct fixture", body=""):
+    """A real-shaped upstream REST listing item, never a search-index hit."""
+    return {"number":number,"state":"open","title":title,"body":body,
+        "html_url":f"https://github.com/{donation.UPSTREAM}/pull/{number}",
+        "user":{"login":author},"base":{"repo":{"full_name":donation.UPSTREAM}}}
+
+
+def is_open_pull_list(endpoint):
+    return endpoint.startswith(f"repos/{donation.UPSTREAM}/pulls?") and "head=" not in endpoint
+
+
 SOURCE = "def calculate():\n    return 1\n"
 TEST = '"""Contribution regressions."""\n'
 SOURCES = {"example.py": SOURCE, "Validation/test_example.py": TEST}
@@ -168,7 +179,7 @@ def test_draft_submission_writes_only_new_branch_and_never_main_or_merge():
         if endpoint.endswith("/forks"):
             return {"full_name": "donor/cale-ai-workbench", "fork": True}
         if endpoint == "repos/donor/cale-ai-workbench":
-            return {"parent": {"full_name": donation.UPSTREAM}}
+            return {"full_name": "donor/cale-ai-workbench", "fork": True, "parent": {"full_name": donation.UPSTREAM}}
         if endpoint.endswith("/git/trees") or endpoint.endswith("/git/commits"):
             return {"sha": "c" * 40}
         if endpoint.endswith("/pulls"):
@@ -209,8 +220,8 @@ def test_background_flow_uses_only_public_source_and_keeps_usage_on_cancellation
           patch("chatgpt_auth.complete", side_effect=complete),
           patch("usage_history.record_completion"),
           patch.object(donation, "public_file", side_effect=public),
-          patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
-          patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/1") as publish):
+          patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT),
+          patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/1") as publish):
         service._run(cancel)
     assert donation.total_tokens(tmp_path) == 50
     assert "PRIVATE DOCUMENT" not in json.dumps(payloads)
@@ -388,8 +399,8 @@ def test_local_background_flow_does_not_require_a_chatgpt_account(tmp_path):
           patch.object(donation, "local_completion", side_effect=local),
           patch("chatgpt_auth.status", side_effect=AssertionError("ChatGPT should not be needed")),
           patch("usage_history.record_completion"), patch.object(donation, "public_file", side_effect=public),
-          patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
-          patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/2") as publish):
+          patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT),
+          patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/2") as publish):
         service._run(threading.Event())
     publish.assert_called_once()
     assert donation.source_totals(tmp_path) == {"local": 50}
@@ -562,8 +573,9 @@ def test_full_blast_gets_past_twelve_runs_and_three_pending_drafts_then_continue
     calls = []
     def api(endpoint):
         calls.append(endpoint)
-        if "search/" in endpoint:
-            return {"total_count": 101, "items": [{"body": "<!-- cale-donation:other -->"}] * (1 if "page=2" in endpoint else 100)}
+        if is_open_pull_list(endpoint):
+            numbers = [101] if "page=2" in endpoint else range(1,101)
+            return [open_pull(n,body="<!-- cale-donation:other -->") for n in numbers]
         return COMMIT
     with (patch("pc_offline.offline", return_value=False),
           patch("github_account.account", return_value="donor"),
@@ -612,9 +624,9 @@ def test_full_blast_keeps_inflight_work_on_activity_but_explicit_stop_cancels(tm
           patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT),
           patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kwargs: jobs),
           patch.object(donation, "public_file", side_effect=public),
-          patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
+          patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT),
           patch.object(donation, "complete_donation", side_effect=complete),
-          patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/7") as publish):
+          patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/7") as publish):
         service._run(service.cancel)
     publish.assert_called_once()
     assert payloads and service.next_attempt == 0
@@ -688,7 +700,7 @@ def test_claim_collision_moves_to_next_job_without_fetching_lost_source(tmp_path
           patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kwargs: jobs),
           patch.object(donation, "public_file", side_effect=public),
           patch.object(donation, "claim_run", side_effect=claim),
-          patch.object(donation, "gh_api", side_effect=lambda endpoint: {"total_count": 0} if "search/" in endpoint else COMMIT),
+          patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT),
           patch.object(donation, "complete_donation", return_value={"choices": [{"message": {
               "content": '{"changes":[]}'}}]}) as inference):
         service._run(threading.Event())
@@ -802,7 +814,7 @@ def test_search_index_lag_after_new_main_commit_cannot_repeat_submitted_job(tmp_
     def api(endpoint):
         if endpoint.endswith("/pulls/7"):
             return {"number": 7, "state": "open"}
-        return {"total_count": 0} if "search/" in endpoint else COMMIT
+        return [] if is_open_pull_list(endpoint) else COMMIT
     with (patch("pc_offline.offline", return_value=False),
           patch("github_account.account", return_value="donor"),
           patch("chatgpt_auth.status", return_value={"sharing": True}),
@@ -1053,7 +1065,7 @@ def test_full_blast_skips_closed_scope_and_immediately_uses_other_area(tmp_path)
     def complete(payload,*args):
         payloads.append(payload)
         return {'choices':[{'message':{'content':'{"changes":[]}'}}]}
-    with patch('pc_offline.offline',return_value=False), patch('github_account.account',return_value='donor'), patch('chatgpt_auth.status',return_value={'sharing':True}), patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT), patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kwargs: jobs), patch.object(donation,'public_file',side_effect=lambda path,revision:json.dumps([blocked,other]) if path=='donation-tasks.json' else SOURCES[path]), patch.object(donation,'gh_api',side_effect=lambda endpoint: {'total_count':0} if 'search/' in endpoint else {'tree':[{'type':'blob','path':path,'sha':sha} for path,sha in BLOBS.items()]} if '/git/trees/' in endpoint else COMMIT), patch.object(donation,'complete_donation',side_effect=complete):
+    with patch('pc_offline.offline',return_value=False), patch('github_account.account',return_value='donor'), patch('chatgpt_auth.status',return_value={'sharing':True}), patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT), patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kwargs: jobs), patch.object(donation,'public_file',side_effect=lambda path,revision:json.dumps([blocked,other]) if path=='donation-tasks.json' else SOURCES[path]), patch.object(donation,'gh_api',side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else {'tree':[{'type':'blob','path':path,'sha':sha} for path,sha in BLOBS.items()]} if '/git/trees/' in endpoint else COMMIT), patch.object(donation,'complete_donation',side_effect=complete):
         service=donation.Service(tmp_path);service._run(threading.Event())
     assert len(payloads)==1
     assert json.loads(payloads[0]['messages'][1]['content'])['task']['id']=='open-area'
@@ -1413,30 +1425,27 @@ def test_scheduler_records_weak_candidate_and_resumes_without_cloud(enabled, mon
     assert donation.total_tokens(enabled) == 0
 
 
-def test_screened_candidate_uses_reviewed_artifacts_and_draft_boundary(enabled, monkeypatch):
+def test_screened_candidate_scheduler_uses_model_publication_boundary(enabled, monkeypatch):
     import github_account
     folder = enabled/"candidate"
     fingerprint = artifacts(folder)
     monkeypatch.setattr(github_account, "account", lambda: "TestDonor")
     monkeypatch.setattr(donation.Service, "allowed", lambda *a, **k: True)
     monkeypatch.setattr(models, "run_job", lambda *a, **k: {"qualified": True, "seconds": 2, "folder": str(folder)})
-    monkeypatch.setattr(donation, "gh_api", lambda path, *a, **k:
-                        [] if "pulls?" in path or "matching-refs" in path else
-                        {"full_name": "TestDonor/cale-ai-workbench", "fork": True} if path.endswith("forks") else
-                        {"parent": {"full_name": donation.UPSTREAM}} if path == "repos/TestDonor/cale-ai-workbench" else {"sha": "a"*40})
     submitted = []
-    def proposal(login, run, job, commit, description, paths, guard, **kwargs):
+    def publish(root, experiment, trained, login, guard):
         guard()
-        assert job["id"] == models.JOB_ID
-        assert set(paths) == {f"ModelContributions/{fingerprint}/{name}" for name in models.ARTIFACTS}
-        assert "No inference tokens" in kwargs["validation_summary"]
-        submitted.append(run)
+        assert root == enabled and login == "TestDonor"
+        assert experiment["fingerprint"] == fingerprint
+        assert set(models.review_artifacts(trained["folder"], fingerprint)) == set(models.ARTIFACTS)
+        submitted.append(experiment["run_id"])
         return "https://github.com/CaleMediaDev/cale-ai-workbench/pull/1"
-    monkeypatch.setattr(donation, "open_proposal", proposal)
+    # Isolate the scheduler boundary here; model upload tests below exercise
+    # the actual journal, exact artifact delta, fork reuse and public delivery.
+    monkeypatch.setattr(donation, "publish_model_candidate", publish)
     service = donation.Service(enabled)
     service._run(threading.Event())
-    assert len(submitted) == 1
-    assert donation.total_tokens(enabled) == 0
+    assert len(submitted) == 1 and donation.total_tokens(enabled) == 0
     with models._connection(enabled) as conn:
         assert conn.execute("SELECT state FROM model_experiments").fetchone()[0] == "submitted"
 
@@ -1470,33 +1479,24 @@ def test_uninitialized_summary_does_not_create_database(tmp_path):
     assert not (tmp_path/"LongTasks").exists()
 
 
-def test_pending_publication_resumes_same_run_without_training(enabled, monkeypatch):
-    import github_account
-    folder = enabled/"candidate"
-    fingerprint = artifacts(folder)
-    claimed = models.claim(enabled)
-    models.complete(enabled, claimed, {"folder": str(folder), "seconds": 2, "qualified": True}, "ready")
-    with models._connection(enabled) as conn:
+def test_pending_publication_resumes_same_run_without_training(model_upload_host, monkeypatch):
+    host = model_upload_host
+    host.publish()
+    # A pre-journal client already uploaded this exact candidate. Its training
+    # receipt remains unchanged; the new transport must reconcile the same PR.
+    with closing(donation.connection(host.root)) as conn, conn:
+        conn.execute("DELETE FROM model_publication_journal")
+    models.complete(host.root, host.claimed, host.trained, "ready")
+    with models._connection(host.root) as conn:
         conn.execute("UPDATE model_experiments SET publication_checked=0")
-    monkeypatch.setattr(github_account, "account", lambda: "TestDonor")
-    monkeypatch.setattr(donation.Service, "allowed", lambda *a, **k: True)
     monkeypatch.setattr(models, "run_job", lambda *a, **k: pytest.fail("Never retrain pending publication"))
-    branch = "cale-donation-" + claimed["run_id"][:16]
-    writes = []
-    def gh(path, data=None):
-        if data:
-            writes.append(data)
-        return [{"head": {"ref": branch, "repo": {"owner": {"login": "TestDonor"}}},
-                 "base": {"repo": {"full_name": donation.UPSTREAM}},
-                 "body": "<!-- cale-model-experiment:" + fingerprint + " -->",
-                 "html_url": "https://github.com/" + donation.UPSTREAM + "/pull/1"}]
-    monkeypatch.setattr(donation, "gh_api", gh)
-    service = donation.Service(enabled)
+    writes = sum(body is not None for _, body in host.remote.calls)
+    service = donation.Service(host.root)
     service._run(threading.Event())
     assert service.message == "Model candidate submitted for owner review."
-    assert not writes
-    assert models.summary(enabled)["worker_seconds"] == 2
-    assert donation.total_tokens(enabled) == 0
+    assert sum(body is not None for _, body in host.remote.calls) == writes
+    assert models.summary(host.root)["worker_seconds"] == 2
+    assert donation.total_tokens(host.root) == 0
 
 
 def test_old_ready_candidate_is_preserved_but_does_not_block_new_policy(enabled, monkeypatch):
@@ -1580,13 +1580,14 @@ def test_quota_exhausted_chatgpt_scheduler_immediately_uses_enabled_local(tmp_pa
          patch('chatgpt_auth.status',return_value={'sharing':True}),patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT),\
          patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
-         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
-         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal',side_effect=lambda *args: drafts.append(args) or 'https://github.com/CaleMediaDev/cale-ai-workbench/pull/11'),\
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:[] if is_open_pull_list(endpoint) else COMMIT),\
+         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation,'open_proposal',side_effect=lambda *args, **kwargs: drafts.append((args, kwargs)) or 'https://github.com/CaleMediaDev/cale-ai-workbench/pull/11'),\
          patch.object(donation.threading,'Thread',DonationInlineThread):
         service.tick()
         assert resources==['chatgpt'] and service.next_attempt==0
         service.tick()
     assert resources==['chatgpt','local'] and len(drafts)==1
+    assert isinstance(drafts[0][1]['publication'], donation.DurablePublication)
     events=service.drain_events()
     assert [event['phase'] for event in events]==['reviewing','waiting','reviewing','checking','submitting','submitted']
     assert events[-1]['pr_url']=='https://github.com/'+donation.UPSTREAM+'/pull/11'
@@ -1605,7 +1606,7 @@ def test_chatgpt_limit_does_not_enable_disabled_local_donations(tmp_path):
     with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
          patch('chatgpt_auth.status',return_value={'sharing':True}),patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
-         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:[] if is_open_pull_list(endpoint) else COMMIT),\
          patch.object(donation,'complete_donation',side_effect=HTTPError('https://chatgpt.example/',429,'quota',{'Retry-After':'120'},None)) as complete,\
          patch.object(donation.threading,'Thread',DonationInlineThread):
         service.tick();service.tick()
@@ -1638,7 +1639,7 @@ def test_cloud_pinned_child_never_turns_into_parallel_local_worker(tmp_path):
     with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
          patch('chatgpt_auth.status',return_value={'sharing':True}),patch('chatgpt_auth.account_fingerprint',return_value=FINGERPRINT),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
-         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:[] if is_open_pull_list(endpoint) else COMMIT),\
          patch.object(donation,'complete_donation',side_effect=HTTPError('https://chatgpt.example/',429,'quota',{},None)) as complete,\
          patch.object(donation.threading,'Thread',DonationInlineThread):
         service.tick();service.tick()
@@ -1691,8 +1692,8 @@ def test_failed_proposal_syntax_check_never_reports_sent_pr_or_private_model_out
     with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
          patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
-         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
-         patch.object(donation,'complete_donation',return_value=result),patch.object(donation,'open_proposal') as publish:
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:[] if is_open_pull_list(endpoint) else COMMIT),\
+         patch.object(donation,'complete_donation',return_value=result),patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation,'open_proposal') as publish:
         service._run(threading.Event())
     publish.assert_not_called()
     events=service.drain_events()
@@ -1724,7 +1725,7 @@ def test_local_scheduler_keeps_full_40kb_pair_eligibility(tmp_path):
     sources={'example.py':SOURCE+'# '+('p'*35000)+'\n','Validation/test_example.py':TEST+'# '+('t'*2000)+'\n'}
     tree={'tree':[{'type':'blob','path':path,'sha':hashlib.sha1(("blob "+str(len(text.encode()))+'\0').encode()+text.encode()).hexdigest(),'size':len(text.encode())} for path,text in sources.items()]}
     def public(path,revision):return json.dumps([JOB]) if path=='donation-tasks.json' else sources[path]
-    def api(endpoint):return {'total_count':0} if 'search/' in endpoint else tree if '/git/trees/' in endpoint else COMMIT
+    def api(endpoint):return [] if is_open_pull_list(endpoint) else tree if '/git/trees/' in endpoint else COMMIT
     with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
          patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
          patch.object(donation,'public_file',side_effect=public),patch.object(donation,'gh_api',side_effect=api),\
@@ -1842,6 +1843,9 @@ def test_donation_chat_shows_real_chatgpt_wait_then_local_review_without_jargon(
     events.append({'run_id':'same','phase':'waiting','resource':'chatgpt'})
     consumer.poll()
     assert 'waiting' in messages[-1] and 'ChatGPT' in messages[-1]
+    assert 'other available reviews can continue' in messages[-1]
+    assert 'Open Donate AI power' in messages[-1]
+    assert 'enabled AI source or GitHub to become available' not in messages[-1]
     clock[0]+=21
     events.append({'run_id':'same','phase':'reviewing','resource':'local'})
     consumer.poll()
@@ -1878,8 +1882,8 @@ def test_invalid_local_proposal_cools_only_job_scope_then_reviews_other_area(tmp
     with patch('pc_offline.offline',return_value=False),patch('github_account.account',return_value='donor'),\
          patch.object(donation,'local_available',return_value=True),patch('readiness_checklist._heavy_gpu_active',return_value=False),\
          patch.object(donation,'continuous_jobs',side_effect=lambda jobs,revision,**kw:jobs),patch.object(donation,'public_file',side_effect=public),\
-         patch.object(donation,'gh_api',side_effect=lambda endpoint:{'total_count':0} if 'search/' in endpoint else COMMIT),\
-         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation,'open_proposal') as publish,\
+         patch.object(donation,'gh_api',side_effect=lambda endpoint:[] if is_open_pull_list(endpoint) else COMMIT),\
+         patch.object(donation,'complete_donation',side_effect=complete),patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation,'open_proposal') as publish,\
          patch.object(donation.threading,'Thread',DonationInlineThread):
         service.tick()
         assert service.next_attempt==0 and service.failures==0
@@ -1908,3 +1912,1547 @@ def test_proposal_cooldown_is_bound_to_resource_job_and_full_source_scope(tmp_pa
 def test_non_text_proposal_is_rejected_as_validation_without_an_attribute_error():
     with pytest.raises(ValueError,match='JSON text'):
         donation.validate_proposal({'changes':[]},SOURCES)
+
+
+@pytest.mark.parametrize("endpoint,data,status,stage", [
+    ("repos/private-owner/private-repo/forks", {}, "404", "fork-create"),
+    ("repos/private-owner/private-repo/git/refs", {}, 403, "branch-create"),
+    ("search/issues?q=PRIVATE", None, "429", "proposal-search"),
+    ("repos/private-owner/private-repo/pulls?state=open", None, "422", "proposal-list"),
+])
+def test_github_cli_failures_have_safe_stage_and_http_status(endpoint, data, status, stage):
+    result = SimpleNamespace(returncode=1,
+        stdout=json.dumps({"status": status, "message": "PRIVATE_SERVER_MESSAGE", "key": "PRIVATE_KEY"}),
+        stderr="PRIVATE_STDERR_ACCOUNT_TOKEN")
+    with patch("github_account.executable", return_value="gh-fixture"), patch.object(
+            donation.subprocess, "run", return_value=result):
+        with pytest.raises(donation.GitHubRequestError) as raised:
+            donation.gh_api(endpoint, data)
+    error = raised.value
+    assert error.stage == stage and error.status == int(status) and error.kind == "http"
+    assert error.__context__ is None
+    assert "PRIVATE" not in str(error) + repr(error.__dict__)
+    assert "private-owner" not in str(error) + repr(error.__dict__)
+
+
+@pytest.mark.parametrize("failure,kind", [
+    (OSError("PRIVATE_OS_PATH"), "transport"),
+    (donation.subprocess.TimeoutExpired(["PRIVATE_COMMAND"], 45, output="PRIVATE_OUTPUT"), "timeout"),
+])
+def test_github_transport_failures_are_typed_without_private_exception_chain(failure, kind):
+    with patch("github_account.executable", return_value="gh-fixture"), patch.object(
+            donation.subprocess, "run", side_effect=failure):
+        with pytest.raises(donation.GitHubRequestError) as raised:
+            donation.gh_api("repos/PRIVATE/PRIVATE")
+    assert raised.value.kind == kind and raised.value.stage == "repository"
+    assert raised.value.__context__ is None
+    assert "PRIVATE" not in str(raised.value) + repr(raised.value.__dict__)
+
+
+@pytest.mark.parametrize("stdout", ["PRIVATE_BAD_JSON", "["*2000, '{bad' + " "*20000])
+def test_github_success_with_invalid_json_is_safe_typed_response_failure(stdout):
+    with patch("github_account.executable", return_value="gh-fixture"), patch.object(
+            donation.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout=stdout)):
+        with pytest.raises(donation.GitHubRequestError) as raised:
+            donation.gh_api("repos/PRIVATE/PRIVATE/contents/code.py")
+    assert raised.value.kind == "response_invalid" and raised.value.stage == "source"
+    assert "PRIVATE" not in str(raised.value) + repr(raised.value.__dict__)
+
+
+@pytest.mark.parametrize("status", [True, 404.0, "404 PRIVATE", "999", "200", None, {}, []])
+def test_github_http_status_never_accepts_untyped_or_embedded_details(status):
+    assert donation._github_status(json.dumps({"status": status})) is None
+    assert donation._github_status('{"status":"404"}' + " "*17000) is None
+
+
+def test_typed_github_failure_is_shared_across_lanes_restart_and_expires(tmp_path):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+        github_account="donor", sources=["chatgpt"], intensity="full_blast")
+    service = donation.Service(tmp_path)
+    failure = donation.GitHubRequestError("fork-create", 404, "http")
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch("chatgpt_auth.status", return_value={"sharing": True}), \
+         patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT), \
+         patch.object(donation, "gh_api", side_effect=failure) as github, \
+         patch.object(donation, "complete_donation") as inference, \
+         patch.object(donation.threading, "Thread", DonationInlineThread):
+        service.tick()
+        assert github.call_count == 1
+        assert "HTTP 404" in service.status_message() and "fork creation" in service.status_message()
+        restarted = donation.Service(tmp_path)
+        restarted.tick()
+        assert github.call_count == 1
+        assert "HTTP 404" in restarted.status_message()
+        with patch.object(donation, "connection", side_effect=AssertionError("Tk must do no I/O")):
+            assert "fork creation" in restarted.status_message()
+        inference.assert_not_called()
+        assert donation.resource_cooldown(tmp_path, "github") > 250
+        assert donation.resource_cooldown(tmp_path, "chatgpt") == 0
+        with closing(donation.connection(tmp_path)) as connection, connection:
+            connection.execute("UPDATE cooldowns SET until=0 WHERE resource='github'")
+            connection.execute("UPDATE github_diagnostic SET until=0")
+            assert connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+            row = connection.execute("SELECT stage,status,kind FROM github_diagnostic").fetchone()
+            assert row == ("fork-create", 404, "http")
+        github.side_effect = InterruptedError("fixture end after permitted retry")
+        expired = donation.Service(tmp_path)
+        expired.tick()
+        assert github.call_count > 1
+        assert "HTTP 404" not in expired.status_message()
+        inference.assert_not_called()
+    assert donation.total_tokens(tmp_path) == 0
+    assert donation.settings(tmp_path)["sources"] == ["chatgpt"]
+
+
+@pytest.mark.parametrize("ledger_fails", [False, True])
+def test_github_submission_failure_keeps_real_usage_and_never_claims_pr_success(tmp_path, ledger_fails):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    service = donation.Service(tmp_path)
+    original_finish = donation.finish
+    def finish(root, run_id, status, *args):
+        if ledger_fails and status == "failed":
+            raise sqlite3.OperationalError("PRIVATE_FAILED_RECEIPT")
+        return original_finish(root, run_id, status, *args)
+    def public(path, revision):
+        return json.dumps([JOB]) if path == "donation-tasks.json" else SOURCES[path]
+    def complete(payload, resource, intensity, cancel, receipt):
+        receipt(RESULT, "ollama", "main", False)
+        return RESULT
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kw: jobs), \
+         patch.object(donation, "public_file", side_effect=public), \
+         patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT), \
+         patch.object(donation, "complete_donation", side_effect=complete), \
+         patch("usage_history.record_completion"), patch.object(donation, "finish", side_effect=finish), \
+         patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", side_effect=donation.GitHubRequestError("fork-create", 403, "http")):
+        service._run(threading.Event())
+    assert donation.total_tokens(tmp_path) == 50
+    assert donation.resource_cooldown(tmp_path, "local") == 0
+    assert "HTTP 403" in service.status_message()
+    assert ("database unavailable" in service.status_message()) is ledger_fails
+    with closing(donation.connection(tmp_path)) as connection:
+        assert connection.execute("SELECT status,tokens,url FROM runs").fetchone() == ("received" if ledger_fails else "failed", 50, "")
+        assert connection.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] == 1
+    assert not any(event["phase"] == "submitted" for event in service.drain_events())
+
+
+def test_github_wait_created_during_source_collection_prevents_new_inference(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    service = donation.Service(tmp_path)
+    def public(path, revision):
+        if path == "donation-tasks.json":
+            return json.dumps([JOB])
+        donation.github_diagnostic(tmp_path, donation.GitHubRequestError("repository", 404, "http"))
+        return SOURCES[path]
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kw: jobs), \
+         patch.object(donation, "public_file", side_effect=public), \
+         patch.object(donation, "gh_api", side_effect=lambda endpoint: [] if is_open_pull_list(endpoint) else COMMIT), \
+         patch.object(donation, "complete_donation") as inference:
+        service._run(threading.Event())
+    inference.assert_not_called()
+    assert "HTTP 404" in service.status_message()
+    assert donation.total_tokens(tmp_path) == 0
+
+
+def test_github_fork_readiness_preserves_typed_failure_instead_of_generic_fallback():
+    calls = []
+    def api(endpoint, data=None):
+        calls.append(endpoint)
+        if endpoint.endswith("/forks"):
+            return {"full_name": "donor/cale-ai-workbench", "fork": True}
+        raise donation.GitHubRequestError("repository", 404, "http")
+    with patch.object(donation, "gh_api", side_effect=api), patch.object(donation.time, "sleep"):
+        with pytest.raises(donation.GitHubRequestError) as raised:
+            donation.open_proposal("donor", "a"*32, JOB, COMMIT, PROPOSAL, {}, lambda: None)
+    assert raised.value.stage == "repository" and raised.value.status == 404
+    assert len(calls) == 17  # Initial existing-fork lookup, creation, then15polls.
+
+
+def test_advisory_old_review_and_scope_404_do_not_pause_current_donation(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    pending = donation.claim_run(tmp_path, "old-other-job", "local", "medium", "c"*40)
+    donation.finish(tmp_path, pending, "submitted", "https://github.com/CaleMediaDev/cale-ai-workbench/pull/1")
+    historical = donation.claim_run(tmp_path, JOB["id"], "local", "medium", "d"*40)
+    donation.finish(tmp_path, historical, "reviewed")
+    with closing(donation.connection(tmp_path)) as connection, connection:
+        connection.execute("UPDATE runs SET review_state='closed_unmerged' WHERE id=?", (historical,))
+    advisory = []
+    def public(path, revision):
+        if revision == "d"*40:
+            advisory.append("old-scope")
+            raise donation.GitHubRequestError("source", 404, "http")
+        return json.dumps([JOB]) if path == "donation-tasks.json" else SOURCES[path]
+    def api(endpoint):
+        if "/pulls/1" in endpoint:
+            advisory.append("old-review")
+            raise donation.GitHubRequestError("proposal-review", 404, "http")
+        return [] if is_open_pull_list(endpoint) else COMMIT
+    def complete(payload, resource, intensity, cancel, receipt):
+        receipt(RESULT, "ollama", "main", False)
+        return RESULT
+    service = donation.Service(tmp_path)
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "continuous_jobs", side_effect=lambda jobs, revision, **kw: jobs), \
+         patch.object(donation, "public_file", side_effect=public), patch.object(donation, "gh_api", side_effect=api), \
+         patch.object(donation, "complete_donation", side_effect=complete) as inference, \
+         patch("usage_history.record_completion"), \
+         patch.object(donation.DurablePublication, "confirm_public_delivery", return_value=None), patch.object(donation, "open_proposal", return_value="https://github.com/CaleMediaDev/cale-ai-workbench/pull/2") as submit:
+        service._run(threading.Event())
+    assert set(advisory) == {"old-review", "old-scope"}
+    inference.assert_called_once()
+    submit.assert_called_once()
+    assert donation.total_tokens(tmp_path) == 50
+    assert donation.resource_cooldown(tmp_path, "github") == 0
+    assert donation.github_diagnostic(tmp_path) == {}
+
+
+@pytest.mark.parametrize("failure", [InterruptedError("fixture cancelled"), sqlite3.OperationalError("fixture ledger")])
+def test_github_boundary_preserves_cancellation_and_non_github_ledger_errors(failure):
+    with patch("github_account.executable", return_value="gh-fixture"), patch.object(
+            donation.subprocess, "run", side_effect=failure):
+        with pytest.raises(type(failure)) as raised:
+            donation.gh_api("repos/PRIVATE/PRIVATE")
+    assert raised.value is failure
+    assert not isinstance(raised.value, donation.GitHubRequestError)
+
+
+@pytest.mark.parametrize("error,category", [
+    (sqlite3.OperationalError("PRIVATE_SQL_AND_PATH"), "database unavailable"),
+    (RuntimeError("PRIVATE_ACCOUNT_OR_TOKEN"), "worker temporarily unavailable"),
+    (OSError("PRIVATE_HELPER_PATH"), "local file or helper unavailable"),
+    (donation.subprocess.TimeoutExpired(["PRIVATE_COMMAND"], 1), "local file or helper unavailable"),
+    (ValueError("PRIVATE_DATA"), "data could not be validated"),
+    (KeyError("PRIVATE_KEY"), "data could not be validated"),
+])
+def test_non_github_service_errors_have_safe_static_category_without_account_cooldown(tmp_path, error, category):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+        github_account="donor", sources=["chatgpt"], intensity="medium")
+    service = donation.Service(tmp_path)
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch("chatgpt_auth.status", return_value={"sharing": True}), \
+         patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT), \
+         patch.object(donation, "gh_api", side_effect=error), \
+         patch.object(donation, "complete_donation") as inference:
+        service._run(threading.Event())
+    inference.assert_not_called()
+    assert category in service.status_message()
+    assert "PRIVATE" not in service.status_message()
+    assert donation.resource_cooldown(tmp_path, "github") == 0
+    assert donation.resource_cooldown(tmp_path, "chatgpt") == 0
+    assert donation.github_diagnostic(tmp_path) == {}
+    assert service.next_attempt > time.monotonic()
+
+
+def test_delayed_empty_github_hydration_cannot_erase_nested_lane_fresh_diagnosis(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    parent = donation.Service(tmp_path)
+    child = donation.Service(tmp_path, _lane=True, _resource="local", _events=parent._events)
+    parent.children = [child]
+    original = donation.github_diagnostic
+    interleaved = []
+    def snapshot(root, error=None):
+        stale = original(root, error)
+        if error is None and not interleaved:
+            interleaved.append(True)
+            child._run(threading.Event())
+        return stale
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "gh_api", side_effect=donation.GitHubRequestError("repository", 404, "http")) as github, \
+         patch.object(donation, "github_diagnostic", side_effect=snapshot):
+        parent._run(threading.Event())
+    assert interleaved and github.call_count == 1
+    assert "HTTP 404" in parent.status_message() and "repository access" in parent.status_message()
+    assert parent._events["github_diagnostic"]["status"] == 404
+    assert original(tmp_path)["status"] == 404
+
+
+def test_github_cache_publication_retains_fresh_write_on_equal_expiry_and_clears_expired(tmp_path):
+    service = donation.Service(tmp_path)
+    first = {"stage": "source", "status": 403, "kind": "http", "until": time.time()+100}
+    latest = {**first, "stage": "fork-create", "status": 404}
+    service._publish_github_diagnostic(first)
+    service._publish_github_diagnostic(latest, fresh=True)
+    assert service._publish_github_diagnostic(first)["status"] == 404
+    assert service._publish_github_diagnostic({})["status"] == 404
+    assert service._publish_github_diagnostic({**first, "until": first["until"]-1})["status"] == 404
+    observed = service._publish_github_diagnostic(
+        {**first, "until": first["until"]-1, "database_unavailable": True}, fresh=True)
+    assert observed["status"] == 404 and observed["database_unavailable"] is True
+    with patch.object(donation.time, "time", return_value=first["until"]+1):
+        assert service._publish_github_diagnostic({}) == {}
+
+
+def test_typed_github_error_with_failed_diagnostic_sql_retains_safe_cause_and_memory_backoff(tmp_path):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    service = donation.Service(tmp_path)
+    child = donation.Service(tmp_path, _lane=True, _resource="local", _events=service._events)
+    original = donation.github_diagnostic
+    def failed_write(root, error=None):
+        if error is not None:
+            raise sqlite3.OperationalError("PRIVATE_DIAGNOSTIC_SQL_PATH")
+        return original(root)
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch.object(donation, "local_available", return_value=True), \
+         patch("readiness_checklist._heavy_gpu_active", return_value=False), \
+         patch.object(donation, "gh_api", side_effect=donation.GitHubRequestError("repository", 404, "http")) as github, \
+         patch.object(donation, "github_diagnostic", side_effect=failed_write), \
+         patch.object(donation, "complete_donation") as inference:
+        service._run(threading.Event())
+        child._run(threading.Event())
+    assert github.call_count == 1
+    inference.assert_not_called()
+    assert "database unavailable" in service.status_message() and "HTTP 404" in service.status_message()
+    assert "PRIVATE" not in service.status_message()
+    assert service.next_attempt > time.monotonic()
+    assert donation.resource_cooldown(tmp_path, "github") == 0  # No durable cooldown claimed.
+    assert original(tmp_path) == {}
+    assert donation.total_tokens(tmp_path) == 0
+
+
+# UI counters must not acquire the worker/migration write lock on Tk.
+def counter_control(root):
+    import donation_ui
+    import queue
+    ui = object.__new__(donation_ui.Controls)
+    ui.service = SimpleNamespace(root=root)
+    ui.popup = None
+    ui.last_counter = 0
+    ui._counter_results = queue.Queue(maxsize=1)
+    ui._counter_worker = None
+    ui._counter_snapshot = None
+    owner = threading.get_ident()
+    class Variable:
+        def __init__(self, value): self.value = value
+        def set(self, value):
+            assert threading.get_ident() == owner, "worker touched Tk variable"
+            self.value = value
+    ui.counter = Variable("Total tokens donated: —")
+    ui.breakdown = Variable("Local: — · Free cloud: — · ChatGPT: —")
+    return ui
+
+
+def counter_ledger(root):
+    for source,tokens in (("local",50),("free_cloud",25),("chatgpt",75)):
+        run = donation.claim_run(root,"counter-"+source,source,"medium")
+        reply = {"model":"reported-fixture","usage":{"total_tokens":tokens}}
+        donation.record_result(root,run,reply,"main",source)
+        donation.record_result(root,run,reply,"main",source)
+    return {"total":150,"sources":{"local":50,"free_cloud":25,"chatgpt":75}}
+
+
+def test_token_snapshot_reads_committed_grouped_totals_under_wal_writer(tmp_path):
+    expected = counter_ledger(tmp_path)
+    with closing(sqlite3.connect(tmp_path/"LongTasks/donations.db")) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("UPDATE runs SET tokens=tokens+1000")
+        start = time.monotonic()
+        assert donation.token_snapshot(tmp_path) == expected
+        assert time.monotonic()-start < .25
+    assert donation.total_tokens(tmp_path) == expected["total"]
+    assert donation.source_totals(tmp_path) == expected["sources"]
+
+
+def test_token_snapshot_legacy_attribution_without_migration_and_missing_unavailable(tmp_path):
+    legacy = tmp_path/"legacy"
+    database = legacy/"LongTasks/donations.db"
+    database.parent.mkdir(parents=True)
+    with closing(sqlite3.connect(database)) as connection,connection:
+        connection.execute("CREATE TABLE runs(id TEXT PRIMARY KEY,started REAL,status TEXT,tokens INTEGER,model TEXT,url TEXT,job TEXT)")
+        connection.execute("INSERT INTO runs VALUES('old',1,'submitted',75,'model','','job')")
+    before = database.read_bytes()
+    assert donation.token_snapshot(legacy) == {"total":75,"sources":{"chatgpt":75}}
+    assert database.read_bytes() == before
+    assert donation.total_tokens(legacy) == 75  # Existing writer migration remains legitimate.
+    assert donation.source_totals(legacy) == {"chatgpt":75}
+    missing = tmp_path/"missing"
+    assert donation.token_snapshot(missing) is None
+    assert not missing.exists()
+    malformed = tmp_path/"broken"/"LongTasks/donations.db"
+    malformed.parent.mkdir(parents=True);malformed.write_bytes(b"not SQLite")
+    original = malformed.read_bytes()
+    assert donation.token_snapshot(malformed.parent.parent) is None
+    assert malformed.read_bytes() == original
+
+
+def test_actual_refresh_returns_without_waiting_for_real_wal_writer(tmp_path):
+    counter_ledger(tmp_path)
+    ui = counter_control(tmp_path)
+    held = threading.Event()
+    errors = []
+    def write():
+        try:
+            with closing(sqlite3.connect(tmp_path/"LongTasks/donations.db")) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("UPDATE runs SET tokens=tokens+1000")
+                held.set();time.sleep(.5);connection.rollback()
+        except Exception as error: errors.append(type(error).__name__);held.set()
+    worker = threading.Thread(target=write)
+    worker.start();assert held.wait(2)
+    try:
+        start = time.monotonic();ui.refresh();elapsed=time.monotonic()-start
+        assert elapsed < .2
+        assert ui._counter_worker is not None
+        ui._counter_worker.join(2)
+        ui.refresh()
+        assert ui.counter.value == "Total tokens donated: 150"
+        assert ui._counter_snapshot["sources"] == {"local":50,"free_cloud":25,"chatgpt":75}
+    finally: worker.join(2)
+    assert not errors
+
+
+def test_counter_probe_is_single_bounded_background_task_and_never_touches_tk(tmp_path):
+    import donation_ui
+    ui = counter_control(tmp_path)
+    entered = threading.Event();release = threading.Event();calls=[]
+    def slow(root):
+        calls.append(threading.get_ident());entered.set();release.wait(2)
+        return {"total":150,"sources":{"local":50,"free_cloud":25,"chatgpt":75}}
+    with patch.object(donation,"token_snapshot",side_effect=slow,create=True):
+        try:
+            start=time.monotonic();ui.refresh()
+            assert time.monotonic()-start < .2 and entered.wait(1)
+            first=ui._counter_worker
+            for _ in range(12):
+                ui.last_counter=0;ui.refresh()
+            assert calls == [first.ident] and first.ident != threading.get_ident()
+            assert ui.counter.value == "Total tokens donated: —"
+            assert ui._counter_results.maxsize == 1
+        finally: release.set()
+        first.join(2);ui.refresh()
+    assert ui.counter.value == "Total tokens donated: 150"
+
+
+def test_counter_unavailable_or_exception_keeps_last_good_without_fabricated_zero(tmp_path):
+    ui=counter_control(tmp_path)
+    good={"total":150,"sources":{"local":50,"free_cloud":25,"chatgpt":75}}
+    with patch.object(donation,"token_snapshot",return_value=good,create=True):
+        ui.refresh();ui._counter_worker.join(2);ui.refresh()
+    visible=(ui.counter.value,ui.breakdown.value)
+    for result in (None,sqlite3.OperationalError("private lock")):
+        with patch.object(donation,"token_snapshot",side_effect=result if isinstance(result,Exception) else None,return_value=result,create=True):
+            ui.last_counter=0;ui.refresh();ui._counter_worker.join(2);ui.refresh()
+        assert (ui.counter.value,ui.breakdown.value)==visible
+        assert ui._counter_snapshot==good
+
+
+
+def test_token_snapshot_keeps_one_schema_and_totals_snapshot_across_writer_commit(tmp_path):
+    expected = counter_ledger(tmp_path)
+    actual_connect = sqlite3.connect
+    committed = []
+    class SchemaCursor:
+        def __init__(self, cursor): self.cursor = cursor
+        def __iter__(self):
+            rows = self.cursor.fetchall()
+            if not committed:
+                with closing(actual_connect(tmp_path/"LongTasks/donations.db")) as writer,writer:
+                    writer.execute("UPDATE runs SET tokens=tokens+1000")
+                committed.append(True)
+            return iter(rows)
+    class Reader:
+        def __init__(self, connection): self.connection = connection
+        def execute(self, sql, *args):
+            cursor = self.connection.execute(sql,*args)
+            return SchemaCursor(cursor) if sql.startswith("PRAGMA table_info") else cursor
+        def set_progress_handler(self, *args): self.connection.set_progress_handler(*args)
+        def close(self): self.connection.close()
+    with patch.object(donation.sqlite3,"connect",side_effect=lambda *a,**k: Reader(actual_connect(*a,**k))):
+        assert donation.token_snapshot(tmp_path) == expected
+    assert committed
+    updated = donation.token_snapshot(tmp_path)
+    assert updated["total"] == 3150
+    assert updated["sources"] == {"local":1050,"free_cloud":1025,"chatgpt":1075}
+
+
+def test_token_snapshot_existing_empty_ledger_is_real_zero(tmp_path):
+    with closing(donation.connection(tmp_path)): pass
+    assert donation.token_snapshot(tmp_path) == {"total":0,"sources":{}}
+
+
+class PublicationRemote:
+    """Owned in-memory GitHub fixture, including applied-but-lost POST responses."""
+    def __init__(self):
+        self.calls = []
+        self.refs, self.commits = {}, {}
+        self.prs = []
+        self.fork_failures = 0
+        self.fork_failure_status = 404
+        self.fork_created = False
+        self.public_visible = True
+        self.pr_failure = ""
+        self.ref_lost = False
+        self.revision = COMMIT["sha"]
+        self.source_changed = False
+        self.job_changed = False
+
+    def public(self, path, revision):
+        if path == "donation-tasks.json":
+            return json.dumps([{**JOB, "instructions": "changed"}] if self.job_changed else [JOB])
+        if self.source_changed and revision == self.revision:
+            return SOURCES[path] + "# external public change\n"
+        return SOURCES[path]
+
+    def api(self, endpoint, data=None):
+        from urllib.parse import parse_qs
+        self.calls.append((endpoint, data))
+        if is_open_pull_list(endpoint):
+            return [pr for pr in self.prs if pr["state"] == "open"]
+        if endpoint.endswith("/commits/main"):
+            return {"sha": self.revision, "commit": {"tree": {"sha": "b"*40}}}
+        if "/git/trees/" in endpoint:
+            return {"tree": [{"path": path, "type": "blob", "sha": donation._public_blob(body)} for path, body in SOURCES.items()]}
+        if endpoint.endswith("/forks"):
+            if self.fork_failures:
+                self.fork_failures -= 1
+                raise donation.GitHubRequestError("fork-create", self.fork_failure_status, "http")
+            self.fork_created = True
+            return {"full_name": "donor/cale-ai-workbench", "fork": True}
+        if endpoint == "repos/donor/cale-ai-workbench":
+            if not self.fork_created:
+                raise donation.GitHubRequestError("repository", 404, "http")
+            return {"full_name": "donor/cale-ai-workbench", "fork": True, "parent": {"full_name": donation.UPSTREAM}}
+        if endpoint.endswith("/git/trees"):
+            return {"sha": "c"*40}
+        if endpoint.endswith("/git/commits"):
+            sha = hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()
+            self.commits[sha] = {"sha": sha, "message": data["message"], "tree": {"sha": data["tree"]},
+                "parents": [{"sha": parent, "url": "fixture-parent-url"} for parent in data["parents"]]}
+            return {"sha": sha}
+        if "/git/commits/" in endpoint:
+            return self.commits[endpoint.rsplit("/", 1)[1]]
+        if "/git/ref/heads/" in endpoint:
+            branch = endpoint.split("/git/ref/heads/")[1]
+            if branch not in self.refs:
+                raise donation.GitHubRequestError("repository", 404, "http")
+            return {"object": {"sha": self.refs[branch]}}
+        if endpoint.endswith("/git/refs"):
+            branch = data["ref"].removeprefix("refs/heads/")
+            if branch in self.refs:
+                raise donation.GitHubRequestError("branch-create", 422, "http")
+            self.refs[branch] = data["sha"]
+            if self.ref_lost:
+                self.ref_lost = False
+                raise donation.GitHubRequestError("branch-create", kind="timeout")
+            return {"object": {"sha": data["sha"]}}
+        if "/pulls?" in endpoint:
+            head = parse_qs(endpoint.split("?", 1)[1])["head"][0]
+            return [pr for pr in self.prs if head == "donor:" + pr["head"]["ref"]]
+        if endpoint.endswith("/pulls"):
+            failure, self.pr_failure = self.pr_failure, ""
+            if failure == "rejected":
+                raise donation.GitHubRequestError("proposal-create", 403, "http")
+            if failure != "unknown-absent":
+                branch = data["head"].split(":", 1)[1]
+                pr = {"number": len(self.prs)+1, "html_url": f"https://github.com/{donation.UPSTREAM}/pull/{len(self.prs)+1}",
+                    "body": data["body"], "title": data["title"], "state": "open", "draft": True, "user": {"login": "donor"},
+                    "base": {"ref": "main", "repo": {"full_name": donation.UPSTREAM}},
+                    "head": {"ref": branch, "sha": self.refs[branch], "repo": {"full_name": "donor/cale-ai-workbench"}}}
+                self.prs.append(pr)
+            if failure in {"applied-lost", "unknown-absent"}:
+                raise donation.GitHubRequestError("proposal-create", kind="timeout")
+            return pr
+        raise AssertionError("Unexpected fixture endpoint: " + endpoint)
+
+
+@pytest.fixture
+def outbox_host(tmp_path, monkeypatch):
+    donation.set_enabled(True, tmp_path, github_account="donor", sources=["local"], intensity="medium")
+    remote = PublicationRemote()
+    calls = []
+    monkeypatch.setattr("pc_offline.offline", lambda: False)
+    monkeypatch.setattr("github_account.account", lambda: "donor")
+    monkeypatch.setattr(donation, "local_available", lambda: True)
+    monkeypatch.setattr("readiness_checklist._heavy_gpu_active", lambda root: False)
+    monkeypatch.setattr(donation, "continuous_jobs", lambda jobs, revision, **kw: jobs)
+    monkeypatch.setattr(donation, "public_file", remote.public)
+    monkeypatch.setattr(donation, "gh_api", remote.api)
+    def public_pull(number):
+        if not remote.public_visible:
+            raise donation.PublicVisibilityPending(404, 'http')
+        found = next((pr for pr in remote.prs if pr['number'] == number), None)
+        if found is None:
+            raise donation.PublicVisibilityPending(404, 'http')
+        return json.loads(json.dumps(found))
+    monkeypatch.setattr(donation, 'public_pull_request', public_pull)
+    monkeypatch.setattr("usage_history.record_completion", lambda *args: None)
+    def complete(payload, resource, intensity, cancel, receipt):
+        calls.append(payload)
+        receipt(RESULT, "ollama", "main", False)
+        return RESULT
+    monkeypatch.setattr(donation, "complete_donation", complete)
+    def tick():
+        service = donation.Service(tmp_path)
+        with patch.object(donation.threading, "Thread", DonationInlineThread):
+            service.tick()
+        return service
+    return SimpleNamespace(root=tmp_path, remote=remote, calls=calls, tick=tick)
+
+
+def outbox_expire(root):
+    # Test clock advancement, never production-counter/lease reset.
+    with closing(donation.connection(root)) as connection:
+        rows = connection.execute("SELECT until FROM cooldowns UNION ALL SELECT checked+61 FROM publication_outbox").fetchall()
+    return max([time.time(), *(row[0] for row in rows)]) + 1
+
+
+def test_valid_publication_404_restart_resumes_original_run_without_model_regeneration(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    first = host.tick()
+    with closing(donation.connection(host.root)) as connection:
+        before = connection.execute("SELECT id,status,tokens FROM runs").fetchall()
+        assert connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone()[1] > 0
+    assert len(host.calls) == 1 and before[0][2] == 50 and "HTTP 404" in first.status_message()
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        second = host.tick()
+    with closing(donation.connection(host.root)) as connection:
+        after = connection.execute("SELECT id,status,tokens FROM runs").fetchall()
+        assert connection.execute("SELECT phase,length(payload),owner FROM publication_outbox").fetchone() == ("submitted", 0, "")
+        assert connection.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] == 1
+    assert after == [(before[0][0], "submitted", 50)]
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1
+    assert donation.total_tokens(host.root) == 50
+    assert "confirmed" in second.status_message()
+
+
+@pytest.mark.parametrize("failure", ["applied-lost", "rejected"])
+def test_publication_pr_restart_reconciles_lost_or_rejected_post_without_reinference(outbox_host, failure):
+    host = outbox_host
+    host.remote.pr_failure = failure
+    host.tick()
+    assert len(host.calls) == 1
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 50
+    posts = [body for endpoint, body in host.remote.calls if endpoint.endswith("/pulls") and body is not None]
+    assert len(posts) == (1 if failure == "applied-lost" else 2)
+    assert len(host.remote.prs) == 1
+    assert any("/pulls?" in endpoint and "head=" in endpoint and "state=all" in endpoint for endpoint, _ in host.remote.calls)
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "submitted"
+
+
+def test_unknown_pr_post_absence_stays_reserved_not_blindly_reposted(outbox_host):
+    host = outbox_host
+    host.remote.pr_failure = "unknown-absent"
+    host.tick()
+    for _ in range(2):
+        with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+            waiting = host.tick()
+        assert "confirmation" in waiting.status_message()
+    assert len(host.calls) == 1 and not host.remote.prs
+    assert sum(endpoint.endswith("/pulls") and data is not None for endpoint, data in host.remote.calls) == 1
+    assert donation.claim_run(host.root, JOB["id"], "local", "medium", "f"*40) == ""
+
+
+def test_applied_ref_lost_response_reuses_exact_branch_without_force_push(outbox_host):
+    host = outbox_host
+    host.remote.ref_lost = True
+    host.tick()
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.refs) == 1 and len(host.remote.prs) == 1
+    assert sum(endpoint.endswith("/git/refs") for endpoint, _ in host.remote.calls) == 1
+
+
+def test_unrelated_main_merge_keeps_pinned_original_base_and_cached_work(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    host.remote.revision = "e"*40
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 50
+    commits = [body for endpoint, body in host.remote.calls if endpoint.endswith("/git/commits") and body]
+    assert commits[0]["parents"] == [COMMIT["sha"]]
+
+
+@pytest.mark.parametrize("changed", ["source", "job", "policy"])
+def test_changed_public_scope_or_validator_rejects_cached_upload_without_new_model(outbox_host, changed):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    mutations = sum(body is not None for _, body in host.remote.calls)
+    if changed == "source": host.remote.source_changed = True
+    if changed == "job": host.remote.job_changed = True
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        if changed == "policy":
+            with patch.object(donation, "_publication_policy", return_value="f"*64):
+                host.tick()
+        else:
+            host.tick()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 50
+    assert sum(body is not None for _, body in host.remote.calls) == mutations
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone() == ("stale", 0)
+
+
+@pytest.mark.parametrize("control", ["disabled", "account", "offline"])
+def test_saved_publication_respects_revoked_consent_account_and_offline_before_rpc(outbox_host, control):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    count = len(host.remote.calls)
+    if control == "disabled": donation.set_enabled(False, host.root)
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        if control == "account":
+            with patch("github_account.account", return_value="another-fixture-account"):
+                host.tick()
+        elif control == "offline":
+            with patch("pc_offline.offline", return_value=True): host.tick()
+        else: host.tick()
+    assert len(host.calls) == 1 and len(host.remote.calls) == count
+    assert not host.remote.prs
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT length(payload) FROM publication_outbox").fetchone()[0] > 0
+
+
+def test_cancel_after_durable_save_retries_same_cached_work_when_reenabled(outbox_host):
+    host = outbox_host
+    original = host.remote.api
+    cancelled = []
+    def api(endpoint, data=None):
+        result = original(endpoint, data)
+        if data is not None and not cancelled:
+            cancelled.append(True)
+            donation.set_enabled(False, host.root)
+        return result
+    with patch.object(donation, "gh_api", side_effect=api):
+        host.tick()
+    assert len(host.calls) == 1 and not host.remote.prs
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase,length(payload),owner FROM publication_outbox").fetchone()[1] > 0
+    donation.set_enabled(True, host.root, github_account="donor", sources=["local"], intensity="medium")
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1 and donation.total_tokens(host.root) == 50
+
+
+def test_every_remote_mutation_follows_validated_payload_and_durable_intent(outbox_host):
+    host = outbox_host
+    original = host.remote.api
+    phases = []
+    def api(endpoint, data=None):
+        if data is not None:
+            with closing(donation.connection(host.root)) as connection:
+                phase, size, owner = connection.execute("SELECT phase,length(payload),owner FROM publication_outbox").fetchone()
+            assert size > 0 and owner and phase.endswith("_intent")
+            phases.append(phase)
+        return original(endpoint, data)
+    with patch.object(donation, "gh_api", side_effect=api): host.tick()
+    assert set(phases) == {"fork_intent", "tree_intent", "commit_intent", "ref_intent", "pr_intent"}
+    assert len(host.remote.prs) == 1
+
+
+def test_wrong_existing_branch_is_not_overwritten_or_submitted(outbox_host):
+    host = outbox_host
+    original = host.remote.api
+    def api(endpoint, data=None):
+        if endpoint.endswith("/forks"):
+            with closing(donation.connection(host.root)) as connection:
+                run = connection.execute("SELECT run FROM publication_outbox").fetchone()[0]
+            host.remote.refs["cale-donation-"+run[:16]] = "f"*40
+        return original(endpoint, data)
+    with patch.object(donation, "gh_api", side_effect=api):
+        waiting = host.tick()
+    assert "not overwritten" in waiting.status_message()
+    assert not host.remote.prs
+    assert not any(endpoint.endswith("/git/refs") for endpoint, _ in host.remote.calls)
+    assert donation.total_tokens(host.root) == 50
+
+
+def test_unknown_post_confirmation_survives_later_source_change_without_duplicate(outbox_host):
+    host = outbox_host
+    host.remote.pr_failure = "applied-lost"
+    host.tick()
+    host.remote.source_changed = True
+    host.remote.revision = "e"*40
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1
+    assert sum(endpoint.endswith("/pulls") and body is not None for endpoint, body in host.remote.calls) == 1
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "submitted"
+
+
+def test_outbox_claim_is_exclusive_across_real_threads_and_release_allows_resume(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    held = threading.Event()
+    release = threading.Event()
+    acquired = []
+    def claim():
+        acquired.append(donation.claim_publication(host.root, donation.settings(host.root), "donor"))
+        held.set()
+        release.wait(3)
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        worker = threading.Thread(target=claim)
+        worker.start()
+        assert held.wait(3)
+        try:
+            assert acquired[0] is not None
+            assert donation.claim_publication(host.root, donation.settings(host.root), "donor") is None
+        finally:
+            release.set()
+            worker.join(3)
+        # A dead owner thread can be reconciled, never a merely expired live one.
+        with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+            reclaimed = donation.claim_publication(host.root, donation.settings(host.root), "donor")
+            assert reclaimed is not None
+            reclaimed.close()
+
+
+def test_outbox_payload_size_is_checked_before_decode_and_corrupt_work_cannot_upload(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    before = len(host.remote.calls)
+    with closing(donation.connection(host.root)) as connection, connection:
+        raw = b'{"PRIVATE_OVERSIZED":' + b' '*1000
+        connection.execute("UPDATE publication_outbox SET payload=?,payload_sha=?", (raw, hashlib.sha256(raw).hexdigest()))
+    actual_loads = donation.json.loads
+    def decode(raw, *args, **kwargs):
+        assert not isinstance(raw, bytes) or b"PRIVATE_OVERSIZED" not in raw
+        return actual_loads(raw, *args, **kwargs)
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)), \
+         patch.object(donation, "_OUTBOX_BYTES", 128), patch.object(donation.json, "loads", side_effect=decode):
+        host.tick()
+    assert len(host.remote.calls) == before and len(host.calls) == 1
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone() == ("corrupt", 0)
+
+
+def test_outbox_reservation_capacity_is_atomic_and_never_evicts_pending_work(tmp_path):
+    consent = {"intensity": "medium"}
+    publications = []
+    try:
+        for index in range(donation._OUTBOX_LIMIT):
+            run = donation.claim_run(tmp_path, "bounded-"+str(index), "local", "medium")
+            publications.append(donation.reserve_publication(tmp_path, run, "local", consent, "donor"))
+        extra = donation.claim_run(tmp_path, "bounded-extra", "local", "medium")
+        with pytest.raises(donation.PublicationPending):
+            donation.reserve_publication(tmp_path, extra, "local", consent, "donor")
+        with closing(donation.connection(tmp_path)) as connection:
+            assert connection.execute("SELECT COUNT(*) FROM publication_outbox").fetchone()[0] == donation._OUTBOX_LIMIT
+    finally:
+        for publication in publications: publication.close()
+
+
+@pytest.mark.parametrize("phase", ["validated", "pr_intent"])
+def test_actual_child_crash_retains_valid_proposal_or_ambiguous_intent_without_new_model(outbox_host, phase):
+    import os, sys, subprocess
+    from pathlib import Path
+    host = outbox_host
+    fixture = host.root / "public-crash-fixture.json"
+    fixture.write_text(json.dumps({"job": JOB, "commit": COMMIT, "proposal": PROPOSAL,
+        "sources": SOURCES, "result": RESULT, "phase": phase}), encoding="utf-8")
+    script = r"""
+import sys,json,os
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import donation as d
+root=Path(sys.argv[2]);value=json.loads(Path(sys.argv[3]).read_text())
+consent=d.settings(root);run=d.claim_run(root,value['job']['id'],'local','medium',value['commit']['sha'])
+d.record_result(root,run,value['result'],'main','ollama')
+publication=d.reserve_publication(root,run,'local',consent,'donor')
+proposal,edited=d.validate_proposal(json.dumps(value['proposal']),value['sources'])
+publication.prepare(value['job'],value['commit'],proposal,edited,value['sources'],consent,'donor')
+if value['phase']=='pr_intent':
+ publication.state={'fork_ready':True,'tree':'c'*40,'commit':'d'*40,'pr_attempted':True,'intent':'pr'}
+ publication._save('pr_intent')
+os._exit(23)
+"""
+    child = subprocess.run([sys.executable, "-I", "-B", "-c", script,
+        str(Path(donation.__file__).resolve().parent), str(host.root), str(fixture)],
+        cwd=host.root, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, timeout=15)
+    assert child.returncode == 23, child.stderr.decode(errors="replace")
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        service = host.tick()
+    assert len(host.calls) == 0 and donation.total_tokens(host.root) == 50
+    if phase == "validated":
+        assert len(host.remote.prs) == 1
+        with closing(donation.connection(host.root)) as connection:
+            assert connection.execute("SELECT status FROM runs").fetchone()[0] == "submitted"
+    else:
+        assert "confirmation" in service.status_message()
+        assert not host.remote.prs
+        assert not any(body is not None for _, body in host.remote.calls)
+
+
+def test_legacy_token_ledger_migrates_without_fabricating_cached_proposals(outbox_host):
+    host = outbox_host
+    database = host.root / "LongTasks/donations.db"
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute("CREATE TABLE runs(id TEXT PRIMARY KEY,started REAL,status TEXT,tokens INTEGER,model TEXT,url TEXT,job TEXT)")
+        connection.execute("INSERT INTO runs VALUES('legacy',1,'submitted',75,'historic','','legacy-other')")
+    host.tick()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 125
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT tokens,status FROM runs WHERE id='legacy'").fetchone() == (75, "submitted")
+        assert connection.execute("SELECT COUNT(*) FROM publication_outbox").fetchone()[0] == 1
+    assert donation.source_totals(host.root) == {"chatgpt": 75, "local": 50}
+
+
+def test_actual_loaded_validator_change_cannot_downgrade_saved_proposal_checks(outbox_host):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    before = len(host.remote.calls)
+    def weakened_validator(text, sources):
+        raise AssertionError("Changed validator must be detected before any reuse")
+    with patch.object(donation, "validate_proposal", weakened_validator), \
+         patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.calls) == before
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase FROM publication_outbox").fetchone()[0] == "stale"
+
+
+def test_publication_policy_uses_loaded_code_not_replaced_disk_source_text():
+    import inspect
+    expected = donation._publication_policy()
+    with patch.object(inspect, "getsource", return_value="private replaced disk text"):
+        assert donation._publication_policy() == expected
+
+
+def test_unresolved_publication_reserves_its_area_but_another_public_job_continues(outbox_host):
+    host = outbox_host
+    other_sources = {"other.py": SOURCE, "Validation/test_other.py": TEST}
+    other = {"id": "other-area", "title": "Independent area", "paths": list(other_sources)}
+    all_sources = {**SOURCES, **other_sources}
+    def public(path, revision):
+        return json.dumps([JOB, other]) if path == "donation-tasks.json" else all_sources[path]
+    def complete(payload, resource, intensity, cancel, receipt):
+        host.calls.append(payload)
+        task = json.loads(payload["messages"][-1]["content"])["task"]
+        result = json.loads(json.dumps(RESULT))
+        if task["id"] == other["id"]:
+            proposal = json.loads(json.dumps(PROPOSAL))
+            for change in proposal["changes"]:
+                change["path"] = change["path"].replace("example", "other")
+            result["choices"][0]["message"]["content"] = json.dumps(proposal)
+        receipt(result, "ollama", "main", False)
+        return result
+    host.remote.pr_failure = "unknown-absent"
+    with patch.object(donation, "public_file", side_effect=public), \
+         patch.object(donation, "complete_donation", side_effect=complete):
+        host.tick()
+        with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+            pending = host.tick()
+            assert "confirmation" in pending.status_message()
+            host.tick()  # Same clock: bounded reconciliation skips the just-checked outbox.
+    assert len(host.calls) == 2 and len(host.remote.prs) == 1
+    tasks = [json.loads(call["messages"][-1]["content"])["task"]["id"] for call in host.calls]
+    assert len(set(tasks)) == 2
+    assert sum(endpoint.endswith("/pulls") and body is not None for endpoint, body in host.remote.calls) == 2
+    assert donation.total_tokens(host.root) == 100
+    with closing(donation.connection(host.root)) as connection:
+        rows = connection.execute("SELECT phase FROM publication_outbox ORDER BY phase").fetchall()
+        assert rows == [("pr_intent",), ("submitted",)]
+
+
+@pytest.mark.parametrize("fault", ["nested_commit", "proposal_none", "empty_change", "state_tree", "state_intent"])
+def test_bounded_corrupt_saved_shapes_are_rejected_before_network_and_do_not_retry_forever(outbox_host, fault):
+    host = outbox_host
+    host.remote.fork_failures = 1
+    host.tick()
+    before = len(host.remote.calls)
+    with closing(donation.connection(host.root)) as connection, connection:
+        raw, state = connection.execute("SELECT payload,state FROM publication_outbox").fetchone()
+        value, metadata = json.loads(raw), json.loads(state)
+        if fault == "nested_commit": value["commit"]["commit"] = 17
+        if fault == "proposal_none": value["proposal"] = None
+        if fault == "empty_change": value["proposal"]["changes"] = [{}]
+        if fault == "state_tree": metadata["tree"] = []
+        if fault == "state_intent": metadata["intent"] = []
+        raw = json.dumps(value).encode()
+        connection.execute("UPDATE publication_outbox SET payload=?,payload_sha=?,state=?",
+            (raw, hashlib.sha256(raw).hexdigest(), json.dumps(metadata)))
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        result = host.tick()
+    assert "data is unavailable" in result.status_message()
+    assert len(host.remote.calls) == before and len(host.calls) == 1
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone() == ("corrupt", 0)
+
+
+def test_corrupt_unknown_post_keeps_area_reserved_instead_of_regenerating_duplicate(outbox_host):
+    host = outbox_host
+    host.remote.pr_failure = "unknown-absent"
+    host.tick()
+    with closing(donation.connection(host.root)) as connection, connection:
+        raw = connection.execute("SELECT payload FROM publication_outbox").fetchone()[0]
+        value = json.loads(raw)
+        value["commit"]["commit"] = None
+        raw = json.dumps(value).encode()
+        connection.execute("UPDATE publication_outbox SET payload=?,payload_sha=?", (raw, hashlib.sha256(raw).hexdigest()))
+    before = len(host.remote.calls)
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+        host.tick()
+    assert len(host.calls) == 1 and len(host.remote.calls) >= before
+    assert sum(endpoint.endswith("/pulls") and body is not None for endpoint, body in host.remote.calls) == 1
+    with closing(donation.connection(host.root)) as connection:
+        phase, size = connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone()
+        assert phase == "corrupt_pending" and size > 0
+    assert donation.claim_run(host.root, JOB["id"], "local", "medium", "f"*40) == ""
+
+
+
+def test_service_uses_direct_pull_list_when_search_author_query_would_return_422(outbox_host):
+    host=outbox_host;real_api=host.remote.api
+    def api(endpoint,data=None):
+        if endpoint.startswith('search/'):
+            raise donation.GitHubRequestError('proposal-search',422,'http')
+        return real_api(endpoint,data)
+    with patch.object(donation,'gh_api',side_effect=api):result=host.tick()
+    assert len(host.calls)==1 and len(host.remote.prs)==1,result.status_message()
+    assert not any(endpoint.startswith('search/') for endpoint,_ in host.remote.calls)
+
+
+
+def test_direct_pull_list_paginates_and_keeps_owned_edited_title_markers(monkeypatch):
+    first=[open_pull(n,author='someone-else',body='<!-- cale-donation:foreign -->') for n in range(1,100)]
+    first.append(open_pull(100,author='DONOR',title='Edited title',body='<!-- cale-donation:owned-area -->'))
+    pages=[first,[open_pull(101,author='donor',title='[Donation] Another proposal')]];calls=[]
+    def api(endpoint):
+        calls.append(endpoint);return pages[len(calls)-1]
+    monkeypatch.setattr(donation,'gh_api',api)
+    result=donation.open_donation_proposals('donor',lambda:None)
+    assert result['total_count']==2 and 'owned-area' in result['items'][0]['body']
+    assert 'foreign' not in json.dumps(result) and len(calls)==2
+    assert all('sort=created' in call and 'direction=asc' in call for call in calls)
+
+
+@pytest.mark.parametrize('fault',['missing_user','number_bool','foreign_repository','foreign_url','closed','title_none','body_dict','oversized_body','invalid_page','surrogate'])
+def test_direct_pull_list_unknown_shape_is_not_an_empty_queue(monkeypatch,fault):
+    item=open_pull(1);records=[item]
+    if fault=='missing_user':item['user']=None
+    elif fault=='number_bool':item['number']=True
+    elif fault=='foreign_repository':item['base']['repo']['full_name']='other/repo'
+    elif fault=='foreign_url':item['html_url']='https://github.com/other/repo/pull/1'
+    elif fault=='closed':item['state']='closed'
+    elif fault=='title_none':item['title']=None
+    elif fault=='body_dict':item['body']={}
+    elif fault=='oversized_body':item['body']='x'*65537
+    elif fault=='invalid_page':records={'items':[]}
+    elif fault=='surrogate':item['body']=chr(0xd800)
+    monkeypatch.setattr(donation,'gh_api',lambda endpoint:records)
+    with pytest.raises(donation.GitHubRequestError) as error:
+        donation.open_donation_proposals('donor',lambda:None)
+    assert error.value.stage=='proposal-list' and error.value.kind=='response_invalid'
+
+
+def test_direct_pull_list_duplicate_page_and_byte_budget_fail_closed(monkeypatch):
+    records=[open_pull(n) for n in range(1,101)];calls=[]
+    monkeypatch.setattr(donation,'gh_api',lambda endpoint:calls.append(endpoint) or records)
+    with pytest.raises(donation.GitHubRequestError):donation.open_donation_proposals('donor',lambda:None)
+    assert len(calls)==2
+    monkeypatch.setattr(donation,'_OPEN_PULLS_MAX_BYTES',1)
+    with pytest.raises(donation.GitHubRequestError):donation.open_donation_proposals('donor',lambda:None)
+
+
+def test_direct_pull_list_full_hundred_page_bound_never_claims_complete(monkeypatch):
+    calls=[]
+    def api(endpoint):
+        calls.append(endpoint);page=len(calls)
+        return [open_pull((page-1)*100+n,author='other') for n in range(1,101)]
+    monkeypatch.setattr(donation,'gh_api',api)
+    with pytest.raises(donation.GitHubRequestError):donation.open_donation_proposals('donor',lambda:None)
+    assert len(calls)==100 and 'page=100' in calls[-1]
+
+
+def test_direct_pull_list_empty_termination_and_cancellation(monkeypatch):
+    calls=[]
+    def api(endpoint):
+        calls.append(endpoint);return [open_pull(n,author='other') for n in range(1,101)] if len(calls)==1 else []
+    monkeypatch.setattr(donation,'gh_api',api)
+    assert donation.open_donation_proposals('donor',lambda:None)=={'total_count':0,'items':[]}
+    assert len(calls)==2
+    calls.clear();checks=[]
+    def cancel():
+        checks.append(True)
+        if len(checks)==3:raise InterruptedError('owned test cancellation')
+    with pytest.raises(InterruptedError):donation.open_donation_proposals('donor',cancel)
+    assert len(calls)==1
+
+
+@pytest.mark.parametrize('failure',[403,404,'incomplete'])
+def test_service_never_infers_until_rest_listing_is_complete(outbox_host,failure):
+    host=outbox_host;real_api=host.remote.api;pages=[]
+    def api(endpoint,data=None):
+        if is_open_pull_list(endpoint):
+            pages.append(endpoint)
+            if len(pages)==1:return [open_pull(n,author='other') for n in range(1,101)]
+            if failure=='incomplete':return {}
+            raise donation.GitHubRequestError('proposal-list',failure,'http')
+        return real_api(endpoint,data)
+    with patch.object(donation,'gh_api',side_effect=api):result=host.tick()
+    assert not host.calls and not host.remote.prs and len(pages)==2
+    assert 'proposal listing' in result.status_message()
+    with closing(donation.connection(host.root)) as connection:
+        assert connection.execute('SELECT COUNT(*) FROM runs').fetchone()[0]==0
+
+
+def test_slow_owned_edited_title_proposal_blocks_before_model(outbox_host):
+    host=outbox_host;donation.set_enabled(True,host.root,github_account='donor',sources=['local'],intensity='slow')
+    real_api=host.remote.api
+    def api(endpoint,data=None):
+        if is_open_pull_list(endpoint):return [open_pull(7,title='Edited title',body='<!-- cale-donation:example-fix -->')]
+        return real_api(endpoint,data)
+    service=donation.Service(host.root);service.last_activity=time.monotonic()-301
+    with patch.object(donation,'gh_api',side_effect=api):service._run(threading.Event())
+    assert not host.calls and 'waiting for maintainer review' in service.status_message()
+
+
+def test_existing_verified_fork_never_requests_creation():
+    calls=[]
+    def api(endpoint,data=None):
+        calls.append((endpoint,data))
+        assert data is None
+        return {'full_name':'DONOR/cale-ai-workbench','fork':True,'parent':{'full_name':donation.UPSTREAM}}
+    assert donation._proposal_target('donor',lambda:None,api)=='donor/cale-ai-workbench'
+    assert calls==[('repos/donor/cale-ai-workbench',None)]
+
+
+@pytest.mark.parametrize('metadata',[None,[],{},
+    {'full_name':'donor/cale-ai-workbench','fork':False,'parent':{'full_name':donation.UPSTREAM}},
+    {'full_name':'other/cale-ai-workbench','fork':True,'parent':{'full_name':donation.UPSTREAM}},
+    {'full_name':'donor/cale-ai-workbench','fork':True,'parent':{'full_name':'other/repository'}},
+    {'full_name':[],'fork':True,'parent':{'full_name':donation.UPSTREAM}},
+    {'full_name':'donor/cale-ai-workbench','fork':True,'parent':{'full_name':[]}}])
+def test_fork_lookup_rejects_unverified_or_malformed_destination_without_writes(metadata):
+    calls=[]
+    def api(endpoint,data=None):
+        calls.append((endpoint,data));return metadata
+    with pytest.raises(donation.GitHubRequestError) as error:
+        donation._proposal_target('donor',lambda:None,api)
+    assert error.value.kind=='response_invalid'
+    assert len(calls)==1 and calls[0][1] is None
+
+
+@pytest.mark.parametrize('status',[401,403,429,500])
+def test_unknown_fork_lookup_does_not_attempt_creation(status):
+    calls=[]
+    def api(endpoint,data=None):
+        calls.append((endpoint,data));raise donation.GitHubRequestError('repository',status,'http')
+    with pytest.raises(donation.GitHubRequestError) as error:
+        donation._proposal_target('donor',lambda:None,api)
+    assert error.value.status==status and len(calls)==1
+
+
+def test_fork403_saved_draft_recovers_to_existing_fork_without_new_ai(outbox_host):
+    import donation_ui
+    host=outbox_host;host.remote.fork_failures=1;host.remote.fork_failure_status=403
+    first=host.tick();messages=[]
+    donation_ui.ChatActivity(first,messages.append).poll()
+    assert len(host.calls)==1 and donation.total_tokens(host.root)==50
+    assert any('GitHub HTTP 403 during fork creation' in message for message in messages)
+    with closing(donation.connection(host.root)) as db:
+        original=db.execute('SELECT id FROM runs').fetchone()[0]
+        assert db.execute('SELECT length(payload) FROM publication_outbox').fetchone()[0]>0
+    # Simulate a now-visible existing fork. Creation remains forbidden: a
+    # successful retry must use GET metadata and retain the same saved work.
+    host.remote.fork_created=True;host.remote.fork_failures=100
+    before=len(host.remote.calls)
+    with patch.object(donation.time,'time',return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls)==1 and donation.total_tokens(host.root)==50 and len(host.remote.prs)==1
+    assert not any(endpoint.endswith('/forks') for endpoint,_ in host.remote.calls[before:])
+    with closing(donation.connection(host.root)) as db:
+        assert db.execute('SELECT id,status FROM runs').fetchall()==[(original,'submitted')]
+
+
+@pytest.mark.parametrize('failure',[
+    {'stage':[], 'status':403, 'kind':'http'},
+    {'stage':'fork-create','status':True,'kind':'http'},
+    {'stage':'fork-create','status':403,'kind':'SECRET https://private.invalid'},
+])
+def test_wait_chat_ignores_untrusted_github_diagnostics(failure):
+    import donation_ui
+    messages=[]
+    service=SimpleNamespace(drain_events=lambda:[{'run_id':'run','phase':'waiting','github_failure':failure}])
+    donation_ui.ChatActivity(service,messages.append).poll()
+    assert len(messages)==1 and 'SECRET' not in messages[0] and 'private.invalid' not in messages[0]
+    assert 'GitHub HTTP' not in messages[0]
+
+
+def test_public_confirmation_keeps_existing_527_saved_payload_policy():
+    assert donation._publication_policy()=='2f2342462a62b4057d69608630bc596a2ecdf9e3dc4c28d2d757104510578ced'
+
+
+def test_donor_only_pr_is_pending_then_publicly_recovers_without_more_tokens_or_posts(outbox_host):
+    import donation_ui
+    host=outbox_host;host.remote.public_visible=False
+    first=host.tick();messages=[]
+    donation_ui.ChatActivity(first,messages.append).poll()
+    assert len(host.calls)==1 and len(host.remote.prs)==1 and donation.total_tokens(host.root)==50
+    assert not any('just sent' in message for message in messages)
+    assert any('public proposal confirmation' in message and 'not confirmed' in message for message in messages)
+    with closing(donation.connection(host.root)) as db:
+        original=db.execute('SELECT id FROM runs').fetchone()[0]
+        assert db.execute('SELECT phase,length(payload) FROM publication_outbox').fetchone()[1]>0
+        assert db.execute('SELECT COUNT(*) FROM runs WHERE status=\'submitted\'').fetchone()[0]==0
+    calls=len(host.remote.calls)
+    host.tick()  # Shared cooldown persists across Service instances.
+    assert len(host.remote.calls)==calls and len(host.calls)==1
+    host.remote.public_visible=True
+    with patch.object(donation.time,'time',return_value=outbox_expire(host.root)):
+        second=host.tick()
+    assert len(host.calls)==1 and len(host.remote.prs)==1 and donation.total_tokens(host.root)==50
+    assert sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)==1
+    with closing(donation.connection(host.root)) as db:
+        assert db.execute('SELECT id,status FROM runs').fetchall()==[(original,'submitted')]
+        assert db.execute('SELECT phase,length(payload) FROM publication_outbox').fetchone()==('submitted',0)
+    messages=[];donation_ui.ChatActivity(second,messages.append).poll()
+    assert any('just sent' in message and '/pull/1' in message for message in messages)
+
+
+@pytest.mark.parametrize('field,value',[
+    ('number',True),('html_url','https://github.com/other/repo/pull/1'),
+    ('body','Unrelated public proposal'),('state','unknown'),('base',None),
+    ('user',{'login':'other'}),('head',{'sha':'f'*40}),
+])
+def test_public_result_must_match_the_exact_saved_proposal(outbox_host,field,value):
+    host=outbox_host;original=donation.public_pull_request
+    def public(number):
+        result=original(number);result[field]=value;return result
+    with patch.object(donation,'public_pull_request',side_effect=public):
+        service=host.tick()
+    assert len(host.calls)==1 and len(host.remote.prs)==1
+    assert 'not confirmed' in service.status_message()
+    with closing(donation.connection(host.root)) as db:
+        assert db.execute('SELECT COUNT(*) FROM runs WHERE status=\'submitted\'').fetchone()[0]==0
+        assert db.execute('SELECT length(payload) FROM publication_outbox').fetchone()[0]>0
+
+
+class PublicPullResponse:
+    status=200
+    def __init__(self,body=b'{}',url=None):
+        self.body=body;self.url=url or f'https://api.github.com/repos/{donation.UPSTREAM}/pulls/728'
+        self.read_limit=None
+    def __enter__(self):return self
+    def __exit__(self,*args):pass
+    def read(self,limit):self.read_limit=limit;return self.body[:limit]
+    def geturl(self):return self.url
+
+
+def test_public_pull_is_a_bounded_fixed_origin_read_without_account_headers():
+    response=PublicPullResponse(b'{"number":728}')
+    captured=[]
+    def open_request(request,timeout):
+        captured.append((request,timeout));return response
+    with patch.object(donation,'build_opener',return_value=SimpleNamespace(open=open_request)) as build:
+        assert donation.public_pull_request(728)=={'number':728}
+    request,timeout=captured[0]
+    assert request.full_url==f'https://api.github.com/repos/{donation.UPSTREAM}/pulls/728'
+    assert timeout==15 and request.data is None and request.get_method()=='GET'
+    assert {key.lower() for key,_ in request.header_items()}=={'accept','user-agent'}
+    assert response.read_limit==256*1024+1
+    redirect=build.call_args.args[0]
+    assert redirect.redirect_request(None,None,302,'',{},'https://other.invalid') is None
+
+
+@pytest.mark.parametrize('response',[
+    PublicPullResponse(b'x'*(256*1024+1)),PublicPullResponse(b'[]'),
+    PublicPullResponse(b'bad json'),PublicPullResponse(b'{}',url='https://other.invalid'),
+])
+def test_public_pull_unknown_response_never_counts_as_delivery(response):
+    with patch.object(donation,'build_opener',return_value=SimpleNamespace(open=lambda *a,**k:response)):
+        with pytest.raises(donation.PublicVisibilityPending):donation.public_pull_request(728)
+
+
+@pytest.mark.parametrize('status,retry,expected',[(404,'',60),(403,'',3600),(429,'120',120),(429,'NaN',3600)])
+def test_public_pull_errors_keep_typed_status_and_bounded_backoff_without_remote_text(status,retry,expected):
+    from urllib.error import HTTPError
+    error=HTTPError('https://private.invalid',status,'PRIVATE BODY',{'Retry-After':retry},None)
+    with patch.object(donation,'build_opener',return_value=SimpleNamespace(open=lambda *a,**k:(_ for _ in ()).throw(error))):
+        with pytest.raises(donation.PublicVisibilityPending) as raised:donation.public_pull_request(728)
+    assert raised.value.status==status and raised.value.retry_seconds==expected
+    assert raised.value.__context__ is None and raised.value.__cause__ is None
+    assert 'PRIVATE' not in str(raised.value) and 'private.invalid' not in str(raised.value)
+
+
+def test_public_pull_interruption_remains_cancellation():
+    with patch.object(donation,'build_opener',return_value=SimpleNamespace(open=lambda *a,**k:(_ for _ in ()).throw(InterruptedError()))):
+        with pytest.raises(InterruptedError):donation.public_pull_request(728)
+
+
+class ModelPublicationRemote(PublicationRemote):
+    """Extend the real-shaped fake GitHub with captured model tree/ancestry."""
+    def __init__(self):
+        super().__init__()
+        self.tree_files = []
+        self.wrong_ancestry = False
+        self.wrong_blob = False
+
+    def api(self, endpoint, data=None):
+        if "/git/matching-refs/heads/" in endpoint:
+            self.calls.append((endpoint,data))
+            branch=endpoint.split('/git/matching-refs/heads/')[1]
+            return [{'ref':'refs/heads/'+branch,'object':{'sha':self.refs[branch]}}] if branch in self.refs else []
+        if "/compare/" in endpoint:
+            self.calls.append((endpoint,data))
+            parent,head=endpoint.split('/compare/')[1].split('...')
+            if endpoint.startswith('repos/'+donation.UPSTREAM+'/'):
+                return {'status':'identical' if parent==head else 'ahead',
+                    'merge_base_commit':{'sha':'f'*40 if self.wrong_ancestry else parent}}
+            files=json.loads(json.dumps(self.tree_files))
+            if self.wrong_blob:files[0]['sha']='f'*40
+            return {'total_commits':1,'files':files}
+        if endpoint.endswith('/git/trees') and data is not None:
+            self.tree_files=[{'filename':item['path'],'status':'added','sha':donation._public_blob(item['content'])}
+                for item in data['tree']]
+        return super().api(endpoint,data)
+
+
+@pytest.fixture
+def model_upload_host(enabled,monkeypatch):
+    import github_account
+    donation.set_enabled(True,enabled,sources=['local'],github_account='donor',intensity='medium',model_training=True)
+    folder=enabled/'model-candidate'
+    fingerprint=artifacts(folder)
+    claimed=models.claim(enabled)
+    assert claimed['fingerprint']==fingerprint
+    trained={'folder':str(folder),'qualified':True,'seconds':2}
+    remote=ModelPublicationRemote()
+    monkeypatch.setattr(github_account,'account',lambda:'donor')
+    monkeypatch.setattr(donation.Service,'allowed',lambda *a,**k:True)
+    monkeypatch.setattr(donation,'gh_api',remote.api)
+    def public(number):
+        if not remote.public_visible:raise donation.PublicVisibilityPending(404,'http')
+        found=next((pr for pr in remote.prs if pr['number']==number),None)
+        if found is None:raise donation.PublicVisibilityPending(404,'http')
+        return json.loads(json.dumps(found))
+    monkeypatch.setattr(donation,'public_pull_request',public)
+    return SimpleNamespace(root=enabled,claimed=claimed,trained=trained,remote=remote,
+        publish=lambda:donation.publish_model_candidate(enabled,claimed,trained,'donor',lambda:None))
+
+
+def test_model_upload_preserves_trainer_identity_and_uses_only_reviewed_json(model_upload_host):
+    host=model_upload_host
+    before=models.identity()
+    assert host.publish().endswith('/pull/1')
+    assert models.identity()==before
+    assert hashlib.sha256(__import__('pathlib').Path(models.__file__).read_bytes()).hexdigest()=='55e0cea16b25c834ae1629d194a3d2c0637eabba168f01427417de4be275f67f'
+    assert len(host.remote.prs)==1 and host.remote.prs[0]['draft'] is True
+    assert {file['filename'] for file in host.remote.tree_files}=={
+        f'ModelContributions/{host.claimed["fingerprint"]}/{name}' for name in models.ARTIFACTS}
+    assert donation.total_tokens(host.root)==0
+
+
+def test_model_upload_reuses_existing_fork_even_if_creation_is_forbidden(model_upload_host):
+    host=model_upload_host;host.remote.fork_created=True;host.remote.fork_failures=100;host.remote.fork_failure_status=403
+    assert host.publish().endswith('/pull/1')
+    assert not any(endpoint.endswith('/forks') for endpoint,_ in host.remote.calls)
+
+
+@pytest.mark.parametrize('failure',['applied-lost','unknown-absent','rejected'])
+def test_model_upload_journals_pr_intent_and_never_duplicates_ambiguous_post(model_upload_host,failure):
+    host=model_upload_host;host.remote.pr_failure=failure
+    with pytest.raises(donation.GitHubRequestError):host.publish()
+    with closing(donation.connection(host.root)) as db:
+        state,owner=db.execute('SELECT state,owner FROM model_publication_journal').fetchone()
+    assert owner=='' and json.loads(state)['pr_attempted']==(failure!='rejected')
+    if failure=='unknown-absent':
+        with pytest.raises(donation.PublicationPending,match='no replacement'):host.publish()
+        assert not host.remote.prs
+    else:
+        assert host.publish().endswith('/pull/1') and len(host.remote.prs)==1
+    assert sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)==(2 if failure=='rejected' else 1)
+
+
+def test_model_upload_public_visibility_wait_keeps_same_candidate_and_pr(model_upload_host):
+    host=model_upload_host;host.remote.public_visible=False
+    with pytest.raises(donation.PublicVisibilityPending):host.publish()
+    host.remote.public_visible=True
+    assert host.publish().endswith('/pull/1')
+    assert len(host.remote.prs)==1
+    assert sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)==1
+    assert donation.total_tokens(host.root)==0
+
+
+@pytest.mark.parametrize('fault',['wrong_blob','wrong_ancestry'])
+def test_model_upload_rejects_unreviewed_delta_or_foreign_base(model_upload_host,fault):
+    host=model_upload_host;host.remote.ref_lost=True
+    with pytest.raises(donation.GitHubRequestError):host.publish()
+    setattr(host.remote,fault,True)
+    with pytest.raises(donation.PublicationPending):host.publish()
+    assert not host.remote.prs
+
+
+def test_model_upload_recovers_applied_ref_and_new_main_without_recreating_objects(model_upload_host):
+    host=model_upload_host;host.remote.ref_lost=True
+    with pytest.raises(donation.GitHubRequestError):host.publish()
+    commits=len(host.remote.commits)
+    host.remote.revision='d'*40
+    assert host.publish().endswith('/pull/1')
+    assert len(host.remote.commits)==commits and len(host.remote.refs)==1 and len(host.remote.prs)==1
+
+
+def test_model_upload_lease_is_exclusive_while_owner_thread_lives(model_upload_host):
+    host=model_upload_host
+    bodies=models.review_artifacts(host.trained['folder'],host.claimed['fingerprint'])
+    owner=donation.ModelPublicationJournal(host.root,host.claimed,'donor',bodies,lambda:None)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future=pool.submit(host.publish)
+            with pytest.raises(donation.PublicationPending,match='live worker'):future.result()
+        assert not host.remote.calls
+    finally:owner.close()
+    assert host.publish().endswith('/pull/1')
+
+
+@pytest.mark.parametrize('bad_state',['[]','{"pr_attempted":"true"}','x'*8193])
+def test_model_upload_corrupt_journal_never_authorizes_another_post(model_upload_host,bad_state):
+    host=model_upload_host;host.remote.pr_failure='unknown-absent'
+    with pytest.raises(donation.GitHubRequestError):host.publish()
+    before=len(host.remote.calls)
+    with closing(donation.connection(host.root)) as db,db:
+        db.execute('UPDATE model_publication_journal SET state=?',(bad_state,))
+    with pytest.raises(donation.PublicationPending):host.publish()
+    assert len(host.remote.calls)==before
+
+
+def test_model_upload_opt_out_prevents_all_remote_work(model_upload_host):
+    host=model_upload_host;donation.set_enabled(False,host.root)
+    with pytest.raises(InterruptedError):host.publish()
+    assert not host.remote.calls
+
+
+def test_model_upload_every_write_has_durable_artifact_binding_and_intent(model_upload_host,monkeypatch):
+    host=model_upload_host;actual=host.remote.api;writes=[]
+    def api(endpoint,data=None):
+        if data is not None:
+            with closing(donation.connection(host.root)) as db:
+                raw,owner=db.execute('SELECT state,owner FROM model_publication_journal').fetchone()
+            state=json.loads(raw)
+            assert owner and set(state['artifacts'])==set(models.ARTIFACTS)
+            assert state['intent']==donation._github_stage(endpoint,data)
+            if endpoint.endswith('/pulls'):assert state['pr_attempted'] is True
+            writes.append(endpoint)
+        return actual(endpoint,data)
+    monkeypatch.setattr(donation,'gh_api',api)
+    assert host.publish().endswith('/pull/1') and writes
+
+
+def test_model_scheduler_hidden_pr_recovers_without_retraining_or_double_compute(model_upload_host,monkeypatch):
+    host=model_upload_host
+    models.complete(host.root,host.claimed,host.trained,'ready')
+    with models._connection(host.root) as db:
+        db.execute('UPDATE model_experiments SET publication_checked=0')
+    monkeypatch.setattr(models,'run_job',lambda *a,**k:pytest.fail('Cached candidate must not be retrained'))
+    monkeypatch.setattr(donation,'complete_donation',lambda *a,**k:pytest.fail('No inference for a model upload'))
+    host.remote.public_visible=False
+    first=donation.Service(host.root);first._run(threading.Event())
+    assert 'not confirmed' in first.message and len(host.remote.prs)==1
+    with models._connection(host.root) as db:
+        assert db.execute('SELECT run_id,state FROM model_experiments').fetchall()==[(host.claimed['run_id'],'ready')]
+    host.remote.public_visible=True
+    with patch.object(donation.time,'time',return_value=outbox_expire(host.root)):
+        second=donation.Service(host.root);second._run(threading.Event())
+    assert 'submitted for owner review' in second.message
+    with models._connection(host.root) as db:
+        assert db.execute('SELECT run_id,state FROM model_experiments').fetchall()==[(host.claimed['run_id'],'submitted')]
+    assert models.summary(host.root)['worker_seconds']==2 and donation.total_tokens(host.root)==0
+    assert len(host.remote.prs)==1 and sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)==1
+
+
+def test_model_upload_cancel_after_pr_intent_sends_no_post_and_can_retry(model_upload_host):
+    host=model_upload_host;cancelled=[False]
+    def cancel():
+        with closing(donation.connection(host.root)) as db:
+            row=db.execute('SELECT state FROM model_publication_journal').fetchone()
+        if row:
+            state=json.loads(row[0])
+            if not cancelled[0] and state.get('intent')=='proposal-create' and state['pr_attempted']:
+                cancelled[0]=True
+                raise InterruptedError()
+    with pytest.raises(InterruptedError):
+        donation.publish_model_candidate(host.root,host.claimed,host.trained,'donor',cancel)
+    assert not host.remote.prs and not any(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)
+    assert host.publish().endswith('/pull/1')
+
+
+def test_model_upload_requires_approval_for_the_actual_github_account(model_upload_host,monkeypatch):
+    host=model_upload_host
+    monkeypatch.setattr('github_account.account',lambda:'other')
+    with pytest.raises(InterruptedError):
+        donation.publish_model_candidate(host.root,host.claimed,host.trained,'other',lambda:None)
+    assert not host.remote.calls
+
+
+def test_cached_model_upload_retry_claim_is_atomic_across_threads(model_upload_host):
+    host=model_upload_host
+    models.complete(host.root,host.claimed,host.trained,'ready')
+    with models._connection(host.root) as db:
+        db.execute('UPDATE model_experiments SET publication_checked=0')
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        claimed=list(pool.map(lambda _:donation.claim_model_publication(host.root,'donor'),range(8)))
+    successful=[value for value in claimed if value]
+    assert len(successful)==1 and successful[0]['run_id']==host.claimed['run_id']
+    assert successful[0]['resume']==host.trained
+    assert not host.remote.calls and donation.total_tokens(host.root)==0
+
+
+def test_cached_model_upload_retry_yields_to_a_live_upload_owner(model_upload_host):
+    host=model_upload_host
+    models.complete(host.root,host.claimed,host.trained,'ready')
+    with models._connection(host.root) as db:
+        db.execute('UPDATE model_experiments SET publication_checked=0')
+    bodies=models.review_artifacts(host.trained['folder'],host.claimed['fingerprint'])
+    owner=donation.ModelPublicationJournal(host.root,host.claimed,'donor',bodies,lambda:None)
+    try:
+        assert donation.claim_model_publication(host.root,'donor') is None
+        with models._connection(host.root) as db:
+            assert db.execute('SELECT publication_checked FROM model_experiments').fetchone()[0]==0
+    finally:owner.close()
+    assert donation.claim_model_publication(host.root,'donor')['run_id']==host.claimed['run_id']
+
+
+def test_model_upload_account_switch_keeps_independent_journals_and_revokes_old_owner(model_upload_host,monkeypatch):
+    host=model_upload_host;bodies=models.review_artifacts(host.trained['folder'],host.claimed['fingerprint'])
+    old=donation.ModelPublicationJournal(host.root,host.claimed,'donor',bodies,lambda:None)
+    donation.set_enabled(True,host.root,sources=['local'],github_account='other',intensity='medium',model_training=True)
+    monkeypatch.setattr('github_account.account',lambda:'other')
+    new=donation.ModelPublicationJournal(host.root,host.claimed,'other',bodies,lambda:None)
+    try:
+        with pytest.raises(InterruptedError):old.guard()
+        new.guard()
+        old.close()
+        with closing(donation.connection(host.root)) as db:
+            assert db.execute('SELECT COUNT(*) FROM model_publication_journal').fetchone()[0]==2
+            assert db.execute('SELECT owner FROM model_publication_journal WHERE account=?',(new.account,)).fetchone()[0]==new.owner
+    finally:
+        old.close();new.close()
+    assert not host.remote.calls
+
+
+@pytest.mark.parametrize('fault',['boolean_commit_count','unknown_file_without_sha','wrong_commit_identity','changed_ref'])
+def test_model_transport_uncertainty_blocks_pr_before_dispatch(model_upload_host,monkeypatch,fault):
+    host=model_upload_host;original=host.remote.api
+    def api(endpoint,data=None):
+        result=original(endpoint,data)
+        if fault=='changed_ref' and endpoint.endswith('/git/refs') and data is not None:
+            host.remote.refs[data['ref'].removeprefix('refs/heads/')]='f'*40
+        if fault=='wrong_commit_identity' and '/git/commits/' in endpoint:
+            result={**result,'sha':'f'*40}
+        if '/compare/' in endpoint and endpoint.startswith('repos/donor/'):
+            if fault=='boolean_commit_count':result={**result,'total_commits':True}
+            if fault=='unknown_file_without_sha':
+                result={**result,'files':[*result['files'][:-1],{'filename':'unreviewed.py','status':'added'}]}
+        return result
+    monkeypatch.setattr(donation,'gh_api',api)
+    with pytest.raises(donation.PublicationPending):host.publish()
+    assert not host.remote.prs
+    assert not any(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)

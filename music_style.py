@@ -37,7 +37,7 @@ SPARSE_VOCAL_STYLE = re.compile(
     r"vocal hooks?|very little (?:conventional )?singing)\b", re.I,
 )
 LEAD_VOCALS = re.compile(
-    r"\b(?:lead vocals?|sung verses?|singing|singer|rap|rapped)\b", re.I,
+    r"\b(?:lead vocals?|sung verses?|singing|singer|rap|rapping|rapper|rapped)\b", re.I,
 )
 EXPLICIT_LEAD = re.compile(
     r"\b(?:singer|rapper|singing|rapping|sung|rapped|"

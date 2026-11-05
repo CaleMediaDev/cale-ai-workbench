@@ -171,6 +171,12 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
             "SELECT active_seconds,last_seen,was_active,last_percent FROM task_eta_state WHERE task_id=?",
             (task_id,),
         ).fetchone()
+        # An out-of-order observation must not move the active-clock baseline
+        # backward: doing so would count the overlapping interval twice later.
+        if row and now < row[1]:
+            if active:
+                return "Estimating time…"
+            return "Paused" if status == "paused" else ""
         elapsed = float(row[0]) if row else 0.0
         # The previous observation determines whether this interval was active.
         # Include work up to a pause or completion, but not time before resuming.

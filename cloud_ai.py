@@ -426,6 +426,26 @@ def argument_error_detail(error):
     relevant leaf gives the worker a useful path without printing that schema
     or the rejected instance. This changes diagnostics, never validation.
     """
+    def scalar(value):
+        return value is None or type(value) in (bool, int, float, str)
+
+    def scalar_equal(left, right):
+        # JSON booleans are not numbers, even though Python True == 1.
+        if not scalar(left) or not scalar(right):
+            return False
+        if type(left) in (int, float) and type(right) in (int, float):
+            return left == right
+        return type(left) is type(right) and left == right
+
+    def scalar_choices(rule):
+        choices = rule.get("enum")
+        if "const" in rule:
+            fixed = rule["const"]
+            choices = ([fixed] if choices is None else
+                       [value for value in choices if scalar_equal(value, fixed)])
+        return ([value for value in choices if scalar(value)]
+                if isinstance(choices, list) else None)
+
     for _ in range(12):
         if error.validator not in {"anyOf", "oneOf"} or not error.context:
             break
@@ -440,10 +460,10 @@ def argument_error_detail(error):
                 rule = branch.get("properties", {}).get(key, {}) if isinstance(branch, dict) else {}
                 if not isinstance(rule, dict):
                     continue
-                for value in rule.get("enum", [rule["const"]] if "const" in rule else []):
-                    if value not in allowed:
+                for value in scalar_choices(rule) or []:
+                    if not any(scalar_equal(value, present) for present in allowed):
                         allowed.append(value)
-            if allowed and error.instance[key] not in allowed:
+            if allowed and not any(scalar_equal(error.instance[key], value) for value in allowed):
                 return ValidationError("Invalid operation discriminator", validator="enum",
                     validator_value=allowed, instance=error.instance[key],
                     path=[*error.absolute_path, key])
@@ -456,23 +476,34 @@ def argument_error_detail(error):
             if not children:
                 continue
             properties = branch.get("properties", {})
-            matches = 0
-            conflicts = 0
-            for key in ("action", "check_tool"):
-                if key not in error.instance:
-                    continue
+            operation_matches = operation_conflicts = 0
+            matches = conflicts = 0
+            for key, attempted in error.instance.items():
+                if not scalar(attempted):
+                    continue  # Structured enum values are not scalar discriminators.
                 rule = properties.get(key, {})
                 if not isinstance(rule, dict):
                     continue
-                allowed = rule.get("enum", [rule["const"]] if "const" in rule else None)
+                allowed = scalar_choices(rule)
                 if allowed is not None:
-                    if error.instance[key] in allowed:
+                    if any(scalar_equal(attempted, value) for value in allowed):
                         matches += 1
+                        if key in ("action", "check_tool"):
+                            operation_matches += 1
                     else:
                         conflicts += 1
-            # Prefer an explicit action/checker match, then the branch needing
-            # the fewest corrections. Child order remains deterministic.
-            candidates.append(((matches, -conflicts, -len(children)), children))
+                        if key in ("action", "check_tool"):
+                            operation_conflicts += 1
+            forbidden = 0
+            if branch.get("additionalProperties") is False:
+                patterns = branch.get("patternProperties", {})
+                forbidden = sum(key not in properties and not any(
+                    re.search(pattern, key) for pattern in patterns) for key in error.instance)
+            # Preserve the selected operation before considering its options.
+            # Generic scalar discriminators and complete shapes break ties;
+            # the original child order remains deterministic.
+            candidates.append(((operation_matches, -operation_conflicts,
+                                matches, -conflicts, -forbidden, -len(children)), children))
         if not candidates:
             break
         _score, children = max(candidates, key=lambda item: item[0])
@@ -934,11 +965,54 @@ def native_reasoning_value(effort, thinking):
     return effort
 
 
-def native_chat_request(payload, capacity, thinking=None):
-    """Translate only losslessly representable text requests to Ollama's native API.
+def native_forced_choice_supported(payload):
+    """Recognize only Cale's declared, typed required/named tool contracts.
+
+    Ollama v0.40.13's OpenAI request struct has no ToolChoice field. Both
+    transports generate ordinary tool replies; valid_completion remains the
+    enforcement boundary against the UNMODIFIED original request. This is
+    compatibility parity, not a claim of server-side forced-tool grammar.
+    """
+    choice = payload.get("tool_choice")
+    if choice != "required":
+        if (not isinstance(choice, dict) or set(choice) != {"type", "function"}
+                or choice.get("type") != "function" or not isinstance(choice.get("function"), dict)
+                or set(choice["function"]) != {"name"}):
+            return False
+        selected = choice["function"]["name"]
+        if not isinstance(selected, str) or not selected:
+            return False
+    else:
+        selected = None
+    tools = payload.get("tools")
+    if not isinstance(tools, list) or not tools:
+        return False
+    names = set()
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        if (not isinstance(tool, dict) or set(tool) != {"type", "function"} or tool.get("type") != "function"
+                or not isinstance(function, dict) or set(function) - {"name", "description", "parameters"}
+                or ("description" in function and not isinstance(function["description"], str))
+                or not isinstance(function.get("name"), str)
+                or not function["name"] or function["name"] in names
+                or not isinstance(function.get("parameters"), dict)):
+            return False
+        schema = function["parameters"]
+        try:
+            validator_for(schema).check_schema(schema)
+        except (SchemaError, ValueError, TypeError, RecursionError):
+            return False
+        names.add(function["name"])
+    return selected is None or selected in names
+
+
+def native_chat_request(payload, capacity, thinking=None, *, allow_forced_choice=False):
+    """Translate conservatively supported text requests to Ollama's native API.
 
     The configured context remains a ceiling, not a reservation. Unknown features
-    use the existing OpenAI transport; never silently remove a requested feature.
+    use the existing OpenAI transport. Ollama 0.40.13 uses the same typed tool
+    schema representation on both endpoints and drops some JSON Schema keywords;
+    valid_completion therefore checks replies against the original host schema.
     """
     allowed = {"model", "messages", "tools", "tool_choice", "stream", "max_tokens",
                "max_completion_tokens", "temperature", "top_p", "seed", "stop",
@@ -951,7 +1025,8 @@ def native_chat_request(payload, capacity, thinking=None):
                                 and payload["max_tokens"] != output)):
         return None
     if payload.get("tool_choice") not in (None, "auto"):
-        return None
+        if not allow_forced_choice or not native_forced_choice_supported(payload):
+            return None
     # Match v0.40.13 ThinkingFromReasoningEffort for canonical levels.
     # Aliases/unknown levels retain the compatibility endpoint unchanged.
     effort = payload.get("reasoning_effort")
@@ -1137,6 +1212,7 @@ class Router:
         self.model_thinking_controls = {}
         self.native_version_until = 0
         self.native_version_ready = False
+        self.native_version = None
         self.model_vision = set()
         self.model_speeds = {}
         self.model_cache_until = 0
@@ -1431,7 +1507,7 @@ class Router:
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         mode = routing_mode.load(STATE) if profile == "main" else routing_mode.DEFAULT
         reason = "Cloud is not connected."
-        local_speed = usage_history.recent_local_speed(
+        local_speed = usage_history.recent_local_response_speed(
             70 if size == "quick" else 35 if size == "balanced" else 15,
             models=local_speed_models(size),
         )
@@ -1443,7 +1519,7 @@ class Router:
                      if spec.get("free_eligible", True)
                      and keys.get(provider) and confirmed.get(provider)]
         measured_speeds = {
-            provider: usage_history.recent_provider_speed(provider, spec["speed"])
+            provider: usage_history.recent_provider_response_speed(provider, spec["speed"])
             for provider, spec in connected
         }
         required_context = estimated_context(payload)
@@ -1452,11 +1528,11 @@ class Router:
                                         payload.get("max_completion_tokens") or 4096))
         prompt_estimate = estimated_input_tokens(payload)
         paid_speed = (
-            usage_history.recent_provider_speed("chatgpt", 140)
+            usage_history.recent_provider_response_speed("chatgpt", 140)
             if mode == "floor_it" else 140
         )
         openrouter_speed = (
-            usage_history.recent_provider_speed("openrouter", 120)
+            usage_history.recent_provider_response_speed("openrouter", 120)
             if key and self.free_request_available() else 0
         )
         eligible_free_speeds = [
@@ -1649,19 +1725,25 @@ class Router:
             native = None
             capacity = self.model_native_contexts.get(body.get("model"), 0)
             if capacity:
-                native = native_chat_request(body, capacity, self.model_thinking_controls.get(body.get("model")))
+                native = native_chat_request(body, capacity, self.model_thinking_controls.get(body.get("model")),
+                                             allow_forced_choice=True)
             if native is not None:
                 if time.monotonic() >= self.native_version_until:
                     self.native_version_ready = False
+                    self.native_version = None
                     try:
                         with urlopen("http://127.0.0.1:11434/api/version", timeout=3) as response:
                             version = json.load(response).get("version", "")
                         match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
-                        self.native_version_ready = bool(match and tuple(map(int, match.groups())) >= (0, 40, 13))
+                        self.native_version = tuple(map(int, match.groups())) if match else None
+                        self.native_version_ready = bool(self.native_version and self.native_version >= (0, 40, 13))
                     except Exception:
                         pass
                     self.native_version_until = time.monotonic() + 60
-                if not self.native_version_ready:
+                if (not self.native_version_ready or body.get("tool_choice") not in (None, "auto")
+                        and self.native_version != (0, 40, 13)):
+                    # Forced-choice compatibility was source-verified only for
+                    # this exact server. Future versions may add new semantics.
                     native = None
             url = ("http://127.0.0.1:11434/api/chat" if native is not None
                    else "http://127.0.0.1:11434/v1/chat/completions")
@@ -1695,7 +1777,10 @@ class Router:
             local = dict(payload)
             local.update(model=selected_model, stream=False)
             local.pop("stream_options", None)
-            if local.get("tools") or size_hint == "quick":
+            # Catalog/probe settings are defaults, not permission to replace
+            # an explicit caller request. Preserve even unsupported non-null
+            # values for the existing codec/compatibility validation path.
+            if (local.get("tools") or size_hint == "quick") and local.get("reasoning_effort") is None:
                 item = next(
                     (
                         entry

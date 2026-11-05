@@ -5,6 +5,7 @@ import json
 import io
 import os
 import unittest
+import pytest
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -25,7 +26,231 @@ from camera_presence import (
     preview_frame,
 )
 from face_identity import FaceModel
+
+
+def presentation_trace(frames, names=None):
+    """Exercise legacy fallback too, so the baseline fails on repeated speech."""
+    import camera_presence as camera,inspect
+    tracker=VisitorTracker(cooldown=120)
+    policy=camera.VisitorGreetingPolicy() if hasattr(camera,'VisitorGreetingPolicy') else None
+    presented=[]
+    for index,(features,boxes) in enumerate(frames):
+        arrivals=(tracker.observe(features,index*.5,boxes=boxes)
+                  if 'boxes' in inspect.signature(tracker.observe).parameters else tracker.observe(features,index*.5))
+        labels=[None if names is None else names[index] for _ in arrivals]
+        flags=getattr(tracker,'arrival_continuities',[False]*len(arrivals))
+        selected=policy.select(labels,flags,index*.5) if policy else labels
+        presented.extend(selected)
+    return presented
+
+
+def test_continuous_same_position_drift_does_not_repeat_unknown_introduction():
+    a,b,c=[1.,0.,0.],[.6,.8,0.],[.6,0.,.8]
+    box=[.1,.1,.2,.3]
+    assert presentation_trace([([f],[box]) for f in (a,a,b,b,c,c)])==[None]
+
+
+@pytest.mark.parametrize('reversed_order',[False,True])
+def test_occluding_new_visitor_is_greeted_when_original_becomes_visible_again(reversed_order):
+    a,b=[1.,0.,0.],[.6,.8,0.]
+    left,right=[.1,.1,.2,.3],[.6,.1,.2,.3]
+    final=([b,a],[right,left]) if reversed_order else ([a,b],[left,right])
+    frames=[([a],[left]),([a],[left]),([b],[left]),final]
+    assert presentation_trace(frames)==[None,None]
+
+
+def test_pending_presentation_continuity_expires_when_face_moves_away():
+    a,b=[1.,0.,0.],[.6,.8,0.]
+    left,right=[.1,.1,.2,.3],[.6,.1,.2,.3]
+    assert presentation_trace([([a],[left]),([a],[left]),([b],[left]),([b],[right])])==[None,None]
+
+
+def test_pending_presentation_continuity_is_not_unique_after_new_overlap():
+    a,b,c=[1.,0.,0.],[.6,.8,0.],[0.,0.,1.]
+    box=[.1,.1,.2,.3]
+    assert presentation_trace([([a],[box]),([a],[box]),([b],[box]),([b,c],[box,box])])==[None,None]
+
+
+def test_known_name_cooldown_cannot_be_bypassed_by_feature_drift():
+    a,b,c=[1.,0.,0.],[.6,.8,0.],[.6,0.,.8]
+    box=[.1,.1,.2,.3]
+    assert presentation_trace([([f],[box]) for f in (a,a,b,b,c,c)],names=['Alex']*6)==['Alex']
+
+
+def test_geometry_does_not_hide_first_intro_new_second_or_new_known_visitor():
+    a,b=[1.,0.,0.],[.6,.8,0.]
+    left,right=[.1,.1,.2,.3],[.6,.1,.2,.3]
+    assert presentation_trace([([f],[left]) for f in (a,b,b)])==[None]
+    assert presentation_trace([([a],[left]),([a],[left]),([a,b],[left,right]),([a,b],[left,right])])==[None,None]
+    assert presentation_trace([([f],[left]) for f in (a,a,b,b)],names=[None,None,'Jamie','Jamie'])==[None,'Jamie']
+
+
+def test_geometry_requires_unique_recent_visible_box_and_real_absence_resets_it():
+    a,b,c=[1.,0.,0.],[0.,1.,0.],[.6,0.,.8]
+    box=[.1,.1,.2,.3]
+    # Overlapping prior tracks leave ambiguous geometry; do not guess continuity.
+    assert presentation_trace([([a,b],[box,box]),([a,b],[box,box]),([c],[box]),([c],[box])])==[None,None,None]
+    frames=[([a],[box]),([a],[box])]+[([],[]) for _ in range(5)]+[([c],[box]),([c],[box])]
+    assert presentation_trace(frames)==[None,None]
+    # Legacy/no-box callers keep the existing feature-only behavior.
+    assert presentation_trace([([f],[None]) for f in (a,a,c,c)])==[None,None]
+
+
+def test_geometry_cannot_steal_stronger_embedding_assignment():
+    tracker=VisitorTracker()
+    a,b,c=[1.,0.,0.],[0.,1.,0.],[.6,0.,.8]
+    left,right=[.1,.1,.2,.3],[.6,.1,.2,.3]
+    tracker.observe([a,b],0,boxes=[left,right]);tracker.observe([a,b],.5,boxes=[left,right])
+    tracker.observe([c,b],1,boxes=[left,right])
+    arrivals=tracker.observe([b,c],1.5,boxes=[right,left])
+    assert arrivals==[c] and tracker.arrival_continuities==[True]
+    assert len(tracker.tracks)==3  # No identity or feature-track merger.
+
+
+def test_known_name_cooldowns_are_independent_and_expire():
+    from camera_presence import VisitorGreetingPolicy
+    policy=VisitorGreetingPolicy(cooldown=120)
+    assert policy.select(['Alex'],[False],0)==['Alex']
+    assert policy.select(['Alex','Jamie'],[True,True],1)==['Jamie']
+    assert policy.select(['Alex'],[False],119)==[]
+    assert policy.select(['Alex'],[True],120)==['Alex']
+
+
+def test_face_observation_boxes_stay_aligned_after_invalid_feature():
+    faces=np.array([[0.,0.,20.,20.],[30.,0.,20.,20.],[60.,0.,20.,20.]])
+    class Detector:
+        def setInputSize(self,_size):pass
+        def detect(self,_frame):return None,faces
+    class Recognizer:
+        def alignCrop(self,_frame,face):return face
+        def feature(self,face):return np.array([0.,0.]) if face[0]==30 else np.array([3.,4.])
+    model=FaceModel.__new__(FaceModel);model.detector=Detector();model.recognizer=Recognizer()
+    model.cv2=SimpleNamespace(error=RuntimeError)
+    image=np.zeros((100,100,3),dtype=np.uint8)
+    observed=model.observations(image)
+    assert [item['feature'] for item in observed]==[[.6,.8],[.6,.8]]
+    assert np.allclose([item['box'] for item in observed],[[0.,0.,.2,.2],[.6,0.,.2,.2]])
+    assert model.features(image)==[[.6,.8],[.6,.8]]
+
+
+def test_watch_uses_ephemeral_geometry_without_repeated_unknown_speech(tmp_path,monkeypatch):
+    import camera_presence as camera,sys
+    permission=[True];index=[0];clock=[0.];events=[]
+    vectors=([1.,0.,0.],[1.,0.,0.],[.6,.8,0.],[.6,.8,0.],[.6,0.,.8],[.6,0.,.8])
+    class Capture:
+        def isOpened(self):return True
+        def read(self):
+            number=index[0];index[0]+=1;clock[0]=number*.5
+            if number>=len(vectors):permission[0]=False
+            return True,np.full((8,8,3),number,dtype=np.uint8)
+        release=Mock()
+    capture=Capture()
+    class Model:
+        def observations(self,frame):
+            return [{'feature':vectors[int(frame[0,0,0])],'box':[.1,.1,.2,.3]}]
+        def identify(self,_feature):return None
+    class ImmediateWorker:
+        def __init__(self,process):self.process=process
+        def submit(self,frame):self.process(frame)
+        def close(self):pass
+    cascade=SimpleNamespace(empty=lambda:False)
+    cv2=SimpleNamespace(VideoCapture=lambda *_:capture,CAP_DSHOW=0,
+        data=SimpleNamespace(haarcascades='.'),CascadeClassifier=lambda *_:cascade,
+        COLOR_BGR2GRAY=1,cvtColor=lambda frame,*_:frame[:,:,0],error=RuntimeError)
+    enroll=Mock()
+    monkeypatch.setitem(sys.modules,'cv2',cv2)
+    monkeypatch.setitem(sys.modules,'camera_network',SimpleNamespace(camera_source=lambda value:value,greeting_camera=lambda:0))
+    monkeypatch.setitem(sys.modules,'face_identity',SimpleNamespace(FaceModel=Model,ENROLL_REQUEST=tmp_path/'absent',enroll=enroll))
+    monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'LatestFrameWorker',ImmediateWorker)
+    monkeypatch.setattr(camera,'negotiate_capture',lambda *_:{'width':8,'height':8,'fps':30})
+    monkeypatch.setattr(camera,'preview_frame',lambda *_:'')
+    monkeypatch.setattr(camera,'time',SimpleNamespace(monotonic=lambda:clock[0],sleep=lambda *_:None))
+    monkeypatch.setattr(camera,'emit',lambda kind,value:events.append((kind,value)))
+    assert camera.watch()==0
+    greetings=[message for kind,message in events if kind=='visitor']
+    assert len(greetings)==1 and 'Who are you?' in greetings[0]
+    assert all(isinstance(message,str) for _,message in events)  # No geometry payload.
+    enroll.assert_not_called();capture.release.assert_called_once()
 from visitor_memory import name_from_intro
+
+
+def static_avatar_cpu_fixture():
+    """Exercise the real render/composition path with no model/device calls."""
+    import time
+    products=[]
+    class StaticPortrait(np.ndarray):
+        def __array_ufunc__(self,ufunc,method,*inputs,**kwargs):
+            if ufunc is np.multiply:products.append(True)
+            values=[np.asarray(value) if isinstance(value,StaticPortrait) else value for value in inputs]
+            return getattr(ufunc,method)(*values,**kwargs)
+    class MotionTensor(np.ndarray):
+        def transpose(self,*axes):
+            return np.swapaxes(np.asarray(self),*axes) if len(axes)==2 else super().transpose(*axes)
+    random=np.random.default_rng(47)
+    engine=avatar_video.CaleAvatar.__new__(avatar_video.CaleAvatar)
+    engine.closed=False;engine.np=np
+    engine.portrait=random.integers(0,256,(16,40,3),dtype=np.uint8).view(StaticPortrait)
+    engine.crop_box=(10,0,26,16)
+    engine.mask=np.arange(256,dtype=np.float32).reshape(16,16,1)/255
+    pixels=random.integers(0,256,(16,16,3),dtype=np.uint8)
+    engine.cv2=SimpleNamespace(BORDER_REPLICATE=1,COLOR_BGR2RGB=2,INTER_LANCZOS4=4,
+        warpAffine=lambda image,*args,**kwargs:image,cvtColor=lambda image,*args:image,
+        resize=Mock(side_effect=lambda image,size,**kwargs:image.copy()))
+    engine.last_detection=engine.last_seen=time.monotonic();engine.last_box=(0,0,8)
+    info={'pitch':0,'yaw':0,'roll':0,'exp':np.zeros((1,1,3),dtype=np.float32)}
+    engine.model=SimpleNamespace(prepare_source=lambda image:image,get_kp_info=lambda _:info,
+                                stitching=lambda _source,target:target)
+    engine.rotation=lambda *_args:np.eye(3,dtype=np.float32)[None].view(MotionTensor)
+    engine.source_rotation=engine.rotation();engine.initial=engine.initial_rotation=None
+    engine.source_info={'exp':info['exp'],'scale':np.ones((1,1),dtype=np.float32),
+                        'kp':np.zeros((1,1,3),dtype=np.float32),'t':np.zeros((1,3),dtype=np.float32)}
+    engine.source_keys=SimpleNamespace(float=lambda:np.zeros((1,1,3),dtype=np.float32))
+    engine._decode=lambda _keys:pixels.copy()
+    engine.torch=SimpleNamespace(cuda=SimpleNamespace(empty_cache=Mock()))
+    return engine,pixels,products
+
+
+def test_avatar_static_composition_does_not_repeat_background_products():
+    engine,pixels,products=static_avatar_cpu_fixture()
+    portrait=np.asarray(engine.portrait).copy();mask=engine.mask.copy()
+    expected=portrait.copy()
+    expected[:,10:26]=np.clip(pixels*mask+portrait[:,10:26]*(1-mask),0,255).astype(np.uint8)
+    if hasattr(engine,'_cache_static_composite'):engine._cache_static_composite()
+    before=len(products)
+    first=engine.render(np.zeros((8,8,3),dtype=np.uint8))
+    second=engine.render(np.zeros((8,8,3),dtype=np.uint8))
+    assert np.array_equal(first,expected) and np.array_equal(second,expected)
+    assert len(products)==before,'static portrait weighting must not repeat per render'
+    assert not np.shares_memory(first,second) and not np.shares_memory(first,engine.portrait)
+    assert np.array_equal(engine.portrait,portrait) and np.array_equal(engine.mask,mask)
+    for call in engine.cv2.resize.call_args_list:
+        assert call.kwargs=={'interpolation':engine.cv2.INTER_LANCZOS4}
+
+
+def test_avatar_cached_blend_is_byte_equal_for_every_uint8_mask_pixel_background():
+    engine=avatar_video.CaleAvatar.__new__(avatar_video.CaleAvatar)
+    engine.np=np;engine.crop_box=(0,0,256,256)
+    # Channels are independent. Exhaust all256^3 combinations, including fully
+    # transparent/opaque mask boundaries, without any GPU or camera machinery.
+    pixels=np.broadcast_to(np.arange(256,dtype=np.uint8)[:,None,None],(256,256,1))
+    engine.portrait=np.broadcast_to(np.arange(256,dtype=np.uint8)[None,:,None],(256,256,1)).copy()
+    engine.cv2=SimpleNamespace(INTER_LANCZOS4=4,resize=lambda image,_size,**_kwargs:image)
+    for value in range(256):
+        engine.mask=np.full((256,256,1),value,dtype=np.float32)/255
+        expected=np.clip(pixels*engine.mask+engine.portrait*(1-engine.mask),0,255).astype(np.uint8)
+        engine._cache_static_composite()
+        actual=engine._composite(pixels)
+        assert np.array_equal(actual,expected),value
+        assert engine.mask_inverse.dtype==engine.masked_background.dtype==np.float32
+
+
+def test_avatar_static_blend_buffers_are_released_on_owned_close():
+    engine,_pixels,_products=static_avatar_cpu_fixture()
+    engine._cache_static_composite()
+    engine.close()
+    assert engine.closed and engine.mask is engine.mask_inverse is engine.masked_background is None
+    engine.torch.cuda.empty_cache.assert_called_once()
 
 
 class CameraPresenceTests(unittest.TestCase):
@@ -570,6 +795,12 @@ def test_camera_preview_uses_latest_slot_independent_of_voice_fifo():
 def test_media_camera_reuses_native_negotiation_and_returns_actual_dimensions(monkeypatch,tmp_path):
     import camera_presence as cam
     import media_worker
+    # Exercise the real raw-mode guard with owned test settings. An installed
+    # user's animated-camera choice must not decide this mocked capture test.
+    media = tmp_path / 'Media'
+    media.mkdir()
+    (media / 'camera-avatar.json').write_text(json.dumps({'enabled': False}), encoding='utf-8')
+    monkeypatch.setattr(media_worker, 'MEDIA', media)
     frame=np.zeros((1080,1920,3),dtype=np.uint8)
     camera=Mock(); camera.isOpened.return_value=True; camera.read.return_value=(True,frame)
     cv2=SimpleNamespace(VideoCapture=Mock(return_value=camera),CAP_DSHOW=0,imwrite=Mock(return_value=True))
@@ -693,6 +924,8 @@ def test_avatar_worker_keeps_latest_frame_and_never_raw_fallback(monkeypatch,tmp
     monkeypatch.setattr(camera,'ROOT',tmp_path)
     monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
     monkeypatch.setattr(camera,'allowed',lambda:True);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
     monkeypatch.setattr(avatar_video,'CaleAvatar',Engine,raising=False)
     monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:neutral,raising=False)
     monkeypatch.setattr(camera,'emit',Mock())
@@ -720,6 +953,8 @@ def test_avatar_worker_drops_inference_result_after_consent_ends(monkeypatch,tmp
     monkeypatch.setattr(camera,'ROOT',tmp_path)
     monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
     monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
     monkeypatch.setattr(avatar_video,'CaleAvatar',Engine,raising=False)
     monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8),raising=False)
     monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda self,rgb:published.append(int(rgb[0,0,0])))
@@ -728,6 +963,98 @@ def test_avatar_worker_drops_inference_result_after_consent_ends(monkeypatch,tmp
     worker.submit(np.full((8,8,3),99,dtype=np.uint8));assert entered.wait(2)
     permission[0]=False;release.set();assert finished.wait(2);worker.close()
     assert published==[0]  # Only the neutral avatar, never late render/raw input.
+
+
+def test_avatar_worker_skips_old_pending_input_after_engine_load(monkeypatch,tmp_path):
+    import camera_presence as camera,threading,time
+    loading=threading.Event();release=threading.Event();rendered=threading.Event();seen=[]
+    class Engine:
+        def __init__(self,*_args):pass
+        def probe(self):loading.set();assert release.wait(2);return {'ok':True,'gpu_allocation_bytes':1}
+        def render(self,frame,**_kwargs):
+            seen.append(int(frame[0,0,0]))
+            if seen[-1]==2:rendered.set()
+            return None
+        def close(self):pass
+    monkeypatch.setattr(camera,'ROOT',tmp_path)
+    monkeypatch.setattr(camera,'allowed',lambda:True);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine)
+    monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8))
+    monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda *_:None);monkeypatch.setattr(camera,'emit',Mock())
+    worker=camera.AvatarFrameWorker(tmp_path)
+    try:
+        assert loading.wait(2)
+        worker.pending.put_nowait((np.full((8,8,3),1,dtype=np.uint8),time.monotonic()-10))
+        release.set()
+        deadline=time.monotonic()+1
+        while not worker.pending.empty() and time.monotonic()<deadline:time.sleep(.005)
+        worker.submit(np.full((8,8,3),2,dtype=np.uint8));assert rendered.wait(2)
+    finally:release.set();worker.close()
+    assert seen==[2]
+
+
+def avatar_stale_output_case(monkeypatch,tmp_path,late_inference,age=10):
+    import camera_presence as camera,threading,time
+    entered=threading.Event();release=threading.Event();live=threading.Event();neutral=threading.Event();published=[]
+    class Clock:
+        offset=0
+        def monotonic(self):return time.monotonic()+self.offset
+        def __getattr__(self,name):return getattr(time,name)
+    clock=Clock()
+    class Engine:
+        def __init__(self,*_args):pass
+        def probe(self):return {'ok':True,'gpu_allocation_bytes':1}
+        def render(self,frame,**_kwargs):
+            entered.set()
+            if late_inference:assert release.wait(2)
+            return np.ones((8,8,3),dtype=np.uint8)
+        def close(self):pass
+    def publish(_self,rgb):
+        value=int(rgb[0,0,0]);published.append(value)
+        if value:live.set()
+        elif len(published)>1:neutral.set()
+    monkeypatch.setattr(camera,'ROOT',tmp_path);monkeypatch.setattr(camera,'time',clock)
+    monkeypatch.setattr(camera,'allowed',lambda:True);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine)
+    monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8))
+    monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',publish);monkeypatch.setattr(camera,'emit',Mock())
+    worker=camera.AvatarFrameWorker(tmp_path)
+    try:
+        worker.submit(np.full((8,8,3),99,dtype=np.uint8));assert entered.wait(2)
+        if not late_inference:assert live.wait(2)
+        clock.offset=age;release.set()
+        if age<=camera.AVATAR_MAX_FRAME_AGE:
+            assert live.wait(1),published
+        else:assert neutral.wait(1),published
+    finally:release.set();worker.close()
+    assert published==([0,1] if age<=camera.AVATAR_MAX_FRAME_AGE else [0,0] if late_inference else [0,1,0])
+
+
+def test_avatar_worker_neutralizes_stalled_capture(monkeypatch,tmp_path):
+    avatar_stale_output_case(monkeypatch,tmp_path,False)
+
+
+def test_avatar_worker_neutralizes_late_render(monkeypatch,tmp_path):
+    avatar_stale_output_case(monkeypatch,tmp_path,True)
+
+
+def test_avatar_worker_keeps_delayed_but_still_fresh_good_render(monkeypatch,tmp_path):
+    avatar_stale_output_case(monkeypatch,tmp_path,True,age=.5)
+
+
+def test_avatar_frame_freshness_rejects_invalid_future_and_expired_times(monkeypatch):
+    import camera_presence as camera
+    monkeypatch.setattr(camera,'time',SimpleNamespace(monotonic=lambda:10.0))
+    assert camera.avatar_frame_fresh(10.0)
+    assert camera.avatar_frame_fresh(9.5)
+    for captured_at in (None,True,'10',float('nan'),float('inf'),0,10.1,9.0):
+        assert not camera.avatar_frame_fresh(captured_at)
 
 
 def test_camera_launcher_reaps_before_replacement_and_never_shares_raw():
@@ -806,7 +1133,9 @@ def test_avatar_launcher_reaps_old_owner_before_setup_and_new_capture(tmp_path,m
     child=Mock();child.stdout=[];child.returncode=0;child.poll.return_value=0
     python=tmp_path/'profile/python.exe';python.parent.mkdir();python.write_bytes(b'fixture')
     def setup(*_args,**_kwargs):
-        assert 'old reaped' in events;events.append('setup');return python
+        assert 'old reaped' in events
+        assert _kwargs.get('defer_probe') is True
+        events.append('setup');return python
     monkeypatch.setattr(video_generation,'ensure_avatar_profile',setup)
     monkeypatch.setitem(__import__('sys').modules,'psutil',SimpleNamespace(Process=lambda _:SimpleNamespace(create_time=lambda:123)))
     def spawned(*args,**kwargs):assert events[-1]=='setup';events.append('new capture');return child
@@ -853,6 +1182,8 @@ def test_avatar_heavy_gpu_work_pauses_and_releases_before_resuming(monkeypatch,t
         def close(self):closed.append(True);paused.set()
     monkeypatch.setattr(camera,'ROOT',tmp_path);monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
     monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:heavy[0])
+    # These queue/lifecycle tests replace the neural engine, including its runtime imports.
+    monkeypatch.setattr(__import__('video_generation'),'_avatar_runtime_facts',lambda *_:{'ort':'fixture','torch':'fixture'})
     monkeypatch.setattr(avatar_video,'CaleAvatar',Engine,raising=False);monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8),raising=False)
     monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda *_:None);monkeypatch.setattr(camera,'emit',Mock())
     worker=camera.AvatarFrameWorker(tmp_path)
@@ -1077,3 +1408,64 @@ def test_camera_switch_wrapper_reaps_real_venv_child_not_only_launcher(tmp_path,
         if actual_pid is not None and psutil.pid_exists(actual_pid):
             owned=psutil.Process(actual_pid);owned.terminate();owned.wait(timeout=3)
         if process.stdin is not None:process.stdin.close()
+
+
+import pytest
+
+
+@pytest.mark.parametrize("outcome", ["passed", "probe_failed", "consent_ended", "runtime_failed", "runtime_consent_ended"])
+def test_live_worker_qualifies_prepared_profile_once_and_never_marks_cancelled_ready(tmp_path,monkeypatch,outcome):
+    import threading,time,video_generation
+    import camera_presence as camera
+    root=tmp_path;profile=video_generation.avatar_profile_root(root)
+    video_generation._avatar_write_status(profile,phase='prepared',ready=False,detail='Files checked')
+    permission=[True];events=[];closed=threading.Event();published=[]
+    facts={'ort':'1.26.0','torch':'2.9.1+cu128','cuda':'12.8','cudnn':123}
+    def runtime(*_):
+        events.append('runtime')
+        if outcome=='runtime_failed':raise RuntimeError('runtime fixture failed')
+        if outcome=='runtime_consent_ended':permission[0]=False
+        return facts
+    class Engine:
+        def __init__(self,*_):events.append('engine')
+        def probe(self):
+            events.append('probe')
+            assert video_generation.avatar_profile_status(root)['ready'] is False
+            if outcome=='probe_failed':raise RuntimeError('inference fixture failed')
+            if outcome=='consent_ended':permission[0]=False
+            return {'ok':True,'gpu_allocation_bytes':123,'frames':4}
+        def render(self,*_,**__):
+            events.append('render');permission[0]=False
+            return np.ones((8,8,3),dtype=np.uint8)
+        def close(self):events.append('close');closed.set()
+    class Lease:
+        def measured(self,_):pass
+        def close(self):closed.set()
+    monkeypatch.setattr(camera,'ROOT',root)
+    monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    monkeypatch.setattr(camera,'AvatarGpuLease',Lease)
+    monkeypatch.setattr(video_generation,'_avatar_runtime_facts',runtime)
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine)
+    monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8))
+    monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda _,image:published.append(image.copy()))
+    monkeypatch.setattr(camera,'emit',Mock())
+    worker=camera.AvatarFrameWorker(profile)
+    try:
+        worker.submit(np.ones((8,8,3),dtype=np.uint8))
+        assert closed.wait(2)
+    finally:worker.close()
+    status=video_generation.avatar_profile_status(root)
+    assert events.count('probe')==(0 if outcome in {'runtime_failed','runtime_consent_ended'} else 1)
+    if outcome=='runtime_consent_ended':assert 'engine' not in events
+    if outcome=='passed':
+        assert status['ready'] is True and status['phase']=='ready'
+        assert status['probe']['torch']==facts['torch'] and status['probe']['probe']['frames']==4
+        assert events[:3]==['runtime','engine','probe'] and 'render' in events
+        # Closing the camera does not erase already-qualified runtime readiness.
+        assert video_generation.avatar_profile_status(root)['ready'] is True
+    else:
+        assert status['ready'] is False
+        assert 'render' not in events
+        if outcome not in {'consent_ended','runtime_consent_ended'}:assert status['phase']=='failed'
+    assert published and all(not image.any() for image in published)

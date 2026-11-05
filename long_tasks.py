@@ -66,14 +66,63 @@ def take_ai_connection_request(state_folder: Path) -> str | None:
     return requested if requested in {"chatgpt", "claude", "grok", "openrouter"} else "setup"
 
 
-def update_dialog_open(children, ignored=()):
-    """Ignore read-only panels while protecting visible input dialogs."""
-    return any(
-        child not in ignored
-        and child.winfo_class() == "Toplevel"
-        and child.winfo_viewable()
-        for child in children
-    )
+def start_connection_worker(pending, operation):
+    """Do not dispatch auth until startup has committed successfully."""
+    import threading
+    if pending.is_set():
+        return None
+    permit, abandoned = threading.Event(), threading.Event()
+    pending.set()
+    def run():
+        permit.wait()
+        if abandoned.is_set():
+            return  # Never clear a later operation's pending flag.
+        try:
+            operation()
+        finally:
+            pending.clear()
+    try:
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+    except BaseException:
+        # Thread.start may raise after OS creation but before bootstrap is
+        # observable. Cancel before releasing the target; no is_alive guess.
+        abandoned.set()
+        permit.set()
+        pending.clear()
+        raise
+    # Outside the failed-start cleanup: once released, the operation owns its
+    # finally even if the caller is interrupted while committing permission.
+    permit.set()
+    return worker
+
+
+def update_dialog_open(children, ignored=(), *, persisted_panel=None,
+                       connection_events=(), connection_process=None):
+    """Saved donation choices do not block updates; pending sign-ins still do.
+
+    Connected buttons may stay disabled indefinitely, so only explicit pending
+    operation events represent ChatGPT/OpenRouter work. GitHub also owns a login
+    process even if its code window was closed. Unknown state defers the update.
+    """
+    try:
+        for event in connection_events:
+            pending = event.is_set()
+            if type(pending) is not bool or pending:
+                return True
+        if connection_process is not None:
+            result = connection_process.poll()
+            if result is None or type(result) is not int:
+                return True
+        return any(
+            child not in ignored
+            and child is not persisted_panel
+            and child.winfo_class() == "Toplevel"
+            and child.winfo_viewable()
+            for child in children
+        )
+    except Exception:
+        return True
 INITIAL_PLAN = (
     "# Plan\n\nThe worker has not written milestones yet. Use the original request and "
     "user follow-ups, then replace this note with concrete acceptance checks.\n"
@@ -4300,6 +4349,7 @@ def gui():
         wraplength=720,
     ).pack(anchor="w", pady=(4, 9))
     chat_events = queue.Queue()
+    chat_connection_pending = threading.Event()
     chat_text = tk.StringVar(value="Not connected.")
 
     def connect_chatgpt():
@@ -4316,7 +4366,7 @@ def gui():
             except Exception as exc:
                 chat_events.put("Connection not finished: " + str(exc))
 
-        threading.Thread(target=worker, daemon=True).start()
+        start_connection_worker(chat_connection_pending, worker)
 
     chat_button = ttk.Button(
         chat_section,
@@ -4363,7 +4413,7 @@ def gui():
             except Exception as exc:
                 chat_events.put(str(exc))
 
-        threading.Thread(target=worker, daemon=True).start()
+        start_connection_worker(chat_connection_pending, worker)
 
     chat_disconnect_button = ttk.Button(
         chat_section, text="Disconnect ChatGPT", command=disconnect_chatgpt
@@ -4401,6 +4451,7 @@ def gui():
         anchor="w", pady=(2, 8)
     )
     cloud_events = queue.Queue()
+    cloud_connection_pending = threading.Event()
     cloud_text = tk.StringVar(value="Optional free cloud models, with your own account.")
 
     def connect():
@@ -4417,7 +4468,7 @@ def gui():
             except Exception as exc:
                 cloud_events.put("Connection not finished: " + str(exc))
 
-        threading.Thread(target=worker, daemon=True).start()
+        start_connection_worker(cloud_connection_pending, worker)
 
     connect_button = ttk.Button(
         router_section,
@@ -4431,8 +4482,14 @@ def gui():
     ).pack(anchor="w", pady=(8, 2))
 
     def disconnect_cloud():
-        disconnect()
-        cloud_text.set("Disconnected. Your local AI still works.")
+        if cloud_connection_pending.is_set():
+            return
+        cloud_connection_pending.set()
+        try:
+            disconnect()
+            cloud_text.set("Disconnected. Your local AI still works.")
+        finally:
+            cloud_connection_pending.clear()
 
     disconnect_button = ttk.Button(
         router_section, text="Disconnect account", command=disconnect_cloud
@@ -5505,7 +5562,7 @@ def gui():
                     if animated:
                         def progress(value):
                             if current():voice_events.put(("camera_session",(generation,"camera_setup",str(value.get("detail","Preparing Live Cale")))))
-                        media_python=video_generation.ensure_avatar_profile(ROOT,progress=progress,cancelled=lambda:not current(),virtual_output=sharing)
+                        media_python=video_generation.ensure_avatar_profile(ROOT,progress=progress,cancelled=lambda:not current(),virtual_output=sharing,defer_probe=True)
                     if not media_python.is_file():raise RuntimeError("Camera tools are still installing.")
                     if not current():return
                     command=camera_worker_command(ROOT,media_python,os.getpid(),psutil.Process(os.getpid()).create_time(),animated,sharing)
@@ -7839,6 +7896,9 @@ def gui():
             and not update_dialog_open(
                 window.winfo_children(),
                 (preview_window, usage_window, readiness_popup[0]),
+                persisted_panel=donation_controls.popup,
+                connection_events=(chat_connection_pending, cloud_connection_pending),
+                connection_process=getattr(window, "github_login_process", None),
             )
         ):
             setup_state = read_task_status(STATE / "install-progress.json")

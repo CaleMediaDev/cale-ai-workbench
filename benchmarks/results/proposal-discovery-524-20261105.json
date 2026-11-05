@@ -1,0 +1,49 @@
+{
+  "release": "0.5.524",
+  "source_before_documentation": "ed3acaa498c6c3ada259f1d57005fbb1bdbe998a",
+  "status": "Qualified source; assembled runtime checks required before publication.",
+  "sha256": {
+    "donation.py": "bd86724b97e0aa89f77aac3bb622b2cb4ccd26e2607c57beb2016f505663cd26",
+    "Validation/test_donation.py": "fdd8c23d5fe04a9fe181204a1f9ceeeb0d9c9976b37fa22b8dbd366882c273cf",
+    "chrome_connector.py": "30df8ea2964f8d3523583702a568d81bc570b1b28085aa042f1b2fa4e90a5c0e",
+    "Validation/test_chrome_connector.py": "aa61bdb4e8905c0311afff27ca3a4f88bf4327bedd0387b18362431c8961afba",
+    "Validation/test_camera_presence.py": "bcc271bcb335da87c6118e0b2dec0bebfd3be33804116484f695ff27bf34b806"
+  },
+  "validation": {
+    "donation_account_modules": {
+      "passed": 305,
+      "subtests": 108,
+      "seconds": 67.93
+    },
+    "independent_rest_controls": {
+      "passed": 19,
+      "seconds": 0.91
+    },
+    "chrome_module": {
+      "passed": 53,
+      "seconds": 0.39
+    },
+    "independent_chrome_parser_probes": 14,
+    "camera_and_media_modules": {
+      "passed": 75,
+      "seconds": 4.59
+    },
+    "camera_fixture_reproduction": "Actual synthetic animated mode: baseline fails, fixed own raw-mode fixture passes while real guard remains active.",
+    "live_readonly_discovery": "Exact author Search422 reproduced; directRESTlisting succeeds. Frozen helper read-only calls for both account names passed.",
+    "assembled_payload": "Not yet run; required before publication."
+  },
+  "problem": "The other PC reports GitHub HTTP422 during proposal search. The exact public author query is reproducibly rejected with Search/q/invalid, while direct repository pull listing succeeds from this PC.",
+  "changes": [
+    "Donation discovery uses fixed-repository REST pull listing instead of an author Search qualifier. It filters the connected author locally and preserves owned job markers even when titles are edited.",
+    "Pagination is bounded, shape-checked and cancellation-aware. A partial, malformed or failed listing cannot authorize fresh inference or become an empty queue. Existing reservations, outbox payloads, consent and actual token receipts remain unchanged.",
+    "Chrome companion version detection accepts a validated common TAG-directive prologue while rejecting malformed prefixes and UTF-8 escapes. No YAML runtime dependency is added.",
+    "The mocked camera-capture fixture owns its raw-mode preference instead of borrowing the real animated-camera setting; production privacy guards are unchanged."
+  ],
+  "limits": [
+    "Removing the reproduced discovery error does not establish the other PC account can create a fork, branch or pull request. Its full publishing result remains unverified.",
+    "REST listing is not a cross-PC atomic lease. Created-ascending pagination and duplicate detection do not guarantee a transaction during concurrent repository changes; local reservations retain their authority.",
+    "The preceding523 installed suite finished with3475 passes,25 terminal skips,402 subtests and1 fixture failure. The fixture fix is qualified separately; that historical run remains failed.",
+    "The Chrome version probe supports a conservative common subset, not complete YAML validation. Tab directive separators are unsupported across the divergent C/pure parsers.",
+    "Private context-projection experiments and the unfinished5-of8 native app are not part of this release. No existing Python migration or physical fresh-PC install is claimed."
+  ]
+}

@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+import pytest
 
 
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,116 @@ from urllib.request import urlopen
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cloud_ai as cloud
 import cloud_providers
+
+
+@pytest.fixture
+def claude_result_case(tmp_path, monkeypatch):
+    """Owned registry and fake official CLI; no account or model invocation."""
+    import usage_history
+    monkeypatch.setattr(cloud_providers, 'AGENT_ROOT', tmp_path/'agents')
+    monkeypatch.setattr(cloud, 'ROOT', tmp_path)
+    monkeypatch.setattr(cloud, 'STATE', tmp_path/'Cloud')
+    monkeypatch.setattr(cloud.pc_offline, 'offline', lambda:False)
+    monkeypatch.setattr(usage_history, 'DATABASE', tmp_path/'usage.db')
+    cloud.routing_mode.save_scope(cloud.STATE, 'both')
+    state=tmp_path/'LongTasks';state.mkdir()
+    with sqlite3.connect(state/'projects.db') as db:
+        db.execute('CREATE TABLE projects(id TEXT PRIMARY KEY,ai_route TEXT)')
+        db.execute('INSERT INTO projects VALUES(?,?)',('c'*12,'both'))
+    folder=tmp_path/'project';folder.mkdir()
+    binary=cloud_providers._subscription_binary('claude');binary.parent.mkdir(parents=True);binary.write_bytes(b'MZfake')
+    cloud_providers._save_agent_preferences('claude',{'login_completed':True,'enabled':True})
+    token=usage_history.CURRENT_TASK.set('c'*12)
+    def run(report, code=0):
+        with patch.object(cloud_providers,'_agent_process',side_effect=[
+                (0,json.dumps({'authMethod':'claude.ai'}),''),(code,json.dumps(report),'')]):
+            return cloud_providers.run_subscription_task('claude',folder,'Repair one function')
+    def rows():
+        if not usage_history.DATABASE.exists():return []
+        with sqlite3.connect(usage_history.DATABASE) as db:
+            return db.execute('SELECT source,task_id,total_tokens FROM usage_events').fetchall()
+    try:yield SimpleNamespace(run=run,rows=rows,folder=folder)
+    finally:usage_history.CURRENT_TASK.reset(token)
+
+
+def claude_final(subtype='success',is_error=False):
+    report={'type':'result','subtype':subtype,'is_error':is_error,
+        'usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':10,'cache_creation_input_tokens':4}}
+    if subtype=='success':report['result']='Proposed edits; independent checks still required.'
+    else:report['errors']=['Partial edits may exist.']
+    return report
+
+
+@pytest.mark.parametrize('subtype',['error_max_turns','error_during_execution','error_max_budget_usd','error_max_structured_output_retries'])
+def test_claude_failed_final_result_keeps_reported_usage_and_failure(claude_result_case,subtype):
+    result=claude_result_case.run(claude_final(subtype,True),1)
+    assert result['status']=='agent_error' and result['exit_code']==1
+    assert result['usage']['total_tokens']==19 and result['verification']=='agent_report_only'
+    assert result['errors']
+    assert claude_result_case.rows()==[('claude_subscription','c'*12,19)]
+
+
+@pytest.mark.parametrize('report',[{}, {'result':'done'},
+    {'type':'result','subtype':'future_unknown','is_error':False,'result':'done'},
+    {'type':'result','subtype':'success','is_error':'false','result':'done'},
+    {'type':'result','subtype':[],'is_error':False,'result':'done'},
+    {'type':'result','subtype':'error_max_turns','is_error':True,'errors':'wrong type'},
+    {'type':'result','subtype':'success','is_error':False,'result':None}])
+def test_claude_unknown_final_shape_never_claims_finished_or_attributes_usage(claude_result_case,report):
+    report={**report,'usage':{'input_tokens':5,'output_tokens':6}}
+    result=claude_result_case.run(report)
+    assert result['status']=='agent_error' and result['usage'] is None
+    assert result['errors'] and claude_result_case.rows()==[]
+
+
+def test_claude_success_still_requires_host_verification(claude_result_case):
+    result=claude_result_case.run(claude_final())
+    assert result['status']=='finished' and result['verification']=='agent_report_only'
+    assert result['errors']==[] and result['usage']['total_tokens']==19
+
+
+def test_claude_nonzero_exit_cannot_turn_success_envelope_into_finished(claude_result_case):
+    result=claude_result_case.run(claude_final(),1)
+    assert result['status']=='agent_error' and result['usage']['total_tokens']==19 and result['errors']
+
+
+def test_claude_error_subtype_dominates_zero_exit_and_false_error_flag(claude_result_case):
+    result=claude_result_case.run(claude_final('error_max_turns',False),0)
+    assert result['status']=='agent_error' and result['usage']['total_tokens']==19
+    assert 'turn limit' in result['errors'][0]
+
+
+def test_claude_failed_final_without_reported_usage_stays_unknown(claude_result_case):
+    report=claude_final('error_during_execution',True);report.pop('usage')
+    result=claude_result_case.run(report,1)
+    assert result['status']=='agent_error' and result['usage'] is None
+    assert claude_result_case.rows()==[]
+
+
+def test_claude_failed_final_prefers_actual_per_model_usage(claude_result_case):
+    report=claude_final('error_max_turns',True)
+    report['modelUsage']={'haiku':{'inputTokens':1,'outputTokens':2,'cacheReadInputTokens':3,'cacheCreationInputTokens':4},
+        'sonnet':{'inputTokens':5,'outputTokens':6}}
+    result=claude_result_case.run(report,1)
+    assert result['status']=='agent_error' and result['usage']['total_tokens']==21
+    assert claude_result_case.rows()==[('claude_subscription','c'*12,10),('claude_subscription','c'*12,11)]
+
+
+@pytest.mark.parametrize('auth',[[],None,'not a status',42])
+def test_claude_malformed_auth_stops_before_task_dispatch(claude_result_case,auth):
+    with patch.object(cloud_providers,'_agent_process',return_value=(0,json.dumps(auth),'')) as process:
+        with pytest.raises(ValueError,match='not currently signed'):
+            cloud_providers.run_subscription_task('claude',claude_result_case.folder,'One step')
+    assert process.call_count==1 and claude_result_case.rows()==[]
+
+
+@pytest.mark.parametrize('auth',[[],None,'not a status',42])
+def test_claude_malformed_login_status_never_records_connected(claude_result_case,auth):
+    with patch.object(cloud_providers,'_agent_process',side_effect=[(0,'ignored',''),(0,json.dumps(auth),'')]):
+        with pytest.raises(RuntimeError,match='subscription'):
+            cloud_providers.connect_subscription_agent('claude')
+    status=cloud_providers.subscription_agent_status('claude')
+    assert status['connected'] is False and status['enabled'] is False
 
 ANSWER = {
     "id": "test",
@@ -611,8 +722,8 @@ class CloudTests(unittest.TestCase):
     def test_cloud_only_uses_connected_free_provider_even_when_local_is_faster(self):
         cloud.routing_mode.save_scope(cloud.STATE, "cloud_only")
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
-        with (patch("usage_history.recent_local_speed", return_value=500),
-              patch("usage_history.recent_provider_speed", return_value=10),
+        with (patch("usage_history.recent_local_response_speed", return_value=500),
+              patch("usage_history.recent_provider_response_speed", return_value=10),
               patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
               patch.object(cloud, "post") as local):
             self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
@@ -622,7 +733,7 @@ class CloudTests(unittest.TestCase):
     def test_cloud_only_medium_uses_enabled_plan_when_no_free_route_exists(self):
         cloud.routing_mode.save_scope(cloud.STATE, "cloud_only")
         cloud.routing_mode.save(cloud.STATE, "medium")
-        with (patch("usage_history.recent_local_speed", return_value=500),
+        with (patch("usage_history.recent_local_response_speed", return_value=500),
               patch("chatgpt_auth.status", return_value={"enabled": True}),
               patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
               patch.object(cloud, "post") as local):
@@ -634,6 +745,9 @@ class CloudTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "LongTasks").mkdir()
+            with patch.object(cloud, "ROOT", root):
+                self.assertEqual(cloud.task_route("b" * 12), "local_only")
+                self.assertFalse((root / "LongTasks/projects.db").exists())
             with sqlite3.connect(root / "LongTasks/projects.db") as conn:
                 conn.execute("CREATE TABLE projects(id TEXT, ai_route TEXT)")
                 conn.execute("INSERT INTO projects VALUES (?,?)", ("a" * 12, "local_only"))
@@ -649,7 +763,7 @@ class CloudTests(unittest.TestCase):
         self.assertIn(cloud.BALANCED_MODEL, balanced)
         self.assertNotIn(cloud.FAST_MODEL, balanced)
         self.assertIn(cloud.LOCAL_MODEL, cloud.local_speed_models("deep"))
-        with (patch("usage_history.recent_local_speed", return_value=30) as speed,
+        with (patch("usage_history.recent_local_response_speed", return_value=30) as speed,
               patch.object(cloud, "post", return_value=ANSWER)):
             cloud.Router().complete(REQUEST)
         speed.assert_called_once_with(70, models=(cloud.FAST_MODEL,))
@@ -732,7 +846,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "Build a working website"}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=25),
+              patch("usage_history.recent_local_response_speed", return_value=25),
               patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as remote,
               patch.object(cloud, "post") as local):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -745,8 +859,8 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "Build a working website"}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=25),
-              patch("usage_history.recent_provider_speed",
+              patch("usage_history.recent_local_response_speed", return_value=25),
+              patch("usage_history.recent_provider_response_speed",
                     side_effect=lambda name, default: {"groq": 8, "bigmodel": 200}[name]),
               patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as remote,
               patch.object(cloud, "post") as local):
@@ -765,7 +879,7 @@ class CloudTests(unittest.TestCase):
     def test_quick_work_stays_local_if_cloud_latency_would_dominate(self):
         cloud.save_provider_key("google", "test_secret_value_123", True)
         with (patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=80),
+              patch("usage_history.recent_local_response_speed", return_value=80),
               patch.object(cloud_providers, "complete") as remote,
               patch.object(cloud, "post", return_value=ANSWER)):
             self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
@@ -776,7 +890,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "Build a working website"}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=25),
+              patch("usage_history.recent_local_response_speed", return_value=25),
               patch.object(cloud_providers, "complete", side_effect=OSError("unavailable")) as remote,
               patch.object(cloud, "post", return_value=ANSWER) as local):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1043,6 +1157,10 @@ class CloudTests(unittest.TestCase):
         # Benchmark runs can retire a slow model while this suite is running.
         self.model_speed = patch("model_fitness.measured_speed", return_value=None)
         self.model_speed.start()
+        # Global retirement is separate from response-speed ranking. Real
+        # slow-model history must not exclude these mocked routing fixtures.
+        self.retirement_speed = patch("model_fitness.retirement_speed", return_value=None)
+        self.retirement_speed.start()
         self.ram = patch("model_library.total_ram_gb", return_value=128)
         self.ram.start()
         self.vram = patch("model_fitness.gpu_vram_gb", return_value=12)
@@ -1061,6 +1179,7 @@ class CloudTests(unittest.TestCase):
         self.addCleanup(self.candidates.stop)
         self.addCleanup(self.loaded.stop)
         self.addCleanup(self.model_speed.stop)
+        self.addCleanup(self.retirement_speed.stop)
         self.addCleanup(self.ram.stop)
         self.addCleanup(self.vram.stop)
         self.addCleanup(self.plan.stop)
@@ -1238,6 +1357,127 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(body["messages"][3]["thinking"], "Read both saved files.")
         self.assertEqual(payload, original)
 
+    def test_native_forced_choice_exact_version_preserves_original_contract_and_history(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        for choice in ("required", {"type": "function", "function": {"name": "save_plan"}}):
+            with self.subTest(choice=choice):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+                router.native_version_ready = True
+                router.native_version = (0, 40, 13)
+                router.native_version_until = time.monotonic()+60
+                payload = {**ARGUMENT_REQUEST, "max_tokens": 2000, "tool_choice": choice,
+                    "reasoning_effort": "low", "messages": [
+                        {"role": "user", "content": "Continue the saved repair."},
+                        {"role": "assistant", "content": None, "tool_calls": [{"id": "previous", "index": 0,
+                            "type": "function", "function": {"name": "read_file", "arguments": '{"path":"main.py"}'}}]},
+                        {"role": "tool", "tool_call_id": "previous", "content": "Actual saved source context"}]}
+                original = json.loads(json.dumps(payload))
+                raw = {"model": cloud.LOCAL_MODEL, "done": True, "prompt_eval_count": 222, "eval_count": 15,
+                    "eval_duration": 1000000000, "message": {"role": "assistant", "content": "", "thinking": "checked",
+                        "tool_calls": [{"id": "next", "function": {"name": "save_plan", "arguments": {"steps": [1, 2]}}}]}}
+                with (patch.object(cloud, "post", side_effect=lambda url, *args, **kwargs:
+                                   raw if url.endswith("/api/chat") else argument_reply([1, 2])) as upstream,
+                      patch.object(cloud, "valid_completion", wraps=cloud.valid_completion) as guard,
+                      patch("usage_history.record_completion") as usage):
+                    result = router.complete(payload)
+                self.assertTrue(upstream.call_args.args[0].endswith("/api/chat"))
+                body = upstream.call_args.args[1]
+                self.assertEqual(body["tools"], payload["tools"])
+                self.assertLess(body["options"]["num_ctx"], 262144)
+                self.assertEqual(body["options"]["num_predict"], 2000)
+                self.assertIs(body["truncate"], False); self.assertIs(body["shift"], False)
+                self.assertEqual(body["messages"][1]["tool_calls"][0]["id"], "previous")
+                self.assertEqual(body["messages"][2]["tool_call_id"], "previous")
+                self.assertIs(guard.call_args.args[1], payload)
+                self.assertEqual(guard.call_args.args[1]["tool_choice"], choice)
+                self.assertEqual(result["usage"]["total_tokens"], 237)
+                self.assertEqual(result["eval_duration"], 1000000000)
+                usage.assert_called_once()
+                self.assertEqual(payload, original)
+
+    def test_native_forced_choice_invalid_reply_cannot_bypass_original_host_guard(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        other = {"type": "function", "function": {"name": "other_tool", "parameters": {"type": "object"}}}
+        failures = [("required", {"role": "assistant", "content": "Here is an ordinary answer."}, "Required tool call was missing"),
+            ({"type": "function", "function": {"name": "save_plan"}}, {"role": "assistant", "content": "",
+                "tool_calls": [{"function": {"name": "other_tool", "arguments": {}}}]}, "Required tool call was replaced")]
+        for choice, message, error in failures:
+            with self.subTest(choice=choice):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+                router.native_version_ready = True; router.native_version = (0,40,13)
+                router.native_version_until = time.monotonic()+60
+                payload = {**ARGUMENT_REQUEST, "tools": [*ARGUMENT_REQUEST["tools"], other], "tool_choice": choice}
+                with (patch.object(cloud, "post", return_value={"model": cloud.LOCAL_MODEL, "done": True, "message": message}) as upstream,
+                      patch("usage_history.record_completion")):
+                    with self.assertRaisesRegex(ValueError, error):
+                        router.complete(payload)
+                self.assertEqual(upstream.call_count, 1)
+                self.assertTrue(upstream.call_args.args[0].endswith("/api/chat"))
+
+    def test_native_forced_choice_bad_arguments_still_fail_bounded_schema_repair(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536}
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+        router.native_version_ready = True; router.native_version = (0,40,13)
+        router.native_version_until = time.monotonic()+60
+        raw = {"model": cloud.LOCAL_MODEL, "done": True, "message": {"role": "assistant", "content": "",
+            "tool_calls": [{"function": {"name": "save_plan", "arguments": {"steps": ["invalid"]}}}]}}
+        repair = {"model": cloud.LOCAL_MODEL, "done": True, "message": {
+            "role": "assistant", "content": '{"steps":["still invalid"]}'}}
+        payload = {**ARGUMENT_REQUEST, "tool_choice": {"type": "function", "function": {"name": "save_plan"}}}
+        original = json.loads(json.dumps(payload))
+        with patch.object(cloud, "post", side_effect=[raw, repair]) as upstream, patch("usage_history.record_completion"):
+            with self.assertRaises(cloud.ToolArgumentError):
+                router.complete(payload)
+        self.assertEqual(upstream.call_count, 2)
+        self.assertTrue(all(call.args[0].endswith("/api/chat") for call in upstream.call_args_list))
+        self.assertEqual(payload, original)
+
+    def test_native_forced_choice_unknown_or_future_version_keeps_compatibility(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        for version in (None, (0,40,12), (0,40,14), (1,0,0)):
+            with self.subTest(version=version):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+                router.native_version_ready = True; router.native_version = version
+                router.native_version_until = time.monotonic()+60
+                payload = {**ARGUMENT_REQUEST, "tool_choice": "required"}
+                with patch.object(cloud, "post", return_value=argument_reply([1])) as upstream:
+                    router.complete(payload)
+                self.assertTrue(upstream.call_args.args[0].endswith("/v1/chat/completions"))
+                self.assertEqual(upstream.call_args.args[1]["tool_choice"], "required")
+
+    def test_native_forced_choice_version_discovery_is_exact_and_cancellable(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        raw = {"model": cloud.LOCAL_MODEL, "done": True, "message": {"role": "assistant", "content": "",
+            "tool_calls": [{"function": {"name": "save_plan", "arguments": {"steps": [1]}}}]}}
+        payload = {**ARGUMENT_REQUEST, "tool_choice": "required"}
+        for version, native in (("0.40.13", True), ("0.40.14", False), ("0.40.13-rc1", False)):
+            with self.subTest(version=version):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+                with (patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps({"version": version}).encode())) as probe,
+                      patch.object(cloud, "post", side_effect=lambda url, *args, **kwargs:
+                                   raw if url.endswith("/api/chat") else argument_reply([1])) as inference,
+                      patch("usage_history.record_completion")):
+                    router.complete(payload)
+                probe.assert_called_once_with("http://127.0.0.1:11434/api/version", timeout=3)
+                self.assertEqual(inference.call_args.args[0].endswith("/api/chat"), native)
+        router = cloud.Router()
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+        cancelled = False
+        def probe(*args, **kwargs):
+            nonlocal cancelled
+            cancelled = True
+            return io.BytesIO(b'{"version":"0.40.13"}')
+        with patch.object(cloud, "urlopen", side_effect=probe), patch.object(cloud, "post") as inference:
+            with self.assertRaises(InterruptedError):
+                router.complete(payload, cancel=lambda: cancelled)
+        inference.assert_not_called()
+
     def test_native_32k_candidate_only_serves_requests_that_fit(self):
         self.candidates.stop()
         alias = "cale-code7"
@@ -1346,7 +1586,7 @@ class CloudTests(unittest.TestCase):
         with (patch.object(cloud, "task_size", return_value="deep"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
               patch("chatgpt_auth.status", return_value={"enabled": False}),
-              patch("usage_history.recent_local_speed", return_value=15),
+              patch("usage_history.recent_local_response_speed", return_value=15),
               patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as direct,
               patch.object(cloud, "post") as post,
               patch.object(cloud.Router, "reserve_free_request") as reserve):
@@ -1365,7 +1605,7 @@ class CloudTests(unittest.TestCase):
         ]}])
         with (patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as direct,
               patch.object(cloud, "post") as local,
-              patch("usage_history.recent_provider_speed",
+              patch("usage_history.recent_provider_response_speed",
                     side_effect=lambda provider, _default: {"groq": 900, "google": 100}[provider])):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
         self.assertEqual(direct.call_args.args[0], "google")
@@ -1388,7 +1628,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=5),
+              patch("usage_history.recent_local_response_speed", return_value=5),
               patch.object(cloud.Router, "reserve_free_request", return_value=True),
               patch.object(cloud, "post", return_value=ANSWER) as post):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1399,7 +1639,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=35),
+              patch("usage_history.recent_local_response_speed", return_value=35),
               patch.object(cloud.Router, "reserve_free_request") as reserve,
               patch.object(cloud, "post", return_value=ANSWER) as post):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1411,7 +1651,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 90_000}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=35),
+              patch("usage_history.recent_local_response_speed", return_value=35),
               patch.object(cloud.Router, "reserve_free_request", return_value=True),
               patch.object(cloud, "post", return_value=ANSWER) as post):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1422,7 +1662,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=5),
+              patch("usage_history.recent_local_response_speed", return_value=5),
               patch.object(cloud.Router, "reserve_free_request", return_value=True),
               patch.object(cloud, "post", side_effect=[OSError("cloud unavailable"), ANSWER]) as post):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1598,7 +1838,7 @@ class CloudTests(unittest.TestCase):
     def test_slow_balanced_task_uses_lighter_chatgpt_model(self):
         with (
             patch.object(cloud, "task_size", return_value="balanced"),
-            patch("usage_history.recent_local_speed", return_value=12),
+            patch("usage_history.recent_local_response_speed", return_value=12),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete", return_value=ANSWER) as complete,
         ):
@@ -1614,7 +1854,7 @@ class CloudTests(unittest.TestCase):
             patch.object(cloud, "task_size", return_value="balanced"),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
-            patch("usage_history.recent_local_speed", return_value=40),
+            patch("usage_history.recent_local_response_speed", return_value=40),
             patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
         ):
             cloud.Router().complete(REQUEST)
@@ -1698,8 +1938,8 @@ class CloudTests(unittest.TestCase):
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
         with (
             patch.object(cloud, "task_size", return_value="quick"),
-            patch("usage_history.recent_local_speed", return_value=30),
-            patch("usage_history.recent_provider_speed",
+            patch("usage_history.recent_local_response_speed", return_value=30),
+            patch("usage_history.recent_provider_response_speed",
                   side_effect=lambda name, default: {"groq": 900, "chatgpt": 150}.get(name, default)),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete") as paid,
@@ -1714,8 +1954,8 @@ class CloudTests(unittest.TestCase):
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
         with (
             patch.object(cloud, "task_size", return_value="quick"),
-            patch("usage_history.recent_local_speed", return_value=30),
-            patch("usage_history.recent_provider_speed",
+            patch("usage_history.recent_local_response_speed", return_value=30),
+            patch("usage_history.recent_provider_response_speed",
                   side_effect=lambda name, default: {"groq": 150, "chatgpt": 900}.get(name, default)),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
@@ -1729,8 +1969,8 @@ class CloudTests(unittest.TestCase):
         cloud.routing_mode.save(cloud.STATE, "floor_it")
         with (
             patch.object(cloud, "task_size", return_value="quick"),
-            patch("usage_history.recent_local_speed", return_value=70),
-            patch("usage_history.recent_provider_speed", return_value=140),
+            patch("usage_history.recent_local_response_speed", return_value=70),
+            patch("usage_history.recent_provider_response_speed", return_value=140),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete") as paid,
             patch.object(cloud, "post", return_value=ANSWER) as local,
@@ -1749,8 +1989,8 @@ class CloudTests(unittest.TestCase):
         router = cloud.Router()
         with (
             patch.object(cloud, "task_size", return_value="deep"),
-            patch("usage_history.recent_local_speed", return_value=10),
-            patch("usage_history.recent_provider_speed",
+            patch("usage_history.recent_local_response_speed", return_value=10),
+            patch("usage_history.recent_provider_response_speed",
                   side_effect=lambda name, default: {"groq": 900, "chatgpt": 200}.get(name, default)),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
@@ -1775,8 +2015,8 @@ class CloudTests(unittest.TestCase):
         router = cloud.Router()
         with (
             patch.object(cloud, "task_size", return_value="deep"),
-            patch("usage_history.recent_local_speed", return_value=10),
-            patch("usage_history.recent_provider_speed",
+            patch("usage_history.recent_local_response_speed", return_value=10),
+            patch("usage_history.recent_provider_response_speed",
                   side_effect=lambda name, default: {
                       "openrouter": 900, "chatgpt": 200,
                   }.get(name, default)),
@@ -1808,7 +2048,7 @@ class CloudTests(unittest.TestCase):
         cloud.routing_memory.record("openrouter", "deep", "limit")
         with (
             patch.object(cloud, "task_size", return_value="balanced"),
-            patch("usage_history.recent_local_speed", return_value=30),
+            patch("usage_history.recent_local_response_speed", return_value=30),
             patch.object(cloud_providers, "complete") as free,
             patch.object(cloud, "post", return_value=ANSWER) as local,
         ):
@@ -1823,7 +2063,7 @@ class CloudTests(unittest.TestCase):
         cloud.routing_memory.record("groq", "balanced", "limit")
         with (
             patch.object(cloud, "task_size", return_value="balanced"),
-            patch("usage_history.recent_local_speed", return_value=30),
+            patch("usage_history.recent_local_response_speed", return_value=30),
             patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
             patch.object(cloud, "post") as local,
         ):
@@ -2516,14 +2756,30 @@ class SubscriptionAgentTests(unittest.TestCase):
 
     def test_subscription_actual_usage_counts_cache_once_and_unknown_is_not_recorded(self):
         import usage_history
-        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'),patch.object(cloud,'STATE',Path(d)/'Cloud'),patch.object(cloud.pc_offline,'offline',return_value=False),patch.object(usage_history,'DATABASE',Path(d)/'usage.db'):
+        with (tempfile.TemporaryDirectory() as d,
+              patch.object(cloud_providers, "AGENT_ROOT", Path(d) / "agents"),
+              patch.object(cloud, "ROOT", Path(d)),
+              patch.object(cloud, "STATE", Path(d) / "Cloud"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch.object(usage_history, "DATABASE", Path(d) / "usage.db")):
+            # This test attributes real usage to a task. Its policy registry must
+            # be readable and owned here, rather than borrowed from the install.
+            state = Path(d) / "LongTasks"
+            state.mkdir()
+            connection = sqlite3.connect(state / "projects.db")
+            try:
+                connection.execute("CREATE TABLE projects (id TEXT PRIMARY KEY, ai_route TEXT)")
+                connection.commit()
+            finally:
+                connection.close()
             folder=Path(d)/'project';folder.mkdir()
             for provider in ('claude','grok'):
                 exe=cloud_providers._subscription_binary(provider);exe.parent.mkdir(parents=True,exist_ok=True);exe.write_bytes(b'MZfake')
                 cloud_providers._save_agent_preferences(provider,{'login_completed':True,'enabled':True})
             token=usage_history.CURRENT_TASK.set('b'*12)
             try:
-                report={'model':'haiku','usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':10,'cache_creation_input_tokens':4}}
+                report={'type':'result','subtype':'success','is_error':False,'result':'Proposed changes',
+                    'model':'haiku','usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':10,'cache_creation_input_tokens':4}}
                 with patch.object(cloud_providers,'_agent_process',side_effect=[(0,json.dumps({'authMethod':'claude.ai'}),''),(0,json.dumps(report),'')]):
                     measured=cloud_providers.run_subscription_task('claude',folder,'task')
                 self.assertEqual(measured['usage'],{'prompt_tokens':16,'completion_tokens':3,'total_tokens':19})
@@ -2773,3 +3029,248 @@ def test_native_context_invalid_outer_tool_index_preserves_legacy_validation():
     for invalid in (True, "0", None, -1, 1.5, 2**63):
         base["messages"][0]["tool_calls"][0]["index"] = invalid
         assert cloud.native_chat_request(base, 65536) is None
+
+
+def test_native_forced_choice_recognizer_rejects_unknown_or_malformed_contracts():
+    import copy
+    valid = {**ARGUMENT_REQUEST, "tool_choice": "required"}
+    assert cloud.native_forced_choice_supported(valid)
+    assert cloud.native_chat_request(valid, 65536) is None  # Explicit transport qualification required.
+    for choice in ("none", "any", {}, {"type": "function", "function": {"name": "not_declared"}},
+                   {"type": "function", "function": {"name": ["save_plan"]}},
+                   {"type": "function", "function": {"name": "save_plan", "extra": True}}):
+        assert not cloud.native_forced_choice_supported({**valid, "tool_choice": choice})
+        assert cloud.native_chat_request({**valid, "tool_choice": choice}, 65536, allow_forced_choice=True) is None
+    for tools in ([], None, [valid["tools"][0], valid["tools"][0]],
+                  [{"type": "function", "function": {"name": "save_plan", "parameters": {"type": "not_a_json_type"}}}]):
+        assert not cloud.native_forced_choice_supported({**valid, "tools": tools})
+
+
+@pytest.mark.parametrize("effort", ["high", "medium", "low", "none"])
+@pytest.mark.parametrize("boolean_control", [True, False])
+@pytest.mark.parametrize("tool_turn", [True, False])
+def test_explicit_effort_survives_catalog_and_quick_defaults(effort, boolean_control, tool_turn):
+    """Mock only transport: inspect the actual Router -> native request body."""
+    import usage_history
+    case = CloudTests("test_candidate_tool_calls_use_verified_reasoning_setting")
+    case.setUp()
+    try:
+        request = {**REQUEST, "max_tokens": 100, "reasoning_effort": effort}
+        if tool_turn:
+            request["tools"] = [{"type": "function", "function": {"name": "multiply",
+                "parameters": {"type": "object", "properties": {"a": {"type": "integer"}},
+                               "required": ["a"]}}}]
+            request["tool_choice"] = "required"
+        original = json.loads(json.dumps(request))
+        router = cloud.Router()
+        router.model_native_contexts = {"qualified": 65536}
+        router.model_thinking_controls = {"qualified": (
+            {"values": [False, True], "default": True} if boolean_control else
+            {"values": ["low", "medium", "high"], "default": "medium"})}
+        router.native_version_ready = True
+        router.native_version = (0, 40, 13)
+        router.native_version_until = time.monotonic() + 60
+        reply = {"model": "qualified", "done": True, "message": {"role": "assistant", "content": "checked"}}
+        if tool_turn:
+            reply["message"]["tool_calls"] = [{"function": {"name": "multiply", "arguments": {"a": 1}}}]
+        with (patch.object(usage_history, "DATABASE", Path(case.temp.name) / "usage.db"),
+              patch.object(cloud, "CATALOG", {"qualified": {"alias": "qualified", "tool_reasoning_effort": "none"}}),
+              patch.object(router, "local_candidates", return_value=["qualified"]),
+              patch.object(cloud, "urlopen", side_effect=AssertionError("No actual network")),
+              patch.object(cloud, "post", return_value=reply) as upstream):
+            router.complete(request, size_hint=None if tool_turn else "quick")
+        assert upstream.call_count == 1
+        assert upstream.call_args.args[0].endswith("/api/chat")
+        expected = False if effort == "none" else True if boolean_control else effort
+        assert upstream.call_args.args[1]["think"] == expected
+        assert request == original
+    finally:
+        case.doCleanups()
+
+
+@pytest.mark.parametrize("source", ["catalog", "shared_weights", "advertised"])
+@pytest.mark.parametrize("effort", ["omitted", None, "high", "unsupported"])
+def test_effort_precedence_keeps_defaults_and_existing_compatibility(source, effort):
+    import usage_history
+    case = CloudTests("test_candidate_tool_calls_use_verified_reasoning_setting")
+    case.setUp()
+    try:
+        request = {**REQUEST, "max_tokens": 100}
+        if effort != "omitted":
+            request["reasoning_effort"] = effort
+        original = json.loads(json.dumps(request))
+        router = cloud.Router()
+        router.model_native_contexts = {"selected": 65536}
+        router.model_thinking_controls = {"selected": {"values": [False, True], "default": True}}
+        router.model_thinking = {"selected"}
+        router.model_weights = {"selected": "same", "peer": "same"}
+        router.native_version_ready = True
+        router.native_version = (0, 40, 13)
+        router.native_version_until = time.monotonic() + 60
+        catalog = ({"selected": {"alias": "selected", "tool_reasoning_effort": "none"}}
+                   if source == "catalog" else
+                   {"peer": {"alias": "peer", "tool_reasoning_effort": "none"}}
+                   if source == "shared_weights" else {})
+        native = {"model": "selected", "done": True, "message": {"role": "assistant", "content": "checked"}}
+        with (patch.object(usage_history, "DATABASE", Path(case.temp.name) / "usage.db"),
+              patch.object(cloud, "CATALOG", catalog),
+              patch.object(router, "local_candidates", return_value=["selected"]),
+              patch.object(cloud, "urlopen", side_effect=AssertionError("No actual network")),
+              patch.object(cloud, "post", side_effect=lambda url, *args, **kwargs:
+                           native if url.endswith("/api/chat") else ANSWER) as upstream):
+            router.complete(request, size_hint="quick")
+        assert upstream.call_count == 1
+        url, body = upstream.call_args.args
+        if effort == "unsupported":
+            assert url.endswith("/v1/chat/completions")
+            assert body["reasoning_effort"] == "unsupported"
+        else:
+            assert url.endswith("/api/chat")
+            assert body["think"] is (effort == "high")
+        assert request == original
+    finally:
+        case.doCleanups()
+
+
+def test_explicit_effort_does_not_relax_original_required_tool_contract():
+    import usage_history
+    case = CloudTests("test_candidate_tool_calls_use_verified_reasoning_setting")
+    case.setUp()
+    try:
+        request = {**ARGUMENT_REQUEST, "reasoning_effort": "high", "tool_choice": "required"}
+        router = cloud.Router()
+        router.model_native_contexts = {"qualified": 65536}
+        router.model_thinking_controls = {"qualified": {"values": [False, True], "default": True}}
+        router.native_version_ready = True
+        router.native_version = (0, 40, 13)
+        router.native_version_until = time.monotonic() + 60
+        with (patch.object(usage_history, "DATABASE", Path(case.temp.name) / "usage.db"),
+              patch.object(cloud, "CATALOG", {"qualified": {"alias": "qualified", "tool_reasoning_effort": "none"}}),
+              patch.object(router, "local_candidates", return_value=["qualified"]),
+              patch.object(cloud, "urlopen", side_effect=AssertionError("No actual network")),
+              patch.object(cloud, "post", return_value={"model": "qualified", "done": True,
+                    "message": {"role": "assistant", "content": "unsupported success claim"}}) as upstream):
+            with pytest.raises(ValueError):
+                router.complete(request)
+        assert upstream.call_count == 1
+        assert upstream.call_args.args[1]["think"] is True
+    finally:
+        case.doCleanups()
+
+
+# Union diagnostics select intent; the original validator remains authoritative.
+def union_discriminator_combined_schema(union="oneOf"):
+    import copy
+    fields = {"type": "object", "additionalProperties": {"type": "string"}}
+    case = {"type": "object", "properties": {
+        "set": fields, "click": {"type": "array", "items": {"type": "string"}},
+        "field_values": fields, "expect": fields}, "additionalProperties": False}
+    base = {"type": "object", "properties": {
+        "path": {"type": "string"}, "revise_inputs": {"type": "boolean"},
+        "assertion_replacements": fields,
+        "cases": {"type": "array", "items": case}},
+        "required": ["path", "cases"], "additionalProperties": False}
+    branches = []
+    for absent, flag in (("assertion_replacements", None), ("revise_inputs", None), (None, False)):
+        branch = copy.deepcopy(base)
+        if absent:
+            branch["properties"].pop(absent)
+        if absent != "assertion_replacements":
+            branch["required"].append("assertion_replacements")
+        if flag is False:
+            branch["properties"]["revise_inputs"] = {"type": "boolean", "const": False}
+            branch["required"].append("revise_inputs")
+        branches.append(branch)
+    combined = copy.deepcopy(base)
+    combined["properties"]["revise_inputs"] = {"type": "boolean", "const": True}
+    combined["properties"]["cases"]["items"]["properties"].pop("expect")
+    combined["properties"]["cases"]["items"]["required"] = ["set", "click", "field_values"]
+    combined["required"] += ["revise_inputs", "assertion_replacements"]
+    return {"type": "object", union: [*branches, combined]}
+
+
+@pytest.mark.parametrize("union", ["oneOf", "anyOf"])
+@pytest.mark.parametrize("fault", ["extra_assertion", "missing_fields"])
+def test_union_discriminator_combined_leaf_not_remove_mapping(union, fault):
+    from jsonschema import Draft202012Validator
+    schema = union_discriminator_combined_schema(union)
+    args = {"path": "index.html", "revise_inputs": True,
+        "assertion_replacements": {"state:amount.value": "field:amount"},
+        "cases": [{"set": {"amount": "10"}, "click": ["submit"],
+                   "field_values": {"amount": "10"}}]}
+    validator = Draft202012Validator(schema)
+    assert validator.is_valid(args)
+    if fault == "extra_assertion":
+        args["cases"][0]["expect"] = {"status": "PRIVATE_EXPECTED_SENTINEL"}
+        expected = ["cases", 0, "expect"]
+    else:
+        args["cases"][0].pop("field_values")
+        expected = ["cases", 0, "field_values"]
+    error = next(validator.iter_errors(args))
+    failure = cloud.ToolArgumentError("check_webapp", error, args)
+    assert failure.path == expected
+    assert "PRIVATE_EXPECTED_SENTINEL" not in str(failure)
+    assert not validator.is_valid(args)  # Diagnostic selection never grants acceptance.
+
+
+def test_union_discriminator_boolean_true_is_not_numeric_one():
+    from jsonschema import Draft202012Validator
+    schema = {"oneOf": [
+        {"type": "object", "properties": {"kind": {"const": 1}, "payload": {}},
+         "required": ["kind", "payload"], "additionalProperties": False},
+        {"type": "object", "properties": {"kind": {"const": True}, "payload": {
+            "type": "object", "required": ["name", "value"]}},
+         "required": ["kind", "payload"], "additionalProperties": False}]}
+    args = {"kind": True, "payload": {}}
+    error = next(Draft202012Validator(schema).iter_errors(args))
+    assert cloud.ToolArgumentError("typed_union", error).path == ["payload", "name"]
+
+
+@pytest.mark.parametrize("pattern", [False, True])
+def test_union_discriminator_forbidden_present_keys_respect_pattern_properties(pattern):
+    from jsonschema import Draft202012Validator
+    generic = {"type": "object", "properties": {"payload": {}},
+               "additionalProperties": False}
+    explicit = {"type": "object", "properties": {"payload": {
+        "type": "object", "required": ["name"]}}, "additionalProperties": False}
+    key = "x_mode" if pattern else "mode"
+    if pattern:
+        explicit["patternProperties"] = {"^x_": {"type": "string"}}
+    else:
+        explicit["properties"][key] = {"type": "string"}
+    schema = {"oneOf": [generic, explicit]}
+    error = next(Draft202012Validator(schema).iter_errors({key: "chosen", "payload": {}}))
+    assert cloud.ToolArgumentError("shape_union", error).path == ["payload", "name"]
+
+
+@pytest.mark.parametrize("operation", ["action", "check_tool"])
+def test_union_discriminator_operation_priority_precedes_secondary_scalar_matches(operation):
+    from jsonschema import Draft202012Validator
+    schema = {"oneOf": [
+        {"type": "object", "properties": {
+            operation: {"const": "plan"}, "mode": {"const": "json"},
+            "encoding": {"const": "utf8"}},
+         "required": [operation, "mode", "encoding"], "additionalProperties": False},
+        {"type": "object", "properties": {
+            operation: {"const": "run"}, "mode": {"const": "text"},
+            "encoding": {"const": "ascii"}},
+         "required": [operation, "mode", "encoding"], "additionalProperties": False}]}
+    args = {operation: "plan", "mode": "text", "encoding": "ascii"}
+    error = next(Draft202012Validator(schema).iter_errors(args))
+    failure = cloud.ToolArgumentError("operation_union", error, args)
+    assert failure.path == ["mode"]  # Preserve selected operation; correct its options.
+    assert not Draft202012Validator(schema).is_valid(args)
+
+
+@pytest.mark.parametrize("value", [{"mode": "selected"}, ["selected"]])
+def test_union_discriminator_ignores_nonscalar_enum_values_when_scoring(value):
+    from jsonschema import Draft202012Validator
+    schema = {"oneOf": [
+        {"type": "object", "properties": {"payload": {"enum": [value]},
+            "detail": {"type": "object", "required": ["name"]}},
+         "required": ["payload", "detail"], "additionalProperties": False},
+        {"type": "object", "properties": {"payload": {},
+            "detail": {"type": "object", "required": ["other"]}},
+         "required": ["payload", "detail"], "additionalProperties": False}]}
+    error = next(Draft202012Validator(schema).iter_errors({"payload": value, "detail": {}}))
+    assert cloud.ToolArgumentError("structured_enum_union", error).path == ["detail", "name"]

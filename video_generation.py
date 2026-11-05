@@ -157,7 +157,12 @@ def video_job_status(job_id: str) -> dict:
         check = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
                                capture_output=True, text=True, timeout=10, creationflags=HIDE)
         if check.returncode == 0 and f'"{pid}"' not in check.stdout:
-            data = _write(job_id, state="failed", error="Video worker exited unexpectedly; see log_path.")
+            # The worker may have published its terminal result and exited
+            # while tasklist was running. Do not overwrite that result using
+            # the stale record read before the process check.
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("state") not in FINISHED:
+                data = _write(job_id, state="failed", error="Video worker exited unexpectedly; see log_path.")
     status = {key: data.get(key) for key in (
         "job_id", "state", "detail", "output_path", "error", "log_path", "updated_at"
     )}
@@ -656,6 +661,48 @@ def _avatar_gpu_busy(root):
     return _heavy_gpu_active(Path(root))
 
 
+def _avatar_runtime_facts(profile, root):
+    """Check the executing runtime before a live or isolated engine loads."""
+    import torch, onnxruntime as ort
+    profile=Path(profile).resolve();media=(Path(root)/"Media/python").resolve()
+    if not Path(ort.__file__).resolve().is_relative_to(profile/"python"):
+        raise RuntimeError("Wrong avatar ORT origin.")
+    if not Path(torch.__file__).resolve().is_relative_to(media):
+        raise RuntimeError("Wrong Media Torch origin.")
+    if ort.__version__!="1.26.0" or torch.__version__!="2.9.1+cu128":
+        raise RuntimeError("Avatar runtime versions changed.")
+    if torch.version.cuda!="12.8" or not torch.cuda.is_available():
+        raise RuntimeError("Avatar CUDA is unavailable.")
+    return {"ort":ort.__version__,"torch":torch.__version__,"cuda":torch.version.cuda,
+            "cudnn":torch.backends.cudnn.version()}
+
+
+def _avatar_finish_deferred_probe(root, profile, facts, probe, current):
+    """Publish only a real, still-authorized first live qualification.
+
+    The GUI reaps the previous camera owner before preparing another one. This
+    status is runtime readiness, not camera consent or an engine-session cache.
+    """
+    if not isinstance(probe,dict) or probe.get("ok") is not True:
+        raise RuntimeError("Avatar inference failed.")
+    status=avatar_profile_status(root)
+    if status.get("phase")!="prepared" or status.get("ready") is not False or not current():
+        return False
+    if Path(profile).resolve()!=avatar_profile_root(root).resolve():
+        raise ValueError("Avatar probe profile is not owned by this app.")
+    _avatar_write_status(Path(profile),phase="ready",ready=True,detail="Live Cale inference tested",
+        probe={"ok":True,**facts,"probe":probe},
+        virtual_output_requested=bool(status.get("virtual_output_requested")),virtual_output_tested=False)
+    return True
+
+
+def _avatar_fail_deferred_probe(root, error, current):
+    status=avatar_profile_status(root)
+    if status.get("phase")=="prepared" and status.get("ready") is False and current():
+        _avatar_write_status(avatar_profile_root(root),phase="failed",ready=False,
+            detail=str(error)[:400],error_type=type(error).__name__)
+
+
 def avatar_profile_probe_worker(profile, parent_pid, parent_started):
     """Explicit trusted CLI role, with a visible live-process GPU lease."""
     import threading
@@ -671,17 +718,12 @@ def avatar_profile_probe_worker(profile, parent_pid, parent_started):
     threading.Thread(target=watch_owner,args=(parent_pid,parent_started),daemon=True).start()
     engine=None;lease=AvatarGpuLease()
     try:
-        import torch,onnxruntime as ort,avatar_video
-        media=(root/"Media/python").resolve()
-        if not Path(ort.__file__).resolve().is_relative_to(profile/"python"):raise RuntimeError("Wrong avatar ORT origin.")
-        if not Path(torch.__file__).resolve().is_relative_to(media):raise RuntimeError("Wrong Media Torch origin.")
-        if ort.__version__!="1.26.0" or torch.__version__!="2.9.1+cu128":raise RuntimeError("Avatar runtime versions changed.")
-        if torch.version.cuda!="12.8" or not torch.cuda.is_available():raise RuntimeError("Avatar CUDA is unavailable.")
+        facts=_avatar_runtime_facts(profile,root)
+        import avatar_video
         engine=avatar_video.CaleAvatar(profile)
         result=engine.probe();lease.measured(result)
         if not isinstance(result,dict) or result.get("ok") is not True:raise RuntimeError("Avatar inference failed.")
-        print(json.dumps({"ok":True,"ort":ort.__version__,"torch":torch.__version__,"cuda":torch.version.cuda,
-            "cudnn":torch.backends.cudnn.version(),"probe":result}),flush=True)
+        print(json.dumps({"ok":True,**facts,"probe":result}),flush=True)
     finally:
         try:
             if engine is not None:engine.close()
@@ -723,12 +765,15 @@ def probe_avatar_profile(profile, root=None, cancelled=None):
     return result
 
 
-def ensure_avatar_profile(root=None, progress=None, cancelled=None, virtual_output=False):
+def ensure_avatar_profile(root=None, progress=None, cancelled=None, virtual_output=False, defer_probe=False):
     """Install optional verified assets, then qualify real inference before ready.
 
     Call only on a background thread. Cancelling or setup failure cannot turn on
     a raw camera fallback. No camera is opened by installation or qualification.
+    The camera launcher can defer GPU qualification to its real neural worker;
+    prepared files alone remain not ready until that worker actually passes.
     """
+    if type(defer_probe) is not bool:raise ValueError("Deferred avatar probe must be boolean.")
     root=Path(root or ROOT);profile=avatar_profile_root(root)
     def report(phase,detail,**extra):
         if cancelled and cancelled():raise RuntimeError("Live Cale setup cancelled.")
@@ -772,6 +817,10 @@ def ensure_avatar_profile(root=None, progress=None, cancelled=None, virtual_outp
                     report("installing","Preparing optional GPL virtual-camera bridge; existing OBS driver required")
                     subprocess.run([music_backend._tool("uv"),"pip","install","--python",str(python),"--no-deps","pyvirtualcam==0.15.0"],check=True,timeout=120,capture_output=True,creationflags=HIDE,env=_avatar_environment())
                     (profile/"virtual-camera-provenance.json").write_text(json.dumps({"package":"pyvirtualcam","version":"0.15.0","license":"GPL-2.0","source":"https://github.com/letmaik/pyvirtualcam","execution":"separate optional avatar-only frame sender","obs_driver":"existing Windows OBS installation required","virtual_output_tested":False}),encoding="utf-8")
+            if defer_probe:
+                report("prepared","Getting your animated camera ready...",
+                       virtual_output_requested=bool(virtual_output),virtual_output_tested=False)
+                return python
             report("testing","Testing Live Cale CUDA imports and actual avatar inference")
             waiting=False
             while True:
