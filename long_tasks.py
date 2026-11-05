@@ -66,18 +66,45 @@ def take_ai_connection_request(state_folder: Path) -> str | None:
     return requested if requested in {"chatgpt", "claude", "grok", "openrouter"} else "setup"
 
 
+def start_connection_worker(pending, operation):
+    """Track one provider operation independently from its connected UI state."""
+    import threading
+    if pending.is_set():
+        return None
+    pending.set()
+    def run():
+        try:
+            operation()
+        finally:
+            pending.clear()
+    worker = None
+    try:
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+    except BaseException:
+        # If start failed after actually creating the thread, that thread's
+        # finally still owns clearance. Unknown state must continue to defer.
+        try:
+            if worker is None or not worker.is_alive():
+                pending.clear()
+        except Exception:
+            pass
+        raise
+    return worker
+
+
 def update_dialog_open(children, ignored=(), *, persisted_panel=None,
-                       connection_controls=(), connection_process=None):
+                       connection_events=(), connection_process=None):
     """Saved donation choices do not block updates; pending sign-ins still do.
 
-    Connection buttons are disabled for their browser callback lifetime. GitHub
-    also owns a login process, even if its code window was closed. Unknown UI
-    or process state defers the update rather than interrupting an account flow.
+    Connected buttons may stay disabled indefinitely, so only explicit pending
+    operation events represent ChatGPT/OpenRouter work. GitHub also owns a login
+    process even if its code window was closed. Unknown state defers the update.
     """
     try:
-        for control in connection_controls:
-            disabled = control.instate(["disabled"])
-            if type(disabled) is not bool or disabled:
+        for event in connection_events:
+            pending = event.is_set()
+            if type(pending) is not bool or pending:
                 return True
         if connection_process is not None:
             result = connection_process.poll()
@@ -4318,6 +4345,7 @@ def gui():
         wraplength=720,
     ).pack(anchor="w", pady=(4, 9))
     chat_events = queue.Queue()
+    chat_connection_pending = threading.Event()
     chat_text = tk.StringVar(value="Not connected.")
 
     def connect_chatgpt():
@@ -4334,7 +4362,7 @@ def gui():
             except Exception as exc:
                 chat_events.put("Connection not finished: " + str(exc))
 
-        threading.Thread(target=worker, daemon=True).start()
+        start_connection_worker(chat_connection_pending, worker)
 
     chat_button = ttk.Button(
         chat_section,
@@ -4381,7 +4409,7 @@ def gui():
             except Exception as exc:
                 chat_events.put(str(exc))
 
-        threading.Thread(target=worker, daemon=True).start()
+        start_connection_worker(chat_connection_pending, worker)
 
     chat_disconnect_button = ttk.Button(
         chat_section, text="Disconnect ChatGPT", command=disconnect_chatgpt
@@ -4419,6 +4447,7 @@ def gui():
         anchor="w", pady=(2, 8)
     )
     cloud_events = queue.Queue()
+    cloud_connection_pending = threading.Event()
     cloud_text = tk.StringVar(value="Optional free cloud models, with your own account.")
 
     def connect():
@@ -4435,7 +4464,7 @@ def gui():
             except Exception as exc:
                 cloud_events.put("Connection not finished: " + str(exc))
 
-        threading.Thread(target=worker, daemon=True).start()
+        start_connection_worker(cloud_connection_pending, worker)
 
     connect_button = ttk.Button(
         router_section,
@@ -4449,8 +4478,14 @@ def gui():
     ).pack(anchor="w", pady=(8, 2))
 
     def disconnect_cloud():
-        disconnect()
-        cloud_text.set("Disconnected. Your local AI still works.")
+        if cloud_connection_pending.is_set():
+            return
+        cloud_connection_pending.set()
+        try:
+            disconnect()
+            cloud_text.set("Disconnected. Your local AI still works.")
+        finally:
+            cloud_connection_pending.clear()
 
     disconnect_button = ttk.Button(
         router_section, text="Disconnect account", command=disconnect_cloud
@@ -7858,7 +7893,7 @@ def gui():
                 window.winfo_children(),
                 (preview_window, usage_window, readiness_popup[0]),
                 persisted_panel=donation_controls.popup,
-                connection_controls=(chat_button, connect_button),
+                connection_events=(chat_connection_pending, cloud_connection_pending),
                 connection_process=getattr(window, "github_login_process", None),
             )
         ):
