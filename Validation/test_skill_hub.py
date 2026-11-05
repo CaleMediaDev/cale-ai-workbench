@@ -12,6 +12,25 @@ class SkillHubTests(unittest.TestCase):
         skill_hub.SEEN.clear()
         skill_hub.INSPECTED.clear()
 
+    def test_missing_records_are_rejected_with_negative_clock_epoch(self):
+        identifier = "skills-sh/example/accessibility"
+        with patch.object(skill_hub.time, "monotonic", return_value=-1e9):
+            with patch.object(skill_hub, "_run", return_value="Unexpected") as run:
+                with self.assertRaisesRegex(ValueError, "Search for this exact skill"):
+                    skill_hub.inspect(identifier)
+                with self.assertRaisesRegex(ValueError, "Search and inspect"):
+                    skill_hub.install(identifier)
+
+                skill_hub.SEEN[identifier] = -1e9
+                with self.assertRaisesRegex(ValueError, "Search and inspect"):
+                    skill_hub.install(identifier)
+
+                skill_hub.SEEN.clear()
+                skill_hub.INSPECTED[identifier] = -1e9
+                with self.assertRaisesRegex(ValueError, "Search and inspect"):
+                    skill_hub.install(identifier)
+                run.assert_not_called()
+
     def test_search_inspect_install_in_order(self):
         identifier = "skills-sh/example/workflows/accessibility"
         payload = json.dumps([{
