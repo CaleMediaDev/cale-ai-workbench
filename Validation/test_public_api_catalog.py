@@ -321,3 +321,58 @@ def test_catalog_rejects_nested_download_before_replacing_valid_snapshot(tmp_pat
         data, fresh = public_api_catalog._catalog()
     assert data == snapshot and fresh is False
     assert cache.read_bytes() == original
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_invalid_nested_download_never_stages_or_replaces_last_good_catalog(tmp_path, constant):
+    cache = tmp_path / "apis.json"
+    original = b'[{"name":"known valid","details":{"score":1}}]'
+    cache.write_bytes(original)
+    expired = cache.stat().st_mtime + public_api_catalog.MAX_AGE + 1
+    downloaded = ('[{"name":"bad","details":{"samples":[1,' + constant + ',2]}}]').encode()
+    with patch.object(public_api_catalog, "CACHE", cache), patch.object(
+            public_api_catalog.time, "time", return_value=expired), patch.object(
+            public_api_catalog, "urlopen") as opened, patch.object(
+            public_api_catalog.tempfile, "TemporaryDirectory") as staging, patch.object(
+            type(cache), "replace") as replacing:
+        opened.return_value.__enter__.return_value.read.return_value = downloaded
+        data, fresh = public_api_catalog._catalog()
+    assert data == json.loads(original) and fresh is False
+    assert cache.read_bytes() == original
+    staging.assert_not_called()
+    replacing.assert_not_called()
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_fresh_invalid_cached_constant_is_not_an_offline_snapshot(tmp_path, constant):
+    cache = tmp_path / "apis.json"
+    invalid = ('[{"name":"invalid cached","details":{"score":' + constant + '}}]').encode()
+    cache.write_bytes(invalid)
+    with patch.object(public_api_catalog, "CACHE", cache), patch.object(
+            public_api_catalog, "urlopen", side_effect=OSError("offline")) as opened:
+        with pytest.raises(RuntimeError, match="unavailable while offline"):
+            public_api_catalog._catalog()
+    opened.assert_called_once()  # Fresh mtime cannot make malformed bytes authoritative.
+    assert cache.read_bytes() == invalid  # Do not destroy unknown/corrupt prior bytes.
+
+
+def test_numeric_constant_words_inside_json_strings_remain_valid_data(tmp_path):
+    cache = tmp_path / "apis.json"
+    payload = [{"name": "NaN Infinity -Infinity", "description": "literal words", "score": 1.25}]
+    raw = json.dumps(payload).encode()
+    with patch.object(public_api_catalog, "CACHE", cache), patch.object(public_api_catalog, "urlopen") as opened:
+        opened.return_value.__enter__.return_value.read.return_value = raw
+        data, fresh = public_api_catalog._catalog()
+    assert data == payload and fresh is True
+    assert cache.read_bytes() == raw
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_invalid_first_download_does_not_create_catalog_cache(tmp_path, constant):
+    cache = tmp_path / "missing-cache" / "apis.json"
+    raw = ('[{"name":"invalid first download","value":' + constant + '}]').encode()
+    with patch.object(public_api_catalog, "CACHE", cache), patch.object(public_api_catalog, "urlopen") as opened:
+        opened.return_value.__enter__.return_value.read.return_value = raw
+        with pytest.raises(RuntimeError, match="unavailable while offline"):
+            public_api_catalog._catalog()
+    assert not cache.parent.exists()
