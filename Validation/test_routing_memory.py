@@ -138,6 +138,27 @@ class ProjectMemoryContributionTests(unittest.TestCase):
         self.assertFalse(memory.search(self.folder, "fresh_invoice", kind="file"))
 
 
+    def test_document_chunk_boundary_preserves_combining_mark_words(self):
+        import hashlib
+
+        source = self.folder / "guide.pdf"
+        source.write_bytes(b"local document fixture")
+        text = " " * (memory.DOCUMENT_CHUNK_CHARS - 1) + "e\u0301clair"
+        result = memory.index_document_text(
+            self.folder, source, text,
+            hashlib.sha256(source.read_bytes()).hexdigest(),
+            revision="combining-mark-regression",
+        )
+        self.assertEqual(result["parts"], 2)
+        stored = "".join(
+            memory.get(self.folder, f"document:guide.pdf:{number}")["body"]
+            for number in (1, 2)
+        )
+        self.assertEqual(stored, text)
+        found = memory.search(self.folder, "eclair", kind="document")
+        self.assertEqual([row["id"] for row in found], ["document:guide.pdf:2"])
+
+
     def test_search_preserves_unicode_terms_without_casefold_expansion(self):
         saved = memory.save(self.folder, "note", "Travel directions",
                             "Follow the Straße to the station.")

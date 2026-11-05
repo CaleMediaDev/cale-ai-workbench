@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -188,6 +189,11 @@ def index_document_text(folder: str | Path, path: str | Path, text: str,
         raise ValueError("Document text is too large to index")
     if not re.fullmatch(r"[a-f0-9]{64}", source_hash):
         raise ValueError("A verified source hash is required")
+    def token_char(char):
+        # Combining marks belong to their word even though isalnum() is false.
+        # Include private-use characters, which unicode61 also treats as tokens.
+        return char.isalnum() or unicodedata.category(char).startswith("M") or unicodedata.category(char) == "Co"
+
     chunks = []
     start = 0
     while start < len(text):
@@ -196,7 +202,7 @@ def index_document_text(folder: str | Path, path: str | Path, text: str,
         # FTS indexes each chunk independently. Avoid turning an ordinary
         # word into two unsearchable fragments at a fixed character boundary.
         while (boundary > start and boundary < len(text)
-               and text[boundary - 1].isalnum() and text[boundary].isalnum()):
+               and token_char(text[boundary - 1]) and token_char(text[boundary])):
             boundary -= 1
         # A token longer than the chunk budget still requires a hard split.
         if boundary > start:
