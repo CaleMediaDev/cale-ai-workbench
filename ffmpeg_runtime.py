@@ -133,7 +133,12 @@ def start_background(root: Path = ROOT) -> None:
         try:
             ensure(resolved_root)
         except (OSError, RuntimeError, subprocess.TimeoutExpired):
-            pass  # The checklist remains in attention; retry after five minutes.
+            # Cool down from failure, not from the start of a slow repair.
+            with _attempt_lock:
+                _last_attempts.pop(resolved_root, None)
+                _last_attempts[resolved_root] = time.monotonic()
+                while len(_last_attempts) > MAX_REPAIR_ROOTS:
+                    _last_attempts.pop(next(iter(_last_attempts)))
         else:
             with _attempt_lock:
                 _last_attempts.pop(resolved_root, None)
