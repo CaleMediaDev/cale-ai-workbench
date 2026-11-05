@@ -196,7 +196,7 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
             conn.execute("DELETE FROM task_eta_samples WHERE task_id=?", (task_id,))
         # The lowered progress is the first observation of the revised run.
         # Keep it as the new baseline rather than waiting for another increase.
-        if active and (percent > previous or restarted) and percent < 95:
+        if active and (not row or percent > previous or restarted) and percent < 95:
             conn.execute("""INSERT OR REPLACE INTO task_eta_samples
                 (task_id,percent,active_seconds,observed) VALUES(?,?,?,?)""",
                 (task_id, percent, elapsed, now),
