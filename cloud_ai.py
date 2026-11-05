@@ -805,7 +805,7 @@ def retry_derestricted(payload, result, original_model="", deadline=None):
     import model_library
 
     ram = model_library.total_ram_gb()
-    vram = model_fitness.gpu_vram_gb()
+    vram = model_fitness.routing_vram_gb(ROOT)
     profiles = (
         ("permissive", "llama", "glm", "permissive_small", "gptoss")
         if task_size(payload.get("messages", [])) == "deep"
@@ -1209,13 +1209,17 @@ class Router:
     def local_candidates(self, size, required_context=65536, require_vision=False,
                          include_fallback=False):
         """Rank installed models with enough context and required capabilities."""
-        if time.monotonic() >= self.model_cache_until:
+        import model_fitness
+
+        avatar_headroom = model_fitness.avatar_reserved_vram_gb(ROOT)
+        if (time.monotonic() >= self.model_cache_until
+                or avatar_headroom != getattr(self, "model_cache_avatar_headroom", 0)):
             refresh_catalog(online=False)
             import model_fitness
             import model_library
 
             ram = model_library.total_ram_gb()
-            vram = model_fitness.gpu_vram_gb()
+            vram = max(0.0, model_fitness.gpu_vram_gb() - avatar_headroom)
             try:
                 with urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
                     tags = json.load(response)
@@ -1291,6 +1295,7 @@ class Router:
             }
             self.model_weights = weight_ids
             self.model_cache_until = time.monotonic() + 60
+            self.model_cache_avatar_headroom = avatar_headroom
         balanced_preferred = BALANCED_MODEL
         if size == "balanced":
             # A newly recommended model must pass the on-device tool probe

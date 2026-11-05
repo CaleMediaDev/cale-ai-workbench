@@ -10,6 +10,8 @@ import tempfile
 import threading
 import time
 import unittest
+
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,6 +57,29 @@ def argument_reply(steps):
         {"id": "plan", "type": "function", "function": {"name": "save_plan",
             "arguments": json.dumps({"steps": steps})}}]}}]}
 
+
+def test_avatar_budget_transition_invalidates_model_cache_without_a_cloud_call(tmp_path, monkeypatch):
+    import model_fitness
+    import model_library
+
+    headroom = [2.0]
+    monkeypatch.setattr(cloud, "ROOT", tmp_path)
+    monkeypatch.setattr(model_fitness, "avatar_reserved_vram_gb", lambda _root: headroom[0])
+    monkeypatch.setattr(model_fitness, "gpu_vram_gb", lambda: 12)
+    monkeypatch.setattr(model_library, "total_ram_gb", lambda: 32)
+    monkeypatch.setattr(cloud, "loaded_local_models", lambda: [])
+    monkeypatch.setattr(cloud, "model_order", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(cloud, "urlopen", lambda *_args, **_kwargs: io.BytesIO(b'{"models":[]}'))
+    with patch.object(cloud, "refresh_catalog") as refresh:
+        router = cloud.Router()
+        router.model_cache_until = time.monotonic() + 600
+        router.local_candidates("quick")
+        assert refresh.call_count == 1 and router.model_cache_avatar_headroom == 2
+        headroom[0] = 0
+        router.local_candidates("quick")
+        assert refresh.call_count == 2 and router.model_cache_avatar_headroom == 0
+        router.local_candidates("quick")
+        assert refresh.call_count == 2
 
 class CloudTests(unittest.TestCase):
     def test_non_game_worker_keeps_distinct_repair_model_eligible(self):

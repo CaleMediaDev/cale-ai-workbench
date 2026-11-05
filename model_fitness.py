@@ -35,6 +35,58 @@ def hardware_allows(weights_gb, ram_gb, vram_gb):
     return weights_gb <= max(8.0, vram_gb * 2.0)
 
 
+def avatar_reserved_vram_gb(root=None):
+    """Read headroom owned by a real live avatar process, not a stale marker.
+
+    The CUDA session itself allocates memory. This signal keeps automatic LLM
+    routing from spending the avatar's measured allocation and safety margin.
+    Physical hardware/download eligibility and benchmark identities stay intact.
+    """
+    import json
+    import math
+    from pathlib import Path
+
+    import psutil
+
+    root = Path(root or Path(__file__).resolve().parent).resolve()
+    state = root / "LongTasks"
+    if not state.resolve().is_relative_to(root):
+        return 0.0
+    reservations = {}
+    for marker in list(state.glob("avatar-gpu-active-*.json"))[:16]:
+        try:
+            if marker.is_symlink() or marker.stat().st_size > 4096:
+                continue
+            record = json.loads(marker.read_text(encoding="utf-8"))
+            if not isinstance(record, dict):
+                continue
+            pid, reserved = record.get("pid"), record.get("reserved_bytes")
+            started = float(record["started"])
+            if (type(pid) is not int or pid <= 0 or type(reserved) is not int
+                    or not 0 < reserved <= 64 * 1024 ** 3
+                    or not math.isfinite(started) or started <= 0
+                    or record.get("phase") not in ("starting", "active")
+                    or marker.stem != "avatar-gpu-active-" + str(pid)):
+                continue
+            process = psutil.Process(pid)
+            command = process.cmdline()
+            if (not process.is_running() or abs(process.create_time() - started) >= .01
+                    or "--avatar" not in command
+                    or not any(Path(value).resolve() == root / "camera_presence.py"
+                               for value in command[1:])):
+                continue
+            # A reused PID and duplicate files cannot multiply a reservation.
+            reservations[pid] = max(reservations.get(pid, 0), reserved)
+        except (OSError, ValueError, TypeError, KeyError, psutil.Error):
+            continue
+    return sum(reservations.values()) / 1024 ** 3
+
+
+def routing_vram_gb(root=None):
+    """Use transient avatar headroom for routing without changing hardware facts."""
+    return max(0.0, gpu_vram_gb() - avatar_reserved_vram_gb(root))
+
+
 def profile_allows(item, ram_gb, vram_gb):
     """Check profile-specific GPU headroom before downloading or routing."""
     return (
