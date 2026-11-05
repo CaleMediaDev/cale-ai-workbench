@@ -1,0 +1,35 @@
+{
+  "release": "0.5.515",
+  "base": "6eb305fc138792acc12ddaec5c33bab18d16b5ad",
+  "implementation_source": "b2bdc0d91d0888b5653f34a95d622e93ca1cb81a",
+  "changes": [
+    "GUI-only deferred setup probe removes a redundant GPU load; static file/package/pth/virtual checks remain; prepared files are not marked ready",
+    "Live worker retains exact ORT/Torch origins, pinned versions, CUDA availability and actual engine probe before readiness promotion; cancellation cannot promote readiness",
+    "Cache immutable illustration blend terms with unchanged float32 operation order, clipping and Lanczos interpolation",
+    "Restore original baseline tools on the existing fifth queued-step escape, even when persisted repair and step counters are misaligned; no budget reset"
+  ],
+  "checks": {
+    "combined_camera_video_gui": {"passed":300,"skipped":1,"seconds":93.12},
+    "tk_skip_control": {"sequence":"7 passed,1 skipped; existing create-failure Tk test could not resolve init.tcl","isolated_same_test":"1 passed in0.66s","limit":"Not claiming301 tests passed together"},
+    "focus_cycle_root": {"passed":30,"seconds":18.51},
+    "focus_cycle_independent": {"passed":27,"seconds":18.12},
+    "focus_cycle_baseline": {"failed":20,"aligned_controls_passed":5,"meaning":"All25persisted counter offsets exercised with actual checkpoint save/read; queue/request/budgets remain unchanged"},
+    "startup_flow": "Real ensure+worker control flow with mocked runtime/neural work: default isolated+live qualification remains2 probes, GUI-deferred path uses1 actual worker probe; readiness ordering and strict runtime guards retained",
+    "static_blend_parity": "All256^3 uint8 pixel/background/mask combinations and actual pinned-mask/OpenCV cases exactly match output bytes"
+  },
+  "cpu_blend_measurement": {
+    "alternating_pairs":80,
+    "baseline_median_ms":7.3197,
+    "cached_median_ms":5.7105,
+    "extra_static_ram_bytes":2073600,
+    "gpu_or_camera_calls":0,
+    "scope":"CPU composition only, no whole-frame FPS improvement claim"
+  },
+  "limits": [
+    "No new actual camera/GPU qualification or measured startup wall-clock saving yet; physical desktop currently in use by another active task",
+    "Actual live model backend and weights unchanged from514; no30fps/native4K claim",
+    "Other deliberately scoped planning/recovery policies can supersede ordinary tool discovery; escape fix is limited to ordinary repair-to-step composition",
+    "No general small-model quality, original expense-app completion, fresh-PC or full installed self-check claim",
+    "Optional dependency snapshot experiments remain private and disabled"
+  ]
+}
