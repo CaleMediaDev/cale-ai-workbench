@@ -54,6 +54,9 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
         if not isinstance(text_value, str):
             continue
         words = " ".join(text_value.split())
+        # JSON booleans are not timestamps, even though float() accepts them.
+        if any(isinstance(segment.get(field), bool) for field in ("start", "end")):
+            continue
         try:
             start = float(segment["start"])
             end = float(segment["end"])

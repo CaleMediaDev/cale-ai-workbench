@@ -114,6 +114,40 @@ def test_save_skips_non_object_segments(tmp_path, invalid_segment, include_valid
     assert vocal.read_bytes() == b"isolated"
 
 
+@pytest.mark.parametrize("invalid", [False, True])
+@pytest.mark.parametrize("field", ["start", "end"])
+@pytest.mark.parametrize("include_valid", [False, True])
+def test_save_skips_boolean_timestamps(tmp_path, invalid, field, include_valid):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    vocal = tmp_path / "vocals.wav"
+    vocal.write_bytes(b"isolated")
+    target = tmp_path / "lyrics"
+    malformed = {"start": 0.0, "end": 5.0, "text": "Boolean timing"}
+    malformed[field] = invalid
+    valid = {"start": 0.25, "end": 0.75, "text": "Keep this"}
+    segments = [malformed]
+
+    if include_valid:
+        segments.append(valid)
+        result = music_lyrics.save(source, vocal, target, {"segments": segments})
+        assert result["segments"] == 1
+        assert (target / "lyrics.txt").read_text(encoding="utf-8") == "Keep this\n"
+        assert (target / "lyrics.srt").read_text(encoding="utf-8") == (
+            "1\n00:00:00,250 --> 00:00:00,750\nKeep this\n"
+        )
+        assert json.loads((target / "lyrics.json").read_text(encoding="utf-8"))[
+            "segments"
+        ] == [valid]
+    else:
+        with pytest.raises(RuntimeError, match="No clear lyrics"):
+            music_lyrics.save(source, vocal, target, {"segments": segments})
+        assert not target.exists()
+
+    assert source.read_bytes() == b"original"
+    assert vocal.read_bytes() == b"isolated"
+
+
 def test_save_skips_overlapping_and_backward_captions(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
