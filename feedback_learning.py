@@ -153,7 +153,10 @@ def guidance(root: str | Path, kind: str, request: str,
             "WHERE kind=? AND task_id!=? AND NOT EXISTS ("
             "SELECT 1 FROM feedback AS newer "
             "WHERE newer.task_id=candidate.task_id "
-            "AND newer.generation>candidate.generation) "
+            "AND (newer.generation>candidate.generation OR ("
+            "newer.generation=candidate.generation AND ("
+            "newer.created>candidate.created OR ("
+            "newer.created=candidate.created AND newer.id>candidate.id))))) "
             "ORDER BY created DESC LIMIT 300",
             (kind, exclude_task_id),
         )]

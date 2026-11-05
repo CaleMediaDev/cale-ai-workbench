@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _thread: threading.Thread | None = None
 _last_attempts: dict[Path, float] = {}
+_repairing_roots: set[Path] = set()
 _attempt_lock = threading.Lock()
 MAX_REPAIR_ROOTS = 64
 
@@ -108,10 +109,14 @@ def ensure(root: Path = ROOT) -> Path:
 def start_background(root: Path = ROOT) -> None:
     """Quietly repair a missing executable after an update or accidental deletion."""
     global _thread
-    if working(root) or (_thread is not None and _thread.is_alive()):
-        return
     resolved_root = Path(root).resolve()
+    if working(resolved_root):
+        with _attempt_lock:
+            _last_attempts.pop(resolved_root, None)
+        return
     with _attempt_lock:
+        if resolved_root in _repairing_roots:
+            return
         now = time.monotonic()
         previous = _last_attempts.get(resolved_root)
         if previous is not None and now - previous < 300:
@@ -122,6 +127,7 @@ def start_background(root: Path = ROOT) -> None:
         _last_attempts[resolved_root] = now
         while len(_last_attempts) > MAX_REPAIR_ROOTS:
             _last_attempts.pop(next(iter(_last_attempts)))
+        _repairing_roots.add(resolved_root)
 
     def repair() -> None:
         try:
@@ -131,9 +137,18 @@ def start_background(root: Path = ROOT) -> None:
         else:
             with _attempt_lock:
                 _last_attempts.pop(resolved_root, None)
+        finally:
+            with _attempt_lock:
+                _repairing_roots.discard(resolved_root)
 
-    _thread = threading.Thread(target=repair, name="ffmpeg-repair", daemon=True)
-    _thread.start()
+    try:
+        _thread = threading.Thread(target=repair, name="ffmpeg-repair", daemon=True)
+        _thread.start()
+    except Exception:
+        with _attempt_lock:
+            _repairing_roots.discard(resolved_root)
+            _last_attempts.pop(resolved_root, None)
+        raise
 
 
 if __name__ == "__main__":

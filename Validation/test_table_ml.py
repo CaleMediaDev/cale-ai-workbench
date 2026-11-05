@@ -59,6 +59,36 @@ class TableMLTests(unittest.TestCase):
                                           "classification")
                     self.assertFalse(model.exists())
 
+    def test_prediction_rejects_unseen_category_colliding_with_numeric_feature(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            # Training saw only color=blue, so its encoded names were distinct.
+            model.write_text(json.dumps({
+                "format": "cale-table-model-v1", "problem_type": "regression",
+                "schema": {
+                    "color": {"kind": "category"},
+                    "color=red": {"kind": "number", "median": 0, "scale": 1},
+                },
+                "feature_names": ["color=blue", "color=red"],
+                "coefficients": [[0, 1]], "intercepts": [0], "classes": [],
+                "target_column": "value", "metric": "holdout_mean_absolute_error",
+                "holdout_score": 1, "baseline_score": 2,
+            }), encoding="utf-8")
+            prediction = root / "new.csv"
+            prediction.write_text("color,color=red\nblue,2\n", encoding="utf-8")
+            valid_output = root / "valid.csv"
+            predict_table_model(str(model), str(prediction), str(valid_output))
+            with valid_output.open(newline="", encoding="utf-8") as stream:
+                self.assertEqual(next(csv.DictReader(stream))["prediction"], "2")
+
+            prediction.write_text("color,color=red\nred,2\n", encoding="utf-8")
+            output = root / "colliding.csv"
+            with self.assertRaisesRegex(ValueError, "Feature names collide"):
+                predict_table_model(str(model), str(prediction), str(output))
+            self.assertFalse(output.exists())
+            self.assertFalse(list(root.glob(".table-prediction-*")))
+
     def test_large_finite_feature_median_can_be_trained_and_reused(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

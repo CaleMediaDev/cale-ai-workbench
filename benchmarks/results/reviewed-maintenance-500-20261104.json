@@ -1,0 +1,104 @@
+{
+  "release": "0.5.500",
+  "source_before_metadata": "69e58b019d93693abd0110ab3064576129ed1ebc",
+  "source_tree": "99cebc875a862b47f1a59cedb89a7f83daca71bd",
+  "accepted_prs": [
+    {
+      "number": 628,
+      "head": "30c033e9c35c07890b189d24ed2b6408b0e50b97",
+      "merge": "a3bc78b77adab1131a10f6743f3684bb03eb0b9f",
+      "baseline": "1 failed, 48 deselected in 0.38s",
+      "candidate": "49 passed, 24 subtests passed in 2.35s"
+    },
+    {
+      "number": 630,
+      "head": "b03296992ce509d567f4a35b012786664ce2ceff",
+      "merge": "802922082b1dad5ccba876bed28effacdeca4938",
+      "baseline": "Submitted symlink test skipped on Windows; independent metadata proof: base copies4 linked references, candidate skips them while installing7 ordinary skills.",
+      "candidate": "7 passed, 5 skipped in 0.95s"
+    },
+    {
+      "number": 632,
+      "head": "ad869b87b66d574bbd99ca192a5fccb936340bf3",
+      "merge": "13a95546758fbe627d76abd292e94cd61ade6317",
+      "baseline": "2 failed, 35 deselected in 1.22s",
+      "candidate": "37 passed in 1.42s"
+    },
+    {
+      "number": 633,
+      "head": "f9d90b8e0e06d829afa545fb55325ba62e634645",
+      "merge": "847917f52a679677961b0f7bb13a6c9f1fb31990",
+      "baseline": "1 failed, 22 deselected in 0.29s",
+      "candidate": "23 passed in 0.17s"
+    },
+    {
+      "number": 634,
+      "head": "1d487ed32633a9cb819f1066e40708884ea4cd7c",
+      "merge": "e46772bc575d9c49fb57da4db308a62d88ac8d11",
+      "baseline": "3 failed, 19 deselected in 0.32s",
+      "candidate": "22 passed in 0.29s"
+    }
+  ],
+  "closed_unmerged_prs": [
+    {
+      "number": 626,
+      "head": "ed04b7f9701eac5ade261531c74f595d1dd30a20",
+      "reason": "All3 submitted tab-before-colon documents are rejected by both runtime PyYAML and configure_install ruamel parsers. Regex acceptance does not demonstrate a usable configured model alias; no supported-runtime bug reproduced.",
+      "evidence": "All3 examples rejected by both PyYAML.safe_load and configure_install ruamel.yaml.YAML().load."
+    }
+  ],
+  "maintainer_diagnostics": {
+    "commits": [
+      {
+        "reviewed_commit": "b8e0e2eed024ca38c882fd874d30c90412d5d411",
+        "public_commit": "6339be383d03b8e1d23944ff3f4f6bf2ea0488b1"
+      },
+      {
+        "reviewed_commit": "b2e680eed031eafce4baf34038b2d386b5b4c667",
+        "public_commit": "d8d0adbe5397b0b05497c4ed7c862afb03e5200a"
+      },
+      {
+        "reviewed_commit": "cb0144419fdbbe2d4abff58f30006bcdd2c58307",
+        "public_commit": "69e58b019d93693abd0110ab3064576129ed1ebc"
+      }
+    ],
+    "original_review_findings": [
+      "Original b8 stat check preceded an unbounded history read; replacement-on-open could decode oversized content.",
+      "Corrected b2 still retained arbitrary-length version digit groups; a100000-digit version produced100159-byte optional history."
+    ],
+    "original_baseline": "3 failed,1 passed,18 deselected on unchanged source: missing deferral reason/history. This is not a claim original b8 was release-ready.",
+    "read_bound_regression": "1 failed,24 deselected on b8: oversized replacement was decoded; b2 reads exactly32001 bytes and decodes only<=32000.",
+    "release_label_regression": "1 failed,25 deselected on b2: huge version exceeds history budget; cb01444 caps release strings at64 before regex, otherwise unknown.",
+    "corrected_full_module": "25 passed,1 skipped,2 subtests passed in0.71s",
+    "retention": {
+      "attempt_limit": 3,
+      "log_tail_read_bytes": 8192,
+      "history_read_bytes": 32001,
+      "maximum_decodable_history_bytes": 32000,
+      "maximum_release_characters": 64,
+      "allowed_log_lines": "pytest progress/counts only; no failure bodies, user paths, task text or raw error messages"
+    },
+    "policy": "Diagnostic metadata/history only; existing busy decisions, cancellation, timeout, failure retry and monitor cadence unchanged. Unknown live churn cause remains unproven; no installed self-check pass is asserted."
+  },
+  "combined_validation": {
+    "command": "python -m pytest -q Validation/test_chrome_connector.py Validation/test_install_environment.py Validation/test_install_retry.py Validation/test_music_style.py Validation/test_self_diagnostics.py Validation/test_self_update.py Validation/test_skill_catalog.py Validation/test_toolbox_mcp.py Validation/test_voice_assistant.py",
+    "exit_code": 0,
+    "unique_test_modules": 9,
+    "passed": 204,
+    "skipped": 6,
+    "subtests_passed": 26,
+    "seconds": 19.48,
+    "includes_updater_installer_modules": 3,
+    "counts_overlap_prior_focused_runs": true
+  },
+  "packaging_validation": {
+    "powershell_installer_scripts_parsed": 6,
+    "archive_contract": "Produced source ZIP validated by self_update.validated_manifest; final artifact hashes recorded separately."
+  },
+  "limitations": [
+    "630 actual symlink/permission tests skip on Windows without privileges; added read-only metadata proof exercises the guard but is not an actual external symlink traversal.",
+    "628 voice synthesis/playback and632 browser transport are mocked; no microphone/audio/browser session or model inference used."
+  ],
+  "excluded": "Private scalar-correction, assertion-repair, ownership-priority, typed-target and authored-note completion/grading experiments. No new end-to-end local-app completion claim.",
+  "runtime_manifest_entries": 250
+}

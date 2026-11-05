@@ -1,0 +1,22 @@
+{
+  "release": "0.5.526",
+  "base": "2dc8dae5567928ea0b37cbc76fae1fc00c064808",
+  "change": "A waiting contribution attempt no longer claims all enabled AI sources or GitHub are unavailable. Direct users to the live donation panel; other available reviews can continue.",
+  "sha256": {
+    "donation_ui.py": "1548f0cb181ad362175e82181e3271d324f41d312e0a70a8db9c7909e4427a7c",
+    "Validation/test_donation.py": "7d10c7316f21754eab21725377ab019062f49f038edb107e3a9bc24313f2545c"
+  },
+  "validation": {
+    "donation_module": {
+      "passed": 282,
+      "seconds": 53.65,
+      "runner_exit_code": 0
+    }
+  },
+  "limits": [
+    "No inference, quota, consent, scheduling, account, or publishing behavior changed.",
+    "Local observation: three recent completed ChatGPT reviews reported13608 tokens; no active GitHub diagnostic or resource cooldown. One failed attempt was followed by another completed review.",
+    "Other-PC current cause is not observed. The donation panel retains detailed diagnostics; a generic chat message alone cannot identify that cause.",
+    "Prior525 composite Tk qualification and unresolved batch-init issue remain unchanged. No full installed-suite or fresh-PC pass is claimed."
+  ]
+}

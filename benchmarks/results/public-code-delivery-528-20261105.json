@@ -1,0 +1,34 @@
+{
+  "release": "0.5.528",
+  "base": "f2bf91ac607d77fce79646267d47050fdc8ea97d",
+  "sha256": {
+    "donation.py": "c8d2fb5eeb3ee87bf716e9ea6ad71218c9df756870067e56d7501bec734f1e87",
+    "Validation/test_donation.py": "b9d25b6e2ef01e610f51e0f02e752123aedac6c4d51999bf94829b3ae4637429"
+  },
+  "validation": {
+    "donation_module": {
+      "passed": 318,
+      "seconds": 77.51,
+      "exit_code": 0
+    }
+  },
+  "existing_saved_payload_policy": "2f2342462a62b4057d69608630bc596a2ecdf9e3dc4c28d2d757104510578ced",
+  "changes": [
+    "Code proposals require credential-free public API confirmation of exact author, branch, commit, upstream, run and job markers before submitted status or sent chat announcements.",
+    "Unknown/publicly hidden results retain their original validated payload and PR intent. Shared bounded cooldown prevents repeated public probes and new AI work while confirmation waits.",
+    "Existing saved payload validation-policy digest remains unchanged; valid cached work is not discarded merely to add this delivery check."
+  ],
+  "real_read_only_probes": {
+    "public717": "200; canonical URL, author and upstream returned",
+    "public728": "404; not confirmed",
+    "owner_authenticated728": "404; not confirmed"
+  },
+  "limits": [
+    "No claim that clientPR728 exists, is fabricated, or has a known account restriction. GitHub does not currently expose it to the owner or public checks.",
+    "This gates new/pending durable code proposals. It does not retroactively confirm historical submitted rows or change the separate model-experiment publication path.",
+    "Anonymous API limits are separate from donor authentication.403/429back off conservatively; no shared API keys are used.",
+    "No proof of donor-owner visibility beyond public matching metadata, no acceptance/merge claim, and no GitHub restriction bypass.",
+    "Installed527 full suite ended deferred after2181passes/9skips/286subtests,2190of3600nodes; not a full pass. Private unfinished app remains5of8 and actual continuation made no progress.",
+    "No full installed-suite or fresh-PC qualification for this release."
+  ]
+}

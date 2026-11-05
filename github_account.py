@@ -7,6 +7,8 @@ reads a token, and the public workbench package contains no account secret.
 from __future__ import annotations
 
 import os
+import re
+import threading
 import subprocess
 from pathlib import Path
 
@@ -46,15 +48,37 @@ def account():
     )
 
 
-def connect():
-    """Open the interactive GitHub browser approval flow in a visible console."""
+def connect(on_code=None):
+    """Keep GitHub's official browser flow; show device codes in Cale, not CMD."""
     gh = executable()
     if not gh:
-        raise RuntimeError(
-            "GitHub tools are still installing. Try again when setup finishes."
-        )
-    return subprocess.Popen(
-        [gh, "auth", "login", "--web", "--clipboard", "--git-protocol", "https"],
-        cwd=ROOT,
-        creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
+        raise RuntimeError("GitHub tools are still installing. Try again when setup finishes.")
+    process = subprocess.Popen(
+        [gh, "auth", "login", "--web", "--clipboard", "--git-protocol", "https", "--hostname", "github.com"],
+        cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace", creationflags=HIDE,
     )
+    # All account/protocol choices are explicit. A newline answers the CLI's
+    # optional 'Press Enter to open the browser' prompt without a terminal.
+    try:
+        process.stdin.write("\n")
+        process.stdin.close()
+    except (OSError, BrokenPipeError):
+        pass
+
+    def read_login_code():
+        try:
+            while True:
+                line = process.stdout.readline(2048)
+                if not isinstance(line, str) or not line:
+                    break
+                line = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line)
+                match = re.search(r"one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})\b", line, re.I)
+                if match and on_code:
+                    on_code(match[1].upper())
+        except (OSError, ValueError):
+            pass
+        finally:
+            process.stdout.close()
+    threading.Thread(target=read_login_code, daemon=True).start()
+    return process

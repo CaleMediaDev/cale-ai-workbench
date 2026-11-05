@@ -1,0 +1,40 @@
+{
+  "release": "0.5.523",
+  "source_before_documentation": "273a5cad22198dcdc76ef007a890d737c18d6e39",
+  "status": "qualified source; assembled payload checks recorded in release notes",
+  "sha256": {
+    "donation.py": "9ad6c909fcc5d97f8c12b7b2fea5df5969ee0ca3366e7ec4dec95a928f9ccecb",
+    "donation_ui.py": "ee216aafcbed11085e0fd70252b2c102582d5c91edaa3ccc31b7d57532e024f1",
+    "Validation/test_donation.py": "530af5fa2042632341f79b3d29367b1c4446a4cb0aafbfa6b9abc6dd9080cfd6",
+    "long_tasks.py": "51adabc7de4eb67cd469da02653c0cbe56d8333caee409e91ad4eac4ff8b764c",
+    "Validation/test_long_tasks.py": "3596710388719f57debe8df52d21c5bb580c5e4142924b8e8ca82e5ad793229c"
+  },
+  "validation": {
+    "donation_account_modules": {
+      "passed": 285,
+      "subtests": 108,
+      "seconds": 36.95
+    },
+    "long_tasks_module": {
+      "passed": 192,
+      "seconds": 54.57
+    },
+    "independent_policy_processes": 5,
+    "independent_cross_process_reconciliation_cases": 3,
+    "root_update_panel_review": "Actual production helper and poll wiring reviewed; active/unknown auth still defers, existing setup/task gates unchanged.",
+    "assembled_payload": "Not yet run; required before publication"
+  },
+  "changes": [
+    "Validated public donation drafts are saved before upload and resumed with their original run, stable branch and actual usage receipts after a restart or GitHub failure.",
+    "Publication rechecks current source, consent and account authority. Ambiguous pull-request delivery is reconciled through exact REST records without blind duplicate posts or model regeneration.",
+    "Donation token displays read asynchronously from a bounded read-only snapshot; database writer locks no longer block the Tk counter refresh.",
+    "An idle donation panel no longer postpones a verified update indefinitely; active account connections and other input dialogs remain protected."
+  ],
+  "limits": [
+    "The other PC is reported to remain on 0.5.521. Its exact donation and updater failure remain unconfirmed until it updates and provides a specific diagnosis.",
+    "A GitHub API without a client idempotency key cannot guarantee automatic resolution of every ambiguous POST. Unconfirmed drafts keep their area reserved while other eligible areas continue.",
+    "Crash, retry and publication tests use real local processes and SQLite with synthetic model results and GitHub responses; they do not claim a real remote account repair or accepted fix.",
+    "The preceding 0.5.522 installed full suite passed 3433 tests with 27 skips and 402 subtests. That result is not represented as a new full-suite run for 0.5.523.",
+    "No existing Python migration, fresh physical PC install, private native-agent experimental contract, camera control or end-to-end autonomous app qualification is included."
+  ]
+}

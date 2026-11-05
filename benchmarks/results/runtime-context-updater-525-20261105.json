@@ -1,0 +1,51 @@
+{
+  "release": "0.5.525",
+  "source_before_documentation": "5b86c9f3dc49bdc3e151810e0112c0c12e8a24c1",
+  "status": "Qualified source; packaged checks required before publication.",
+  "sha256": {
+    "task_context.py": "c2a42ca6e937390d4c1db3aa2afb89c307a46b174709f56434b951e08839d915",
+    "native_agent.py": "80fea839f0d5df45f40e096e27f27bb0ebb4dbc86fcaf66f20afba8a58f141a6",
+    "Validation/test_native_agent.py": "ac1b086df3cd47e0aaf77fc8b147786ae57e6e57b8a1c6a40039e861a6661648",
+    "long_tasks.py": "56c881a398f62b1f5eec4c37992bea6f9922ca330486a552c5a428c2bf944500",
+    "Validation/test_long_tasks.py": "8c221cf8396f38c2e9510ccbc50e2df08c94491f6dc2fb091f01fa3f6c6eeb17"
+  },
+  "validation": {
+    "public_native_module": {
+      "passed": 546,
+      "seconds": 628.94,
+      "original_checkpoint_unchanged": true
+    },
+    "updater_archive_full_module": {
+      "passed": 211,
+      "seconds": 75.0
+    },
+    "updater_integrated_source_module": {
+      "passed": 210,
+      "skipped": 1,
+      "seconds": 62.9,
+      "skip_note": "Conditional Tk skip; exact node/reason not retained by initial terminal command. Packaged run records skip reasons."
+    },
+    "independent_context_cases": {
+      "passed": 20,
+      "seconds": 6.04
+    },
+    "independent_updater_cases": {
+      "passed": 22,
+      "seconds": 7.45
+    }
+  },
+  "changes": [
+    "Normal task context labels historical component-check records separately from fresh source verification and whole-task completion. Exact built-in startup notes are labelled unauthored; custom notes are retained.",
+    "No-checkpoint recovery reads existing SQLite with read-only fail-fast access and a VM budget, without initialization or migration. Missing, locked, corrupt or malformed data remains explicitly unknown; custom notes survive.",
+    "Fix the update guard added in523: a disabled Connected button is not evidence of active sign-in. Explicit connection-operation events protect real sign-in work while allowing connected-idle updates.",
+    "Authentication work is gated until its thread startup commits. Failed/ambiguous startup cancels the old target before dispatch, and a late abandoned thread cannot clear a newer pending operation."
+  ],
+  "limits": [
+    "Connected clients on523/524 may need the Windows installer once because the old guard can block delivery of its own fix. Subsequent updates use the corrected operation signal.",
+    "Normal fresh-message context retains the existing writable cache. Read-only recovery is limited to the no-checkpoint fallback; no broad database migration is included.",
+    "SQLite VM/busy settings cannot preempt arbitrary synchronous OS/filesystem I/O; controlled timing is not a universal millisecond SLA.",
+    "Saved unit results do not prove current app behavior. The private unfinished expense app remains5/8; no new live model/app success is claimed.",
+    "The other PC proposal-search422 request is fixed in the preceding524 and retained here; its full fork/branch/PR publishing access remains unverified.",
+    "No new account grants, model downloads, camera/microphone settings, cloud keys or existing Python migration are part of this source change."
+  ]
+}

@@ -45,7 +45,11 @@ def _sources(root: Path):
                 yield source, relative
     for name in SHARED_REFERENCES:
         source = bundled / "references" / name
-        if source.is_file() and not source.is_symlink():
+        if (
+            not source.parent.is_symlink()
+            and source.is_file()
+            and not source.is_symlink()
+        ):
             yield source, Path("references") / name
 
 

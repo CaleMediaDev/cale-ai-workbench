@@ -159,6 +159,26 @@ def test_negated_lead_vocals_preserve_vocal_texture():
     assert music_style.requires_sustained_vocals(positive)
 
 
+def test_negated_rap_does_not_turn_vocal_chops_into_a_lead_request():
+    for negation in ("no", "without any", "avoid", "don't want"):
+        for sound in ("rap", "rapping"):
+            exclusion = negation + " " + sound
+            request = "Heavy dubstep with vocal chops, " + exclusion
+            assert not music_style.explicit_lead_vocals(request)
+            assert not music_style.unambiguous_vocal_song(request)
+            assert not music_style.requires_sustained_vocals(request)
+            caption = music_style.enhance(request)
+            assert "Sparse chopped vocal syllables" in caption
+            assert exclusion not in caption
+            assert not music_style.requires_sustained_vocals(caption)
+            assert music_style.enhance(caption) == caption
+
+    positive = "Heavy dubstep with vocal chops and rapped verses"
+    assert music_style.explicit_lead_vocals(positive)
+    assert music_style.unambiguous_vocal_song(positive)
+    assert music_style.requires_sustained_vocals(positive)
+
+
 def test_sparse_female_hook_does_not_get_full_verse_direction():
     request = ("Female singing voice, main vocal hook: waapy waaap. "
                "Very little conventional singing, with massive instrumental drops.")
@@ -284,6 +304,19 @@ def test_explicit_lead_and_chops_keep_full_lead_caption_idempotent():
         assert "vocal chops" in caption
         assert music_style.enhance(caption) == caption
         assert music_style.requires_sustained_vocals(caption)
+
+
+def test_old_chopped_feedback_does_not_override_current_sung_verses():
+    request = "Female singer with sung verses and chorus"
+    expected = music_style.enhance(request)
+    for complaint in ("There were vocal chops", "There were only short hooks"):
+        feedback = "\nPast user feedback: " + complaint
+        caption = music_style.enhance(request + feedback)
+        assert caption == expected + feedback
+        assert "female lead vocals throughout, clear sung verses and chorus" in caption
+        assert "short female vocal hooks" not in caption
+        assert music_style.requires_sustained_vocals(caption)
+        assert music_style.enhance(caption) == caption
 
 
 def test_lead_cue_from_old_feedback_does_not_override_current_chopped_texture():

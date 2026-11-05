@@ -38,6 +38,8 @@ class ToneAdaptationTests(unittest.TestCase):
         for finish_reason, content, expected in (
             ("length", "I was going to say that", "I heard you. What do you need?"),
             ("content_filter", "I was going to say that", "I heard you. What do you need?"),
+            ("tool_calls", "Let me check that for you.", "I heard you. What do you need?"),
+            ("function_call", "Let me check that for you.", "I heard you. What do you need?"),
             ("stop", "Glad I could help!", "Glad I could help!"),
         ):
             with self.subTest(finish_reason=finish_reason):
@@ -47,6 +49,22 @@ class ToneAdaptationTests(unittest.TestCase):
                 }]}
                 with patch("cloud_ai.post", return_value=result):
                     self.assertEqual(tone_adaptation.social_reply("Hello"), expected)
+
+    def test_tool_call_metadata_uses_fallback_without_matching_finish_reason(self):
+        for metadata in (
+            {"tool_calls": [{"id": "call_1", "type": "function",
+                             "function": {"name": "perform_task", "arguments": "{}"}}]},
+            {"function_call": {"name": "perform_task", "arguments": "{}"}},
+        ):
+            for finish_reason in (None, "stop"):
+                with self.subTest(metadata=metadata, finish_reason=finish_reason):
+                    message = {"content": "I've completed that task.", **metadata}
+                    choice = {"message": message}
+                    if finish_reason is not None:
+                        choice["finish_reason"] = finish_reason
+                    with patch("cloud_ai.post", return_value={"choices": [choice]}):
+                        self.assertEqual(tone_adaptation.social_reply("Please do that task."),
+                                         "I heard you. What do you need?")
 
     def test_malformed_model_response_leaves_a_short_reply(self):
         for result in ({"choices": None}, {"choices": [{"message": None}]}):

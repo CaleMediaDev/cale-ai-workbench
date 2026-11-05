@@ -333,6 +333,34 @@ def test_inspector_handles_overlapping_cache_publications(tmp_path):
     assert not list((tmp_path / ".local-ai/document-cache").glob("*.tmp"))
 
 
+def test_inspector_rebuilds_invalid_or_oversized_cache(tmp_path):
+    source = tmp_path / "notes.pdf"
+    original = b"unchanged PDF source"
+    source.write_bytes(original)
+    text = "fresh document text"
+
+    with patch.object(file_chat, "ROOT", tmp_path), patch.object(
+        file_chat, "document_text", return_value=text,
+    ) as extract, patch.object(project_memory, "index_document_text"), patch.object(
+        project_documents, "MAX_EXTRACTED_CHARS", 64,
+    ):
+        first = project_documents.inspect(tmp_path, "notes.pdf")
+        assert first["text"] == text and not first["cached"]
+        cache = next((tmp_path / ".local-ai/document-cache").glob("*.txt"))
+
+        for corrupt in (b"\xff", b"x" * 65):
+            cache.write_bytes(corrupt)
+            recovered = project_documents.inspect(tmp_path, "notes.pdf")
+            reused = project_documents.inspect(tmp_path, "notes.pdf")
+            assert recovered["text"] == reused["text"] == text
+            assert not recovered["cached"] and reused["cached"]
+            assert cache.read_bytes() == text.encode("utf-8")
+            assert source.read_bytes() == original
+
+    assert extract.call_count == 3
+    assert not list(cache.parent.glob("*.tmp"))
+
+
 def test_inspector_preserves_extracted_line_endings_in_cache(tmp_path):
     source = tmp_path / "notes.pdf"
     source.write_bytes(b"placeholder PDF source")

@@ -1,0 +1,36 @@
+{
+  "release": "0.5.529",
+  "base": "eb767b643593aa870859470e051d6aaf41574291",
+  "sha256": {
+    "donation.py": "8f6a0513e09f2cd4678c511b99337983d9c1f5514fbb1af8063108d4aed6acfd",
+    "Validation/test_donation.py": "fd8cbeeb76b8c5c64aef67727dfafaa01ef2b6996b8b72e5589be884240d2dbe",
+    "small_training.py": "55e0cea16b25c834ae1629d194a3d2c0637eabba168f01427417de4be275f67f"
+  },
+  "validation": {
+    "donation_module": {
+      "passed": 343,
+      "seconds": 111.43,
+      "exit_code": 0
+    },
+    "focused_model_cases": {
+      "passed": 27,
+      "seconds": 19.35
+    },
+    "adversarial_baseline": "4 new cases failed before correction: unverified metadata/changed refs could reach PR dispatch. All pass after pre-POST ref and immutable delta checks."
+  },
+  "trainer_bytes_match_published528": true,
+  "code_payload_policy_unchanged": "2f2342462a62b4057d69608630bc596a2ecdf9e3dc4c28d2d757104510578ced",
+  "changes": [
+    "Cale scheduler model contributions use a per-run/per-account SQLite journal with a live native-thread owner, exact reviewed artifact hashes and durable remote mutation intents.",
+    "Verified existing forks are reused. Saved branch deltas must contain exactly the four reviewed JSON artifacts on confirmed upstream ancestry; current ref is rechecked before PR dispatch.",
+    "Uncertain PR POSTs reconcile rather than repeat. Definitive rejection and cancellation before dispatch can retry safely. Public matching metadata is required before reporting delivery.",
+    "Cached qualified upload retry is separate from new training: one-minute transactional transport claims preserve the original candidate, run ID and maximum recorded compute time. Original hourly training policy remains unchanged.",
+    "Trainer bytes stay identical to528; legacy direct trainer publisher remains for provenance compatibility. Cale scheduler uses the new donation-layer transport."
+  ],
+  "limits": [
+    "Tests use real-shaped in-memory GitHub and synthetic provenance-valid artifact fixtures; no real training, donor account, PR mutation, accepted fix or model activation is claimed.",
+    "SQLite claims are local to a PC, not a distributed cross-PC lease. Ref/provenance checks are repeated observations, not an atomic GitHub compare-and-POST transaction.",
+    "Historical submitted rows are not retroactively confirmed. GitHub restrictions and anonymous visibility API limits cannot be overridden.",
+    "No full installed-suite, fresh-PC, microphone/camera/music or app-completion pass is claimed. Private unfinished app remains5/8."
+  ]
+}
