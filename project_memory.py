@@ -494,53 +494,133 @@ def verification_context(project):
     finally:_VERIFICATION_PROJECT.reset(token)
 
 
+# Verification is an explicit disk operation, never a stat-only digest cache.
+_VERIFICATION_MAX_BYTES = 2 * 1024**3
+_VERIFICATION_MAX_FILES = 16384
+_VERIFICATION_MAX_VISITED = 65536
+_VERIFICATION_MAX_PATH_BYTES = 4 * 1024**2
+_VERIFICATION_MAX_SECONDS = 60.0
+_VERIFICATION_READ_BYTES = 1024**2
+
+
+def _verification_file_identity(value):
+    return (value.st_dev, value.st_ino, value.st_size,
+            value.st_mtime_ns, value.st_ctime_ns)
+
+
 def verification_source_state(folder):
-    """Bounded content manifest; omitted dependencies make scope explicitly limited."""
+    """Stream a bounded, complete source manifest or label it explicitly limited.
+
+    Hash every included byte on each capture: size/mtime alone are not content
+    identity. Before/open/after file identity and directory rechecks detect
+    ordinary edits/replacements/listing races. This is not a filesystem snapshot
+    or a sandbox against deliberately coordinated same-user tampering.
+    """
     import json
+    import stat
     root = _artifact_project_root(folder)
-    entries=[]; pending=[root]; total=0; omitted=0; visited=0
+    started=time.monotonic()
+    entries=[]; pending=[root]; directories=[]; total=consumed=visited=path_bytes=0
+    omitted=0; reasons=set(); exhausted=False
     excluded={'.git','__pycache__'}
     runtime={'.venv','venv','node_modules','Toolbox'}
-    while pending and visited<4096 and len(entries)<2048 and total<=32*1024*1024:
+    def limited(reason):
+        nonlocal omitted
+        omitted+=1;reasons.add(reason)
+    def expired():
+        return time.monotonic()-started>=_VERIFICATION_MAX_SECONDS
+    def unsafe(value):
+        return stat.S_ISLNK(value.st_mode) or bool(getattr(value,'st_file_attributes',0)&0x400)
+    while pending and not exhausted:
+        if expired():limited('elapsed_budget');break
         directory=pending.pop()
-        from itertools import islice
-        with os.scandir(directory) as children:
-            items=list(islice(children,2049))
-        if len(items)>2048:omitted+=1
-        items=sorted(items[:2048],key=lambda item:item.name)
-        for item in items:
-            visited+=1
-            if visited>4096:omitted+=1;break
-            path=Path(item.path)
-            if item.is_symlink() or getattr(item.stat(follow_symlinks=False),'st_file_attributes',0)&0x400:
-                omitted+=1;continue
-            if item.is_dir(follow_symlinks=False):
-                if item.name in excluded:continue
-                if item.name in runtime:omitted+=1;continue
-                if path==root/'.local-ai':
-                    # This directory owns mutable task state, not app source.
-                    # Any code asset there prevents a full source-scope claim.
-                    state_items=list(islice(path.iterdir(),2049))
-                    if (len(state_items)>2048 or any(child.is_dir() or child.is_symlink()
-                            or child.suffix.lower() in {'.js','.mjs','.html','.css','.py'} for child in state_items)):
-                        omitted+=1
-                    continue
-                pending.append(path);continue
-            if not item.is_file(follow_symlinks=False):omitted+=1;continue
-            if len(entries)>=2048:omitted+=1;break
-            before=path.stat()
-            if before.st_size>2*1024*1024 or total+before.st_size>32*1024*1024:
-                omitted+=1;continue
-            with path.open('rb') as stream:data=stream.read(2*1024*1024+1)
-            after=path.stat()
-            if len(data)>2*1024*1024 or (before.st_size,before.st_mtime_ns)!=(after.st_size,after.st_mtime_ns):
-                omitted+=1;continue
-            total+=len(data)
-            entries.append([path.relative_to(root).as_posix(),hashlib.sha256(data).hexdigest()])
-    omitted+=len(pending)
+        try:
+            initial=directory.stat(follow_symlinks=False)
+            if unsafe(initial) or not stat.S_ISDIR(initial.st_mode):
+                limited('linked_or_changed_directory');continue
+            with os.scandir(directory) as children:
+                for item in children:
+                    if expired():limited('elapsed_budget');exhausted=True;break
+                    if visited>=_VERIFICATION_MAX_VISITED:
+                        limited('visited_budget');exhausted=True;break
+                    visited+=1
+                    path=Path(item.path)
+                    relative=path.relative_to(root).as_posix()
+                    path_bytes+=len(relative.encode('utf-8'))
+                    if path_bytes>_VERIFICATION_MAX_PATH_BYTES:
+                        limited('path_budget');exhausted=True;break
+                    try:
+                        before=path.stat(follow_symlinks=False)
+                        if unsafe(before):limited('linked_path');continue
+                        if stat.S_ISDIR(before.st_mode):
+                            if item.name in excluded:continue
+                            if item.name in runtime:limited('excluded_runtime');continue
+                            if path==root/'.local-ai':
+                                # Mutable task metadata is not app source. Code
+                                # or nested/linked assets here prevent full scope.
+                                from itertools import islice
+                                with os.scandir(path) as state_children:
+                                    state_items=list(islice(state_children,2049))
+                                if (len(state_items)>2048 or any(child.is_dir(follow_symlinks=False)
+                                        or child.is_symlink() or getattr(child.stat(follow_symlinks=False),'st_file_attributes',0)&0x400
+                                        or Path(child.name).suffix.lower() in {'.js','.mjs','.html','.css','.py'}
+                                        for child in state_items)):
+                                    limited('task_state_assets')
+                                continue
+                            pending.append(path);continue
+                        if not stat.S_ISREG(before.st_mode):limited('special_file');continue
+                        if len(entries)>=_VERIFICATION_MAX_FILES:
+                            limited('file_budget');exhausted=True;break
+                        if before.st_size<0 or consumed+before.st_size>_VERIFICATION_MAX_BYTES:
+                            limited('byte_budget');continue
+                        digest=hashlib.sha256();size=0;complete=True
+                        with path.open('rb') as stream:
+                            opened=os.fstat(stream.fileno())
+                            # Windows Path.stat and CRT fstat expose different ctime
+                            # semantics. Compare all identity fields within each
+                            # API; bridge path/descriptor by dev/ino/size/mtime.
+                            if _verification_file_identity(before)[:4]!=_verification_file_identity(opened)[:4]:
+                                limited('changed_file');continue
+                            while True:
+                                if expired():
+                                    limited('elapsed_budget');exhausted=True;complete=False;break
+                                chunk=stream.read(min(_VERIFICATION_READ_BYTES,
+                                                      _VERIFICATION_MAX_BYTES-consumed+1))
+                                if not chunk:break
+                                consumed+=len(chunk);size+=len(chunk)
+                                if consumed>_VERIFICATION_MAX_BYTES:
+                                    limited('byte_budget');exhausted=True;complete=False;break
+                                digest.update(chunk)
+                            after_open=os.fstat(stream.fileno())
+                        after=path.stat(follow_symlinks=False)
+                        if (unsafe(after) or _verification_file_identity(opened)!=_verification_file_identity(after_open)
+                                or _verification_file_identity(before)!=_verification_file_identity(after)
+                                or size!=before.st_size):
+                            limited('changed_file');continue
+                        if complete:
+                            total+=size;entries.append([relative,digest.hexdigest()])
+                    except (OSError,ValueError):
+                        limited('unavailable_path')
+            after_directory=directory.stat(follow_symlinks=False)
+            if unsafe(after_directory) or _verification_file_identity(initial)!=_verification_file_identity(after_directory):
+                limited('changed_directory')
+            directories.append((directory,_verification_file_identity(after_directory)))
+        except (OSError,ValueError):
+            limited('unavailable_directory')
+    # A new/deleted/renamed entry in an already scanned directory must not turn
+    # an incomplete listing into a full-source claim while later folders hash.
+    for directory,identity in directories:
+        if expired():limited('elapsed_budget');break
+        try:
+            current=directory.stat(follow_symlinks=False)
+            if unsafe(current) or _verification_file_identity(current)!=identity:
+                limited('changed_directory')
+        except (OSError,ValueError):limited('unavailable_directory')
+    if pending:omitted+=len(pending);reasons.add('unvisited_directories')
     encoded=json.dumps(sorted(entries),separators=(',',':')).encode()
     return {'sha256':hashlib.sha256(encoded).hexdigest(),'files':len(entries),'bytes':total,
-            'omitted':omitted,'scope':'limited_dependency_manifest' if omitted else 'full_project_source'}
+            'omitted':omitted,'scope':'limited_dependency_manifest' if omitted else 'full_project_source',
+            'limitations':sorted(reasons)}
 
 
 def verification_basis(folder, project=None):

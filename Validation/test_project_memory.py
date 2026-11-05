@@ -1,6 +1,8 @@
 """Persistent, project-scoped memory and full-text indexing behavior."""
 
 import hashlib
+import pytest
+import json
 import os
 import sqlite3
 import tempfile
@@ -513,7 +515,8 @@ def test_recovery_artifact_guard_rejects_database_link(tmp_path):
 
 # Scoped host evidence port: original accepted85552a5 regressions.
 
-def test_verification_manifest_covers_external_js_and_marks_omitted_inputs_limited(tmp_path):
+def test_verification_manifest_covers_external_js_and_marks_omitted_inputs_limited(tmp_path,monkeypatch):
+    monkeypatch.setattr(memory,"_VERIFICATION_MAX_BYTES",2*1024*1024)
     root=tmp_path/'app';root.mkdir();(root/'index.html').write_text('<script src="app.js"></script>')
     script=root/'app.js';script.write_text('let n=1')
     first=memory.verification_source_state(root)
@@ -569,3 +572,101 @@ def test_verification_receipt_wont_attest_hot_replaced_unloaded_checker(tmp_path
             checker_file=runner,basis_before=basis,loaded_checker_sha256=loaded) is None
         assert trusted.call_count==1
     assert memory.current_check_receipts(root,project,checker_file=runner)==[]
+
+
+def test_verification_streams_complete_assets_above_old_two_mib_cap(tmp_path,monkeypatch):
+    asset=tmp_path/'sprite.bin';data=b'x'*(3*1024*1024+7);asset.write_bytes(data)
+    original=Path.open;sizes=[]
+    class Reader:
+        def __init__(self,stream):self.stream=stream
+        def __enter__(self):return self
+        def __exit__(self,*args):return self.stream.__exit__(*args)
+        def fileno(self):return self.stream.fileno()
+        def read(self,size=-1):
+            sizes.append(size);assert 0<=size<=1024*1024,'source hashing must stream at most1MiB'
+            return self.stream.read(size)
+    def opened(path,mode='r',*args,**kwargs):
+        stream=original(path,mode,*args,**kwargs)
+        return Reader(stream) if path==asset and mode=='rb' else stream
+    monkeypatch.setattr(Path,'open',opened)
+    observed=memory.verification_source_state(tmp_path)
+    assert observed['scope']=='full_project_source' and observed['bytes']==len(data)
+    expected=hashlib.sha256(json.dumps([['sprite.bin',hashlib.sha256(data).hexdigest()]],separators=(',',':')).encode()).hexdigest()
+    assert observed['sha256']==expected and sizes
+
+
+def test_verification_complete_manifest_exceeds_old_directory_and_file_caps(tmp_path):
+    assets=tmp_path/'assets';assets.mkdir()
+    for index in range(2050):(assets/f'{index:05}.txt').write_bytes(b'x')
+    observed=memory.verification_source_state(tmp_path)
+    assert observed['scope']=='full_project_source' and observed['files']==2050 and observed['bytes']==2050
+
+
+@pytest.mark.parametrize('budget,reason', [('_VERIFICATION_MAX_BYTES','byte_budget'),
+    ('_VERIFICATION_MAX_FILES','file_budget'),('_VERIFICATION_MAX_VISITED','visited_budget'),
+    ('_VERIFICATION_MAX_PATH_BYTES','path_budget'),('_VERIFICATION_MAX_SECONDS','elapsed_budget')])
+def test_verification_budget_exhaustion_is_limited_never_a_full_digest(tmp_path,monkeypatch,budget,reason):
+    (tmp_path/'one.txt').write_bytes(b'abc');(tmp_path/'two.txt').write_bytes(b'def')
+    monkeypatch.setattr(memory,budget,0 if budget=='_VERIFICATION_MAX_SECONDS' else 1)
+    result=memory.verification_source_state(tmp_path)
+    assert result['scope']=='limited_dependency_manifest' and result['omitted']>=1
+    assert reason in result['limitations']
+
+
+def test_verification_rehashes_same_size_source_when_mtime_is_restored(tmp_path):
+    source=tmp_path/'source.js';source.write_bytes(b'const value=1;');original=source.stat()
+    before=memory.verification_source_state(tmp_path)
+    source.write_bytes(b'const value=2;');os.utime(source,ns=(original.st_atime_ns,original.st_mtime_ns))
+    after=memory.verification_source_state(tmp_path)
+    assert before['scope']==after['scope']=='full_project_source'
+    assert before['sha256']!=after['sha256'] and before['bytes']==after['bytes']
+
+
+def test_verification_unavailable_file_and_runtime_are_explicit_limited(tmp_path,monkeypatch):
+    source=tmp_path/'source.js';source.write_bytes(b'const value=1;')
+    runtime=tmp_path/'node_modules';runtime.mkdir()
+    original=Path.open
+    def opened(path,mode='r',*args,**kwargs):
+        if path==source and mode=='rb':raise PermissionError('temporary read failure')
+        return original(path,mode,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',opened)
+    result=memory.verification_source_state(tmp_path)
+    assert result['scope']=='limited_dependency_manifest'
+    assert {'unavailable_path','excluded_runtime'}<=set(result['limitations'])
+
+
+def test_verification_detects_file_mutation_during_stream(tmp_path,monkeypatch):
+    source=tmp_path/'source.bin';source.write_bytes(b'x'*(2*1024*1024));initial=source.stat()
+    original=Path.open;changed=[]
+    class Reader:
+        def __init__(self,stream):self.stream=stream
+        def __enter__(self):return self
+        def __exit__(self,*args):return self.stream.__exit__(*args)
+        def fileno(self):return self.stream.fileno()
+        def read(self,size):
+            data=self.stream.read(size)
+            if data and not changed:
+                changed.append(True)
+                with original(source,'r+b') as writer:writer.write(b'y')
+                os.utime(source,ns=(initial.st_atime_ns,initial.st_mtime_ns+1_000_000_000))
+            return data
+    def opened(path,mode='r',*args,**kwargs):
+        stream=original(path,mode,*args,**kwargs)
+        return Reader(stream) if path==source and mode=='rb' else stream
+    monkeypatch.setattr(Path,'open',opened)
+    result=memory.verification_source_state(tmp_path)
+    assert changed and result['scope']=='limited_dependency_manifest'
+    assert 'changed_file' in result['limitations'] and result['files']==0
+
+
+def test_verification_detects_directory_listing_changes(tmp_path,monkeypatch):
+    source=tmp_path/'source.js';source.write_bytes(b'x');initial=tmp_path.stat();original=Path.open;changed=[]
+    def opened(path,mode='r',*args,**kwargs):
+        if path==source and mode=='rb' and not changed:
+            changed.append(True);(tmp_path/'late.js').write_bytes(b'y')
+            os.utime(tmp_path,ns=(initial.st_atime_ns,initial.st_mtime_ns+1_000_000_000))
+        return original(path,mode,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',opened)
+    result=memory.verification_source_state(tmp_path)
+    assert changed and result['scope']=='limited_dependency_manifest'
+    assert 'changed_directory' in result['limitations']
