@@ -251,7 +251,17 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
             writer.writeheader()
             for start in range(0, len(rows), 4096):
                 batch = rows[start:start + 4096]
-                matrix = vectorizer.transform(_features(batch, model["schema"]))
+                features = _features(batch, model["schema"])
+                for row in features:
+                    for column, value in row.items():
+                        if model["schema"][column]["kind"] == "category":
+                            encoded = f"{column}={value}"
+                            if (encoded in vectorizer.vocabulary_
+                                    and model["schema"].get(encoded, {}).get("kind") == "number"):
+                                raise ValueError(
+                                    "Feature names collide after categorical encoding; rename the columns."
+                                )
+                matrix = vectorizer.transform(features)
                 with np.errstate(over="ignore", invalid="ignore"):
                     scores = matrix @ weights.T + biases
                 if not np.isfinite(scores).all():
