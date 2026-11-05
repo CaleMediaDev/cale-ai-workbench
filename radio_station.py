@@ -1007,8 +1007,9 @@ class Controls:
         self._button(station_row, "New station", self.station_dialog).pack(side="left", padx=(8, 0))
         self._button(station_row, "Edit", lambda: self.station_dialog(True)).pack(side="left", padx=8)
         self.vocals = tk.BooleanVar(value=True)
-        tk.Checkbutton(station_row, text="Vocals", variable=self.vocals, bg=self.bg, fg=self.muted,
-            selectcolor=self.panel, activebackground=self.bg, activeforeground=self.ink, relief="flat").pack(side="right")
+        self.vocals_toggle = tk.Checkbutton(station_row, text="Vocals", variable=self.vocals, bg=self.bg, fg=self.muted,
+            selectcolor=self.panel, activebackground=self.bg, activeforeground=self.ink, relief="flat")
+        self.vocals_toggle.pack(side="right")
         self.badge = tk.Label(station_row, text="READY", fg=self.cyan, bg="#10313a", padx=10, pady=5, font=("Segoe UI", 9, "bold"))
         self.badge.pack(side="right", padx=12)
         decks = tk.Frame(self.frame, bg=self.bg)
@@ -1156,6 +1157,10 @@ class Controls:
         self.song_tab.configure(bg=self.cyan if mode=="song" else "#24313c", fg="#071017" if mode=="song" else self.ink)
         self.generate_button.configure(text="Make song" if mode=="song" else "Start station",
             state="disabled" if mode=="song" and self.on_make_song is None else "normal")
+        if mode == "song":
+            self.vocals_toggle.pack_forget()
+        else:
+            self.vocals_toggle.pack(side="right", before=self.badge)
         self._clear_prompt_hint()
         self.prompt.focus_set()
 
@@ -1178,6 +1183,9 @@ class Controls:
             self.prompt.focus_set()
             return
         if self.mode == "song":
+            if self.on_make_song is None:
+                self.text.set("Song creation is not connected here. Your description is kept.")
+                return
             if self.on_make_song is not None:
                 try:
                     started = self.on_make_song(prompt)

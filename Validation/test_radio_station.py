@@ -1026,3 +1026,28 @@ def test_studio_failed_song_callback_keeps_the_description(tmp_path):
         assert "did not start" in controls.text.get()
     finally:
         window.destroy()
+
+
+def test_studio_vocals_is_radio_only_and_missing_song_launcher_keeps_prompt(tmp_path):
+    import tkinter as tk
+    try:
+        window, controls, service, songs = studio_preview_fixture(tmp_path)
+    except tk.TclError as error:
+        pytest.skip("Tk desktop unavailable: "+str(error))
+    window.withdraw()
+    try:
+        controls.vocals.set(False)
+        controls.on_make_song = None
+        controls.set_mode("song")
+        assert not controls.vocals_toggle.winfo_manager()
+        assert str(controls.generate_button.cget("state")) == "disabled"
+        controls.prompt.insert(0, "A song with my original vocal instructions")
+        controls.generate()  # Return-key path must also give an honest response.
+        assert controls.prompt.get() == "A song with my original vocal instructions"
+        assert "not connected" in controls.text.get()
+        assert not songs
+        controls.set_mode("radio")
+        assert controls.vocals_toggle.winfo_manager() == "pack"
+        assert controls.vocals.get() is False
+    finally:
+        window.destroy()
