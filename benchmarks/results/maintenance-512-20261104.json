@@ -1,0 +1,28 @@
+{
+  "release": "0.5.512",
+  "baseline": "4df65a79ede66c838f533063ccc9e3f7d5bdf66f",
+  "merged_changes_head": "ad99463dcdb964cedb5234fe139f12a46157fabe",
+  "pull_requests": [703, 704, 705, 706],
+  "qualification": {
+    "original_regression_failures": 4,
+    "exact_pr_head_tests_passed": [18, 17, 22, 18],
+    "combined_review_tests_passed": 75,
+    "root_integration_tests_passed": 75,
+    "public_main_tests_passed": 75,
+    "skipped": 1,
+    "skip_reason": "Existing dangling-symlink test cannot create its symlink in this Windows environment. The real different-file replacement regression ran and passed.",
+    "models_called": false,
+    "runtime_manifest_entries": 250
+  },
+  "behavior": [
+    "A repair thread that never started does not suppress immediate retry through a stale throttle timestamp.",
+    "Failed temporary PDF image storage omits that scan while preserving native readable text and closing resources.",
+    "Catalog freshness uses fstat on the open handle whose bytes were read, rather than a potentially replaced cache path.",
+    "Failed mastering fallback cleanup checks file identity and preserves a different replacement file or link."
+  ],
+  "limits": [
+    "File-identity checks are not serialization against adversarial same-inode mutation or the final check/unlink race.",
+    "This does not establish a complete fresh-PC installer, microphone, music-generation or PDF OCR end-to-end qualification.",
+    "The experimental host-verification evidence gate is not part of this maintenance release."
+  ]
+}
