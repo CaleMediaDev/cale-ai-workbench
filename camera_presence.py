@@ -128,8 +128,11 @@ class VisitorTracker:
         self.cooldown = cooldown
         self.similarity = similarity
         self.tracks = []
+        self.arrival_continuities = []
 
-    def observe(self, features, now):
+    def observe(self, features, now, boxes=None):
+        self.arrival_continuities=[]
+        boxes=[_visitor_box(box) for box in boxes] if isinstance(boxes,list) and len(boxes)==len(features) else [None]*len(features)
         # Keep visible faces until an observed miss, even after a long gap
         # between observations. Retain recently departed faces for cooldown.
         self.tracks = [track for track in self.tracks
@@ -153,6 +156,17 @@ class VisitorTracker:
                     and track_index not in matched):
                 assignments[feature_index] = track_index
                 matched.add(track_index)
+        # Strong embedding matches always win. Geometry merely marks an
+        # otherwise new greeting candidate as possibly continuous: it does not
+        # merge identities, borrow a name or lower recognition thresholds.
+        geometric={i:[j for j,track in enumerate(self.tracks)
+                       if j not in matched and track['misses']==0
+                       and math.isfinite(track['last_greeted'])
+                       and 0<=now-track['last_seen']<=1.5
+                       and _visitor_overlap(boxes[i],track.get('box'))>=.55]
+                   for i in range(len(features)) if i not in assignments}
+        continuous={i for i,targets in geometric.items() if len(targets)==1
+                    and sum(targets[0] in other for other in geometric.values())==1}
         for feature_index, feature in enumerate(features):
             if feature_index in assignments:
                 track = self.tracks[assignments[feature_index]]
@@ -161,6 +175,7 @@ class VisitorTracker:
                     # now, so waiting in the room cannot outlast a cooldown.
                     track["hits"] = 1
                     track["pending_greeting"] = now - track["last_greeted"] >= self.cooldown
+                    track['presentation_continuity']=False
                 else:
                     track["hits"] = (
                         track["hits"] + 1
@@ -173,17 +188,57 @@ class VisitorTracker:
             else:
                 track = {"feature": feature, "last_seen": now,
                          "hits": 1, "last_greeted": float("-inf"),
-                         "misses": 0, "pending_greeting": True}
+                         "misses": 0, "pending_greeting": True,
+                         'presentation_continuity':feature_index in continuous}
                 self.tracks.append(track)
                 matched.add(len(self.tracks) - 1)
+            track['box']=boxes[feature_index]
             if track["hits"] >= 2 and track["pending_greeting"]:
                 track["pending_greeting"] = False
                 track["last_greeted"] = now
                 greetings.append(feature)
+                self.arrival_continuities.append(track.get('presentation_continuity',False))
         for index, track in enumerate(self.tracks):
             if index not in matched:
                 track["misses"] += 1
         return greetings
+
+
+def _visitor_box(value):
+    if not isinstance(value,(list,tuple)) or len(value)!=4:return None
+    if any(type(v) not in (int,float) or not math.isfinite(v) for v in value):return None
+    x,y,w,h=value
+    return tuple(value) if 0<=x<1 and 0<=y<1 and w>0 and h>0 and x+w<=1.000001 and y+h<=1.000001 else None
+
+
+def _visitor_overlap(left,right):
+    left,right=_visitor_box(left),_visitor_box(right)
+    if left is None or right is None:return 0.
+    x,y,w,h=left;a,b,c,d=right
+    intersection=max(0.,min(x+w,a+c)-max(x,a))*max(0.,min(y+h,b+d)-max(y,b))
+    return intersection/(w*h+c*d-intersection)
+
+
+class VisitorGreetingPolicy:
+    """Deduplicate automatic introductions without assigning face identities.
+
+    Unknown people replacing one another in the same position without an
+    observed absence remain ambiguous. Known names are evaluated from CURRENT
+    embeddings; geometry never supplies a name or authorizes enrollment.
+    """
+    def __init__(self,cooldown=120):
+        self.cooldown=cooldown;self.known={}
+
+    def select(self,names,continuities,now):
+        self.known={name:stamp for name,stamp in self.known.items() if now-stamp<self.cooldown}
+        selected=[]
+        for index,name in enumerate(names):
+            if name:
+                if name in self.known:continue
+                self.known[name]=now;selected.append(name)
+                if len(self.known)>256:self.known.pop(min(self.known,key=self.known.get))
+            elif not (index<len(continuities) and continuities[index] is True):selected.append(None)
+        return selected
 
 
 def greeting_line(names):
@@ -599,6 +654,7 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
         return 0
     state = VisitorState()
     tracker = VisitorTracker()
+    greeting_policy = VisitorGreetingPolicy()
     enrolling_name = None
     enrolling_features = []
     enrolling_started = 0.0
@@ -626,7 +682,13 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
         try:
             # Capture stays native; recognition has a separate bounded CPU cost.
             face_frame = recognition_frame(frame, cv2) if face_model else frame
-            features = face_model.features(face_frame) if face_model else []
+            boxes=None
+            observe=getattr(face_model,'observations',None) if face_model else None
+            observations=observe(face_frame) if callable(observe) else None
+            if isinstance(observations,list) and all(isinstance(item,dict) and 'feature' in item for item in observations):
+                features=[item['feature'] for item in observations]
+                boxes=[item.get('box') for item in observations]
+            else:features = face_model.features(face_frame) if face_model else []
         except Exception:
             face_model = None
             features = []
@@ -662,9 +724,10 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
                 enrolling_name = None
         now = time.monotonic()
         if face_model:
-            arrivals = tracker.observe(features, now)
+            arrivals = tracker.observe(features, now, boxes=boxes)
             if arrivals:
-                emit("visitor", greeting_line([face_model.identify(item) for item in arrivals]))
+                names=greeting_policy.select([face_model.identify(item) for item in arrivals],tracker.arrival_continuities,now)
+                if names:emit("visitor", greeting_line(names))
         elif state.observe(seen, now):
             emit("visitor", greeting_line([None]))
     negotiated = negotiate_capture(camera, cv2, isinstance(source, int))

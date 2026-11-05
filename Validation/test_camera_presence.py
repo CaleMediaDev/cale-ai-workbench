@@ -25,6 +25,131 @@ from camera_presence import (
     preview_frame,
 )
 from face_identity import FaceModel
+
+
+def presentation_trace(frames, names=None):
+    """Exercise legacy fallback too, so the baseline fails on repeated speech."""
+    import camera_presence as camera,inspect
+    tracker=VisitorTracker(cooldown=120)
+    policy=camera.VisitorGreetingPolicy() if hasattr(camera,'VisitorGreetingPolicy') else None
+    presented=[]
+    for index,(features,boxes) in enumerate(frames):
+        arrivals=(tracker.observe(features,index*.5,boxes=boxes)
+                  if 'boxes' in inspect.signature(tracker.observe).parameters else tracker.observe(features,index*.5))
+        labels=[None if names is None else names[index] for _ in arrivals]
+        flags=getattr(tracker,'arrival_continuities',[False]*len(arrivals))
+        selected=policy.select(labels,flags,index*.5) if policy else labels
+        presented.extend(selected)
+    return presented
+
+
+def test_continuous_same_position_drift_does_not_repeat_unknown_introduction():
+    a,b,c=[1.,0.,0.],[.6,.8,0.],[.6,0.,.8]
+    box=[.1,.1,.2,.3]
+    assert presentation_trace([([f],[box]) for f in (a,a,b,b,c,c)])==[None]
+
+
+def test_known_name_cooldown_cannot_be_bypassed_by_feature_drift():
+    a,b,c=[1.,0.,0.],[.6,.8,0.],[.6,0.,.8]
+    box=[.1,.1,.2,.3]
+    assert presentation_trace([([f],[box]) for f in (a,a,b,b,c,c)],names=['Alex']*6)==['Alex']
+
+
+def test_geometry_does_not_hide_first_intro_new_second_or_new_known_visitor():
+    a,b=[1.,0.,0.],[.6,.8,0.]
+    left,right=[.1,.1,.2,.3],[.6,.1,.2,.3]
+    assert presentation_trace([([f],[left]) for f in (a,b,b)])==[None]
+    assert presentation_trace([([a],[left]),([a],[left]),([a,b],[left,right]),([a,b],[left,right])])==[None,None]
+    assert presentation_trace([([f],[left]) for f in (a,a,b,b)],names=[None,None,'Jamie','Jamie'])==[None,'Jamie']
+
+
+def test_geometry_requires_unique_recent_visible_box_and_real_absence_resets_it():
+    a,b,c=[1.,0.,0.],[0.,1.,0.],[.6,0.,.8]
+    box=[.1,.1,.2,.3]
+    # Overlapping prior tracks leave ambiguous geometry; do not guess continuity.
+    assert presentation_trace([([a,b],[box,box]),([a,b],[box,box]),([c],[box]),([c],[box])])==[None,None,None]
+    frames=[([a],[box]),([a],[box])]+[([],[]) for _ in range(5)]+[([c],[box]),([c],[box])]
+    assert presentation_trace(frames)==[None,None]
+    # Legacy/no-box callers keep the existing feature-only behavior.
+    assert presentation_trace([([f],[None]) for f in (a,a,c,c)])==[None,None]
+
+
+def test_geometry_cannot_steal_stronger_embedding_assignment():
+    tracker=VisitorTracker()
+    a,b,c=[1.,0.,0.],[0.,1.,0.],[.6,0.,.8]
+    left,right=[.1,.1,.2,.3],[.6,.1,.2,.3]
+    tracker.observe([a,b],0,boxes=[left,right]);tracker.observe([a,b],.5,boxes=[left,right])
+    tracker.observe([c,b],1,boxes=[left,right])
+    arrivals=tracker.observe([b,c],1.5,boxes=[right,left])
+    assert arrivals==[c] and tracker.arrival_continuities==[True]
+    assert len(tracker.tracks)==3  # No identity or feature-track merger.
+
+
+def test_known_name_cooldowns_are_independent_and_expire():
+    from camera_presence import VisitorGreetingPolicy
+    policy=VisitorGreetingPolicy(cooldown=120)
+    assert policy.select(['Alex'],[False],0)==['Alex']
+    assert policy.select(['Alex','Jamie'],[True,True],1)==['Jamie']
+    assert policy.select(['Alex'],[False],119)==[]
+    assert policy.select(['Alex'],[True],120)==['Alex']
+
+
+def test_face_observation_boxes_stay_aligned_after_invalid_feature():
+    faces=np.array([[0.,0.,20.,20.],[30.,0.,20.,20.],[60.,0.,20.,20.]])
+    class Detector:
+        def setInputSize(self,_size):pass
+        def detect(self,_frame):return None,faces
+    class Recognizer:
+        def alignCrop(self,_frame,face):return face
+        def feature(self,face):return np.array([0.,0.]) if face[0]==30 else np.array([3.,4.])
+    model=FaceModel.__new__(FaceModel);model.detector=Detector();model.recognizer=Recognizer()
+    model.cv2=SimpleNamespace(error=RuntimeError)
+    image=np.zeros((100,100,3),dtype=np.uint8)
+    observed=model.observations(image)
+    assert [item['feature'] for item in observed]==[[.6,.8],[.6,.8]]
+    assert np.allclose([item['box'] for item in observed],[[0.,0.,.2,.2],[.6,0.,.2,.2]])
+    assert model.features(image)==[[.6,.8],[.6,.8]]
+
+
+def test_watch_uses_ephemeral_geometry_without_repeated_unknown_speech(tmp_path,monkeypatch):
+    import camera_presence as camera,sys
+    permission=[True];index=[0];clock=[0.];events=[]
+    vectors=([1.,0.,0.],[1.,0.,0.],[.6,.8,0.],[.6,.8,0.],[.6,0.,.8],[.6,0.,.8])
+    class Capture:
+        def isOpened(self):return True
+        def read(self):
+            number=index[0];index[0]+=1;clock[0]=number*.5
+            if number>=len(vectors):permission[0]=False
+            return True,np.full((8,8,3),number,dtype=np.uint8)
+        release=Mock()
+    capture=Capture()
+    class Model:
+        def observations(self,frame):
+            return [{'feature':vectors[int(frame[0,0,0])],'box':[.1,.1,.2,.3]}]
+        def identify(self,_feature):return None
+    class ImmediateWorker:
+        def __init__(self,process):self.process=process
+        def submit(self,frame):self.process(frame)
+        def close(self):pass
+    cascade=SimpleNamespace(empty=lambda:False)
+    cv2=SimpleNamespace(VideoCapture=lambda *_:capture,CAP_DSHOW=0,
+        data=SimpleNamespace(haarcascades='.'),CascadeClassifier=lambda *_:cascade,
+        COLOR_BGR2GRAY=1,cvtColor=lambda frame,*_:frame[:,:,0],error=RuntimeError)
+    enroll=Mock()
+    monkeypatch.setitem(sys.modules,'cv2',cv2)
+    monkeypatch.setitem(sys.modules,'camera_network',SimpleNamespace(camera_source=lambda value:value,greeting_camera=lambda:0))
+    monkeypatch.setitem(sys.modules,'face_identity',SimpleNamespace(FaceModel=Model,ENROLL_REQUEST=tmp_path/'absent',enroll=enroll))
+    monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'LatestFrameWorker',ImmediateWorker)
+    monkeypatch.setattr(camera,'negotiate_capture',lambda *_:{'width':8,'height':8,'fps':30})
+    monkeypatch.setattr(camera,'preview_frame',lambda *_:'')
+    monkeypatch.setattr(camera,'time',SimpleNamespace(monotonic=lambda:clock[0],sleep=lambda *_:None))
+    monkeypatch.setattr(camera,'emit',lambda kind,value:events.append((kind,value)))
+    assert camera.watch()==0
+    greetings=[message for kind,message in events if kind=='visitor']
+    assert len(greetings)==1 and 'Who are you?' in greetings[0]
+    assert all(isinstance(message,str) for _,message in events)  # No geometry payload.
+    enroll.assert_not_called();capture.release.assert_called_once()
 from visitor_memory import name_from_intro
 
 
