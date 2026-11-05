@@ -334,6 +334,38 @@ def test_clone_probe_requires_actual_complete_non_silent_render_before_cache_pas
     assert not Path(command[-2]).exists()  # Evidence metadata survives, temporary audio does not.
 
 
+def test_clone_probe_drains_stdout_before_waiting_for_worker_exit(clone_probe_runtime, monkeypatch):
+    root, snapshot, wav, process = clone_probe_runtime
+    render = process()
+    children = []
+
+    def start(command, **kwargs):
+        child = render(command, **kwargs)
+        # Model a worker blocked writing its final response to a full pipe.
+        # It cannot exit until communicate drains that response.
+        child.poll.return_value = None
+        response = child.communicate.return_value
+
+        def communicate(timeout):
+            child.poll.return_value = 0
+            return response
+
+        child.communicate.side_effect = communicate
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(cale_voice.subprocess, "Popen", start)
+    # The old poll-only loop reaches its deadline without draining stdout.
+    monkeypatch.setattr(cale_voice.time, "monotonic", Mock(side_effect=[0, 0, 181]))
+    monkeypatch.setattr(cale_voice.time, "sleep", Mock())
+    stop = Mock()
+    monkeypatch.setattr("self_diagnostics._stop_check", stop)
+
+    assert cale_voice.run_probe()["status"] == "passed"
+    children[0].communicate.assert_called_once_with(timeout=0.2)
+    stop.assert_not_called()
+
+
 def test_clone_capability_rejects_overflowing_probe_timestamp(clone_probe_runtime, monkeypatch):
     root, snapshot, wav, process = clone_probe_runtime
     monkeypatch.setattr(cale_voice.subprocess, "Popen", process())
