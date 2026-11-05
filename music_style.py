@@ -25,7 +25,7 @@ NEGATED_SINGER = re.compile(
     r"\s+(?:lead\s+)?(?:voice|vocals?|singer)\b", re.I,
 )
 NEGATED_LEAD_VOCALS = re.compile(
-    rf"\b{NEGATION}\s+(?:any\s+)?(?:lead\s+vocals?|rap|rapping)\b", re.I,
+    rf"\b{NEGATION}\s+(?:any\s+)?(?:lead\s+vocals?|rap|rapping|rapper|rapped)\b", re.I,
 )
 VOCAL_TEXTURE = re.compile(
     r"\b(?:vocal chops?|chopped vocals?|wordless vocals?|"
