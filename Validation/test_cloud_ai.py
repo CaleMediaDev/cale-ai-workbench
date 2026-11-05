@@ -611,8 +611,8 @@ class CloudTests(unittest.TestCase):
     def test_cloud_only_uses_connected_free_provider_even_when_local_is_faster(self):
         cloud.routing_mode.save_scope(cloud.STATE, "cloud_only")
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
-        with (patch("usage_history.recent_local_speed", return_value=500),
-              patch("usage_history.recent_provider_speed", return_value=10),
+        with (patch("usage_history.recent_local_response_speed", return_value=500),
+              patch("usage_history.recent_provider_response_speed", return_value=10),
               patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
               patch.object(cloud, "post") as local):
             self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
@@ -622,7 +622,7 @@ class CloudTests(unittest.TestCase):
     def test_cloud_only_medium_uses_enabled_plan_when_no_free_route_exists(self):
         cloud.routing_mode.save_scope(cloud.STATE, "cloud_only")
         cloud.routing_mode.save(cloud.STATE, "medium")
-        with (patch("usage_history.recent_local_speed", return_value=500),
+        with (patch("usage_history.recent_local_response_speed", return_value=500),
               patch("chatgpt_auth.status", return_value={"enabled": True}),
               patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
               patch.object(cloud, "post") as local):
@@ -649,7 +649,7 @@ class CloudTests(unittest.TestCase):
         self.assertIn(cloud.BALANCED_MODEL, balanced)
         self.assertNotIn(cloud.FAST_MODEL, balanced)
         self.assertIn(cloud.LOCAL_MODEL, cloud.local_speed_models("deep"))
-        with (patch("usage_history.recent_local_speed", return_value=30) as speed,
+        with (patch("usage_history.recent_local_response_speed", return_value=30) as speed,
               patch.object(cloud, "post", return_value=ANSWER)):
             cloud.Router().complete(REQUEST)
         speed.assert_called_once_with(70, models=(cloud.FAST_MODEL,))
@@ -732,7 +732,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "Build a working website"}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=25),
+              patch("usage_history.recent_local_response_speed", return_value=25),
               patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as remote,
               patch.object(cloud, "post") as local):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -745,8 +745,8 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "Build a working website"}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=25),
-              patch("usage_history.recent_provider_speed",
+              patch("usage_history.recent_local_response_speed", return_value=25),
+              patch("usage_history.recent_provider_response_speed",
                     side_effect=lambda name, default: {"groq": 8, "bigmodel": 200}[name]),
               patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as remote,
               patch.object(cloud, "post") as local):
@@ -765,7 +765,7 @@ class CloudTests(unittest.TestCase):
     def test_quick_work_stays_local_if_cloud_latency_would_dominate(self):
         cloud.save_provider_key("google", "test_secret_value_123", True)
         with (patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=80),
+              patch("usage_history.recent_local_response_speed", return_value=80),
               patch.object(cloud_providers, "complete") as remote,
               patch.object(cloud, "post", return_value=ANSWER)):
             self.assertEqual(cloud.Router().complete(REQUEST), ANSWER)
@@ -776,7 +776,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "Build a working website"}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=25),
+              patch("usage_history.recent_local_response_speed", return_value=25),
               patch.object(cloud_providers, "complete", side_effect=OSError("unavailable")) as remote,
               patch.object(cloud, "post", return_value=ANSWER) as local):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1467,7 +1467,7 @@ class CloudTests(unittest.TestCase):
         with (patch.object(cloud, "task_size", return_value="deep"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
               patch("chatgpt_auth.status", return_value={"enabled": False}),
-              patch("usage_history.recent_local_speed", return_value=15),
+              patch("usage_history.recent_local_response_speed", return_value=15),
               patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as direct,
               patch.object(cloud, "post") as post,
               patch.object(cloud.Router, "reserve_free_request") as reserve):
@@ -1486,7 +1486,7 @@ class CloudTests(unittest.TestCase):
         ]}])
         with (patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as direct,
               patch.object(cloud, "post") as local,
-              patch("usage_history.recent_provider_speed",
+              patch("usage_history.recent_provider_response_speed",
                     side_effect=lambda provider, _default: {"groq": 900, "google": 100}[provider])):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
         self.assertEqual(direct.call_args.args[0], "google")
@@ -1509,7 +1509,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=5),
+              patch("usage_history.recent_local_response_speed", return_value=5),
               patch.object(cloud.Router, "reserve_free_request", return_value=True),
               patch.object(cloud, "post", return_value=ANSWER) as post):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1520,7 +1520,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=35),
+              patch("usage_history.recent_local_response_speed", return_value=35),
               patch.object(cloud.Router, "reserve_free_request") as reserve,
               patch.object(cloud, "post", return_value=ANSWER) as post):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1532,7 +1532,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 90_000}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=35),
+              patch("usage_history.recent_local_response_speed", return_value=35),
               patch.object(cloud.Router, "reserve_free_request", return_value=True),
               patch.object(cloud, "post", return_value=ANSWER) as post):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1543,7 +1543,7 @@ class CloudTests(unittest.TestCase):
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 60_000}])
         with (patch.object(cloud, "task_size", return_value="balanced"),
               patch.object(cloud.pc_offline, "offline", return_value=False),
-              patch("usage_history.recent_local_speed", return_value=5),
+              patch("usage_history.recent_local_response_speed", return_value=5),
               patch.object(cloud.Router, "reserve_free_request", return_value=True),
               patch.object(cloud, "post", side_effect=[OSError("cloud unavailable"), ANSWER]) as post):
             self.assertEqual(cloud.Router().complete(request), ANSWER)
@@ -1719,7 +1719,7 @@ class CloudTests(unittest.TestCase):
     def test_slow_balanced_task_uses_lighter_chatgpt_model(self):
         with (
             patch.object(cloud, "task_size", return_value="balanced"),
-            patch("usage_history.recent_local_speed", return_value=12),
+            patch("usage_history.recent_local_response_speed", return_value=12),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete", return_value=ANSWER) as complete,
         ):
@@ -1735,7 +1735,7 @@ class CloudTests(unittest.TestCase):
             patch.object(cloud, "task_size", return_value="balanced"),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
-            patch("usage_history.recent_local_speed", return_value=40),
+            patch("usage_history.recent_local_response_speed", return_value=40),
             patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
         ):
             cloud.Router().complete(REQUEST)
@@ -1819,8 +1819,8 @@ class CloudTests(unittest.TestCase):
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
         with (
             patch.object(cloud, "task_size", return_value="quick"),
-            patch("usage_history.recent_local_speed", return_value=30),
-            patch("usage_history.recent_provider_speed",
+            patch("usage_history.recent_local_response_speed", return_value=30),
+            patch("usage_history.recent_provider_response_speed",
                   side_effect=lambda name, default: {"groq": 900, "chatgpt": 150}.get(name, default)),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete") as paid,
@@ -1835,8 +1835,8 @@ class CloudTests(unittest.TestCase):
         cloud.save_provider_key("groq", "gsk_test_secret_value", True)
         with (
             patch.object(cloud, "task_size", return_value="quick"),
-            patch("usage_history.recent_local_speed", return_value=30),
-            patch("usage_history.recent_provider_speed",
+            patch("usage_history.recent_local_response_speed", return_value=30),
+            patch("usage_history.recent_provider_response_speed",
                   side_effect=lambda name, default: {"groq": 150, "chatgpt": 900}.get(name, default)),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
@@ -1850,8 +1850,8 @@ class CloudTests(unittest.TestCase):
         cloud.routing_mode.save(cloud.STATE, "floor_it")
         with (
             patch.object(cloud, "task_size", return_value="quick"),
-            patch("usage_history.recent_local_speed", return_value=70),
-            patch("usage_history.recent_provider_speed", return_value=140),
+            patch("usage_history.recent_local_response_speed", return_value=70),
+            patch("usage_history.recent_provider_response_speed", return_value=140),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete") as paid,
             patch.object(cloud, "post", return_value=ANSWER) as local,
@@ -1870,8 +1870,8 @@ class CloudTests(unittest.TestCase):
         router = cloud.Router()
         with (
             patch.object(cloud, "task_size", return_value="deep"),
-            patch("usage_history.recent_local_speed", return_value=10),
-            patch("usage_history.recent_provider_speed",
+            patch("usage_history.recent_local_response_speed", return_value=10),
+            patch("usage_history.recent_provider_response_speed",
                   side_effect=lambda name, default: {"groq": 900, "chatgpt": 200}.get(name, default)),
             patch("chatgpt_auth.status", return_value={"enabled": True}),
             patch("chatgpt_auth.complete", return_value=ANSWER) as paid,
@@ -1896,8 +1896,8 @@ class CloudTests(unittest.TestCase):
         router = cloud.Router()
         with (
             patch.object(cloud, "task_size", return_value="deep"),
-            patch("usage_history.recent_local_speed", return_value=10),
-            patch("usage_history.recent_provider_speed",
+            patch("usage_history.recent_local_response_speed", return_value=10),
+            patch("usage_history.recent_provider_response_speed",
                   side_effect=lambda name, default: {
                       "openrouter": 900, "chatgpt": 200,
                   }.get(name, default)),
@@ -1929,7 +1929,7 @@ class CloudTests(unittest.TestCase):
         cloud.routing_memory.record("openrouter", "deep", "limit")
         with (
             patch.object(cloud, "task_size", return_value="balanced"),
-            patch("usage_history.recent_local_speed", return_value=30),
+            patch("usage_history.recent_local_response_speed", return_value=30),
             patch.object(cloud_providers, "complete") as free,
             patch.object(cloud, "post", return_value=ANSWER) as local,
         ):
@@ -1944,7 +1944,7 @@ class CloudTests(unittest.TestCase):
         cloud.routing_memory.record("groq", "balanced", "limit")
         with (
             patch.object(cloud, "task_size", return_value="balanced"),
-            patch("usage_history.recent_local_speed", return_value=30),
+            patch("usage_history.recent_local_response_speed", return_value=30),
             patch.object(cloud_providers, "complete", return_value=(ANSWER, 0.5)) as free,
             patch.object(cloud, "post") as local,
         ):

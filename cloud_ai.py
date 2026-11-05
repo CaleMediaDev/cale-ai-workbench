@@ -1474,7 +1474,7 @@ class Router:
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         mode = routing_mode.load(STATE) if profile == "main" else routing_mode.DEFAULT
         reason = "Cloud is not connected."
-        local_speed = usage_history.recent_local_speed(
+        local_speed = usage_history.recent_local_response_speed(
             70 if size == "quick" else 35 if size == "balanced" else 15,
             models=local_speed_models(size),
         )
@@ -1486,7 +1486,7 @@ class Router:
                      if spec.get("free_eligible", True)
                      and keys.get(provider) and confirmed.get(provider)]
         measured_speeds = {
-            provider: usage_history.recent_provider_speed(provider, spec["speed"])
+            provider: usage_history.recent_provider_response_speed(provider, spec["speed"])
             for provider, spec in connected
         }
         required_context = estimated_context(payload)
@@ -1495,11 +1495,11 @@ class Router:
                                         payload.get("max_completion_tokens") or 4096))
         prompt_estimate = estimated_input_tokens(payload)
         paid_speed = (
-            usage_history.recent_provider_speed("chatgpt", 140)
+            usage_history.recent_provider_response_speed("chatgpt", 140)
             if mode == "floor_it" else 140
         )
         openrouter_speed = (
-            usage_history.recent_provider_speed("openrouter", 120)
+            usage_history.recent_provider_response_speed("openrouter", 120)
             if key and self.free_request_available() else 0
         )
         eligible_free_speeds = [

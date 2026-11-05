@@ -319,3 +319,94 @@ def test_migrated_usage_reader_does_not_reserve_writer_lock(tmp_path, monkeypatc
     finally:
         writer.rollback()
         writer.close()
+
+
+def test_routing_response_speed_compares_native_and_compat_end_to_end(tmp_path, monkeypatch):
+    """A fast decoder with slow prefill is not a fast complete response."""
+    import model_fitness
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for _ in range(3):
+        assert usage_history.record_completion(
+            {"model": "slow:latest", "usage": {"completion_tokens": 200},
+             "eval_count": 200, "eval_duration": 1_000_000_000}, "ollama", 100)
+        assert usage_history.record_completion(
+            {"model": "fast", "usage": {"completion_tokens": 100}}, "ollama", 2)
+    assert model_fitness.measured_speed("slow") == 2
+    assert model_fitness.measured_speed("fast:latest") == 50
+    from auto_route import model_order
+    assert model_order("deep", {"slow": 35, "fast": 21}, "slow", "fast", "slow",
+                       speeds={m: model_fitness.measured_speed(m) for m in ("slow", "fast")})[0] == "fast"
+    assert usage_history.recent_local_response_speed(99, models=("slow:latest",)) == 2
+    # Decode/display and destructive retirement retain their original contract.
+    assert usage_history.recent_model_speed("slow") == 200
+    assert usage_history.recent_model_retirement_speed("slow") == 200
+
+
+def test_response_speed_mixed_transports_short_calls_and_no_decode_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for source in ("ollama", "cloud"):
+        for index, (tokens, elapsed) in enumerate(((1, .5), (100, 2), (200, 8))):
+            result = {"model": "mixed:latest" if index % 2 else "mixed",
+                      "usage": {"completion_tokens": tokens}}
+            if index % 2:
+                result.update(eval_count=100, eval_duration=1_000_000_000)
+            assert usage_history.record_completion(result, source, elapsed)
+    assert usage_history.recent_model_response_speed("mixed") == 25
+    assert usage_history.recent_model_response_speed("mixed:latest") == 25
+    assert usage_history.recent_local_response_speed(99, models=("mixed:latest", "mixed")) == 25
+    assert usage_history.recent_provider_response_speed("cloud", 99) == 25
+    for _ in range(4):
+        assert usage_history.record_completion(
+            {"model": "decode-only", "usage": {"completion_tokens": 200},
+             "eval_count": 200, "eval_duration": 1_000_000_000}, "ollama")
+    assert usage_history.recent_model_speed("decode-only") == 200
+    assert usage_history.recent_model_response_speed("decode-only") is None
+    assert usage_history.recent_local_response_speed(99, models=("decode-only",)) == 99
+    # Old timing-basis labels are immaterial when actual completion/elapsed exist;
+    # an absent elapsed field is never inferred from legacy TPS.
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        conn.execute("UPDATE usage_events SET speed_basis='unknown' WHERE model LIKE 'mixed%'")
+    assert usage_history.recent_model_response_speed("mixed") == 25
+
+
+def test_response_speed_rejects_malformed_rows_and_requires_three_valid_calls(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    conn = usage_history._connection()
+    with conn:
+        for tokens, elapsed in ((0, 1), (-1, 1), (1, 0), (1, -1), (1, None),
+                                (1, float("inf")), (1, float("nan")),
+                                (1, "bad"), ("bad", 1), (1.5, 1),
+                                (1_000_000_001, 1), (100, 1e-310)):
+            conn.execute("INSERT INTO usage_events(timestamp,source,model,prompt_tokens,completion_tokens,"
+                         "total_tokens,tokens_per_second,elapsed_seconds) VALUES(?,?,?,?,?,?,?,?)",
+                         (usage_history.time.time(), "ollama", "bad", 0, tokens, 200, 999, elapsed))
+    conn.close()
+    assert usage_history.recent_model_response_speed("bad") is None
+    for _ in range(2):
+        _local_timed("bad", 100, 2)
+    assert usage_history.recent_model_response_speed("bad") is None
+    assert usage_history.recent_local_response_speed(13, models=("bad",)) == 13
+    _local_timed("bad", 100, 2)
+    assert usage_history.recent_model_response_speed("bad") == 50
+    assert usage_history.recent_model_response_speed("unrelated") is None
+
+
+def test_response_speed_keeps_recent_valid_sample_window_and_source_scope(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_history, "DATABASE", tmp_path / "usage.db")
+    for _ in range(12):
+        _local_timed("window:latest", 100, 100)
+    for _ in range(12):
+        _local_timed("window", 100, 2)
+    assert usage_history.recent_model_response_speed("window:latest") == 50
+    for _ in range(8):
+        assert usage_history.record_completion({"model": "window", "usage": {"completion_tokens": 100}},
+                                              "cloud", elapsed_seconds=4)
+    assert usage_history.recent_provider_response_speed("cloud", 99) == 25
+    # Invalid recent rows must not displace the bounded most-recent valid rows.
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        conn.execute("UPDATE usage_events SET elapsed_seconds=NULL WHERE source='cloud'")
+    assert usage_history.recent_provider_response_speed("cloud", 99) == 99
+    assert usage_history.recent_model_response_speed("window") == 50
+    with sqlite3.connect(usage_history.DATABASE) as conn:
+        conn.execute("UPDATE usage_events SET timestamp=?", (usage_history.time.time()-31*86400,))
+    assert usage_history.recent_model_response_speed("window") is None

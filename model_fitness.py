@@ -488,10 +488,10 @@ def game_build_approved(item, root):
 
 
 def measured_speed(alias):
-    """Return an established median, or None until three real calls exist."""
+    """Return comparable end-to-end response speed after three timed calls."""
     import usage_history
 
-    return usage_history.recent_model_speed(alias)
+    return usage_history.recent_model_response_speed(alias)
 
 
 def retirement_speed(alias):
