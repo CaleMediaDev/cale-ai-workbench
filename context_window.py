@@ -126,7 +126,7 @@ def sync(root, model):
         original,
     )
     match = re.search(
-        r"(?m)^  context_length: \d+[ \t]*$", model_section.group("body")
+        r"(?m)^  context_length: \d+(?=[ \t]*(?:#[^\n]*)?$)", model_section.group("body")
     ) if model_section else None
     if not match:
         raise ValueError("Main model context setting is missing")
