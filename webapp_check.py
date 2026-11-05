@@ -24,6 +24,10 @@ MAX_REPORT_BYTES = 1_000_000
 REPORT_NAME = "browser-check-report.json"
 
 
+# Bind receipts to this loaded implementation, not later hot-replaced bytes.
+_LOADED_CHECKER_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
 def _relative_html_path(name: str) -> Path:
     """Reject rooted Windows paths too: /page.html is not is_absolute on Windows."""
     if (not isinstance(name, str) or not name or "\x00" in name
@@ -73,24 +77,12 @@ def _case_element_id(value, index: int, field: str) -> str:
             "For table row counts use row_counts:{tbodyId:2}; expect checks literal text.") from error
 
 
-def observe_rows(page, names: list[str]) -> dict:
-    """Read only native table/section row collections; target IDs are data."""
-    if not names:
-        return {}
-    return page.evaluate("""names => Object.fromEntries(names.map(id => {
-        const matches=document.querySelectorAll('#'+CSS.escape(id));
-        if(matches.length!==1) return [id,{error:matches.length?'duplicate target':'missing target'}];
-        const el=matches[0],tag=el.localName;
-        if(!['table','thead','tbody','tfoot'].includes(tag))
-            return [id,{error:'target is not table, thead, tbody or tfoot',tag}];
-        try {
-            const type=tag==='table'?HTMLTableElement:HTMLTableSectionElement;
-            const rows=Object.getOwnPropertyDescriptor(type.prototype,'rows').get.call(el);
-            const count=Object.getOwnPropertyDescriptor(HTMLCollection.prototype,'length').get.call(rows);
-            return Number.isSafeInteger(count)&&count>=0
-                ? [id,{value:count,tag}] : [id,{error:'invalid native row count',tag}];
-        } catch (_) { return [id,{error:'native row collection is unavailable',tag}]; }
-    }))""", names)
+def observe_rows(page, names: list[str], *, native_key=None) -> dict:
+    """Use the pristine observer installed before app code, never app getters."""
+    if not names:return {}
+    if native_key is None:
+        return {name:{'error':'Pristine row observer unavailable; use the actual browser check'} for name in names}
+    return page.evaluate("([key,names]) => window[key]('rows',names)",[native_key,names])
 
 
 def _click_token(value):
@@ -422,7 +414,7 @@ def validate_spec(folder: Path, spec: dict) -> Path:
     return _project_file(folder, spec.get("path"))
 
 
-def project_only_route(folder: Path, *, on_document=None):
+def project_only_route(folder: Path, *, on_document=None, on_resource=None, on_blocked=None):
     """Restrict local files; optional observers receive the exact served HTML bytes."""
     root = folder.resolve()
 
@@ -431,6 +423,7 @@ def project_only_route(folder: Path, *, on_document=None):
         if parsed.scheme == "file":
             local = Path(url2pathname(parsed.path)).resolve()
             if local.is_relative_to(root):
+                if on_resource is not None:on_resource(local)
                 if on_document is not None and route.request.resource_type == "document":
                     try:
                         validated = _project_file(root, local.relative_to(root).as_posix())
@@ -450,6 +443,7 @@ def project_only_route(folder: Path, *, on_document=None):
         elif parsed.scheme in {"data", "blob", "about"}:
             route.continue_()
             return
+        if on_blocked is not None:on_blocked()
         route.abort()
 
     return handle
@@ -637,8 +631,71 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
         try:
             context = browser.new_context(offline=True, viewport={
                 "width": spec.get("viewport_width", 375), "height": 812})
-            context.route("**/*", project_only_route(folder))
+            # Each fresh document (including reloads) captures native DOM
+            # operations before page code can replace prototype descriptors.
+            # The immutable nonenumerable closure never calls app-owned getters.
+            native_key='__cale_collection_'+os.urandom(16).hex()
+            context.add_init_script("""(() => {
+              const key=__CALE_KEY__;
+              const apply=Reflect.apply, descriptor=Object.getOwnPropertyDescriptor;
+              const create=Object.create, define=Object.defineProperty;
+              const doc=document, query=Document.prototype.querySelectorAll;
+              const escape=CSS.escape, css=CSS;
+              const tag=descriptor(Element.prototype,'localName').get;
+              const children=descriptor(Element.prototype,'children').get;
+              const tableRows=descriptor(HTMLTableElement.prototype,'rows').get;
+              const sectionRows=descriptor(HTMLTableSectionElement.prototype,'rows').get;
+              const collectionLength=descriptor(HTMLCollection.prototype,'length').get;
+              const collectionItem=HTMLCollection.prototype.item;
+              const nodeLength=descriptor(NodeList.prototype,'length').get;
+              const nodeItem=NodeList.prototype.item;
+              const integer=Number.isSafeInteger;
+              const observe=(mode,value) => {
+                if(mode==='list') {
+                  const name=apply(tag,value,[]);
+                  if(name!=='ul'&&name!=='ol') return null;
+                  const list=apply(children,value,[]),count=apply(collectionLength,list,[]);
+                  if(!integer(count)||count<0||count>10000) return null;
+                  for(let index=0;index<count;index++) {
+                    if(apply(tag,apply(collectionItem,list,[index]),[])!=='li') return null;
+                  }
+                  return count;
+                }
+                const out=create(null);
+                for(let index=0;index<value.length;index++) {
+                  const id=value[index],record=create(null);
+                  const matches=apply(query,doc,['#'+apply(escape,css,[id])]);
+                  const length=apply(nodeLength,matches,[]);
+                  if(length!==1) {record.error=length?'duplicate target':'missing target';out[id]=record;continue;}
+                  const el=apply(nodeItem,matches,[0]),name=apply(tag,el,[]);
+                  record.tag=name;
+                  if(name!=='table'&&name!=='thead'&&name!=='tbody'&&name!=='tfoot') {
+                    record.error='target is not table, thead, tbody or tfoot';out[id]=record;continue;
+                  }
+                  try {
+                    const rows=apply(name==='table'?tableRows:sectionRows,el,[]);
+                    const count=apply(collectionLength,rows,[]);
+                    if(integer(count)&&count>=0) record.value=count;
+                    else record.error='invalid native row count';
+                  } catch (_) {record.error='native row collection is unavailable';}
+                  out[id]=record;
+                }
+                return out;
+              };
+              define(window,key,{value:observe,writable:false,configurable:false,enumerable:false});
+            })();""".replace('__CALE_KEY__',json.dumps(native_key),1))
+            dependencies=set();dependency_limited=[False]
+            def observe_dependency(path):
+                relative=path.relative_to(folder.resolve())
+                if len(dependencies)>=256 or len(relative.as_posix())>240:
+                    dependency_limited[0]=True;return
+                dependencies.add(relative.as_posix())
+                if any(part in {'.git','.local-ai','__pycache__','node_modules','.venv','venv','Toolbox'} for part in relative.parts):
+                    dependency_limited[0]=True
+            def blocked_dependency():dependency_limited[0]=True
+            context.route("**/*", project_only_route(folder,on_resource=observe_dependency,on_blocked=blocked_dependency))
             page = context.new_page()
+            page.on("requestfailed",lambda _request:blocked_dependency())
             page.on("pageerror", lambda error: errors.append(str(error)[:300]))
             page.goto(page_path.as_uri(), wait_until="load", timeout=15_000)
             def find_target(token):
@@ -657,7 +714,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                     exists = target.count() == 1
                     observed["text:" + element_id] = (
                         exists, exists and target.is_visible(),
-                        target.inner_text()[:200] if exists else "",
+                        hashlib.sha256(target.inner_text().encode()).hexdigest() if exists else "",
+                        target.evaluate("(el,key) => window[key]('list',el)",native_key) if exists else None,
                     )
                 for field in ("visible", "hidden"):
                     for token in case.get(field, []):
@@ -666,9 +724,36 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                 observed.update({"state:" + key: value for key, value in
                                  observe_state(page, list(case.get("state", {}))).items()})
                 observed.update({"rows:" + key: value for key, value in
-                                 observe_rows(page, list(case.get("row_counts", {}))).items()})
+                                 observe_rows(page, list(case.get("row_counts", {})),native_key=native_key).items()})
                 return observed
 
+            def collection_count(target, observed):
+                if target.startswith('text:'):
+                    return observed[3] if isinstance(observed,(list,tuple)) and len(observed)==4 else None
+                if not isinstance(observed,dict) or 'error' in observed:return None
+                value=observed.get('value')
+                if target.startswith('rows:'):return value if type(value) is int else None
+                if target.startswith('state:'):
+                    if isinstance(value,list):return len(value)
+                    if target.endswith('.length') and type(value) is int and value>=0:return value
+                return None
+
+            # Observe the initial values of at most 80 typed assertion targets.
+            # Merely returning to default empty/zero after add-then-delete is
+            # not evidence of storage unless a prior reload proved the baseline.
+            initial_spec={'expect':{},'row_counts':{},'state':{}}
+            initial_count=0
+            for declared in spec['cases']:
+                for field in initial_spec:
+                    for key,wanted in declared.get(field,{}).items():
+                        if key not in initial_spec[field] and initial_count<80:
+                            initial_spec[field][key]=wanted;initial_count+=1
+            initial_observations=asserted_state(initial_spec)
+            initial_hashes={target:hashlib.sha256(json.dumps(value,sort_keys=True,allow_nan=False).encode()).hexdigest()
+                            for target,value in initial_observations.items()}
+            persistence_candidates = {}
+            persistence_baselines = {}
+            persistence_witnesses = []
             for number, case in enumerate(spec["cases"], 1):
                 failures = []
                 target_failed = False
@@ -855,6 +940,52 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                                 and value["value"] != before[name]["value"])]
                 if actions and changed and not failures:
                     interactions.append({"case": number, "actions": actions, "targets": changed})
+                # A persistence witness is an actual changed asserted outcome,
+                # followed by a reload-only case retaining that same observation.
+                # Visibility/static headings and a reload in another context do
+                # not establish persistence of a mutation.
+                expected = {"text:"+key:value for key,value in case.get("expect",{}).items()}
+                expected.update({"rows:"+key:value for key,value in case.get("row_counts",{}).items()})
+                expected.update({"state:"+key:value for key,value in case.get("state",{}).items()})
+                if not failures:
+                    for target,wanted in expected.items():
+                        wanted_hash=hashlib.sha256(json.dumps(wanted,sort_keys=True,allow_nan=False).encode()).hexdigest()
+                        observed_hash=hashlib.sha256(json.dumps(after.get(target),sort_keys=True,allow_nan=False).encode()).hexdigest()
+                        if case.get('reload') and not any(case.get(kind) for kind in ('set','click','keys')):
+                            candidate=persistence_candidates.get(target)
+                            if candidate and candidate['expected_sha256']==wanted_hash and candidate['observed_sha256']==observed_hash:
+                                witness={**candidate,'reload_case':number,'target':target}
+                                if len(persistence_witnesses)<32:persistence_witnesses.append(witness)
+                                elif witness['effect'] not in {item['effect'] for item in persistence_witnesses}:
+                                    # Keep at least one witness for each requested
+                                    # effect even when earlier targets fill the cap.
+                                    for index,item in enumerate(persistence_witnesses):
+                                        if sum(other['effect']==item['effect'] for other in persistence_witnesses)>1:
+                                            persistence_witnesses[index]=witness;break
+                            persistence_baselines[target]={'case':number,'observed_sha256':observed_hash}
+                        elif actions and not case.get('reload') and target in changed:
+                            before_hash=hashlib.sha256(json.dumps(before.get(target),sort_keys=True,allow_nan=False).encode()).hexdigest()
+                            previous=persistence_baselines.get(target)
+                            old_count=collection_count(target,before.get(target));new_count=collection_count(target,after.get(target))
+                            effect='mutation';baseline_case=baseline_hash=None
+                            if previous and previous['observed_sha256']==before_hash:
+                                baseline_case=previous['case'];baseline_hash=previous['observed_sha256']
+                            if old_count is not None and new_count is not None:
+                                if new_count>old_count:effect='creation'
+                                elif new_count<old_count:
+                                    if baseline_case is None:
+                                        persistence_candidates.pop(target,None);continue
+                                    effect='removal'
+                            if (target not in initial_hashes
+                                    or observed_hash==initial_hashes[target] and baseline_case is None
+                                    or not case.get('set') and effect=='mutation' and baseline_case is None):
+                                persistence_candidates.pop(target,None);continue
+                            persistence_candidates[target]={'action_case':number,'expected_sha256':wanted_hash,
+                                'observed_sha256':observed_hash,'before_observed_sha256':before_hash,
+                                'initial_observed_sha256':initial_hashes[target],'effect':effect,
+                                'count_before':old_count,'count_after':new_count,
+                                'baseline_reload_case':baseline_case,'baseline_observed_sha256':baseline_hash}
+
             if screenshot:
                 destination = folder / ".local-ai" / "browser.png"
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -888,7 +1019,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
     return {"passed": all(item["passed"] for item in results) and not errors,
             "case_count": len(results), "failed_case_count": sum(not item["passed"] for item in results),
             "cases": results, "javascript_errors": errors,
-            "page_sha256": page_hash, "interactions": interactions,
+            "page_sha256": page_hash, "interactions": interactions, "persistence_witnesses": persistence_witnesses[:32],
+            "dependency_scope": 'limited_dependency_manifest' if dependency_limited[0] else 'project_local_dependencies',
             "normalized_inputs": normalized_inputs}
 
 
@@ -998,12 +1130,63 @@ def assertion_targets(spec: dict) -> set[str]:
         + ["rows:" + name for name in case.get("row_counts", {})])}
 
 
+def _select_persistence_witnesses(results, *, max_items=32, max_bytes=24000):
+    """Retain complete same-target effect groups before generic evidence.
+
+    This only selects bounded metadata. Original results, sequence numbering,
+    assertions and the global verdict are never changed. Leave payload room
+    for source/request/checker receipt fields rather than overflowing the DB cap.
+    """
+    max_items=min(32,max(0,max_items));max_bytes=min(24000,max(0,max_bytes))
+    candidates=[];groups={}
+    for sequence,result in enumerate(results[:MAX_SAVED_SEQUENCES],1):
+        for witness in result.get('persistence_witnesses',[])[:32]:
+            if not isinstance(witness,dict) or not isinstance(witness.get('effect'),str):continue
+            if witness['effect'] not in {'mutation','creation','removal'}:continue
+            if not isinstance(witness.get('target'),str):continue
+            if any(type(witness.get(field)) is not int for field in ('action_case','reload_case')):continue
+            value={**witness,'sequence':sequence,'path':result['path']}
+            candidates.append(value)
+            groups.setdefault((value['path'],sequence,value['target']),[]).append(value)
+    complete=[]
+    for key,values in groups.items():
+        roles={role:next((value for value in values if value['effect']==role),None) for role in ('creation','removal')}
+        if all(roles.values()):complete.append((key,[roles['creation'],roles['removal']]))
+    selected=[];used=set()
+    def identity(value):
+        return (value['path'],value['sequence'],value['target'],value['effect'],value.get('action_case'),value.get('reload_case'))
+    def include(values):
+        fresh=[value for value in values if identity(value) not in used]
+        if len(selected)+len(fresh)>max_items:return False
+        try:raw=json.dumps(selected+fresh,sort_keys=True,allow_nan=False).encode()
+        except (ValueError,TypeError):return False
+        if len(raw)>max_bytes:return False
+        selected.extend(fresh);used.update(identity(value) for value in fresh)
+        return True
+    # Give different pages a complete representative group before spending
+    # remaining capacity on repeated groups from the same page or generic text.
+    paths=set()
+    for key,pair in complete:
+        if key[0] not in paths and include(pair):paths.add(key[0])
+    for _key,pair in complete:include(pair)
+    for value in candidates:include([value])
+    return selected
+
+
+
 def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = None) -> dict:
     """Replay request-bound sequences separately and reject changed test data."""
     from playwright.sync_api import sync_playwright
 
     import task_context
 
+    import project_memory
+    receipt_source = receipt_basis = None
+    try:
+        receipt_source = project_memory.verification_source_state(folder)
+        receipt_basis = project_memory.verification_basis(folder)
+    except (OSError,ValueError,TypeError,RuntimeError,project_memory.sqlite3.Error):
+        pass  # Optional provenance cannot prevent the actual browser run.
     raw = spec_file.read_bytes()
     if len(raw) > 64000:
         raise ValueError("Saved browser checks must be under 64 KB")
@@ -1052,7 +1235,9 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
                                 "interaction_case_count": len(result.get("interactions", [])),
                                 "interaction_targets": targets[:4], "interaction_targets_limited": len(targets) > 4,
                                 "case_count": result["case_count"], "failed_case_count": result["failed_case_count"],
-                                "javascript_errors": result["javascript_errors"][:3]})
+                                "javascript_errors": result["javascript_errors"][:3],
+                                "persistence_witnesses": result.get("persistence_witnesses", [])[:32],
+                                "dependency_scope": result.get("dependency_scope", "not_observed")})
         finally:
             browser.close()
     unchanged = (spec_file.read_bytes() == raw
@@ -1063,12 +1248,22 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
     except (OSError, ValueError):
         sources_unchanged = False
     passed = all(result["passed"] for result in results) and unchanged and sources_unchanged
-    return {"passed": passed, "suite_sha256": digest,
+    report = {"passed": passed, "suite_sha256": digest,
+            "dependency_scope": ('project_local_dependencies' if all(result.get('dependency_scope')=='project_local_dependencies' for result in results) else 'limited_dependency_manifest'),
+            "persistence_witnesses": _select_persistence_witnesses(results),
             "verified_paths": sorted({spec["path"] for spec in checks}) if passed else [],
             "case_count": sum(result["case_count"] for result in results),
             "failed_case_count": sum(result["failed_case_count"] for result in results),
             "checks": results, "errors": ([] if unchanged else ["Saved cases or user instructions changed during verification"])
                 + ([] if sources_unchanged else ["HTML source changed between saved sequences; rerun the verifier"])}
+    try:
+        permit=project_memory._issue_host_check_permit(folder,'check_webapp_saved',{'suite_sha256':digest},report,
+            receipt_source,checker_file=__file__,basis_before=receipt_basis,loaded_checker_sha256=_LOADED_CHECKER_SHA256)
+        project_memory.record_host_check_receipt(folder,'check_webapp_saved',{'suite_sha256':digest},report,
+            receipt_source,checker_file=__file__,basis_before=receipt_basis,loaded_checker_sha256=_LOADED_CHECKER_SHA256,execution_permit=permit)
+    except (OSError,ValueError,TypeError,RuntimeError,project_memory.sqlite3.Error):
+        pass  # Optional receipt capture never changes the real checker verdict.
+    return report
 
 
 def _retarget_assertion_case(old: dict, correction: dict, retarget: dict) -> dict:

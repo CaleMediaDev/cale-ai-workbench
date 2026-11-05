@@ -478,3 +478,246 @@ def get(folder: str | Path, memory_id: str) -> dict:
                 raise ValueError("This document memory is outdated; use inspect_project_file on its source to rebuild it.")
             raise ValueError("Memory source file was removed or is no longer safe to read.")
     return dict(row)
+
+
+# Scoped host verification evidence; no model-declared success authority.
+_VERIFICATION_RECEIPT_BYTES = 32000
+from contextvars import ContextVar
+_VERIFICATION_PROJECT = ContextVar('verification_project', default=None)
+
+
+@contextmanager
+def verification_context(project):
+    """Host-owned task context; never an argument exposed to the model."""
+    token=_VERIFICATION_PROJECT.set(project)
+    try:yield
+    finally:_VERIFICATION_PROJECT.reset(token)
+
+
+def verification_source_state(folder):
+    """Bounded content manifest; omitted dependencies make scope explicitly limited."""
+    import json
+    root = _artifact_project_root(folder)
+    entries=[]; pending=[root]; total=0; omitted=0; visited=0
+    excluded={'.git','__pycache__'}
+    runtime={'.venv','venv','node_modules','Toolbox'}
+    while pending and visited<4096 and len(entries)<2048 and total<=32*1024*1024:
+        directory=pending.pop()
+        from itertools import islice
+        with os.scandir(directory) as children:
+            items=list(islice(children,2049))
+        if len(items)>2048:omitted+=1
+        items=sorted(items[:2048],key=lambda item:item.name)
+        for item in items:
+            visited+=1
+            if visited>4096:omitted+=1;break
+            path=Path(item.path)
+            if item.is_symlink() or getattr(item.stat(follow_symlinks=False),'st_file_attributes',0)&0x400:
+                omitted+=1;continue
+            if item.is_dir(follow_symlinks=False):
+                if item.name in excluded:continue
+                if item.name in runtime:omitted+=1;continue
+                if path==root/'.local-ai':
+                    # This directory owns mutable task state, not app source.
+                    # Any code asset there prevents a full source-scope claim.
+                    state_items=list(islice(path.iterdir(),2049))
+                    if (len(state_items)>2048 or any(child.is_dir() or child.is_symlink()
+                            or child.suffix.lower() in {'.js','.mjs','.html','.css','.py'} for child in state_items)):
+                        omitted+=1
+                    continue
+                pending.append(path);continue
+            if not item.is_file(follow_symlinks=False):omitted+=1;continue
+            if len(entries)>=2048:omitted+=1;break
+            before=path.stat()
+            if before.st_size>2*1024*1024 or total+before.st_size>32*1024*1024:
+                omitted+=1;continue
+            with path.open('rb') as stream:data=stream.read(2*1024*1024+1)
+            after=path.stat()
+            if len(data)>2*1024*1024 or (before.st_size,before.st_mtime_ns)!=(after.st_size,after.st_mtime_ns):
+                omitted+=1;continue
+            total+=len(data)
+            entries.append([path.relative_to(root).as_posix(),hashlib.sha256(data).hexdigest()])
+    omitted+=len(pending)
+    encoded=json.dumps(sorted(entries),separators=(',',':')).encode()
+    return {'sha256':hashlib.sha256(encoded).hexdigest(),'files':len(entries),'bytes':total,
+            'omitted':omitted,'scope':'limited_dependency_manifest' if omitted else 'full_project_source'}
+
+
+def verification_basis(folder, project=None):
+    """Use full original instructions; never substitute an empty followup hash."""
+    root=_artifact_project_root(folder)
+    if project is None:
+        project=_VERIFICATION_PROJECT.get()
+    if project is None:
+        # CLI verifiers have no in-process task context. Read an existing task
+        # registry without creating/migrating it or blocking behind a writer.
+        import long_tasks
+        database=long_tasks.STATE/'projects.db'
+        if database.is_file():
+            try:
+                from contextlib import closing
+                with closing(sqlite3.connect(database.as_uri()+'?mode=ro',uri=True,timeout=.2)) as conn:
+                    row=conn.execute('SELECT brief,folder FROM projects WHERE folder=? LIMIT 1',(str(root),)).fetchone()
+                if row:project={'brief':row[0],'folder':row[1]}
+            except sqlite3.Error:pass
+    if not project or Path(project['folder']).resolve()!=root:return None
+    basis={'brief':hashlib.sha256(str(project.get('brief','')).encode()).hexdigest()}
+    for name,path in (('rules',root/'AGENTS.md'),('followups',root/'.local-ai/USER-REQUESTS.md')):
+        basis[name]=None
+        if path.is_file():
+            with path.open('rb') as stream:basis[name]=hashlib.file_digest(stream,'sha256').hexdigest()
+    return basis
+
+
+def _verification_digest(value):
+    import json
+    return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+
+
+def record_host_check_receipt(folder, checker, arguments, report, source_before, *, checker_file, basis_before=None, loaded_checker_sha256=None, execution_permit=None):
+    """Called only after an actual host check. Optional cache errors never alter verdicts."""
+    import json
+    import task_context
+    if not _consume_host_check_permit(execution_permit,folder,checker,arguments,report,source_before,
+            checker_file=checker_file,basis_before=basis_before,loaded_checker_sha256=loaded_checker_sha256):return None
+    root=_artifact_project_root(folder)
+    basis=verification_basis(root)
+    after=verification_source_state(root)
+    checker_hash=hashlib.sha256(Path(checker_file).read_bytes()).hexdigest()
+    if loaded_checker_sha256 is None or loaded_checker_sha256!=checker_hash:return None
+    if basis!=basis_before or source_before!=after or report.get('passed') is not True:return None
+    encoded_report=json.dumps(report,sort_keys=True,allow_nan=False)
+    if len(encoded_report.encode())>1024*1024:return None
+    suite=report.get('suite_sha256')
+    if suite is None:
+        suite=_verification_digest(arguments)
+    witnesses=report.get('persistence_witnesses',[])[:32]
+    kind=report.get('check_tool',checker)
+    structured=kind in {'check_python_function','check_javascript_function','check_webapp','check_webapp_saved','check_document_report'}
+    level='acceptance_passed' if structured else 'process_exit_zero'
+    if basis is None:level+='_unbound'
+    value={'version':1,'observed_at':time.time(),'project':hashlib.sha256(str(root).encode()).hexdigest(),
+           'planning_basis':basis,'request_hash':task_context.request_identity(root),
+           'checker':checker,'check_sha256':_verification_digest(arguments),'bound_step_check_sha256':report.get('check_sha256'),'suite_sha256':suite,
+           'checker_sha256':checker_hash,
+           'source_before':source_before,'source_after':after,'report_sha256':hashlib.sha256(encoded_report.encode()).hexdigest(),
+           'passed':True,'verification_level':level,'dependency_scope':report.get('dependency_scope','not_observed'),
+           'training_eligible':False,'persistence_witnesses':witnesses}
+    raw=json.dumps(value,sort_keys=True,allow_nan=False)
+    if len(raw.encode())>_VERIFICATION_RECEIPT_BYTES:return None
+    identifier=_verification_digest(value)
+    with connection(root) as conn:
+        conn.execute('CREATE TABLE IF NOT EXISTS verification_receipts (id TEXT PRIMARY KEY,payload TEXT NOT NULL,created REAL NOT NULL)')
+        conn.execute('INSERT OR IGNORE INTO verification_receipts VALUES(?,?,?)',(identifier,raw,time.time()))
+        conn.execute('DELETE FROM verification_receipts WHERE id NOT IN (SELECT id FROM verification_receipts ORDER BY created DESC LIMIT 64)')
+    return identifier
+
+
+def current_check_receipts(folder, project, *, checker_file):
+    """Revalidate local cache integrity/freshness; this does not execute any check."""
+    import json
+    import task_context
+    root=_artifact_project_root(folder);basis=verification_basis(root,project)
+    current=verification_source_state(root)
+    runner=hashlib.sha256(Path(checker_file).read_bytes()).hexdigest()
+    output=[]
+    with connection(root) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='verification_receipts'").fetchone():return []
+        rows=conn.execute('SELECT id,substr(payload,1,32001) AS payload,length(CAST(payload AS BLOB)) AS bytes FROM verification_receipts ORDER BY created DESC LIMIT 64').fetchall()
+    for row in rows:
+        if row['bytes']>_VERIFICATION_RECEIPT_BYTES:continue
+        try:value=json.loads(row['payload'])
+        except (ValueError,TypeError):continue
+        fields={'version','observed_at','dependency_scope','project','planning_basis','request_hash','checker','check_sha256','suite_sha256',
+                'checker_sha256','bound_step_check_sha256','source_before','source_after','report_sha256','passed','verification_level',
+                'training_eligible','persistence_witnesses'}
+        if not isinstance(value,dict) or set(value)!=fields:continue
+        try:
+            if _verification_digest(value)!=row['id']:continue
+        except (ValueError,TypeError):continue
+        if any(not isinstance(value.get(key),str) or not re.fullmatch(r'[a-f0-9]{64}',value[key])
+               for key in ('project','check_sha256','suite_sha256','checker_sha256','report_sha256')):continue
+        bound=value.get('bound_step_check_sha256')
+        if bound is not None and (not isinstance(bound,str) or not re.fullmatch(r'[a-f0-9]{64}',bound)):continue
+        if (type(value.get('observed_at')) not in (int,float) or not 0<value['observed_at']<time.time()+1
+                or type(value.get('version')) is not int or value['version']!=1
+                or value.get('passed') is not True or value.get('training_eligible') is not False
+                or value.get('verification_level')!='acceptance_passed'
+                or value.get('project')!=hashlib.sha256(str(root).encode()).hexdigest()
+                or value.get('planning_basis')!=basis or value.get('request_hash')!=task_context.request_identity(root)
+                or _verification_digest(value.get('source_before'))!=_verification_digest(current)
+                or _verification_digest(value.get('source_after'))!=_verification_digest(current)
+                or value.get('checker_sha256')!=runner):continue
+        output.append(value)
+    return output
+
+
+# Opaque permits bind recording to a real checker return in this process. This
+# prevents ordinary import/API fabrication; it is not a sandbox against the
+# same user deliberately monkeypatching modules or editing the database.
+_HOST_CHECK_PERMITS = {}
+_HOST_CHECK_CODE = {}
+
+
+def _host_report_binding(folder, checker, arguments, report, source_before, *, checker_file, basis_before, loaded_checker_sha256):
+    import json
+    raw=json.dumps(report,sort_keys=True,allow_nan=False)
+    if len(raw.encode())>1024*1024:return None
+    return _verification_digest([str(Path(folder).resolve()),checker,arguments,
+        hashlib.sha256(raw.encode()).hexdigest(),source_before,str(Path(checker_file).resolve()),
+        basis_before,loaded_checker_sha256])
+
+
+def _issue_host_check_permit(folder, checker, arguments, report, source_before, *, checker_file, basis_before=None, loaded_checker_sha256=None):
+    """Only exact owned execution code may bind its actual completed report.
+
+    Names, filenames or supplied passed=True are insufficient. Check the live
+    module globals and function identity, then compare its code object with the
+    owned source compiled without execution. This also supports real __main__
+    CLI aliases and rejects stale bytecode/hot-replaced source.
+    """
+    import sys
+    import types
+    frame=sys._getframe(1)
+    name=frame.f_globals.get('__name__')
+    module=sys.modules.get(name)
+    if name not in {'native_agent','webapp_check','__main__'} or module is None or vars(module) is not frame.f_globals:return None
+    path=Path(getattr(module,'__file__','')).resolve()
+    allowed={'native_agent':{'execute_tool','_run_function_check_cli'},'webapp_check':{'run_saved_checks'}}
+    if frame.f_code.co_name not in allowed.get(path.stem,set()):return None
+    function=frame.f_globals.get(frame.f_code.co_name)
+    if getattr(function,'__code__',None) is not frame.f_code:return None
+    if Path(frame.f_code.co_filename).resolve()!=path or Path(checker_file).resolve()!=path:return None
+    if loaded_checker_sha256!=frame.f_globals.get('_LOADED_CHECKER_SHA256'):return None
+    with path.open('rb') as stream:source=stream.read(2*1024*1024+1)
+    if len(source)>2*1024*1024 or hashlib.sha256(source).hexdigest()!=loaded_checker_sha256:return None
+    key=(str(path),loaded_checker_sha256,frame.f_code.co_name,frame.f_code.co_filename,sys.implementation.cache_tag)
+    expected=_HOST_CHECK_CODE.get(key)
+    if expected is None:
+        try:compiled=compile(source,frame.f_code.co_filename,'exec',dont_inherit=True,optimize=sys.flags.optimize)
+        except (SyntaxError,ValueError,TypeError):return None
+        code=next((value for value in compiled.co_consts if isinstance(value,types.CodeType) and value.co_name==frame.f_code.co_name),None)
+        if code is None:return None
+        expected=code
+        if len(_HOST_CHECK_CODE)>=8:_HOST_CHECK_CODE.pop(next(iter(_HOST_CHECK_CODE)))
+        _HOST_CHECK_CODE[key]=expected
+    if frame.f_code!=expected:return None
+    if not isinstance(report,dict) or report.get('passed') is not True:return None
+    binding=_host_report_binding(folder,checker,arguments,report,source_before,checker_file=checker_file,
+        basis_before=basis_before,loaded_checker_sha256=loaded_checker_sha256)
+    if binding is None:return None
+    now=time.monotonic()
+    for token in list(_HOST_CHECK_PERMITS):
+        if _HOST_CHECK_PERMITS[token]['expires']<now:del _HOST_CHECK_PERMITS[token]
+    if len(_HOST_CHECK_PERMITS)>=64:_HOST_CHECK_PERMITS.pop(next(iter(_HOST_CHECK_PERMITS)))
+    token=uuid.uuid4().hex
+    _HOST_CHECK_PERMITS[token]={'binding':binding,'expires':now+120}
+    return token
+
+
+def _consume_host_check_permit(token, folder, checker, arguments, report, source_before, *, checker_file, basis_before, loaded_checker_sha256):
+    value=(_HOST_CHECK_PERMITS.pop(token,None) if isinstance(token,str) and len(token)==32 and re.fullmatch(r'[a-f0-9]{32}',token) else None)
+    if value is None or value['expires']<time.monotonic():return False
+    binding=_host_report_binding(folder,checker,arguments,report,source_before,checker_file=checker_file,
+        basis_before=basis_before,loaded_checker_sha256=loaded_checker_sha256)
+    return binding is not None and binding==value['binding']

@@ -7370,3 +7370,498 @@ def test_game_libraries_omitted_task_folder_is_bound_to_current_project(tmp_path
     assert not result.startswith('Tool error:'),result
     assert (folder/'vendor/cale-game/phaser/phaser.min.js').read_bytes()==payload
     assert arguments==before
+# Scoped host evidence port: original accepted85552a5 regressions.
+
+def persistence_bookmark_fixture(tmp_path, *, persistent=False):
+    """Real browser fixture; original requirements never come from app code."""
+    item=project(tmp_path/'bookmarks');folder=Path(item['folder'])
+    item['brief']='Build an offline bookmark app in index.html with a title input and Add button. Save bookmarks across page reloads.'
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    source="""<!doctype html><meta name=viewport content='width=device-width'>
+    <input id=title><button id=add>Add bookmark</button><ul id=bookmarks></ul><span id=count>0</span>
+    <script src='app.js'></script>"""
+    (folder/'index.html').write_text(source)
+    code="""let items=LOAD;
+    function render(){document.getElementById('bookmarks').textContent=items.join(' | ');document.getElementById('count').textContent=items.length;}
+    document.getElementById('add').onclick=()=>{items.push(document.getElementById('title').value);SAVE;render();};render();"""
+    code=code.replace('LOAD',"JSON.parse(localStorage.getItem('bookmarks') || '[]')" if persistent else '[]')
+    code=code.replace('SAVE',"localStorage.setItem('bookmarks',JSON.stringify(items))" if persistent else '')
+    (folder/'app.js').write_text(code)
+    spec={'path':'index.html','cases':[
+        {'set':{'title':'Alpha'},'click':['add'],'expect':{'bookmarks':'Alpha','count':'1'}},
+        {'set':{'title':'Beta'},'click':['add'],'expect':{'bookmarks':'Beta','count':'2'}}]}
+    active=task_context.plan_steps(folder,[{'phase':'Persistence','title':'Bookmarks persist',
+        'check_tool':'check_webapp','check_arguments':spec}])['active']
+    runtime=tmp_path/'runtime';runtime.mkdir()
+    return item,folder,spec,active,runtime
+
+
+
+def test_explicit_reload_requirement_rejects_real_weak_passed_suite(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path)
+    from contextlib import nullcontext
+    context=getattr(project_memory,'verification_context',lambda project:nullcontext())
+    with context(item),patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        actual=json.loads(native_agent.execute_tool(folder,'check_webapp',spec))
+        assert actual['passed'],actual
+        completed=json.loads(native_agent.execute_tool(folder,'task_steps',{'action':'complete','step_id':active['id']}))
+        assert completed['passed'] and completed['done']==1
+        verification=native_agent.execute_tool(folder,'run_verifier',{})
+        assert verification.startswith('Exit code: 0\n'),verification
+        state={**native_agent.browser_check_evidence(folder,spec,json.dumps(actual)),'verify_passed':True}
+        assert state['browser_verified']
+        issue=native_agent.completion_issue(folder,item,state)
+    assert 'persistence after reload' in issue
+    assert 'same' in issue and task_context.step_status(folder)['done']==1
+
+
+
+def test_real_storage_reload_witness_satisfies_only_explicit_persistence_obligation(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    # Retain both original cases; the new outcome is actually observed after
+    # two real mutations and then through a reload with no replayed input.
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item),patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        actual=json.loads(native_agent.execute_tool(folder,'check_webapp',spec))
+        assert actual['passed'],actual
+        original_done=json.loads(native_agent.execute_tool(folder,'task_steps',{'action':'complete','step_id':active['id']}))
+        assert original_done['passed'] and original_done['done']==1
+        verification=native_agent.execute_tool(folder,'run_verifier',{})
+        assert verification.startswith('Exit code: 0\n'),verification
+        replay=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert replay['passed'] and replay['persistence_witnesses']
+        assert not native_agent.persistence_completion_issue(folder,item)
+        state={**native_agent.browser_check_evidence(folder,spec,json.dumps(actual)),'verify_passed':True}
+        assert not native_agent.completion_issue(folder,item,state)
+        receipts=project_memory.current_check_receipts(folder,item,checker_file=webapp_check.__file__)
+        measured=[row for row in receipts if row['checker']=='check_webapp_saved']
+        assert measured and measured[0]['persistence_witnesses']
+        assert measured[0]['source_before']['scope']=='full_project_source'
+        # External JavaScript is part of the source closure, even with unchanged HTML.
+        script=folder/'app.js';original=script.read_bytes();script.write_bytes(original+b'\n// changed')
+        assert native_agent.persistence_completion_issue(folder,item)
+        script.write_bytes(original)
+        old=item['brief'];item['brief']+=' Also retain a second field.'
+        assert native_agent.persistence_completion_issue(folder,item)
+        item['brief']=old
+        assert not native_agent.persistence_completion_issue(folder,item)
+        # Hash-corrupted/loose cache metadata cannot replace a missing witness.
+        with project_memory.connection(folder) as conn:
+            conn.execute("UPDATE verification_receipts SET payload=replace(payload,'reload_case','forged_reload_case')")
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+@pytest.mark.parametrize('brief',[
+    'Build an offline counter app.',
+    'Build a bookmark app. Do not save bookmarks across page reloads.',
+    'Build a bookmark app. Perhaps save bookmarks across page reloads.',
+    'Explain how bookmarks might persist after reload?',
+    'Build a bookmark app. Save bookmarks if requested later.',
+])
+def test_persistence_obligation_does_not_invent_negated_or_ambiguous_scope(tmp_path,brief):
+    item=project(tmp_path/'ordinary');item['brief']=brief
+    assert task_context.explicit_persistence_obligations(item['folder'],item)==[]
+
+
+
+@pytest.mark.parametrize('mode',['static','reload_with_new_input','no_storage','separate_contexts'])
+def test_real_browser_persistence_witness_rejects_nonproof_sequences(tmp_path,mode):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=mode!='no_storage')
+    if mode=='static':
+        page=folder/'index.html';page.write_text(page.read_text()+'<h1 id=heading>Bookmarks</h1>')
+        spec['cases']=[{'set':{'title':'Alpha'},'click':['add'],'expect':{'heading':'Bookmarks'}},
+                       {'reload':True,'expect':{'heading':'Bookmarks'}}]
+    elif mode=='reload_with_new_input':
+        spec['cases']=[spec['cases'][0],{**spec['cases'][1],'reload':True}]
+    elif mode=='no_storage':
+        spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    elif mode=='separate_contexts':
+        first=webapp_check.check(folder,{'path':'index.html','cases':[spec['cases'][0]]})
+        assert first['passed'] and first['interactions'] and not first['persistence_witnesses']
+        spec={'path':'index.html','cases':[{'reload':True,'expect':{'bookmarks':'','count':'0'}}]}
+    result=webapp_check.check(folder,spec)
+    if mode=='no_storage':assert not result['passed']
+    else:assert result['passed']
+    assert not result['persistence_witnesses']
+
+
+
+def test_persistence_obligations_preserve_exact_source_span_and_basis(tmp_path):
+    item=project(tmp_path/'span');item['brief']='Build a bookmark page. Save bookmarks across page reloads.'
+    obligations=task_context.explicit_persistence_obligations(item['folder'],item)
+    assert len(obligations)==1
+    value=obligations[0];span=item['brief'][slice(*value['span'])]
+    assert value['source']=='brief' and 'Save bookmarks' in span
+    assert value['span_sha256']==hashlib.sha256(span.encode()).hexdigest()
+    assert value['planning_basis']==native_agent.planning_basis(item)
+    for brief in ['Bookmarks should not persist after reload.','Bookmarks must not save across reloads.',
+                  'The old app saved bookmarks across reloads.','Could save bookmarks after reload.']:
+        item['brief']=brief
+        assert task_context.explicit_persistence_obligations(item['folder'],item)==[]
+
+
+
+def test_browser_hidden_dependency_remains_limited_even_if_project_manifest_skips_git_metadata(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    hidden=folder/'.git';hidden.mkdir()
+    (folder/'app.js').replace(hidden/'app.js')
+    page=folder/'index.html';page.write_text(page.read_text().replace("src='app.js'","src='.git/app.js'"))
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    assert project_memory.verification_source_state(folder)['scope']=='full_project_source'
+    with project_memory.verification_context(item):
+        measured=webapp_check.check(folder,spec)
+        assert measured['passed'] and measured['persistence_witnesses']
+        assert measured['dependency_scope']=='limited_dependency_manifest'
+        webapp_check.save_verifier(folder,spec)
+        replay=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert replay['passed'] and replay['dependency_scope']=='limited_dependency_manifest'
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_command_unit_receipt_binds_original_check_and_does_not_promote_process_success(tmp_path):
+    item=project(tmp_path/'commands');folder=Path(item['folder'])
+    active=task_context.plan_steps(folder,[{'title':'Actual command','phase':'Run',
+        'check_command':'Write-Output "checked"','shell':'powershell'}])['active']
+    with project_memory.verification_context(item):
+        result=json.loads(native_agent.execute_tool(folder,'task_steps',{'action':'complete','step_id':active['id']}))
+    assert result['passed']
+    with project_memory.connection(folder) as conn:
+        rows=[json.loads(row['payload']) for row in conn.execute('SELECT payload FROM verification_receipts')]
+    matching=[row for row in rows if row['checker']=='task_steps']
+    assert matching and matching[0]['bound_step_check_sha256']==task_context.step_check_identity(active)
+    assert matching[0]['verification_level']=='process_exit_zero'
+    assert matching[0]['training_eligible'] is False
+
+
+
+@pytest.mark.parametrize('brief',[
+    'Build a bookmark app. Save a screenshot after reloading the page.',
+    'Build a bookmark app. Remember to save a report after reloading.',
+    'Build a bookmark app. Keep the Add button visible after reload.',
+])
+def test_nonpersistent_after_reload_procedures_do_not_invent_data_retention(tmp_path,brief):
+    item=project(tmp_path/'procedure');item['brief']=brief
+    assert task_context.explicit_persistence_obligations(item['folder'],item)==[]
+
+
+
+def test_reload_preserve_original_dual_clause_cannot_be_satisfied_by_real_add_only_witness(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    item['brief']='Build an offline bookmark app in index.html with input and buttons. Save records on this computer with localStorage. Reloading must preserve added records and deletions.'
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        actual=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert actual['passed'] and actual['persistence_witnesses']
+        issue=native_agent.persistence_completion_issue(folder,item)
+    assert 'removal' in issue or 'deletion' in issue
+    obligations=task_context.explicit_persistence_obligations(folder,item)
+    assert obligations and any(row['required_effects']==['creation','removal'] for row in obligations)
+    assert task_context.step_status(folder)['done']==0
+
+
+
+def deletion_reload_fixture(tmp_path, *, store=True, store_deletion=True):
+    item,folder,original,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    item['brief']='Build an offline bookmark app in index.html with input and buttons. Save records on this computer with localStorage. Reloading must preserve added records and deletions.'
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    active=task_context.plan_steps(folder,[{'phase':'Persistence','title':'Bookmark data',
+        'check_tool':'check_webapp','check_arguments':original}])['active']
+    page=folder/'index.html';page.write_text(page.read_text().replace('<ul id=bookmarks>','<button id=remove>Remove last</button><ul id=bookmarks>'))
+    code="""let items=LOAD;
+    function render(){const list=document.getElementById('bookmarks');list.textContent='';items.forEach(name=>{const li=document.createElement('li');li.textContent=name;list.appendChild(li);});document.getElementById('count').textContent=items.length;}
+    function save(){SAVE;}
+    document.getElementById('add').onclick=()=>{items.push(document.getElementById('title').value);save();render();};
+    document.getElementById('remove').onclick=()=>{items.pop();DELETE_SAVE;render();};render();"""
+    code=code.replace('LOAD',"JSON.parse(localStorage.getItem('bookmarks') || '[]')" if store else '[]')
+    code=code.replace('DELETE_SAVE','save()' if store_deletion else '')
+    code=code.replace('SAVE',"localStorage.setItem('bookmarks',JSON.stringify(items))" if store else '')
+    (folder/'app.js').write_text(code)
+    spec=copy.deepcopy(original)
+    spec['cases'] += [
+        {'reload':True,'expect':{'bookmarks':'Beta','count':'2'}},
+        {'click':['remove'],'expect':{'bookmarks':'Alpha','count':'1'}},
+        {'reload':True,'expect':{'bookmarks':'Alpha','count':'1'}}]
+    return item,folder,spec,active
+
+
+
+def test_actual_add_and_delete_reload_have_distinct_persisted_baseline_witnesses(tmp_path):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path)
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed'],report
+        effects={row['effect'] for row in report['persistence_witnesses']}
+        assert {'creation','removal'}<=effects
+        removal=next(row for row in report['persistence_witnesses'] if row['effect']=='removal')
+        assert removal['baseline_reload_case']==3 and removal['action_case']==4 and removal['reload_case']==5
+        assert removal['count_before']==2 and removal['count_after']==1
+        assert removal['baseline_observed_sha256']==removal['before_observed_sha256']
+        assert not native_agent.persistence_completion_issue(folder,item)
+    assert spec['cases'][:2]==task_context.step_status(folder)['active']['check_arguments']['cases']
+    assert task_context.step_status(folder)['done']==0
+
+
+
+def test_never_stored_add_delete_reload_empty_is_not_deletion_persistence(tmp_path):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path,store=False)
+    spec['cases']=[spec['cases'][0],{'click':['remove'],'expect':{'bookmarks':'','count':'0'}},
+                   {'reload':True,'expect':{'bookmarks':'','count':'0'}}]
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed']  # All-zero after reload alone is a weak check.
+        assert not any(row['effect']=='removal' for row in report['persistence_witnesses'])
+        assert 'removal' in native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_real_storage_delete_write_mutation_fails_reload_and_cannot_earn_removal(tmp_path):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path,store_deletion=False)
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert not report['passed'] and report['failed_case_count']>=1
+        assert not any(row['effect']=='removal' for row in report['persistence_witnesses'])
+        assert 'removal' in native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_plain_import_cannot_register_fabricated_browser_pass_when_real_reload_fails(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=False)
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        actual=webapp_check.check(folder,spec)
+        assert not actual['passed']
+        digest=hashlib.sha256((folder/'.local-ai/webapp-check.json').read_bytes()).hexdigest()
+        fabricated={'passed':True,'suite_sha256':digest,'dependency_scope':'project_local_dependencies',
+            'persistence_witnesses':[{'sequence':1,'path':'index.html','action_case':2,'reload_case':3,
+                'target':'text:bookmarks','effect':'mutation','count_before':None,'count_after':None,
+                'baseline_reload_case':None,'baseline_observed_sha256':None,
+                'before_observed_sha256':'b'*64,'initial_observed_sha256':'c'*64,'observed_sha256':'a'*64,
+                'expected_sha256':hashlib.sha256(json.dumps('Beta').encode()).hexdigest()}]}
+        assert native_agent.valid_persistence_witnesses(fabricated['persistence_witnesses'],json.loads((folder/'.local-ai/webapp-check.json').read_bytes()))
+        receipt=project_memory.record_host_check_receipt(folder,'check_webapp_saved',{'suite_sha256':digest},fabricated,
+            project_memory.verification_source_state(folder),checker_file=webapp_check.__file__,
+            basis_before=project_memory.verification_basis(folder),loaded_checker_sha256=webapp_check._LOADED_CHECKER_SHA256)
+        assert receipt is None
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_real_host_receipt_permit_is_one_use_and_bound_to_exact_report(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    real_record=project_memory.record_host_check_receipt
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        with patch.object(project_memory,'record_host_check_receipt',wraps=real_record) as recording:
+            report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed'] and not native_agent.persistence_completion_issue(folder,item)
+        args,kwargs=recording.call_args
+        assert kwargs['execution_permit']
+        assert real_record(*args,**kwargs) is None  # Already consumed by the real capture.
+        issue_kwargs={key:value for key,value in kwargs.items() if key!='execution_permit'}
+        assert project_memory._issue_host_check_permit(*args,**issue_kwargs) is None
+        captured=[]
+        with patch.object(project_memory,'record_host_check_receipt',side_effect=lambda *a,**k:captured.append((a,k))):
+            repeated=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert repeated['passed']
+        original,options=captured[-1]
+        altered=list(original);altered[3]={**original[3],'case_count':999}
+        assert real_record(*altered,**options) is None
+        assert real_record(*original,**options) is None  # Mismatch also consumes the permit.
+
+
+
+def test_offline_aborted_external_script_keeps_dependency_scope_limited(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    page=folder/'index.html';page.write_text(page.read_text()+"<script src='https://example.invalid/unavailable.js'></script>")
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed'] and report['persistence_witnesses']
+        assert report['dependency_scope']=='limited_dependency_manifest'
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_actual_generated_browser_verifier_and_main_alias_capture_real_receipts(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    webapp_check.save_verifier(folder,spec,accumulate=True)
+    hidden=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
+    child=subprocess.run(['powershell','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(folder/'.local-ai/verify.ps1')],
+        capture_output=True,text=True,timeout=40,creationflags=hidden)
+    assert child.returncode==0,child.stderr+child.stdout
+    with project_memory.connection(folder) as conn:
+        cli_rows=[json.loads(row['payload']) for row in conn.execute('SELECT payload FROM verification_receipts')]
+    assert any(row['checker']=='check_webapp_saved' for row in cli_rows)
+    # A separate real runpy __main__ entrypoint has an authoritative TEMP task
+    # registry. No fake browser verdict or canonical-module main() shortcut.
+    with patch.object(long_tasks,'STATE',runtime),long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+            (item['id'],str(folder.resolve()),item['brief'],time.time(),time.time()))
+    bootstrap=tmp_path/'browser_cli_bootstrap.py'
+    bootstrap.write_text('import sys,runpy\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(Path(native_agent.__file__).parent))+')\nimport long_tasks\nlong_tasks.STATE=Path('+repr(str(runtime))+')\nsys.argv='+repr([webapp_check.__file__,'--folder',str(folder),'--spec',str(folder/'.local-ai/webapp-check.json')])+'\nrunpy.run_path('+repr(webapp_check.__file__)+',run_name="__main__")\n')
+    aliased=subprocess.run([sys.executable,'-B',str(bootstrap)],capture_output=True,text=True,timeout=40,creationflags=hidden)
+    assert aliased.returncode==0,aliased.stderr+aliased.stdout
+    assert project_memory.current_check_receipts(folder,item,checker_file=webapp_check.__file__)
+    assert not native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_actual_native_function_checker_cli_main_captures_real_pass(tmp_path):
+    folder=tmp_path/'native-cli';folder.mkdir();(folder/'.local-ai').mkdir()
+    (folder/'logic.py').write_text('def twice(value): return value*2')
+    spec={'request_hash':task_context.request_identity(folder),'checks':[
+        {'path':'logic.py','function':'twice','cases':[{'args':[3],'expected':6}]}]}
+    path=folder/'.local-ai/cale-python-checks.json';path.write_text(json.dumps(spec))
+    sha=hashlib.sha256(path.read_bytes()).hexdigest()
+    child=subprocess.run([sys.executable,'-B',native_agent.__file__,'check-python',str(folder),str(path),sha],
+        capture_output=True,text=True,timeout=30,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+    assert child.returncode==0,child.stderr+child.stdout
+    assert json.loads(child.stdout)['passed']
+    with project_memory.connection(folder) as conn:
+        rows=[json.loads(row['payload']) for row in conn.execute('SELECT payload FROM verification_receipts')]
+    assert any(row['checker']=='check_python_function' and row['verification_level']=='acceptance_passed_unbound' for row in rows)
+
+
+
+def test_never_stored_return_to_initial_zero_cannot_satisfy_even_generic_reload_request(tmp_path):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path,store=False)
+    item['brief']='Build an offline bookmark app in index.html with input and buttons. Save bookmarks across page reloads.'
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    spec['cases']=[spec['cases'][0],{'click':['remove'],'expect':{'bookmarks':'','count':'0'}},
+                   {'reload':True,'expect':{'bookmarks':'','count':'0'}}]
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed']
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_collection_witness_observation_never_invokes_app_owned_children_getter(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    script=folder/'app.js'
+    script.write_text(script.read_text()+"\nwindow.witness={getterReads:0}; const nativeChildren=Object.getOwnPropertyDescriptor(Element.prototype,'children').get; Object.defineProperty(document.getElementById('bookmarks'),'children',{get(){window.witness.getterReads++;return nativeChildren.call(this);}});")
+    for case in spec['cases']:case['state']={'witness.getterReads':0}
+    measured=webapp_check.check(folder,spec)
+    assert measured['passed'],measured
+
+
+
+def test_collection_witness_observation_never_invokes_app_prototype_children_getter(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    script=folder/'app.js'
+    script.write_text(script.read_text()+"\nwindow.probe={reads:0}; const pristineChildren=Object.getOwnPropertyDescriptor(Element.prototype,'children').get; Object.defineProperty(Element.prototype,'children',{configurable:true,get(){window.probe.reads++;return pristineChildren.call(this);}});")
+    control={'path':'index.html','cases':[{'click':['add'],'state':{'probe.reads':0}}]}
+    assert webapp_check.check(folder,control)['passed']
+    for case in spec['cases']:case['state']={'probe.reads':0}
+    measured=webapp_check.check(folder,spec)
+    assert measured['passed'],measured
+
+
+
+@pytest.mark.parametrize('kind', ['children','collection_length','collection_item','matches'])
+def test_pristine_list_witness_ignores_all_later_prototype_replacements(tmp_path,kind):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path)
+    replacements={
+        'children': "const d=Object.getOwnPropertyDescriptor(Element.prototype,'children');Object.defineProperty(Element.prototype,'children',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'collection_length': "const d=Object.getOwnPropertyDescriptor(HTMLCollection.prototype,'length');Object.defineProperty(HTMLCollection.prototype,'length',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'collection_item': "const method=HTMLCollection.prototype.item;HTMLCollection.prototype.item=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'matches': "const method=Element.prototype.matches;Element.prototype.matches=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+    }
+    script=folder/'app.js';script.write_text(script.read_text()+'\nwindow.probe={reads:0};'+replacements[kind])
+    control={'path':'index.html','cases':[{'set':{'title':'Control'},'click':['add'],'state':{'probe.reads':0}}]}
+    assert webapp_check.check(folder,control)['passed']
+    for case in spec['cases']:case['state']={'probe.reads':0}
+    measured=webapp_check.check(folder,spec)
+    assert measured['passed'],measured
+    assert {'creation','removal'}<={row['effect'] for row in measured['persistence_witnesses']}
+
+
+
+@pytest.mark.parametrize('kind', ['table_rows','section_rows','collection_length','collection_item','node_length','node_item','query','escape','tag'])
+def test_pristine_row_observer_ignores_later_dom_prototype_and_method_replacements(tmp_path,kind):
+    import webapp_check
+    item=project(tmp_path/'tables');folder=Path(item['folder'])
+    replacements={
+        'table_rows': "const d=Object.getOwnPropertyDescriptor(HTMLTableElement.prototype,'rows');Object.defineProperty(HTMLTableElement.prototype,'rows',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'section_rows': "const d=Object.getOwnPropertyDescriptor(HTMLTableSectionElement.prototype,'rows');Object.defineProperty(HTMLTableSectionElement.prototype,'rows',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'collection_length': "const d=Object.getOwnPropertyDescriptor(HTMLCollection.prototype,'length');Object.defineProperty(HTMLCollection.prototype,'length',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'collection_item': "const method=HTMLCollection.prototype.item;HTMLCollection.prototype.item=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'node_length': "const d=Object.getOwnPropertyDescriptor(NodeList.prototype,'length');Object.defineProperty(NodeList.prototype,'length',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'node_item': "const method=NodeList.prototype.item;NodeList.prototype.item=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'query': "const method=Document.prototype.querySelectorAll;Document.prototype.querySelectorAll=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'escape': "const method=CSS.escape;CSS.escape=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'tag': "const d=Object.getOwnPropertyDescriptor(Element.prototype,'localName');Object.defineProperty(Element.prototype,'localName',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+    }
+    source="""<button id=add>Add</button><table id=records><tbody id=body></tbody></table>
+    <script>window.probe={reads:0};document.getElementById('add').onclick=()=>{const row=document.createElement('tr');const cell=document.createElement('td');cell.textContent='Entry';row.appendChild(cell);document.getElementById('body').appendChild(row);};REPLACEMENT</script>"""
+    (folder/'index.html').write_text(source.replace('REPLACEMENT',replacements[kind]))
+    control={'path':'index.html','cases':[{'click':['add'],'state':{'probe.reads':0}}]}
+    assert webapp_check.check(folder,control)['passed']
+    observed=copy.deepcopy(control);observed['cases'][0]['row_counts']={'records':1,'body':1}
+    result=webapp_check.check(folder,observed)
+    assert result['passed'],result
+
+
+
+def test_global_witness_budget_retains_later_complete_group_without_changing_any_verdict(tmp_path):
+    import webapp_check
+    item,folder,strong,active=deletion_reload_fixture(tmp_path)
+    page=folder/'index.html'
+    spans=''.join('<span id="noise'+str(index)+'">0</span>' for index in range(32))
+    page.write_text(page.read_text().replace("<script src='app.js'></script>",'<input id=seed><button id=fill>Fill</button>'+spans+"<script src='app.js'></script>"))
+    script=folder/'app.js'
+    script.write_text(script.read_text()+"\nfunction noise(value){for(let i=0;i<32;i++)document.getElementById('noise'+i).textContent=value;}noise(localStorage.getItem('noise')||'0');document.getElementById('fill').onclick=()=>{const value=document.getElementById('seed').value;localStorage.setItem('noise',value);noise(value);};")
+    first={'noise'+str(index):'1' for index in range(16)}
+    second={'noise'+str(index):'2' for index in range(16,32)}
+    noise={'path':'index.html','cases':[{'set':{'seed':'1'},'click':['fill'],'expect':first},
+        {'reload':True,'expect':first},{'set':{'seed':'2'},'click':['fill'],'expect':second},
+        {'reload':True,'expect':second}]}
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,noise,accumulate=True)
+        webapp_check.save_verifier(folder,strong,accumulate=True)
+        path=folder/'.local-ai/webapp-check.json';before=path.read_bytes()
+        report=webapp_check.run_saved_checks(folder,path)
+        assert report['passed'] and report['case_count']==9 and report['failed_case_count']==0
+        assert len(report['checks'])==2 and all(check['passed'] for check in report['checks'])
+        assert path.read_bytes()==before
+        assert len(report['persistence_witnesses'])<=32
+        later=[row for row in report['persistence_witnesses'] if row['sequence']==2 and row['target']=='text:bookmarks']
+        assert {'creation','removal'}<={row['effect'] for row in later}
+        assert not native_agent.persistence_completion_issue(folder,item)
+        # A later failure is still authoritative; witness priority never edits
+        # cases, original numbering, success flags or the global verifier.
+        webapp_check.save_verifier(folder,{'path':'index.html','cases':[{'expect':{'missing':'required'}}]},accumulate=True)
+        failed_bytes=path.read_bytes()
+        failed=webapp_check.run_saved_checks(folder,path)
+        assert not failed['passed'] and failed['case_count']==10 and failed['failed_case_count']==1
+        assert [check['passed'] for check in failed['checks']]==[True,True,False]
+        assert path.read_bytes()==failed_bytes
+        assert native_agent.persistence_completion_issue(folder,item)

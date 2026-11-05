@@ -999,3 +999,53 @@ def recovery_attempt(folder,episode_id,method,tool,arguments,result,outcome,*,pr
         if len(evidence)>2000:raise ValueError('Recovery proof exceeds its checkpoint budget')
         conn.execute('UPDATE capability_recoveries SET status=?,proof=?,updated=? WHERE id=?',
             ('recovered' if proven else 'awaiting_acceptance',evidence,time.time(),episode_id))
+
+
+def explicit_persistence_obligations(folder, project):
+    """A narrow, auditable phrase guard, not a semantic requirements classifier.
+
+    Require both an affirmative persistence request and an explicit reload
+    consequence in the same short clause. Negated, hypothetical/question and
+    ambiguous clauses do not invent a new completion requirement.
+    """
+    root=project_memory._artifact_project_root(folder)
+    basis=project_memory.verification_basis(root,project)
+    sources=[('brief',str(project.get('brief','')))]
+    followups=root/'.local-ai/USER-REQUESTS.md'
+    if followups.is_file():
+        with followups.open('rb') as stream:raw=stream.read(64001)
+        if len(raw)<=64000:sources.append(('followups',raw.decode('utf-8',errors='replace')))
+    obligations=[]
+    for source,text in sources:
+        for match in re.finditer(r'[^.!?;\n]+[.!?;]?',text):
+            clause=match[0].strip()
+            if not clause or len(clause)>400 or clause.endswith('?'):continue
+            if re.search(r"(?i)\b(?:do not|don't|never|no need|not required|need not|needn't|does not|doesn't|without|may|might|could|optionally|perhaps|should not|must not|shall not|will not|not save|not persist|not retain|not keep)\b",clause):continue
+            if re.match(r'(?i)(?:if|explain|describe|example|suppose|what|why|how)\b',clause):continue
+            if re.search(r'(?i)\b(?:if|unless)\b',clause):continue
+            reload_word=r'\b(?:reload(?:ing|s)?|refresh(?:ing|es)?|reopen(?:ing)?|restart(?:ing|s)?)\b'
+            # 'Save after reloading' can be a screenshot/export procedure.
+            # Require intrinsic persist semantics or save ACROSS reloads;
+            # generic 'keep visible' is layout, not a mutation-retention claim.
+            persistent=re.search(r'(?i)\bpersist\b.{0,180}\b(?:after|across|between|through|on)\b.{0,80}'+reload_word,clause)
+            save_across=re.search(r'(?i)\bsave\b.{0,180}\b(?:across|between|through)\b.{0,80}'+reload_word,clause)
+            reload_preserves=re.search(reload_word+r'\s+(?:must|shall|should)\s+(?:preserve|retain|restore)\b',clause,re.I)
+            if re.search(r'(?i)\b(?:visibility|visible|layout|aligned|alignment|nothing)\b',clause):continue
+            if not (persistent or save_across or reload_preserves):continue
+            effects=[]
+            if re.search(r'(?i)\b(?:added|additions|created|creations)\b',clause):effects.append('creation')
+            if re.search(r'(?i)\b(?:deleted|deletions|removed|removals)\b',clause):effects.append('removal')
+            if not effects:effects=['mutation']
+            value={'kind':'browser_persistence','required_effects':effects,'source':source,'span':[match.start(),match.end()],
+                   'span_sha256':hashlib.sha256(match[0].encode()).hexdigest(),'planning_basis':basis}
+            value['id']=_recovery_hash(value)
+            obligations.append(value)
+            if len(obligations)>=32:break
+        if len(obligations)>=32:break
+    with project_memory.connection(root) as conn:
+        conn.execute('CREATE TABLE IF NOT EXISTS requirement_obligations (id TEXT PRIMARY KEY,payload TEXT NOT NULL,updated REAL NOT NULL)')
+        for value in obligations:
+            conn.execute('INSERT OR REPLACE INTO requirement_obligations VALUES(?,?,?)',
+                         (value['id'],json.dumps(value,sort_keys=True),time.time()))
+        conn.execute('DELETE FROM requirement_obligations WHERE id NOT IN (SELECT id FROM requirement_obligations ORDER BY updated DESC LIMIT 64)')
+    return obligations

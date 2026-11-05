@@ -2569,3 +2569,22 @@ def test_browser_plan_path_format_only_developer_probe_keeps_pure_compatibility(
     with pytest.raises(ValueError, match="relative HTML path"):
         task_context._validate_steps([{**step, "check_arguments": {
             **step["check_arguments"], "path": "/index.html"}}])
+
+
+# Scoped host evidence port: original accepted85552a5 regressions.
+
+def test_persistence_metadata_budget_is_atomic_bounded_and_does_not_mutate_results():
+    import copy,json
+    noise=[{'target':'text:noise'+str(index),'effect':'mutation','action_case':1,'reload_case':2} for index in range(32)]
+    pair=[{'target':'text:records','effect':effect,'action_case':case,'reload_case':case+1}
+          for effect,case in [('creation',1),('removal',3)]]
+    results=[{'path':'index.html','passed':True,'persistence_witnesses':noise},
+             {'path':'index.html','passed':False,'persistence_witnesses':pair}]
+    before=copy.deepcopy(results)
+    selected=webapp_check._select_persistence_witnesses(results,max_items=2)
+    assert len(selected)==2 and {row['effect'] for row in selected}=={'creation','removal'}
+    assert all(row['sequence']==2 for row in selected)
+    assert results==before
+    tiny=webapp_check._select_persistence_witnesses(results,max_bytes=1)
+    assert tiny==[]
+    assert len(json.dumps(webapp_check._select_persistence_witnesses(results)).encode())<=24000

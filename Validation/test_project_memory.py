@@ -509,3 +509,63 @@ def test_recovery_artifact_guard_rejects_database_link(tmp_path):
     with pytest.raises(ValueError,match='own project'):
         memory._artifact_project_root(root)
     assert target.read_text()=='unmodified'
+
+
+# Scoped host evidence port: original accepted85552a5 regressions.
+
+def test_verification_manifest_covers_external_js_and_marks_omitted_inputs_limited(tmp_path):
+    root=tmp_path/'app';root.mkdir();(root/'index.html').write_text('<script src="app.js"></script>')
+    script=root/'app.js';script.write_text('let n=1')
+    first=memory.verification_source_state(root)
+    assert first['scope']=='full_project_source'
+    script.write_text('let n=2')
+    assert memory.verification_source_state(root)['sha256']!=first['sha256']
+    (root/'large.mov').write_bytes(b'x'*(2*1024*1024+1))
+    limited=memory.verification_source_state(root)
+    assert limited['scope']=='limited_dependency_manifest' and limited['omitted']>=1
+    assert limited['bytes']<2*1024*1024
+
+
+
+def test_verification_receipts_capture_real_pass_but_reject_other_project_and_corrupt_cache(tmp_path):
+    import json
+    import native_agent
+    from unittest.mock import patch
+    root=tmp_path/'one';root.mkdir();(root/'.local-ai').mkdir()
+    (root/'logic.py').write_text('def twice(value): return value * 2')
+    project={'folder':str(root),'brief':'Implement twice(value) in logic.py','id':'receipt'}
+    args={'path':'logic.py','function':'twice','cases':[{'args':[3],'expected':6}]}
+    import long_tasks
+    runtime=tmp_path/'runtime';runtime.mkdir()
+    with memory.verification_context(project),patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[project]):
+        verdict=json.loads(native_agent.execute_tool(root,'check_python_function',args))
+    assert verdict['passed']
+    rows=memory.current_check_receipts(root,project,checker_file=native_agent.__file__)
+    assert rows and rows[0]['verification_level']=='acceptance_passed'
+    assert rows[0]['training_eligible'] is False
+    assert len(rows[0]['report_sha256'])==64 and rows[0]['planning_basis']['brief']
+    other=tmp_path/'two';other.mkdir();(other/'.local-ai').mkdir()
+    (other/'logic.py').write_bytes((root/'logic.py').read_bytes())
+    import shutil
+    shutil.copy2(root/'.local-ai/memory.sqlite3',other/'.local-ai/memory.sqlite3')
+    assert memory.current_check_receipts(other,{**project,'folder':str(other)},checker_file=native_agent.__file__)==[]
+    with memory.connection(root) as conn:
+        conn.execute("UPDATE verification_receipts SET payload=?",(' '*1000000,))
+    assert memory.current_check_receipts(root,project,checker_file=native_agent.__file__)==[]
+
+
+
+def test_verification_receipt_wont_attest_hot_replaced_unloaded_checker(tmp_path):
+    root=tmp_path/'project';root.mkdir()
+    project={'folder':str(root),'brief':'Check a local operation'}
+    runner=tmp_path/'checker.py';runner.write_text('# implementation one')
+    loaded=hashlib.sha256(runner.read_bytes()).hexdigest()
+    runner.write_text('# implementation two was never loaded')
+    # Isolate the source-snapshot guard after an already-trusted execution
+    # binding. Actual execution/permit positives are tested independently.
+    with memory.verification_context(project),patch.object(memory,'_consume_host_check_permit',return_value=True) as trusted:
+        source=memory.verification_source_state(root);basis=memory.verification_basis(root)
+        assert memory.record_host_check_receipt(root,'test',{}, {'passed':True},source,
+            checker_file=runner,basis_before=basis,loaded_checker_sha256=loaded) is None
+        assert trusted.call_count==1
+    assert memory.current_check_receipts(root,project,checker_file=runner)==[]

@@ -227,6 +227,10 @@ TOOLS.append({"type": "function", "function": {
         "required": ["provider", "prompt"], "additionalProperties": False}}})
 
 
+# Bind receipts to this loaded implementation, not later hot-replaced bytes.
+_LOADED_CHECKER_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
 def bind_step_checker_schemas(tools: list) -> None:
     """Expose the same nested contracts enforced when SQLite saves a plan.
 
@@ -644,6 +648,38 @@ def readable_powershell_error(stderr: str) -> str:
 
 
 def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit=None) -> str:
+    """Observe generic actual checker passes without trusting model success claims."""
+    import project_memory
+    observed=(name in {'check_python_function','check_javascript_function','check_webapp','check_document_report','run_verifier'}
+              or name=='task_steps' and arguments.get('action')=='complete')
+    before=basis=None
+    receipt_arguments=arguments
+    if observed:
+        try:
+            before=project_memory.verification_source_state(folder)
+            basis=project_memory.verification_basis(folder)
+            if name=='task_steps':
+                import task_context
+                active=task_context.step_status(folder)['active']
+                if active:
+                    receipt_arguments={key:active.get(key) for key in ('id','check_tool','check_arguments','check_command','shell')}
+                    receipt_arguments['check_sha256']=task_context.step_check_identity(active)
+        except (OSError,ValueError,TypeError,RuntimeError,project_memory.sqlite3.Error):pass
+    result=_execute_tool(folder,name,arguments,before_step_commit=before_step_commit)
+    if before is not None:
+        try:
+            report=({'passed':result.startswith('Exit code: 0\n'),'output_sha256':hashlib.sha256(result.encode()).hexdigest()} if name=='run_verifier' else json.loads(result))
+            if isinstance(report,dict):
+                permit=project_memory._issue_host_check_permit(folder,name,receipt_arguments,report,before,
+                    checker_file=__file__,basis_before=basis,loaded_checker_sha256=_LOADED_CHECKER_SHA256)
+                project_memory.record_host_check_receipt(folder,name,receipt_arguments,report,before,
+                    checker_file=__file__,basis_before=basis,loaded_checker_sha256=_LOADED_CHECKER_SHA256,execution_permit=permit)
+        except (OSError,ValueError,TypeError,RuntimeError,project_memory.sqlite3.Error):pass
+    return result
+
+
+
+def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit=None) -> str:
     try:
         if name == "delegate_subscription_task":
             import cloud_providers
@@ -4296,6 +4332,91 @@ def plan_declared_function_step(project: dict, state: dict, messages: list, call
         return False  # Ordinary project planning remains available after one failed attempt.
 
 
+def persistence_completion_issue(folder, project):
+    """Require a fresh measured reload witness only for an explicit request.
+
+    This proves one observed retained mutation, not complete semantic coverage.
+    The real independent verifier remains required by completion_issue.
+    """
+    import project_memory
+    import task_context
+    import webapp_check
+    suite=Path(folder)/'.local-ai/webapp-check.json'
+    if not browser_check_required(project) and not suite.is_file():return ''
+    obligations=task_context.explicit_persistence_obligations(folder,project)
+    if not obligations:return ''
+    required={effect for row in obligations for effect in row['required_effects']}
+    if not suite.is_file():return 'The original request explicitly requires persistence after reload. Add and run a same-sequence browser case that changes data, asserts its new outcome, reloads, and asserts that same outcome without filling or clicking again.'
+    with suite.open('rb') as stream:raw=stream.read(64001)
+    if len(raw)>64000:return 'The saved browser suite exceeds the bounded persistence evidence limit; restore its valid retained checks.'
+    saved=json.loads(raw)
+    digest=hashlib.sha256(raw).hexdigest()
+    receipts=project_memory.current_check_receipts(folder,project,checker_file=webapp_check.__file__)
+    for receipt in receipts:
+        if (receipt.get('checker')=='check_webapp_saved' and receipt.get('suite_sha256')==digest
+                and receipt.get('source_after',{}).get('scope')=='full_project_source'
+                and receipt.get('dependency_scope')=='project_local_dependencies'
+                and receipt.get('check_sha256')==project_memory._verification_digest({'suite_sha256':digest})
+                and valid_persistence_witnesses(receipt.get('persistence_witnesses'),saved)):
+            groups={}
+            pages=[name for name in requested_root_files(str(project.get('brief',''))) if Path(name).suffix.lower() in {'.html','.htm'}]
+            for witness in receipt['persistence_witnesses']:
+                if len(pages)==1 and witness['path']!=pages[0]:continue
+                groups.setdefault((witness['path'],witness['sequence'],witness['target']),set()).add(witness['effect'])
+            if any(('mutation' not in required or observed) and required-{'mutation'}<=observed for observed in groups.values()):return ''
+    return ('The original request explicitly requires persistence after reload, but no fresh full-source browser witness records it. '
+            'Use check_webapp with one saved sequence: change data through its controls, assert the changed text/state/count, '
+            'then reload in a later case and assert that same value with no new fill/click/key actions. Retain all earlier cases '
+            'and run the actual saved verifier after the final source edit. Static visibility or SQL done rows are not reload proof. '
+            +' Required measured effects: '+', '.join(sorted(required))+'. A removal/deletion needs an earlier successful reload baseline, then an observed collection decrease, then another reload retaining the new outcome. Supported counts are table rows, UL/OL items, or exported array.length state; add-only evidence does not cover deletion. For click/key-only mutation, first assert a reload baseline. Returning to the initial empty/zero without a persisted baseline is not evidence.')
+
+
+
+def valid_persistence_witnesses(witnesses, saved):
+    """Reject loose or malformed cache metadata; observations originate in checker."""
+    if not isinstance(witnesses,list) or not 1<=len(witnesses)<=32:return False
+    for value in witnesses:
+        if (not isinstance(value,dict) or set(value)!={'sequence','path','action_case','reload_case','target','expected_sha256','observed_sha256','before_observed_sha256','initial_observed_sha256','effect','count_before','count_after','baseline_reload_case','baseline_observed_sha256'}
+                or type(value['sequence']) is not int or not 1<=value['sequence']<=32
+                or type(value['action_case']) is not int or type(value['reload_case']) is not int
+                or not 1<=value['action_case']<value['reload_case']<=128
+                or not isinstance(value['path'],str) or len(value['path'])>240
+                or not isinstance(value['target'],str) or not re.fullmatch(r'(?:text|rows|state):.{1,166}',value['target'])
+                or any(not isinstance(value[key],str) or not re.fullmatch(r'[a-f0-9]{64}',value[key]) for key in ('expected_sha256','observed_sha256','before_observed_sha256','initial_observed_sha256'))):return False
+        if value['effect'] not in {'mutation','creation','removal'}:return False
+        if any(count is not None and (type(count) is not int or not 0<=count<=10000) for count in (value['count_before'],value['count_after'])):return False
+        if value['effect'] in {'creation','removal'}:
+            if value['count_before'] is None or value['count_after'] is None:return False
+            if value['effect']=='creation' and value['count_after']<=value['count_before']:return False
+            if value['effect']=='removal' and value['count_after']>=value['count_before']:return False
+        if value['effect']=='removal' and value['baseline_reload_case'] is None:return False
+        if value['baseline_reload_case'] is not None:
+            if (type(value['baseline_reload_case']) is not int or not 1<=value['baseline_reload_case']<value['action_case']
+                    or value['baseline_observed_sha256']!=value['before_observed_sha256']):return False
+        elif value['baseline_observed_sha256'] is not None or value['observed_sha256']==value['initial_observed_sha256']:return False
+        try:
+            sequence=saved['checks'][value['sequence']-1]
+            action=sequence['cases'][value['action_case']-1]
+            reload=sequence['cases'][value['reload_case']-1]
+            if sequence['path']!=value['path'] or action.get('reload') or reload.get('reload') is not True:return False
+            if not any(action.get(kind) for kind in ('set','click','keys')) or any(reload.get(kind) for kind in ('set','click','keys')):return False
+            if value['baseline_reload_case'] is not None:
+                baseline=sequence['cases'][value['baseline_reload_case']-1]
+                if baseline.get('reload') is not True or any(baseline.get(kind) for kind in ('set','click','keys')):return False
+            namespace,_,target=value['target'].partition(':')
+            field={'text':'expect','rows':'row_counts','state':'state'}[namespace]
+            if value['baseline_reload_case'] is not None and target not in baseline.get(field,{}):return False
+            if namespace=='rows' and value['effect'] in {'creation','removal'}:
+                if action[field][target]!=value['count_after']:return False
+                if value['effect']=='removal' and baseline[field][target]!=value['count_before']:return False
+            left=action[field][target];right=reload[field][target]
+            canonical=lambda item:hashlib.sha256(json.dumps(item,sort_keys=True,allow_nan=False).encode()).hexdigest()
+            if canonical(left)!=value['expected_sha256'] or canonical(right)!=value['expected_sha256']:return False
+        except (KeyError,IndexError,TypeError,ValueError):return False
+    return True
+
+
+
 def completion_issue(folder: Path, project: dict | None = None,
                      state: dict | None = None) -> str:
     """Catch a premature handoff before the costly independent review starts."""
@@ -4386,6 +4507,12 @@ def completion_issue(folder: Path, project: dict | None = None,
                         "retain earlier cases and rerun the verifier. Do not change working app behavior just to add tests.")
         except (OSError, ValueError) as error:
             return "Cannot confirm saved browser case coverage: " + str(error)[:300] + "; rerun check_webapp."
+    if project and state and state.get("verify_passed"):
+        try:
+            issue=persistence_completion_issue(folder,project)
+        except (OSError,ValueError,TypeError,RuntimeError,sqlite3.Error):
+            return 'Cannot validate the original reload requirement against fresh host evidence; rerun its actual saved browser checks.'
+        if issue:return issue
     return ""
 
 
@@ -5213,6 +5340,12 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
 
 
 def run_slice(project: dict, complete=None) -> dict:
+    import project_memory
+    with project_memory.verification_context(project):
+        return _run_slice(project,complete=complete)
+
+
+def _run_slice(project: dict, complete=None) -> dict:
     """Execute a bounded set of model turns, checkpointing each completed tool."""
     import task_context
     from cloud_ai import LOCAL_MODEL, Router
@@ -6003,6 +6136,28 @@ def apply_request(project: dict, action: str, note: str) -> str:
     raise ValueError("Unknown task action")
 
 
+def _run_function_check_cli(folder, spec_path, expected_sha, *, javascript=False):
+    import project_memory
+    before=basis=None
+    try:
+        before=project_memory.verification_source_state(folder)
+        basis=project_memory.verification_basis(folder)
+    except (OSError,ValueError,TypeError,RuntimeError,sqlite3.Error):pass
+    runner=run_javascript_checks if javascript else run_python_checks
+    result=runner(folder,spec_path,expected_sha)
+    if before is not None:
+        try:
+            checker='check_javascript_function' if javascript else 'check_python_function'
+            arguments={'spec_sha256':expected_sha}
+            report={**result,'suite_sha256':expected_sha}
+            permit=project_memory._issue_host_check_permit(folder,checker,arguments,report,before,
+                checker_file=__file__,basis_before=basis,loaded_checker_sha256=_LOADED_CHECKER_SHA256)
+            project_memory.record_host_check_receipt(folder,checker,arguments,report,before,
+                checker_file=__file__,basis_before=basis,loaded_checker_sha256=_LOADED_CHECKER_SHA256,execution_permit=permit)
+        except (OSError,ValueError,TypeError,RuntimeError,sqlite3.Error):pass
+    return result
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 5 and sys.argv[1] in {"check-python", "check-javascript"}:
         try:
@@ -6012,8 +6167,8 @@ if __name__ == "__main__":
             notes = project_path(folder, ".local-ai")
             sys.pycache_prefix = str(notes / f"uncached-{os.getpid()}-{time.time_ns()}")
             sys.dont_write_bytecode = True
-            runner = run_javascript_checks if sys.argv[1] == "check-javascript" else run_python_checks
-            result = runner(folder, Path(sys.argv[3]).resolve(), sys.argv[4])
+            result = _run_function_check_cli(folder, Path(sys.argv[3]).resolve(), sys.argv[4],
+                javascript=sys.argv[1] == "check-javascript")
         except BaseException as error:
             result = {"passed": False, "errors": [f"{type(error).__name__}: {str(error)[:500]}"]}
         print(json.dumps(result))
