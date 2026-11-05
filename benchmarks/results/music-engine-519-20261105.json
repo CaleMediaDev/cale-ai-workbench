@@ -1,0 +1,91 @@
+{
+  "release": "0.5.519",
+  "status": "qualified",
+  "code_commit_before_documentation": "b782e32af1447afba7360d449d62e03edf13b8cf",
+  "startup_code_sha256": "d69051d520b402123a25ee5c976c0fb57a12eb2b15fb609d8a4a2496c7281977",
+  "tests_sha256": "7b94f7c8d8cf86296d56e5f84fb3e119019ab6372d32d51aacfc97cffc62119d",
+  "real_untouched_source_help_passed": true,
+  "real_already_patched_source_help_passed": true,
+  "upstream_revision": "ca1e85fe9430179831e6bc6be790c332190a3866",
+  "behavior": [
+    "New owned engine processes verify source, imported origins, loaded code, globals and defaults.",
+    "The CPU VAE method uses the pinned float32 CPU policy and restores the original device and dtype in finally.",
+    "The compatibility method changes only the fresh process; upstream source files are not rewritten.",
+    "The setup lock spans installation, launch and HTTP readiness; healthy APIs return without launch or patching."
+  ],
+  "checks": {
+    "root": {
+      "command": "python -B -m pytest -q Validation/test_music_backend.py Validation/test_radio_station.py",
+      "result": "173 passed",
+      "seconds": 20.27,
+      "terminal_session": 79855
+    },
+    "independent": {
+      "music_module": "124 passed in7.42s",
+      "python311_regression": "Original isolated-AST compiler check fails; full-module compiler correction passes."
+    },
+    "real_python311_help_original": {
+      "help_exit_code": 0,
+      "seconds": 12.671999999991385,
+      "candidate_sha256": "d69051d520b402123a25ee5c976c0fb57a12eb2b15fb609d8a4a2496c7281977",
+      "source_files_unchanged": 5,
+      "source_snapshot_fixture": true,
+      "decode_source_sha256": "4cd434b7ec4367b34711587ba18d7d3f82b4b171dded017c3ed12a3fd87438b4",
+      "network_or_listener_attempts": 1,
+      "all_network_and_bind_calls_blocked": true,
+      "unexpected_network_attempts": 0,
+      "blocked_outside_temp_writes": 0,
+      "cuda_hidden": true,
+      "models_loaded": false,
+      "music_submissions": 0,
+      "scope": "Actual ACE environment imports and console-help path only."
+    },
+    "real_python311_help_already_corrected": {
+      "help_exit_code": 0,
+      "seconds": 13.15700000000652,
+      "candidate_sha256": "d69051d520b402123a25ee5c976c0fb57a12eb2b15fb609d8a4a2496c7281977",
+      "source_files_unchanged": 5,
+      "source_snapshot_fixture": true,
+      "decode_source_sha256": "f77db5f289a298326b996ae5c0327e89a078f3c155263a2a10574dafcc9d75d3",
+      "network_or_listener_attempts": 1,
+      "all_network_and_bind_calls_blocked": true,
+      "unexpected_network_attempts": 0,
+      "blocked_outside_temp_writes": 0,
+      "cuda_hidden": true,
+      "models_loaded": false,
+      "music_submissions": 0,
+      "scope": "Actual ACE environment imports and console-help path only."
+    },
+    "real_help_environment": "Actual ACE venv, CPU-hidden, offline, pinned Git source snapshots in owned TEMP; all connect/bind calls blocked, including optional urllib3 IPv6 import probe."
+  },
+  "real_startup_regression": {
+    "initial_candidate": "077e93ac2fc4d49012717f4a29ac950be3289f0a",
+    "failure": "Python3.11 compiles imported global calls differently when the function is extracted from module context.",
+    "corrected_author_commit": "a074dd04f8e8d9ae2cd501079db66708ee8694e5",
+    "correction": "Compile full verified source without executing it and extract the exact function CodeType; strict code comparisons remain."
+  },
+  "separate_operator_recovery_evidence": {
+    "three_minute_instrumental_attempt_seconds": 65.02194309234619,
+    "original_request_including_queue_seconds": 3772.4568016529083,
+    "fully_decoded_mp3_seconds": 180.02,
+    "audio_mean_db": -16.2,
+    "audio_peak_db": -1.6,
+    "subsequent_service_snapshot": {
+      "succeeded": 8,
+      "failed": 0,
+      "running": 0,
+      "queued": 0,
+      "average_seconds": 58.68043753504753
+    },
+    "activation": "Known-cohort operator recovery used the same corrected method on disk, then restarted and explicitly initialized the API. It did not use the new process wrapper."
+  },
+  "limits": [
+    "Running music services are unchanged; the process-only correction takes effect on the next owned engine start.",
+    "The real CLI checks exit at help before uvicorn or model loading; they do not qualify a new wrapper audio render.",
+    "The recovered full song used CUDA decode with6.14GiB effectivefree; full-song CPU latency and vocals are not qualified.",
+    "The65.02s recovered attempt does not erase the original3772.46s wait or guarantee latency on other machines.",
+    "Automatic orphan recovery, API admission/cancellation and resource ownership remain separate unfinished work.",
+    "Lazy/eager initialization behavior is unchanged; HTTP health alone does not prove models or the planning LM ready.",
+    "Existing environment migration, clean-PC downloads and complete first-install flow were not requalified in this release."
+  ]
+}

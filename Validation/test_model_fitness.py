@@ -15,6 +15,48 @@ import model_fitness
 import model_library
 
 
+def test_avatar_headroom_requires_matching_live_process_and_preserves_physical_gpu(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import psutil
+
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    marker = state / "avatar-gpu-active-123.json"
+    record = {"pid": 123, "started": 100.0, "reserved_bytes": 2 * 1024 ** 3,
+              "phase": "active", "updated": 101.0}
+    marker.write_text(json.dumps(record), encoding="utf-8")
+    process = SimpleNamespace(is_running=lambda: True, create_time=lambda: 100.0,
+        cmdline=lambda: ["python.exe", "-u", str(tmp_path / "camera_presence.py"), "--avatar"])
+    monkeypatch.setattr(psutil, "Process", lambda _pid: process)
+    monkeypatch.setattr(model_fitness, "gpu_vram_gb", lambda: 12.0)
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 2
+    assert model_fitness.routing_vram_gb(tmp_path) == 10
+    assert model_fitness.gpu_vram_gb() == 12
+    # Stale file timestamps alone do not imply that its process stopped.
+    record["updated"] = 0
+    marker.write_text(json.dumps(record), encoding="utf-8")
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 2
+    process.create_time = lambda: 200.0
+    assert model_fitness.routing_vram_gb(tmp_path) == 12
+    process.create_time = lambda: 100.0
+    process.cmdline = lambda: ["python.exe", str(tmp_path / "different.py"), "--avatar"]
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
+    process.cmdline = lambda: ["python.exe", "-I", "-B", str(tmp_path / "video_generation.py"), "avatar-profile-probe"]
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 2
+    process.cmdline = lambda: ["python.exe", "-c", "print('avatar-profile-probe')"]
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
+    process.cmdline = lambda: ["python.exe", "-I", "-B", str(tmp_path / "video_generation.py"), "avatar-profile-probe"]
+    canonical = {**record, "reserved_bytes": 3 * 1024 ** 3}
+    (state / "avatar-gpu-current.json").write_text(json.dumps(canonical), encoding="utf-8")
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 3
+    (state / "avatar-gpu-current.json").unlink()
+    marker.write_text("[]", encoding="utf-8")
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
+    record["started"] = float("nan")
+    marker.write_text(json.dumps(record), encoding="utf-8")
+    assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
+
+
 def test_27b_hardware_rejection_happens_before_download():
     import pytest
 
@@ -207,6 +249,39 @@ def test_game_ranking_nested_cache_falls_back_and_allows_retry():
         ) == ["cale-fast"]
 
 
+def test_game_probe_current_rejects_nested_cache_and_recovers():
+    depth = max(5000, sys.getrecursionlimit() + 100)
+    source = "candidate:7b"
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        path = root / "LongTasks/game-model-probes.json"
+        path.parent.mkdir()
+        path.write_text("[" * depth + "0" + "]" * depth, encoding="utf-8")
+        with (
+            patch.object(model_library, "post") as post,
+            patch.object(model_library, "weight_blob", return_value="a" * 64),
+            patch.object(model_fitness, "gpu_vram_gb", return_value=12),
+            patch.object(model_library, "total_ram_gb", return_value=32),
+        ):
+            assert model_fitness.game_probe_current(source, root) is False
+            post.assert_not_called()
+            path.write_text(
+                json.dumps({source: {
+                    "version": model_fitness.GAME_PROBE_VERSION,
+                    "weights": "a" * 64,
+                    "vram_gb": 12,
+                    "ram_gb": 32,
+                    "updated": time.time(),
+                    "build": {"passed": True},
+                }}),
+                encoding="utf-8",
+            )
+            assert model_fitness.game_probe_current(
+                source, root, info={"model": source}
+            ) is True
+            post.assert_not_called()
+
+
 def test_game_probe_requires_two_complete_independent_passes():
     with tempfile.TemporaryDirectory() as folder:
         checks = {str(i): True for i in range(13)}
@@ -245,6 +320,36 @@ def test_game_probe_nested_completion_json_is_saved_as_failed_samples():
     replies = [
         {"modelfile": "FROM sha256-" + "a" * 64},
         *[{"message": {"content": nested}} for _ in range(3)],
+    ]
+    with tempfile.TemporaryDirectory() as folder:
+        with (
+            patch.object(model_library, "post", side_effect=replies) as post,
+            patch.object(model_fitness, "grade_game_code") as grade_code,
+            patch.object(model_fitness, "grade_game_html") as grade_html,
+            patch.object(model_fitness, "gpu_vram_gb", return_value=12),
+            patch.object(model_library, "total_ram_gb", return_value=32),
+        ):
+            result = model_fitness.probe_game_coding("candidate:7b", folder)
+        assert post.call_count == 4
+        grade_code.assert_not_called()
+        grade_html.assert_not_called()
+        assert result["passed"] is False
+        assert [sample["checks"] for sample in result["samples"]] == [
+            {"valid_code": False},
+            {"valid_code": False},
+        ]
+        assert result["build"]["passed"] is False
+        assert result["build"]["checks"] == {"valid_html": False}
+        saved = json.loads(
+            (Path(folder) / "LongTasks/game-model-probes.json").read_text()
+        )
+        assert saved["candidate:7b"] == result
+
+
+def test_game_probe_null_completion_content_is_saved_as_failure():
+    replies = [
+        {"modelfile": "FROM sha256-" + "a" * 64},
+        *[{"message": {"content": None}} for _ in range(3)],
     ]
     with tempfile.TemporaryDirectory() as folder:
         with (
@@ -502,9 +607,9 @@ def test_game_grader_outer_timeout_marks_code_invalid():
 
 
 def test_repeated_slow_completions_disqualify_model():
-    with patch.object(model_fitness, "measured_speed", return_value=2.2):
+    with patch.object(model_fitness, "retirement_speed", return_value=2.2):
         assert not model_fitness.suitable("cale-qwen35", 20.6, 128, 12)
-    with patch.object(model_fitness, "measured_speed", return_value=18.4):
+    with patch.object(model_fitness, "retirement_speed", return_value=18.4):
         assert model_fitness.suitable("cale-qwen36", 21.1, 128, 12)
 
 

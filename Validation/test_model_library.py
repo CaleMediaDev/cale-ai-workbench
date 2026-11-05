@@ -1094,3 +1094,39 @@ class AutoModelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_auto_retirement_uses_qualified_history_without_deleting_user_weights(tmp_path, monkeypatch):
+    import model_fitness
+    import usage_history
+    catalog = {"main": {"alias":"main"}, "candidate": {
+        "alias":"candidate", "source":"user:weights", "label":"Candidate",
+        "ram_gb":8, "download_gb":1}}
+    for name,tokens,seconds,should_delete in (("tiny",1,.5,False),("slow",128,64,True)):
+        folder=tmp_path/name
+        monkeypatch.setattr(usage_history,"DATABASE",folder/"usage.db")
+        for _ in range(3):
+            assert usage_history.record_completion({"model":"candidate","usage":{"completion_tokens":tokens}},
+                                                  "ollama",elapsed_seconds=seconds)
+        with (patch.object(library,"ROOT",folder),
+              patch.object(library,"CATALOG",catalog),
+              patch.object(library,"total_ram_gb",return_value=32),
+              patch("model_fitness.gpu_vram_gb",return_value=12),
+              patch("model_fitness.profile_allows",return_value=True),
+              patch("long_tasks.projects",return_value=[]),
+              patch.object(library,"ensure_main_standard",return_value=False),
+              patch.object(library,"repair_main_alias",return_value=False),
+              patch.object(library,"cleanup_retired_main_sources"),
+              patch.object(library,"alias_update_waits_for_tasks",return_value=False),
+              patch.object(library,"model_ready",return_value=True),
+              patch.object(library,"owned_sources",return_value=set()),
+              patch.object(library,"install") as install,
+              patch.object(library,"delete_model") as delete):
+            library.auto_install(folder,refresh=False)
+        if should_delete:
+            delete.assert_called_once_with("candidate")
+        else:
+            delete.assert_not_called()
+        install.assert_not_called()
+        status=json.loads((folder/"optional-model-candidate.json").read_text())
+        assert status["status"] == ("retired" if should_delete else "complete")

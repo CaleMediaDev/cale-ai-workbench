@@ -426,6 +426,26 @@ def argument_error_detail(error):
     relevant leaf gives the worker a useful path without printing that schema
     or the rejected instance. This changes diagnostics, never validation.
     """
+    def scalar(value):
+        return value is None or type(value) in (bool, int, float, str)
+
+    def scalar_equal(left, right):
+        # JSON booleans are not numbers, even though Python True == 1.
+        if not scalar(left) or not scalar(right):
+            return False
+        if type(left) in (int, float) and type(right) in (int, float):
+            return left == right
+        return type(left) is type(right) and left == right
+
+    def scalar_choices(rule):
+        choices = rule.get("enum")
+        if "const" in rule:
+            fixed = rule["const"]
+            choices = ([fixed] if choices is None else
+                       [value for value in choices if scalar_equal(value, fixed)])
+        return ([value for value in choices if scalar(value)]
+                if isinstance(choices, list) else None)
+
     for _ in range(12):
         if error.validator not in {"anyOf", "oneOf"} or not error.context:
             break
@@ -440,10 +460,10 @@ def argument_error_detail(error):
                 rule = branch.get("properties", {}).get(key, {}) if isinstance(branch, dict) else {}
                 if not isinstance(rule, dict):
                     continue
-                for value in rule.get("enum", [rule["const"]] if "const" in rule else []):
-                    if value not in allowed:
+                for value in scalar_choices(rule) or []:
+                    if not any(scalar_equal(value, present) for present in allowed):
                         allowed.append(value)
-            if allowed and error.instance[key] not in allowed:
+            if allowed and not any(scalar_equal(error.instance[key], value) for value in allowed):
                 return ValidationError("Invalid operation discriminator", validator="enum",
                     validator_value=allowed, instance=error.instance[key],
                     path=[*error.absolute_path, key])
@@ -456,23 +476,34 @@ def argument_error_detail(error):
             if not children:
                 continue
             properties = branch.get("properties", {})
-            matches = 0
-            conflicts = 0
-            for key in ("action", "check_tool"):
-                if key not in error.instance:
-                    continue
+            operation_matches = operation_conflicts = 0
+            matches = conflicts = 0
+            for key, attempted in error.instance.items():
+                if not scalar(attempted):
+                    continue  # Structured enum values are not scalar discriminators.
                 rule = properties.get(key, {})
                 if not isinstance(rule, dict):
                     continue
-                allowed = rule.get("enum", [rule["const"]] if "const" in rule else None)
+                allowed = scalar_choices(rule)
                 if allowed is not None:
-                    if error.instance[key] in allowed:
+                    if any(scalar_equal(attempted, value) for value in allowed):
                         matches += 1
+                        if key in ("action", "check_tool"):
+                            operation_matches += 1
                     else:
                         conflicts += 1
-            # Prefer an explicit action/checker match, then the branch needing
-            # the fewest corrections. Child order remains deterministic.
-            candidates.append(((matches, -conflicts, -len(children)), children))
+                        if key in ("action", "check_tool"):
+                            operation_conflicts += 1
+            forbidden = 0
+            if branch.get("additionalProperties") is False:
+                patterns = branch.get("patternProperties", {})
+                forbidden = sum(key not in properties and not any(
+                    re.search(pattern, key) for pattern in patterns) for key in error.instance)
+            # Preserve the selected operation before considering its options.
+            # Generic scalar discriminators and complete shapes break ties;
+            # the original child order remains deterministic.
+            candidates.append(((operation_matches, -operation_conflicts,
+                                matches, -conflicts, -forbidden, -len(children)), children))
         if not candidates:
             break
         _score, children = max(candidates, key=lambda item: item[0])
@@ -805,7 +836,7 @@ def retry_derestricted(payload, result, original_model="", deadline=None):
     import model_library
 
     ram = model_library.total_ram_gb()
-    vram = model_fitness.gpu_vram_gb()
+    vram = model_fitness.routing_vram_gb(ROOT)
     profiles = (
         ("permissive", "llama", "glm", "permissive_small", "gptoss")
         if task_size(payload.get("messages", [])) == "deep"
@@ -919,6 +950,254 @@ def loaded_local_models():
         return []
 
 
+
+def native_reasoning_value(effort, thinking):
+    """Preserve named effort, or the official boolean-only model conversion."""
+    values = thinking.get("values") if isinstance(thinking, dict) else None
+    default = thinking.get("default") if isinstance(thinking, dict) else None
+    if isinstance(values, list) and values:
+        valid = all(type(value) is bool or isinstance(value, str) and value for value in values)
+        unique = len({(type(value), value) for value in values}) == len(values) if valid else False
+        supported_default = any(type(value) is type(default) and value == default for value in values)
+        if valid and unique and supported_default and any(type(value) is bool and value for value in values):
+            if not any(isinstance(value, str) for value in values):
+                return True
+    return effort
+
+
+def native_forced_choice_supported(payload):
+    """Recognize only Cale's declared, typed required/named tool contracts.
+
+    Ollama v0.40.13's OpenAI request struct has no ToolChoice field. Both
+    transports generate ordinary tool replies; valid_completion remains the
+    enforcement boundary against the UNMODIFIED original request. This is
+    compatibility parity, not a claim of server-side forced-tool grammar.
+    """
+    choice = payload.get("tool_choice")
+    if choice != "required":
+        if (not isinstance(choice, dict) or set(choice) != {"type", "function"}
+                or choice.get("type") != "function" or not isinstance(choice.get("function"), dict)
+                or set(choice["function"]) != {"name"}):
+            return False
+        selected = choice["function"]["name"]
+        if not isinstance(selected, str) or not selected:
+            return False
+    else:
+        selected = None
+    tools = payload.get("tools")
+    if not isinstance(tools, list) or not tools:
+        return False
+    names = set()
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        if (not isinstance(tool, dict) or set(tool) != {"type", "function"} or tool.get("type") != "function"
+                or not isinstance(function, dict) or set(function) - {"name", "description", "parameters"}
+                or ("description" in function and not isinstance(function["description"], str))
+                or not isinstance(function.get("name"), str)
+                or not function["name"] or function["name"] in names
+                or not isinstance(function.get("parameters"), dict)):
+            return False
+        schema = function["parameters"]
+        try:
+            validator_for(schema).check_schema(schema)
+        except (SchemaError, ValueError, TypeError, RecursionError):
+            return False
+        names.add(function["name"])
+    return selected is None or selected in names
+
+
+def native_chat_request(payload, capacity, thinking=None, *, allow_forced_choice=False):
+    """Translate conservatively supported text requests to Ollama's native API.
+
+    The configured context remains a ceiling, not a reservation. Unknown features
+    use the existing OpenAI transport. Ollama 0.40.13 uses the same typed tool
+    schema representation on both endpoints and drops some JSON Schema keywords;
+    valid_completion therefore checks replies against the original host schema.
+    """
+    allowed = {"model", "messages", "tools", "tool_choice", "stream", "max_tokens",
+               "max_completion_tokens", "temperature", "top_p", "seed", "stop",
+               "frequency_penalty", "presence_penalty", "response_format", "reasoning_effort"}
+    if set(payload) - allowed or payload.get("stream", False):
+        return None
+    output = payload.get("max_completion_tokens", payload.get("max_tokens"))
+    if (type(output) is not int or output <= 0 or type(capacity) is not int
+            or capacity <= 0 or ("max_tokens" in payload and "max_completion_tokens" in payload
+                                and payload["max_tokens"] != output)):
+        return None
+    if payload.get("tool_choice") not in (None, "auto"):
+        if not allow_forced_choice or not native_forced_choice_supported(payload):
+            return None
+    # Match v0.40.13 ThinkingFromReasoningEffort for canonical levels.
+    # Aliases/unknown levels retain the compatibility endpoint unchanged.
+    effort = payload.get("reasoning_effort")
+    if effort not in (None, "", "none", "low", "medium", "high", "max"):
+        return None
+    messages, call_names = [], {}
+    for message in payload.get("messages", []):
+        if not isinstance(message, dict) or set(message) - {
+                "role", "content", "tool_calls", "tool_call_id", "name", "reasoning"}:
+            return None
+        role, content = message.get("role"), message.get("content")
+        if role not in ("system", "user", "assistant", "tool"):
+            return None
+        if content is None and role == "assistant" and isinstance(message.get("tool_calls"), list):
+            content = ""
+        if not isinstance(content, str):
+            return None
+        native = {"role": role, "content": content}
+        if "reasoning" in message:
+            if role != "assistant" or not isinstance(message["reasoning"], str):
+                return None
+            native["thinking"] = message["reasoning"]
+        if "tool_calls" in message:
+            if role != "assistant" or not isinstance(message["tool_calls"], list):
+                return None
+            native["tool_calls"] = []
+            for call in message["tool_calls"]:
+                if (not isinstance(call, dict) or set(call) - {"id", "index", "type", "function"}
+                        or call.get("type") != "function" or not isinstance(call.get("id"), str)
+                        or not call["id"] or call["id"] in call_names
+                        or ("index" in call and (type(call["index"]) is not int
+                            or not 0 <= call["index"] < 2**63))):
+                    return None
+                function = call.get("function")
+                if (not isinstance(function, dict) or set(function) != {"name", "arguments"}
+                        or not isinstance(function["name"], str) or not function["name"]):
+                    return None
+                try:
+                    arguments = json.loads(function["arguments"])
+                except (ValueError, TypeError):
+                    return None
+                if not isinstance(arguments, dict):
+                    return None
+                # OpenAI's optional outer stream index is parsed but not copied
+                # by v0.40.13 FromCompletionToolCall. Keep native index unset.
+                call_names[call["id"]] = function["name"]
+                native["tool_calls"].append({"id": call["id"], "function": {
+                    "name": function["name"], "arguments": arguments}})
+        if role == "tool":
+            identity = message.get("tool_call_id")
+            name = message.get("name") or call_names.get(identity)
+            if not isinstance(identity, str) or not identity or not isinstance(name, str) or not name:
+                return None
+            native.update(tool_call_id=identity, tool_name=name)
+        elif "name" in message or "tool_call_id" in message:
+            return None
+        messages.append(native)
+    if not messages:
+        return None
+    tools = payload.get("tools", [])
+    if not isinstance(tools, list):
+        return None
+    for tool in tools:
+        if (not isinstance(tool, dict) or set(tool) != {"type", "function"}
+                or tool.get("type") != "function" or not isinstance(tool.get("function"), dict)
+                or set(tool["function"]) - {"name", "description", "parameters"}):
+            return None
+    body = {"model": payload["model"], "messages": messages, "stream": False,
+            "truncate": False, "shift": False}
+    if tools:
+        body["tools"] = copy.deepcopy(tools)
+    response_format = payload.get("response_format")
+    if response_format is not None:
+        if not isinstance(response_format, dict):
+            return None
+        if response_format == {"type": "json_object"}:
+            body["format"] = "json"
+        elif (set(response_format) == {"type", "json_schema"}
+              and response_format.get("type") == "json_schema"
+              and isinstance(response_format["json_schema"], dict)
+              and not set(response_format["json_schema"]) - {"name", "strict", "schema"}
+              and isinstance(response_format["json_schema"].get("schema"), dict)):
+            body["format"] = copy.deepcopy(response_format["json_schema"]["schema"])
+        else:
+            return None
+    if effort == "none":
+        body["think"] = False
+    elif effort:
+        body["think"] = native_reasoning_value(effort, thinking)
+    required = estimated_input_tokens(payload) + output + 1024
+    if required > capacity:
+        raise ValueError("Local request exceeds the approved context capacity; history was not truncated.")
+    bucket = 1 << (max(1, required) - 1).bit_length()
+    # A non-power-of-two approved ceiling is usable in full.
+    options = {"num_ctx": min(bucket, capacity), "num_predict": output,
+               "temperature": 1.0 if payload.get("temperature") is None else payload["temperature"],
+               "top_p": 1.0 if payload.get("top_p") is None else payload["top_p"]}
+    for key in ("seed", "frequency_penalty", "presence_penalty"):
+        if payload.get(key) is not None:
+            options[key] = copy.deepcopy(payload[key])
+    if "stop" in payload:
+        stop = payload["stop"]
+        if isinstance(stop, str):
+            stop = [stop]
+        if not isinstance(stop, list) or not all(isinstance(item, str) for item in stop):
+            return None
+        options["stop"] = list(stop)
+    body["options"] = options
+    return body
+
+
+
+def native_usage_fields(raw):
+    """Keep upstream measurements even when the generated reply is unusable."""
+    if not isinstance(raw, dict):
+        return {}
+    result = {"model": raw.get("model", "")}
+    for key in ("prompt_eval_count", "eval_count", "eval_duration", "prompt_eval_duration",
+                "load_duration", "total_duration"):
+        if type(raw.get(key)) is int and raw[key] >= 0:
+            result[key] = raw[key]
+    if all(type(raw.get(key)) is int and raw[key] >= 0
+           for key in ("prompt_eval_count", "eval_count")):
+        result["usage"] = {"prompt_tokens": raw["prompt_eval_count"],
+                           "completion_tokens": raw["eval_count"],
+                           "total_tokens": raw["prompt_eval_count"] + raw["eval_count"]}
+    cached = raw.get("prompt_eval_cached_count")
+    if type(cached) is int and cached >= 0:
+        result["prompt_eval_cached_count"] = cached
+        if "usage" in result:
+            result["usage"]["prompt_tokens_details"] = {"cached_tokens": cached}
+    return result
+
+
+def native_chat_completion(raw):
+    """Normalize a completed native reply without inventing token measurements."""
+    if not isinstance(raw, dict) or raw.get("done") is not True:
+        raise ValueError("Incomplete native Ollama response.")
+    source = raw.get("message")
+    if (not isinstance(source, dict) or source.get("role") != "assistant"
+            or not isinstance(source.get("content", ""), str)):
+        raise ValueError("Invalid native Ollama assistant response.")
+    message = {"role": "assistant", "content": source.get("content", "")}
+    if "thinking" in source:
+        if not isinstance(source["thinking"], str):
+            raise ValueError("Invalid native Ollama reasoning response.")
+        message["reasoning"] = source["thinking"]
+    calls = source.get("tool_calls", [])
+    if not isinstance(calls, list):
+        raise ValueError("Invalid native Ollama tool response.")
+    identities = set()
+    for call in calls:
+        function = call.get("function") if isinstance(call, dict) else None
+        if (not isinstance(function, dict) or not isinstance(function.get("name"), str)
+                or not function["name"] or not isinstance(function.get("arguments"), dict)):
+            raise ValueError("Invalid native Ollama tool arguments.")
+        identity = call.get("id") or "call_" + secrets.token_hex(12)
+        if not isinstance(identity, str) or identity in identities:
+            raise ValueError("Invalid native Ollama tool identity.")
+        identities.add(identity)
+        message.setdefault("tool_calls", []).append({"id": identity, "type": "function",
+            "function": {"name": function["name"], "arguments": json.dumps(
+                function["arguments"], ensure_ascii=False, allow_nan=False)}})
+    result = {"id": "ollama_" + secrets.token_hex(12), "object": "chat.completion",
+              "created": int(time.time()), "model": raw.get("model", ""),
+              "choices": [{"index": 0, "message": message, "finish_reason":
+                  "tool_calls" if calls else raw.get("done_reason", "stop")} ]}
+    result.update(native_usage_fields(raw))
+    return result
+
+
 class Router:
     """Choose a provider for one request while preserving local fallback."""
 
@@ -929,6 +1208,11 @@ class Router:
         self.lock = threading.Lock()
         self.model_cache = {}
         self.model_contexts = {}
+        self.model_native_contexts = {}
+        self.model_thinking_controls = {}
+        self.native_version_until = 0
+        self.native_version_ready = False
+        self.native_version = None
         self.model_vision = set()
         self.model_speeds = {}
         self.model_cache_until = 0
@@ -1001,13 +1285,17 @@ class Router:
     def local_candidates(self, size, required_context=65536, require_vision=False,
                          include_fallback=False):
         """Rank installed models with enough context and required capabilities."""
-        if time.monotonic() >= self.model_cache_until:
+        import model_fitness
+
+        avatar_headroom = model_fitness.avatar_reserved_vram_gb(ROOT)
+        if (time.monotonic() >= self.model_cache_until
+                or avatar_headroom != getattr(self, "model_cache_avatar_headroom", 0)):
             refresh_catalog(online=False)
             import model_fitness
             import model_library
 
             ram = model_library.total_ram_gb()
-            vram = model_fitness.gpu_vram_gb()
+            vram = max(0.0, model_fitness.gpu_vram_gb() - avatar_headroom)
             try:
                 with urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
                     tags = json.load(response)
@@ -1017,6 +1305,8 @@ class Router:
                 weights = {}
             available = {}
             contexts = {}
+            native_contexts = {}
+            thinking_controls = {}
             weight_ids = {}
             vision = set()
             thinking = set()
@@ -1056,6 +1346,14 @@ class Router:
                     available[name] = float(match.group(1)) if match else 1.0
                     weight_ids[name] = model_library.weight_blob(info)
                     contexts[name] = int(configured.group(1))
+                    from context_window import native_context
+                    try:
+                        native_limit = native_context(info)
+                    except (ValueError, TypeError, AttributeError):
+                        native_limit = 0
+                    if native_limit:
+                        native_contexts[name] = min(contexts[name], native_limit)
+                    thinking_controls[name] = copy.deepcopy(info.get("thinking"))
                     if "vision" in info.get("capabilities", []):
                         vision.add(name)
                     if "thinking" in info.get("capabilities", []):
@@ -1064,6 +1362,8 @@ class Router:
                     continue
             self.model_cache = available
             self.model_contexts = contexts
+            self.model_native_contexts = native_contexts
+            self.model_thinking_controls = thinking_controls
             self.model_vision = vision
             self.model_thinking = thinking
             self.model_speeds = {
@@ -1071,6 +1371,7 @@ class Router:
             }
             self.model_weights = weight_ids
             self.model_cache_until = time.monotonic() + 60
+            self.model_cache_avatar_headroom = avatar_headroom
         balanced_preferred = BALANCED_MODEL
         if size == "balanced":
             # A newly recommended model must pass the on-device tool probe
@@ -1206,7 +1507,7 @@ class Router:
         key = credentials().get("cloud_key") if profile == "main" and not offline_mode else ""
         mode = routing_mode.load(STATE) if profile == "main" else routing_mode.DEFAULT
         reason = "Cloud is not connected."
-        local_speed = usage_history.recent_local_speed(
+        local_speed = usage_history.recent_local_response_speed(
             70 if size == "quick" else 35 if size == "balanced" else 15,
             models=local_speed_models(size),
         )
@@ -1218,7 +1519,7 @@ class Router:
                      if spec.get("free_eligible", True)
                      and keys.get(provider) and confirmed.get(provider)]
         measured_speeds = {
-            provider: usage_history.recent_provider_speed(provider, spec["speed"])
+            provider: usage_history.recent_provider_response_speed(provider, spec["speed"])
             for provider, spec in connected
         }
         required_context = estimated_context(payload)
@@ -1227,11 +1528,11 @@ class Router:
                                         payload.get("max_completion_tokens") or 4096))
         prompt_estimate = estimated_input_tokens(payload)
         paid_speed = (
-            usage_history.recent_provider_speed("chatgpt", 140)
+            usage_history.recent_provider_response_speed("chatgpt", 140)
             if mode == "floor_it" else 140
         )
         openrouter_speed = (
-            usage_history.recent_provider_speed("openrouter", 120)
+            usage_history.recent_provider_response_speed("openrouter", 120)
             if key and self.free_request_available() else 0
         )
         eligible_free_speeds = [
@@ -1416,22 +1717,57 @@ class Router:
         schema_repair_attempted = False
         empty_weights = set()
         transient_retry_used = False
+        native_started = False
 
         def local_post(body, timeout):
-            nonlocal transient_retry_used
+            nonlocal transient_retry_used, native_started
             check_cancel()
+            native = None
+            capacity = self.model_native_contexts.get(body.get("model"), 0)
+            if capacity:
+                native = native_chat_request(body, capacity, self.model_thinking_controls.get(body.get("model")),
+                                             allow_forced_choice=True)
+            if native is not None:
+                if time.monotonic() >= self.native_version_until:
+                    self.native_version_ready = False
+                    self.native_version = None
+                    try:
+                        with urlopen("http://127.0.0.1:11434/api/version", timeout=3) as response:
+                            version = json.load(response).get("version", "")
+                        match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+                        self.native_version = tuple(map(int, match.groups())) if match else None
+                        self.native_version_ready = bool(self.native_version and self.native_version >= (0, 40, 13))
+                    except Exception:
+                        pass
+                    self.native_version_until = time.monotonic() + 60
+                if (not self.native_version_ready or body.get("tool_choice") not in (None, "auto")
+                        and self.native_version != (0, 40, 13)):
+                    # Forced-choice compatibility was source-verified only for
+                    # this exact server. Future versions may add new semantics.
+                    native = None
+            url = ("http://127.0.0.1:11434/api/chat" if native is not None
+                   else "http://127.0.0.1:11434/v1/chat/completions")
+            if native is None and native_started:
+                raise RuntimeError("Native local inference failed; legacy transport was not attempted because it may truncate history.") from last_error
+            check_cancel()
+            transport = native if native is not None else body
+            native_started = native_started or native is not None
+            started = time.monotonic()
             try:
-                return post("http://127.0.0.1:11434/v1/chat/completions", body, timeout=timeout)
+                result = post(url, transport, timeout=timeout)
             except HTTPError as error:
                 if error.code not in (500, 502, 503, 504) or transient_retry_used:
                     raise
-                # The failed response delivered no tool result. Retry this
-                # same request once, without model swaps or duplicate effects.
                 transient_retry_used = True
                 if error.fp is not None:
                     error.close()
                 check_cancel()
-                return post("http://127.0.0.1:11434/v1/chat/completions", body, timeout=min(timeout, 60))
+                result = post(url, transport, timeout=min(timeout, 60))
+            if native is not None:
+                import usage_history
+                usage_history.record_completion(native_usage_fields(result), "ollama", time.monotonic() - started)
+                result = native_chat_completion(result)
+            return result
 
         for selected_model in selected:
             identity = getattr(self, "model_weights", {}).get(selected_model)
@@ -1441,7 +1777,10 @@ class Router:
             local = dict(payload)
             local.update(model=selected_model, stream=False)
             local.pop("stream_options", None)
-            if local.get("tools") or size_hint == "quick":
+            # Catalog/probe settings are defaults, not permission to replace
+            # an explicit caller request. Preserve even unsupported non-null
+            # values for the existing codec/compatibility validation path.
+            if (local.get("tools") or size_hint == "quick") and local.get("reasoning_effort") is None:
                 item = next(
                     (
                         entry

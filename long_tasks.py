@@ -49,14 +49,80 @@ DEFAULT_ENGINE = "native"
 HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
-def update_dialog_open(children, ignored=()):
-    """Ignore read-only panels while protecting visible input dialogs."""
-    return any(
-        child not in ignored
-        and child.winfo_class() == "Toplevel"
-        and child.winfo_viewable()
-        for child in children
-    )
+def github_account_refresh_allowed(active_process, checked_process) -> bool:
+    """An old account probe cannot complete a newer browser login."""
+    return checked_process is active_process and (active_process is None or active_process.poll() == 0)
+
+
+def take_ai_connection_request(state_folder: Path) -> str | None:
+    """Consume only an installer-selected provider, never a command or URL."""
+    marker = state_folder / "open-supercharge"
+    try:
+        with marker.open(encoding="utf-8-sig") as stream:
+            requested = stream.read(65).strip()
+        marker.unlink()
+    except (OSError, UnicodeError):
+        return None
+    return requested if requested in {"chatgpt", "claude", "grok", "openrouter"} else "setup"
+
+
+def start_connection_worker(pending, operation):
+    """Do not dispatch auth until startup has committed successfully."""
+    import threading
+    if pending.is_set():
+        return None
+    permit, abandoned = threading.Event(), threading.Event()
+    pending.set()
+    def run():
+        permit.wait()
+        if abandoned.is_set():
+            return  # Never clear a later operation's pending flag.
+        try:
+            operation()
+        finally:
+            pending.clear()
+    try:
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+    except BaseException:
+        # Thread.start may raise after OS creation but before bootstrap is
+        # observable. Cancel before releasing the target; no is_alive guess.
+        abandoned.set()
+        permit.set()
+        pending.clear()
+        raise
+    # Outside the failed-start cleanup: once released, the operation owns its
+    # finally even if the caller is interrupted while committing permission.
+    permit.set()
+    return worker
+
+
+def update_dialog_open(children, ignored=(), *, persisted_panel=None,
+                       connection_events=(), connection_process=None):
+    """Saved donation choices do not block updates; pending sign-ins still do.
+
+    Connected buttons may stay disabled indefinitely, so only explicit pending
+    operation events represent ChatGPT/OpenRouter work. GitHub also owns a login
+    process even if its code window was closed. Unknown state defers the update.
+    """
+    try:
+        for event in connection_events:
+            pending = event.is_set()
+            if type(pending) is not bool or pending:
+                return True
+        if connection_process is not None:
+            result = connection_process.poll()
+            if result is None or type(result) is not int:
+                return True
+        return any(
+            child not in ignored
+            and child is not persisted_panel
+            and child.winfo_class() == "Toplevel"
+            and child.winfo_viewable()
+            for child in children
+        )
+    except Exception:
+        return True
 INITIAL_PLAN = (
     "# Plan\n\nThe worker has not written milestones yet. Use the original request and "
     "user follow-ups, then replace this note with concrete acceptance checks.\n"
@@ -499,6 +565,31 @@ def current_progress_file(project):
     return document_path(project, "PROGRESS.md")
 
 
+def game_import_activity(folder, now=None):
+    """Show fresh source-transfer activity without awarding task completion."""
+    try:
+        root = Path(folder).resolve()
+        path = (root / ".local-ai/game-import-progress.json").resolve()
+        if not path.is_relative_to(root) or path.stat().st_size > 4096:
+            return ""
+        record = json.loads(path.read_text(encoding="utf-8"))
+        age = (time.time() if now is None else now) - float(record["updated"])
+        if not 0 <= age <= 15:
+            return ""
+        phase = record.get("phase")
+        label = {"resolving": "Finding game source", "downloading": "Downloading game source",
+                 "archive_cached": "Checking downloaded source", "checking_cache": "Verifying game source",
+                 "copying_source": "Copying editable game source"}.get(phase)
+        if not label:
+            return ""  # source_ready is not an active transfer or a finished game.
+        done, total = record.get("bytes_done", 0), record.get("bytes_total", 0)
+        if type(done) is int and type(total) is int and 0 <= done <= total < 100_000_000_000 and total:
+            return f"{label} · {done / 1048576:.1f}/{total / 1048576:.1f} MB"
+        return label
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, OverflowError):
+        return ""
+
+
 def task_progress(p):
     """Show 100% once independent checks finish; edits can reopen the work."""
     state = p["status"]
@@ -597,7 +688,10 @@ def task_progress(p):
         if setup.get("status") in ("failed", "error"):
             step = "AI setup needs attention: " + str(setup.get("current", "Unknown error"))
     elif state == "working":
-        waiting = active_worker_wait(p)
+        importing = game_import_activity(p["folder"])
+        if importing:
+            step = importing
+        waiting = "" if importing else active_worker_wait(p)
         if waiting:
             step = f"{step[:85]} · {waiting}"
     if p["detail"].startswith("Supervisor will retry this task"):
@@ -608,6 +702,18 @@ def task_progress(p):
                     f"Retry in {remaining}s: {reason}")
     return percent, step[:180]
 
+
+
+def task_card_elapsed(item):
+    """Do not turn an absent legacy creation time into decades of task work."""
+    try:
+        created = float(item.get("created") or 0)
+        if not 0 < created <= time.time() + 86400:
+            return "Time unavailable"
+    except (ValueError, TypeError, OverflowError):
+        return "Time unavailable"
+    return task_eta.total_time(item['created'], item['updated'], item['status'],
+                               finished=item.get('finished'))
 
 def task_controls_for(state):
     """Keep finished cards simple; chat can still request a revision."""
@@ -850,7 +956,7 @@ def add_project(title, folder, brief, waiting_for_setup=False, pending_media=Non
         rules.write_text(
             "# Local project\n\nPreserve existing data and tests. Keep .local-ai/PLAN.md and PROGRESS.md current. "
             "Work toward the user's full request in verified milestones. Run real behavior tests after the last edit. "
-            "Use Cale's configured AI route: local Ollama, user-connected free cloud, or the user's enabled ChatGPT plan. Obey this task's local-only setting when selected. Do not configure new paid AI, invoke Codex, or delegate. A connected GitHub account may store this code in a private repository; never publish it publicly or send external messages without the user's request.\n",
+            "Use Cale's configured AI route: local Ollama, user-connected free cloud, or the user's enabled ChatGPT plan. Explicitly enabled Claude Code and Grok Build subscriptions may handle bounded project steps through delegate_subscription_task. Obey this task's local-only setting and all project rules. Do not configure new paid APIs or bypass the official agents' permissions. Independently verify delegated edits against the original checks. A connected GitHub account may store this code in a private repository; never publish it publicly or send external messages without the user's request.\n",
             encoding="utf-8",
         )
     with database() as conn:
@@ -3658,6 +3764,29 @@ def monitor_restart_needed(now=None, tasks_active=None):
     return True
 
 
+
+def stop_owned_camera_process(process, timeout=3):
+    """Reap the exact child Popen before another process may open its camera."""
+    if process is None:return
+    if isinstance(getattr(process,"pid",None),int):
+        from camera_presence import stop_owned_avatar_process_tree
+        stop_owned_avatar_process_tree(process,timeout=timeout,root=ROOT)
+        return
+    if process.poll() is None:
+        process.terminate()
+        try:process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill();process.wait(timeout=timeout)
+    else:process.wait(timeout=timeout)
+
+
+def camera_worker_command(root, python, parent_pid, parent_started, animated=False, virtual_output=False):
+    command=[str(python),"-u",str(Path(root)/"camera_presence.py"),
+             "--parent-pid",str(parent_pid),"--parent-started",str(parent_started)]
+    if animated:command.append("--avatar")
+    if animated and virtual_output:command.append("--virtual-output")
+    return command
+
 def gui():
     """Show the desktop shell; the monitor and model workers run separately."""
     import base64
@@ -3725,8 +3854,8 @@ def gui():
     if os.name == "nt":
         window.state("zoomed")
     window.minsize(1050, 740)
-    bg, card, field = "#0b1020", "#151d31", "#202d46"
-    text, muted, accent = "#edf3ff", "#aab8d3", "#6e82ff"
+    bg, card, field = "#0b1017", "#151c25", "#202b36"
+    text, muted, accent = "#f1f6fa", "#a8b8c5", "#16cbd6"
     window.configure(background=bg)
     style = ttk.Style(window)
     style.theme_use("clam")
@@ -3750,11 +3879,20 @@ def gui():
         foreground=[("disabled", "#73819a")],
     )
     style.configure(
-        "Accent.TButton", background=accent, foreground="white", padding=(18, 11)
+        "Accent.TButton", background=accent, foreground="#061419", padding=(18, 11)
     )
-    style.map("Accent.TButton", background=[("disabled", "#26334d"), ("active", "#8797ff")],
+    style.map("Accent.TButton", background=[("disabled", "#26334d"), ("active", "#65e6ee")],
               foreground=[("disabled", "#b7c8e6")])
-    style.configure("Danger.TButton", background="#a94358", foreground="white")
+    style.configure("Danger.TButton", background="#c64b66", foreground="white")
+    style.configure("TCombobox", fieldbackground=field, background=card,
+                    foreground=text, arrowcolor=accent, padding=8)
+    style.map("TCombobox", fieldbackground=[("readonly", field)],
+              foreground=[("readonly", text)], selectbackground=[("readonly", field)])
+    style.configure("TScrollbar", background=field, troughcolor=bg,
+                    borderwidth=0, arrowsize=10, lightcolor=field, darkcolor=field)
+    style.map("TScrollbar", background=[("active", accent)])
+    style.configure("Coral.TButton", background="#f26778", foreground="#190e15", padding=(18, 11))
+    style.map("Coral.TButton", background=[("active", "#ff93a1")])
     style.map("Danger.TButton", background=[("active", "#c15367")])
     style.configure("Mode.TButton", padding=(7, 4), font=("Segoe UI", 9, "bold"))
     style.configure("SelectedMode.TButton", background=accent, foreground="white",
@@ -3771,7 +3909,7 @@ def gui():
 
     # Keep dense task text within a readable width on large monitors while
     # still using the full available height for the task list.
-    outer = ttk.Frame(window, padding=(20, 16))
+    outer = ttk.Frame(window, padding=(20, 12))
 
     def fit_content(event):
         if event.widget is not window:
@@ -3781,6 +3919,17 @@ def gui():
             x=max(0, (event.width - content_width) // 2), y=0,
             width=content_width, height=event.height,
         )
+        navigation = getattr(window, "workspace_navigation", None)
+        if navigation is not None:
+            # Wide displays keep navigation in the brand bar. A short second
+            # row on narrow PCs preserves every account/donation control.
+            navigation.pack_forget()
+            if content_width >= 1200:
+                window.workspace_hint.pack_forget()
+                navigation.pack(in_=header, side="left", padx=(8, 0))
+            else:
+                navigation.pack(in_=outer, fill="x", pady=(2, 10), after=header_status)
+                window.workspace_hint.pack(side="right")
 
     window.bind("<Configure>", fit_content, add="+")
     outer.place(x=0, y=0, width=1120, height=window.winfo_height())
@@ -3791,7 +3940,7 @@ def gui():
     logo_path = ROOT / "assets/cale-logo.png"
     if logo_path.is_file():
         with Image.open(logo_path) as logo_source:
-            logo_source.thumbnail((66, 66), Image.Resampling.LANCZOS)
+            logo_source.thumbnail((48, 48), Image.Resampling.LANCZOS)
             window.cale_logo = ImageTk.PhotoImage(logo_source.copy())
         tk.Label(header, image=window.cale_logo, bg=bg, borderwidth=0).pack(
             side="left", padx=(0, 14)
@@ -3811,7 +3960,7 @@ def gui():
     ttk.Label(brand, text="Cale AI Local Workbench", font=("Segoe UI", 18, "bold")).pack(anchor="w")
     ttk.Label(
         brand,
-        text="Works while you do other things.",
+        text="Your ideas. Built locally.",
         style="Muted.TLabel",
     ).pack(anchor="w")
 
@@ -3820,44 +3969,45 @@ def gui():
     # The RPM-style ring moves from green through amber to red as load rises.
     gauge_widgets = {}
     gauge_row = ttk.Frame(outer)
-    gauge_row.pack(fill="x", pady=(2, 14))
+    gauge_row.pack(fill="x", pady=(2, 10))
     drive_free_text = tk.StringVar(value="")
     drive_rate_text = tk.StringVar(value="")
     net_rate_text = tk.StringVar(value="")
     offline_button = None
     for column, gauge_name in enumerate(("cpu", "ram", "gpu", "drive", "net")):
-        center = 70
+        center = 46
         gauge_row.columnconfigure(column, weight=1, uniform="gauges")
         holder = ttk.Frame(gauge_row, style="Card.TFrame", padding=(6, 6))
         holder.grid(row=0, column=column, sticky="nsew", padx=5)
         gauge_canvas = tk.Canvas(
-            holder, width=140, height=90,
+            holder, width=92, height=68,
             bg=card, highlightthickness=0, borderwidth=0
         )
         gauge_canvas.pack(anchor="center")
         segments = [
             gauge_canvas.create_arc(
-                center - 34, 4, center + 34, 72,
+                center - 25, 2, center + 25, 52,
                 start=90 - index * 15, extent=-12.5,
                 style="arc", outline=system_gauges.dim_rpm_color(index / 23), width=8,
             )
             for index in range(24)
         ]
         value = gauge_canvas.create_text(
-            center, 38, text="—", fill=text,
-            font=("Segoe UI", 16, "bold")
+            center, 28, text="—", fill=text,
+            font=("Segoe UI", 13, "bold")
         )
         gauge_canvas.create_text(
-            center, 82, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 10, "bold")
+            center, 62, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 10, "bold")
         )
         detail = drive_free_text if gauge_name == "drive" else net_rate_text if gauge_name == "net" else ""
         ttk.Label(holder, textvariable=detail if detail else None,
                   text="" if detail else " ", style="CardMuted.TLabel",
                   font=("Segoe UI", 10), anchor="center").pack(fill="x")
         detail = drive_rate_text if gauge_name == "drive" else ""
-        ttk.Label(holder, textvariable=detail if detail else None,
-                  text="" if detail else " ", style="CardMuted.TLabel",
-                  font=("Segoe UI", 10), anchor="center").pack(fill="x")
+        if gauge_name != "net":
+            ttk.Label(holder, textvariable=detail if detail else None,
+                      text="" if detail else " ", style="CardMuted.TLabel",
+                      font=("Segoe UI", 10), anchor="center").pack(fill="x")
         gauge_widgets[gauge_name] = (gauge_canvas, segments, value)
         if gauge_name == "net":
             offline_button = ttk.Button(
@@ -3974,22 +4124,74 @@ def gui():
         "<Configure>", lambda event: super_canvas.itemconfigure(super_window, width=event.width),
     )
 
+    music_shell = ttk.Frame(outer)
+    music_canvas = tk.Canvas(music_shell, background=bg, borderwidth=0, highlightthickness=0)
+    music_scroll = ttk.Scrollbar(music_shell, orient="vertical", command=music_canvas.yview)
+    music_canvas.pack(side="left", fill="both", expand=True)
+    music_page = ttk.Frame(music_canvas)
+    music_window = music_canvas.create_window((0, 0), window=music_page, anchor="nw")
+
+    def update_music_scroll(first, last):
+        music_scroll.set(first, last)
+        if float(first) > .001 or float(last) < .999:
+            if not music_scroll.winfo_manager():
+                music_scroll.pack(side="right", fill="y", before=music_canvas)
+        else:
+            music_scroll.pack_forget()
+
+    music_canvas.configure(yscrollcommand=update_music_scroll)
+    music_page.bind("<Configure>", lambda _: music_canvas.configure(scrollregion=music_canvas.bbox("all")))
+    music_canvas.bind("<Configure>", lambda event: music_canvas.itemconfigure(music_window, width=event.width))
+    create_shell = ttk.Frame(outer)
+    workspace = tk.StringVar(value="home")
+    workspace_buttons = {}
+    workspace_shells = {"home": main_shell, "music": music_shell,
+                        "create": create_shell, "supercharge": super_shell}
+
+    def show_workspace(name):
+        """Change only the visible workspace; task/audio services keep running."""
+        if name not in workspace_shells:
+            return
+        for shell in workspace_shells.values():
+            shell.pack_forget()
+        gauge_row.pack_forget()
+        workspace.set(name)
+        selected_shell = workspace_shells[name]
+        selected_shell.pack(fill="both", expand=True)
+        if name == "home":
+            gauge_row.pack(fill="x", pady=(2, 10), before=main_shell)
+        for key, button in workspace_buttons.items():
+            button.configure(style="SelectedMode.TButton" if key == name else "Mode.TButton")
+        if name == "create":
+            window.after_idle(lambda: update_side_preview(projects()))
+
     def show_super():
-        main_shell.pack_forget()
-        rocket.pack_forget()
-        super_shell.pack(fill="both", expand=True)
+        show_workspace("supercharge")
 
     def show_main():
-        super_shell.pack_forget()
-        rocket.pack(side="right")
-        main_shell.pack(fill="both", expand=True)
+        show_workspace("home")
+
+    workspace_nav = ttk.Frame(outer)
+    workspace_nav.pack(fill="x", pady=(2, 10), before=gauge_row)
+    for key, label in (("home", "Home"), ("music", "Music Studio"), ("create", "Create")):
+        button = ttk.Button(workspace_nav, text=label,
+            command=lambda selected=key: show_workspace(selected),
+            style="SelectedMode.TButton" if key == "home" else "Mode.TButton")
+        button.pack(side="left", padx=(0, 8), ipadx=12, ipady=7)
+        workspace_buttons[key] = button
+    workspace_hint = ttk.Label(workspace_nav, text="CHAT  /  MUSIC  /  GAMES, APPS & WEBSITES",
+              style="Muted.TLabel", font=("Segoe UI", 9))
+    workspace_hint.pack(side="right")
+    window.workspace_navigation = workspace_nav
+    window.workspace_hint = workspace_hint
 
     rocket = ttk.Button(
-        header, text="🚀  Supercharge my AI", command=show_super, style="Accent.TButton"
+        header, text="Supercharge my AI", command=show_super, style="Coral.TButton"
     )
     rocket.pack(side="right")
     donation_controls = donation_ui.Controls(
-        header, window, donation_service, lambda: connect_github(), lambda: connect_chatgpt(), lambda: connect())
+        header, window, donation_service, lambda: connect_github(), lambda: connect_chatgpt(), lambda: connect(),
+        on_activity=lambda content: assistant_reply(content, private=True))
     window.bind_all("<KeyPress>", lambda _: donation_service.activity(), add="+")
     window.bind_all("<ButtonPress>", lambda _: donation_service.activity(), add="+")
     window.bind_all("<MouseWheel>", lambda _: donation_service.activity(), add="+")
@@ -4038,6 +4240,84 @@ def gui():
         style="Muted.TLabel",
     ).pack(anchor="w", pady=(5, 12))
 
+    # The same four choices are visible in the first-run installer. The
+    # official provider apps own their subscription credentials and approvals.
+    quick_connections = ttk.Frame(super_page)
+    quick_connections.pack(fill="x", pady=(0, 14))
+    for column, (label, provider) in enumerate((
+            ("Connect ChatGPT", "chatgpt"), ("Connect Claude", "claude"),
+            ("Connect Grok", "grok"), ("Connect OpenRouter", "openrouter"))):
+        quick_connections.columnconfigure(column, weight=1)
+        ttk.Button(quick_connections, text=label,
+                   command=lambda selected=provider: open_ai_connection(selected),
+                   style="Accent.TButton").grid(row=0, column=column, sticky="ew", padx=(0, 8))
+
+    def connect_subscription(provider):
+        """Keep sign-in and account tokens inside the unmodified official CLI."""
+        names = {"claude": ("Claude", "Claude Code"), "grok": ("Grok", "Grok Build")}
+        if provider not in names:
+            return
+        name, app_name = names[provider]
+        panel = tk.Toplevel(window)
+        panel.title("Connect " + name)
+        panel.transient(window)
+        body = ttk.Frame(panel, padding=24)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Use your " + name + " subscription", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        ttk.Label(body, text=("Cale will install the official " + app_name + " app if needed and open its own sign-in. "
+            "Sign in with your account and an eligible plan. Cale does not copy your account tokens. "
+            "Task use counts against that plan's limits; this does not enable separately billed API usage."),
+            wraplength=560, style="Muted.TLabel").pack(anchor="w", pady=(10, 16))
+        events = queue.Queue()
+        status = tk.StringVar(value="Connecting does not start a task. You can keep installing Cale while you sign in.")
+        ttk.Label(body, textvariable=status, wraplength=560).pack(anchor="w", pady=(0, 14))
+
+        def begin():
+            button.configure(state="disabled")
+            status.set("Preparing " + app_name + "…")
+            def work():
+                try:
+                    result = cloud_providers.connect_subscription_agent(provider,
+                        on_progress=lambda message: events.put(("progress", message)))
+                    if result.get("connected"):
+                        cloud_providers.enable_subscription_agent(provider, True)
+                    events.put(("done", result))
+                except Exception as error:
+                    events.put(("error", str(error)))
+            threading.Thread(target=work, daemon=True).start()
+
+        button = ttk.Button(body, text="Connect and use my " + name + " plan", command=begin, style="Accent.TButton")
+        button.pack(anchor="w", ipady=5)
+        ttk.Button(body, text="Close", command=panel.destroy).pack(anchor="w", pady=(10, 0))
+
+        def poll_connection():
+            if not panel.winfo_exists():
+                return
+            try:
+                while True:
+                    kind, value = events.get_nowait()
+                    if kind == "progress":
+                        status.set(str(value))
+                    elif kind == "done":
+                        status.set(value.get("detail") or (name + " sign-in finished."))
+                        button.configure(state="normal", text="Connect again")
+                    else:
+                        status.set("Connection not finished: " + str(value))
+                        button.configure(state="normal")
+            except queue.Empty:
+                pass
+            panel.after(250, poll_connection)
+        panel.after(250, poll_connection)
+
+    def open_ai_connection(provider):
+        show_super()
+        if provider == "chatgpt":
+            connect_chatgpt()
+        elif provider == "openrouter":
+            connect()
+        elif provider in {"claude", "grok"}:
+            connect_subscription(provider)
+
     # Put the two easiest account connections first. Less common connections
     # stay collapsed so a new user does not start with a wall of API settings.
     chat_section = ttk.Frame(super_page, style="Card.TFrame", padding=18)
@@ -4069,6 +4349,7 @@ def gui():
         wraplength=720,
     ).pack(anchor="w", pady=(4, 9))
     chat_events = queue.Queue()
+    chat_connection_pending = threading.Event()
     chat_text = tk.StringVar(value="Not connected.")
 
     def connect_chatgpt():
@@ -4085,7 +4366,7 @@ def gui():
             except Exception as exc:
                 chat_events.put("Connection not finished: " + str(exc))
 
-        threading.Thread(target=worker, daemon=True).start()
+        start_connection_worker(chat_connection_pending, worker)
 
     chat_button = ttk.Button(
         chat_section,
@@ -4132,7 +4413,7 @@ def gui():
             except Exception as exc:
                 chat_events.put(str(exc))
 
-        threading.Thread(target=worker, daemon=True).start()
+        start_connection_worker(chat_connection_pending, worker)
 
     chat_disconnect_button = ttk.Button(
         chat_section, text="Disconnect ChatGPT", command=disconnect_chatgpt
@@ -4170,6 +4451,7 @@ def gui():
         anchor="w", pady=(2, 8)
     )
     cloud_events = queue.Queue()
+    cloud_connection_pending = threading.Event()
     cloud_text = tk.StringVar(value="Optional free cloud models, with your own account.")
 
     def connect():
@@ -4186,7 +4468,7 @@ def gui():
             except Exception as exc:
                 cloud_events.put("Connection not finished: " + str(exc))
 
-        threading.Thread(target=worker, daemon=True).start()
+        start_connection_worker(cloud_connection_pending, worker)
 
     connect_button = ttk.Button(
         router_section,
@@ -4200,8 +4482,14 @@ def gui():
     ).pack(anchor="w", pady=(8, 2))
 
     def disconnect_cloud():
-        disconnect()
-        cloud_text.set("Disconnected. Your local AI still works.")
+        if cloud_connection_pending.is_set():
+            return
+        cloud_connection_pending.set()
+        try:
+            disconnect()
+            cloud_text.set("Disconnected. Your local AI still works.")
+        finally:
+            cloud_connection_pending.clear()
 
     disconnect_button = ttk.Button(
         router_section, text="Disconnect account", command=disconnect_cloud
@@ -4292,13 +4580,55 @@ def gui():
         value="Connect your own GitHub account to save projects online."
     )
     github_events = queue.Queue()
+    github_login_events = queue.Queue()
+    github_code = tk.StringVar(value="")
+
+    def copy_github_code():
+        if github_code.get():
+            window.clipboard_clear()
+            window.clipboard_append(github_code.get())
+            github_text.set("Code copied. Paste it into GitHub's browser page and approve the connection.")
+
+    def show_github_code(code):
+        if not isinstance(code, str) or not re.fullmatch(r"[A-Z0-9]{4}-[A-Z0-9]{4}", code):
+            return False
+        github_code.set(code)
+        github_code_row.pack(anchor="w", pady=(4, 8))
+        try:
+            copy_github_code()
+        except tk.TclError:
+            github_text.set("Paste the code shown here into GitHub's browser page and approve the connection.")
+        return True
 
     def connect_github():
         try:
-            github_account.connect()
-            github_text.set(
-                "Finish the GitHub approval in the browser. The sign-in window shows the code if needed."
-            )
+            # Donation controls can start this flow while More connections is
+            # collapsed. Keep the browser/code instructions visible in Cale.
+            panel = getattr(window, "github_login_panel", None)
+            if panel is None or not panel.winfo_exists():
+                panel = tk.Toplevel(window)
+                panel.title("Connect GitHub")
+                panel.transient(window)
+                window.github_login_panel = panel
+                body = ttk.Frame(panel, padding=24)
+                body.pack(fill="both", expand=True)
+                ttk.Label(body, text="Connect your GitHub", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+                ttk.Label(body, textvariable=github_text, wraplength=520).pack(anchor="w", pady=(10, 12))
+                ttk.Entry(body, textvariable=github_code, state="readonly", width=16, font=("Segoe UI", 18)).pack(anchor="w", pady=(0, 12))
+                ttk.Button(body, text="Copy code", command=copy_github_code).pack(anchor="w", pady=(0, 8))
+                ttk.Button(body, text="Open GitHub in my browser", command=lambda: webbrowser.open("https://github.com/login/device"), style="Accent.TButton").pack(anchor="w")
+                ttk.Button(body, text="Close", command=panel.destroy).pack(anchor="w", pady=(12, 0))
+            panel.lift()
+            active_login = getattr(window, "github_login_process", None)
+            if active_login is not None and active_login.poll() is None:
+                github_text.set("Finish this GitHub sign-in in your browser. Use the code shown here if asked.")
+                return
+            github_code.set("")
+            window.github_login_generation = getattr(window, "github_login_generation", 0) + 1
+            generation = window.github_login_generation
+            window.github_login_process = github_account.connect(
+                on_code=lambda code: github_login_events.put((code, generation)))
+            github_text.set("Opening GitHub in your browser. If it asks for a code, Cale will show and copy it here.")
         except Exception as exc:
             github_text.set(str(exc))
 
@@ -4312,6 +4642,11 @@ def gui():
     ttk.Label(
         optional_section, textvariable=github_text, style="Muted.TLabel", wraplength=720
     ).pack(anchor="w", pady=(6, 2))
+    github_code_row = ttk.Frame(optional_section)
+    ttk.Entry(github_code_row, textvariable=github_code, state="readonly", width=14).pack(side="left", padx=(0, 8))
+    ttk.Button(github_code_row, text="Copy code", command=copy_github_code).pack(side="left", padx=(0, 8))
+    ttk.Button(github_code_row, text="Open GitHub", command=lambda: webbrowser.open("https://github.com/login/device")).pack(side="left")
+
     ttk.Label(
         optional_section,
         text="Save code in your repositories. Publish suitable static sites with GitHub Pages.",
@@ -4417,7 +4752,7 @@ def gui():
 
     voice_speaking = threading.Event()
     talk_chat_row = ttk.Frame(main_page)
-    talk_chat_row.pack(fill="x", pady=(4, 18))
+    talk_chat_row.pack(fill="x", pady=(4, 8))
     title_row = ttk.Frame(talk_chat_row)
     title_row.pack(side="left", anchor="n", padx=(0, 14))
     title_copy = ttk.Frame(title_row)
@@ -4425,7 +4760,7 @@ def gui():
     beach_scene = ttk.Frame(title_copy)
     beach_scene.pack(anchor="w")
     cale_scene = ttk.Frame(beach_scene)
-    cale_scene.pack(side="left", anchor="n", padx=(0, 8))
+    cale_scene.pack(anchor="w", padx=(0, 8))
     if not avatar_video.attach(cale_scene, ROOT / "assets/cale-talking.webp", voice_speaking):
         ttk.Label(cale_scene, text="Talk to Cale", font=("Segoe UI", 29, "bold")).pack(
             anchor="w"
@@ -4435,10 +4770,12 @@ def gui():
             text="Ask a question or describe something you'd like me to make.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(3, 0))
-    ttk.Label(cale_scene, text="CALE  •  BEACH SIDE", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+    companion_caption = ttk.Frame(beach_scene)
+    companion_caption.pack(fill="x", pady=(3, 0))
+    ttk.Label(companion_caption, text="CALE  •  BEACH SIDE", style="Muted.TLabel").pack(side="left")
     camera_scene = ttk.Frame(beach_scene)
-    camera_scene.pack(side="left", anchor="n")
-    camera_frame = tk.Frame(camera_scene, width=200, height=132, bg="#0b1020")
+    # Camera preview is visible only while the camera is enabled.
+    camera_frame = tk.Frame(camera_scene, width=320, height=132, bg=bg)
     camera_frame.pack_propagate(False)
     camera_frame.pack()
     camera_preview = tk.Label(
@@ -4446,19 +4783,22 @@ def gui():
         fg="#d8e8f5", font=("Segoe UI", 10), borderwidth=0,
     )
     camera_preview.pack(fill="both", expand=True)
-    ttk.Label(camera_scene, text="YOU  •  LOCAL WEBCAM", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
+    camera_scene_caption=ttk.Label(camera_scene, text="YOU  •  LOCAL WEBCAM", style="Muted.TLabel")
+    camera_scene_caption.pack(anchor="w",pady=(3,0))
+    camera_options=ttk.Frame(beach_scene)
+    camera_options.pack(fill="x",pady=(3,0))
     companion_controls = ttk.Frame(title_copy)
-    companion_controls.pack(fill="x", pady=(10, 0))
+    companion_controls.pack(fill="x", pady=(8, 0))
     speech_status = tk.StringVar(value="Preparing your voice · Cale is quiet")
     ttk.Label(title_copy, textvariable=speech_status, style="Muted.TLabel",
-              wraplength=510).pack(anchor="w", pady=(8, 0))
+              wraplength=300).pack(anchor="w", pady=(8, 0))
 
     def clear_camera_preview():
         camera_preview.configure(image="", text="Your camera\nTurn it on to join Cale")
         camera_preview.cale_photo = None
 
     def show_camera_preview(payload):
-        if greeting_until[0] <= time.time() or len(payload) > 200_000:
+        if greeting_until[0] <= time.time() or len(payload) > 2_800_000:
             return
         try:
             photo = ImageTk.PhotoImage(
@@ -4522,6 +4862,30 @@ def gui():
 
     conversation_events = queue.Queue()
     voice_events = queue.Queue()
+    camera_frames = queue.Queue(maxsize=1)
+    camera_generation = [0]
+
+    def offer_camera_frame(value, generation=None):
+        if generation is not None and generation != camera_generation[0]:
+            return
+        if len(value) > 2_800_000:
+            return
+        try:
+            camera_frames.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            camera_frames.put_nowait((camera_generation[0],value))
+        except queue.Full:
+            pass
+
+    def camera_preview_poll():
+        try:
+            generation,payload=camera_frames.get_nowait()
+            if generation==camera_generation[0]:show_camera_preview(payload)
+        except queue.Empty:
+            pass
+        window.after(33, camera_preview_poll)
     voice_busy = threading.Event()
     mute_marker = STATE / "voice-muted"
     voice_muted = threading.Event()
@@ -4937,9 +5301,9 @@ def gui():
         companion_controls, text="🔇  Unmute Cale" if voice_muted.is_set() else "🔊  Mute Cale",
         command=toggle_voice_mute,
     )
-    mute_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    mute_button.grid(row=0, column=1, padx=(6, 0), pady=(4, 0), sticky="ew")
     mic_button = ttk.Button(companion_controls, text="🎤  Mic Off", command=toggle_listening)
-    mic_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    mic_button.grid(row=0, column=0, pady=(4, 0), sticky="ew")
     presence = tk.Canvas(
         header_status, width=148, height=46, background=bg,
         highlightthickness=0, borderwidth=0,
@@ -5145,46 +5509,101 @@ def gui():
     greeting_until = [float(read_task_status(greeting_config).get("until", 0))]
     visitor_awaiting_intro_until = [0.0]
 
-    def start_camera_greeting():
-        """Run local face detection in the media runtime, off the UI thread."""
-        if greeting_until[0] <= time.time():
-            return
-        if greeting_process[0] is not None and greeting_process[0].poll() is None:
-            return
-        media_python = ROOT / "Media/python/Scripts/python.exe"
-        if not media_python.is_file():
-            voice_events.put(("camera_error", "Camera tools are still installing."))
-            return
+    camera_start_lock = threading.Lock()
+    avatar_config = ROOT/"Media/camera-avatar.json"
+    avatar_selected = tk.BooleanVar(value=bool(read_task_status(avatar_config).get("enabled",True)))
+    virtual_selected = tk.BooleanVar(value=False)  # Sharing to other apps is explicit each session.
 
-        def monitor():
+    def update_camera_layout():
+        # The live Cale replaces his static portrait, rather than stacking two
+        # copies and pushing essential chat/microphone controls off the window.
+        animated=avatar_selected.get() and greeting_until[0]>time.time()
+        if animated:cale_scene.pack_forget()
+        elif not cale_scene.winfo_manager():cale_scene.pack(anchor="w",padx=(0,8),before=companion_caption)
+        camera_scene_caption.configure(text="Your Cale avatar" if animated else "YOU  •  LOCAL WEBCAM")
+
+    def start_camera_greeting(restart=False):
+        """Setup runs off Tk; old camera owner is reaped before any new launch."""
+        if greeting_until[0] <= time.time():return
+        if not restart and greeting_process[0] is not None and greeting_process[0].poll() is None:return
+        camera_generation[0]+=1
+        generation=camera_generation[0]
+        animated=avatar_selected.get();sharing=bool(animated and virtual_selected.get())
+        update_camera_layout()
+        try:
+            import video_generation
+            video_generation.save_avatar_camera_mode(ROOT,animated)
+        except OSError as error:
+            clear_camera_preview()
+            voice_events.put(("camera_session",(generation,"camera_error","Camera mode could not be saved; camera stopped.")))
+            return
+        clear_camera_preview()
+        camera_preview.configure(text="Preparing animated Cale…\nYour real camera stays hidden" if animated else "Opening your camera…")
+        if animated:
             try:
-                import psutil
-
-                process = subprocess.Popen(
-                    [str(media_python), "-u", str(ROOT / "camera_presence.py"),
-                     "--parent-pid", str(os.getpid()), "--parent-started",
-                     str(psutil.Process(os.getpid()).create_time())],
-                    cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, encoding="utf-8", errors="replace",
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-                greeting_process[0] = process
+                from PIL import ImageOps
+                picture=ImageOps.fit(Image.fromarray(avatar_video.neutral_camera_avatar()),(320,132))
+                photo=ImageTk.PhotoImage(picture)
+                camera_preview.configure(image=photo,text="")
+                camera_preview.cale_photo=photo
+            except (AttributeError,OSError,ValueError):pass
+        def current():return generation==camera_generation[0] and greeting_until[0]>time.time()
+        def monitor():
+            process=None
+            try:
+                import psutil,video_generation
+                with camera_start_lock:
+                    if not current():return
+                    previous=greeting_process[0]
+                    stop_owned_camera_process(previous)
+                    if greeting_process[0] is previous:greeting_process[0]=None
+                    if not current():return
+                    media_python=ROOT/"Media/python/Scripts/python.exe"
+                    if animated:
+                        def progress(value):
+                            if current():voice_events.put(("camera_session",(generation,"camera_setup",str(value.get("detail","Preparing Live Cale")))))
+                        media_python=video_generation.ensure_avatar_profile(ROOT,progress=progress,cancelled=lambda:not current(),virtual_output=sharing,defer_probe=True)
+                    if not media_python.is_file():raise RuntimeError("Camera tools are still installing.")
+                    if not current():return
+                    command=camera_worker_command(ROOT,media_python,os.getpid(),psutil.Process(os.getpid()).create_time(),animated,sharing)
+                    process=subprocess.Popen(command,cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+                        text=True,encoding="utf-8",errors="replace",creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0),
+                        env=video_generation._avatar_environment() if animated else None)
+                    greeting_process[0]=process
                 for line in process.stdout:
-                    try:
-                        event = json.loads(line)
-                    except ValueError:
-                        continue
-                    voice_events.put(("camera_" + str(event.get("event", "error")),
-                                      str(event.get("message", ""))))
-                process.wait()
-                if process.returncode and greeting_until[0] > time.time():
-                    voice_events.put(("camera_error", "Camera greeting stopped. Check the camera connection and try again."))
-            except OSError as exc:
-                voice_events.put(("camera_error", "Could not start webcam: " + str(exc)))
+                    if not current():break
+                    if len(line)>2_800_256:continue
+                    try:event=json.loads(line)
+                    except ValueError:continue
+                    if event.get("event")=="frame":offer_camera_frame(str(event.get("message","")),generation)
+                    else:voice_events.put(("camera_session",(generation,"camera_"+str(event.get("event","error")),str(event.get("message","")))))
+                if not current():stop_owned_camera_process(process)
+                else:
+                    process.wait()
+                    if process.returncode:voice_events.put(("camera_session",(generation,"camera_error","Camera stopped. Your real image is not used as an animated fallback.")))
+            except Exception as error:
+                if current():voice_events.put(("camera_session",(generation,"camera_error",str(error)[:220])))
             finally:
-                greeting_process[0] = None
+                if process is not None:
+                    try:stop_owned_camera_process(process)
+                    except (OSError,subprocess.TimeoutExpired):pass
+                    if greeting_process[0] is process:greeting_process[0]=None
+        threading.Thread(target=monitor,daemon=True).start()
 
-        threading.Thread(target=monitor, daemon=True).start()
+    def change_camera_view():
+        try:
+            import video_generation
+            video_generation.save_avatar_camera_mode(ROOT,avatar_selected.get())
+        except OSError:
+            avatar_selected.set(bool(read_task_status(avatar_config).get("enabled",True)))
+            status.set("Camera mode could not be saved. The previous camera mode remains selected.")
+            return
+        share_camera_button.configure(state="normal" if avatar_selected.get() else "disabled")
+        if not avatar_selected.get():virtual_selected.set(False)
+        if greeting_until[0]>time.time():start_camera_greeting(restart=True)
+        else:
+            camera_generation[0]+=1
+            clear_camera_preview()
 
     def toggle_camera_greeting():
         """The visible one-hour switch also gates all other camera tools."""
@@ -5195,9 +5614,13 @@ def gui():
         greeting_config.write_text(json.dumps({"until": until}), encoding="utf-8")
         camera_consent.write_text(json.dumps({"until": until}), encoding="utf-8")
         camera_button.configure(text="📷  Camera On" if enabled else "📷  Camera Off")
+        update_camera_layout()
         if enabled:
+            camera_scene.pack(anchor="w", pady=(8, 0),before=camera_options)
             start_camera_greeting()
         else:
+            camera_generation[0]+=1
+            camera_scene.pack_forget()
             clear_camera_preview()
             process = greeting_process[0]
             if process is not None and process.poll() is None:
@@ -5205,22 +5628,34 @@ def gui():
             status.set("Camera greeting turned off.")
 
     camera_button = ttk.Button(
-        companion_controls, text="📷  Camera On" if greeting_until[0] > time.time()
-        else "📷  Camera Off", command=toggle_camera_greeting,
+        companion_caption, text="📷 Camera On" if greeting_until[0] > time.time()
+        else "📷 Camera Off", command=toggle_camera_greeting, style="Tiny.TButton",
     )
-    camera_button.pack(side="left", padx=(6, 0))
+    camera_button.pack(side="right")
+    style.configure("Camera.TRadiobutton",background=bg,foreground=text,font=("Segoe UI",9),indicatorcolor=field)
+    style.configure("Camera.TCheckbutton",background=bg,foreground=muted,font=("Segoe UI",9),indicatorcolor=field)
+    style.map("Camera.TRadiobutton",background=[("active",field)])
+    style.map("Camera.TCheckbutton",background=[("active",field)])
+    camera_modes=ttk.Frame(camera_options)
+    camera_modes.pack(fill="x",pady=(4,0))
+    ttk.Radiobutton(camera_modes,text="Raw camera",variable=avatar_selected,value=False,command=change_camera_view,style="Camera.TRadiobutton").pack(side="left")
+    ttk.Radiobutton(camera_modes,text="Animated Cale",variable=avatar_selected,value=True,command=change_camera_view,style="Camera.TRadiobutton").pack(side="left",padx=(6,0))
+    share_camera_button=ttk.Checkbutton(camera_options,text="Share animated Cale to other apps (OBS)",variable=virtual_selected,command=change_camera_view,style="Camera.TCheckbutton",
+        state="normal" if avatar_selected.get() else "disabled")
+    share_camera_button.pack(anchor="w",pady=(3,0))
     if greeting_until[0] > time.time():
+        camera_scene.pack(anchor="w", pady=(8, 0),before=camera_options)
         start_camera_greeting()
     window.bind("<Control-Alt-space>", lambda _: record_voice())
     ttk.Label(title_copy, textvariable=voice_label, style="Muted.TLabel",
               wraplength=310).pack(
         anchor="w", pady=(8, 2)
     )
-    chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=18)
+    chat_panel = ttk.Frame(talk_chat_row, style="Card.TFrame", padding=12)
     chat_panel.pack(side="left", fill="both", expand=True)
     chat_heading = ttk.Frame(chat_panel, style="Card.TFrame")
     chat_heading.pack(fill="x", pady=(0, 5))
-    ttk.Label(chat_heading, text="What shall we make?", style="Card.TLabel",
+    ttk.Label(chat_heading, text="Chat with Cale", style="Card.TLabel",
               font=("Segoe UI", 18, "bold")).pack(side="left")
     readiness_text = tk.StringVar(value="")
     readiness_label = ttk.Label(
@@ -5259,30 +5694,57 @@ def gui():
         )
         button.pack(side="left", padx=(4, 0))
         mode_buttons[mode] = button
-    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=180)
+    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=130)
     conversation_frame.pack(fill="both", expand=True)
     conversation_frame.pack_propagate(False)
     conversation = tk.Text(
-        conversation_frame, height=1, wrap="word", state="disabled", background=card,
+        conversation_frame, width=1, height=1, wrap="word", state="disabled", background=card,
         foreground=text, insertbackground=text, relief="flat", padx=10, pady=6,
         font=("Segoe UI", 11), highlightthickness=0,
     )
     conversation_scroll = ttk.Scrollbar(
         conversation_frame, orient="vertical", command=conversation.yview
     )
-    conversation.configure(yscrollcommand=conversation_scroll.set)
-    conversation_scroll.pack(side="right", fill="y")
+    def update_chat_scroll(first, last):
+        """Keep history accessible without an empty scrollbar on short chats."""
+        conversation_scroll.set(first, last)
+        if float(first) > 0.001 or float(last) < 0.999:
+            if not conversation_scroll.winfo_manager():
+                conversation_scroll.pack(side="right", fill="y", before=conversation)
+        else:
+            conversation_scroll.pack_forget()
+
+    conversation.configure(yscrollcommand=update_chat_scroll)
     conversation.pack(side="left", fill="both", expand=True)
     conversation.tag_configure("user", foreground="#a6c9ff", spacing1=8)
     conversation.tag_configure("assistant", foreground=text, spacing1=8)
-    entry_row = ttk.Frame(chat_panel, style="Card.TFrame")
-    entry_row.pack(fill="x", pady=(8, 0))
+    entry_row = ttk.Frame(chat_panel, style="Card.TFrame", padding=(0, 8))
+    # Chat history and its composer stay together above the task grid.
+    entry_row.pack(side="bottom", fill="x", pady=(6, 0), before=conversation_frame)
     chat_input = tk.Text(
         entry_row, background=field, foreground=text, insertbackground=text,
         relief="flat", font=("Segoe UI", 12), highlightthickness=0,
-        height=2, wrap="word", padx=8, pady=6,
+        width=1, height=2, wrap="word", padx=8, pady=6,
     )
     chat_input.pack(side="left", fill="both", expand=True, padx=(0, 8))
+    def size_home_chat(event=None):
+        if event is not None and event.widget is not window:
+            return
+        compact = window.winfo_height() < 880
+        for canvas, _segments, value in gauge_widgets.values():
+            factor = 0.8 if compact else 1.0
+            previous = getattr(canvas, "home_scale", 1.0)
+            if factor != previous:
+                canvas.scale("all", 46, 0, factor/previous, factor/previous)
+                canvas.home_scale = factor
+            canvas.configure(height=round(68*factor) + 8)
+            canvas.itemconfigure(value, font=("Segoe UI", 11 if compact else 13, "bold"))
+        conversation_frame.configure(height=88 if compact else 150)
+        chat_input.configure(height=1 if compact else 2)
+        mode_row.pack_forget()
+        mode_row.pack(side="bottom" if window.winfo_width() < 1100 else "right", anchor="w")
+    window.bind("<Configure>", size_home_chat, add="+")
+    size_home_chat()
     attachments = []
     attachment_text = tk.StringVar(value="")
     attachment_label = ttk.Label(
@@ -5336,6 +5798,8 @@ def gui():
 
     attach_button = ttk.Button(entry_row, text="Add files", command=show_attachment_menu)
 
+    chat_mirrors = []
+
     def show_chat(role, content, speak=True):
         at_bottom = conversation.yview()[1] >= 0.98
         conversation.configure(state="normal")
@@ -5375,6 +5839,13 @@ def gui():
         conversation.configure(state="disabled")
         if at_bottom:
             conversation.see("end")
+        for mirror in chat_mirrors:
+            follow = mirror.yview()[1] >= .98
+            mirror.configure(state="normal")
+            mirror.insert("end", ("You" if role == "user" else "Cale") + ": " + content + "\n\n")
+            mirror.configure(state="disabled")
+            if follow:
+                mirror.see("end")
         if role == "assistant" and speak:
             speak_update(content)
 
@@ -5513,21 +5984,22 @@ def gui():
 
     threading.Thread(target=answer_worker, daemon=True).start()
 
-    def submit_chat_text(value=None):
+    def submit_chat_text(value=None, *, use_attachments=True, intent=None):
         nonlocal pending_followup
+        from_home_composer = value is None
         donation_service.activity()
         ready, explanation = first_launch_readiness(STATE)
         if not ready:
             readiness_text.set(explanation)
-            return
+            return False
         raw_value = (
             chat_input.get("1.0", "end-1c") if value is None else value
         ).strip()
         if not raw_value:
             if attachments:
                 assistant_reply("Tell me what you'd like me to do with the selected files or folder.")
-            return
-        selected_paths = list(attachments)
+            return False
+        selected_paths = list(attachments) if use_attachments else []
         if selected_paths:
             try:
                 user_file_memory.remember_roots(STATE, selected_paths)
@@ -5535,14 +6007,16 @@ def gui():
                 conversation_events.put("I couldn't save those files to long-term memory yet.")
             index_requests.put(selected_paths)
         value = chat_assistant.attach_request(raw_value, selected_paths)
-        if raw_value == chat_input.get("1.0", "end-1c").strip():
+        if from_home_composer and raw_value == chat_input.get("1.0", "end-1c").strip():
             chat_input.delete("1.0", "end")
-        attachments.clear()
-        show_attachments()
+        if use_attachments:
+            attachments.clear()
+            show_attachments()
 
         def restore_selection():
-            attachments[:] = selected_paths
-            show_attachments()
+            if use_attachments:
+                attachments[:] = selected_paths
+                show_attachments()
         # The pending question belongs only once in the model conversation.
         # Keep machine-readable paths in the task brief, while the chat shows
         # a short, readable reminder of what the person selected.
@@ -5577,7 +6051,7 @@ def gui():
                 assistant_reply("I can't find an earlier reply to read aloud yet.")
             return
         active = chat_assistant.followup_tasks(projects(), raw_value)
-        if pending_followup:
+        if pending_followup and intent is None:
             note, ids = pending_followup
             saved_tasks = {p["id"]: p for p in projects()}
             candidates = [saved_tasks[pid] for pid in ids if pid in saved_tasks]
@@ -5600,7 +6074,7 @@ def gui():
                 return
             pending_followup = None
         try:
-            action = chat_assistant.route_with_files(raw_value, active, selected_paths)
+            action = intent if intent in ("task", "music") else chat_assistant.route_with_files(raw_value, active, selected_paths)
             if action == "image":
                 setup = read_task_status(STATE / "install-progress.json")
                 if setup_blocks_tasks(setup):
@@ -5656,6 +6130,8 @@ def gui():
         except Exception as exc:
             restore_selection()
             assistant_reply("I couldn't do that yet: " + str(exc))
+            return False
+        return True
 
     send_button = ttk.Button(entry_row, text="Send", command=submit_chat_text, style="Accent.TButton")
     send_button.pack(side="right")
@@ -5708,10 +6184,143 @@ def gui():
         window.after(350, poll_chat)
 
     window.after(350, poll_chat)
-    radio_station.Controls(main_page, window, radio_service)
+    def make_studio_song(prompt):
+        ready, explanation = first_launch_readiness(STATE)
+        if not ready:
+            status.set(explanation)
+            messagebox.showinfo("Getting ready", explanation, parent=window)
+            return False
+        return submit_chat_text("Make a song: " + prompt, use_attachments=False, intent="music") is True
+
+    studio_controls = radio_station.Controls(
+        music_page, window, radio_service, on_make_song=make_studio_song)
+
+    # Creation has a dedicated canvas-sized live preview instead of opening a
+    # second window over the conversation. It uses the existing preview capture
+    # and task pipeline; no separate agent or duplicated conversation is started.
+    create_header = ttk.Frame(create_shell)
+    create_header.pack(fill="x", pady=(4, 16))
+    ttk.Label(create_header, text="Make something yours.",
+              font=("Segoe UI", 25, "bold")).pack(side="left")
+    create_kind = tk.StringVar(value="Game")
+    create_kinds = ttk.Frame(create_header)
+    create_kinds.pack(side="right")
+    create_kind_buttons = {}
+    game_library_button = ttk.Button(create_header, text="Game library", command=lambda: open_game_library())
+    game_library_button.pack(side="left", padx=(16, 0))
+
+    def choose_create_kind(kind):
+        create_kind.set(kind)
+        if kind == "Game":
+            if not game_library_button.winfo_manager():
+                game_library_button.pack(side="left", padx=(16, 0))
+        else:
+            game_library_button.pack_forget()
+        for key, button in create_kind_buttons.items():
+            button.configure(style="SelectedMode.TButton" if key == kind else "Mode.TButton")
+
+    for kind in ("Game", "App", "Website"):
+        button = ttk.Button(create_kinds, text=kind,
+            command=lambda choice=kind: choose_create_kind(choice),
+            style="SelectedMode.TButton" if kind == "Game" else "Mode.TButton")
+        button.pack(side="left", padx=(6, 0))
+        create_kind_buttons[kind] = button
+    create_project_row = ttk.Frame(create_shell)
+    create_project_row.pack(fill="x", pady=(0, 12))
+    ttk.Label(create_project_row, text="Project", style="Muted.TLabel").pack(side="left", padx=(0, 10))
+    create_project_selection = tk.StringVar(value="Current project")
+    create_project_choices = {}
+    create_project_picker = ttk.Combobox(create_project_row, textvariable=create_project_selection,
+        state="readonly", width=48, values=("Current project",))
+    create_project_picker.pack(side="left", fill="x", expand=True)
+
+    def open_create_preview():
+        project = next((item for item in projects() if item["id"] == preview_task_id), None)
+        page = project_preview.source(project["folder"]) if project else ""
+        if page:
+            webbrowser.open(page)
+        elif project:
+            os.startfile(project["folder"])
+
+    create_open_button = ttk.Button(create_project_row, text="Open preview", command=open_create_preview, state="disabled")
+    create_open_button.pack(side="right", padx=(12, 0))
+    create_body = ttk.Frame(create_shell)
+    create_body.pack(fill="both", expand=True)
+    create_body.columnconfigure(0, weight=1, minsize=270)
+    create_body.columnconfigure(1, weight=3, minsize=480)
+    create_body.rowconfigure(0, weight=1)
+    create_chat = ttk.Frame(create_body, style="Card.TFrame", padding=20)
+    create_chat.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+    ttk.Label(create_chat, text="Build with Cale", style="Card.TLabel",
+              font=("Segoe UI", 18, "bold")).pack(anchor="w")
+    ttk.Label(create_chat, text="Describe it. Watch it take shape.",
+              style="CardMuted.TLabel").pack(anchor="w", pady=(4, 16))
+    create_status = tk.StringVar(value="Your next idea starts here.")
+    ttk.Label(create_chat, textvariable=create_status, style="CardMuted.TLabel",
+              wraplength=270, justify="left").pack(fill="x", pady=(0, 16))
+    create_history = ttk.Frame(create_chat, style="Card.TFrame")
+    create_history.pack(fill="both", expand=True)
+    create_phase = tk.StringVar(value="Build  /  Test  /  Finished")
+    ttk.Label(create_chat, textvariable=create_phase, style="CardMuted.TLabel",
+              font=("Segoe UI", 10, "bold")).pack(anchor="w", before=create_history, pady=(0, 8))
+    create_conversation = tk.Text(create_history, state="disabled", height=5, width=28,
+        background=card, foreground=text, relief="flat", wrap="word",
+        font=("Segoe UI", 11), padx=4, pady=8, highlightthickness=0)
+    create_conversation.pack(side="left", fill="both", expand=True)
+    chat_mirrors.append(create_conversation)
+    create_history_scroll = ttk.Scrollbar(create_history, command=create_conversation.yview)
+    def update_create_scroll(first, last):
+        create_history_scroll.set(first, last)
+        if float(first) > .001 or float(last) < .999:
+            if not create_history_scroll.winfo_manager():
+                create_history_scroll.pack(side="right", fill="y", before=create_conversation)
+        else:
+            create_history_scroll.pack_forget()
+
+    create_conversation.configure(yscrollcommand=update_create_scroll)
+    create_prompt = tk.Text(create_chat, height=3, width=28, wrap="word", relief="flat",
+        background=field, foreground=text, insertbackground=text,
+        font=("Segoe UI", 11), padx=12, pady=12, highlightthickness=0)
+    create_prompt.pack(side="bottom", fill="x", pady=(12, 8), before=create_history)
+
+    def submit_creation():
+        prompt = create_prompt.get("1.0", "end-1c").strip()
+        if not prompt:
+            create_prompt.focus_set()
+            return
+        ready, explanation = first_launch_readiness(STATE)
+        if not ready:
+            create_status.set(explanation)
+            return
+        accepted = submit_chat_text("Build a " + create_kind.get().lower() + ": " + prompt,
+                                    use_attachments=False, intent="task")
+        if accepted:
+            create_prompt.delete("1.0", "end")
+            create_status.set("Request sent. Cale will report progress here and in Home.")
+        else:
+            create_status.set("Cale could not start that request. Your prompt is still here; check the chat for details.")
+
+    create_build_button = ttk.Button(create_chat, text="Build it", command=submit_creation,
+                                    style="Accent.TButton")
+    create_build_button.pack(side="bottom", fill="x", before=create_prompt)
+    create_preview_host = ttk.Frame(create_body, style="Card.TFrame", padding=18)
+    create_preview_host.grid(row=0, column=1, sticky="nsew")
+    create_empty = ttk.Frame(create_preview_host, style="Card.TFrame")
+    create_empty.pack(fill="both", expand=True)
+    ttk.Label(create_empty, text="Your live preview", style="Card.TLabel",
+              font=("Segoe UI", 22, "bold")).pack(expand=True, anchor="s")
+    ttk.Label(create_empty, text="Your game, app or website will appear here as Cale builds it.",
+              style="CardMuted.TLabel", wraplength=380, justify="center").pack(expand=True, anchor="n", pady=(12, 0))
+    def open_game_library():
+        import game_library_ui
+
+        return game_library_ui.open_library(window, submit_chat_text,
+            lambda: show_workspace("create"), {"background": bg, "surface": card,
+                "field": field, "text": text, "muted": muted})
+
     task_heading = ttk.Frame(main_page)
-    task_heading.pack(fill="x", pady=(0, 12))
-    ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 20, "bold")).pack(side="left")
+    task_heading.pack(fill="x", pady=(0, 8))
+    ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 17, "bold")).pack(side="left")
     chatgpt_usage = ttk.Label(task_heading, text="", style="Muted.TLabel")
     chatgpt_usage.pack(side="right", padx=(0, 12))
     usage_window = tk.Toplevel(window)
@@ -5732,20 +6341,10 @@ def gui():
     usage_window.protocol("WM_DELETE_WINDOW", usage_window.withdraw)
     ttk.Button(task_heading, text="✦  Model activity", command=open_usage).pack(side="right")
     list_wrap = ttk.Frame(main_page)
-    canvas = tk.Canvas(list_wrap, background=bg, borderwidth=0, highlightthickness=0)
-    scrollbar = ttk.Scrollbar(list_wrap, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=scrollbar.set)
-    scrollbar.pack(side="right", fill="y")
-    canvas.pack(side="left", fill="both", expand=True)
-    cards = ttk.Frame(canvas)
-    cards_window = canvas.create_window((0, 0), window=cards, anchor="nw")
-    cards.bind(
-        "<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all"))
-    )
-    canvas.bind(
-        "<Configure>",
-        lambda event: canvas.itemconfigure(cards_window, width=event.width),
-    )
+    # Cards share the home page's scroll region. A second canvas here creates
+    # competing wheel targets and traps the task list inside a small viewport.
+    cards = ttk.Frame(list_wrap)
+    cards.pack(fill="x")
     # A separate, resizable window keeps the full graph one click from tasks.
     # It never gets buried beneath a long list of active or completed cards.
     usage_panel = ttk.Frame(usage_window, style="Card.TFrame", padding=(18, 14))
@@ -5910,11 +6509,6 @@ def gui():
             # Do not move the home page a second time after they consume input.
             if isinstance(widget, tk.Text):
                 return None
-            if widget is canvas:
-                first, last = canvas.yview()
-                if lines > 0 and last < 0.999 or lines < 0 and first > 0.001:
-                    return canvas
-                return main_canvas
             if widget is main_page or widget is main_canvas:
                 return main_canvas
             widget = widget.master
@@ -5956,6 +6550,24 @@ def gui():
         return None
 
     window.bind_all("<MouseWheel>", scroll_super, add="+")
+
+    def scroll_music(event):
+        if not music_shell.winfo_ismapped():
+            return None
+        widget = window.winfo_containing(window.winfo_pointerx(), window.winfo_pointery())
+        while widget is not None:
+            if isinstance(widget, (tk.Text, tk.Scale, ttk.Scale, ttk.Combobox)):
+                return None
+            if widget is music_page or widget is music_canvas:
+                lines = (-3 if event.delta > 0 else 3) if hasattr(event, "delta") and event.delta else (-3 if event.num == 4 else 3)
+                music_canvas.yview_scroll(lines, "units")
+                return "break"
+            widget = widget.master
+        return None
+
+    window.bind_all("<MouseWheel>", scroll_music, add="+")
+    window.bind_all("<Button-4>", scroll_music, add="+")
+    window.bind_all("<Button-5>", scroll_music, add="+")
 
     sharing_songs = set()
 
@@ -6310,8 +6922,84 @@ def gui():
     preview_capture_at = {}
     # Keep a layout anchor for task cards without showing model installation
     # details on the main screen. The separate model worker owns downloads.
+    task_order = []
+    task_grid = ttk.Frame(cards)
+    task_grid.pack(fill="x")
     models_section = ttk.Frame(cards)
     models_section.pack(fill="x")
+
+    def layout_task_cards(_event=None):
+        width = max(1, min(main_canvas.winfo_width(), window.winfo_width() - 80))
+        columns = 3 if width >= 1180 else 2 if width >= 700 else 1
+        for column in range(3):
+            task_grid.columnconfigure(column, weight=1 if column < columns else 0,
+                                      uniform="task-cards" if column < columns else "")
+        for index, pid in enumerate(task_order):
+            entry = task_cards.get(pid)
+            if not entry:
+                continue
+            entry["panel"].grid(row=index // columns, column=index % columns,
+                                 sticky="nsew", padx=(0, 10 if index % columns < columns-1 else 0), pady=(0, 10))
+            entry["name"].configure(wraplength=0)
+            entry["current_label"].configure(wraplength=0)
+    task_grid.bind("<Configure>", layout_task_cards)
+
+    def create_task_card(title):
+        panel = tk.Frame(task_grid, bg=card, padx=14, pady=12,
+                         highlightthickness=1, highlightbackground="#284052")
+        header = ttk.Frame(panel, style="Card.TFrame")
+        header.pack(fill="x")
+        gauge = tk.Canvas(header, width=48, height=48, background=card, highlightthickness=0)
+        gauge.pack(side="left", padx=(0, 10))
+        copy = ttk.Frame(header, style="Card.TFrame")
+        copy.pack(side="left", fill="x", expand=True)
+        title_var = tk.StringVar(value=title)
+        name = ttk.Label(copy, textvariable=title_var, style="Card.TLabel",
+                         font=("Segoe UI", 12, "bold"), width=1)
+        name.pack(anchor="w", fill="x")
+        state_var = tk.StringVar(value="")
+        ttk.Label(copy, textvariable=state_var, style="CardMuted.TLabel",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(3, 0))
+        menu_button = tk.Menubutton(header, text="⋯", bg=card, fg="#8ea9bb",
+                                   activebackground="#25384b", activeforeground=text,
+                                   relief="flat", font=("Segoe UI", 16, "bold"), cursor="hand2")
+        menu_button.pack(side="right", anchor="n")
+        menu = tk.Menu(menu_button, tearoff=False, bg=card, fg=text)
+        menu_button.configure(menu=menu)
+        current_var, eta_var = tk.StringVar(), tk.StringVar()
+        current_label = ttk.Label(panel, textvariable=current_var, style="CardMuted.TLabel", width=1)
+        current_label.pack(fill="x", pady=(9, 0))
+        eta_label = ttk.Label(panel, textvariable=eta_var, style="CardMuted.TLabel", wraplength=300)
+        percent_var = tk.StringVar(value="0%")
+        bar = tk.Canvas(panel, height=6, background=card, highlightthickness=0, borderwidth=0)
+        bar.pack(fill="x", pady=(10, 6))
+        metrics = tk.StringVar(value="0 tokens · 0s")
+        ttk.Label(panel, textvariable=metrics, style="CardMuted.TLabel",
+                  font=("Segoe UI", 9)).pack(anchor="w")
+        controls = ttk.Frame(panel, style="Card.TFrame")
+        controls.pack(fill="x", pady=(10, 0))
+        gauge.percent, gauge.task_state = 0, ""
+        def draw_gauge(_event=None):
+            gauge.delete("all")
+            shade = ("#ff7a8c" if gauge.task_state in {"failed", "stopped", "needs_input"}
+                     else "#e9b55a" if gauge.task_state == "paused" else "#23d5c5")
+            gauge.create_oval(4, 4, 44, 44, outline="#2b3b50", width=4)
+            if gauge.percent:
+                gauge.create_arc(4, 4, 44, 44, start=90, extent=-359.9*gauge.percent/100,
+                                 style="arc", outline=shade, width=4)
+            gauge.create_text(24, 24, text=f"{gauge.percent}%", fill=text, font=("Segoe UI", 9, "bold"))
+            bar.delete("all")
+            width = max(1, bar.winfo_width())
+            bar.create_rectangle(0, 1, width, 5, fill="#2b3b50", outline="")
+            bar.create_rectangle(0, 1, width*gauge.percent/100, 5, fill=shade, outline="")
+        bar.bind("<Configure>", draw_gauge)
+        draw_gauge()
+        return {"panel":panel, "name":name, "title":title_var, "percent":percent_var,
+                "state":state_var, "gauge":gauge, "draw_gauge":draw_gauge,
+                "current":current_var, "eta":eta_var, "current_label":current_label,
+                "eta_label":eta_label, "tokens":metrics, "sources":tk.StringVar(),
+                "controls":controls, "menu":menu, "compact":True}
+
 
     def set_text(variable, value):
         if variable.get() != value:
@@ -6420,7 +7108,9 @@ def gui():
         percent = max(0, min(100, int(percent)))
         set_text(card_info["percent"], f"{percent}%")
         set_text(card_info["current"], current)
-        if state.lower().replace(" ", "_") in ("accepted", "ready_for_review", "finished", "complete"):
+        if card_info.get("compact"):
+            pass  # The fixed-size arc keeps finished and active cards aligned.
+        elif state.lower().replace(" ", "_") in ("accepted", "ready_for_review", "finished", "complete"):
             card_info["gauge"].configure(height=12)
         else:
             card_info["gauge"].configure(height=34)
@@ -6442,6 +7132,30 @@ def gui():
         controls = card_info["controls"]
         for child in controls.winfo_children():
             child.destroy()
+        if card_info.get("compact"):
+            menu = card_info["menu"]
+            menu.delete(0, "end")
+            menu.add_command(label="Details", command=lambda pid=item["id"]: task_details(next(p for p in projects() if p["id"] == pid)))
+            menu.add_command(label="Open files", command=lambda pid=item["id"]: task_action(pid, "open"))
+            for index, (label, kind) in enumerate(task_controls_for(item["status"])):
+                if index < 3:
+                    button = ttk.Button(controls, text="Add note" if kind == "note" else label,
+                        style="Danger.TButton" if kind == "stop" else "TButton",
+                        width=1,
+                        command=lambda pid=item["id"], action=kind: task_action(pid, action))
+                    button.grid(row=0, column=index, sticky="ew", padx=(0, 5))
+                    controls.columnconfigure(index, weight=1)
+                else:
+                    menu.add_command(label=label, command=lambda pid=item["id"], action=kind: task_action(pid, action))
+            if direct_music and item["status"] in ("ready_for_review", "accepted"):
+                menu.add_command(label="Play song", command=lambda pid=item["id"]: task_action(pid, "play_music"))
+            if (direct_music or standalone_audio_project(item)) and item["status"] in ("ready_for_review", "accepted"):
+                menu.add_command(label="Share to Facebook", command=lambda pid=item["id"]: task_action(pid, "share_facebook"))
+            if camera:
+                menu.add_command(label="Turn camera off" if allowed else "Allow camera (1 hour)",
+                    command=lambda pid=item["id"], action="camera_off" if allowed else "camera_on": task_action(pid, action))
+            card_info["controls_signature"] = signature
+            return
         controls_to_show = task_controls_for(item["status"])
         for label, kind in controls_to_show:
             ttk.Button(
@@ -6480,9 +7194,7 @@ def gui():
         setup = read_task_status(STATE / "install-progress.json")
         if setup and not setup_card_dismissed.is_file():
             if setup_card is None:
-                first = next(
-                    (entry["panel"] for entry in task_cards.values()), models_section
-                )
+                first = task_grid
                 setup_card = create_progress_card("Set up your AI", first)
                 controls = ttk.Frame(setup_card["panel"], style="Card.TFrame")
                 controls.pack(fill="x", pady=(9, 0))
@@ -6612,6 +7324,7 @@ def gui():
             ollama_card = None
 
         all_tasks = list(reversed(projects()))
+        task_order[:] = [item["id"] for item in all_tasks]
         tokens_by_task = usage_history.task_totals()
         sources_by_task = usage_history.task_sources()
         live_ids = {item["id"] for item in all_tasks}
@@ -6631,57 +7344,28 @@ def gui():
             empty_label.destroy()
             empty_label = None
 
-        # Create oldest first, then insert each newer task above it. Existing
-        # widgets stay in place, which preserves the exact scroll position.
-        for item in reversed(all_tasks):
+        for item in all_tasks:
             pid = item["id"]
             if pid not in task_cards:
-                first = next(
-                    (
-                        task_cards[p["id"]]["panel"]
-                        for p in all_tasks
-                        if p["id"] in task_cards
-                    ),
-                    models_section,
-                )
-                card_info = create_progress_card(item["title"], first)
+                card_info = create_task_card(item["title"])
                 card_info["name"].configure(cursor="hand2")
-                card_info["name"].bind(
-                    "<Button-1>",
-                    lambda _, task_id=pid: task_details(
-                        next(p for p in projects() if p["id"] == task_id)
-                    ),
-                )
-                controls = ttk.Frame(card_info["panel"], style="Card.TFrame")
-                controls.pack(fill="x", pady=(9, 0))
-                card_info["controls"] = controls
-                token_var = tk.StringVar(value="Tokens: 0    Total time: 0s")
-                ttk.Label(card_info["panel"], textvariable=token_var,
-                          style="CardMuted.TLabel").pack(anchor="w", before=controls,
-                                                          pady=(3, 0))
-                card_info["tokens"] = token_var
-                source_var = tk.StringVar(value="AI used: waiting for first response")
-                ttk.Label(card_info["panel"], textvariable=source_var,
-                          style="CardMuted.TLabel", wraplength=900).pack(
-                              anchor="w", before=controls, pady=(2, 0))
-                card_info["sources"] = source_var
+                card_info["name"].bind("<Button-1>", lambda _, task_id=pid: task_details(next(p for p in projects() if p["id"] == task_id)))
                 task_cards[pid] = card_info
             card_info = task_cards[pid]
-            set_text(card_info["title"], item["title"])
+            set_text(card_info["title"], item["title"][:42] + ("…" if len(item["title"]) > 42 else ""))
             source_totals = sources_by_task.get(pid, [])
             token_label, source_label = task_usage_labels(
                 item, tokens_by_task.get(pid, 0), source_totals)
             set_text(
                 card_info["tokens"],
-                token_label + "    Total time: " + task_eta.total_time(
-                    item['created'], item['updated'], item['status'], finished=item['finished']),
+                token_label[:64] + " · " + task_card_elapsed(item),
             )
             set_text(card_info["sources"], source_label)
             percent, current = task_progress(item)
             finished = item["status"] in ("ready_for_review", "accepted")
             state = "Finished" if finished else item["status"].replace("_", " ").capitalize()
             update_progress_card(
-                card_info, percent, "" if finished else "Current step: " + current, state
+                card_info, percent, "Ready to open" if finished else current[:72] + ("…" if len(current) > 72 else ""), state
             )
             set_text(
                 card_info["eta"],
@@ -6691,75 +7375,82 @@ def gui():
                 if image_job_id(item) and item["status"] == "working"
                 else task_eta.countdown(STATE / "projects.db", pid, percent, item["status"]),
             )
-            for key in ("current", "eta"):
-                label = card_info[key + "_label"]
-                if card_info[key].get():
-                    if not label.winfo_manager():
-                        label.pack(anchor="w", before=card_info["controls"], pady=(3, 0))
-                elif label.winfo_manager():
-                    label.pack_forget()
+            # Longer current-step, ETA and model details stay in Details.
             update_task_controls(card_info, item)
+        layout_task_cards()
 
     def update_side_preview(all_projects):
-        """Show the active task's page or Chrome session beside the task board."""
+        """Keep the selected project's existing capture inside Create's preview."""
         nonlocal preview_window, preview_label, preview_caption
         nonlocal preview_task_id, preview_dismissed_id, preview_image_signature
         candidates = list(reversed(all_projects))
-        project = next(
-            (
-                item
-                for item in candidates
+        build_candidates = [item for item in candidates
+            if project_preview.WEB_WORDS.search(str(item.get("title", "")) + " " + str(item.get("brief", "")))
+            and not music_job_id(item) and not image_job_id(item)]
+        choices = {str(item["title"])[:68] + " · " + str(item["id"]): item["id"]
+                   for item in build_candidates}
+        create_project_choices.clear()
+        create_project_choices.update(choices)
+        create_project_picker.configure(values=("Current project", *choices))
+        if create_project_selection.get() not in ("Current project", *choices):
+            create_project_selection.set("Current project")
+        selected_id = choices.get(create_project_selection.get())
+        project = next((item for item in build_candidates if item["id"] == selected_id), None)
+        if project is None:
+            project = next((item for item in candidates
                 if item["status"] in ("working", "checking", "queued")
-                and (
-                    project_preview.wants_preview(item)
-                    or project_preview.browser_screenshot_path(item["folder"]).is_file()
-                )
-            ),
-            None,
-        )
+                and (project_preview.wants_preview(item)
+                     or project_preview.browser_screenshot_path(item["folder"]).is_file())), None)
         if project is None:
             project = next(
                 (item for item in candidates if project_preview.wants_preview(item)),
                 None,
             )
         if project is None:
+            project = next(iter(build_candidates), None)
+        if project is None:
             if preview_window is not None:
                 preview_window.destroy()
                 preview_window = None
             preview_task_id = None
+            create_empty.pack(fill="both", expand=True)
+            create_status.set("Your next idea starts here.")
+            create_phase.set("Build  /  Test  /  Finished")
+            create_open_button.configure(state="disabled")
             return
+        create_phase.set("Build  /  Test  /  FINISHED" if project["status"] in ("accepted", "ready_for_review")
+                         else "Build  /  TEST  /  Finished" if project["status"] == "checking"
+                         else "BUILD  /  Test  /  Finished")
+        create_open_button.configure(state="normal")
+        create_status.set(project["title"] + "\n" + str(project.get("detail") or project["status"]))
         pid = project["id"]
         if pid != preview_task_id:
             preview_image_signature = None
+            if preview_label is not None and preview_label.winfo_exists():
+                preview_label.configure(image="", text="Waiting for the first visual update…", fg=muted)
+                if preview_window is not None:
+                    preview_window.picture = None
             if preview_dismissed_id != pid:
                 preview_dismissed_id = None
             preview_task_id = pid
         if preview_dismissed_id == pid:
             return
         if preview_window is None or not preview_window.winfo_exists():
-            preview_window = tk.Toplevel(window)
-            preview_window.title("Cale · Live preview")
-            preview_window.configure(background=bg)
-            preview_window.geometry("450x760")
-            preview_window.minsize(300, 350)
-            window.update_idletasks()
-            x = min(
-                window.winfo_rootx() + window.winfo_width() + 8,
-                window.winfo_screenwidth() - 458,
-            )
-            y = min(window.winfo_rooty(), window.winfo_screenheight() - 790)
-            preview_window.geometry(f"+{max(0, x)}+{max(0, y)}")
+            create_empty.pack_forget()
+            preview_window = ttk.Frame(create_preview_host, style="Card.TFrame")
+            preview_window.pack(fill="both", expand=True)
             ttk.Label(
-                preview_window, text="Live preview", font=("Segoe UI", 16, "bold")
+                preview_window, text="Live preview", style="Card.TLabel", font=("Segoe UI", 16, "bold")
             ).pack(anchor="w", padx=14, pady=(14, 3))
             preview_caption = ttk.Label(
                 preview_window,
                 text="Waiting for the first visual update…",
-                style="Muted.TLabel",
-                wraplength=420,
+                style="CardMuted.TLabel",
+                wraplength=700,
             )
             preview_caption.pack(anchor="w", padx=14, pady=(0, 12))
-            preview_label = tk.Label(preview_window, bg="#101725", borderwidth=0)
+            preview_label = tk.Label(preview_window, bg="#101725", borderwidth=0, cursor="hand2")
+            preview_label.bind("<Button-1>", lambda _: open_create_preview())
             preview_label.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
             def dismiss_preview():
@@ -6768,7 +7459,6 @@ def gui():
                 preview_window.destroy()
                 preview_window = None
 
-            preview_window.protocol("WM_DELETE_WINDOW", dismiss_preview)
         folder = Path(project["folder"])
         browser_image = project_preview.browser_screenshot_path(folder)
         task_image = project_preview.screenshot_path(folder)
@@ -6782,30 +7472,36 @@ def gui():
             else task_image
         )
         if visual.is_file():
-            signature = (str(visual), visual.stat().st_mtime_ns)
+            signature = (str(visual), visual.stat().st_mtime_ns,
+                         create_preview_host.winfo_width(), create_preview_host.winfo_height())
             if signature != preview_image_signature:
                 try:
                     with Image.open(visual) as opened:
                         picture = opened.convert("RGB")
-                    picture.thumbnail((420, 660), Image.Resampling.LANCZOS)
+                    picture.thumbnail((max(400, create_preview_host.winfo_width() - 60),
+                                       max(300, create_preview_host.winfo_height() - 100)), Image.Resampling.LANCZOS)
                     preview_window.picture = ImageTk.PhotoImage(picture)
-                    preview_label.configure(image=preview_window.picture)
+                    preview_label.configure(image=preview_window.picture, text="")
                     preview_image_signature = signature
                 except (OSError, ValueError):
-                    pass
+                    preview_label.configure(image="", text="This preview could not be loaded. Open preview to view the project.", fg=muted)
+                    preview_window.picture = None
+                    preview_image_signature = None
+        else:
+            preview_label.configure(image="", text="Waiting for the first visual update…", fg=muted)
+            preview_window.picture = None
+            preview_image_signature = None
         preview_caption.configure(
             text=(
                 "Chrome · "
                 if visual == browser_image and visual.is_file()
                 else "App · "
             )
-            + project["title"]
+            + project["title"] + " · Click the preview to open and interact"
         )
-        page = (
-            project_preview.source(folder)
-            if project_preview.wants_preview(project)
-            else ""
-        )
+        # Finished projects can be reopened from the picker too. Capture only
+        # while Create is visible, so idle Home does not run preview browsers.
+        page = project_preview.source(folder) if workspace.get() == "create" else ""
         now = time.monotonic()
         if (
             page
@@ -6862,6 +7558,9 @@ def gui():
         try:
             while True:
                 event, value = voice_events.get_nowait()
+                if event=="camera_session":
+                    generation,event,value=value
+                    if generation!=camera_generation[0]:continue
                 if event in ("heard", "heard_handsfree"):
                     try:
                         runtime_diagnostics.resolve(STATE, "microphone")
@@ -6906,8 +7605,6 @@ def gui():
                 elif event == "speech_error":
                     voice_label.set("Speech unavailable: " + value[:140])
                     report_runtime_issue("speech", value)
-                elif event == "camera_frame":
-                    show_camera_preview(value)
                 elif event in ("camera_visitor", "camera_enrolled"):
                     if event == "camera_visitor" and "Who are you?" in value:
                         visitor_awaiting_intro_until[0] = time.monotonic() + 45
@@ -6922,8 +7619,10 @@ def gui():
                     if event == "camera_error":
                         report_runtime_issue("camera", value)
                         camera_button.configure(text="📷  Camera Off")
+                        camera_scene.pack_forget()
                         clear_camera_preview()
                         greeting_until[0] = 0
+                        update_camera_layout()
                         greeting_config.write_text(json.dumps({"until": 0}), encoding="utf-8")
                         camera_consent.write_text(json.dumps({"until": 0}), encoding="utf-8")
                 elif event in ("replay_done", "replay_error"):
@@ -6941,6 +7640,8 @@ def gui():
         except queue.Empty:
             pass
         window.after(500, voice_poll)
+
+    create_project_picker.bind("<<ComboboxSelected>>", lambda _: update_side_preview(projects()))
 
     def refresh():
         nonlocal idle_since, idle_slot, setup_spoken_step, voice_upgrade_queued
@@ -7127,13 +7828,11 @@ def gui():
         refresh()
         # Setup may open account connections while large model downloads keep
         # running. A marker also reaches an already-open single-instance GUI.
-        connection_request = STATE / "open-supercharge"
-        if connection_request.is_file():
-            try:
-                connection_request.unlink()
-                show_super()
-            except OSError:
-                pass  # Retry next tick when the marker is briefly locked.
+        requested_connection = take_ai_connection_request(STATE)
+        if requested_connection:
+            show_super()
+            if requested_connection != "setup":
+                open_ai_connection(requested_connection)
         if (time.monotonic() - getattr(window, "resume_update_checked_at", 0) > 15
                 and not getattr(window, "resume_update_checking", False)):
             window.resume_update_checked_at = time.monotonic()
@@ -7197,6 +7896,9 @@ def gui():
             and not update_dialog_open(
                 window.winfo_children(),
                 (preview_window, usage_window, readiness_popup[0]),
+                persisted_panel=donation_controls.popup,
+                connection_events=(chat_connection_pending, cloud_connection_pending),
+                connection_process=getattr(window, "github_login_process", None),
             )
         ):
             setup_state = read_task_status(STATE / "install-progress.json")
@@ -7234,15 +7936,27 @@ def gui():
                 and monitor_restart_needed()):
             window.monitor_restart_at = time.monotonic()
             start_monitor()
+        while not github_login_events.empty():
+            code, generation = github_login_events.get_nowait()
+            if generation == getattr(window, "github_login_generation", 0):
+                show_github_code(code)
         if not github_events.empty():
-            account = github_events.get_nowait()
-            if account:
+            account, generation, checked_login = github_events.get_nowait()
+            active_login = getattr(window, "github_login_process", None)
+            if (account and generation == getattr(window, "github_login_generation", 0)
+                    and github_account_refresh_allowed(active_login, checked_login)):
                 github_text.set(
                     "Connected as @"
                     + account
                     + ". Your AI can use your repositories when you ask it to."
                 )
                 github_button.configure(text="GitHub connected")
+                window.github_login_process = None
+                github_code.set("")
+                github_code_row.pack_forget()
+                panel = getattr(window, "github_login_panel", None)
+                if panel is not None and panel.winfo_exists():
+                    panel.destroy()
         if (
             not getattr(window, "github_checking", False)
             and time.monotonic() - getattr(window, "github_checked_at", 0) > 20
@@ -7250,9 +7964,15 @@ def gui():
             window.github_checking = True
             window.github_checked_at = time.monotonic()
 
-            def check_github():
+            generation = getattr(window, "github_login_generation", 0)
+            active_login = getattr(window, "github_login_process", None)
+            checked_login = active_login if active_login is None or active_login.poll() == 0 else False
+            if active_login is not None and active_login.poll() not in (None, 0):
+                github_text.set("GitHub sign-in did not finish. Click Connect GitHub to try again.")
+
+            def check_github(generation=generation, checked_login=checked_login):
                 try:
-                    github_events.put(github_account.account())
+                    github_events.put((github_account.account(), generation, checked_login))
                 finally:
                     window.github_checking = False
 
@@ -7279,6 +7999,7 @@ def gui():
     # request is ignored until all of its speech has finished. The greeting
     # remains queued and plays once the initial listening clip is complete.
     toggle_listening(interrupt_speech=True)
+    camera_preview_poll()
     voice_poll()
     poll()
 

@@ -60,6 +60,17 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class CalculatorPrecisionTests(unittest.TestCase):
+    def test_unsupported_tuple_is_rejected_before_sibling_evaluation(self):
+        for expression in (
+            "1 / 0 + ()",
+            "() + 1 / 0",
+            "1 / 0 + (2 * ())",
+        ):
+            with self.subTest(expression=expression):
+                self.assertIsNone(calculate(expression))
+        self.assertEqual(calculate("1 / 0 + (2 * 3)"), "Cannot divide by zero.")
+        self.assertEqual(calculate("1 + (2 * 3)"), "1 + (2 * 3) = 7")
+
     def test_nested_floor_division_is_rejected_before_sibling_evaluation(self):
         for expression in (
             "1 / 0 + (2 // 1)",

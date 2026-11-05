@@ -865,7 +865,7 @@ def repair_main_alias(ram=None, vram=None, *, alias=None):
                 # weights. Keep the strongest qualified model for demanding
                 # work even before it has accumulated three timed task calls.
                 # The router still uses the small alias for quick requests.
-                speed = model_fitness.measured_speed(alias)
+                speed = model_fitness.measured_speed(alias)  # End-to-end, not decode TPS.
                 info = post("/api/show", {"model": alias}, timeout=10) if current_usable else {}
                 candidates.append((weight, speed or 0, alias, item.get("source", ""),
                                    weight_blob(info), info))
@@ -1024,7 +1024,7 @@ def auto_install(status_dir, refresh=True):
                     save_download_status(path, "skipped_hardware",
                                          "This model would be too slow on this PC", 0)
                     continue
-                speed = model_fitness.measured_speed(model.get("alias", profile))
+                speed = model_fitness.retirement_speed(model.get("alias", profile))
                 if speed is not None and speed < 5:
                     retired = retire_slow_model(model)
                     waiting = not retired and alias_update_waits_for_tasks(model)

@@ -1,0 +1,77 @@
+{
+  "release": "0.5.518",
+  "public_base": "5fbf959c5583f33eb3a9f24564e103ec406670e1",
+  "implementation_source": "d588ae1",
+  "upstream_reviewed_source": "01bf5f1ae098421d5dc8ec8f064ac828877af389",
+  "scope": "Pin an app-owned Python base for newly created Toolbox and Media environments; qualify before setup connections; retain pending creation across retries.",
+  "validation": {
+    "root": {
+      "source": "d588ae1",
+      "modules": [
+        "test_install_environment",
+        "test_install_retry",
+        "test_setup_recovery",
+        "test_self_update"
+      ],
+      "passed": 73,
+      "subtests": 8,
+      "seconds": 45.48
+    },
+    "independent_final": {
+      "source": "01bf5f1ae098421d5dc8ec8f064ac828877af389",
+      "passed": 8,
+      "subtests": 8,
+      "seconds": 38.4
+    },
+    "actual_fresh_environment_smoke": {
+      "seconds": 37.53,
+      "real_pinned_base": true,
+      "toolbox_and_media_actual_venv_commands": true,
+      "start_and_confirm_actual_production_functions": true,
+      "pending_markers_absent_after_pass": true,
+      "qualified_markers_present_after_pass": true
+    }
+  },
+  "runtime": {
+    "distribution": "Astral python-build-standalone",
+    "build": "20261026",
+    "python": "3.13.18",
+    "sqlite": "3.53.1",
+    "archive_bytes": 48077770,
+    "archive_sha256": "ebe90cc1dce2dd2d7afa1f0aa9b6c269c7c0174aeabdc6a801381602b7283424",
+    "critical_file_pins": 11,
+    "new_environment_gate": [
+      "launcher hashes",
+      "sys.prefix",
+      "sys.executable",
+      "sys.base_prefix",
+      "Python version",
+      "SQLite version and source ID",
+      "stdlib origin",
+      "_sqlite3 extension origin",
+      "loaded SQLite DLL origin"
+    ]
+  },
+  "reproduced_and_fixed": [
+    "Setup could launch a pending connection at38percent before the Media runtime existed; both runtimes now created at25percent before dependencies/connections.",
+    "New runnable runtime failed origin verification, but retry accepted it merely because -V worked.",
+    "Actual installer child crashed after creating executable files and before verification; retry skipped qualification.",
+    "Forward-slash owned command lines were missed by the conservative creation-idle check."
+  ],
+  "retry_protocol": [
+    "Publish bounded exact-byte environment-local pending intent before venv starts.",
+    "Pending intent requires fresh creation/qualification even if -V succeeds.",
+    "Preserve incomplete directory via no-replace quarantine before rebuilding.",
+    "Only successful actual origin/integrity verification renames pending intent to qualified.",
+    "Unknown or partial intent bytes are retained and rejected; healthy historical environments are not silently migrated."
+  ],
+  "limits": [
+    "Existing working Python environments are unchanged; no existing-runtime migration is enabled.",
+    "The generic rebuild/journal prototype is excluded.",
+    "The process snapshot for creation is not a shared launch barrier or existing-maintenance authority.",
+    "Full clean-PC installation, all online package/model downloads, and GUI connection completion were not rerun.",
+    "The first-install timing tests execute production source branches with external bootstrap/venv/process launches stubbed; separate fresh-environment smoke uses real pinned extraction, venv creation and production gates.",
+    "Hermes remains part of current installer bootstrap; a separate native-first bootstrap experiment is not shipped here.",
+    "No new models, camera or GPU behavior."
+  ]
+}

@@ -45,12 +45,12 @@ def _present(text: str, phrase: str) -> bool:
 
 def _money(text: str) -> Decimal:
     match = re.search(
-        r"\$\s*(-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(?!\d|[.,]\d)\b",
+        r"(-?)\$\s*(-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(?!\d|[.,]\d)\b",
         text,
     )
-    if not match:
+    if not match or (match.group(1) and match.group(2).startswith("-")):
         raise ValueError("Calculation phrases need a dollar amount")
-    return Decimal(match.group(1).replace(",", ""))
+    return Decimal((match.group(1) + match.group(2)).replace(",", ""))
 
 
 def normalize_spec(spec: dict) -> dict:

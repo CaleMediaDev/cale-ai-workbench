@@ -91,7 +91,7 @@ def edit_music(source_path: str, output_path: str, start_seconds: float = 0,
         raise ValueError("Gain must be between -60 and +24 dB.")
     filters = []
     if gain_db:
-        filters.append(f"volume={gain_db:g}dB")
+        filters.append(f"volume={gain_db:.17g}dB")
     if fade_in_seconds:
         filters.append(f"afade=t=in:st=0:d={fade_in_seconds:.17g}")
     if fade_out_seconds:
@@ -120,8 +120,8 @@ def mix_music(background_path: str, foreground_path: str, output_path: str,
     if not 0 <= foreground_start_seconds <= 36000:
         raise ValueError("Foreground start must be between 0 and 10 hours.")
     delay = round(foreground_start_seconds * 1000)
-    graph = (f"[0:a]volume={background_gain_db:g}dB[bg];"
-             f"[1:a]volume={foreground_gain_db:g}dB,adelay={delay}:all=1[fg];"
+    graph = (f"[0:a]volume={background_gain_db:.17g}dB[bg];"
+             f"[1:a]volume={foreground_gain_db:.17g}dB,adelay={delay}:all=1[fg];"
              "[bg][fg]amix=inputs=2:duration=longest:normalize=0[mix]")
     _run(["-i", str(background), "-i", str(foreground), "-filter_complex", graph,
           "-map", "[mix]", "-vn"], output)

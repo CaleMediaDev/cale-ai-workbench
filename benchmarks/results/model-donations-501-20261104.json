@@ -1,0 +1,91 @@
+{
+  "release": "0.5.501",
+  "feature": "Explicit opt-in CPU donations for evaluated small specialist models",
+  "validation": {
+    "modules": 6,
+    "result": "273 passed, 4 skipped, 118 subtests passed in 23.01 seconds",
+    "earlier_catalog_failure": "Existing public500 assignment was52291 characters. Seven unchanged existing memory tests moved into existing test_routing_memory.py; final assignment31839 characters."
+  },
+  "actual_worker": {
+    "source": "ed0758e499a10b8b1c264ae267b9528d8ca681bc",
+    "experiment_sha256": "2a77a5cd0dd47d4b38870926707bef6292073fe8b0a44aa2298b07ce6186b905",
+    "policy": {
+      "job": "model-clinc-utility-v1",
+      "dataset_id": "clinc150",
+      "dataset": {
+        "repository": "clinc/oos-eval",
+        "commit": "828f8093932c8fe6ca7936c3d2e52903b1c523de",
+        "purpose": "intent classification and out-of-scope evaluation",
+        "license": "CC-BY-3.0",
+        "license_path": "LICENSE",
+        "attribution": "Larson et al. (2019), An Evaluation Dataset for Intent Classification and Out-of-Scope Prediction",
+        "files": {
+          "LICENSE": "e6bc9e9c474700b708f568bac9e5a8a9bcb2b1dad53442f5ba449fcb848b8e76",
+          "data/data_full.json": "36923c3705a59e08fe9c3883d8bc2dd966ef93e22cb78ac41171782a698d56e0"
+        }
+      },
+      "labels": [
+        "calculator",
+        "calendar",
+        "calendar_update",
+        "date",
+        "definition",
+        "reminder",
+        "reminder_update",
+        "time",
+        "timer",
+        "translate",
+        "weather",
+        "oos"
+      ],
+      "timeout": 300,
+      "threads": 2,
+      "gate": "accuracy>both-baselines+.05;macro_f1>=.70;not-routing-qualified",
+      "trainer_sha256": "55e0cea16b25c834ae1629d194a3d2c0637eabba168f01427417de4be275f67f",
+      "worker_sha256": "55e0cea16b25c834ae1629d194a3d2c0637eabba168f01427417de4be275f67f",
+      "python": "3.13.6",
+      "dependencies": {
+        "scikit-learn": "1.9.1",
+        "numpy": "2.5.4",
+        "scipy": "1.18.1"
+      }
+    },
+    "worker_seconds": 2.9277743000129703,
+    "elapsed_seconds": 3.1652765999897383,
+    "model_bytes": 1254794,
+    "artifact_hashes": {
+      "model.json": "df2707eeb95caae16877078104ea681428c77fae71d2b271bd7fdb5ba17865f7",
+      "evaluation.json": "ca382344966847c67692093ff30e5ff088dc554c59b32e898d903af8c8b1e558",
+      "candidate.json": "2e7820993a62d1913a2be264425a0c2ccdb248c5ec515f5a48d14626c60f5e10",
+      "contribution.json": "5d139693a5e92d55496acfc4fd983a8318a61929b10d89c9a0c212886a2ee649"
+    },
+    "accuracy": 0.6135338345864662,
+    "macro_f1": 0.5718705186459785,
+    "always_oos_baseline_accuracy": 0.7518796992481203,
+    "portable_latency": {
+      "cold_seconds": 0.043278600001940504,
+      "warm_median_seconds": 0.0002861000248230994,
+      "samples": 20,
+      "device": "cpu"
+    },
+    "state": "not_qualified",
+    "inference_tokens": 0,
+    "activated": false,
+    "uploads_performed": false,
+    "identical_completed_experiment_suppressed": true
+  },
+  "limitations": [
+    "This fixed public intent benchmark is not proof of Cale routing or tool-use quality.",
+    "Actual candidate failed screening and remains local/inactive.",
+    "Experiment novelty is tracked per PC, not coordinated across contributors.",
+    "Publication, crash recovery, cancellation and account boundaries use focused mocked tests; actual smoke trained and validated locally without uploads.",
+    "No claim that the installed full self-check has passed."
+  ],
+  "compatibility": {
+    "manifest_entries": 250,
+    "original_manifest_set_preserved": true,
+    "updater_cap_unchanged": true,
+    "new_worker_location": "small_training.py",
+    "intermediate_253_file_build_rejected_before_publication": true
+  }
+}

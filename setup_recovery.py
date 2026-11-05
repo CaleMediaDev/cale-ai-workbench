@@ -187,7 +187,7 @@ def recover() -> bool:
         try:
             timestamps = (float(progress.get("updated", 0)),
                           float(record.get("started", 0)))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return False
         if not all(math.isfinite(value) for value in timestamps):
             return False
@@ -237,7 +237,7 @@ def recover() -> bool:
             try:
                 timestamps = (float(progress.get("updated", 0)),
                               float(record.get("started", 0)))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 return False
             if not all(math.isfinite(value) for value in timestamps):
                 return False

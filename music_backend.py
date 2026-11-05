@@ -306,32 +306,32 @@ def start_server() -> bool:
         if healthy():
             return music_lm_ready()
         install()
-    env = os.environ.copy()
-    env.update({
-        "ACESTEP_API_HOST": "127.0.0.1",
-        "ACESTEP_API_PORT": "8001",
-        # Let ACE-Step's GPU tiers enable its lyric/music planner on machines
-        # that can run it; forcing it off reduced vocal-song quality on 12 GB.
-        "ACESTEP_INIT_LLM": "auto",
-        "ACESTEP_LM_BACKEND": "pt",
-        "HF_HOME": str(ROOT / "Media" / "music" / "huggingface"),
-    })
-    executable = ENGINE / ".venv" / "Scripts" / "acestep-api.exe"
-    if not executable.is_file():
-        raise RuntimeError("ACE-Step installed without its API launcher.")
-    log_path = ROOT / "Media" / "music" / "server.log"
-    with log_path.open("ab") as log:
-        process = subprocess.Popen(
-            [str(executable)], cwd=ENGINE, env=env,
-            stdout=log, stderr=subprocess.STDOUT, creationflags=HIDE,
-        )
-    for _ in range(180):
-        if healthy():
-            return music_lm_ready()
-        if process.poll() is not None:
-            break
-        time.sleep(2)
-    raise RuntimeError("The local music engine did not start. See Media/music/server.log.")
+        env = os.environ.copy()
+        env.update({
+            "ACESTEP_API_HOST": "127.0.0.1",
+            "ACESTEP_API_PORT": "8001",
+            # Let ACE-Step's GPU tiers enable its lyric/music planner on machines
+            # that can run it; forcing it off reduced vocal-song quality on 12 GB.
+            "ACESTEP_INIT_LLM": "auto",
+            "ACESTEP_LM_BACKEND": "pt",
+            "HF_HOME": str(ROOT / "Media" / "music" / "huggingface"),
+        })
+        executable = ENGINE / ".venv" / "Scripts" / "python.exe"
+        if not executable.is_file():
+            raise RuntimeError("ACE-Step installed without its API launcher.")
+        log_path = ROOT / "Media" / "music" / "server.log"
+        with log_path.open("ab") as log:
+            process = subprocess.Popen(
+                [str(executable), "-B", str(Path(__file__).resolve()), "--run-engine"], cwd=ENGINE, env=env,
+                stdout=log, stderr=subprocess.STDOUT, creationflags=HIDE,
+            )
+        for _ in range(180):
+            if healthy():
+                return music_lm_ready()
+            if process.poll() is not None:
+                break
+            time.sleep(2)
+        raise RuntimeError("The local music engine did not start. See Media/music/server.log.")
 
 
 def _generate_music(
@@ -1239,5 +1239,286 @@ def _run_job(job_id: str) -> None:
         usage_history.CURRENT_TASK.reset(attribution)
 
 
+# Managed compatibility preparation for the pinned upstream CPU VAE fallback.
+# This creates reviewable backup/candidate bytes ONLY. It never rewrites a live
+# engine or claims that stopping its polling worker cancels API computation.
+_ACE_VAE_DECODE_RELATIVE = 'acestep/core/generation/handler/generate_music_decode.py'
+_ACE_VAE_DECODE_SHA256 = '5ebe4dfd65635a687a5692d37ab377ab959170e764fbedf54d6e35711cc40416'
+_ACE_VAE_DECODE_CRLF_SHA256 = '4cd434b7ec4367b34711587ba18d7d3f82b4b171dded017c3ed12a3fd87438b4'
+
+
+def _cpu_vae_compatibility_source(source: bytes) -> bytes:
+    """Use upstream's CPU dtype policy and restore both device and dtype.
+
+    Only the exact LF/Windows-CRLF files at REVISION qualify. Unknown source,
+    including local edits or an already replaced implementation, is preserved.
+    """
+    import hashlib
+    if not isinstance(source,bytes) or hashlib.sha256(source).hexdigest() not in {
+            _ACE_VAE_DECODE_SHA256,_ACE_VAE_DECODE_CRLF_SHA256}:
+        raise ValueError('Pinned ACE VAE source differs; preserve it for review.')
+    newline=b'\r\n' if b'\r\n' in source else b'\n'
+    text=source.replace(b'\r\n',b'\n').decode('utf-8')
+    replacements=[
+        ('                vae_device = None\n',
+         '                vae_device = None\n                vae_dtype = None\n'),
+        ('                        vae_device = next(self.vae.parameters()).device\n'
+         '                        self.vae = self.vae.cpu()\n'
+         '                        pred_latents_for_decode = pred_latents_for_decode.cpu()\n'
+         '                        self._empty_cache()\n'
+         '                try:\n',
+         '                        vae_parameter = next(self.vae.parameters())\n'
+         '                        vae_device, vae_dtype = vae_parameter.device, vae_parameter.dtype\n'
+         '                        cpu_dtype = self._get_vae_dtype("cpu")\n'
+         '                try:\n'
+         '                    if vae_cpu:\n'
+         '                        self.vae = self.vae.to(device="cpu", dtype=cpu_dtype)\n'
+         '                        pred_latents_for_decode = pred_latents_for_decode.to(device="cpu", dtype=cpu_dtype)\n'
+         '                        self._empty_cache()\n'),
+        ('                        self.vae = self.vae.to(vae_device)\n',
+         '                        self.vae = self.vae.to(device=vae_device, dtype=vae_dtype)\n')]
+    for old,new in replacements:
+        if text.count(old)!=1:raise ValueError('Pinned ACE VAE patch anchor changed; no candidate prepared.')
+        text=text.replace(old,new,1)
+    import ast
+    ast.parse(text)
+    return text.encode('utf-8').replace(b'\n',newline)
+
+
+def prepare_cpu_vae_compatibility_patch(destination: str | Path) -> dict:
+    """Publish an exclusive review bundle, without changing the engine source.
+
+    Activation is deliberately absent: an API query timeout is not cancellation,
+    and all API clients need a shared admission barrier before any live restart.
+    """
+    import hashlib
+    import design_tools
+    root=design_tools._game_plain_path(ROOT)
+    engine=design_tools._game_plain_path(ENGINE)
+    target=design_tools._game_plain_path(destination)
+    if not engine.is_relative_to(root) or not target.is_relative_to(root/'Recovery'):
+        raise ValueError('Use this installation engine and a NEW Recovery subfolder.')
+    if target.exists():raise FileExistsError('Existing patch evidence is preserved; choose a new folder.')
+    if not target.parent.is_dir():raise ValueError('Prepare the owned Recovery parent first.')
+    with design_tools._game_directory_guard(root,engine):
+        revision=subprocess.run([_tool('git'),'-C',str(engine),'rev-parse','HEAD'],capture_output=True,text=True,
+                                timeout=15,creationflags=HIDE)
+        if revision.returncode or revision.stdout.strip()!=REVISION:
+            raise ValueError('ACE revision differs; no compatibility bundle was written.')
+        source_path=design_tools._game_plain_path(engine/_ACE_VAE_DECODE_RELATIVE)
+        with source_path.open('rb') as stream:source=stream.read(100001)
+        if len(source)>100000:raise ValueError('ACE VAE source exceeds its preparation budget.')
+        candidate=_cpu_vae_compatibility_source(source)
+        evidence={'format':'cale-ace-cpu-vae-candidate-v1','upstream_revision':REVISION,
+                  'relative_path':_ACE_VAE_DECODE_RELATIVE,'original_sha256':hashlib.sha256(source).hexdigest(),
+                  'candidate_sha256':hashlib.sha256(candidate).hexdigest(),'activated':False,
+                  'policy':'Use existing _get_vae_dtype(cpu), restore exact prior device and dtype in finally.',
+                  'limits':'Preparation only. Needs quiescent all-client activation/restart, actual full-song qualification and rollback protocol.'}
+        # Recheck while engine ancestor handles remain held. A future activation
+        # must independently revalidate this identity; this is not a launch lock.
+        with source_path.open('rb') as stream:current=stream.read(100001)
+        if current!=source:raise ValueError('ACE source changed during preparation.')
+        design_tools._game_publish(target,{'original.py':source,'candidate.py':candidate,
+            'receipt.json':json.dumps(evidence,indent=2).encode('utf-8')})
+    return {**evidence,'folder':str(target)}
+
+
+
+
+# These files define the CPU policy and single-process console entrypoint used
+# by the managed wrapper. Pins are canonical LF at the upstream REVISION.
+_ACE_CPU_DEPENDENCY_PINS = {
+    'acestep/core/generation/handler/memory_utils.py': '48e61bc8890206ab3f2ce85e7feeb3153c87f5b33d6cff2c56b5c5890367f5c1',
+    'acestep/core/generation/handler/init_service_offload_context.py': '9e5dac9c938e2ec8ef37b9040117182abc70740e518df4d4be5c4b1b004b8ca2',
+    'acestep/api/server_cli.py': 'cd29f85d95f6c6fedd57331576f502e699ab7536c8d468201de80bddb76b7412',
+    'acestep/api_server.py': 'b580bbff8878362f051d8652a2c12c57473d49edae46dd35c47b8f1bd3df3adc',
+}
+_ACE_CPU_V2_HASHES = frozenset({'4edf66b5023b333026afd3511e74d7f98cef4f6b42a07c1efbed188c5658b8e4',
+                              'f77db5f289a298326b996ae5c0327e89a078f3c155263a2a10574dafcc9d75d3'})
+
+
+def _read_engine_cpu_sources():
+    """Read only exact pinned source; no installation or source rewrite here."""
+    import hashlib
+
+    engine = ENGINE.resolve(strict=True)
+    revision = subprocess.run(
+        [_tool('git'), '-C', str(engine), 'rev-parse', 'HEAD'],
+        capture_output=True, text=True, timeout=15, creationflags=HIDE,
+    )
+    if revision.returncode or revision.stdout.strip() != REVISION:
+        raise ValueError('ACE revision differs; refusing managed engine startup.')
+    sources = {}
+    for relative in (_ACE_VAE_DECODE_RELATIVE, *_ACE_CPU_DEPENDENCY_PINS):
+        path = engine / relative
+        if not path.resolve(strict=True).is_relative_to(engine):
+            raise ValueError('ACE source escaped its engine.')
+        with path.open('rb') as stream:
+            raw = stream.read(100001)
+        if len(raw) > 100000:
+            raise ValueError('ACE source exceeds its startup verification budget.')
+        canonical = raw.replace(b'\r\n', b'\n')
+        digest = hashlib.sha256(raw).hexdigest()
+        if relative == _ACE_VAE_DECODE_RELATIVE:
+            allowed = {_ACE_VAE_DECODE_SHA256, _ACE_VAE_DECODE_CRLF_SHA256, *_ACE_CPU_V2_HASHES}
+            if digest not in allowed:
+                raise ValueError('ACE decode source differs; existing source was preserved.')
+        elif hashlib.sha256(canonical).hexdigest() != _ACE_CPU_DEPENDENCY_PINS[relative]:
+            raise ValueError('ACE CPU policy or entrypoint source differs; existing source was preserved.')
+        sources[relative] = (path, raw)
+    return sources
+
+
+def _ace_function_from_source(source, module, name, class_name=None):
+    """Compile one verified function, retaining its original module globals."""
+    import ast
+
+    tree = ast.parse(source.decode('utf-8'))
+    body = tree.body
+    if class_name:
+        body = next(
+            node.body for node in body
+            if isinstance(node, ast.ClassDef) and node.name == class_name
+        )
+    function = next(
+        node for node in body if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+    future = [
+        node for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == '__future__'
+    ]
+    selected = ast.fix_missing_locations(ast.Module(body=[*future, function], type_ignores=[]))
+    # Inheriting this application's future flags would change the upstream
+    # function contract. Include only future imports from its verified source.
+    code = compile(selected, str(module.__file__), 'exec', dont_inherit=True)
+    temporary = {}
+    exec(code, module.__dict__, temporary)
+    function = temporary[name]
+    # Python 3.11 optimizes calls differently when names are known imports in
+    # the surrounding module. Compile that entire VERIFIED module, but never
+    # execute it, so expected and replacement code retain its symbol table.
+    import types
+
+    module_code = compile(source, str(module.__file__), 'exec', dont_inherit=True)
+    scope = module_code
+    if class_name:
+        classes = [
+            value for value in scope.co_consts
+            if isinstance(value, types.CodeType) and value.co_name == class_name
+        ]
+        if len(classes) != 1:
+            raise ValueError('Verified ACE class code could not be selected uniquely.')
+        scope = classes[0]
+    functions = [
+        value for value in scope.co_consts
+        if isinstance(value, types.CodeType) and value.co_name == name
+    ]
+    if len(functions) != 1 or functions[0].co_freevars or function.__closure__:
+        raise ValueError('Verified ACE function code needs unsupported closure context.')
+    function.__code__ = functions[0]
+    return function
+
+
+
+def _ace_code_matches(actual, expected):
+    """Bind loaded code, globals and defaults for these pinned functions."""
+    import types
+
+    if not isinstance(actual, types.FunctionType) or actual.__globals__ is not expected.__globals__:
+        return False
+    if type(actual.__defaults__) is not type(expected.__defaults__):
+        return False
+    if actual.__defaults__ != expected.__defaults__:
+        return False
+    if actual.__defaults__ is not None and any(
+        type(left) is not type(right)
+        for left, right in zip(actual.__defaults__, expected.__defaults__)
+    ):
+        return False
+    if actual.__kwdefaults__ != expected.__kwdefaults__:
+        return False
+    # Normalize loader filename/qualname only, never bytecode or constants.
+    code = expected.__code__.replace(
+        co_filename=actual.__code__.co_filename, co_qualname=actual.__code__.co_qualname,
+    )
+    return actual.__code__ == code
+
+
+def _run_engine(argv=None):
+    """Apply the CPU compatibility method in THIS fresh process only.
+
+    Existing healthy APIs are never changed. Upstream runs one uvicorn worker
+    without reload, so its handler sees this same mixin object and globals.
+    """
+    import hashlib
+    import importlib
+
+    sources = _read_engine_cpu_sources()
+
+    def checked_module(name, relative):
+        module = importlib.import_module(name)
+        if Path(module.__file__).resolve() != sources[relative][0].resolve():
+            raise ValueError('Imported ACE module origin differs; refusing managed engine startup.')
+        return module
+
+    relative = _ACE_VAE_DECODE_RELATIVE
+    module = checked_module('acestep.core.generation.handler.generate_music_decode', relative)
+    policy_relative = 'acestep/core/generation/handler/memory_utils.py'
+    policy = checked_module('acestep.core.generation.handler.memory_utils', policy_relative)
+    method = '_decode_generate_music_pred_latents'
+    original = module.GenerateMusicDecodeMixin.__dict__[method]
+    source = sources[relative][1]
+    source_function = _ace_function_from_source(source, module, method, 'GenerateMusicDecodeMixin')
+    candidate = (
+        source if hashlib.sha256(source).hexdigest() in _ACE_CPU_V2_HASHES
+        else _cpu_vae_compatibility_source(source)
+    )
+    patched = _ace_function_from_source(candidate, module, method, 'GenerateMusicDecodeMixin')
+    if not (_ace_code_matches(original, source_function) or _ace_code_matches(original, patched)):
+        raise ValueError('Loaded ACE decode code differs from verified source.')
+    policy_function = _ace_function_from_source(
+        sources[policy_relative][1], policy, '_get_vae_dtype', 'MemoryUtilsMixin',
+    )
+    if not _ace_code_matches(policy.MemoryUtilsMixin._get_vae_dtype, policy_function):
+        raise ValueError('Loaded ACE CPU dtype policy differs from verified source.')
+    entry = checked_module('acestep.api_server', 'acestep/api_server.py')
+    cli = checked_module('acestep.api.server_cli', 'acestep/api/server_cli.py')
+    entrypoints = (
+        (entry, 'main', 'acestep/api_server.py'),
+        (cli, 'run_api_server_main', 'acestep/api/server_cli.py'),
+    )
+    for imported, name, path in entrypoints:
+        expected = _ace_function_from_source(sources[path][1], imported, name)
+        if not _ace_code_matches(getattr(imported, name), expected):
+            raise ValueError('Loaded ACE entrypoint differs from verified source.')
+    if entry.run_api_server_main is not cli.run_api_server_main:
+        raise ValueError('ACE console entrypoint binding differs from verified CLI.')
+    # Imports must not race a source update; reread exact bytes before main.
+    for path, raw in sources.values():
+        with path.open('rb') as stream:
+            current = stream.read(100001)
+        if current != raw:
+            raise ValueError('ACE source changed during managed startup.')
+    if not _ace_code_matches(original, patched):
+        patched.__qualname__ = original.__qualname__
+        module.GenerateMusicDecodeMixin._decode_generate_music_pred_latents = patched
+    print('CALE_ACE_CPU_PATCH ' + json.dumps({
+        'revision': REVISION, 'source_sha256': hashlib.sha256(source).hexdigest(),
+        'candidate_sha256': hashlib.sha256(candidate).hexdigest(),
+        'mode': 'process_only', 'disk_modified': False,
+    }), flush=True)
+    previous = sys.argv
+    try:
+        # The wrapper flag is not an ACE argparse option. Preserve upstream
+        # arguments exactly after it; normal owned startup supplies none.
+        arguments = list(argv) if argv is not None else []
+        sys.argv = [str(ENGINE / '.venv/Scripts/acestep-api.exe'), *arguments]
+        entry.main()
+    finally:
+        sys.argv = previous
+
+
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--run-job":
     _run_job(sys.argv[2])
+elif __name__ == "__main__" and sys.argv[1:2] == ["--run-engine"]:
+    _run_engine(sys.argv[2:])

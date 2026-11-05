@@ -36,6 +36,28 @@ def test_skills_and_tools_are_indexed_searched_and_refreshed():
             assert "Check contrast" in capability_index.read_skill(root, result[0]["id"])["content"]
 
 
+def test_front_matter_description_supports_lf_and_crlf():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        skill, tools = fixture(root)
+        with patch.object(capability_index, "_registered_tools", return_value=tools):
+            for newline in ("\n", "\r\n"):
+                content = newline.join([
+                    "---",
+                    "description: Build accessible websites with clear layouts.",
+                    "---",
+                    "",
+                    "Use semantic HTML.",
+                    "",
+                ])
+                skill.write_bytes(content.encode("utf-8"))
+                capability_index.sync(root)
+                result = capability_index.search(root, "accessible", kind="skill")
+                assert len(result) == 1
+                assert result[0]["description"] == "Build accessible websites with clear layouts."
+                assert skill.read_bytes() == content.encode("utf-8")
+
+
 def test_empty_front_matter_description_uses_first_sentence():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)

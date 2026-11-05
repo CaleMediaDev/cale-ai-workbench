@@ -1,0 +1,45 @@
+{
+  "release": "0.5.513",
+  "verification_source": "c96c84f1db594ab2f1defe5f567f5fd048573b17",
+  "maintenance_source": "8bc5b19",
+  "integration_with_preview_cleanup_test": "14c7726",
+  "validation": {
+    "full_memory_browser_native": {"passed": 808, "skipped": 6, "subtests_passed": 8, "seconds": 1122.22},
+    "merged_voice_music_toolbox_companion": {"passed": 189, "skipped": 1, "subtests_passed": 24, "seconds": 9.31},
+    "source_retention_audit": {"files": 7, "lost_public_or_port_definitions": 0, "duplicate_definitions": 0},
+    "original_regressions_reproduced": [
+      "A weak browser suite could pass without witnessing the explicitly requested reload behavior.",
+      "Large source assets and more than 2048 files exhausted the old manifest limits.",
+      "A valid page loading 300 local assets was incorrectly marked dependency-incomplete.",
+      "An unused node_modules directory blocked otherwise measured reload evidence.",
+      "An early source file changed while a later asset streamed, yet the old final directory-only check kept its old digest marked complete."
+    ],
+    "runtime_manifest_entries": 250
+  },
+  "guards": [
+    "Fresh host observations are bound to original instructions, source content, checker implementation and actual saved suite.",
+    "Imported fabricated reports, substitutions and permit replays cannot mint normal host execution receipts.",
+    "Full application source with explicitly excluded unused runtime roots qualifies only alongside complete actual local browser dependency observations.",
+    "Loaded excluded runtime assets, unavailable inputs, changed files and exhausted limits remain unverified.",
+    "Creation and deletion require distinct measured effects; returning to an initial empty result without a persisted baseline is insufficient.",
+    "Final file identity checks retain existing content hashes without rereading the content."
+  ],
+  "large_import_measurement": {
+    "scope": "Earlier streaming candidate, before the final included-file identity pass; not final-release end-to-end timing.",
+    "files": 12569,
+    "bytes": 1230233605,
+    "cold_capture": {"seconds": 60.013, "complete": false},
+    "warm_complete_captures_seconds": [15.646, 10.741],
+    "two_full_hashes_identical": true,
+    "gameplay_executed": false
+  },
+  "donation_fixes": [681, 682, 683, 684],
+  "limits": [
+    "Narrow supported reload observations do not prove every natural-language requirement or general program correctness.",
+    "Streaming manifests are bounded real disk I/O, not atomic filesystem snapshots; cold or slow scans can remain limited.",
+    "The optional observed-dependency acceleration prototype is not included or activated.",
+    "Private native field-value authoring and repair-budget migration experiments are not included.",
+    "Receipts are not model training approval or protection against deliberate same-user database/process tampering.",
+    "Scoped tests do not establish a new full fresh-PC installation or microphone/music-generation qualification."
+  ]
+}
