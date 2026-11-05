@@ -759,7 +759,7 @@ def test_avatar_worker_skips_old_pending_input_after_engine_load(monkeypatch,tmp
     assert seen==[2]
 
 
-def avatar_stale_output_case(monkeypatch,tmp_path,late_inference):
+def avatar_stale_output_case(monkeypatch,tmp_path,late_inference,age=10):
     import camera_presence as camera,threading,time
     entered=threading.Event();release=threading.Event();live=threading.Event();neutral=threading.Event();published=[]
     class Clock:
@@ -789,10 +789,12 @@ def avatar_stale_output_case(monkeypatch,tmp_path,late_inference):
     try:
         worker.submit(np.full((8,8,3),99,dtype=np.uint8));assert entered.wait(2)
         if not late_inference:assert live.wait(2)
-        clock.offset=10;release.set()
-        assert neutral.wait(1),published
+        clock.offset=age;release.set()
+        if age<=camera.AVATAR_MAX_FRAME_AGE:
+            assert live.wait(1),published
+        else:assert neutral.wait(1),published
     finally:release.set();worker.close()
-    assert published==([0,0] if late_inference else [0,1,0])
+    assert published==([0,1] if age<=camera.AVATAR_MAX_FRAME_AGE else [0,0] if late_inference else [0,1,0])
 
 
 def test_avatar_worker_neutralizes_stalled_capture(monkeypatch,tmp_path):
@@ -803,12 +805,16 @@ def test_avatar_worker_neutralizes_late_render(monkeypatch,tmp_path):
     avatar_stale_output_case(monkeypatch,tmp_path,True)
 
 
+def test_avatar_worker_keeps_delayed_but_still_fresh_good_render(monkeypatch,tmp_path):
+    avatar_stale_output_case(monkeypatch,tmp_path,True,age=.5)
+
+
 def test_avatar_frame_freshness_rejects_invalid_future_and_expired_times(monkeypatch):
     import camera_presence as camera
     monkeypatch.setattr(camera,'time',SimpleNamespace(monotonic=lambda:10.0))
     assert camera.avatar_frame_fresh(10.0)
     assert camera.avatar_frame_fresh(9.5)
-    for captured_at in (None,True,'10',float('nan'),float('inf'),10.1,9.0):
+    for captured_at in (None,True,'10',float('nan'),float('inf'),0,10.1,9.0):
         assert not camera.avatar_frame_fresh(captured_at)
 
 
