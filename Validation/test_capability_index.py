@@ -92,6 +92,24 @@ def test_quoted_empty_front_matter_description_uses_first_sentence():
                 assert result[0]["description"] == "Build accessible websites."
 
 
+def test_self_referential_skill_symlink_does_not_block_index():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        skill, tools = fixture(root)
+        invalid = root / "vendor/agent-skills/cyclic/SKILL.md"
+        invalid.parent.mkdir(parents=True)
+        invalid.symlink_to("SKILL.md")
+        with patch.object(capability_index, "_registered_tools", return_value=tools):
+            result = capability_index.sync(root)
+            assert result["skills"] == 1 and result["tools"] == 1
+            assert capability_index.health(root)["ok"]
+            assert capability_index.search(root, "accessible", kind="skill")[0]["id"] == "skill:" + skill.parent.name
+            assert capability_index.search(root, "image", kind="tool")[0]["name"] == "make_image"
+            assert capability_index.sync(root)["updated"] == 0
+        assert invalid.is_symlink()
+        assert invalid.readlink() == Path("SKILL.md")
+
+
 def test_directory_named_skill_md_does_not_block_index():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
