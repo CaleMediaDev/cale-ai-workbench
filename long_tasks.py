@@ -67,29 +67,33 @@ def take_ai_connection_request(state_folder: Path) -> str | None:
 
 
 def start_connection_worker(pending, operation):
-    """Track one provider operation independently from its connected UI state."""
+    """Do not dispatch auth until startup has committed successfully."""
     import threading
     if pending.is_set():
         return None
+    permit, abandoned = threading.Event(), threading.Event()
     pending.set()
     def run():
+        permit.wait()
+        if abandoned.is_set():
+            return  # Never clear a later operation's pending flag.
         try:
             operation()
         finally:
             pending.clear()
-    worker = None
     try:
         worker = threading.Thread(target=run, daemon=True)
         worker.start()
     except BaseException:
-        # If start failed after actually creating the thread, that thread's
-        # finally still owns clearance. Unknown state must continue to defer.
-        try:
-            if worker is None or not worker.is_alive():
-                pending.clear()
-        except Exception:
-            pass
+        # Thread.start may raise after OS creation but before bootstrap is
+        # observable. Cancel before releasing the target; no is_alive guess.
+        abandoned.set()
+        permit.set()
+        pending.clear()
         raise
+    # Outside the failed-start cleanup: once released, the operation owns its
+    # finally even if the caller is interrupted while committing permission.
+    permit.set()
     return worker
 
 

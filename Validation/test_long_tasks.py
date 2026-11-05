@@ -3811,18 +3811,91 @@ def test_actual_openrouter_disconnect_clears_synchronous_operation(failure):
     assert update_dialog_poll_call([],None,cloud_event=pending) is False
 
 
-@pytest.mark.parametrize('alive',[False,True])
-def test_connection_worker_start_failure_preserves_unknown_live_authority(monkeypatch,alive):
-    pending=threading.Event()
+@pytest.mark.parametrize('error_type',[RuntimeError,KeyboardInterrupt,SystemExit])
+def test_connection_worker_failed_start_cancels_late_target_before_new_owner(monkeypatch,error_type):
+    pending=threading.Event();targets=[];calls=[]
     class FailedThread:
-        def __init__(self,**kwargs):assert pending.is_set()
-        def start(self):raise RuntimeError('Owned start failure')
-        def is_alive(self):return alive
+        def __init__(self,**kwargs):
+            assert pending.is_set();targets.append(kwargs['target'])
+        def start(self):raise error_type('Owned start failure')
+        def is_alive(self):raise AssertionError('Startup cancellation must not guess OS thread state')
     monkeypatch.setattr(threading,'Thread',FailedThread)
-    with pytest.raises(RuntimeError):task_module.start_connection_worker(pending,lambda:None)
-    assert pending.is_set() is alive
-    pending.clear()  # Owned test event only; no real thread was created.
+    with pytest.raises(error_type):task_module.start_connection_worker(pending,lambda:calls.append(True))
+    assert not pending.is_set()
+    pending.set()  # A subsequent operation now owns this test event.
+    targets[0]()  # An abandoned old target must not dispatch or clear it.
+    assert not calls and pending.is_set()
+    pending.clear()
 
 
 def test_update_poll_missing_connection_event_is_unknown_not_idle():
     assert update_dialog_poll_call([],None,chat_event=object()) is True
+
+
+
+@pytest.mark.parametrize('fault',[KeyboardInterrupt,RuntimeError])
+def test_startup_fault_gate_cancels_late_auth_without_clearing_later_owner(fault):
+    original_thread=threading.Thread
+    bootstrap=threading.Event();future_started=threading.Event();future_finish=threading.Event()
+    pending=threading.Event();old_workers=[];future_workers=[];old_calls=[];observed={}
+    class DelayedBootstrap(original_thread):
+        def __init__(self,**kwargs):super().__init__(**kwargs);old_workers.append(self)
+        def _bootstrap_inner(self):
+            bootstrap.wait(3)
+            super()._bootstrap_inner()
+        def start(self):
+            original_wait=self._started.wait
+            def interrupt(*args,**kwargs):raise fault('Owned synthetic start interruption')
+            self._started.wait=interrupt
+            try:super().start()
+            finally:self._started.wait=original_wait
+    def future_operation():
+        assert pending.is_set()
+        future_started.set();future_finish.wait(3)
+    try:
+        with patch.object(threading,'Thread',DelayedBootstrap):
+            with pytest.raises(fault):task_module.start_connection_worker(pending,lambda:old_calls.append(True))
+        assert not pending.is_set()
+        future=task_module.start_connection_worker(pending,future_operation)
+        future_workers.append(future);assert future_started.wait(2)
+        bootstrap.set()
+        for worker in old_workers:
+            assert worker._started.wait(2)
+            worker.join(3)
+        observed['old_calls']=len(old_calls)
+        observed['later_owner_still_pending']=pending.is_set()
+        observed['update_blocked']=task_module.update_dialog_open([],connection_events=(pending,))
+    finally:
+        bootstrap.set();future_finish.set()
+        for worker in old_workers+future_workers:
+            if worker is not None and worker._started.wait(3):worker.join(3)
+    assert not any(worker.is_alive() for worker in old_workers+future_workers)
+    assert observed=={'old_calls':0,'later_owner_still_pending':True,'update_blocked':True}
+    assert not pending.is_set()
+
+
+
+def test_start_permission_commit_interruption_preserves_running_operation_authority():
+    original_event=threading.Event;original_thread=threading.Thread
+    pending=original_event();started=original_event();release=original_event();workers=[];created=[]
+    class InterruptedPermit(original_event):
+        def set(self):
+            super().set()
+            raise KeyboardInterrupt('Owned interruption after permission commit')
+    def event():
+        result=InterruptedPermit() if not created else original_event()
+        created.append(result);return result
+    def thread(**kwargs):
+        worker=original_thread(**kwargs);workers.append(worker);return worker
+    def operation():
+        assert pending.is_set();started.set();release.wait(3)
+    try:
+        with patch.object(threading,'Event',side_effect=event),patch.object(threading,'Thread',side_effect=thread):
+            with pytest.raises(KeyboardInterrupt):task_module.start_connection_worker(pending,operation)
+        assert started.wait(2) and pending.is_set()
+        assert task_module.update_dialog_open([],connection_events=(pending,)) is True
+    finally:
+        release.set()
+        for worker in workers:worker.join(3)
+    assert workers and not any(worker.is_alive() for worker in workers)
+    assert not pending.is_set()
