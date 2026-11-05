@@ -89,6 +89,35 @@ class TableMLTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse(list(root.glob(".table-prediction-*")))
 
+    def test_prediction_rejects_category_collisions_across_batches(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            model = root / "model.json"
+            model.write_text(json.dumps({
+                "format": "cale-table-model-v1", "problem_type": "regression",
+                "schema": {
+                    "color": {"kind": "category"},
+                    "color=red": {"kind": "category"},
+                },
+                "feature_names": ["color=blue", "color=red=dark"],
+                "coefficients": [[0, 1]], "intercepts": [0], "classes": [],
+                "target_column": "value", "metric": "holdout_mean_absolute_error",
+                "holdout_score": 1, "baseline_score": 2,
+            }), encoding="utf-8")
+            prediction = root / "new.csv"
+            output = root / "predicted.csv"
+            # Neither row collides internally. Together, color='red=dark'
+            # and color=red='dark' encode to the same coordinate.
+            for repetitions in (1, 4096):
+                with self.subTest(repetitions=repetitions):
+                    prediction.write_text(
+                        "color,color=red\n" + "red=dark,light\n" * repetitions
+                        + "blue,dark\n", encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "Feature names collide"):
+                        predict_table_model(str(model), str(prediction), str(output))
+                    self.assertFalse(output.exists())
+                    self.assertFalse(list(root.glob(".table-prediction-*")))
+
     def test_large_finite_feature_median_can_be_trained_and_reused(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
