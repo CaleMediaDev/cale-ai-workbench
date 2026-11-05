@@ -321,7 +321,14 @@ def probe_tool_use(alias, reasoning_effort=None):
         raise CandidateModelError(
             "Model downloaded, but it did not pass the local tool-use check."
         )
-    for call in message.get("tool_calls", []) or []:
+    calls = message.get("tool_calls", [])
+    if calls is None:
+        calls = []
+    if not isinstance(calls, list):
+        raise CandidateModelError(
+            "Model downloaded, but it did not pass the local tool-use check."
+        )
+    for call in calls:
         if not isinstance(call, dict):
             continue
         function = call.get("function", {})
