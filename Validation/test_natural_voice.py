@@ -103,6 +103,21 @@ class NaturalVoiceTests(unittest.TestCase):
                 self.assertIn("--download-voice", run.call_args_list[1].args[0])
                 self.assertEqual(json.loads(status.read_text())["status"], "complete")
 
+    def test_missing_locking_module_reports_error_without_starting_install(self):
+        with tempfile.TemporaryDirectory() as folder:
+            status = Path(folder) / "voice-status.json"
+            status.write_text(json.dumps({"status": "working"}))
+            with (
+                patch.dict(sys.modules, {"msvcrt": None}),
+                patch.object(natural_voice, "STATUS", status),
+                patch.object(natural_voice.subprocess, "run") as run,
+            ):
+                natural_voice.install()
+            self.assertEqual(json.loads(status.read_text())["status"], "error")
+            self.assertIn("msvcrt", status.read_text())
+            self.assertFalse((status.parent / "natural-voice.lock").exists())
+            run.assert_not_called()
+
     def test_progress_directory_failure_reports_error_without_starting_install(self):
         failure = OSError(errno.ENOSPC, "No space for progress directory")
         fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=MagicMock())

@@ -47,12 +47,12 @@ def whisper_ready():
 
 def install():
     """Install the pinned synthesizer and verified weights once per PC."""
-    import msvcrt
-
     try:
+        import msvcrt
+
         STATUS.parent.mkdir(exist_ok=True)
         lock_file = (STATUS.parent / "natural-voice.lock").open("a+b")
-    except OSError as exc:
+    except (ImportError, OSError) as exc:
         save_download_status(STATUS, "error", str(exc)[:400], 0)
         return
     with lock_file as lock:
