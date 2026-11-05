@@ -223,6 +223,56 @@ def test_media_timeout_reaps_worker_and_preserves_timeout(tmp_path, exit_state):
     assert cleanup == (["wait"] if exit_state == "already_exited" else ["kill", "wait"])
 
 
+@pytest.mark.parametrize("mode", ["error", "timeout", "cancel"])
+def test_media_cleanup_pipe_error_preserves_original_failure(tmp_path, mode):
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    original = OSError("original worker pipe failure")
+    cleanup = []
+
+    async def check():
+        started = asyncio.Event()
+
+        class FakeProcess:
+            returncode = None
+
+            async def communicate(self, data=None):
+                if data is None:
+                    cleanup.append("drain")
+                    raise OSError("cleanup pipe failure")
+                started.set()
+                if mode == "error":
+                    raise original
+                await asyncio.Future()
+
+            def kill(self):
+                cleanup.append("kill")
+                self.returncode = -1
+
+        async def fake_spawn(*args, **kwargs):
+            return FakeProcess()
+
+        with (patch.object(toolbox_mcp, "ROOT", tmp_path),
+              patch.object(toolbox_mcp.asyncio, "create_subprocess_exec", fake_spawn)):
+            if mode == "cancel":
+                task = asyncio.create_task(toolbox_mcp.media_run("generate_image"))
+                await started.wait()
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            elif mode == "timeout":
+                with pytest.raises(TimeoutError, match="Local generate_image exceeded 0 seconds"):
+                    await toolbox_mcp.media_run("generate_image", timeout=0)
+            else:
+                with pytest.raises(OSError) as caught:
+                    await toolbox_mcp.media_run("generate_image")
+                assert caught.value is original
+        assert cleanup == ["kill", "drain"]
+
+    asyncio.run(check())
+
+
 def test_media_timeout_drains_full_pipes_before_reaping(tmp_path):
     python = tmp_path / "Media/python/Scripts/python.exe"
     python.parent.mkdir(parents=True)
