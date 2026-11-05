@@ -3170,7 +3170,9 @@ def test_donation_activity_reaches_real_tk_chat_history_voice_and_link(tmp_path)
         tree=ast.parse((ROOT/'long_tasks.py').read_text(encoding='utf-8-sig'))
         definitions=[next(node for node in ast.walk(tree) if isinstance(node,ast.FunctionDef) and node.name==name)
                      for name in ('show_chat','assistant_reply')]
-        namespace={'conversation':conversation,'re':re,'uuid':uuid,'webbrowser':SimpleNamespace(open=lambda link:None),
+        mirror=tk.Text(window)
+        mirror.pack()
+        namespace={'conversation':conversation,'chat_mirrors':[mirror],'re':re,'uuid':uuid,'webbrowser':SimpleNamespace(open=lambda link:None),
                    'speak_update':spoken.append,'save_chat':task_module.save_chat}
         exec(compile(ast.Module(body=definitions,type_ignores=[]),'actual-desktop-chat','exec'),namespace)
         # Exercise the actual wiring expression too: this is the same callback
@@ -3192,6 +3194,7 @@ def test_donation_activity_reaches_real_tk_chat_history_voice_and_link(tmp_path)
         assert len(history)==1 and history[0]['role']=='assistant' and history[0]['private']
         assert 'I just sent a proposed improvement' in conversation.get('1.0','end')
         assert spoken==[history[0]['content']]
+        assert history[0]['content'] in mirror.get('1.0','end')
         assert conversation.index('@0,0')==first_visible  # Background updates never steal older history.
         links=[tag for tag in conversation.tag_names() if tag.startswith('link-')]
         assert len(links)==1 and conversation.tk.call(conversation._w,'tag','bind',links[0],'<Button-1>')
@@ -3356,3 +3359,71 @@ def test_old_github_account_probe_cannot_finish_new_pending_login():
     assert not task_module.github_account_refresh_allowed(failed, failed)
     assert task_module.github_account_refresh_allowed(finished, finished)
     assert task_module.github_account_refresh_allowed(None, None)
+
+
+def test_workspace_navigation_preserves_pages_and_gauges_without_starting_work():
+    import ast
+    import tkinter as tk
+    from tkinter import ttk
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        shells = {name: ttk.Frame(window) for name in ("home", "music", "create", "supercharge")}
+        gauges = ttk.Frame(window)
+        buttons = {name: ttk.Button(window) for name in ("home", "music", "create")}
+        selected = tk.StringVar(master=window, value="home")
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "show_workspace")
+        namespace = {"window": window, "projects": lambda: [], "update_side_preview": lambda _: None,
+                     "workspace_shells": shells, "gauge_row": gauges, "workspace": selected,
+                     "workspace_buttons": buttons, "main_shell": shells["home"]}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "real-workspace-navigation", "exec"), namespace)
+        for name in ("home", "music", "create", "supercharge", "home"):
+            namespace["show_workspace"](name)
+            assert selected.get() == name
+            assert shells[name].winfo_manager() == "pack"
+            assert all(not shell.winfo_manager() for key, shell in shells.items() if key != name)
+            assert bool(gauges.winfo_manager()) is (name == "home")
+        namespace["show_workspace"]("unknown")
+        assert selected.get() == "home"  # Unknown commands cannot blank the app.
+        assert all(shell.winfo_exists() for shell in shells.values())
+    finally:
+        window.destroy()
+
+
+def test_create_page_routes_selected_kind_and_keeps_prompt_until_setup_ready():
+    import ast
+    import tkinter as tk
+    import pytest
+    try:
+        window = tk.Tk()
+    except tk.TclError as error:
+        pytest.skip("Tk display unavailable: " + str(error))
+    window.withdraw()
+    try:
+        prompt = tk.Text(window)
+        prompt.insert("1.0", "A booking page for my business")
+        kind = tk.StringVar(master=window, value="Website")
+        status = tk.StringVar(master=window)
+        sent = []
+        tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
+        node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "submit_creation")
+        namespace = {"create_prompt": prompt, "create_kind": kind, "create_status": status,
+                     "STATE": Path("unused"), "first_launch_readiness": lambda _: (False, "Downloading tools"),
+                     "submit_chat_text": sent.append}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "real-create-submit", "exec"), namespace)
+        namespace["submit_creation"]()
+        assert not sent and "booking" in prompt.get("1.0", "end")
+        assert status.get() == "Downloading tools"
+        namespace["first_launch_readiness"] = lambda _: (True, "")
+        namespace["submit_creation"]()
+        assert sent == ["Build a website: A booking page for my business"]
+        assert prompt.get("1.0", "end-1c") == ""
+        namespace["submit_creation"]()
+        assert len(sent) == 1
+    finally:
+        window.destroy()

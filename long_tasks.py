@@ -3742,8 +3742,8 @@ def gui():
     if os.name == "nt":
         window.state("zoomed")
     window.minsize(1050, 740)
-    bg, card, field = "#0b1020", "#151d31", "#202d46"
-    text, muted, accent = "#edf3ff", "#aab8d3", "#6e82ff"
+    bg, card, field = "#0b1017", "#151c25", "#202b36"
+    text, muted, accent = "#f1f6fa", "#a8b8c5", "#16cbd6"
     window.configure(background=bg)
     style = ttk.Style(window)
     style.theme_use("clam")
@@ -3767,11 +3767,20 @@ def gui():
         foreground=[("disabled", "#73819a")],
     )
     style.configure(
-        "Accent.TButton", background=accent, foreground="white", padding=(18, 11)
+        "Accent.TButton", background=accent, foreground="#061419", padding=(18, 11)
     )
-    style.map("Accent.TButton", background=[("disabled", "#26334d"), ("active", "#8797ff")],
+    style.map("Accent.TButton", background=[("disabled", "#26334d"), ("active", "#65e6ee")],
               foreground=[("disabled", "#b7c8e6")])
-    style.configure("Danger.TButton", background="#a94358", foreground="white")
+    style.configure("Danger.TButton", background="#c64b66", foreground="white")
+    style.configure("TCombobox", fieldbackground=field, background=card,
+                    foreground=text, arrowcolor=accent, padding=8)
+    style.map("TCombobox", fieldbackground=[("readonly", field)],
+              foreground=[("readonly", text)], selectbackground=[("readonly", field)])
+    style.configure("TScrollbar", background=field, troughcolor=bg,
+                    borderwidth=0, arrowsize=10, lightcolor=field, darkcolor=field)
+    style.map("TScrollbar", background=[("active", accent)])
+    style.configure("Coral.TButton", background="#f26778", foreground="#190e15", padding=(18, 11))
+    style.map("Coral.TButton", background=[("active", "#ff93a1")])
     style.map("Danger.TButton", background=[("active", "#c15367")])
     style.configure("Mode.TButton", padding=(7, 4), font=("Segoe UI", 9, "bold"))
     style.configure("SelectedMode.TButton", background=accent, foreground="white",
@@ -3788,7 +3797,7 @@ def gui():
 
     # Keep dense task text within a readable width on large monitors while
     # still using the full available height for the task list.
-    outer = ttk.Frame(window, padding=(20, 16))
+    outer = ttk.Frame(window, padding=(20, 12))
 
     def fit_content(event):
         if event.widget is not window:
@@ -3808,7 +3817,7 @@ def gui():
     logo_path = ROOT / "assets/cale-logo.png"
     if logo_path.is_file():
         with Image.open(logo_path) as logo_source:
-            logo_source.thumbnail((66, 66), Image.Resampling.LANCZOS)
+            logo_source.thumbnail((48, 48), Image.Resampling.LANCZOS)
             window.cale_logo = ImageTk.PhotoImage(logo_source.copy())
         tk.Label(header, image=window.cale_logo, bg=bg, borderwidth=0).pack(
             side="left", padx=(0, 14)
@@ -3828,7 +3837,7 @@ def gui():
     ttk.Label(brand, text="Cale AI Local Workbench", font=("Segoe UI", 18, "bold")).pack(anchor="w")
     ttk.Label(
         brand,
-        text="Works while you do other things.",
+        text="Your ideas. Built locally.",
         style="Muted.TLabel",
     ).pack(anchor="w")
 
@@ -3837,35 +3846,35 @@ def gui():
     # The RPM-style ring moves from green through amber to red as load rises.
     gauge_widgets = {}
     gauge_row = ttk.Frame(outer)
-    gauge_row.pack(fill="x", pady=(2, 14))
+    gauge_row.pack(fill="x", pady=(2, 10))
     drive_free_text = tk.StringVar(value="")
     drive_rate_text = tk.StringVar(value="")
     net_rate_text = tk.StringVar(value="")
     offline_button = None
     for column, gauge_name in enumerate(("cpu", "ram", "gpu", "drive", "net")):
-        center = 70
+        center = 46
         gauge_row.columnconfigure(column, weight=1, uniform="gauges")
         holder = ttk.Frame(gauge_row, style="Card.TFrame", padding=(6, 6))
         holder.grid(row=0, column=column, sticky="nsew", padx=5)
         gauge_canvas = tk.Canvas(
-            holder, width=140, height=90,
+            holder, width=92, height=68,
             bg=card, highlightthickness=0, borderwidth=0
         )
         gauge_canvas.pack(anchor="center")
         segments = [
             gauge_canvas.create_arc(
-                center - 34, 4, center + 34, 72,
+                center - 25, 2, center + 25, 52,
                 start=90 - index * 15, extent=-12.5,
                 style="arc", outline=system_gauges.dim_rpm_color(index / 23), width=8,
             )
             for index in range(24)
         ]
         value = gauge_canvas.create_text(
-            center, 38, text="—", fill=text,
-            font=("Segoe UI", 16, "bold")
+            center, 28, text="—", fill=text,
+            font=("Segoe UI", 13, "bold")
         )
         gauge_canvas.create_text(
-            center, 82, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 10, "bold")
+            center, 62, text=gauge_name.upper(), fill=muted, font=("Segoe UI", 10, "bold")
         )
         detail = drive_free_text if gauge_name == "drive" else net_rate_text if gauge_name == "net" else ""
         ttk.Label(holder, textvariable=detail if detail else None,
@@ -3991,18 +4000,49 @@ def gui():
         "<Configure>", lambda event: super_canvas.itemconfigure(super_window, width=event.width),
     )
 
+    music_shell = ttk.Frame(outer)
+    create_shell = ttk.Frame(outer)
+    workspace = tk.StringVar(value="home")
+    workspace_buttons = {}
+    workspace_shells = {"home": main_shell, "music": music_shell,
+                        "create": create_shell, "supercharge": super_shell}
+
+    def show_workspace(name):
+        """Change only the visible workspace; task/audio services keep running."""
+        if name not in workspace_shells:
+            return
+        for shell in workspace_shells.values():
+            shell.pack_forget()
+        gauge_row.pack_forget()
+        workspace.set(name)
+        selected_shell = workspace_shells[name]
+        selected_shell.pack(fill="both", expand=True)
+        if name == "home":
+            gauge_row.pack(fill="x", pady=(2, 10), before=main_shell)
+        for key, button in workspace_buttons.items():
+            button.configure(style="SelectedMode.TButton" if key == name else "Mode.TButton")
+        if name == "create":
+            window.after_idle(lambda: update_side_preview(projects()))
+
     def show_super():
-        main_shell.pack_forget()
-        rocket.pack_forget()
-        super_shell.pack(fill="both", expand=True)
+        show_workspace("supercharge")
 
     def show_main():
-        super_shell.pack_forget()
-        rocket.pack(side="right")
-        main_shell.pack(fill="both", expand=True)
+        show_workspace("home")
+
+    workspace_nav = ttk.Frame(outer)
+    workspace_nav.pack(fill="x", pady=(2, 10), before=gauge_row)
+    for key, label in (("home", "Home"), ("music", "Music Studio"), ("create", "Create")):
+        button = ttk.Button(workspace_nav, text=label,
+            command=lambda selected=key: show_workspace(selected),
+            style="SelectedMode.TButton" if key == "home" else "Mode.TButton")
+        button.pack(side="left", padx=(0, 8), ipadx=18, ipady=7)
+        workspace_buttons[key] = button
+    ttk.Label(workspace_nav, text="CHAT  /  MUSIC  /  GAMES, APPS & WEBSITES",
+              style="Muted.TLabel", font=("Segoe UI", 9)).pack(side="right")
 
     rocket = ttk.Button(
-        header, text="🚀  Supercharge my AI", command=show_super, style="Accent.TButton"
+        header, text="Supercharge my AI", command=show_super, style="Coral.TButton"
     )
     rocket.pack(side="right")
     donation_controls = donation_ui.Controls(
@@ -4560,7 +4600,7 @@ def gui():
 
     voice_speaking = threading.Event()
     talk_chat_row = ttk.Frame(main_page)
-    talk_chat_row.pack(fill="x", pady=(4, 18))
+    talk_chat_row.pack(fill="x", pady=(4, 16))
     title_row = ttk.Frame(talk_chat_row)
     title_row.pack(side="left", anchor="n", padx=(0, 14))
     title_copy = ttk.Frame(title_row)
@@ -4568,7 +4608,7 @@ def gui():
     beach_scene = ttk.Frame(title_copy)
     beach_scene.pack(anchor="w")
     cale_scene = ttk.Frame(beach_scene)
-    cale_scene.pack(side="left", anchor="n", padx=(0, 8))
+    cale_scene.pack(anchor="w", padx=(0, 8))
     if not avatar_video.attach(cale_scene, ROOT / "assets/cale-talking.webp", voice_speaking):
         ttk.Label(cale_scene, text="Talk to Cale", font=("Segoe UI", 29, "bold")).pack(
             anchor="w"
@@ -4580,8 +4620,8 @@ def gui():
         ).pack(anchor="w", pady=(3, 0))
     ttk.Label(cale_scene, text="CALE  •  BEACH SIDE", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
     camera_scene = ttk.Frame(beach_scene)
-    camera_scene.pack(side="left", anchor="n")
-    camera_frame = tk.Frame(camera_scene, width=200, height=132, bg="#0b1020")
+    # Camera preview is visible only while the camera is enabled.
+    camera_frame = tk.Frame(camera_scene, width=320, height=132, bg=bg)
     camera_frame.pack_propagate(False)
     camera_frame.pack()
     camera_preview = tk.Label(
@@ -4591,10 +4631,10 @@ def gui():
     camera_preview.pack(fill="both", expand=True)
     ttk.Label(camera_scene, text="YOU  •  LOCAL WEBCAM", style="Muted.TLabel").pack(anchor="w", pady=(3, 0))
     companion_controls = ttk.Frame(title_copy)
-    companion_controls.pack(fill="x", pady=(10, 0))
+    companion_controls.pack(fill="x", pady=(8, 0))
     speech_status = tk.StringVar(value="Preparing your voice · Cale is quiet")
     ttk.Label(title_copy, textvariable=speech_status, style="Muted.TLabel",
-              wraplength=510).pack(anchor="w", pady=(8, 0))
+              wraplength=300).pack(anchor="w", pady=(8, 0))
 
     def clear_camera_preview():
         camera_preview.configure(image="", text="Your camera\nTurn it on to join Cale")
@@ -5080,9 +5120,9 @@ def gui():
         companion_controls, text="🔇  Unmute Cale" if voice_muted.is_set() else "🔊  Mute Cale",
         command=toggle_voice_mute,
     )
-    mute_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    mute_button.grid(row=0, column=1, padx=(6, 0), pady=(4, 0), sticky="ew")
     mic_button = ttk.Button(companion_controls, text="🎤  Mic Off", command=toggle_listening)
-    mic_button.pack(side="right", padx=(0, 8), pady=(8, 0))
+    mic_button.grid(row=0, column=0, pady=(4, 0), sticky="ew")
     presence = tk.Canvas(
         header_status, width=148, height=46, background=bg,
         highlightthickness=0, borderwidth=0,
@@ -5339,8 +5379,10 @@ def gui():
         camera_consent.write_text(json.dumps({"until": until}), encoding="utf-8")
         camera_button.configure(text="📷  Camera On" if enabled else "📷  Camera Off")
         if enabled:
+            camera_scene.pack(anchor="w", pady=(8, 0))
             start_camera_greeting()
         else:
+            camera_scene.pack_forget()
             clear_camera_preview()
             process = greeting_process[0]
             if process is not None and process.poll() is None:
@@ -5351,8 +5393,9 @@ def gui():
         companion_controls, text="📷  Camera On" if greeting_until[0] > time.time()
         else "📷  Camera Off", command=toggle_camera_greeting,
     )
-    camera_button.pack(side="left", padx=(6, 0))
+    camera_button.grid(row=1, column=0, columnspan=2, pady=(8, 0), sticky="w")
     if greeting_until[0] > time.time():
+        camera_scene.pack(anchor="w", pady=(8, 0))
         start_camera_greeting()
     window.bind("<Control-Alt-space>", lambda _: record_voice())
     ttk.Label(title_copy, textvariable=voice_label, style="Muted.TLabel",
@@ -5363,7 +5406,7 @@ def gui():
     chat_panel.pack(side="left", fill="both", expand=True)
     chat_heading = ttk.Frame(chat_panel, style="Card.TFrame")
     chat_heading.pack(fill="x", pady=(0, 5))
-    ttk.Label(chat_heading, text="What shall we make?", style="Card.TLabel",
+    ttk.Label(chat_heading, text="What are we making?", style="Card.TLabel",
               font=("Segoe UI", 18, "bold")).pack(side="left")
     readiness_text = tk.StringVar(value="")
     readiness_label = ttk.Label(
@@ -5402,7 +5445,7 @@ def gui():
         )
         button.pack(side="left", padx=(4, 0))
         mode_buttons[mode] = button
-    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=180)
+    conversation_frame = ttk.Frame(chat_panel, style="Card.TFrame", height=210)
     conversation_frame.pack(fill="both", expand=True)
     conversation_frame.pack_propagate(False)
     conversation = tk.Text(
@@ -5426,8 +5469,10 @@ def gui():
     conversation.pack(side="left", fill="both", expand=True)
     conversation.tag_configure("user", foreground="#a6c9ff", spacing1=8)
     conversation.tag_configure("assistant", foreground=text, spacing1=8)
-    entry_row = ttk.Frame(chat_panel, style="Card.TFrame")
-    entry_row.pack(fill="x", pady=(8, 0))
+    entry_row = ttk.Frame(main_shell, style="Card.TFrame", padding=(12, 10))
+    # Claim the composer first so it remains reachable while task/history
+    # content scrolls on short displays. It never adds another scroll region.
+    entry_row.pack(side="bottom", fill="x", pady=(10, 0), before=main_scroll)
     chat_input = tk.Text(
         entry_row, background=field, foreground=text, insertbackground=text,
         relief="flat", font=("Segoe UI", 12), highlightthickness=0,
@@ -5487,6 +5532,8 @@ def gui():
 
     attach_button = ttk.Button(entry_row, text="Add files", command=show_attachment_menu)
 
+    chat_mirrors = []
+
     def show_chat(role, content, speak=True):
         at_bottom = conversation.yview()[1] >= 0.98
         conversation.configure(state="normal")
@@ -5526,6 +5573,13 @@ def gui():
         conversation.configure(state="disabled")
         if at_bottom:
             conversation.see("end")
+        for mirror in chat_mirrors:
+            follow = mirror.yview()[1] >= .98
+            mirror.configure(state="normal")
+            mirror.insert("end", ("You" if role == "user" else "Cale") + ": " + content + "\n\n")
+            mirror.configure(state="disabled")
+            if follow:
+                mirror.see("end")
         if role == "assistant" and speak:
             speak_update(content)
 
@@ -5859,7 +5913,122 @@ def gui():
         window.after(350, poll_chat)
 
     window.after(350, poll_chat)
-    radio_station.Controls(main_page, window, radio_service)
+    def make_studio_song(prompt):
+        ready, explanation = first_launch_readiness(STATE)
+        if not ready:
+            status.set(explanation)
+            messagebox.showinfo("Getting ready", explanation, parent=window)
+            return False
+        submit_chat_text("Make a song: " + prompt)
+        return True
+
+    studio_controls = radio_station.Controls(
+        music_shell, window, radio_service, on_make_song=make_studio_song)
+
+    # Creation has a dedicated canvas-sized live preview instead of opening a
+    # second window over the conversation. It uses the existing preview capture
+    # and task pipeline; no separate agent or duplicated conversation is started.
+    create_header = ttk.Frame(create_shell)
+    create_header.pack(fill="x", pady=(4, 16))
+    ttk.Label(create_header, text="Make something yours.",
+              font=("Segoe UI", 25, "bold")).pack(side="left")
+    create_kind = tk.StringVar(value="Game")
+    create_kinds = ttk.Frame(create_header)
+    create_kinds.pack(side="right")
+    create_kind_buttons = {}
+
+    def choose_create_kind(kind):
+        create_kind.set(kind)
+        for key, button in create_kind_buttons.items():
+            button.configure(style="SelectedMode.TButton" if key == kind else "Mode.TButton")
+
+    for kind in ("Game", "App", "Website"):
+        button = ttk.Button(create_kinds, text=kind,
+            command=lambda choice=kind: choose_create_kind(choice),
+            style="SelectedMode.TButton" if kind == "Game" else "Mode.TButton")
+        button.pack(side="left", padx=(6, 0))
+        create_kind_buttons[kind] = button
+    create_project_row = ttk.Frame(create_shell)
+    create_project_row.pack(fill="x", pady=(0, 12))
+    ttk.Label(create_project_row, text="Project", style="Muted.TLabel").pack(side="left", padx=(0, 10))
+    create_project_selection = tk.StringVar(value="Current project")
+    create_project_choices = {}
+    create_project_picker = ttk.Combobox(create_project_row, textvariable=create_project_selection,
+        state="readonly", width=48, values=("Current project",))
+    create_project_picker.pack(side="left", fill="x", expand=True)
+
+    def open_create_preview():
+        project = next((item for item in projects() if item["id"] == preview_task_id), None)
+        page = project_preview.source(project["folder"]) if project else ""
+        if page:
+            webbrowser.open(page)
+        elif project:
+            os.startfile(project["folder"])
+
+    create_open_button = ttk.Button(create_project_row, text="Open preview", command=open_create_preview, state="disabled")
+    create_open_button.pack(side="right", padx=(12, 0))
+    create_body = ttk.Frame(create_shell)
+    create_body.pack(fill="both", expand=True)
+    create_body.columnconfigure(0, weight=1, minsize=270)
+    create_body.columnconfigure(1, weight=3, minsize=480)
+    create_body.rowconfigure(0, weight=1)
+    create_chat = ttk.Frame(create_body, style="Card.TFrame", padding=20)
+    create_chat.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+    ttk.Label(create_chat, text="Build with Cale", style="Card.TLabel",
+              font=("Segoe UI", 18, "bold")).pack(anchor="w")
+    ttk.Label(create_chat, text="Describe it. Watch it take shape.",
+              style="CardMuted.TLabel").pack(anchor="w", pady=(4, 16))
+    create_status = tk.StringVar(value="Your next idea starts here.")
+    ttk.Label(create_chat, textvariable=create_status, style="CardMuted.TLabel",
+              wraplength=270, justify="left").pack(fill="x", pady=(0, 16))
+    create_history = ttk.Frame(create_chat, style="Card.TFrame")
+    create_history.pack(fill="both", expand=True)
+    create_phase = tk.StringVar(value="Build  /  Test  /  Finished")
+    ttk.Label(create_chat, textvariable=create_phase, style="CardMuted.TLabel",
+              font=("Segoe UI", 10, "bold")).pack(anchor="w", before=create_history, pady=(0, 8))
+    create_conversation = tk.Text(create_history, state="disabled", height=5, width=28,
+        background=card, foreground=text, relief="flat", wrap="word",
+        font=("Segoe UI", 11), padx=4, pady=8, highlightthickness=0)
+    create_conversation.pack(side="left", fill="both", expand=True)
+    chat_mirrors.append(create_conversation)
+    create_history_scroll = ttk.Scrollbar(create_history, command=create_conversation.yview)
+    def update_create_scroll(first, last):
+        create_history_scroll.set(first, last)
+        if float(first) > .001 or float(last) < .999:
+            if not create_history_scroll.winfo_manager():
+                create_history_scroll.pack(side="right", fill="y", before=create_conversation)
+        else:
+            create_history_scroll.pack_forget()
+
+    create_conversation.configure(yscrollcommand=update_create_scroll)
+    create_prompt = tk.Text(create_chat, height=3, width=28, wrap="word", relief="flat",
+        background=field, foreground=text, insertbackground=text,
+        font=("Segoe UI", 11), padx=12, pady=12, highlightthickness=0)
+    create_prompt.pack(fill="x", pady=(12, 8))
+
+    def submit_creation():
+        prompt = create_prompt.get("1.0", "end-1c").strip()
+        if not prompt:
+            create_prompt.focus_set()
+            return
+        ready, explanation = first_launch_readiness(STATE)
+        if not ready:
+            create_status.set(explanation)
+            return
+        submit_chat_text("Build a " + create_kind.get().lower() + ": " + prompt)
+        create_prompt.delete("1.0", "end")
+        create_status.set("Request sent. Cale will report progress here and in Home.")
+
+    ttk.Button(create_chat, text="Build it", command=submit_creation,
+               style="Accent.TButton").pack(fill="x")
+    create_preview_host = ttk.Frame(create_body, style="Card.TFrame", padding=18)
+    create_preview_host.grid(row=0, column=1, sticky="nsew")
+    create_empty = ttk.Frame(create_preview_host, style="Card.TFrame")
+    create_empty.pack(fill="both", expand=True)
+    ttk.Label(create_empty, text="Your live preview", style="Card.TLabel",
+              font=("Segoe UI", 22, "bold")).pack(expand=True, anchor="s")
+    ttk.Label(create_empty, text="Your game, app or website will appear here as Cale builds it.",
+              style="CardMuted.TLabel", wraplength=380, justify="center").pack(expand=True, anchor="n", pady=(12, 0))
     task_heading = ttk.Frame(main_page)
     task_heading.pack(fill="x", pady=(0, 12))
     ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 20, "bold")).pack(side="left")
@@ -6837,33 +7006,49 @@ def gui():
             update_task_controls(card_info, item)
 
     def update_side_preview(all_projects):
-        """Show the active task's page or Chrome session beside the task board."""
+        """Keep the selected project's existing capture inside Create's preview."""
         nonlocal preview_window, preview_label, preview_caption
         nonlocal preview_task_id, preview_dismissed_id, preview_image_signature
         candidates = list(reversed(all_projects))
-        project = next(
-            (
-                item
-                for item in candidates
+        build_candidates = [item for item in candidates
+            if project_preview.WEB_WORDS.search(str(item.get("title", "")) + " " + str(item.get("brief", "")))
+            and not music_job_id(item) and not image_job_id(item)]
+        choices = {str(item["title"])[:68] + " · " + str(item["id"]): item["id"]
+                   for item in build_candidates}
+        create_project_choices.clear()
+        create_project_choices.update(choices)
+        create_project_picker.configure(values=("Current project", *choices))
+        if create_project_selection.get() not in ("Current project", *choices):
+            create_project_selection.set("Current project")
+        selected_id = choices.get(create_project_selection.get())
+        project = next((item for item in build_candidates if item["id"] == selected_id), None)
+        if project is None:
+            project = next((item for item in candidates
                 if item["status"] in ("working", "checking", "queued")
-                and (
-                    project_preview.wants_preview(item)
-                    or project_preview.browser_screenshot_path(item["folder"]).is_file()
-                )
-            ),
-            None,
-        )
+                and (project_preview.wants_preview(item)
+                     or project_preview.browser_screenshot_path(item["folder"]).is_file())), None)
         if project is None:
             project = next(
                 (item for item in candidates if project_preview.wants_preview(item)),
                 None,
             )
         if project is None:
+            project = next(iter(build_candidates), None)
+        if project is None:
             if preview_window is not None:
                 preview_window.destroy()
                 preview_window = None
             preview_task_id = None
+            create_empty.pack(fill="both", expand=True)
+            create_status.set("Your next idea starts here.")
+            create_phase.set("Build  /  Test  /  Finished")
+            create_open_button.configure(state="disabled")
             return
+        create_phase.set("Build  /  Test  /  FINISHED" if project["status"] in ("accepted", "ready_for_review")
+                         else "Build  /  TEST  /  Finished" if project["status"] == "checking"
+                         else "BUILD  /  Test  /  Finished")
+        create_open_button.configure(state="normal")
+        create_status.set(project["title"] + "\n" + str(project.get("detail") or project["status"]))
         pid = project["id"]
         if pid != preview_task_id:
             preview_image_signature = None
@@ -6873,29 +7058,21 @@ def gui():
         if preview_dismissed_id == pid:
             return
         if preview_window is None or not preview_window.winfo_exists():
-            preview_window = tk.Toplevel(window)
-            preview_window.title("Cale · Live preview")
-            preview_window.configure(background=bg)
-            preview_window.geometry("450x760")
-            preview_window.minsize(300, 350)
-            window.update_idletasks()
-            x = min(
-                window.winfo_rootx() + window.winfo_width() + 8,
-                window.winfo_screenwidth() - 458,
-            )
-            y = min(window.winfo_rooty(), window.winfo_screenheight() - 790)
-            preview_window.geometry(f"+{max(0, x)}+{max(0, y)}")
+            create_empty.pack_forget()
+            preview_window = ttk.Frame(create_preview_host, style="Card.TFrame")
+            preview_window.pack(fill="both", expand=True)
             ttk.Label(
-                preview_window, text="Live preview", font=("Segoe UI", 16, "bold")
+                preview_window, text="Live preview", style="Card.TLabel", font=("Segoe UI", 16, "bold")
             ).pack(anchor="w", padx=14, pady=(14, 3))
             preview_caption = ttk.Label(
                 preview_window,
                 text="Waiting for the first visual update…",
-                style="Muted.TLabel",
-                wraplength=420,
+                style="CardMuted.TLabel",
+                wraplength=700,
             )
             preview_caption.pack(anchor="w", padx=14, pady=(0, 12))
-            preview_label = tk.Label(preview_window, bg="#101725", borderwidth=0)
+            preview_label = tk.Label(preview_window, bg="#101725", borderwidth=0, cursor="hand2")
+            preview_label.bind("<Button-1>", lambda _: open_create_preview())
             preview_label.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
             def dismiss_preview():
@@ -6904,7 +7081,6 @@ def gui():
                 preview_window.destroy()
                 preview_window = None
 
-            preview_window.protocol("WM_DELETE_WINDOW", dismiss_preview)
         folder = Path(project["folder"])
         browser_image = project_preview.browser_screenshot_path(folder)
         task_image = project_preview.screenshot_path(folder)
@@ -6918,12 +7094,14 @@ def gui():
             else task_image
         )
         if visual.is_file():
-            signature = (str(visual), visual.stat().st_mtime_ns)
+            signature = (str(visual), visual.stat().st_mtime_ns,
+                         create_preview_host.winfo_width(), create_preview_host.winfo_height())
             if signature != preview_image_signature:
                 try:
                     with Image.open(visual) as opened:
                         picture = opened.convert("RGB")
-                    picture.thumbnail((420, 660), Image.Resampling.LANCZOS)
+                    picture.thumbnail((max(400, create_preview_host.winfo_width() - 60),
+                                       max(300, create_preview_host.winfo_height() - 100)), Image.Resampling.LANCZOS)
                     preview_window.picture = ImageTk.PhotoImage(picture)
                     preview_label.configure(image=preview_window.picture)
                     preview_image_signature = signature
@@ -6935,7 +7113,7 @@ def gui():
                 if visual == browser_image and visual.is_file()
                 else "App · "
             )
-            + project["title"]
+            + project["title"] + " · Click the preview to open and interact"
         )
         page = (
             project_preview.source(folder)
@@ -7077,6 +7255,8 @@ def gui():
         except queue.Empty:
             pass
         window.after(500, voice_poll)
+
+    create_project_picker.bind("<<ComboboxSelected>>", lambda _: update_side_preview(projects()))
 
     def refresh():
         nonlocal idle_since, idle_slot, setup_spoken_step, voice_upgrade_queued
