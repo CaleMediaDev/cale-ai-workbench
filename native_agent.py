@@ -2214,14 +2214,8 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
                        if item.get("role") == "system" and
                        str(item.get("content", "")).startswith("Current task checkpoint")), None)
     if checkpoint is None:
-        notes = []
-        for name in ("PLAN.md", "PROGRESS.md", "USER-REQUESTS.md"):
-            path = folder / ".local-ai" / name
-            if path.is_file():
-                notes.append(name + ":\n" + path.read_text(encoding="utf-8", errors="replace")[-6000:])
-        checkpoint = {"role": "system", "content":
-                      "Recovered project state (search_project_memory for older decisions and files):\n"
-                      + "\n".join(notes)}
+        import task_context
+        checkpoint = {"role": "system", "content": task_context.recovery_snapshot(folder)}
     base = [messages[0], copy.deepcopy(checkpoint)]
 
     def clip(value: str, length: int) -> str:

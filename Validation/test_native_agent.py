@@ -8227,3 +8227,297 @@ def test_helper_record_tampered_after_real_check_cannot_publish_sql_pass(tmp_pat
         result=native_agent.execute_tool(folder,'task_steps',{'action':'complete','step_id':active['id']})
     assert result.startswith('Tool error:')
     assert task_context.step_status(folder)['done']==0
+
+def context_projection_fixture(tmp_path, notes=True):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    state = folder / ".local-ai"
+    state.mkdir()
+    (state / "USER-REQUESTS.md").write_text("", encoding="utf-8")
+    if notes:
+        (state / "PLAN.md").write_text(long_tasks.INITIAL_PLAN, encoding="utf-8")
+        (state / "PROGRESS.md").write_text(long_tasks.INITIAL_PROGRESS, encoding="utf-8")
+    task_context.plan_steps(folder, [queue_step("Unit "+str(i), "exit 0", "Components") for i in range(1,9)])
+    # Saved host-status fixture, NOT evidence that any real app is complete.
+    for _ in range(5):
+        active = task_context.step_status(folder)["active"]
+        task_context.record_step_check(folder, active["id"], task_context.request_identity(folder), "Exit code: 0\nfixture component result", unchanged=True)
+    return folder
+
+
+def context_projection_rows(folder):
+    with project_memory.connection(folder) as connection:
+        return [tuple(row) for row in connection.execute("SELECT id,request_hash,status,attempts,evidence FROM task_steps ORDER BY id")]
+
+
+@pytest.mark.parametrize("whitespace", [False, True])
+def test_context_projection_labels_saved_components_and_suppresses_only_exact_startup_templates(tmp_path, whitespace):
+    folder = context_projection_fixture(tmp_path)
+    if whitespace:
+        for name, template in (("PLAN.md", long_tasks.INITIAL_PLAN), ("PROGRESS.md", long_tasks.INITIAL_PROGRESS)):
+            (folder/".local-ai"/name).write_text("\ufeff\n\t"+template.replace(" ", "  ").replace("\n", "\r\n")+"\n", encoding="utf-8")
+    files = {name:(folder/".local-ai"/name).read_bytes() for name in ("PLAN.md", "PROGRESS.md")}
+    rows = context_projection_rows(folder)
+    checkpoint = task_context.snapshot(folder)
+    assert "5/8 component checks recorded passed" in checkpoint
+    assert "not current source verification or whole-task completion" in checkpoint
+    assert "SQLite step 6: Unit 6" in checkpoint
+    assert "No work has been completed yet" not in checkpoint
+    assert "The worker has not written milestones yet" not in checkpoint
+    assert "startup placeholder" in checkpoint and "not been authored" in checkpoint
+    assert context_projection_rows(folder) == rows
+    assert files == {name:(folder/".local-ai"/name).read_bytes() for name in files}
+
+
+def test_context_projection_preserves_custom_notes_even_with_similar_startup_words(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    progress = "# Progress\n\nNo work has been completed yet on the optional export. Earlier component checks exist.\nNext: Preserve the pending feature.\n"
+    plan = "# User roadmap\n- [ ] Preserve a real custom requirement\n"
+    (folder/".local-ai/PROGRESS.md").write_text(progress, encoding="utf-8")
+    root_plan = folder/"PLAN.md"
+    root_plan.write_text(plan, encoding="utf-8")
+    stamp = time.time_ns()+2_000_000_000
+    os.utime(root_plan, ns=(stamp, stamp))
+    checkpoint = task_context.snapshot(folder)
+    assert progress in checkpoint.replace("\r\n", "\n") and plan in checkpoint.replace("\r\n", "\n")
+    assert "[Saved at project root: PLAN.md]" in checkpoint
+    assert "5/8 component checks recorded passed" in checkpoint
+    assert "startup placeholder" not in checkpoint
+
+
+def test_context_projection_missing_notes_do_not_mean_no_work_or_author_completion(tmp_path):
+    folder = context_projection_fixture(tmp_path, notes=False)
+    checkpoint = task_context.snapshot(folder)
+    assert "5/8 component checks recorded passed" in checkpoint
+    assert "PLAN.md:\n[Missing or empty note" in checkpoint
+    assert "PROGRESS.md:\n[Missing or empty note" in checkpoint
+    assert "No work has been completed yet" not in checkpoint
+    assert not (folder/".local-ai/PLAN.md").exists()
+    assert not (folder/".local-ai/PROGRESS.md").exists()
+
+
+def test_context_projection_followup_scopes_out_old_component_records(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    rows = context_projection_rows(folder)
+    (folder/".local-ai/USER-REQUESTS.md").write_text("Now implement a new requested feature.", encoding="utf-8")
+    checkpoint = task_context.snapshot(folder)
+    assert "5/8 component checks recorded passed" not in checkpoint
+    assert "no current-request component-check records" in checkpoint
+    assert "does not mean no work has been performed" in checkpoint
+    assert context_projection_rows(folder) == rows
+
+
+def test_context_projection_real_fresh_and_no_checkpoint_compaction_reuse_same_queue(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    state = {"verify_passed": False, "turns": 261, "step_focus_turns": 4}
+    before = copy.deepcopy(state)
+    messages = [{"role": "system", "content": "Original request must remain intact."},
+                {"role": "user", "content": "Repeated old discussion. "*6000}]
+    fresh = native_agent.fresh_messages(messages, folder, state)
+    fallback = native_agent.compact_messages(messages, folder, context_limit=20000)
+    for content in (fresh[1]["content"], fallback[1]["content"]):
+        assert "5/8 component checks recorded passed" in content
+        assert "SQLite step 6: Unit 6" in content
+        assert "No work has been completed yet" not in content
+        assert "not current source verification or whole-task completion" in content
+    assert fresh[0] == fallback[0] == messages[0]
+    assert state == before
+
+
+def test_context_projection_does_not_author_notes_or_promote_completion(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    source = folder/"index.html"
+    source.write_text("<!doctype html><title>Unfinished project</title>", encoding="utf-8")
+    paths = [source,folder/".local-ai/PLAN.md",folder/".local-ai/PROGRESS.md"]
+    before = {str(path):path.read_bytes() for path in paths}
+    rows = context_projection_rows(folder)
+    state = {"verify_passed":False}
+    task_context.snapshot(folder)
+    native_agent.compact_messages(recovery_projection_messages(),folder,20000)
+    native_agent.fresh_messages([{"role":"system","content":"Maintain accurate project notes."}],folder,state)
+    assert before == {str(path):path.read_bytes() for path in paths}
+    assert context_projection_rows(folder) == rows
+    assert task_context.step_status(folder)["done"] == 5
+    assert state["verify_passed"] is False
+
+
+def test_context_projection_fingerprints_match_real_builtin_constants_and_preserve_quotes():
+    for name, template in (("PLAN.md", long_tasks.INITIAL_PLAN), ("PROGRESS.md", long_tasks.INITIAL_PROGRESS)):
+        assert "startup placeholder" in task_context.project_note_excerpt(name, template, 3500)
+        custom = "# Actual project note\nThe initial note was quoted below:\n" + template
+        assert task_context.project_note_excerpt(name, custom, 3500) == custom
+
+
+def test_context_projection_saved_unit_counts_do_not_attest_new_source_bytes(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    (folder/"index.html").write_text("<p>New unverified source</p>", encoding="utf-8")
+    messages = [{"role": "system", "content": "Build the requested app."}]
+    state = {"verify_passed": False}
+    content = native_agent.fresh_messages(messages, folder, state)[1]["content"]
+    assert "5/8 component checks recorded passed" in content
+    assert "not current source verification or whole-task completion" in content
+    assert state["verify_passed"] is False
+
+
+def recovery_projection_messages():
+    return [{"role": "system", "content": "Keep the complete original requirements."},
+            {"role": "user", "content": "Old discussion repeated. "*10000}]
+
+
+@pytest.mark.parametrize("database", ["missing", "corrupt", "oldschema"])
+def test_recovery_projection_unavailable_database_retains_custom_notes_without_initialization(tmp_path, database):
+    from contextlib import closing
+    folder = tmp_path/"project"
+    (folder/".local-ai").mkdir(parents=True)
+    (folder/"PLAN.md").write_text("# Actual plan\n- [ ] Preserve custom acceptance.\n", encoding="utf-8")
+    path = folder/".local-ai/memory.sqlite3"
+    if database == "corrupt": path.write_bytes(b"owned corrupt SQLite fixture")
+    if database == "oldschema":
+        with closing(sqlite3.connect(path)) as connection, connection:
+            connection.execute("CREATE TABLE existing_note (body TEXT)")
+            connection.execute("INSERT INTO existing_note VALUES('preserve')")
+    before = path.read_bytes() if path.exists() else None
+    result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+    assert "Preserve custom acceptance" in result[1]["content"]
+    assert "SQLite progress is unavailable" in result[1]["content"]
+    assert "Do not infer zero progress" in result[1]["content"]
+    assert (path.read_bytes() if path.exists() else None) == before
+    if database == "oldschema":
+        with closing(sqlite3.connect(path)) as connection:
+            assert connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == [("existing_note",)]
+
+
+def test_recovery_projection_real_wal_writer_is_nonblocking_and_shows_committed_current_queue(tmp_path):
+    import threading
+    from contextlib import closing
+    folder = context_projection_fixture(tmp_path)
+    held = threading.Event()
+    errors = []
+    def writer():
+        try:
+            with closing(sqlite3.connect(folder/".local-ai/memory.sqlite3")) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("UPDATE task_steps SET status='done'")
+                held.set()
+                time.sleep(.55)
+                connection.rollback()
+        except Exception as error:
+            errors.append(type(error).__name__)
+            held.set()
+    worker = threading.Thread(target=writer)
+    worker.start()
+    assert held.wait(2)
+    try:
+        started = time.monotonic()
+        result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+        assert time.monotonic()-started < .2
+        assert "5/8 component checks recorded passed" in result[1]["content"]
+        assert "SQLite step 6: Unit 6" in result[1]["content"]
+        assert "8/8 component" not in result[1]["content"]
+    finally: worker.join(2)
+    assert not errors
+
+
+def test_recovery_projection_changed_followup_during_read_cannot_publish_old_queue(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    actual = task_context._step_status
+    observed = []
+    def changed(connection, request):
+        result = actual(connection, request)
+        observed.append(True)
+        (folder/".local-ai/USER-REQUESTS.md").write_text("New instructions arrived during the read.", encoding="utf-8")
+        return result
+    with patch.object(task_context, "_step_status", side_effect=changed):
+        result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+    assert observed
+    assert "SQLite progress is unavailable" in result[1]["content"]
+    assert "5/8 component checks recorded passed" not in result[1]["content"]
+
+
+def test_recovery_projection_exception_closes_reader_and_never_calls_writer_helpers(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    actual_connect = sqlite3.connect
+    closed = []
+    statements = []
+    class Reader:
+        def __init__(self, connection): self.connection = connection
+        @property
+        def row_factory(self): return self.connection.row_factory
+        @row_factory.setter
+        def row_factory(self, value): self.connection.row_factory = value
+        def set_progress_handler(self, *args): self.connection.set_progress_handler(*args)
+        def execute(self, sql, *args):
+            statements.append(sql)
+            return self.connection.execute(sql, *args)
+        def close(self):
+            self.connection.close()
+            closed.append(True)
+    with patch.object(sqlite3, "connect", side_effect=lambda *a, **kw: Reader(actual_connect(*a, **kw))), \
+         patch.object(task_context, "_step_status", side_effect=sqlite3.OperationalError("owned TEMP failure")), \
+         patch.object(project_memory, "connection", side_effect=AssertionError("no writer helper")), \
+         patch.object(project_memory, "database_path", side_effect=AssertionError("no database initialization")):
+        result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+    assert closed == [True]
+    assert "SQLite progress is unavailable" in result[1]["content"]
+    assert not any(re.match(r"(?i)CREATE|INSERT|UPDATE|DELETE|ALTER", sql) for sql in statements)
+
+
+def test_recovery_projection_exclusive_rollback_writer_returns_unknown_without_waiting(tmp_path):
+    import threading
+    from contextlib import closing
+    folder = context_projection_fixture(tmp_path)
+    database = folder/".local-ai/memory.sqlite3"
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+    (folder/".local-ai/PROGRESS.md").write_text("# Progress\nNext: Preserve the custom note.\n", encoding="utf-8")
+    held = threading.Event()
+    def writer():
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute("BEGIN EXCLUSIVE")
+            held.set()
+            time.sleep(.55)
+            connection.rollback()
+    worker = threading.Thread(target=writer)
+    worker.start()
+    assert held.wait(2)
+    try:
+        started = time.monotonic()
+        result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+        assert time.monotonic()-started < .2
+        assert "SQLite progress is unavailable" in result[1]["content"]
+        assert "Preserve the custom note" in result[1]["content"]
+    finally: worker.join(2)
+
+
+def test_recovery_projection_sqlite_vm_budget_returns_unknown_not_partial_totals(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    with project_memory.connection(folder) as connection:
+        first = connection.execute("SELECT request_hash FROM task_steps LIMIT 1").fetchone()[0]
+        connection.executemany("INSERT INTO task_steps(request_hash,position,phase,title,check_command,shell,status,updated) VALUES(?,?,'Fixture','Fixture','exit 0','default','done',0)", [(first, i+100) for i in range(10000)])
+    calls = []
+    def clock():
+        calls.append(True)
+        return 0 if len(calls) == 1 else 1
+    with patch.object(task_context.time, "monotonic", side_effect=clock):
+        result = task_context.recovery_snapshot(folder)
+    assert len(calls) >= 2
+    assert "SQLite progress is unavailable" in result
+    assert "component checks recorded passed" not in result
+
+
+@pytest.mark.parametrize("column", ["phase", "title", "evidence"])
+def test_recovery_projection_blob_queue_cell_returns_unknown_and_preserves_notes(tmp_path, column):
+    from contextlib import closing
+    folder = context_projection_fixture(tmp_path)
+    (folder/"PLAN.md").write_text("# Actual plan\nPreserve custom acceptance.\n", encoding="utf-8")
+    database = folder/".local-ai/memory.sqlite3"
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute(f"UPDATE task_steps SET {column}=? WHERE id=6", (sqlite3.Binary(b"bounded invalid text cell"),))
+    before = database.read_bytes()
+    result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+    content = result[1]["content"]
+    assert "SQLite progress is unavailable" in content
+    assert "Preserve custom acceptance" in content
+    assert "5/8 component checks recorded passed" not in content
+    assert "SQLite step 6" not in content
+    assert database.read_bytes() == before
