@@ -167,6 +167,9 @@ class VisitorTracker:
                    for i in range(len(features)) if i not in assignments}
         continuous={i for i,targets in geometric.items() if len(targets)==1
                     and sum(targets[0] in other for other in geometric.values())==1}
+        # Snapshot before updating any track so detection order cannot hide
+        # that the original presentation now belongs to another visible face.
+        visible_tracks={id(self.tracks[j]) for j in matched}
         for feature_index, feature in enumerate(features):
             if feature_index in assignments:
                 track = self.tracks[assignments[feature_index]]
@@ -176,6 +179,7 @@ class VisitorTracker:
                     track["hits"] = 1
                     track["pending_greeting"] = now - track["last_greeted"] >= self.cooldown
                     track['presentation_continuity']=False
+                    track.pop('presentation_anchor',None)
                 else:
                     track["hits"] = (
                         track["hits"] + 1
@@ -190,10 +194,30 @@ class VisitorTracker:
                          "hits": 1, "last_greeted": float("-inf"),
                          "misses": 0, "pending_greeting": True,
                          'presentation_continuity':feature_index in continuous}
+                if feature_index in continuous:
+                    anchor=self.tracks[geometric[feature_index][0]]
+                    # Only a RAM token and geometry, never a retained track or
+                    # feature vector. Tracks outlive this 1.5-second decision.
+                    track['presentation_anchor']=(id(anchor),anchor.get('box'),anchor['last_seen'])
                 self.tracks.append(track)
                 matched.add(len(self.tracks) - 1)
             track['box']=boxes[feature_index]
             if track["hits"] >= 2 and track["pending_greeting"]:
+                anchor_context=track.pop('presentation_anchor',None)
+                if track.get('presentation_continuity'):
+                    # This is temporary greeting suppression, not an identity
+                    # match. Recheck its original evidence at decision time:
+                    # an occluded second visitor may now be clearly separate.
+                    if anchor_context is None:
+                        track['presentation_continuity']=False
+                    else:
+                        anchor_id,anchor_box,anchor_seen=anchor_context
+                        track['presentation_continuity']=(
+                            anchor_id not in visible_tracks
+                            and 0<=now-anchor_seen<=1.5
+                            and _visitor_overlap(boxes[feature_index],anchor_box)>=.55
+                            and sum(_visitor_overlap(box,anchor_box)>=.55
+                                    for box in boxes[:len(features)])==1)
                 track["pending_greeting"] = False
                 track["last_greeted"] = now
                 greetings.append(feature)

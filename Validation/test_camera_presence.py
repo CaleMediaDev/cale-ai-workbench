@@ -5,6 +5,7 @@ import json
 import io
 import os
 import unittest
+import pytest
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -47,6 +48,27 @@ def test_continuous_same_position_drift_does_not_repeat_unknown_introduction():
     a,b,c=[1.,0.,0.],[.6,.8,0.],[.6,0.,.8]
     box=[.1,.1,.2,.3]
     assert presentation_trace([([f],[box]) for f in (a,a,b,b,c,c)])==[None]
+
+
+@pytest.mark.parametrize('reversed_order',[False,True])
+def test_occluding_new_visitor_is_greeted_when_original_becomes_visible_again(reversed_order):
+    a,b=[1.,0.,0.],[.6,.8,0.]
+    left,right=[.1,.1,.2,.3],[.6,.1,.2,.3]
+    final=([b,a],[right,left]) if reversed_order else ([a,b],[left,right])
+    frames=[([a],[left]),([a],[left]),([b],[left]),final]
+    assert presentation_trace(frames)==[None,None]
+
+
+def test_pending_presentation_continuity_expires_when_face_moves_away():
+    a,b=[1.,0.,0.],[.6,.8,0.]
+    left,right=[.1,.1,.2,.3],[.6,.1,.2,.3]
+    assert presentation_trace([([a],[left]),([a],[left]),([b],[left]),([b],[right])])==[None,None]
+
+
+def test_pending_presentation_continuity_is_not_unique_after_new_overlap():
+    a,b,c=[1.,0.,0.],[.6,.8,0.],[0.,0.,1.]
+    box=[.1,.1,.2,.3]
+    assert presentation_trace([([a],[box]),([a],[box]),([b],[box]),([b,c],[box,box])])==[None,None]
 
 
 def test_known_name_cooldown_cannot_be_bypassed_by_feature_drift():
