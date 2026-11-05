@@ -635,6 +635,9 @@ class CloudTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "LongTasks").mkdir()
+            with patch.object(cloud, "ROOT", root):
+                self.assertEqual(cloud.task_route("b" * 12), "local_only")
+                self.assertFalse((root / "LongTasks/projects.db").exists())
             with sqlite3.connect(root / "LongTasks/projects.db") as conn:
                 conn.execute("CREATE TABLE projects(id TEXT, ai_route TEXT)")
                 conn.execute("INSERT INTO projects VALUES (?,?)", ("a" * 12, "local_only"))
@@ -1044,6 +1047,10 @@ class CloudTests(unittest.TestCase):
         # Benchmark runs can retire a slow model while this suite is running.
         self.model_speed = patch("model_fitness.measured_speed", return_value=None)
         self.model_speed.start()
+        # Global retirement is separate from response-speed ranking. Real
+        # slow-model history must not exclude these mocked routing fixtures.
+        self.retirement_speed = patch("model_fitness.retirement_speed", return_value=None)
+        self.retirement_speed.start()
         self.ram = patch("model_library.total_ram_gb", return_value=128)
         self.ram.start()
         self.vram = patch("model_fitness.gpu_vram_gb", return_value=12)
@@ -1062,6 +1069,7 @@ class CloudTests(unittest.TestCase):
         self.addCleanup(self.candidates.stop)
         self.addCleanup(self.loaded.stop)
         self.addCleanup(self.model_speed.stop)
+        self.addCleanup(self.retirement_speed.stop)
         self.addCleanup(self.ram.stop)
         self.addCleanup(self.vram.stop)
         self.addCleanup(self.plan.stop)
@@ -2638,7 +2646,22 @@ class SubscriptionAgentTests(unittest.TestCase):
 
     def test_subscription_actual_usage_counts_cache_once_and_unknown_is_not_recorded(self):
         import usage_history
-        with tempfile.TemporaryDirectory() as d,patch.object(cloud_providers,'AGENT_ROOT',Path(d)/'agents'),patch.object(cloud,'STATE',Path(d)/'Cloud'),patch.object(cloud.pc_offline,'offline',return_value=False),patch.object(usage_history,'DATABASE',Path(d)/'usage.db'):
+        with (tempfile.TemporaryDirectory() as d,
+              patch.object(cloud_providers, "AGENT_ROOT", Path(d) / "agents"),
+              patch.object(cloud, "ROOT", Path(d)),
+              patch.object(cloud, "STATE", Path(d) / "Cloud"),
+              patch.object(cloud.pc_offline, "offline", return_value=False),
+              patch.object(usage_history, "DATABASE", Path(d) / "usage.db")):
+            # This test attributes real usage to a task. Its policy registry must
+            # be readable and owned here, rather than borrowed from the install.
+            state = Path(d) / "LongTasks"
+            state.mkdir()
+            connection = sqlite3.connect(state / "projects.db")
+            try:
+                connection.execute("CREATE TABLE projects (id TEXT PRIMARY KEY, ai_route TEXT)")
+                connection.commit()
+            finally:
+                connection.close()
             folder=Path(d)/'project';folder.mkdir()
             for provider in ('claude','grok'):
                 exe=cloud_providers._subscription_binary(provider);exe.parent.mkdir(parents=True,exist_ok=True);exe.write_bytes(b'MZfake')
