@@ -64,6 +64,52 @@ def test_failed_scan_export_preserves_other_pages_and_closes_resources(tmp_path)
     document.close.assert_called_once_with()
 
 
+def test_temp_directory_failure_preserves_native_text_and_reports_omission(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    class PdfiumError(Exception):
+        pass
+
+    pdf = tmp_path / "unavailable-temp-storage.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    pages = [Mock(), Mock()]
+    textpages = [Mock(), Mock()]
+    for page, textpage, text in zip(pages, textpages, ["Native order", ""]):
+        page.get_textpage.return_value = textpage
+        textpage.get_text_bounded.return_value = text
+    document = Mock()
+    document.__len__ = Mock(return_value=2)
+    document.__getitem__ = Mock(side_effect=lambda index: pages[index])
+    recognize = Mock()
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(
+            PdfDocument=Mock(return_value=document), PdfiumError=PdfiumError
+        ),
+        "media_worker": SimpleNamespace(recognize_image=recognize),
+    }), patch.object(
+        scanned_pdf.tempfile, "TemporaryDirectory",
+        side_effect=OSError("temporary storage unavailable"),
+    ) as temporary_directory:
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert "[Page 1; selectable text]\nNative order" in result["text"]
+    assert "[1 scanned pages were not read: 2.]" in result["text"]
+    assert "[Page 2; vision transcription]" not in result["text"]
+    assert result["pages_read"] == [1]
+    assert result["scanned_pages"] == [2]
+    assert result["has_scans"] is True
+    assert result["partial"] is True
+    temporary_directory.assert_called_once_with(prefix="cale-pdf-")
+    recognize.assert_not_called()
+    for page, textpage in zip(pages, textpages):
+        page.render.assert_not_called()
+        textpage.close.assert_called_once_with()
+    assert [page.close.call_count for page in pages] == [1, 2]
+    document.close.assert_called_once_with()
+
+
 def test_native_pdf_does_not_require_vision_worker(tmp_path):
     import sys
     from unittest.mock import Mock
