@@ -272,6 +272,35 @@ def test_recovery_skips_null_recovery_count_without_aborting_other_jobs(tmp_path
     assert recovered["recoveries"] == 1
 
 
+def test_recovery_skips_overflowing_recovery_count_without_aborting_other_jobs(tmp_path):
+    bad_id = "4" * 32
+    good_id = "5" * 32
+    bad_path = quick_image._job_path(tmp_path, bad_id)
+    bad_path.parent.mkdir(parents=True)
+    # A valid JSON number can decode to infinity and overflow int().
+    bad_text = json.dumps({
+        "job_id": bad_id, "status": "working", "prompt": "a dog",
+        "output_path": str(tmp_path / "bad.png"),
+    })[:-1] + ', "recoveries": 1e309}'
+    bad_path.write_text(bad_text, encoding="utf-8")
+    quick_image._write_job(tmp_path, good_id, {
+        "job_id": good_id, "status": "working", "prompt": "a dog",
+        "output_path": str(tmp_path / "good.png"),
+    })
+    good_path = quick_image._job_path(tmp_path, good_id)
+
+    with (patch.object(Path, "glob", return_value=iter([bad_path, good_path])),
+          patch.object(quick_image, "_worker_running", return_value=False),
+          patch.object(quick_image, "_launch_job") as launch):
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_called_once_with(tmp_path, good_id)
+
+    assert bad_path.read_text(encoding="utf-8") == bad_text
+    recovered = quick_image.image_job_status(tmp_path, good_id)
+    assert recovered["status"] == "queued"
+    assert recovered["recoveries"] == 1
+
+
 def test_recovery_skips_non_object_job_records(tmp_path):
     for index, malformed in enumerate((None, [], "invalid", 42)):
         root = tmp_path / str(index)
