@@ -934,7 +934,48 @@ def native_reasoning_value(effort, thinking):
     return effort
 
 
-def native_chat_request(payload, capacity, thinking=None):
+def native_forced_choice_supported(payload):
+    """Recognize only Cale's declared, typed required/named tool contracts.
+
+    Ollama v0.40.13's OpenAI request struct has no ToolChoice field. Both
+    transports generate ordinary tool replies; valid_completion remains the
+    enforcement boundary against the UNMODIFIED original request. This is
+    compatibility parity, not a claim of server-side forced-tool grammar.
+    """
+    choice = payload.get("tool_choice")
+    if choice != "required":
+        if (not isinstance(choice, dict) or set(choice) != {"type", "function"}
+                or choice.get("type") != "function" or not isinstance(choice.get("function"), dict)
+                or set(choice["function"]) != {"name"}):
+            return False
+        selected = choice["function"]["name"]
+        if not isinstance(selected, str) or not selected:
+            return False
+    else:
+        selected = None
+    tools = payload.get("tools")
+    if not isinstance(tools, list) or not tools:
+        return False
+    names = set()
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        if (not isinstance(tool, dict) or set(tool) != {"type", "function"} or tool.get("type") != "function"
+                or not isinstance(function, dict) or set(function) - {"name", "description", "parameters"}
+                or ("description" in function and not isinstance(function["description"], str))
+                or not isinstance(function.get("name"), str)
+                or not function["name"] or function["name"] in names
+                or not isinstance(function.get("parameters"), dict)):
+            return False
+        schema = function["parameters"]
+        try:
+            validator_for(schema).check_schema(schema)
+        except (SchemaError, ValueError, TypeError, RecursionError):
+            return False
+        names.add(function["name"])
+    return selected is None or selected in names
+
+
+def native_chat_request(payload, capacity, thinking=None, *, allow_forced_choice=False):
     """Translate only losslessly representable text requests to Ollama's native API.
 
     The configured context remains a ceiling, not a reservation. Unknown features
@@ -951,7 +992,8 @@ def native_chat_request(payload, capacity, thinking=None):
                                 and payload["max_tokens"] != output)):
         return None
     if payload.get("tool_choice") not in (None, "auto"):
-        return None
+        if not allow_forced_choice or not native_forced_choice_supported(payload):
+            return None
     # Match v0.40.13 ThinkingFromReasoningEffort for canonical levels.
     # Aliases/unknown levels retain the compatibility endpoint unchanged.
     effort = payload.get("reasoning_effort")
@@ -1137,6 +1179,7 @@ class Router:
         self.model_thinking_controls = {}
         self.native_version_until = 0
         self.native_version_ready = False
+        self.native_version = None
         self.model_vision = set()
         self.model_speeds = {}
         self.model_cache_until = 0
@@ -1649,19 +1692,25 @@ class Router:
             native = None
             capacity = self.model_native_contexts.get(body.get("model"), 0)
             if capacity:
-                native = native_chat_request(body, capacity, self.model_thinking_controls.get(body.get("model")))
+                native = native_chat_request(body, capacity, self.model_thinking_controls.get(body.get("model")),
+                                             allow_forced_choice=True)
             if native is not None:
                 if time.monotonic() >= self.native_version_until:
                     self.native_version_ready = False
+                    self.native_version = None
                     try:
                         with urlopen("http://127.0.0.1:11434/api/version", timeout=3) as response:
                             version = json.load(response).get("version", "")
                         match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
-                        self.native_version_ready = bool(match and tuple(map(int, match.groups())) >= (0, 40, 13))
+                        self.native_version = tuple(map(int, match.groups())) if match else None
+                        self.native_version_ready = bool(self.native_version and self.native_version >= (0, 40, 13))
                     except Exception:
                         pass
                     self.native_version_until = time.monotonic() + 60
-                if not self.native_version_ready:
+                if (not self.native_version_ready or body.get("tool_choice") not in (None, "auto")
+                        and self.native_version != (0, 40, 13)):
+                    # Forced-choice compatibility was source-verified only for
+                    # this exact server. Future versions may add new semantics.
                     native = None
             url = ("http://127.0.0.1:11434/api/chat" if native is not None
                    else "http://127.0.0.1:11434/v1/chat/completions")

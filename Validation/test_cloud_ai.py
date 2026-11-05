@@ -1238,6 +1238,127 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(body["messages"][3]["thinking"], "Read both saved files.")
         self.assertEqual(payload, original)
 
+    def test_native_forced_choice_exact_version_preserves_original_contract_and_history(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        for choice in ("required", {"type": "function", "function": {"name": "save_plan"}}):
+            with self.subTest(choice=choice):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+                router.native_version_ready = True
+                router.native_version = (0, 40, 13)
+                router.native_version_until = time.monotonic()+60
+                payload = {**ARGUMENT_REQUEST, "max_tokens": 2000, "tool_choice": choice,
+                    "reasoning_effort": "low", "messages": [
+                        {"role": "user", "content": "Continue the saved repair."},
+                        {"role": "assistant", "content": None, "tool_calls": [{"id": "previous", "index": 0,
+                            "type": "function", "function": {"name": "read_file", "arguments": '{"path":"main.py"}'}}]},
+                        {"role": "tool", "tool_call_id": "previous", "content": "Actual saved source context"}]}
+                original = json.loads(json.dumps(payload))
+                raw = {"model": cloud.LOCAL_MODEL, "done": True, "prompt_eval_count": 222, "eval_count": 15,
+                    "eval_duration": 1000000000, "message": {"role": "assistant", "content": "", "thinking": "checked",
+                        "tool_calls": [{"id": "next", "function": {"name": "save_plan", "arguments": {"steps": [1, 2]}}}]}}
+                with (patch.object(cloud, "post", side_effect=lambda url, *args, **kwargs:
+                                   raw if url.endswith("/api/chat") else argument_reply([1, 2])) as upstream,
+                      patch.object(cloud, "valid_completion", wraps=cloud.valid_completion) as guard,
+                      patch("usage_history.record_completion") as usage):
+                    result = router.complete(payload)
+                self.assertTrue(upstream.call_args.args[0].endswith("/api/chat"))
+                body = upstream.call_args.args[1]
+                self.assertEqual(body["tools"], payload["tools"])
+                self.assertLess(body["options"]["num_ctx"], 262144)
+                self.assertEqual(body["options"]["num_predict"], 2000)
+                self.assertIs(body["truncate"], False); self.assertIs(body["shift"], False)
+                self.assertEqual(body["messages"][1]["tool_calls"][0]["id"], "previous")
+                self.assertEqual(body["messages"][2]["tool_call_id"], "previous")
+                self.assertIs(guard.call_args.args[1], payload)
+                self.assertEqual(guard.call_args.args[1]["tool_choice"], choice)
+                self.assertEqual(result["usage"]["total_tokens"], 237)
+                self.assertEqual(result["eval_duration"], 1000000000)
+                usage.assert_called_once()
+                self.assertEqual(payload, original)
+
+    def test_native_forced_choice_invalid_reply_cannot_bypass_original_host_guard(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        other = {"type": "function", "function": {"name": "other_tool", "parameters": {"type": "object"}}}
+        failures = [("required", {"role": "assistant", "content": "Here is an ordinary answer."}, "Required tool call was missing"),
+            ({"type": "function", "function": {"name": "save_plan"}}, {"role": "assistant", "content": "",
+                "tool_calls": [{"function": {"name": "other_tool", "arguments": {}}}]}, "Required tool call was replaced")]
+        for choice, message, error in failures:
+            with self.subTest(choice=choice):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+                router.native_version_ready = True; router.native_version = (0,40,13)
+                router.native_version_until = time.monotonic()+60
+                payload = {**ARGUMENT_REQUEST, "tools": [*ARGUMENT_REQUEST["tools"], other], "tool_choice": choice}
+                with (patch.object(cloud, "post", return_value={"model": cloud.LOCAL_MODEL, "done": True, "message": message}) as upstream,
+                      patch("usage_history.record_completion")):
+                    with self.assertRaisesRegex(ValueError, error):
+                        router.complete(payload)
+                self.assertEqual(upstream.call_count, 1)
+                self.assertTrue(upstream.call_args.args[0].endswith("/api/chat"))
+
+    def test_native_forced_choice_bad_arguments_still_fail_bounded_schema_repair(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536}
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+        router.native_version_ready = True; router.native_version = (0,40,13)
+        router.native_version_until = time.monotonic()+60
+        raw = {"model": cloud.LOCAL_MODEL, "done": True, "message": {"role": "assistant", "content": "",
+            "tool_calls": [{"function": {"name": "save_plan", "arguments": {"steps": ["invalid"]}}}]}}
+        repair = {"model": cloud.LOCAL_MODEL, "done": True, "message": {
+            "role": "assistant", "content": '{"steps":["still invalid"]}'}}
+        payload = {**ARGUMENT_REQUEST, "tool_choice": {"type": "function", "function": {"name": "save_plan"}}}
+        original = json.loads(json.dumps(payload))
+        with patch.object(cloud, "post", side_effect=[raw, repair]) as upstream, patch("usage_history.record_completion"):
+            with self.assertRaises(cloud.ToolArgumentError):
+                router.complete(payload)
+        self.assertEqual(upstream.call_count, 2)
+        self.assertTrue(all(call.args[0].endswith("/api/chat") for call in upstream.call_args_list))
+        self.assertEqual(payload, original)
+
+    def test_native_forced_choice_unknown_or_future_version_keeps_compatibility(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        for version in (None, (0,40,12), (0,40,14), (1,0,0)):
+            with self.subTest(version=version):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+                router.native_version_ready = True; router.native_version = version
+                router.native_version_until = time.monotonic()+60
+                payload = {**ARGUMENT_REQUEST, "tool_choice": "required"}
+                with patch.object(cloud, "post", return_value=argument_reply([1])) as upstream:
+                    router.complete(payload)
+                self.assertTrue(upstream.call_args.args[0].endswith("/v1/chat/completions"))
+                self.assertEqual(upstream.call_args.args[1]["tool_choice"], "required")
+
+    def test_native_forced_choice_version_discovery_is_exact_and_cancellable(self):
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        raw = {"model": cloud.LOCAL_MODEL, "done": True, "message": {"role": "assistant", "content": "",
+            "tool_calls": [{"function": {"name": "save_plan", "arguments": {"steps": [1]}}}]}}
+        payload = {**ARGUMENT_REQUEST, "tool_choice": "required"}
+        for version, native in (("0.40.13", True), ("0.40.14", False), ("0.40.13-rc1", False)):
+            with self.subTest(version=version):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+                with (patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps({"version": version}).encode())) as probe,
+                      patch.object(cloud, "post", side_effect=lambda url, *args, **kwargs:
+                                   raw if url.endswith("/api/chat") else argument_reply([1])) as inference,
+                      patch("usage_history.record_completion")):
+                    router.complete(payload)
+                probe.assert_called_once_with("http://127.0.0.1:11434/api/version", timeout=3)
+                self.assertEqual(inference.call_args.args[0].endswith("/api/chat"), native)
+        router = cloud.Router()
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+        cancelled = False
+        def probe(*args, **kwargs):
+            nonlocal cancelled
+            cancelled = True
+            return io.BytesIO(b'{"version":"0.40.13"}')
+        with patch.object(cloud, "urlopen", side_effect=probe), patch.object(cloud, "post") as inference:
+            with self.assertRaises(InterruptedError):
+                router.complete(payload, cancel=lambda: cancelled)
+        inference.assert_not_called()
+
     def test_native_32k_candidate_only_serves_requests_that_fit(self):
         self.candidates.stop()
         alias = "cale-code7"
@@ -2773,3 +2894,18 @@ def test_native_context_invalid_outer_tool_index_preserves_legacy_validation():
     for invalid in (True, "0", None, -1, 1.5, 2**63):
         base["messages"][0]["tool_calls"][0]["index"] = invalid
         assert cloud.native_chat_request(base, 65536) is None
+
+
+def test_native_forced_choice_recognizer_rejects_unknown_or_malformed_contracts():
+    import copy
+    valid = {**ARGUMENT_REQUEST, "tool_choice": "required"}
+    assert cloud.native_forced_choice_supported(valid)
+    assert cloud.native_chat_request(valid, 65536) is None  # Explicit transport qualification required.
+    for choice in ("none", "any", {}, {"type": "function", "function": {"name": "not_declared"}},
+                   {"type": "function", "function": {"name": ["save_plan"]}},
+                   {"type": "function", "function": {"name": "save_plan", "extra": True}}):
+        assert not cloud.native_forced_choice_supported({**valid, "tool_choice": choice})
+        assert cloud.native_chat_request({**valid, "tool_choice": choice}, 65536, allow_forced_choice=True) is None
+    for tools in ([], None, [valid["tools"][0], valid["tools"][0]],
+                  [{"type": "function", "function": {"name": "save_plan", "parameters": {"type": "not_a_json_type"}}}]):
+        assert not cloud.native_forced_choice_supported({**valid, "tools": tools})
