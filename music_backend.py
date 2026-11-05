@@ -1239,5 +1239,85 @@ def _run_job(job_id: str) -> None:
         usage_history.CURRENT_TASK.reset(attribution)
 
 
+# Managed compatibility preparation for the pinned upstream CPU VAE fallback.
+# This creates reviewable backup/candidate bytes ONLY. It never rewrites a live
+# engine or claims that stopping its polling worker cancels API computation.
+_ACE_VAE_DECODE_RELATIVE = 'acestep/core/generation/handler/generate_music_decode.py'
+_ACE_VAE_DECODE_SHA256 = '5ebe4dfd65635a687a5692d37ab377ab959170e764fbedf54d6e35711cc40416'
+_ACE_VAE_DECODE_CRLF_SHA256 = '4cd434b7ec4367b34711587ba18d7d3f82b4b171dded017c3ed12a3fd87438b4'
+
+
+def _cpu_vae_compatibility_source(source: bytes) -> bytes:
+    """Use upstream's CPU dtype policy and restore both device and dtype.
+
+    Only the exact LF/Windows-CRLF files at REVISION qualify. Unknown source,
+    including local edits or an already replaced implementation, is preserved.
+    """
+    import hashlib
+    if not isinstance(source,bytes) or hashlib.sha256(source).hexdigest() not in {
+            _ACE_VAE_DECODE_SHA256,_ACE_VAE_DECODE_CRLF_SHA256}:
+        raise ValueError('Pinned ACE VAE source differs; preserve it for review.')
+    newline=b'\r\n' if b'\r\n' in source else b'\n'
+    text=source.replace(b'\r\n',b'\n').decode('utf-8')
+    replacements=[
+        ('                vae_device = None\n',
+         '                vae_device = None\n                vae_dtype = None\n'),
+        ('                        vae_device = next(self.vae.parameters()).device\n'
+         '                        self.vae = self.vae.cpu()\n'
+         '                        pred_latents_for_decode = pred_latents_for_decode.cpu()\n',
+         '                        vae_parameter = next(self.vae.parameters())\n'
+         '                        vae_device, vae_dtype = vae_parameter.device, vae_parameter.dtype\n'
+         '                        cpu_dtype = self._get_vae_dtype("cpu")\n'
+         '                        self.vae = self.vae.to(device="cpu", dtype=cpu_dtype)\n'
+         '                        pred_latents_for_decode = pred_latents_for_decode.to(device="cpu", dtype=cpu_dtype)\n'),
+        ('                        self.vae = self.vae.to(vae_device)\n',
+         '                        self.vae = self.vae.to(device=vae_device, dtype=vae_dtype)\n')]
+    for old,new in replacements:
+        if text.count(old)!=1:raise ValueError('Pinned ACE VAE patch anchor changed; no candidate prepared.')
+        text=text.replace(old,new,1)
+    import ast
+    ast.parse(text)
+    return text.encode('utf-8').replace(b'\n',newline)
+
+
+def prepare_cpu_vae_compatibility_patch(destination: str | Path) -> dict:
+    """Publish an exclusive review bundle, without changing the engine source.
+
+    Activation is deliberately absent: an API query timeout is not cancellation,
+    and all API clients need a shared admission barrier before any live restart.
+    """
+    import hashlib
+    import design_tools
+    root=design_tools._game_plain_path(ROOT)
+    engine=design_tools._game_plain_path(ENGINE)
+    target=design_tools._game_plain_path(destination)
+    if not engine.is_relative_to(root) or not target.is_relative_to(root/'Recovery'):
+        raise ValueError('Use this installation engine and a NEW Recovery subfolder.')
+    if target.exists():raise FileExistsError('Existing patch evidence is preserved; choose a new folder.')
+    if not target.parent.is_dir():raise ValueError('Prepare the owned Recovery parent first.')
+    with design_tools._game_directory_guard(root,engine):
+        revision=subprocess.run([_tool('git'),'-C',str(engine),'rev-parse','HEAD'],capture_output=True,text=True,
+                                timeout=15,creationflags=HIDE)
+        if revision.returncode or revision.stdout.strip()!=REVISION:
+            raise ValueError('ACE revision differs; no compatibility bundle was written.')
+        source_path=design_tools._game_plain_path(engine/_ACE_VAE_DECODE_RELATIVE)
+        with source_path.open('rb') as stream:source=stream.read(100001)
+        if len(source)>100000:raise ValueError('ACE VAE source exceeds its preparation budget.')
+        candidate=_cpu_vae_compatibility_source(source)
+        evidence={'format':'cale-ace-cpu-vae-candidate-v1','upstream_revision':REVISION,
+                  'relative_path':_ACE_VAE_DECODE_RELATIVE,'original_sha256':hashlib.sha256(source).hexdigest(),
+                  'candidate_sha256':hashlib.sha256(candidate).hexdigest(),'activated':False,
+                  'policy':'Use existing _get_vae_dtype(cpu), restore exact prior device and dtype in finally.',
+                  'limits':'Preparation only. Needs quiescent all-client activation/restart, actual full-song qualification and rollback protocol.'}
+        # Recheck while engine ancestor handles remain held. A future activation
+        # must independently revalidate this identity; this is not a launch lock.
+        with source_path.open('rb') as stream:current=stream.read(100001)
+        if current!=source:raise ValueError('ACE source changed during preparation.')
+        design_tools._game_publish(target,{'original.py':source,'candidate.py':candidate,
+            'receipt.json':json.dumps(evidence,indent=2).encode('utf-8')})
+    return {**evidence,'folder':str(target)}
+
+
+
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--run-job":
     _run_job(sys.argv[2])

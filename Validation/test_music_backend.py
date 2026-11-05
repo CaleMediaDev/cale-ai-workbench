@@ -1562,3 +1562,127 @@ def test_vocal_song_video_repair_does_not_recompose_or_retranscribe(tmp_path):
     assert done["status"] == "complete" and done["vocal_check"]["passed"]
     assert render.call_args.kwargs["expected_source_sha256"] == digest
     assert audio.read_bytes() == b"approved vocal audio"
+
+
+# Exact MIT upstream source fixture at ca1e85fe; no installed engine is required.
+_ACE_CPU_DECODE_FIXTURE = 'c-q}sTW{RD5q{ra!RkrMS<7~kQxw~704H&R1H_5p<D@NIL#8EamyK>EDchSMKz~GkVSh<yDC$n_ZrrpFCl9fgmzm)=_gOoR^O}Wu#18Lh!Xv79o{=?63MM3pb3txyRxD$JDi)-r<l)T?$wjzkQVD(7cN}Ln<7tr#MOI<`TQ2M06i?YK7I{k4rr_C%nDvuvGbgWksOIEDfs|-6CzoZBu!fvMPSxEcUzMV)@4}}Q6SHcIh9C?p{8do~VV=djVX<N=U~$Ys#qU@U3&w&wLDOJ$JDbhIgi1-?n#Y~t+bSf^_yf-tGXnqMZJ#Pw7^z{1NCN+7N)nnyB+^%iTC<e!Oy%UB-Z8)pUdu9>3t8cV#3B}xpb)H}f(3n0gNjTb6)d^>H2#w;iRaCyyi`T0<U)gX1^CYq!|V0{&tfJ5#6kuj0`SULf=RdmlC{TZs7jgyw^W7eK=LnaxL-y*52CWt@1oJpRh;Bhb@){{1ai$|wIF(Tv<dt}ny}usM-E<8n!eH+_AfP5^TETe7Y#AM@Kv59pvW3<o*@=m1$VWE1idE_k7Ga-jM!+&pEXoY#7ed_dywATNG9%h*eV9?T<?;CZb0^kfNd$tGc;jE1=v>45Wvh~2iSG#Piy3~Hp`C0cn-LfnbMvIR?So3FraBsUrWqLkJR)5f(HioC)C@$TkpaHzzE^t(Ljj4>QADGYxdPLDRQX};H}`865-OvtOOeKI4cvyi-d=CD<M4G(dY$JrN{<K)t1%OR&5{=s2Th(3XI-B#i+ToRP+{Z+}vQOf)FBctILIQ$p%a=Kud7?RES(G$S-kY3x+RwPv0N@lEuipWD;T~>?8>-Bm|3`&?F&Wn8-V@Vw`Bu(ecd(^T}Q3svj$^$r(66PhDZ2!js{FKG7izA6=Wj?>k;YxBGgstj+(*sqDGlaju&SEh4?+&8qe2m6ONl?orUJIoEI>!<iqJLZIgBBe>f_T^M(P(=9z8WOJRyPlEbThkW})9up3>0+BQenOh&76BlD#6@@%c>%HOif*kdgs|5u#qzWut!686AO{t;pS?-qw8eQY_LG90O?`-$gNP0OSJRhCz1eN7ffEnLv<Hd3mLB^-+0H7u6M+`)Gu!3j~mH<=25-|4nc{ZT$&AQ6cSVio%T<PpLa5LiwdVh>tJob&Qg)hk0?nhs)X~DkDNd$!mTlV+#+Bf1@c=QiKly|))P#G-K2kSDU`uHA%rHb&RGr+3;4Z+-k%@2p7<5IgAwVn!W+7C#gtLZA&bD04oU51`dvyJOvh^&u*S=)~E-w$+xDqAkM(3WNDdOlYSehhQ-==zxN<n=YLV(67cv2WYZ3=SEUA*3G22lzrv33ULr*@UY#v;3NHsob&3ysbK$TS-O?3!C8uy$Ck|vE|nWN>~64mR}oizInbg4i8X`r70#JT0&;j{vY!P$dR_QgdF?iU4C(LNF!P(25J_NApsK|I!K;Gu$Jnib_Z<-!uIcf{)-5v&mn46D8(w97#hBv(^H?kTC?zTk%M{;O*fEond)K)sR9QcZw$MzIV(wZM6J05&IzNEP4IZ;laHA!3v4mq5&tMDlmcJ0x({z@_?ZD3$VrI}5oM-JkbADy<lvy*F4P3==OF+2M`DsANmz{aC-f|k-Ju}^WbQ={^eXikm>_OKvx7<ytoF?b`ak>R4d$2Q-;*4W0511LTPZs@Ng?Mj@)p=5Sqb&+$*a>}FHg^d*Oz}iKdlnev!_GK*S${yYo%Uw<T`)L9RKeCva5Z@>*ea6QD$Yz5{LwtJamTcZqi%n8h<3q<uGMi_>SLi^GmG4nqtY~Kh7muL@6O-CL3^$2uoD7`Hu073=K`TV<LcMS@=_toyWa$n*0tP=N}=BevynD$NrHu3Fu03pZs`I6v?Ko4~G@@qN>#){&Xaoh$}{{=B)WVnZfo-_`8$-#KYcI?|FIp=EKEl^@_u$yMUy<w50Kc|2(!nuHpeXeQC+^<`$;*r7hd<pbB|@Y03Qh*7!~zzCr!o`}kyNE<g3m>i?^TlQ);A7r#X<2;Fh^ke_!7pw6VnjC2Nrp6<n|K~KMM>y1b{XX;4;&e57>NXO6>C2+rDzaY1Hp3E&xnthBkIhxsjP*V-j^dsQZU|ePrc|A4LGZWCE5<J{Ksp(^KJ|J#}ZA8~d*ydm9<_7vbOr4;ih^N=s)Avc%5H=%_dI<`fB*A3ezcEJl&ua!n2~;$=N<N*O)=!h`yi6i;%kWavC(~8JnHfId+5xUL<0d`ZG*hWgv%lZ;Bae+BQ8SPP6tJ{tjJ8!rH0Ev}OXz%UK(j*W9{GO&u)*P%PBV$none0tv3<TVoMBYe6M)+%qRSpV12EG9AOGu=>H3-}?Xgd0SqMA;lwl{K51OVQXA-(N#96Xp56X4!D094VeC(QJ5EkViAVc6(G+aZ?0(*nzVRRjPcVjsNDo_Jw60$UNkLTnm5Cf_Bs?1BQhE(oqu|dMB1sJozGPg@`bf9`SOAECLLJ$}cd_*o7tMMh89qTy7Vlo<ox8+z?K}@d1Nm-hUP0*~n-r@1l)8|i~JX`or<8N<Y?#LI03Vqm3X;;pz93RXvNRx*Ekgg|L7!B$rbSAx6FF?(h<w{RKM$};6*vlIVUA=YR6!=R!1#m>9-V<wK#iQkwOP^(T9NLF!o>mw4pr7Ew`v78t1E3x`o)1j{6HsMC@8vqjxT-|S@aKj}$FuS=5*c=OS^AYn^}Z!>(n31Z7j_o8yAAQ|{8!U3L3#U`7y4VMPZuX=RS7>~Nj;iwnemuIq^!)zo0HFsRdm3-p`QRA+sSy7yW`2u=tS>3EYRij7hA6PzeKYAqCpFyF}&T^%?HD;zWmx5iOn1L1JT&l0I5GgC-w7Ur!)qYdn&M5-wli%oDUf^h|XS@C!gQq`bWr{DnDQulm}>Mn7dnyceC+!o@hhECAjyLSMT)bUEfvQ)n1}<{RsSO%cMGY9D|m}UO&rk4UQS+=OzQTgA&*COoW-FQ{SqiITElZ>hDX~ot+)@Y>9VxMv2X0N;9Ks^pPt1sJ~hpRj{Bgcvcx2H!me!vF)nSFhIE}YfQV+xf3AS$+1K~aA$hkiqWK8HO)tfrp0>*S)s_O{-M7Ck+`;37TY_@Si0-8cYlFaMs&UhkEzz1`xV%KgR~Swp@Ztg<^@%FzPZE#_`eCO6(<pxufse3@>uwWO6ha(CB?5ZcgU0sZq2?wwf^{rJ^oR9JSgTF&L9^%BDMLOh$c#QD$&PAhzlm6jq1d4_^?80>NzxxajcKg-I!%T)p~odu*F|!XIjDSSN92;k7-s;^b39qy~?oR>lm)Bk7!J`Y9MjQT(!(*+;6v;uA#RSs;{mstuCXVdk3poKE**^#M9*!wzk(*O^u(i9`S6#R+8a&ftutCoQHegAt5=`viM;F-ss{y5(&({$H-QpA69>g)LGnifo0LQAw~DkCfbxV_{)ig#zAN5VI`q*MU%np?fXCNA;J&&BM;jM6_qj{O;UOj)&Bq>-N>i'
+
+def ace_cpu_source_fixture():
+    import base64,zlib
+    return zlib.decompress(base64.b85decode(_ACE_CPU_DECODE_FIXTURE))
+
+
+def cpu_decode_method(source):
+    """Execute the actual trusted upstream method with typed CPU/GPU doubles."""
+    import ast,gc,types,time
+    tree=ast.parse(source.decode())
+    node=next(n for c in tree.body if isinstance(c,ast.ClassDef) for n in c.body
+              if isinstance(n,ast.FunctionDef) and n.name=='_decode_generate_music_pred_latents')
+    code=ast.fix_missing_locations(ast.Module(body=[node],type_ignores=[]))
+    class Tensor:
+        def __init__(self,device='cuda:0',dtype='bfloat16'):self.device=device;self.dtype=dtype
+        def detach(self):return self
+        def cpu(self):return Tensor('cpu',self.dtype)
+        def transpose(self,*a):return self
+        def contiguous(self):return self
+        def to(self,*args,device=None,dtype=None):
+            if args:
+                if args[0] in ('bfloat16','float32'):dtype=args[0]
+                else:device=args[0]
+            return Tensor(device or self.device,dtype or self.dtype)
+        def float(self):return Tensor(self.device,'float32')
+        def abs(self):return self
+        def amax(self,**kw):return self
+        def __gt__(self,value):return False
+    torch=types.SimpleNamespace(Tensor=Tensor,inference_mode=nullcontext,float32='float32',any=lambda value:False)
+    context={'torch':torch,'gc':gc,'time':time,'os':types.SimpleNamespace(environ={}),
+             'logger':types.SimpleNamespace(info=lambda *a:None,debug=lambda *a:None,warning=lambda *a:None),
+             'get_effective_free_vram_gb':lambda:.1}
+    # The method annotations reference Optional/Callable/Dict/Any/Tuple.
+    import typing
+    context.update(vars(typing));exec(compile(code,'pinned_ace_decode_fixture.py','exec'),context)
+    return context['_decode_generate_music_pred_latents'],context,Tensor
+
+
+@pytest.mark.parametrize('manual',[False,True])
+@pytest.mark.parametrize('decode_error',[False,True])
+def test_cpu_vae_patch_uses_cpu_float32_then_restores_original_device_and_dtype(manual,decode_error):
+    import types
+    source=music_backend._cpu_vae_compatibility_source(ace_cpu_source_fixture())
+    method,context,Tensor=cpu_decode_method(source)
+    if manual:context['os'].environ['ACESTEP_VAE_ON_CPU']='1'
+    observed=[]
+    class Vae:
+        def __init__(self):self.parameter=Tensor()
+        @property
+        def dtype(self):return self.parameter.dtype
+        def parameters(self):return iter([self.parameter])
+        def cpu(self):self.parameter=self.parameter.cpu();return self
+        def to(self,*args,**kw):self.parameter=self.parameter.to(*args,**kw);return self
+        def decode(self,latents):
+            observed.append((self.parameter.device,self.parameter.dtype,latents.device,latents.dtype))
+            assert observed[-1]==('cpu','float32','cpu','float32')
+            if decode_error:raise RuntimeError('actual decode failure')
+            return types.SimpleNamespace(sample=Tensor('cpu','float32'))
+    vae=Vae();host=types.SimpleNamespace(vae=vae,use_mlx_vae=False,mlx_vae=None,device='cuda',
+        current_offload_cost=0,_empty_cache=lambda:None,_memory_allocated=lambda:0,_max_memory_allocated=lambda:0,
+        _load_model_context=lambda *a:nullcontext(),_get_vae_dtype=lambda device:'float32' if device=='cpu' else 'bfloat16')
+    arguments=dict(pred_latents=Tensor(),progress=None,use_tiled_decode=False,time_costs={'total_time_cost':0})
+    if decode_error:
+        with pytest.raises(RuntimeError,match='actual decode failure'):method(host,**arguments)
+    else:
+        wave,latents,cost=method(host,**arguments)
+        assert wave.dtype=='float32' and latents.device=='cpu'
+    assert observed and vae.parameter.device=='cuda:0' and vae.parameter.dtype=='bfloat16'
+
+
+def test_cpu_vae_patch_leaves_gpu_decode_and_dtype_policy_unchanged():
+    import types
+    method,context,Tensor=cpu_decode_method(music_backend._cpu_vae_compatibility_source(ace_cpu_source_fixture()))
+    context['get_effective_free_vram_gb']=lambda:4.0
+    class Vae:
+        dtype='bfloat16'
+        def decode(self,latents):
+            assert latents.device=='cuda:0' and latents.dtype=='bfloat16'
+            return types.SimpleNamespace(sample=Tensor('cuda:0','float32'))
+    host=types.SimpleNamespace(vae=Vae(),use_mlx_vae=False,mlx_vae=None,device='cuda',current_offload_cost=0,
+        _empty_cache=lambda:None,_memory_allocated=lambda:0,_max_memory_allocated=lambda:0,
+        _load_model_context=lambda *a:nullcontext(),_get_vae_dtype=lambda *a:(_ for _ in ()).throw(AssertionError('No CPU transition')))
+    wave,_,_=method(host,pred_latents=Tensor(),progress=None,use_tiled_decode=False,time_costs={'total_time_cost':0})
+    assert wave.device=='cuda:0'
+
+
+@pytest.mark.parametrize('newline',[b'\n',b'\r\n'])
+def test_cpu_vae_patch_exact_pin_guard_preserves_supported_checkout_newlines(newline):
+    import hashlib
+    source=ace_cpu_source_fixture().replace(b'\n',newline)
+    result=music_backend._cpu_vae_compatibility_source(source)
+    assert result!=source and (result.count(b'\r\n')>0)==(newline==b'\r\n')
+    with pytest.raises(ValueError,match='differs'):music_backend._cpu_vae_compatibility_source(source+b'# user change')
+
+
+def test_cpu_vae_preparation_preserves_engine_and_publishes_exclusive_backup_candidate(tmp_path,monkeypatch):
+    root=tmp_path/'app';engine=root/'Media/music/ACE-Step-1.5';engine.mkdir(parents=True);(root/'Recovery').mkdir()
+    source=engine/music_backend._ACE_VAE_DECODE_RELATIVE;source.parent.mkdir(parents=True);original=ace_cpu_source_fixture();source.write_bytes(original)
+    monkeypatch.setattr(music_backend,'ROOT',root);monkeypatch.setattr(music_backend,'ENGINE',engine)
+    monkeypatch.setattr(music_backend,'_tool',lambda name:'git')
+    with patch.object(music_backend.subprocess,'run',return_value=subprocess.CompletedProcess([],0,music_backend.REVISION+'\n','')):
+        target=root/'Recovery/candidate';result=music_backend.prepare_cpu_vae_compatibility_patch(target)
+        assert result['activated'] is False and source.read_bytes()==original
+        assert (target/'original.py').read_bytes()==original
+        assert (target/'candidate.py').read_bytes()==music_backend._cpu_vae_compatibility_source(original)
+        assert json.loads((target/'receipt.json').read_text())['candidate_sha256']==result['candidate_sha256']
+        with pytest.raises(FileExistsError):music_backend.prepare_cpu_vae_compatibility_patch(target)
+        assert source.read_bytes()==original
+
+
+@pytest.mark.parametrize('failure',['revision','source'])
+def test_cpu_vae_preparation_declines_unknown_source_without_overwrite(tmp_path,monkeypatch,failure):
+    root=tmp_path/'app';engine=root/'Media/music/ACE-Step-1.5';engine.mkdir(parents=True);(root/'Recovery').mkdir()
+    source=engine/music_backend._ACE_VAE_DECODE_RELATIVE;source.parent.mkdir(parents=True)
+    raw=ace_cpu_source_fixture()+(b'# local change' if failure=='source' else b'');source.write_bytes(raw)
+    monkeypatch.setattr(music_backend,'ROOT',root);monkeypatch.setattr(music_backend,'ENGINE',engine);monkeypatch.setattr(music_backend,'_tool',lambda name:'git')
+    revision='unknown' if failure=='revision' else music_backend.REVISION
+    with patch.object(music_backend.subprocess,'run',return_value=subprocess.CompletedProcess([],0,revision+'\n','')):
+        with pytest.raises(ValueError):music_backend.prepare_cpu_vae_compatibility_patch(root/'Recovery/candidate')
+    assert source.read_bytes()==raw and not (root/'Recovery/candidate').exists()
