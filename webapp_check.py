@@ -1410,6 +1410,16 @@ def serialize_result(result: dict, limit: int = 16000) -> str:
     if len(encoded) <= limit:
         return encoded
     value = copy.deepcopy(result)
+    if isinstance(value.get("persistence_witnesses"), list) and value["persistence_witnesses"]:
+        # These optional hashes belong in full host evidence, not at the cost
+        # of actual case verdicts in a model-facing reply. The original result
+        # and receipt remain intact; omission is explicit, never a zero count.
+        value["persistence_witness_count"] = len(value.pop("persistence_witnesses"))
+        value["persistence_witnesses_limited"] = True
+        value["diagnostics_limited"] = True
+        encoded = json.dumps(value, ensure_ascii=False)
+        if len(encoded) <= limit:
+            return encoded
     cases = value.get("cases", [])
     failed = [case for case in cases if case.get("passed") is False]
     value.setdefault("case_count", len(cases))

@@ -2588,3 +2588,24 @@ def test_persistence_metadata_budget_is_atomic_bounded_and_does_not_mutate_resul
     tiny=webapp_check._select_persistence_witnesses(results,max_bytes=1)
     assert tiny==[]
     assert len(json.dumps(webapp_check._select_persistence_witnesses(results)).encode())<=24000
+
+
+def test_persistence_witness_metadata_cannot_turn_real_browser_pass_into_output_error(tmp_path):
+    import copy,json
+    spans=''.join('<span id="n'+str(index)+'">0</span>' for index in range(32))
+    (tmp_path/'index.html').write_text('<input id=seed><button id=fill>Fill</button>'+spans+"<script>function render(v){for(let i=0;i<32;i++)document.getElementById('n'+i).textContent=v;}render(localStorage.getItem('n')||'0');document.getElementById('fill').onclick=()=>{const v=document.getElementById('seed').value;localStorage.setItem('n',v);render(v);};</script>")
+    first={'n'+str(index):'1' for index in range(16)}
+    second={'n'+str(index):'2' for index in range(16,32)}
+    spec={'path':'index.html','cases':[{'set':{'seed':'1'},'click':['fill'],'expect':first},
+        {'reload':True,'expect':first},{'set':{'seed':'2'},'click':['fill'],'expect':second},
+        {'reload':True,'expect':second}]}
+    result=webapp_check.check(tmp_path,spec)
+    assert result['passed'] and len(result['persistence_witnesses'])==32
+    original=copy.deepcopy(result)
+    encoded=webapp_check.serialize_result(result)
+    preview=json.loads(encoded)
+    assert len(encoded)<=16000 and preview['passed'] and preview['failed_case_count']==0
+    assert len(preview['cases'])==4  # Optional hashes cannot crowd out actual verdicts.
+    assert preview['persistence_witnesses_limited'] is True
+    assert preview['persistence_witness_count']==32
+    assert result==original  # Full host evidence/receipts are never truncated.
