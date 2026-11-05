@@ -186,6 +186,30 @@ def test_document_check_handles_negative_dollar_amounts(tmp_path, report_amount,
         "Calculation 1: report amount differs from source arithmetic"])
 
 
+@pytest.mark.parametrize("location", ["source", "report"])
+@pytest.mark.parametrize("negative", [False, True])
+def test_document_check_preserves_sign_of_bare_dollar_evidence(tmp_path, location, negative):
+    folder = _project(tmp_path)
+    source_amount = "-$10" if negative and location == "source" else "$10"
+    report_amount = "-$12" if negative and location == "report" else "$12"
+    source_text = f"Base fee: {source_amount}\nExtra fee: $2\n"
+    (folder / "terms.txt").write_text(source_text, encoding="utf-8")
+    (folder / "summary.md").write_text(
+        f"Total payable: {report_amount}\n", encoding="utf-8")
+    spec = {"source_path": "terms.txt", "report_path": "summary.md",
+            "calculations": [{"operation": "add",
+                              "source_texts": ["$10", "Extra fee: $2"],
+                              "report_text": "$12"}]}
+    with patch.object(document_check.project_documents, "inspect",
+                      return_value={"text": source_text}):
+        result = document_check.check(folder, spec)
+    expected_error = ("Calculation 1: source amounts were not found"
+                      if location == "source"
+                      else "Calculation 1: report text was not found")
+    assert result["passed"] is (not negative)
+    assert result["errors"] == ([expected_error] if negative else [])
+
+
 def test_document_check_rejects_source_change_during_extraction(tmp_path):
     folder = _project(tmp_path)
     original_inspect = document_check.project_documents.inspect
