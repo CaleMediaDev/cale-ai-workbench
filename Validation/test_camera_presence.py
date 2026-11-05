@@ -366,6 +366,20 @@ class CameraPresenceTests(unittest.TestCase):
         self.assertEqual(len(tracker.tracks), 1)
         self.assertEqual(tracker.tracks[0]["last_greeted"], 0.5)
 
+    def test_single_miss_after_long_gap_does_not_create_new_arrival(self):
+        tracker = VisitorTracker(cooldown=10)
+        face = [1.0, 0.0]
+        self.assertEqual(tracker.observe([face], 0), [])
+        self.assertEqual(tracker.observe([face], 0.5), [face])
+
+        # A stalled stream followed by one detection dropout is not the
+        # five observed misses required to establish a departure.
+        self.assertEqual(tracker.observe([], 31), [])
+        self.assertEqual(tracker.observe([face], 31.5), [])
+        self.assertEqual(tracker.observe([face], 32), [])
+        self.assertEqual(len(tracker.tracks), 1)
+        self.assertEqual(tracker.tracks[0]["last_greeted"], 0.5)
+
     def test_return_after_departure_and_cooldown_is_greeted(self):
         tracker = VisitorTracker(cooldown=10)
         face = [1.0, 0.0]

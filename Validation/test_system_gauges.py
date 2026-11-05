@@ -1,5 +1,7 @@
 """Sensor math and unavailable-GPU behavior for the header gauges."""
 
+import pytest
+
 import system_gauges
 
 
@@ -217,29 +219,36 @@ def test_network_counter_runtime_failure_is_isolated_and_recovers(monkeypatch):
     assert recovered["net"] == 24
 
 
-def test_network_throughput_survives_unavailable_interface_stats(monkeypatch):
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError])
+def test_network_throughput_survives_unavailable_interface_stats(monkeypatch, error_type):
     import sys
     from types import SimpleNamespace
 
     counters = iter([
         SimpleNamespace(bytes_recv=1_000_000, bytes_sent=2_000_000),
         SimpleNamespace(bytes_recv=3_000_000, bytes_sent=3_000_000),
+        SimpleNamespace(bytes_recv=5_000_000, bytes_sent=4_000_000),
     ])
-    times = iter([10.0, 12.0])
+    times = iter([10.0, 12.0, 14.0])
+    stats_calls = 0
 
-    def unavailable_stats():
-        raise OSError("Interface statistics unavailable")
+    def interface_stats():
+        nonlocal stats_calls
+        stats_calls += 1
+        if stats_calls <= 2:
+            raise error_type("Interface statistics unavailable")
+        return {"Ethernet": SimpleNamespace(isup=True, speed=100)}
 
     monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(
         disk_io_counters=lambda: None,
         net_io_counters=lambda: next(counters),
-        net_if_stats=unavailable_stats,
+        net_if_stats=interface_stats,
     ))
     monkeypatch.setattr(system_gauges, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(system_gauges, "_cpu_times", lambda: None)
-    monkeypatch.setattr(system_gauges, "_ram_percent", lambda: None)
-    monkeypatch.setattr(system_gauges, "_gpu_percent", lambda: None)
-    monkeypatch.setattr(system_gauges, "_drive_space", lambda: (None, None))
+    monkeypatch.setattr(system_gauges, "_ram_percent", lambda: 37)
+    monkeypatch.setattr(system_gauges, "_gpu_percent", lambda: 41)
+    monkeypatch.setattr(system_gauges, "_drive_space", lambda: (25, 100))
     monkeypatch.setattr(system_gauges.time, "monotonic", lambda: next(times))
 
     sampler = system_gauges.HardwareSampler()
@@ -250,6 +259,13 @@ def test_network_throughput_survives_unavailable_interface_stats(monkeypatch):
     assert second["net_down_mbps"] == 8
     assert second["net_up_mbps"] == 4
     assert second["net"] is None
+    assert second["ram"] == 37
+    assert second["gpu"] == 41
+    assert second["drive"] == 25
+    recovered = sampler.sample()
+    assert recovered["net_down_mbps"] == 8
+    assert recovered["net_up_mbps"] == 4
+    assert recovered["net"] == 12
 
 
 def test_gpu_decode_failure_is_isolated_and_recovers(monkeypatch):

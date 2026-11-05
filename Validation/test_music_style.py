@@ -179,6 +179,34 @@ def test_negated_rap_does_not_turn_vocal_chops_into_a_lead_request():
     assert music_style.requires_sustained_vocals(positive)
 
 
+def test_negated_rapper_and_rapped_verses_preserve_vocal_texture():
+    for negation in ("no", "without any", "avoid", "don't want"):
+        for sound in ("rapper", "rapped verses"):
+            exclusion = negation + " " + sound
+            request = "Heavy dubstep with vocal chops, " + exclusion
+            assert not music_style.explicit_lead_vocals(request)
+            assert not music_style.unambiguous_vocal_song(request)
+            assert not music_style.requires_sustained_vocals(request)
+            caption = music_style.enhance(request)
+            assert "Sparse chopped vocal syllables" in caption
+            assert "clear sung verses and chorus" not in caption
+            assert exclusion not in caption
+            assert not music_style.requires_sustained_vocals(caption)
+            assert music_style.enhance(caption) == caption
+
+    for sound in ("a rapper", "rapped verses"):
+        request = "Heavy dubstep with vocal chops and " + sound
+        assert music_style.explicit_lead_vocals(request)
+        assert music_style.unambiguous_vocal_song(request)
+        assert music_style.requires_sustained_vocals(request)
+
+
+def test_positive_rap_aliases_override_chops_but_negations_do_not():
+    for alias in ("rap", "rapping", "rapper", "rapped verses"):
+        assert music_style.requires_sustained_vocals("Vocal chops and " + alias)
+        assert not music_style.requires_sustained_vocals("Vocal chops without any " + alias)
+
+
 def test_sparse_female_hook_does_not_get_full_verse_direction():
     request = ("Female singing voice, main vocal hook: waapy waaap. "
                "Very little conventional singing, with massive instrumental drops.")

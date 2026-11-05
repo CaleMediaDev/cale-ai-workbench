@@ -133,10 +133,10 @@ class VisitorTracker:
     def observe(self, features, now, boxes=None):
         self.arrival_continuities=[]
         boxes=[_visitor_box(box) for box in boxes] if isinstance(boxes,list) and len(boxes)==len(features) else [None]*len(features)
-        # Keep visible faces until an observed miss, even after a long gap
-        # between observations. Retain recently departed faces for cooldown.
+        # Keep tracks until five observed misses establish departure, including
+        # a stream stall. Retain recently departed faces for cooldown.
         self.tracks = [track for track in self.tracks
-                       if track["misses"] == 0
+                       if track["misses"] < 5
                        or now - track["last_seen"] <= max(self.cooldown, 30)]
         greetings = []
         features = features[:8]

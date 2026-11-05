@@ -856,14 +856,14 @@ def virtual_avatar_sender(stream=None, parent_pid=None, parent_started=None):
     import pyvirtualcam  # Optional GPL2 dependency stays in this child process.
     stream=stream or sys.stdin.buffer
     def read_exact(size):
-        chunks=[]
-        remaining=size
-        while remaining:
-            chunk=stream.read(remaining)
+        # A pipe may return tiny fragments; retain one byte buffer rather
+        # than a Python object per fragment of the bounded JPEG packet.
+        data=bytearray()
+        while len(data)<size:
+            chunk=stream.read(size-len(data))
             if not chunk:break
-            chunks.append(chunk)
-            remaining-=len(chunk)
-        return b"".join(chunks)
+            data.extend(chunk)
+        return bytes(data)
     if parent_pid is not None:
         import threading
         sys.path.insert(0,str(Path(__file__).resolve().parent))

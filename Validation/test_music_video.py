@@ -308,6 +308,42 @@ def test_music_video_cover_pixel_aspect_does_not_distort_output(tmp_path):
     assert cover.read_bytes() == original_cover
 
 
+@pytest.mark.parametrize("dpi, band", [
+    ((72, 144), (0, 80, 320, 240)),
+    ((144, 72), (80, 0, 240, 320)),
+])
+def test_music_video_crops_cover_using_display_aspect_ratio(tmp_path, dpi, band):
+    song = tmp_path / "song.wav"
+    cover = tmp_path / "narrow-cover.png"
+    video = tmp_path / "square.mp4"
+    frame = tmp_path / "frame.png"
+    with wave.open(str(song), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b"\x00\x00" * 16000)
+    artwork = Image.new("RGB", (320, 320), (20, 20, 220))
+    artwork.paste((220, 20, 20), band)
+    # Exercise both SAR directions as decoded by the bundled FFmpeg: crop
+    # vertically for a narrow displayed cover and horizontally for a wide one.
+    artwork.save(cover, dpi=dpi)
+    original_cover = cover.read_bytes()
+
+    music_video.make_music_video(
+        str(song), str(video), layout="square", background_image=str(cover)
+    )
+    subprocess.run(
+        [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(video),
+         "-frames:v", "1", str(frame)],
+        check=True, capture_output=True, creationflags=music_video.HIDE,
+    )
+    with Image.open(frame) as image:
+        assert image.size == (720, 720)
+        red, green, blue = image.convert("RGB").getpixel((20, 20))
+        assert red > green * 2 and red > blue * 2
+    assert cover.read_bytes() == original_cover
+
+
 def test_music_video_burns_timed_srt_captions_without_changing_inputs(tmp_path):
     song = tmp_path / "song.wav"
     captions = tmp_path / "lyrics.srt"

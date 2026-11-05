@@ -63,6 +63,12 @@ def _run(arguments: list[str], output: Path) -> None:
                         raise RuntimeError("Local audio edit produced an incomplete WAV frame.")
             except (wave.Error, EOFError) as exc:
                 raise RuntimeError("Local audio edit produced an invalid WAV file.") from exc
+        else:
+            # A nonempty compressed file may contain only metadata. Decode it
+            # privately and reuse the WAV frame checks before publishing it.
+            # The recursive call outputs WAV, so validation cannot recurse again.
+            _run(["-xerror", "-i", str(staged), "-map", "0:a:0", "-vn",
+                  "-c:a", "pcm_s16le"], Path(directory) / "validation.wav")
         # Unlike replace(), a hard link refuses to overwrite a destination
         # created while FFmpeg was running. Cleanup removes only our staging file.
         output.hardlink_to(staged)

@@ -187,14 +187,15 @@ def _checked_probe_wav(path: Path) -> dict:
         # Nonzero PCM alone accepts a constant DC offset or inaudible one-bit
         # noise. Inspect bounded samples across the whole clip, independently
         # per channel so opposite stereo DC offsets cannot impersonate speech.
-        stride = max(1, math.ceil(frames / 32000))
+        # The WAV is already size- and duration-bounded. Inspect every frame:
+        # fixed-stride subsampling can alias audible tones to a constant value.
         scale = float(1 << (width * 8 - 1))
         audible = False
         for channel in range(channels):
             count = 0
             total = squared = 0.0
             minimum, maximum = 1.0, -1.0
-            for frame in range(0, frames, stride):
+            for frame in range(frames):
                 offset = (frame * channels + channel) * width
                 raw = samples[offset:offset + width]
                 value = ((raw[0] - 128) if width == 1 else int.from_bytes(raw, "little", signed=True)) / scale

@@ -639,7 +639,7 @@ def resume_failed_sdk_job(job_id: str) -> dict:
     _write_job(job_id, resumed)
     try:
         _launch_job(job_id)
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         _write_job(job_id, {**resumed, "status": "error", "current": str(exc)[:300]})
         raise
     return resumed

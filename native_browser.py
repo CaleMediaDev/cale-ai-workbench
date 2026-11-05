@@ -350,7 +350,7 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
           document.querySelectorAll('[data-cale-ref]').forEach(el => el.removeAttribute('data-cale-ref'));
           const nodes = [...document.querySelectorAll('a,button,input,textarea,select,[role="button"],[contenteditable="true"]')];
           let n = 0;
-          return nodes.filter(el => el.getClientRects().length && !el.closest('[aria-hidden="true"]'))
+          return nodes.filter(el => el.getClientRects().length && getComputedStyle(el).visibility === 'visible' && !el.closest('[aria-hidden="true"]'))
             .slice(0, 100).map(el => {
               const ref = String(++n);
               el.setAttribute('data-cale-ref', ref);

@@ -34,6 +34,49 @@ def test_staged_midi_publication_preserves_concurrent_output(tmp_path):
     assert source.read_bytes() == b"original audio"
 
 
+def test_failed_publication_preserves_replacement_symlink_to_owned_inode(tmp_path):
+    probe = tmp_path / "symlink-probe"
+    try:
+        probe.symlink_to(tmp_path)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation is unavailable")
+    probe.unlink()
+
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"original audio")
+    target = tmp_path / "notes"
+    destination = target / "guitar.mid"
+    original_link = music_midi.os.link
+    staged_midi = []
+
+    def render(args, **kwargs):
+        staging = Path(args[-1])
+        staged_midi.append(staging / "guitar.mid")
+        staged_midi[0].write_bytes(b"MThd generated")
+        (staging / "z-extra.txt").write_bytes(b"metadata")
+        return type("Done", (), {"returncode": 0})()
+
+    def replace_before_failure(staged, output):
+        if output.name == "z-extra.txt":
+            destination.unlink()
+            destination.symlink_to(staged_midi[0])
+            raise OSError("publication failed")
+        return original_link(staged, output)
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path("python.exe")), \
+         patch.object(music_midi.subprocess, "run", side_effect=render), \
+         patch.object(music_midi.os, "link", side_effect=replace_before_failure):
+        with pytest.raises(OSError, match="publication failed"):
+            music_midi.transcribe_to_midi(str(source), str(target))
+
+    assert destination.is_symlink()
+    assert destination.readlink() == staged_midi[0]
+    assert not staged_midi[0].exists()
+    assert list(target.iterdir()) == [destination]
+    assert source.read_bytes() == b"original audio"
+
+
 def test_failed_staged_publication_rolls_back_only_owned_midi(tmp_path):
     source = tmp_path / "guitar.wav"
     source.write_bytes(b"original audio")

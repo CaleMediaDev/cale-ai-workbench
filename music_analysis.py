@@ -91,13 +91,14 @@ def analyze_music(source_path: str) -> dict:
         int(np.ceil(len(signal) / (segment_seconds * sample_rate))),
     )
     for segment_index in range(segment_count):
-        # Round absolute boundaries rather than accumulating a rounded interval.
-        start = round(segment_index * frames_per_segment)
+        # Use absolute boundaries without assigning pre-boundary frames to
+        # the next segment or accumulating rounding drift.
+        start = int(np.ceil(segment_index * frames_per_segment))
         # Include trailing frames in the final segment, not a new segment.
         end = (
             chroma.shape[1]
             if segment_index == segment_count - 1
-            else round((segment_index + 1) * frames_per_segment)
+            else int(np.ceil((segment_index + 1) * frames_per_segment))
         )
         if start >= chroma.shape[1]:
             break
