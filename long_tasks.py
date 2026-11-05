@@ -5971,9 +5971,16 @@ def gui():
     create_kinds = ttk.Frame(create_header)
     create_kinds.pack(side="right")
     create_kind_buttons = {}
+    game_library_button = ttk.Button(create_header, text="Game library", command=lambda: open_game_library())
+    game_library_button.pack(side="left", padx=(16, 0))
 
     def choose_create_kind(kind):
         create_kind.set(kind)
+        if kind == "Game":
+            if not game_library_button.winfo_manager():
+                game_library_button.pack(side="left", padx=(16, 0))
+        else:
+            game_library_button.pack_forget()
         for key, button in create_kind_buttons.items():
             button.configure(style="SelectedMode.TButton" if key == kind else "Mode.TButton")
 
@@ -6069,6 +6076,13 @@ def gui():
               font=("Segoe UI", 22, "bold")).pack(expand=True, anchor="s")
     ttk.Label(create_empty, text="Your game, app or website will appear here as Cale builds it.",
               style="CardMuted.TLabel", wraplength=380, justify="center").pack(expand=True, anchor="n", pady=(12, 0))
+    def open_game_library():
+        import game_library_ui
+
+        return game_library_ui.open_library(window, submit_chat_text,
+            lambda: show_workspace("create"), {"background": bg, "surface": card,
+                "field": field, "text": text, "muted": muted})
+
     task_heading = ttk.Frame(main_page)
     task_heading.pack(fill="x", pady=(0, 12))
     ttk.Label(task_heading, text="My tasks", font=("Segoe UI", 20, "bold")).pack(side="left")

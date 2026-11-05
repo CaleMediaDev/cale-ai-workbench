@@ -34,6 +34,21 @@ DISCOVERY_MAX_PAGES = 32
 DISCOVERY_MAX_TOOLS = 2000
 DISCOVERY_SECONDS = 15
 LOCAL_CATALOG = {
+    "local.game_library_search": {
+        "description": "Search all182 bundled game references offline. Source links identify editable imports; demo-only games can be rebuilt as original projects. Import is not proof of working gameplay.",
+        "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string"}, "genre": {"type": "string"},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 12}},
+            "additionalProperties": False},
+    },
+    "local.import_game_example": {
+        "description": "Copy pinned published game source into a NEW relative directory in a registered task. Preserve license notices; inspect/edit and test actual gameplay. No code execution or package installation; demo-only entries cannot be imported. Cached source works offline.",
+        "inputSchema": {"type": "object", "properties": {
+            "project_folder": {"type": "string"}, "game_id": {"type": "string"},
+            "path": {"type": "string"}},
+            "required": ["project_folder", "game_id", "path"], "additionalProperties": False},
+    },
     "local.install_game_libraries": {
         "description": "Install pinned offline Phaser game engine and Yuka NPC seek/patrol JS plus MIT licenses/API notes in a registered task. No npm, accounts, CDN dependency or game execution; preserves existing files.",
         "inputSchema": {"type":"object", "properties":{"project_folder":{"type":"string"}, "libraries":{"type":"array", "minItems":1, "maxItems":2, "uniqueItems":True, "items":{"enum":["phaser","yuka"]}}}, "required":["project_folder"], "additionalProperties":False},
@@ -427,6 +442,8 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
         raise ValueError("arguments_json must be a JSON object")
     if tool in LOCAL_CATALOG:
         local_tools = {
+            "local.game_library_search": game_library_search,
+            "local.import_game_example": import_game_example,
             "local.install_game_libraries": install_game_libraries,
             "local.start_3d_job": start_3d_job,
             "local.build_3d_scene": build_3d_scene,
@@ -1409,6 +1426,31 @@ async def install_game_libraries(project_folder: str, libraries: list[str] = ["p
     preserved. Returns local script/API-guide paths; does not run game code.
     """
     return await asyncio.to_thread(_install_game_libraries, project_folder, libraries)
+
+
+@server.tool()
+async def game_library_search(query: str = "", genre: str = "", offset: int = 0, limit: int = 8) -> dict:
+    """Search the offline catalog without adding its schema to every model turn."""
+    import native_agent
+
+    value = await asyncio.to_thread(native_agent.execute_tool, ROOT,
+        "game_library_search", dict(query=query, genre=genre, offset=offset, limit=limit))
+    if value.startswith("Tool error:"):
+        raise ValueError(value)
+    return json.loads(value)
+
+
+@server.tool()
+async def import_game_example(project_folder: str, game_id: str, path: str) -> dict:
+    """Import source through the task-scoped host wrapper, with a compact receipt."""
+    import native_agent
+
+    folder = registered_project(project_folder)
+    value = await asyncio.to_thread(native_agent.execute_tool, folder,
+        "import_game_example", {"game_id": game_id, "path": path})
+    if value.startswith("Tool error:"):
+        raise ValueError(value)
+    return json.loads(value)
 
 
 if __name__ == "__main__":

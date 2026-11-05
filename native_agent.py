@@ -602,7 +602,7 @@ def remember_read_cycle(state: dict, tool: str, arguments: dict, result: str, ou
     """
     if outcome != "Completed":
         return False
-    if tool in {"write_file", "edit_file", "transform_csv", "create_game_starter"}:
+    if tool in {"write_file", "edit_file", "transform_csv", "create_game_starter", "import_game_example"}:
         path = str(arguments.get("path") or arguments.get("output_path") or "").replace("\\", "/")
         if path not in {"PLAN.md", "PROGRESS.md", ".local-ai/PLAN.md", ".local-ai/PROGRESS.md"}:
             state.pop("recent_read_hashes", None)
@@ -1139,6 +1139,57 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                 result["active_step_alignment"] = reason
             result["ok"] = result["passed"]
             return webapp_check.serialize_result(result, MAX_TOOL_OUTPUT)
+        if name == "game_library_search":
+            import design_tools
+
+            result = design_tools.game_library_search(arguments.get("query", ""),
+                offset=arguments.get("offset", 0), limit=min(12, arguments.get("limit", 8)),
+                genre=arguments.get("genre", ""))
+            # Keep the complete catalog available through pagination without
+            # returning a giant resource list or truncating JSON mid-record.
+            games = [{key: game.get(key) for key in (
+                "id", "title", "genre", "description", "creator", "play_url", "source_status", "source_url")}
+                for game in result["games"]]
+            summary = {"total": result["total"], "matches": result["matches"],
+                       "games": games, "next_offset": result.get("next_offset")}
+            while len(json.dumps(summary, ensure_ascii=False)) > MAX_TOOL_OUTPUT and games:
+                games.pop()
+                summary["next_offset"] = arguments.get("offset", 0) + len(games)
+            return json.dumps(summary, ensure_ascii=False)
+        if name == "import_game_example":
+            import design_tools
+
+            target = project_path(folder, arguments["path"])
+            if target == folder.resolve():
+                raise ValueError("Choose a new subdirectory such as game; the task root already exists.")
+            result = design_tools.import_game_example(arguments["game_id"], str(target))
+            if Path(result["folder"]).resolve() != target.resolve():
+                raise ValueError("Game import returned an unexpected destination.")
+            entrypoint = result.get("entrypoint")
+            local_entrypoint = None
+            if entrypoint:
+                entry = project_path(folder, str(target.relative_to(folder.resolve()) / entrypoint))
+                if not entry.is_relative_to(target.resolve()) or not entry.is_file():
+                    raise ValueError("Imported entrypoint is outside its game or missing.")
+                local_entrypoint = entry.relative_to(folder.resolve()).as_posix()
+                if entry.suffix.lower() in (".html", ".htm"):
+                    declaration = project_path(folder, ".local-ai/preview.json")
+                    declaration.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        with declaration.open("x", encoding="utf-8") as stream:
+                            json.dump({"file": local_entrypoint}, stream)
+                    except FileExistsError:
+                        pass  # Preserve an explicitly configured preview/server.
+            receipt = Path(result["receipt_path"]).resolve()
+            if not receipt.is_relative_to(target.resolve()):
+                raise ValueError("Game import receipt is outside the imported source.")
+            return json.dumps({"folder": target.relative_to(folder.resolve()).as_posix(),
+                "entrypoint": local_entrypoint, "game_id": result["game"]["id"],
+                "title": result["game"]["title"], "source_url": result["game"].get("source_url"),
+                "source_receipt": receipt.relative_to(folder.resolve()).as_posix(),
+                "requires_build": result.get("requires_build", False),
+                "verified_gameplay": False,
+                "next": "Inspect the real source and license, implement the requested changes, then run the actual game and checks. Importing source is not completing the task."}, ensure_ascii=False)
         if name == "create_game_starter":
             import design_tools
             import project_memory
@@ -1824,6 +1875,11 @@ def prompt(project: dict) -> str:
         if re.search(r"(?i)\b(?:csv|spreadsheet)\b", brief) else ""
     )
     game_hint = (
+        "For adapting an existing game, discover local.game_library_search for the complete 182-game catalog. "
+        "Call local.import_game_example with this task project_folder to copy published source into a new relative directory, such as game. "
+        "For an explicit library-import request, import the selected game before editing; do not replace it with a generic starter. "
+        "Retain attribution/licenses and test actual gameplay; demo-only references have no published source. "
+        "For engine/NPC tools, discover install_game_libraries (Phaser and Yuka); cached libraries run locally without accounts. "
         "For a new standalone HTML space shooter, create_game_starter supplies a reusable offline engine "
         "and suggested real browser checks. Use it when consistent with the request; do not use a starter "
         "when the user forbids reuse or requires a different framework. Customize and test the actual page "
@@ -2400,7 +2456,7 @@ def step_tools(project: dict, state: dict, available: list) -> list:
         state["step_focus_turns"] = 0
         return available
     state["step_focus_turns"] = count + 1
-    core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text", "check_python_function", "check_javascript_function", "create_game_starter", "check_game_starter",
+    core = {"task_steps", "list_files", "read_file", "edit_file", "write_file", "search_text", "check_python_function", "check_javascript_function", "create_game_starter", "check_game_starter", "game_library_search", "import_game_example",
             "run_command", "run_verifier", "check_webapp", "check_document_report",
             "inspect_project_file", "transform_csv"}
     if (queue.get("active") or {}).get("check_tool") == "check_webapp":
@@ -4589,7 +4645,7 @@ def game_starter_candidate(project: dict) -> str | None:
     user_text = parts[0] + "\n" + (parts[-1] if (folder / ".local-ai/USER-REQUESTS.md").is_file() else "")
     if (not re.search(r"(?i)\b(?:space[ -]+shooter|space[ -]+invaders)\b", request)
             or not re.search(r"(?i)\b(?:build|create|make|code|develop|implement)\b", parts[0])
-            or re.search(r"(?i)\b(?:review|article|tutorial|summary|design document|from[ -]scratch|3d|webgl|react|vue|svelte|typescript|phaser|kaboom|godot|unity|unreal|pygame|python|rust)\b", request)
+            or re.search(r"(?i)\b(?:review|article|tutorial|summary|design document|from[ -]scratch|import|library|template|3d|webgl|react|vue|svelte|typescript|phaser|kaboom|godot|unity|unreal|pygame|python|rust)\b", request)
             or re.search(r"(?i)\b(?:no|without|avoid)\s+(?:any\s+)?(?:templates?|starters?|reuse)\b|\b(?:do not|don't)\s+use\s+(?:a\s+)?(?:template|starter)", request)
             or re.search(r"(?i)\b(?:do not|don't|never)\s+(?:build|create|make|generate|develop)\s+(?:(?:a|the|this|that)\s+)?(?:game|space[ -]+shooter)\b", user_text)):
         return None
@@ -5668,7 +5724,7 @@ def run_slice(project: dict, complete=None) -> dict:
             elif function.get("name") in {"run_command", "run_verifier", "call_local_tool", "check_game_starter"}:
                 state["verify_passed"] = False
                 state["verifier_nudged"] = False
-            elif function.get("name") in {"write_file", "edit_file", "transform_csv", "create_game_starter"}:
+            elif function.get("name") in {"write_file", "edit_file", "transform_csv", "create_game_starter", "import_game_example"}:
                 path = str(args.get("path", "")).replace("\\", "/") if isinstance(args, dict) else ""
                 if path not in {".local-ai/PLAN.md", ".local-ai/PROGRESS.md"}:
                     state["verify_passed"] = False
