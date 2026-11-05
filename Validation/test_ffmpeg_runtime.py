@@ -177,6 +177,39 @@ def test_background_repair_only_throttles_failures(tmp_path, repair_fails):
         assert thread.return_value.start.call_count == expected_attempts
 
 
+def test_observed_external_recovery_clears_failed_repair_cooldown(tmp_path):
+    with patch.object(ffmpeg_runtime, "_last_attempts", {}), \
+            patch.object(ffmpeg_runtime, "_repairing_roots", set()), \
+            patch.object(ffmpeg_runtime, "_thread", None), \
+            patch.object(ffmpeg_runtime, "working", side_effect=[False, True, False]), \
+            patch.object(ffmpeg_runtime, "ensure") as ensure, \
+            patch.object(ffmpeg_runtime.time, "monotonic", return_value=10.0) as clock, \
+            patch.object(ffmpeg_runtime.threading, "Thread") as thread:
+        ensure.side_effect = [RuntimeError("repair failed"),
+                              ffmpeg_runtime.executable(tmp_path)]
+        thread.return_value.start.side_effect = (
+            lambda: thread.call_args.kwargs["target"]()
+        )
+
+        ffmpeg_runtime.start_background(tmp_path)
+        assert ffmpeg_runtime._last_attempts[tmp_path.resolve()] == 10.0
+        ensure.assert_called_once_with(tmp_path.resolve())
+
+        # An external repair makes the previous failure obsolete.
+        clock.return_value = 20.0
+        ffmpeg_runtime.start_background(tmp_path)
+        assert tmp_path.resolve() not in ffmpeg_runtime._last_attempts
+        assert ensure.call_count == 1
+
+        # A new deletion must be repaired, even inside the old cooldown.
+        clock.return_value = 30.0
+        ffmpeg_runtime.start_background(tmp_path)
+        assert ensure.call_count == 2
+        assert thread.return_value.start.call_count == 2
+        assert not ffmpeg_runtime._last_attempts
+        assert not ffmpeg_runtime._repairing_roots
+
+
 def test_active_background_repair_does_not_block_another_root(tmp_path):
     from unittest.mock import MagicMock
 

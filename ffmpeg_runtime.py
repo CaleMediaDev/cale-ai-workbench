@@ -109,9 +109,11 @@ def ensure(root: Path = ROOT) -> Path:
 def start_background(root: Path = ROOT) -> None:
     """Quietly repair a missing executable after an update or accidental deletion."""
     global _thread
-    if working(root):
-        return
     resolved_root = Path(root).resolve()
+    if working(resolved_root):
+        with _attempt_lock:
+            _last_attempts.pop(resolved_root, None)
+        return
     with _attempt_lock:
         if resolved_root in _repairing_roots:
             return
