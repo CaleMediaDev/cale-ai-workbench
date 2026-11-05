@@ -22,8 +22,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-import imageio_ffmpeg
-
 ROOT = Path(__file__).resolve().parent
 BASE = ROOT / "Media" / "video"
 SOURCE = BASE / "openvideo-studio"
@@ -480,6 +478,7 @@ def _render_job(job_id: str, data: dict) -> None:
                         # that prevents retrying the export.
                         with tempfile.TemporaryDirectory(prefix="cale-video-") as temporary:
                             converted = Path(temporary) / "converted.mp4"
+                            import imageio_ffmpeg  # Video export only; the isolated avatar CLI does not need FFmpeg.
                             subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-i", str(rendered),
                                             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", str(converted)],
                                            check=True, timeout=3600, creationflags=HIDE)
@@ -809,6 +808,7 @@ def virtual_avatar_sender(stream=None, parent_pid=None, parent_started=None):
     stream=stream or sys.stdin.buffer
     if parent_pid is not None:
         import threading
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
         from camera_presence import owner_alive,watch_owner,start_launcher_guard
         if not owner_alive(parent_pid,parent_started):return 0
         start_launcher_guard()

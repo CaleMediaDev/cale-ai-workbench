@@ -15,6 +15,15 @@ import pytest
 import video_generation
 
 
+def test_avatar_cli_module_loads_without_video_export_packages():
+    """The Media-based avatar runtime intentionally has no imageio-ffmpeg."""
+    script = str(Path(video_generation.__file__).resolve())
+    code = "import runpy; value=runpy.run_path(" + repr(script) + "); assert callable(value['avatar_profile_probe_worker'])"
+    result = subprocess.run([sys.executable, "-I", "-S", "-c", code],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
 def test_video_setup_uses_bundled_git_without_system_git(tmp_path):
     bundled = tmp_path / "data/tools/git-2.53.0+3-win32-x64/cmd/git.exe"
     bundled.parent.mkdir(parents=True)
@@ -413,8 +422,8 @@ def test_failed_conversion_leaves_no_partial_export(tmp_path, failure):
     ), patch.object(video_generation, "_workflow", return_value={}), patch.object(
         video_generation, "_request",
         side_effect=[{}, {"prompt_id": "prompt-1"}, history],
-    ), patch.object(video_generation.subprocess, "Popen") as launch, patch.object(
-        video_generation.imageio_ffmpeg, "get_ffmpeg_exe", return_value="ffmpeg"
+    ), patch.object(video_generation.subprocess, "Popen") as launch, patch(
+        "imageio_ffmpeg.get_ffmpeg_exe", return_value="ffmpeg"
     ), patch.object(video_generation.subprocess, "run", side_effect=fail_conversion):
         launch.return_value.poll.return_value = None
         with pytest.raises(type(failure)):

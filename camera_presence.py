@@ -510,7 +510,7 @@ class AvatarVirtualOutput:
     def _run(self):
         import subprocess,struct
         try:
-            self.process=subprocess.Popen([sys.executable,"-u",str(ROOT/"video_generation.py"),"avatar-virtual-sender",
+            self.process=subprocess.Popen([sys.executable,"-I","-B","-u",str(ROOT/"video_generation.py"),"avatar-virtual-sender",
                 "--parent-pid",str(os.getpid()),"--parent-started",str(psutil.Process(os.getpid()).create_time())],stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
             while not self.stopped.is_set():
