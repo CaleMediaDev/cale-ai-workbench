@@ -94,7 +94,7 @@ def _dom_contract(folder: Path, page) -> dict:
         const id = el.getAttribute('id') || '';
         const tag = el.localName, type = (typeof el.type === 'string' && el.type) || el.getAttribute('type') || '';
         const disabled = el.matches(':disabled'), readOnly = !!el.readOnly;
-        const visible = !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden],[aria-hidden="true"]');
+        const visible = !!el.getClientRects().length && getComputedStyle(el).visibility === 'visible' && !el.closest('[hidden],[aria-hidden="true"]');
         const constraints = {};
         for(const key of ['required','min','max','step','minlength','maxlength','pattern','multiple']) {
           if(el.hasAttribute(key)) constraints[key] = el.getAttribute(key).slice(0,120);
