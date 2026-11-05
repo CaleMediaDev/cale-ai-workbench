@@ -183,6 +183,11 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
                         publication = _StemPublication(destination, original, expected_digest, expected_size)
                         publication.mark()
                         published.append(publication)
+                        current, actual_digest, actual_size = _stem_digest(destination)
+                        if (_publication_signature(current) != _publication_signature(original)
+                                or actual_size != expected_size
+                                or actual_digest.digest() != expected_digest.digest()):
+                            raise OSError("A rendered stem changed during publication")
             except BaseException:
                 for publication in reversed(published):
                     publication.rollback()
