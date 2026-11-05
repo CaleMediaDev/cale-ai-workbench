@@ -1073,7 +1073,7 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(payload, original)
 
     def test_native_transport_unknown_version_or_features_preserves_legacy_request(self):
-        for version, extra in ((False, {}), (True, {"reasoning_effort": "high"}),
+        for version, extra in ((False, {}), (True, {"reasoning_effort": "unsupported"}),
                                (True, {"tool_choice": "required"}), (True, {"max_tokens": None})):
             with self.subTest(version=version, extra=extra):
                 router = cloud.Router()
@@ -1161,6 +1161,22 @@ class CloudTests(unittest.TestCase):
             with self.assertRaises(InterruptedError):
                 router.complete({**REQUEST, "max_tokens": 80}, cancel=lambda: cancelled)
         inference.assert_not_called()
+
+    def test_native_gptoss_canonical_effort_uses_sized_transport(self):
+        for effort in ("low", "medium", "high"):
+            with self.subTest(effort=effort):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+                router.native_version_ready = True
+                router.native_version_until = time.monotonic() + 60
+                raw = {"model": cloud.LOCAL_MODEL, "done": True,
+                       "message": {"role": "assistant", "content": "checked", "thinking": "kept"}}
+                with patch.object(cloud, "post", side_effect=lambda url, *args, **kwargs:
+                                  raw if url.endswith("/api/chat") else ANSWER) as upstream, patch("usage_history.record_completion"):
+                    result = router.complete({**REQUEST, "max_tokens": 80, "reasoning_effort": effort})
+                self.assertTrue(upstream.call_args.args[0].endswith("/api/chat"))
+                self.assertEqual(upstream.call_args.args[1]["think"], effort)
+                self.assertEqual(result["choices"][0]["message"]["reasoning"], "kept")
 
     def test_native_32k_candidate_only_serves_requests_that_fit(self):
         self.candidates.stop()
@@ -2619,7 +2635,7 @@ def test_native_context_codec_preserves_tool_ids_schema_options_and_no_mutation(
 def test_native_context_unsupported_features_keep_legacy_and_overflow_never_truncates():
     import pytest
     base = {"model": "local", "max_tokens": 30, "messages": [{"role": "user", "content": "hello"}]}
-    for change in ({"tool_choice": "required"}, {"reasoning_effort": "high"}, {"n": 2},
+    for change in ({"tool_choice": "required"}, {"reasoning_effort": "unsupported"}, {"n": 2},
                    {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}}]}]},
                    {"messages": [{"role": "developer", "content": "rules"}]}, {"max_tokens": None}):
         assert cloud.native_chat_request({**base, **change}, 65536) is None
@@ -2664,3 +2680,28 @@ def test_native_context_nullable_sampling_matches_legacy_defaults():
         "presence_penalty": None, "frequency_penalty": None}, 65536)
     assert body["options"]["temperature"] == 1.0 and body["options"]["top_p"] == 1.0
     assert not {"seed", "presence_penalty", "frequency_penalty"} & body["options"].keys()
+
+
+def test_native_context_effort_matches_official_named_and_boolean_metadata():
+    base = {"model": "local", "max_tokens": 40, "messages": [{"role": "user", "content": "hello"}]}
+    for effort in ("low", "medium", "high", "max"):
+        assert cloud.native_chat_request({**base, "reasoning_effort": effort}, 65536)["think"] == effort
+        assert cloud.native_chat_request({**base, "reasoning_effort": effort}, 65536,
+            {"values": [False, True], "default": True})["think"] is True
+        assert cloud.native_chat_request({**base, "reasoning_effort": effort}, 65536,
+            {"values": [False, True, "low", "high"], "default": "low"})["think"] == effort
+    for invalid_descriptor in (None, [], {"values": [False, True], "default": "unknown"},
+                               {"values": [True, True], "default": True}):
+        assert cloud.native_chat_request({**base, "reasoning_effort": "low"}, 65536, invalid_descriptor)["think"] == "low"
+    for unsupported in ("minimal", "ultra", "xhigh", "surprise"):
+        assert cloud.native_chat_request({**base, "reasoning_effort": unsupported}, 65536) is None
+    assert cloud.native_chat_request({**base, "reasoning_effort": "none"}, 65536,
+        {"values": [False, True], "default": True})["think"] is False
+    assert "think" not in cloud.native_chat_request({**base, "reasoning_effort": ""}, 65536)
+
+
+def test_native_context_bare_null_assistant_keeps_legacy_invalid_request_semantics():
+    base = {"model": "local", "max_tokens": 20, "messages": [{"role": "assistant", "content": None}]}
+    assert cloud.native_chat_request(base, 65536) is None
+    base["messages"][0]["tool_calls"] = []
+    assert cloud.native_chat_request(base, 65536)["messages"][0]["content"] == ""

@@ -920,7 +920,21 @@ def loaded_local_models():
 
 
 
-def native_chat_request(payload, capacity):
+def native_reasoning_value(effort, thinking):
+    """Preserve named effort, or the official boolean-only model conversion."""
+    values = thinking.get("values") if isinstance(thinking, dict) else None
+    default = thinking.get("default") if isinstance(thinking, dict) else None
+    if isinstance(values, list) and values:
+        valid = all(type(value) is bool or isinstance(value, str) and value for value in values)
+        unique = len({(type(value), value) for value in values}) == len(values) if valid else False
+        supported_default = any(type(value) is type(default) and value == default for value in values)
+        if valid and unique and supported_default and any(type(value) is bool and value for value in values):
+            if not any(isinstance(value, str) for value in values):
+                return True
+    return effort
+
+
+def native_chat_request(payload, capacity, thinking=None):
     """Translate only losslessly representable text requests to Ollama's native API.
 
     The configured context remains a ceiling, not a reservation. Unknown features
@@ -938,9 +952,10 @@ def native_chat_request(payload, capacity):
         return None
     if payload.get("tool_choice") not in (None, "auto"):
         return None
-    # Other effort levels depend on the model family. Preserve their existing
-    # compatibility-layer conversion until the native mapping is qualified.
-    if payload.get("reasoning_effort") not in (None, "none"):
+    # Match v0.40.13 ThinkingFromReasoningEffort for canonical levels.
+    # Aliases/unknown levels retain the compatibility endpoint unchanged.
+    effort = payload.get("reasoning_effort")
+    if effort not in (None, "", "none", "low", "medium", "high", "max"):
         return None
     messages, call_names = [], {}
     for message in payload.get("messages", []):
@@ -950,7 +965,7 @@ def native_chat_request(payload, capacity):
         role, content = message.get("role"), message.get("content")
         if role not in ("system", "user", "assistant", "tool"):
             return None
-        if content is None and role == "assistant":
+        if content is None and role == "assistant" and isinstance(message.get("tool_calls"), list):
             content = ""
         if not isinstance(content, str):
             return None
@@ -1018,8 +1033,10 @@ def native_chat_request(payload, capacity):
             body["format"] = copy.deepcopy(response_format["json_schema"]["schema"])
         else:
             return None
-    if payload.get("reasoning_effort") == "none":
+    if effort == "none":
         body["think"] = False
+    elif effort:
+        body["think"] = native_reasoning_value(effort, thinking)
     required = estimated_input_tokens(payload) + output + 1024
     if required > capacity:
         raise ValueError("Local request exceeds the approved context capacity; history was not truncated.")
@@ -1113,6 +1130,7 @@ class Router:
         self.model_cache = {}
         self.model_contexts = {}
         self.model_native_contexts = {}
+        self.model_thinking_controls = {}
         self.native_version_until = 0
         self.native_version_ready = False
         self.model_vision = set()
@@ -1204,6 +1222,7 @@ class Router:
             available = {}
             contexts = {}
             native_contexts = {}
+            thinking_controls = {}
             weight_ids = {}
             vision = set()
             thinking = set()
@@ -1250,6 +1269,7 @@ class Router:
                         native_limit = 0
                     if native_limit:
                         native_contexts[name] = min(contexts[name], native_limit)
+                    thinking_controls[name] = copy.deepcopy(info.get("thinking"))
                     if "vision" in info.get("capabilities", []):
                         vision.add(name)
                     if "thinking" in info.get("capabilities", []):
@@ -1259,6 +1279,7 @@ class Router:
             self.model_cache = available
             self.model_contexts = contexts
             self.model_native_contexts = native_contexts
+            self.model_thinking_controls = thinking_controls
             self.model_vision = vision
             self.model_thinking = thinking
             self.model_speeds = {
@@ -1619,7 +1640,7 @@ class Router:
             native = None
             capacity = self.model_native_contexts.get(body.get("model"), 0)
             if capacity:
-                native = native_chat_request(body, capacity)
+                native = native_chat_request(body, capacity, self.model_thinking_controls.get(body.get("model")))
             if native is not None:
                 if time.monotonic() >= self.native_version_until:
                     self.native_version_ready = False
