@@ -534,7 +534,7 @@ def refresh_pending_reviews(root: Path, fetch=None, check_cancel=lambda: None) -
 
 
 _GITHUB_STAGES = {
-    "request": "request", "proposal-search": "proposal search", "revision": "public revision lookup",
+    "request": "request", "proposal-search": "proposal search", "proposal-list": "proposal listing", "revision": "public revision lookup",
     "source": "public source lookup", "tree": "public tree lookup", "fork-create": "fork creation",
     "repository": "repository access", "tree-create": "draft tree creation",
     "commit-create": "draft commit creation", "branch-create": "draft branch creation",
@@ -570,7 +570,7 @@ def _github_stage(endpoint, data):
     if "/git/commits" in path: return "commit-create"
     if "/git/refs" in path: return "branch-create"
     if "/commits/" in path: return "revision"
-    if path.endswith("/pulls") and data is not None: return "proposal-create"
+    if path.endswith("/pulls"): return "proposal-create" if data is not None else "proposal-list"
     if "/pulls/" in path: return "proposal-review"
     if re.fullmatch(r"repos/[^/]+/[^/]+", path): return "repository"
     return "request"
@@ -751,6 +751,64 @@ def _proposal_target(login, check_cancel, api=None):
                 raise last_github_error
             raise RuntimeError("Your GitHub fork is still preparing; try another day.")
     return target
+
+
+# REST listing avoids Search's author-index/visibility validation. A short
+# page is required: reaching either bound is unknown, never an empty queue.
+_OPEN_PULLS_MAX_PAGES = 100
+_OPEN_PULLS_MAX_BYTES = 8 * 1024 * 1024
+
+
+def open_donation_proposals(login, check_cancel):
+    """List owned reports with bounded REST pagination, not a Search query.
+
+    REST pages are not a transaction. Created-ascending order and duplicate
+    detection expose common paging changes; local claims/outbox reservations
+    remain authoritative even when the remote list changes concurrently.
+    """
+    if (not isinstance(login, str) or not 1 <= len(login) <= 100
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\[bot\])?", login)):
+        raise GitHubRequestError("proposal-list", kind="response_invalid")
+    owned, seen, total_bytes = [], set(), 0
+    for page in range(1, _OPEN_PULLS_MAX_PAGES + 1):
+        check_cancel()
+        query = urlencode({"state": "open", "sort": "created", "direction": "asc",
+                           "per_page": 100, "page": page})
+        records = gh_api(f"repos/{UPSTREAM}/pulls?" + query)
+        check_cancel()
+        if not isinstance(records, list) or len(records) > 100:
+            raise GitHubRequestError("proposal-list", kind="response_invalid")
+        for record in records:
+            if not isinstance(record, dict):
+                raise GitHubRequestError("proposal-list", kind="response_invalid")
+            number, user, title, body = (record.get(key) for key in ("number", "user", "title", "body"))
+            base = record.get("base")
+            repository = base.get("repo") if isinstance(base, dict) else None
+            author = user.get("login") if isinstance(user, dict) else None
+            if (type(number) is not int or number <= 0 or number in seen or record.get("state") != "open"
+                    or record.get("html_url") != f"https://github.com/{UPSTREAM}/pull/{number}"
+                    or not isinstance(repository, dict) or not isinstance(repository.get("full_name"), str)
+                    or repository["full_name"].casefold() != UPSTREAM.casefold()
+                    or not isinstance(author, str) or not 1 <= len(author) <= 100
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\[bot\])?", author)
+                    or not isinstance(title, str) or not 1 <= len(title) <= 256
+                    or body is not None and (not isinstance(body, str) or len(body) > 65536)):
+                raise GitHubRequestError("proposal-list", kind="response_invalid")
+            seen.add(number)
+            try:
+                total_bytes += len(title.encode("utf-8")) + len((body or "").encode("utf-8"))
+            except UnicodeError:
+                raise GitHubRequestError("proposal-list", kind="response_invalid") from None
+            if total_bytes > _OPEN_PULLS_MAX_BYTES:
+                raise GitHubRequestError("proposal-list", kind="response_invalid")
+            markers = re.findall(r"<!-- cale-donation:([a-z0-9-]{1,60}) -->", body or "")
+            if author.casefold() == login.casefold() and ("[donation]" in title.casefold() or markers):
+                # Keep only the exact existing job markers, never arbitrary PR
+                # text. Edited titles must not erase an owned area's reservation.
+                owned.append({"body": "\n".join("<!-- cale-donation:" + marker + " -->" for marker in markers)})
+        if len(records) < 100:
+            return {"total_count": len(owned), "items": owned}
+    raise GitHubRequestError("proposal-list", kind="response_invalid")
 
 
 def _proposal_body(job, commit, proposal, validation_summary=None):
@@ -1618,22 +1676,7 @@ class Service:
             resource = available[(available.index(previous[0]) + 1) % len(available)] if previous and previous[0] in available else available[0]
             check_cancel()
             refresh_pending_reviews(self.root, check_cancel=check_cancel)
-            query = urlencode({"q": f'repo:{UPSTREAM} is:pr is:open author:{login} "[Donation]" in:title'})
-            opened = gh_api("search/issues?" + query + "&per_page=100")
-            if consent["intensity"] in {"medium", "full_blast"}:
-                total = int(opened.get("total_count", 0))
-                if total > 1000 or opened.get("incomplete_results"):
-                    raise RuntimeError("Draft listing is incomplete; retry before proposing duplicates.")
-                items = list(opened.get("items", []))
-                for page in range(2, (total + 99) // 100 + 1):
-                    check_cancel()
-                    part = gh_api("search/issues?" + query + f"&per_page=100&page={page}")
-                    if part.get("incomplete_results"):
-                        raise RuntimeError("Draft listing is incomplete.")
-                    items.extend(part.get("items", []))
-                if len(items) < total:
-                    raise RuntimeError("Draft listing changed; retry before proposing duplicates.")
-                opened["items"] = items
+            opened = open_donation_proposals(login, check_cancel)
             if profile["open"] is not None and opened.get("total_count", 0) >= profile["open"]:
                 self.message = "Your proposal is waiting for maintainer review."
                 return
